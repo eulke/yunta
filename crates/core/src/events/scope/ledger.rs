@@ -1,10 +1,7 @@
 //! What a run granted beyond the scope a task or a node declared, and what
-//! it derived a task may reach beyond it, folded once.
-//!
-//! Three places used to read the three expansion kinds with their own
-//! rule: one for the paths an attempt may write, one to tell whether
-//! anything was ever granted, one to summarize the run. Every surface
-//! that asks what a task or a node may reach reads it here.
+//! it derived a task may reach beyond it, folded once: the paths an attempt
+//! may write, the answer each request got, and the run's totals. Every
+//! surface that asks what a task or a node may reach reads it here.
 
 use std::collections::BTreeMap;
 

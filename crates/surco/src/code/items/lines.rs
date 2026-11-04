@@ -6,6 +6,11 @@
 //! next. An item is a statement whose words declare one, with its
 //! decorators above it or before it on its line. Each language's words are
 //! read in a module of its own.
+//!
+//! Not by braces, as Rust's are: a statement with no `;` would run to the next
+//! `{` and take the next item's body as its own. A layout no formatter writes
+//! can mislead it: a statement whose continuation is indented no further than
+//! its first line ends there.
 
 mod go;
 mod python;

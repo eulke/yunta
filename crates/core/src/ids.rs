@@ -377,8 +377,9 @@ string_id!(
 );
 
 string_id!(
-    /// A named agent of an adapter (`agent:`) — one printable word,
-    /// opaque to the engine.
+    /// The name `agent:` gives an agent — one printable word that resolves
+    /// to a definition the run owns: the project's `.yunta/agents/<name>.md`,
+    /// or one a pack declares, named `publisher/agent`.
     AgentName, what = "agent name", rule = TOKEN_RULE, check = is_token
 );
 

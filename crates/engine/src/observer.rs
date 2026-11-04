@@ -8,7 +8,7 @@
 //! holds is the cache of a single invocation, discarded with it.
 //!
 //! **What reaches an observer, and what cannot.** An event reaches a
-//! run's log through [`RunLog`](crate::RunLog) and nowhere else, so the
+//! run's log through [`RunLog`](crate::run_log::RunLog) and nowhere else, so the
 //! mirror sits there: a log built with an observer hands it every event
 //! it appends, in the order the log carries them. The scheduler's own
 //! events, a live session's audit trail, what an agent posts

@@ -1,10 +1,10 @@
 //! `yunta doctor`: probes every adapter this project's `runners:`
-//! names — binary present, version compatible, auth valid — and
-//! reports each one, healthy or not. The same `probe()` a real
+//! names — the binary there and answering `--version`, every setting
+//! read — and reports each one, healthy or not. The same `probe()` a real
 //! `yunta run`/`yunta resume` calls before spending anything (see
 //! `commands::probe_or_refuse`); this command exists to run it on
-//! demand and report every result instead of stopping at the first
-//! failure.
+//! demand and report every result as a check of its own instead of
+//! refusing.
 //!
 //! Says who git commits a run's work as, or that it cannot name anyone.
 //!

@@ -23,13 +23,12 @@ use crate::schema_range::SchemaRange;
 use crate::workflow::NodePermissions;
 
 /// The pack's own identity: `publisher/name`, invoked as
-/// `yunta run acme/review`, composed as `use: acme/qa-review`,
-/// referenced as `skills: [acme/review-rubric]`. Kept as two plain
-/// fields rather than one combined id — `publisher` and `name` are
-/// independently meaningful (namespacing, `permissions.packs.publishers`
-/// matches on `publisher` alone) and forcing every caller to split a
-/// combined string back apart would just move the parsing problem
-/// around instead of solving it.
+/// `yunta run acme/review` and composed as `use: acme/qa-review`. Kept
+/// as two plain fields rather than one combined id — `publisher` and
+/// `name` are independently meaningful (namespacing,
+/// `permissions.packs.publishers` matches on `publisher` alone) and
+/// forcing every caller to split a combined string back apart would
+/// just move the parsing problem around instead of solving it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackManifest {
@@ -62,8 +61,11 @@ pub struct PackManifest {
 }
 
 /// What the installer's own config must provide — never satisfied
-/// by the pack itself; `check`/`add` validate these against the local
-/// merged config, this type only parses what's asked for.
+/// by the pack itself. `yunta check` and `yunta run` refuse a workflow of
+/// the pack while the project or the machine lacks any of it, and
+/// `yunta doctor` reports the gap; `pack add` installs the pack regardless,
+/// so it can be configured for later. This type only parses what is asked
+/// for.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackRequires {
@@ -81,7 +83,9 @@ pub struct PackRequires {
 }
 
 /// One entry in `requires.runners`: a runner name the installer's own
-/// `runners:` must define with a candidate.
+/// `runners:` must define with a candidate. A pack names the runners its
+/// workflows ask for, never an adapter, a model or a secret: the word is
+/// `runner` in a manifest as in a workflow and on the log.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequiredRunner {

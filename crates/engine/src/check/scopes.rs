@@ -1,4 +1,17 @@
-//! See [`super`]. One family of workflow-check rules.
+//! See [`super`]. Who may write the same files at once, and which commands
+//! the project's permissions deny.
+//!
+//! Nodes that run together share one tree. Two of them that may write and
+//! declare scopes that can reach the same files are refused: that much is
+//! provable from the file. Without declared scopes nothing can tell which
+//! of them wrote a file while both run — no command node tracks its writes
+//! — so two writers with no declared scope are a warning that recommends
+//! `scope`, never a detection the engine cannot make. A node that declares
+//! `permissions: read-only` writes nothing, and counts for neither. A
+//! `parallel` group's children whose scopes overlap are refused where the
+//! workflow is read, and its writers without one are warned about here;
+//! the nodes the scheduler runs side by side under `max_parallel_nodes` are
+//! held here to both halves.
 
 use super::*;
 use yunta_core::ScopeGlob;

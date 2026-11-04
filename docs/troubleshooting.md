@@ -11,7 +11,7 @@ names the node and the exact problem, and a problem about the workflow file is
 followed by the line it is about, with carets under the part at fault and what
 helps fix it under them:
 
-```
+```text
 ✗ bad.yaml · 2 errors
 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 
@@ -102,17 +102,19 @@ refuses a file with any of them.
 
 ## `yunta doctor` reports an adapter unhealthy
 
-```
+```text
   ✗ codex      unhealthy: `codex` is not on PATH
 ```
 
-The diagnostic names the actual problem: binary missing, version
-incompatible, or auth invalid. Fix that specific thing and re-run — `doctor`
-runs the identical probe `yunta run` runs before spending anything, so a
-healthy `doctor` means the binary is there, answers and authenticates.
+The diagnostic names the actual problem: a binary missing or not answering, a
+version the adapter does not support, or a setting it does not read. Fix that
+specific thing and re-run — `doctor` runs the identical probe `yunta run` runs
+before spending anything, so a healthy `doctor` means the binary is there and
+answers.
 
-It does not mean a session opens. The probe asks for a version, which never
-touches the configuration a run writes the CLI; a CLI that refuses that
+It does not mean its credentials hold or a session opens. The probe asks for a
+version, which reaches no service and never touches the configuration a run
+writes the CLI; a CLI that refuses that
 configuration is healthy to a probe and dead to a run. `yunta doctor
 --session` opens one real session per binding, asks it to submit an empty
 `questions` document, and reports success only after the run accepts that
@@ -191,7 +193,7 @@ in the workflow instead. See [scope and permissions](guide.md#scope-and-permissi
 
 ## A node failed on an artifact it declared
 
-```
+```text
 artifacts/plan/tasks.yaml: 2 errors
   task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
   task `graph-cmd`: `depends_on` names `t9`, which no task in this file declares
@@ -207,7 +209,7 @@ For a `prompt` or `loop` node, the document arrives through a run tool and the
 engine takes it into the run. A session that never handed one over closes the
 node on a failure of its own, headed by the node rather than by a file:
 
-```
+```text
 node `plan`: 1 error
   handed over no tasks document: produce it before the node ends, or stop declaring it here
 ```
@@ -232,7 +234,7 @@ document, and names which of those it is.
 
 ## The engine refused a document or a finding a session offered
 
-```
+```text
 The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
 
   1. task `graph-cmd`: `scope` is empty; every task declares at least one glob, the only paths it may touch
@@ -251,7 +253,7 @@ A document that reads into its kind is refused with every rule it breaks, all at
 once. A document that does not read into its kind is refused with that one problem
 and the path where it sits:
 
-```
+```text
   1. does not parse at `tasks[1].scope`: invalid type: string "src/**", expected a sequence
 ```
 
@@ -282,7 +284,7 @@ criterion itself is wrong.
 
 ## `yunta run` refuses because git cannot name who commits
 
-```
+```text
 a run commits every node's work, and git cannot name who commits here: …
 ```
 
@@ -294,7 +296,7 @@ commits as.
 
 ## `isolation: none` refuses to start
 
-```
+```text
 `<path>` has uncommitted changes; isolation `none` requires a clean tree: without it, scope-by-diff can't tell the agent's work from what was already there
 ```
 
@@ -306,7 +308,7 @@ in place.
 
 ## A run looked stuck after the laptop slept
 
-```
+```text
 run: host suspended for 1h52m, which durations leave out; new sessions wait until it has been awake 2m00s
 ```
 
@@ -320,7 +322,7 @@ else: check `yunta status`.
 
 ## A suite takes minutes longer than its tests on macOS
 
-```
+```text
   ▲ first run  a new binary's first run takes 307 ms here, its next 4 ms
     so         macOS assesses each new executable before its first run, and a
                suite pays that for every test binary it links again
@@ -425,7 +427,7 @@ the tree the task starts from and it failed, so the task is `blocked` before any
 session opened. The stop names each guard, and says what the guard is there to
 show when the criteria say so:
 
-```
+```text
 guard `cargo test -p billing` is already red before any work started: it is there to show that totals match the invoices
 ```
 
@@ -456,7 +458,7 @@ task, and only the plan can change them.
 
 ## `resume` says the run is broken because of an artifact
 
-```
+```text
 run is broken: run `01J...` no longer holds the bytes its log accepted for 1
 of the 3 artifacts it names: `artifacts/plan/tasks.yaml`: object
 `a1b2...` holds content that hashes to `c3d4...`: the bytes under
@@ -490,7 +492,7 @@ That log names files rather than objects; see [compatibility](compatibility.md).
 
 ## `resume` says the run is broken because of its worktree
 
-```
+```text
 run is broken: run `01J...` works in `/home/me/.yunta/worktrees/01J...`, whose
 HEAD `9f1c...` no longer has the run's base commit `4a77...` behind it: every
 task, scope check and criterion this run's log records was established against
@@ -534,7 +536,7 @@ that is gone.
 
 ## `resume` cannot find the run's worktree
 
-```
+```text
 the run's branch `yunta/run/01J...` has no worktree at
 `/home/me/.yunta/worktrees/01J...` (there is nothing at that path); the
 run's history and artifacts are intact; bring the checkout back with `git

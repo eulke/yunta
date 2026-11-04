@@ -1,3 +1,19 @@
+//! The log in SQLite: one row per event, and each run's hash chain over its
+//! rows.
+//!
+//! An append gives the event the next `seq` of its run and its link of the
+//! chain in one transaction: `event_hash` is SHA-256 over the previous
+//! event's hash and the row's own fields in a fixed order — `run_id`, `seq`,
+//! `ts`, `node_id`, `kind`, `payload_json`, `schema_version` — over the bytes
+//! as stored, so no reading of a later binary bears on it. A run's first
+//! link is anchored on the hash of its `run_created` manifest hash, so every
+//! run's chain is its own. The hash is stored with its row and the run's
+//! head moves with it; replay never recomputes one. [`Storage::verify_chain`]
+//! walks a chain when asked — by `yunta verify` and for every receipt — and
+//! names the first seq an altered, deleted, inserted or reordered row, or a
+//! deleted tail, breaks. The chain proves integrity and order, never who
+//! wrote the log.
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 

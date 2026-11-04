@@ -1,11 +1,8 @@
-//! The tasks document as a run works it, folded once.
-//!
-//! Five places used to walk the task events with their own rule: one for
-//! the status, one for the attempt number, one for the commit a `done`
-//! landed at, one to find the registration a status change is caused by.
-//! Every surface that asks what a task is doing — or what the criteria
-//! it is checked against cost — reads it here rather than walking the
-//! kinds itself: a second fold is a second answer.
+//! The tasks document as a run works it, folded once: each task's status,
+//! its attempts, the commit a `done` landed at, and the event each status
+//! change is caused by. Every surface that asks what a task is doing — or
+//! what the criteria it is checked against cost — reads it here rather than
+//! walking the kinds itself: a second fold is a second answer.
 
 use std::collections::{BTreeMap, BTreeSet};
 

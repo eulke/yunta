@@ -175,6 +175,7 @@ mod tests {
             adapter: None,
             frozen: None,
             provenance_gaps: Vec::new(),
+            loaded_links: Vec::new(),
         }
     }
 

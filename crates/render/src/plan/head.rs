@@ -14,8 +14,9 @@ use super::said;
 
 /// The head of `review`: its title with how big it is; then its summary,
 /// what keeps it from being proven when anything does, and what the person
-/// asked for. Where the plan stands for its reader is the page's to say. A
-/// count of its tests is not part of it: how a plan is proven is said once,
+/// asked for. Where the plan stands for its reader is the page's to say: a
+/// file the plan is drawn into carries no word of a decision answered later.
+/// A count of its tests is not part of it: how a plan is proven is said once,
 /// in its proof.
 pub(super) fn head(review: &PlanReview, steps: &[Vec<&Task>]) -> Doc {
     let mut doc = Doc::new().with(Block::Title(Title {

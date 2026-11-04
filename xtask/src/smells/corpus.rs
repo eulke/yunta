@@ -24,6 +24,20 @@ pub(super) fn entries(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Whether `path` is an asset no counter reads as text: an image, a PDF, or
+/// the folder metadata a desktop leaves.
+pub(super) fn is_asset(path: &Path) -> bool {
+    let named = |name: &str| path.file_name().is_some_and(|file| file == name);
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_lowercase);
+    named(".DS_Store")
+        || extension.is_some_and(|ext| {
+            ["png", "jpg", "jpeg", "gif", "webp", "ico", "pdf"].contains(&ext.as_str())
+        })
+}
+
 /// Every `.rs` file under `dir`, recursively; missing directories yield
 /// nothing so a counter over a path that does not exist is simply zero.
 pub(super) fn rs_files(dir: &Path) -> Vec<PathBuf> {

@@ -9,6 +9,14 @@
 //! change that only puts words in, or only takes them out, stands where it
 //! reads best among the places that say the same; and a short stretch kept
 //! between two changes on one line reads as part of one change with them.
+//!
+//! A diff is drawn and never recorded: it is a function of the plan's code and
+//! the code the log holds, so a better way of drawing it reaches the runs that
+//! came before it. Its marks stand inside the plan's own lines, since a diff
+//! drawn under them would draw the code twice. A shape the plan abbreviates
+//! shows the words it leaves out as removed, which is what its text says. A mark
+//! can collide with code such as `vec![-1]`: color tells them apart, and plain
+//! output can, rarely, be ambiguous.
 
 use std::ops::Range;
 

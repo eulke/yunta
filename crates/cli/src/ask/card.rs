@@ -1,7 +1,8 @@
 //! A decision a person answers with keys, as a card: the question, what a reader
 //! needs to answer, every option with what it does and what it costs, one pointed
 //! at, and what follows it. Pure: a stroke goes in, and what it asks of the prompt
-//! comes out.
+//! comes out. No option names a command: the prompt is how one is chosen, and the
+//! commands are said where the run is parked.
 
 use std::collections::BTreeMap;
 

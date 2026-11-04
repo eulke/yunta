@@ -27,7 +27,7 @@ impl crate::task_cycle::KeepsOutput for RunCtx<'_> {
     }
 }
 
-/// `RunCtx` is the one real [`SessionObserver`] — audit events
+/// `RunCtx` is the one real [`SessionObserver`](crate::task_cycle::SessionObserver) — audit events
 /// land in the run's own log as they arrive, so a concurrent `status`
 /// sees the live session, and they reach the invocation's display
 /// surface on the same path every other event of the run takes. An

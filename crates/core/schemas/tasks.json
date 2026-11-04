@@ -93,7 +93,7 @@
       ]
     },
     "Criterion": {
-      "description": "One criterion: a command, and whether it is a `guard` (passes before\nand after the work) or an ordinary criterion (fails before the work,\npasses after).",
+      "description": "One criterion: a command, and whether it is a `guard` (passes before\nand after the work) or an ordinary criterion (fails before the work,\npasses after).\n\nThe criteria are a task's only verification: no model judges whether\nit is done. A criterion is deterministic in the tree it runs on — the\nsame tree answers the same, which is what lets the engine keep its\nanswer for that tree — so a command whose verdict depends on the clock,\nthe network or a service is a `bash` node, never a criterion. What no\ncommand can verify is not a task: it goes behind a `gate`, for a person\nto close.",
       "type": "object",
       "properties": {
         "cmd": {
@@ -125,6 +125,7 @@
       ]
     },
     "CriterionType": {
+      "description": "A criterion's kind: a `guard` is green before the work, and the task has\nto keep it green.",
       "type": "string",
       "enum": [
         "guard"

@@ -48,11 +48,16 @@ impl FindingSeverity {
 #[serde(try_from = "FindingWire", into = "FindingWire")]
 #[schemars(with = "FindingWire")]
 pub struct Finding {
+    /// Its id, unique among the findings its author posted.
     pub id: FindingId,
+    /// How much it matters: what a `findings_gate` holds the run to.
     pub severity: FindingSeverity,
     /// What it says: a session's own words, or what the engine found.
     pub says: FindingSays,
+    /// Where it is. Two findings at one place that make one complaint are
+    /// counted once.
     pub location: Location,
+    /// A command that would prove it fixed, when its author proposes one.
     pub proposed_criterion: Option<ProposedCriterion>,
 }
 
@@ -117,7 +122,9 @@ impl TryFrom<FindingWire> for Finding {
 }
 
 /// The finding's author is the envelope's own `node_id` — not repeated
-/// here.
+/// here. A finding with no node is the engine's own, about the run: each
+/// degradation it suffers is posted as one, never a warning that leaves
+/// the log silent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FindingPostedPayload {
     pub finding: Finding,
@@ -131,7 +138,8 @@ pub struct FindingUpdatedPayload {
 }
 
 /// The node's finding `id` no longer stands, and why — in the words of
-/// whoever took it back.
+/// whoever took it back. A withdrawal is final: the id is never posted,
+/// updated or withdrawn again, and a finding that comes back is a new id.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FindingWithdrawnPayload {
     pub id: FindingId,

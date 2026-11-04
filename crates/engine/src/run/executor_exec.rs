@@ -1,9 +1,15 @@
 //! `kind: executor` — the extension point when neither
 //! `bash` nor `check`'s closed builtin list is enough: external code, a
-//! JSON contract over stdio. The high-level shape is fixed (JSON
-//! in, JSON out, exit code is the verdict); this module's own doc
-//! comments carry the concrete contract it adds on top, and naming those
-//! fields is open work: their names are not fixed.
+//! JSON contract over stdio. The engine writes the node's `with:` and the
+//! run's paths to the executor's stdin as one JSON value, reads an
+//! optional `summary` back from its stdout, and takes its exit code as
+//! the verdict, bounded by the node's `timeout_seconds`. Any language can
+//! write one, and a person can run one by hand to see what it answers.
+//!
+//! What runs is the copy the run froze when it was born, verified against
+//! its hash, and its declared path passes the project's command
+//! permissions first. An executor is code: a pack that ships one is
+//! installed only as `permissions.packs.executors` allows.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -25,11 +31,9 @@ use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 /// `run` mirrors the `{{run.dir}}`/`{{run.worktree}}` template variables
 /// every other node already exposes (`node_exec::template_vars`), rather
 /// than inventing different names for the same two paths. `env` is
-/// always present and empty — no per-node `env:`
-/// declaration exists on `kind: executor` yet (same "not designed yet"
-/// treatment `isolation: container` gets elsewhere), so there is nothing
-/// to declare, but the key stays so an executor never has to branch on
-/// its absence.
+/// always present and empty: `kind: executor` declares no environment of
+/// its own, and the key stays so an executor never has to branch on its
+/// absence.
 fn build_stdin(
     ctx: &RunCtx<'_>,
     with: &serde_json::Map<String, serde_json::Value>,

@@ -16,7 +16,20 @@
 //!
 //! A block holds what is said and the role each part plays, never a
 //! width, an escape or a glyph: a glyph is written only in [`glyphs`], an
-//! escape only in [`paint`], and a state word only in [`words`].
+//! escape only in [`paint`], and a state word only in [`words`]. Its map:
+//!
+//! - What is said: `words` and `figures`, `text` for the grammar and the layout
+//!   of a sentence, `prose` for what a session wrote, and `paths`.
+//! - What it is drawn with: `glyphs`, `line`, `bars`, `motion`, `paint` and
+//!   `palette`, for a stream that `look` and `width` measure.
+//! - What a document is made of: `doc`, `components`, `diagram`, and `code`, the
+//!   one lexer every reader of code reads with.
+//! - Who draws it: `surface`, and `golden` compares what a surface drew with what
+//!   was written down for it.
+//!
+//! Not a module of `yunta-render` or a crate above `yunta-core`: a language that
+//! shares a crate with its documents, or that can see the domain's types, holds
+//! its rules by care, and core's refusals need its grammar from below.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting or panicking.

@@ -1243,6 +1243,9 @@ nodes:
 
 /// Two units that landed on one branch left one history, not two heads:
 /// the run's tree carries both, each as its own commit.
+/// Reached by: `crates/engine/src/run/ctx.rs`, `crates/engine/src/run/invocation.rs`,
+/// `crates/engine/src/run/shared_tree.rs`, `crates/engine/src/run/node_start.rs`,
+/// `crates/engine/src/run/node_close.rs`
 #[tokio::test]
 async fn two_units_landing_on_one_branch_serialize() {
     let bench = Bench::new();

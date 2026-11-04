@@ -6,7 +6,9 @@
 //! The engine, never the agent, decides `done`: [`run_task`] always
 //! re-runs every criterion after dispatch, regardless of what the
 //! session reported — an agent that claims success with red criteria
-//! still leaves the task not-done.
+//! still leaves the task not-done. The memo keeps what a criterion
+//! answered on a tree while nothing it could turn on changed, so a check
+//! that asks again on the same tree reads it instead of running it.
 
 mod answer;
 mod attempt;

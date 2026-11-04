@@ -132,7 +132,7 @@ async fn force_covered(
 
 /// Removes from `checkout` what git ignores under `covered`, which the
 /// plain `clean -ffd` leaves in place: all of it under a rooted pathspec,
-/// and each file a loose one reaches.
+/// each file a loose one reaches, and a link or a file at a point.
 pub(super) async fn clean_covered(
     checkout: &Path,
     covered: &Pathspecs,
@@ -143,7 +143,9 @@ pub(super) async fn clean_covered(
         args.extend(covered.rooted.iter().map(String::as_str));
         git::change(checkout, Effect::Checkout, &args, supervision).await?;
     }
-    let loose = ignored_under(checkout, &["--directory"], &covered.loose, supervision).await?;
+    let mut loose = ignored_under(checkout, &["--directory"], &covered.loose, supervision).await?;
+    let points = standing(checkout, &covered.points).await;
+    loose.extend(ignored_under(checkout, &[], &literal(&points), supervision).await?);
     for file in listed_files(&loose) {
         let path = checkout.join(std::ffi::OsStr::from_bytes(file));
         match tokio::fs::remove_file(&path).await {
@@ -175,7 +177,41 @@ async fn covered_ignored(
         listed.extend_from_slice(file);
         listed.push(0);
     }
+    for point in standing(cwd, &covered.points).await {
+        listed.extend_from_slice(point.as_os_str().as_bytes());
+        listed.push(0);
+    }
     Ok(listed)
+}
+
+/// The points of `points` a link or a file stands at in `checkout`, below
+/// directories that are real: there the close has something to judge, and a
+/// directory at a point is never entered. A point under something that is no
+/// directory is left to that path, a point of its own.
+async fn standing(checkout: &Path, points: &[PathBuf]) -> Vec<PathBuf> {
+    let mut standing = Vec::new();
+    'points: for point in points {
+        let above = point.ancestors().skip(1);
+        for dir in above.filter(|dir| !dir.as_os_str().is_empty()) {
+            let real = tokio::fs::symlink_metadata(checkout.join(dir)).await;
+            if !real.is_ok_and(|meta| meta.is_dir()) {
+                continue 'points;
+            }
+        }
+        let here = tokio::fs::symlink_metadata(checkout.join(point)).await;
+        if here.is_ok_and(|meta| !meta.is_dir()) {
+            standing.push(point.clone());
+        }
+    }
+    standing
+}
+
+/// `paths` as pathspecs that name each one as it is.
+fn literal(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| format!(":(literal){}", path.display()))
+        .collect()
 }
 
 /// What git ignores under `pathspecs`, listed with `extra` and

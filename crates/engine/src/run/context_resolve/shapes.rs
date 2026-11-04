@@ -73,6 +73,11 @@ pub(super) async fn mount_artifact_shapes(
 /// carries it is named the way the session's CLI names it (`naming`). A
 /// plan or a spec is told the `suite` the run measures, which its commands
 /// extend when they run the project's tests.
+///
+/// The block says it is the document's whole contract — its keys, their
+/// types and its rules — and that where any other instruction describes the
+/// document differently, the block is what the engine enforces: an author's
+/// prompt is prose that may restate a shape and fall behind it.
 pub(super) fn artifact_shapes(
     node: &Node,
     naming: yunta_core::ToolNaming,

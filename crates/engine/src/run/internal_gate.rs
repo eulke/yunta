@@ -232,7 +232,8 @@ impl<'a> InternalGate<'a> {
 /// one counts as none. With none, whether to approve the change the plan among
 /// `shown` names, when one names it; else that the gate needs a decision, by
 /// its node. An internal gate's escalation and a forge's pull request both ask
-/// it.
+/// it. Not a template on `message:`: a message would read an artifact the gate
+/// does not name, and every author would write the same sentence.
 pub(super) fn claim(node: &Node, message: Option<&str>, shown: &[ShownDocument]) -> Claim {
     match message.filter(|message| !message.trim().is_empty()) {
         Some(message) => Claim::Written(message.to_string()),

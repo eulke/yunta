@@ -3,7 +3,8 @@
 //! reading serves every reader of code (the word diff, the colors of code,
 //! the items a text declares, a terminal's page of Markdown, the engine's
 //! search for a name and the smells' measure of code), so no two of them can
-//! disagree on where a string, a comment or a fence ends.
+//! disagree on where a string, a comment or a fence ends. It does not read JSX's
+//! text: an apostrophe in it opens a literal that ends at its line.
 
 mod literal;
 #[cfg(test)]

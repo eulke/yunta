@@ -603,6 +603,8 @@ fn one_finished_round(events: &[StoredEvent], node: &NodeId, cut: usize) {
 proptest! {
     /// `derive` is pure: the same log always derives the same state, with no
     /// dependence on `HashMap` iteration order or any hidden state.
+    /// Reached by: `crates/engine/src/replay.rs`, `crates/engine/src/replay/**`,
+    /// `crates/core/src/events/**`
     #[test]
     fn derive_is_deterministic(log in log()) {
         prop_assert_eq!(derive(&log), derive(&log));

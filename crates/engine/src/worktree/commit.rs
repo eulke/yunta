@@ -75,7 +75,8 @@ pub async fn commit_tree(
 }
 
 /// Puts `paths` in `repo` back as its `HEAD` holds them: a path `HEAD`
-/// has is checked out from it, and one it does not have is removed.
+/// has, as a file or as a directory, is checked out from it, and one it
+/// does not have is removed.
 /// What a run refuses to commit goes back to where the branch had it,
 /// so nothing later commits it by accident.
 pub async fn restore(
@@ -97,7 +98,12 @@ pub async fn restore(
         git::change(repo, Effect::Checkout, &checkout, supervision).await?;
     }
     for (path, name) in paths.iter().zip(&names) {
-        if tracked.contains(name) {
+        // A link or a file put where `HEAD` has a directory is gone once the
+        // directory's files are checked out.
+        if tracked
+            .iter()
+            .any(|known| Path::new(known).starts_with(name))
+        {
             continue;
         }
         match tokio::fs::remove_file(repo.join(path)).await {

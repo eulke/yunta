@@ -2,13 +2,13 @@
 //!
 //! Every tool is built here so the list and its arguments stay one
 //! decision: which tools a session sees depends on that session (a
-//! blackboard group, a task, the kinds of document its node
-//! declares), and each one's `inputSchema` comes from the schema this
+//! task, its node's own scope, a blackboard group, the kinds of document
+//! its node declares), and each one's `inputSchema` comes from the schema this
 //! repository publishes for the document it carries rather than from a
 //! second description written by hand. A tool whose schema drifts from
 //! the document the close validates is a promise the engine breaks, so
 //! there is one source for both. The words a tool is described in are
-//! written in [`words`](super::words).
+//! written in [`words`].
 
 use rmcp::model::Tool;
 use serde_json::{json, Value};

@@ -194,7 +194,8 @@ impl CheckoutPool {
     /// the manifest recorded of the project is taken rather than asked
     /// for again, and what it may keep of the disk is the run's config's.
     /// It cleans what the run protects from its first take on, before any
-    /// wake of the run adds the tests a person approves.
+    /// wake of the run adds the tests a person approves. A deny that does
+    /// not build is the wake's diagnostic: the rest is cleaned all the same.
     pub fn of_run(
         root: &Path,
         repo: &Path,
@@ -212,9 +213,9 @@ impl CheckoutPool {
             .as_ref()
             .and_then(|storage| storage.pool.as_ref());
         let pool = Self::reached(root, repo, Some(holder.to_path_buf()), known, limits, clock);
-        // A deny that does not build is the wake's diagnostic; what every
-        // run protects is cleaned all the same.
-        let protected = Protected::new(manifest.config.denied_paths(), &[])
+        let links = &manifest.loaded_links;
+        let protected = Protected::of_run(manifest.config.denied_paths(), &[], links)
+            .or_else(|_| Protected::of_run(&[], &[], links))
             .or_else(|_| Protected::new(&[], &[]))
             .map(|set| set.pathspecs())
             .unwrap_or_default();

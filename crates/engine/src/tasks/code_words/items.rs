@@ -8,6 +8,12 @@
 //! JavaScript or TypeScript, and Python; a file's are searched at its top,
 //! one level into each `impl`, `trait`, class and interface, and one level
 //! into each inline module that is not a test's.
+//!
+//! The reader can pick the wrong item where a macro makes items, where an
+//! inline module other than a test's holds a namesake, or where `cfg` twins
+//! declare one and the plan writes neither twin's attributes: it then reads the
+//! twins in turn, the first for the first planned. Where it cannot tell, a
+//! shape reads as not compared or as new.
 
 use std::collections::BTreeSet;
 use std::ops::Range;

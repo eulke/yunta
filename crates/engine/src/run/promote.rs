@@ -8,6 +8,12 @@
 //! CLI's `drive_promotions` for top-level runs, and `workflow_exec` for
 //! a `kind: workflow` child that promotes mid-composition.
 //!
+//! A run never changes its mode or its manifest. When the work outgrows its
+//! mode, a person chooses to promote at the escalation that offers it, and
+//! the run closes `promoted` while this successor is born, in the next mode
+//! of the workflow's declaration order and from the same frozen inputs; the
+//! chain is on both logs. There is no way back to an earlier mode.
+//!
 //! The successor's tree branches from where the predecessor's work left
 //! it, so every commit that run integrated is an ancestor of the
 //! successor's HEAD and the tasks it finished are finished here too.
@@ -56,16 +62,13 @@ pub struct Predecessor<'a> {
     pub run_dir: &'a Path,
 }
 
-/// Creates (never runs) the successor of `predecessor`, which just
-/// closed `Promoted` toward `suggested_mode`.
-///
 /// What the caller brings to a run it creates: where the log goes, the
 /// instant and the ids the log is stamped with, and the supervision every
 /// subprocess that creation spawns is born under.
 ///
 /// Grouped because they travel together and none of them is a decision
 /// this function makes: it is handed the caller's infrastructure and
-/// trail, exactly as [`create_run`](crate::create_run) is.
+/// trail, exactly as [`create_run`] is.
 pub struct CallerInfra<'a> {
     pub storage: &'a AsyncStorage,
     pub ids: &'a dyn IdSource,
@@ -80,11 +83,14 @@ pub struct CallerInfra<'a> {
     pub secrets: &'a dyn yunta_core::SecretSource,
 }
 
+/// Creates (never runs) the successor of `predecessor`, which just
+/// closed `Promoted` toward `suggested_mode`.
+///
 /// The successor works in the predecessor's own tree: under
 /// `Isolation::Worktree` on a branch of its own cut where that tree stands,
 /// and under `Isolation::None` in the same checkout — the lock (if any) is
-/// the caller's and only releases when the whole chain ends. `storage`, `ids` and `supervision` are the
-/// caller's infrastructure and trail, as in [`create_run`].
+/// the caller's and only releases when the whole chain ends. `caller` is
+/// the caller's infrastructure and trail, as in [`create_run`].
 pub async fn create_promotion_successor(
     predecessor: Predecessor<'_>,
     suggested_mode: &ModeName,
@@ -140,6 +146,16 @@ async fn successor_manifest(
     // The successor builds on wherever the predecessor's own
     // work left the tree, not on the original base.
     manifest.base_commit = crate::worktree::head_commit(predecessor.worktree, supervision).await?;
+    // The links it protects through are those of the tree it builds on.
+    manifest.loaded_links =
+        crate::manifest::loaded_links(predecessor.worktree, &manifest.base_commit, supervision)
+            .await
+            .map_err(|error| match error {
+                crate::manifest::ManifestError::Links(git) => RunError::from(git),
+                other => RunError::Broken {
+                    diagnostic: other.to_string(),
+                },
+            })?;
     // Resolved ahead of the checkout's handover: a short declared secret
     // refuses the successor with nothing taken.
     let redactor = run_redactor(&manifest, secrets)?;

@@ -9,7 +9,11 @@
 //! A person deciding on a change reads the change. The code a task writes
 //! sits in its card, once; the code of the tests that prove it is not part
 //! of the read — the whole plan has each file the spec wrote after every
-//! card, and a review names the command that shows them.
+//! card, and a review names the command that shows them. It is not folded
+//! inside a card: a fold a terminal cannot open is a promise the page does not
+//! keep, and the code would still sit between the changes of every task. Nor is
+//! it cut short on its task: a shorter test is still the proof before the
+//! change, and a cut file is a file nobody can run.
 
 use surco::components::{Code, Fold, Section};
 use surco::doc::{Block, Doc};

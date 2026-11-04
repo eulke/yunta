@@ -1,11 +1,22 @@
 //! The real `claude-code` adapter: spawns the `claude` CLI headless
 //! (`-p --output-format stream-json`), streams its JSON lines into
 //! `AgentEvent`s (`parse.rs`), and maps yunta's portable request fields
-//! onto the CLI's own flags (`permissions.rs`). Never exercised by the
-//! automated suite — no real LLM in CI — covered instead by
-//! `crates/adapters/tests/claude_code.rs` against a scripted fake binary,
-//! plus one check run by hand against the real CLI; cargo test runs
-//! the stubs only.
+//! onto the CLI's own flags (`permissions.rs`).
+//!
+//! Its fence judges each tool call: the `--settings` a launch passes install
+//! the hooks that ask the engine before every writing tool, before the
+//! session stops, and after a write the run formats (`rail.rs`), and the
+//! fence's roots reach the CLI as `--add-dir`. The same settings hold the
+//! sandbox a confined session's commands run in, which fails the session
+//! rather than run a command unconfined. An agent's instructions are read
+//! from a file of the session's scratch, and the run's tools are an HTTP
+//! server of the session's `--mcp-config` file, which keeps the bearer off
+//! `argv`.
+//!
+//! Never exercised by the automated suite — no real LLM in CI — covered
+//! instead by `crates/adapters/tests/claude_code.rs` and the contract suite
+//! against a scripted fake binary, plus one check run by hand against the
+//! real CLI; cargo test runs the stubs only.
 
 mod parse;
 mod permissions;

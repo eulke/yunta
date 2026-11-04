@@ -26,11 +26,17 @@ pub enum Decider {
     },
 }
 
+/// A command a session proposes with a scope request or a finding: one that
+/// fails when proposed and passes once the work it asks for is done.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProposedCriterion {
     pub cmd: String,
 }
 
+/// What a session asked to write beyond its scope, as it asked it: never a
+/// request the engine rewrote. Written when the request is decided — at
+/// the call, for a refusal no work could change, and otherwise at the
+/// close of the attempt or the node that received it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionRequestedPayload {
     /// The task that asked. Absent when the session that asked works a
@@ -38,19 +44,26 @@ pub struct ScopeExpansionRequestedPayload {
     /// node's, the one the event is written under.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<TaskId>,
+    /// The globs it asked to be allowed.
     pub paths: Vec<ScopeGlob>,
+    /// Its reason, in its own words.
     pub reason: String,
+    /// A criterion it proposed with the request, when it proposed one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion: Option<ProposedCriterion>,
+    /// What the proposed criterion did when the decision ran it before any
+    /// work; absent when the decision did not run it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion_precheck: Option<ProposedCriterionPrecheck>,
 }
 
+/// The code a proposed criterion exited with before the work.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProposedCriterionPrecheck {
     pub exit_code: i32,
 }
 
+/// A request for scope granted: who decided, and exactly what it allowed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionGrantedPayload {
     /// The task the grant widens. Absent for a grant to a node's own
@@ -62,6 +75,8 @@ pub struct ScopeExpansionGrantedPayload {
     /// none, and reads back without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<ScopeExpansionMode>,
+    /// The engine's grants in this run once this decision is made: what
+    /// `max_per_run` caps. A person's grant is not one of them.
     pub count_this_run: u32,
     /// The exact paths this grant authorized — self-contained
     /// audit, and what a later attempt's effective scope derives from
@@ -72,6 +87,8 @@ pub struct ScopeExpansionGrantedPayload {
     pub paths: Vec<ScopeGlob>,
 }
 
+/// A request for scope refused, and why. Every refusal also posts a
+/// finding that says so.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionDeniedPayload {
     /// Absent when the denied request was the node's own.
@@ -82,6 +99,7 @@ pub struct ScopeExpansionDeniedPayload {
     /// none, and reads back without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<ScopeExpansionMode>,
+    /// The engine's grants in this run when the request was refused.
     pub count_this_run: u32,
     /// Why it was denied, when the decider said. A denial logged as text
     /// before reasons were typed is read by `why()` instead.
@@ -113,7 +131,8 @@ impl ScopeExpansionDeniedPayload {
 
 /// What a task may write beyond its declared scope because a shape it owns
 /// is named there — derived by the engine from the workflow's tasks and the
-/// run's tree, never asked for and never decided.
+/// run's tree, never asked for and never decided. Not a grant: it counts
+/// toward no cap.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeDerivedPayload {
     pub task_id: TaskId,
@@ -139,7 +158,9 @@ pub enum WithdrawalCause {
 }
 
 /// A request its task closed with, unanswered. Nobody decided it, so
-/// nothing was granted or denied: the request leaves with the task.
+/// nothing was granted or denied: the request leaves with the task,
+/// posting no finding and counting toward no cap. A task that does not
+/// close keeps its request for a person.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionWithdrawnPayload {
     pub task_id: TaskId,

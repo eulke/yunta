@@ -1,11 +1,28 @@
 //! The workflow engine: DAG scheduler, verification cycle, resumability.
-//! `yunta-engine` never depends on rusqlite/sqlx
-//! directly and never contains CLI-specific knowledge — those
-//! are enforced by the crate graph itself, not by convention.
+//! `yunta-engine` never depends on rusqlite/sqlx directly and never contains
+//! CLI-specific knowledge — the crate graph enforces both, not convention. It
+//! reaches an adapter only through the port `yunta-core` declares, and the CLI
+//! is the only shipped crate above it; the test harness `yunta-testkit` builds
+//! on it too. Its map:
 //!
-//! It sits in the middle of that graph (core ← storage/adapters ← engine
-//! ← cli): it reaches an adapter only through the ports `yunta-core`
-//! declares, and the CLI is the only crate above it.
+//! - Birth and resume: `run` creates a run and drives its loop, from what
+//!   `manifest` freezes and `frozen` keeps; `inputs`, `modes`, `catalog`,
+//!   `agents`, `skills` and `runner` resolve what a workflow names, and
+//!   `run_dir` and `session_dir` lay out what a run keeps on disk.
+//! - A node's work: `task_cycle` runs a task through its checks, over what
+//!   `tasks` means to the run; `scope`, `scope_expansion` and `permissions`
+//!   judge what it wrote; `answers`, `human_interaction` and `reserved` carry a
+//!   person's decisions; `findings`, `verification_effectiveness` and
+//!   `artifacts` keep what nodes report and hand over; `check` is `yunta check`.
+//! - The log and what reads it: `run_log` is the one way an event reaches it;
+//!   `replay` derives state, and `view`, `live`, `observer`, `stats`, `history`,
+//!   `receipt` and `events_export` read that state.
+//! - Sessions' tools: `run_tools` serves a node session's MCP server, shaped by
+//!   `mcp`.
+//! - Checkouts: `worktree` isolates and pools them; `wakefulness` notices a
+//!   host that slept.
+//! - Boundaries: `git`, `process`, `process_registry`, `lock` and `pace`.
+//! - Packs: `pack_audit` and `pack_requires`.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.

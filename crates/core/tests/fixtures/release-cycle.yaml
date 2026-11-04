@@ -1,12 +1,11 @@
-# The canonical composed reference workflow
-# as a parse fixture — exercises the
-# `kind: workflow` schema.
+# A workflow built from others: a release of two features, each built by the
+# reference workflow, between a design review and a QA pass.
 name: release-cycle
 inputs:
   rfc:
     type: path
     required: true
-    description: "RFC a revisar"
+    description: "The RFC to review"
   feat_a:
     type: string
     required: true
@@ -16,17 +15,18 @@ inputs:
 nodes:
   - id: design
     kind: workflow
-    use: design-review
+    use: design-review              # a workflow the catalog holds, by its name
     inputs: { rfc: "{{inputs.rfc}}" }
 
   - id: approve-design
     kind: gate
     depends_on: [design]
-    assignee: arquitectura
+    assignee: architecture
 
   - id: build
     kind: parallel
     depends_on: [approve-design]
+    join: all                       # all | any: done when every child is, or at the first
     nodes:
       - { id: feat-a, kind: workflow, use: build-feature, inputs: { idea: "{{inputs.feat_a}}" } }
       - { id: feat-b, kind: workflow, use: build-feature, inputs: { idea: "{{inputs.feat_b}}" } }

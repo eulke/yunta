@@ -1,9 +1,8 @@
 //! What the adapters could not do, folded once.
 //!
-//! A capability the engine consulted and an adapter does not declare is
-//! a degradation the log records, and until now exactly one surface read
-//! it: the receipt, `stats` and `verify` never mentioned it at all.
-//! Every surface that counts or lists degradations reads them here.
+//! A capability the engine consulted and an adapter does not declare is a
+//! degradation the log records. Every surface that counts or lists
+//! degradations reads them here.
 
 use chrono::{DateTime, Utc};
 

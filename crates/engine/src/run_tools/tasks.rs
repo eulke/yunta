@@ -157,11 +157,15 @@ struct TaskSheet<'a> {
     invariants: &'a [String],
     /// What the diff is held to: declared plus granted.
     scope: &'a [ScopeGlob],
-    /// What the diff may never touch, whatever its scope: every path the
-    /// run protects, and the files of every test a person approved, this
-    /// task's own among them.
+    /// What the diff may never touch, whatever its scope, but for what
+    /// `granted` lifts: every path the run protects, and the files of every
+    /// test a person approved, this task's own among them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     denied: Vec<ScopeGlob>,
+    /// The instruction files a person granted this task: paths `denied`
+    /// holds that it may write all the same.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    granted: Vec<ScopeGlob>,
     criteria: Vec<Declared<'a>>,
     cycles: Vec<Cycle>,
     /// What the engine ran these checks with, told only when one of them
@@ -189,6 +193,7 @@ impl<'a> TaskSheet<'a> {
             invariants: &task.invariants,
             scope: &access.scope,
             denied: access.protected.every(),
+            granted: access.protected.granted(),
             criteria: task
                 .criteria
                 .iter()

@@ -17,19 +17,23 @@ workflow's `criteria` do, by running and exiting `0`.
 
 ## Install
 
-Yunta isn't published to crates.io or as a prebuilt release binary.
-[`install.sh`](install.sh) builds a static binary from source and installs it to
-`~/.local/bin`, no sudo:
+Each release publishes a binary for Linux (x86_64 and aarch64, static musl) and
+macOS (x86_64 and aarch64); Yunta isn't published to crates.io.
+[`install.sh`](install.sh) installs the latest release's binary for your platform to
+`~/.local/bin` (or `$YUNTA_INSTALL_DIR`), no sudo, once it matches the release's
+SHA-256 checksums; `YUNTA_VERSION=v0.0.5` pins a release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/eulke/yunta/main/install.sh | sh
 ```
 
-Or, from a clone already on disk, `./install.sh`. On Linux it links against `musl`
+Or, from a clone already on disk, `./install.sh`. Where no release matches the
+version and the platform, the script builds a static binary from source instead,
+which needs a recent stable Rust toolchain. On Linux that build links against `musl`
 for a real static binary (no glibc dependency at runtime) — `rustup target add
 x86_64-unknown-linux-musl` plus a musl C toolchain (`apt install musl-tools` on
 Debian/Ubuntu) if you don't have one already; the script installs the Rust target
-itself. Requires a recent stable Rust toolchain either way.
+itself.
 
 For local development, plain `cargo build --release` (binary at
 `target/release/yunta`) or `cargo run -p yunta --` from the workspace root both work
@@ -185,7 +189,7 @@ work held to its plan, PR).
 | `yunta stats [<run>] [--workflow <name>] [--full \| --dig] [--json]` | Verification cost: cost-per-verified-task, rework rate, cache rate, wall-clock breakdown (time the host was suspended left out, and said) — for one run or a workflow's whole history. For one run, where its time went, as a bar of its parts: working, rails, checks (and how much of them guards ran with the task's own criterion already red), measuring the suite while nothing else ran, waiting on you — from the moment the engine began asking — offline, parked, and the engine between steps; then each node's time and tokens, and each runner's. `--full` adds the run's rails and each node's blocked share and models; `--dig` keeps each node's id whole. With `--workflow <name>` and no history, `--json` prints the same document with `runs` empty, where the human view says there are no runs. |
 | `yunta verify <run> [--json]` | Checks a run's evidence end to end, reporting the two guarantees apart: its event hash chain, recomputed from the log as persisted, and the bytes of every artifact that log accepted, read back and hashed against its own name. `--json` prints the report as one document. |
 | `yunta receipt <run> [--json]` | Generates a Verified Work Receipt for a finished run — markdown + JSON, derived entirely from the event log, written to the run's own directory; a run that failed names each node that failed and why. A `pull_request` node puts the same receipt in the pull request it opens. |
-| `yunta doctor [--session] [--full] [--json]` | Health-checks every adapter your `runners:` name — binary present, version compatible, auth valid — or, when it names none, gives the runner to declare on the adapters this machine answers for. At a glance the checks that hold fold into one row that names each, and every other check has its own row with what it means and how to make it hold; `--full` gives every check its own row, who git commits a run's work as among them. It checks every installed pack's `requires:` against your config: runners resolvable, mcp servers defined, commands on `PATH`. It fails only on what would stop a workflow in the catalog: a runner one needs, a forge token one opening a pull request needs. `--session` goes further and opens one real session per binding, which is the only way to find out whether a CLI accepts the configuration a run writes it; it spends a prompt each. `--json` prints the report as one document. |
+| `yunta doctor [--session] [--full] [--json]` | Health-checks every adapter your `runners:` name — the binary there and answering `--version`, every setting read — or, when it names none, gives the runner to declare on the adapters this machine answers for. At a glance the checks that hold fold into one row that names each, and every other check has its own row with what it means and how to make it hold; `--full` gives every check its own row, who git commits a run's work as among them. It checks every installed pack's `requires:` against your config: runners resolvable, mcp servers defined, commands on `PATH`. It fails only on what would stop a workflow in the catalog: a runner one needs, a forge token one opening a pull request needs. `--session` goes further and opens one real session per binding, which is the only way to find out whether a CLI accepts the configuration a run writes it; it spends a prompt each. `--json` prints the report as one document. |
 | `yunta pack add <source>[@ref] [--yes] [--run-tests]` / `new <publisher>/<name>` / `update <publisher>/<name> <ref> [--yes]` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed; nothing of the pack runs unless `--run-tests` asks for its own cases after the install. Its workflows and skills are then addressable as `publisher/name` (`yunta run acme/review`, `use: acme/qa-review`, `skills: [acme/rubric]`) — see [packs](docs/packs.md). `permissions.packs` governs both verbs: a non-empty publisher allow-list restricts sources, and the executors policy (`prompt` default: `--yes` to confirm; `deny`: refused outright; `allow`: no confirmation) gates packs that ship executable code. `check` refuses any node that exceeds the pack's own declared permissions ceiling. |
 | `yunta pack audit <publisher>/<name>` | Prints a full static inventory of a pack's own workflows — every command, context source, per-node permission, agent, mcp server, executor and full untrimmed prompt — plus whether it ships tests and whether they pass. `add` runs this automatically before vendoring. |
 | `yunta mcp` | Runs the MCP control plane over stdio: `document_shape`, `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`. |
@@ -212,8 +216,9 @@ derive their answer by replaying that log, which is what makes killing the proce
 any point and resuming safe.
 
 A node that has not started reads `never ran`, one at work reads `running`, and it ends
-`finished`, `failed` or `skipped`. A node held by a gate — a human decision point — reads
-`needs you`, with nothing running underneath it; it survives the engine restarting just
+`finished`, `failed` or `skipped`. A node held by a gate — a human decision point — or by
+questions nobody answered yet reads `needs you`, with nothing running underneath it; it
+survives the engine restarting just
 like any other state. `waiting` is only ever a clock: a node held until a limit resets. A
 node whose run was stopped while its attempt was open reads `stopped`: nothing runs it, and
 the run's resume starts it again.

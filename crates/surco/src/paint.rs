@@ -4,12 +4,15 @@
 //! A stream is painted plain, or in one layer of color: the sixteen colors of
 //! its terminal's theme, or 24-bit colors tuned to the ground its terminal
 //! draws on. Color only repeats what the words already say, so a stream
-//! writes the same text plain and in either layer: a captured stream reads
-//! the same whoever captured it, and that is held by a test rather than by
-//! care. A link comes with color, in either layer, and is not a layer of its
-//! own. Whether a stream gets color, in which layer and with links, is a
-//! policy read once from the command line and the environment by whoever
-//! runs the process, then asked per stream.
+//! writes the same text plain and in either layer, in Unicode and in ASCII: a
+//! captured stream reads the same whoever captured it, a code span keeps its
+//! backticks under color, and no surface chooses a word by its layer. That is
+//! held by a test rather than by care. A link comes with color, in either
+//! layer, and is not a layer of its own. Whether a stream gets color, in which
+//! layer and with links, is a policy read once from the command line and the
+//! environment by whoever runs the process, then asked per stream. The terminal
+//! is never asked: a query needs a terminal that answers and a wait for an answer
+//! that may never come, at every start, and tells nothing about a pipe.
 //!
 //! This is the one place in the crate that writes an escape: an SGR color,
 //! a terminal link, the window's title, a synchronized update or a bell.
@@ -220,7 +223,8 @@ impl Paint {
     /// `line`, painted: each span in its tone, and as a link where the paint
     /// has links on. Only a layer with 24-bit color paints fills: each span on
     /// the fill it carries or else the line's, and a filled line erased to its
-    /// edge, so the fill reaches the edge with no space written.
+    /// edge, so the fill reaches the edge with no space written: a space would
+    /// change what a reader copies and the width a cut measures.
     pub fn line(self, line: &Line) -> String {
         let fill = line.fill();
         let painted: String = line

@@ -1,6 +1,17 @@
 //! A gate published to a forge, as its pull request says it: the title it
 //! is known by, the description a reviewer reads within what the forge keeps
 //! of one, and the files the pull request carries beside it.
+//!
+//! The description is the gate's page, in the forge's Markdown: a reviewer
+//! decides on what the pull request says, and a second arrangement of one page
+//! would drift from the first. Its sections are headings of the second level
+//! under the forge's title, a card and the proof are folded, the risks are an
+//! alert, the steps' order is Mermaid, and the decision is a table of the answers
+//! a review gives, the commands of the machine that holds the run after it. No
+//! answer names a command of its own: a published gate is answered on its forge,
+//! and the one command that moves the run after any answer is said once. It is
+//! not cut at the limit, which would cut the decision, its last part, or break a
+//! fence or a table: it gives things up whole, code first.
 
 use surco::components::{Chosen, Decision, DecisionOption, Section};
 use surco::doc::Block;
@@ -101,7 +112,10 @@ enum Level {
 
 /// The levels a description is drawn at, from the whole page to the decision
 /// alone. Each leaves out more than the one before it, and the decision is in
-/// every one. The first that fits is drawn.
+/// every one: each code block's lines, what each fold holds, a text document's
+/// words but its title, every document, and then what weighs on the decision.
+/// Code goes first: it is the bulk of a plan, and it reads as well in the
+/// forge's file viewer. The first that fits is drawn.
 const LEVELS: [Level; 6] = [
     Level::Documents(Leaves::Nothing),
     Level::Documents(Leaves::CodeLines),

@@ -87,8 +87,9 @@ fn facts(
     tested(fields, task, review, judged)
 }
 
-/// The files `task` changes, each once, in the order it names them. A test
-/// the spec wrote is the spec's: a change on one is no change of the
+/// The files `task` changes, each once, in the order it names them: a card
+/// names these and not its scope, since a person decides on what changes. A
+/// test the spec wrote is the spec's: a change on one is no change of the
 /// task's, and what keeps the plan from being proven says so.
 pub(super) fn changed_files<'a>(task: &'a Task, judged: Option<&TaskReview>) -> Vec<&'a str> {
     let mut files: Vec<&str> = Vec::new();

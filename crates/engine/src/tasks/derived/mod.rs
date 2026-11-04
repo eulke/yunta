@@ -19,6 +19,22 @@
 //! implied, and a shape planned in it is new. [`reach`] states what each
 //! task may write, and [`shapes`] what the tree held of each shape, which
 //! every page that draws the plan reads.
+//!
+//! The reading is made when the plan is registered, never when a page is
+//! drawn: every draw and every poll of a run parked on a plan would run git, a
+//! page drawn where no repository holds the commit would say less, and which
+//! files name a shape would get a second answer at another commit. It is made
+//! at the tree's HEAD, not the run's base commit: once work lands and the plan
+//! is made again, the base is not the tree the planner read. And it is an event
+//! of its own, not a field of `scope_derived`, which is per task and written
+//! only when a task's reach changes: a reader needs what the tree held of a
+//! shape that reaches nothing.
+//!
+//! A file that names a shape need not call it: a re-export or an import names
+//! it too. An alias made with `use … as`, a caller in another repository and a
+//! shape moved from another file are not found, and a moved shape reads as new.
+//! Only a declared shape is followed, never the items a change names: names as
+//! common as `add` and `list` would fill a card with rows that imply nothing.
 
 mod reach;
 mod shapes;

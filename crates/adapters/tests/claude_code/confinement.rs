@@ -146,3 +146,36 @@ async fn coverage_follows_what_the_sandbox_leaves_commands() {
         }
     }
 }
+
+/// The sandbox denies the skills root Codex scans to an edit session's
+/// commands, and leaves the rest of `.agents/` to the checkout's write.
+#[tokio::test]
+async fn the_sandbox_denies_only_the_skills_root_of_agents() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
+    req.confinement.protected =
+        std::sync::Arc::new(yunta_core::protected::Protected::new(&[], &[]).unwrap());
+    let args = argv_for(dir.path(), req).await;
+    let at = args
+        .iter()
+        .position(|arg| arg == "--settings")
+        .expect("handed its settings")
+        + 1;
+    let settings: serde_json::Value = serde_json::from_str(&args[at]).unwrap();
+    let denied = settings["sandbox"]["filesystem"]["denyWrite"]
+        .as_array()
+        .expect("the settings deny some trees")
+        .clone();
+    let skills = serde_json::json!(dir.path().join(".agents/skills"));
+    assert!(denied.contains(&skills), "{denied:?}");
+    let agents = serde_json::json!(dir.path().join(".agents"));
+    assert!(!denied.contains(&agents), "{denied:?}");
+}

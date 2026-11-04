@@ -1,6 +1,19 @@
-//! `yunta` binary entrypoint. Stays thin by design: parse argv with clap,
-//! then hand off to `cli`, which routes each subcommand to its module
-//! under `commands/`.
+//! `yunta` binary entrypoint. Stays thin by design: parse argv with clap, then
+//! hand off to `cli`, which routes each subcommand to its module under
+//! `commands/`. Its map:
+//!
+//! - Commands: `cli` parses and routes, `commands` holds one module per
+//!   subcommand, `context` opens each one, `help` prints the help, `graph`
+//!   draws a workflow's graph, `pack` installs and lists packs, `project`
+//!   resolves the project and its config, and `detect` reads what a repository
+//!   says about itself.
+//! - What a person sees and answers: `output` owns what a command writes,
+//!   `surface` and `render` draw a run as it happens, `run_page` draws where a
+//!   run stands, `ask` and `human_interaction` take a person's answers, and
+//!   `identity` names who decided.
+//! - For machines and the process: `json` is the versioned JSON the CLI emits,
+//!   `error` is the one error a command hands back, and `interrupt` is what
+//!   trips cancellation.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.

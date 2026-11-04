@@ -2,54 +2,37 @@
 //! materialized under `objects/<content_hash>` *before* the node's
 //! session opens, then folded into the rendered prompt — so replay can
 //! name exactly what a session saw without re-running anything (the
-//! hash identifies the content, it never substitutes for it).
+//! hash identifies the content, it never substitutes for it). A `prompt`
+//! node resolves its context once, and a loop once per task brief, its
+//! stable and run-stable sources kept across briefs. A source that fails
+//! is the node's failure, never context silently absent; a `files:` entry
+//! declared optional that is missing is marked in its place, and named
+//! under `absent` on `context_assembled`.
 //!
-//! Scope of this module, deliberate and documented rather than left
-//! silent:
-//! - Resolved for `kind: prompt` nodes only — validation rejects
-//!   `context:` on any other kind. A loop node's own per-task sessions
-//!   don't go through `execute_prompt` at all (`run_task`'s own
-//!   dispatch); task-scoped context is a separate integration this
-//!   module doesn't cover.
-//! - `files:` resolves each entry as a literal path (after template
-//!   rendering), never a filesystem glob walk — no test here exercises
-//!   pattern expansion; real glob support is debt, not silently
-//!   approximated.
-//! - `knowledge:` resolves all three layers with real precedence: the
-//!   layers merge by filename, `repo` overwriting `user` overwriting
-//!   `org` on a name collision, regardless of the order `layers:` names
-//!   them in. `org` is the union of every installed knowledge pack's
-//!   declared contents (vendored contents, via the pack catalog); two
-//!   *packs* shipping the same filename is a typed error naming both —
-//!   between packs there is no precedence to fall back on.
-//! - `node-output:` only ever has something to read for `kind: bash`
-//!   nodes (`execute_bash` is the only place this module captures output
-//!   from, right after the process exits, success or failure alike —
-//!   exactly the lint→fix-lint→lint case a corrective node needs to
-//!   read back). An `executor` node's output is not captured for it: that
-//!   is open work.
-//! - Stable-first assembly: every source is classified
-//!   `stable | run-stable | volatile` (`stability_class`) and the final
-//!   text is always segment-ordered that way, regardless of `context:`'s
-//!   own declaration order — the ordering a provider's prompt cache
-//!   needs a byte-stable prefix to help at all.
-//!   `context_assembled.segment_hashes` carries one hash per non-empty
-//!   class, over exactly that class's own canonical text.
-//! - `mcp:` speaks streamable-HTTP only, matching the reference config's
-//!   own `mcp_servers:` shape (`{ url, auth_env }` — a bearer token's
-//!   env var *name*, never the token itself, so no secret ever lands in
-//!   config or the log). No stdio MCP transport exists here;
-//!   `mcp_servers:` never declares a launch command, only a URL, so
-//!   there is nothing to spawn. `query:` resolves as a `tools/call` on a
-//!   tool literally named `query`, the simplest reading of the field's
-//!   own name; the toy server this module's own tests spawn implements
-//!   exactly that tool.
-//! - No literal `trait ContextSource` — with a single set of builtins
-//!   and no second implementer (packs are still ahead), a trait object
-//!   buys nothing a real boundary would. Every builtin is a plain
-//!   resolver function behind
-//!   one `match`; a dynamic-dispatch version becomes the right shape only
-//!   once a pack actually needs to plug in its own source.
+//! Stable first. Every source has a stability class its kind fixes
+//! (`stability_class`): `stable` — repo files, knowledge — then
+//! `run-stable` — artifacts, immutable once accepted — then `volatile` —
+//! a command, the log, the tasks, a node's output, an MCP answer. The text
+//! is always assembled in that order, whatever order `context:` declares,
+//! then the prompt, with the same separators every time and no clock
+//! inside, so the sessions of a run share a byte-identical prefix and a
+//! provider's prompt cache serves it. The engine manages no cache: it keeps
+//! the prefix stable, and `context_assembled.segment_hashes` — one hash
+//! per non-empty class — is the mechanical check that the prefix held.
+//!
+//! A source at or under `limits.inline_context_bytes` is inlined; a larger
+//! one is referenced by the path of its object, for the session's CLI to
+//! read. `files:` resolves each entry as a literal path once its templates
+//! render, never a glob walk. `knowledge:` merges its layers by filename,
+//! `repo` over `user` over `org`, whatever order `layers:` names them in.
+//! `node-output:` reads what a `bash` node printed, or what a `parallel`
+//! group's blackboard consolidated at its join; an `executor` node's
+//! output is not captured. `mcp:` speaks streamable HTTP to a server
+//! `mcp_servers:` declares — a URL, and the name of the variable holding
+//! its token, never the token — and asks it a `tools/call` of the tool
+//! named `query`. Each builtin is a plain resolver function behind one
+//! `match`: no source comes from outside the engine, so a trait object
+//! would buy nothing.
 
 mod error;
 mod knowledge;
@@ -83,9 +66,10 @@ use yunta_core::events::NodeEvent;
 pub(super) use sources::write_node_output;
 
 /// Bound on how long any single external call (`command:`'s subprocess,
-/// `mcp:`'s round trip) may run before the node gives up and fails —
-/// the spec requires a timeout on `command:` stdout but names no number,
-/// so this constant fixes one.
+/// `mcp:`'s round trip) may run before the node gives up and fails: a
+/// source that never answers would otherwise keep the session it feeds
+/// from ever opening. Half a minute is long for what a context source is,
+/// the output of a quick command or one query.
 const EXTERNAL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Resolves every `context:` entry on `node`, materializes each, emits
@@ -356,9 +340,9 @@ async fn resolve_one(
     Ok(Resolved::whole(bytes))
 }
 
-/// Below `inline_threshold` materialized bytes, a source's content is
-/// embedded directly in the prompt; at or above it, only a pointer to
-/// the materialized file is.
+/// At or under `inline_threshold` materialized bytes, a source's content
+/// is embedded directly in the prompt; above it, only a pointer to the
+/// materialized file is.
 fn render_block(
     source_id: &str,
     kind: &str,

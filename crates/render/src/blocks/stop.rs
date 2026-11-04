@@ -79,7 +79,7 @@ fn surprise(surprise: &Surprise) -> String {
     }
 }
 
-/// Each run as "`cmd` <verb> <exit code>", the code with what it means and
+/// Each run as "`cmd` \<verb\> \<exit code\>", the code with what it means and
 /// the line it concluded with, in order: a person deciding about the task
 /// reads why it fails without opening what the run kept of it.
 fn exits(runs: &[CriterionResult], verb: &str) -> String {

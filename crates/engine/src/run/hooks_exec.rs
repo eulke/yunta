@@ -1,5 +1,15 @@
 //! `hooks:` around a node — the `before`/`after` commands, the node's
 //! own list merged over `node_defaults`, and how a hook failure lands.
+//!
+//! Hooks are the engine's, run in the node's own cycle and never handed to
+//! an adapter, so every adapter gets the same ones and none reimplements
+//! them. An attempt runs in this order: `node_started`, the `before` hooks,
+//! the node's own work — for a session, its runner, its context, then the
+//! session — and its close: the `after` hooks, then what verifies the work.
+//! A `before` hook that fails ends the node before a token is spent. Each
+//! step's rendered command passes the project's command permissions first,
+//! and a refusal there fails the node whatever its `on_failure: warn` says;
+//! what it prints is kept in the run's objects, never on the terminal.
 
 use std::path::PathBuf;
 

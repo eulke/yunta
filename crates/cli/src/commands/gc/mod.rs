@@ -1,13 +1,13 @@
-//! `yunta gc`: removes `run.dir`/worktree pairs for terminal runs once
-//! `storage.retention_days` has passed since their last event.
+//! `yunta gc`: collects terminal runs once `storage.retention_days` has
+//! passed since their last event, and tidies the project's pool.
 //!
 //! A finished run's `run.dir` can be deleted without losing anything:
-//! `events.jsonl` already exported a self-contained copy at close, and
-//! worktree isolation deliberately leaves the git worktree on disk "for
-//! inspection" after a run finishes (`worktree.rs`'s own doc comment)
-//! rather than removing it — `gc` is the mechanism that eventually
-//! reclaims that disk, not `release_worktree` (a no-op for
-//! `Isolation::Worktree` by design).
+//! `events.jsonl` already exported a self-contained copy at close. Its
+//! checkout is the project's pool's, so it goes back to the pool with
+//! its build rather than being removed; only a checkout a run made before
+//! its project kept a pool is taken away. A parked run nobody came back
+//! to within retention gives its checkout back the same way, unless a
+//! session it left waits to be picked up there.
 //!
 //! A run is found and reclaimed by the paths *frozen in its manifest*,
 //! not the current config's: `run.dir` through the same search rule

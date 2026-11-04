@@ -2,6 +2,11 @@
 //! drives it passes an [`IdSource`], the way time enters through
 //! [`Clock`](crate::Clock). The binary passes [`SystemIdSource`], which
 //! mints ULIDs; tests inject a sequential source and get reproducible ids.
+//!
+//! An id names a run and nothing else: a child run gets one of its own,
+//! and so does a promotion's successor. Their links live in the log — the
+//! parent's `child_run_created`, the successor's `run_created.promoted_from`
+//! — because a relation spelled only in a name is in no log to replay.
 
 use chrono::{DateTime, Utc};
 

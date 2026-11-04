@@ -1,7 +1,8 @@
 //! What the tree a plan was registered against held of the shapes it
 //! builds, as a card tells it: under each shape's code, what that code is
 //! to the code that stands where it goes; in the card's words, the files
-//! beyond the plan whose code names a shape the plan changes.
+//! beyond the plan whose code names a shape the plan changes. Every page that
+//! draws a plan reads this one record, and none runs git.
 
 use std::collections::BTreeSet;
 

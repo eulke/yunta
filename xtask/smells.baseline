@@ -19,6 +19,8 @@ git_command_outside_git_rs 0
 glyph_literal_outside_glyphs 0
 let_underscore_in_prod 0
 look_inside_a_block 0
+mode_name_in_prod 0
+module_docs_over_60_lines 0
 numeric_const_without_reason 0
 parenthesized_plural_in_prod_strings 0
 prod_fns_over_100_lines 0
@@ -28,6 +30,7 @@ run_tool_named_outside_vocabulary 0
 session_request_literal_outside_plan 0
 sleep_outside_mock_latency 0
 space_runs_in_prod_strings 0
+spanish_prose_lines 0
 src_files_over_500_lines 0
 state_phrase_outside_words 0
 sync_fs_in_async 0

@@ -29,6 +29,23 @@ pub fn production_only(text: &str) -> String {
         .join("\n")
 }
 
+/// The lines of the module doc a file opens with: its `//!` lines before the
+/// first item, past the blank lines, inner attributes and plain comments
+/// around them.
+pub fn module_doc_lines(source: &str) -> usize {
+    let aside = |line: &&str| {
+        line.is_empty()
+            || line.starts_with("#![")
+            || (line.starts_with("//") && !line.starts_with("//!"))
+    };
+    source
+        .lines()
+        .map(str::trim_start)
+        .take_while(|line| line.starts_with("//!") || aside(line))
+        .filter(|line| line.starts_with("//!"))
+        .count()
+}
+
 /// Every line of `source`, read as Rust, with its comments and the text
 /// of its literals turned to spaces, so a brace inside a string or a
 /// comment never opens or closes a body. A literal or a block comment

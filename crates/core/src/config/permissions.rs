@@ -73,6 +73,11 @@ pub struct CommandPermissions {
 /// `permissions.packs` — governance over pack contents. Parsed and
 /// merged here; enforced by `pack add` and `pack update`, which read the
 /// merged value and name the layer that declared it when they refuse.
+///
+/// Two settings and no matrix: which publishers may be installed, and
+/// whether a pack's executable code may run. Trusting one publisher's
+/// executors and not another's is the allow-list with `executors:
+/// prompt`, which asks case by case.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackPermissions {

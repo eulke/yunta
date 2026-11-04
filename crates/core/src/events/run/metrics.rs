@@ -5,10 +5,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::session::payloads::TokenUsage;
 
+/// A run's spend in tokens, the only unit the engine counts in: a price is a
+/// surface's estimate beside it, never this.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunMetrics {
+    /// The cost per verified task: `tokens` over the tasks that reached
+    /// `done`. Absent when none did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cptv: Option<f64>,
+    /// The run's whole spend.
     pub tokens: TokenUsage,
 }
 

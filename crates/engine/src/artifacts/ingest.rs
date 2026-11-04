@@ -17,7 +17,7 @@
 //!
 //! What the run then *stores* for a verified artifact is not read here:
 //! an interpreted document is re-rendered from what it parsed as, and
-//! that is [`super::canonical`]'s subject, along with the documents that
+//! that is [`canonical`](mod@super::canonical)'s subject, along with the documents that
 //! never were a file at all.
 //!
 //! Every failure here is an [`ArtifactFailure`]: a problem with the file

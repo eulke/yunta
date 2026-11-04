@@ -2,8 +2,9 @@
 //! reproduces sessions from YAML fixtures (a script of events plus
 //! filesystem effects), with injectable failures and latency, so the
 //! engine's whole cycle — tasks, degradation, cancellation, resume,
-//! eventually parallelism — is testable without an LLM. A fixture
-//! scripts every session of a run in spawn order; see [`MockFixture`].
+//! parallelism — is testable without an LLM, and a workflow can be tried
+//! without spending a token. A fixture scripts every session of a run in
+//! spawn order; see [`MockFixture`].
 //!
 //! A fixture names the CLI it stands for. The mock plans each launch with
 //! that CLI's own planner, so its argv, mounts, sandbox and coverage are the

@@ -1,7 +1,7 @@
 //! Run execution: the scheduler loop that replays the log,
 //! asks [`schedule::decide`] what is next, and runs it until the answer
 //! is terminal — plus the node lookup the step handlers share. Every stop
-//! that waits for a person funnels through [`super::pause`].
+//! that waits for a person funnels through [`super::pause()`].
 //!
 //! Crash, restart and Ctrl-C are the same case: whatever the log says
 //! happened, happened; everything else re-runs. A resume re-enters
@@ -55,7 +55,7 @@ struct Scheduling {
     spec: Option<ContentHash>,
 }
 
-/// [`execute_run`] with an explicit composition depth:
+/// [`execute_run`](super::execute_run) with an explicit composition depth:
 /// `workflow_exec` re-enters here for each child run, one level deeper —
 /// the recursion "a parent's resume recursively resumes orphaned
 /// children" is made of.

@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use super::Node;
 use crate::port::PermissionProfile;
 
+/// `permissions: read-only | edit | full` at node level — maps 1:1 onto
+/// the adapter's session profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum NodePermissions {
@@ -49,7 +51,9 @@ impl Node {
 /// `inherit` loads the person's own — their settings, extensions, MCP
 /// servers and hooks — and adds the run's on top; `isolated` loads only
 /// what the run mounts, so a session behaves the same on any machine. The
-/// CLI's credentials are the person's either way.
+/// CLI's credentials are the person's either way, and the run's own hooks
+/// load either way: they come with the session's request, never from a
+/// configuration file the choice could leave out.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
 )]
@@ -85,6 +89,13 @@ impl Effort {
 }
 
 /// A node's crash-recovery policy — the full triple of options.
+///
+/// `restart_node` runs the node again from its start, as a new attempt:
+/// the context it is handed is rebuilt from the run's data, so the attempt
+/// can always begin, but its effect has to be safe to repeat.
+/// `fail_if_uncertain` is for an effect that is not — a notification with
+/// no key to dedupe on, a charge: a resume that finds the node running with
+/// no terminal pauses for a person instead of guessing how it ended.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
 )]

@@ -1,6 +1,6 @@
 //! The one place the engine asks whether an adapter can do something.
 //!
-//! [`require`] reads [`POLICY`] and answers: granted, degraded under a
+//! [`require`] reads [`POLICY`](yunta_core::port::policy::POLICY) and answers: granted, degraded under a
 //! stated fallback, or refused. Every consultation goes through it, so a
 //! capability can never be consulted in one place and forgotten in
 //! another, and the sentence a degradation records is the same wherever

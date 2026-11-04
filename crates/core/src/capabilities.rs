@@ -1,3 +1,12 @@
+//! What an adapter declares it can do: its capabilities, constant for the
+//! adapter's lifetime. The engine reads them before it asks for anything and
+//! never emulates what an adapter does not declare. Each capability's absence
+//! has one policy in [`crate::port::policy`]: `yunta check` refuses a
+//! workflow that needs what an adapter lacks, or the run goes on under a
+//! stated fallback and records it as `capability_degraded`. The struct is also
+//! the `capabilities` field of `agent_session_opened`, so the log and the
+//! `Adapter` trait share one definition.
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -25,8 +34,8 @@ pub struct Capabilities {
     pub fence: FenceLevel,
     /// Distinguishes permission profiles (`read_only`/`edit`/`full`).
     pub permission_profiles: bool,
-    /// Supports the CLI's own named agents, selectable via the portable
-    /// `agent:` field.
+    /// Can add an agent's instructions (`SessionRequest.agent`), which the
+    /// run resolved from its own definition, to its CLI's own.
     pub custom_agents: bool,
     /// Emits trustworthy token usage in the stream.
     pub usage_reporting: bool,
@@ -104,7 +113,9 @@ impl ToolNaming {
 /// What an adapter can build to keep a session's writes inside its
 /// fence. Three levels, because three is what the market has: nothing;
 /// a judgement before each file-tool call; or a filesystem sandbox the
-/// process itself runs under.
+/// process itself runs under. A level names what is built, never how a
+/// call reaches the engine: a hook, an extension and a delegated program
+/// that each ask before a write are one level, `tool_calls`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
 )]
@@ -154,7 +165,7 @@ impl Capability {
         Capability::MidSessionTokenCap,
     ];
 
-    /// The field name, as the log and the spec spell it.
+    /// The field name, as the log spells it.
     pub fn as_str(self) -> &'static str {
         match self {
             Capability::ResumeSession => "resume_session",

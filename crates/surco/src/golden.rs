@@ -12,6 +12,9 @@
 //! `YUNTA_BLESS=1` writes what was rendered instead of comparing, for a
 //! change that means to change what a surface prints. The new files are
 //! reviewed in the diff like any other change.
+//!
+//! It stands behind the `golden` feature, which the tests of a crate with
+//! goldens enable, so nothing of it ships.
 
 // A golden exists to fail a test, so a panic or an unwrap here is the
 // failure itself, not a fallible path in production.

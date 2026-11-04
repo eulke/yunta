@@ -8,16 +8,6 @@ use serde::{Deserialize, Serialize};
 use super::{ArtifactCode, Fault, FileCode};
 use crate::events::LoggedWords;
 
-/// The stable name of a rule that only holds across a whole document.
-///
-/// Exhaustive, so a rule cannot be minted by typing a new string, and
-/// countable, so a receipt reports what a run keeps getting wrong
-/// without reading prose. A code says which rule broke and nothing
-/// about which document it broke in: `DuplicateId` is one rule asked of
-/// tasks documents, findings and questions alike, and what separates the three
-/// is the [`ArtifactKind`](crate::ArtifactKind) on the report carrying
-/// it. Counting by code alone conflates them; counting by kind and code
-/// does not.
 /// Declares the rule vocabulary once: the variant, the name it serializes
 /// and is grepped by, and the doc a maintainer reads. `ALL` comes from the
 /// same list, so a rule cannot be added to the enum without joining the
@@ -31,9 +21,9 @@ macro_rules! rule_codes {
         /// and countable, so a receipt reports what a run keeps getting
         /// wrong without reading prose. A code says which rule broke and
         /// nothing about which document it broke in: `DuplicateId` is one
-        /// rule asked of tasks documents, findings and questions alike, and what
-        /// separates the three is the
-        /// [`ArtifactKind`](crate::ArtifactKind) on the report carrying
+        /// rule asked of a workflow, a tasks document, findings and
+        /// questions alike, and what separates them is the
+        /// [`DocumentKind`](crate::diagnostic::DocumentKind) on the report carrying
         /// it. Counting by code alone conflates them; counting by kind
         /// and code does not.
         ///

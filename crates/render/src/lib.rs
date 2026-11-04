@@ -1,23 +1,27 @@
-//! How Yunta tells a reader things: the columns a line is built from,
-//! the step every block is indented by, the bars and sparklines that
-//! carry a magnitude, the words a run's and a node's state and a
-//! decision's options are called by, the sentences a log's typed facts
-//! are read as (why a run paused, how a node ended, what a failure says,
-//! which fallback the engine took), and the characters it is all drawn
-//! with.
+//! What Yunta says in Surco: the sentences a log's typed facts are read as (why
+//! a run paused, how a node ended, what a failure says, which fallback the engine
+//! took), and the documents a person reads a run by: a gate's page, a plan, a
+//! pull request's body, the receipt.
 //!
-//! One crate, because two readers told the same fact in two words — a
-//! person at a terminal, a file the engine writes, a pull request — read
-//! it side by side. It sits on `yunta-core` alone, below the engine, so
-//! the engine writes for a person with the same words and blocks the
-//! command line draws. What depends on the process — which stream is a
-//! terminal, how wide it measures, what the environment asked for — is
-//! the caller's to settle and pass in.
+//! One crate, because two readers told the same fact in two words — a person at
+//! a terminal, a file a run leaves, a pull request — read it side by side. It
+//! sits on `yunta-core` and `yunta-surco`: the engine hands core data, and the
+//! CLI and the adapters draw it with these words and blocks. What depends on the
+//! process — which stream is a terminal, how wide it measures, what the
+//! environment asked for — is the caller's to settle and pass in.
 //!
 //! How anything is drawn is not decided here: the words of a state, the
 //! marks, the figures, the blocks a document is made of and the surfaces
 //! that draw them are Surco's ([`surco`]). This crate says Yunta's own
 //! facts with them, and never writes a second version of one.
+//!
+//! Its map:
+//!
+//! - A run and its nodes: `state`, `pause`, `outcome`, `failure`, `spend`,
+//!   `changes`, `caution`, `inputs`, `place`, `target` and `policy`.
+//! - A decision a person meets: `gate`, `escalation`, `claim`, `evidence`,
+//!   `offers`, `shown`, `plan`, `spec`, `findings` and `found`.
+//! - What leaves the terminal: `blocks`, `published` and `receipt`.
 
 pub mod blocks;
 pub mod caution;

@@ -92,6 +92,38 @@ async fn a_failing_node_names_the_denied_paths_its_close_refused() {
     assert!(!at_head(&bench).contains(".github/ci.yml"));
 }
 
+/// A link put where the branch holds a CLI's configuration directory is
+/// refused, and the close puts the directory back as the branch had it.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_put_in_place_of_a_cli_s_config_directory_is_refused_and_put_back() {
+    let bench = Bench::new();
+    write(&bench.worktree.join(".claude/settings.json"), "{}\n");
+    yunta_testkit::git(&bench.worktree, &["add", "-A"]);
+    yunta_testkit::git(&bench.worktree, &["commit", "-q", "-m", "config"]);
+    let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, run: \"rm -rf .claude && mkdir -p evil && ln -s evil .claude && echo y > notes.txt\" }\n";
+    bench
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            MOCK_CONFIG,
+        )
+        .await;
+
+    let refused = std::path::PathBuf::from(".claude");
+    let failed = failures(&bench.events(), "tidy");
+    assert!(
+        failed.iter().any(|(_, paths)| paths.contains(&refused)),
+        "{failed:?}"
+    );
+    let config = bench.worktree.join(".claude");
+    assert!(std::fs::symlink_metadata(&config).unwrap().is_dir());
+    assert_eq!(
+        std::fs::read_to_string(config.join("settings.json")).unwrap(),
+        "{}\n"
+    );
+}
+
 /// What a person edits during a pause is theirs, not the run's: it is
 /// committed as found even where the project denies it to every run.
 #[tokio::test]

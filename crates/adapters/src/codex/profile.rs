@@ -23,30 +23,7 @@ pub(super) fn overrides(conf: &Confinement, cwd: &Path) -> Result<Vec<String>, U
         }
         return Ok(vec!["--sandbox".into(), "danger-full-access".into()]);
     }
-    let mode = |m: &str| toml::Value::String(m.into());
-    let mut fs = toml::Table::new();
-    fs.insert(":tmpdir".into(), mode("write"));
-    fs.insert(":slash_tmp".into(), mode("write"));
-    // Named explicitly: `:slash_tmp` opens all of /private/tmp, so a checkout
-    // there needs its own entry.
-    fs.insert(
-        cwd.display().to_string(),
-        mode(if conf.writes_worktree() {
-            "write"
-        } else {
-            "read"
-        }),
-    );
-    fs.extend(
-        conf.roots
-            .iter()
-            .map(|root| (root.display().to_string(), mode("write"))),
-    );
-    fs.extend(
-        conf.protected_trees(cwd)
-            .iter()
-            .map(|tree| (tree.display().to_string(), mode("read"))),
-    );
+    let fs = filesystem(conf, cwd);
     let key = |name: &str| format!("permissions.{PROFILE}.{name}");
     // `extends` is always set: without it the CLI aborts on :project_roots.
     let base = if conf.writes_worktree() {
@@ -61,6 +38,43 @@ pub(super) fn overrides(conf: &Confinement, cwd: &Path) -> Result<Vec<String>, U
     args.extend(ConfigOverride::value(key("filesystem"), toml::Value::Table(fs)).into_args());
     args.extend(ConfigOverride::bool(key("network.enabled"), conf.network).into_args());
     Ok(args)
+}
+
+/// The directory Codex holds read-only under a writable root unless a
+/// profile names it, though of it Codex loads only its skills root.
+const AGENTS_DIR: &str = ".agents";
+
+/// The profile's filesystem table: temp and the session's roots writable,
+/// the checkout as the session may write it, and every protected tree
+/// read-only. A session that writes the checkout has `AGENTS_DIR` named
+/// writable too, so the project's files there are the checkout's like any
+/// other; the skills root a run protects stays read-only as the deeper entry.
+fn filesystem(conf: &Confinement, cwd: &Path) -> toml::Table {
+    let mode = |m: &str| toml::Value::String(m.into());
+    let writes = conf.writes_worktree();
+    let mut fs = toml::Table::new();
+    fs.insert(":tmpdir".into(), mode("write"));
+    fs.insert(":slash_tmp".into(), mode("write"));
+    // Named explicitly: `:slash_tmp` opens all of /private/tmp, so a checkout
+    // there needs its own entry.
+    fs.insert(
+        cwd.display().to_string(),
+        mode(if writes { "write" } else { "read" }),
+    );
+    if writes {
+        fs.insert(cwd.join(AGENTS_DIR).display().to_string(), mode("write"));
+    }
+    fs.extend(
+        conf.roots
+            .iter()
+            .map(|root| (root.display().to_string(), mode("write"))),
+    );
+    fs.extend(
+        conf.protected_trees(cwd)
+            .iter()
+            .map(|tree| (tree.display().to_string(), mode("read"))),
+    );
+    fs
 }
 
 /// The probe's report with the CLI's version held to `VERSION_FLOOR`: a

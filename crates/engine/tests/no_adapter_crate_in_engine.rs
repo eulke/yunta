@@ -1,15 +1,15 @@
-//! The engine knows an adapter only by the port: the trait it calls, the
-//! request it hands over, the events it reads back. That port is
-//! `yunta_core::port`, so `yunta-adapters` — where `claude-code`, `codex`
-//! and `mock` are actually built — is a crate the engine's library never
-//! links, and the compiler is what holds that. This test is what says so
-//! when the manifest is edited.
+//! The crates the engine's library never links. It knows an adapter only by
+//! the port: the trait it calls, the request it hands over, the events it
+//! reads back. That port is `yunta_core::port`, so `yunta-adapters` — where
+//! `claude-code`, `codex` and `mock` are actually built — stays out. It never
+//! draws either, so `yunta-render`, which the CLI and the adapters draw with,
+//! stays out too. The compiler holds both; these tests say so when the
+//! manifest is edited.
 //
 // The library, not the tests: a port is exercised against an
-// implementation of it, so `[dev-dependencies]` does name the crate and
-// the engine's own tests run whole workflows on the mock. What would
-// break the frontier is a line in `[dependencies]`, which is the table
-// this reads.
+// implementation of it and a receipt is read the way a person is shown
+// it, so `[dev-dependencies]` does name both crates. What would break the
+// frontier is a line in `[dependencies]`, which is the table this reads.
 
 #[test]
 fn the_engine_library_never_links_the_crate_that_builds_concrete_adapters() {
@@ -19,6 +19,19 @@ fn the_engine_library_never_links_the_crate_that_builds_concrete_adapters() {
         "yunta-engine must not depend on yunta-adapters — the port it calls is \
          `yunta_core::port`, and a concrete adapter reaches the engine as a \
          `dyn Adapter` the CLI constructed. It depends on: {named:?}"
+    );
+}
+
+/// The engine decides and records; it never draws. It hands the CLI and the
+/// adapters core data, and they draw it with `yunta-render`, so a surface can
+/// change what a person reads without the engine knowing.
+#[test]
+fn the_engine_library_never_links_the_crate_that_draws() {
+    let named = dependencies(include_str!("../Cargo.toml"));
+    assert!(
+        !named.contains(&"yunta-render"),
+        "yunta-engine must not depend on yunta-render — the engine hands core \
+         data, and the CLI and the adapters draw it. It depends on: {named:?}"
     );
 }
 
