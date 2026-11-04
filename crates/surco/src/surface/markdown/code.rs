@@ -5,6 +5,7 @@
 //! and the title and what is said of the code stay.
 
 use super::{code_span, plain_text, Leaves, Page, GLYPHS};
+use crate::code::MIN_FENCE;
 use crate::components::Code;
 
 /// Code as `page` says it: fenced with its lines, or, where the page leaves
@@ -79,10 +80,6 @@ pub(super) fn fence(text: &str) -> String {
         .unwrap_or_default();
     "`".repeat((longest + 1).max(MIN_FENCE))
 }
-
-/// The fewest signs that open or close a fence: CommonMark opens and closes a
-/// fence with three signs, so a shorter run is ordinary text.
-pub(super) const MIN_FENCE: usize = 3;
 
 #[cfg(test)]
 mod tests {

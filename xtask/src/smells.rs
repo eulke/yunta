@@ -21,6 +21,7 @@
 mod cli;
 mod corpus;
 mod disk;
+mod language;
 mod prose;
 mod references;
 mod shape;
@@ -35,7 +36,7 @@ use yunta_core::durable::{self, Durability};
 use corpus::{crate_src_dirs, crate_test_dirs, is_test_source, rs_files, Corpus};
 use disk::{count_engine_fs_outside_runtime, count_sync_fs_in_async, discarded_results};
 use shape::{code_lines, functions_over, production_only};
-use strings::{in_glyphs, production_lines, string_counts};
+use strings::string_counts;
 use thresholds::numeric_consts_without_reason;
 
 /// Where the committed baseline lives, next to this crate.
@@ -73,10 +74,14 @@ fn measure() -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     code_counts(&corpus, &mut counts);
     string_counts(&corpus, &mut counts);
-    text_counts(&root, &corpus, &mut counts);
+    text_counts(&root, &mut counts);
     test_counts(&corpus, &mut counts);
     // The counters that read one question each, from the tree they name.
-    for (name, count) in COUNTERS.iter().chain(sites::COUNTERS) {
+    for (name, count) in COUNTERS
+        .iter()
+        .chain(sites::COUNTERS)
+        .chain(language::COUNTERS)
+    {
         counts.insert((*name).to_string(), count(&root));
     }
     counts
@@ -127,20 +132,9 @@ fn code_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
     );
 }
 
-/// The counters over the text a reader is shown: the glyphs a line is drawn
-/// with, a ledger's fold, and the words and tense the repository states.
-fn text_counts(root: &Path, corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
-    // A glyph that says how a line reads — the separator between two facts,
-    // the mark of a line that goes on, the sign of one thing inside
-    // another — written as a literal: a surface
-    // drawing with the ASCII set prints it nonetheless, where the glyph set would
-    // have printed what that terminal can draw.
-    counts.insert(
-        "separator_literal_outside_glyphs".to_string(),
-        production_lines(&corpus.drawn, in_glyphs, |line| {
-            !line.trim_start().starts_with("//") && line.contains(['·', '↪', '›'])
-        }),
-    );
+/// The counters over the text a reader is shown: a ledger's fold, and the
+/// words and tense the repository states.
+fn text_counts(root: &Path, counts: &mut BTreeMap<String, usize>) {
     // A `_ =>` inside a ledger's fold is a kind that derives nothing with
     // nothing saying so: the arm exists, the reader sees no diagnostic, and
     // the state is simply wrong. Every kind is named, and one that moves
@@ -362,7 +356,10 @@ mod tests {
         "git_command_outside_git_rs",
         "reason_built_by_format",
         "run_tool_named_outside_vocabulary",
-        "separator_literal_outside_glyphs",
+        "glyph_literal_outside_glyphs",
+        "command_outside_advice",
+        "state_phrase_outside_words",
+        "look_inside_a_block",
         "dash_in_prod_strings",
         "sleep_outside_mock_latency",
         "src_files_over_500_lines",

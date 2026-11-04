@@ -266,7 +266,7 @@ pub(crate) async fn init_git(
     for args in [
         vec!["init", "-q"],
         vec!["config", "user.email", "yunta-test@localhost"],
-        vec!["config", "user.name", "yunta test"],
+        vec!["config", "user.name", "yunta-test"],
         vec!["add", "-A"],
         vec!["commit", "-q", "--allow-empty", "-m", "sandbox"],
     ] {

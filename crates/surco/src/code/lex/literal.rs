@@ -6,7 +6,7 @@
 
 mod data;
 mod languages;
-pub(crate) use data::Fence;
+pub(crate) use data::{fence_left_open, Fences, MIN_FENCE};
 
 use super::Language;
 use languages::{csharp, dart, python, raw_cpp, regex, rust, scala, swift};
@@ -121,7 +121,12 @@ fn nests(language: Language) -> bool {
 }
 
 /// The literal that starts at `at`, if one does.
-pub(super) fn literal(language: Language, source: &[u8], at: usize) -> Option<Literal> {
+pub(super) fn literal(
+    language: Language,
+    source: &[u8],
+    at: usize,
+    fences: &Fences,
+) -> Option<Literal> {
     match language {
         Language::Rust => rust(source, at),
         Language::C => raw_cpp(source, at).or_else(|| quoted_or_char(source, at)),
@@ -158,7 +163,7 @@ pub(super) fn literal(language: Language, source: &[u8], at: usize) -> Option<Li
         Language::Yaml => data::yaml(source, at),
         Language::Toml => data::toml(source, at),
         Language::Json => data::json(source, at),
-        Language::Markdown => data::markdown(source, at),
+        Language::Markdown => data::markdown(source, at, fences),
     }
 }
 
@@ -362,6 +367,6 @@ fn after_word(source: &[u8], at: usize) -> bool {
 }
 
 /// Whether `byte` belongs to a name: a letter, a digit or `_`.
-pub(in crate::code) fn is_word(byte: u8) -> bool {
+pub fn is_word(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }

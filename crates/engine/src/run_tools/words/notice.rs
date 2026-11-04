@@ -38,7 +38,7 @@ pub(crate) fn documents_text(submitted: &[(ArtifactKind, String)]) -> String {
          object, never as a file:",
     );
     for (kind, tool) in submitted {
-        text.push_str(&format!("\n  the `{kind}` document → `{tool}`"));
+        text.push_str(&format!("\n  the `{kind}` document goes through `{tool}`"));
     }
     text.push_str(
         "\nThe tool validates the document exactly as the node's close will and answers \

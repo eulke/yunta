@@ -77,7 +77,7 @@ fn main() -> ExitCode {
     // writes to stdout takes the same color, width and glyphs.
     let look = render::stdout_look();
     let mode = cli.mode();
-    tracing::debug!("yunta starting");
+    tracing::debug!("starting");
 
     let outcome = drive(cli, started, mode, &look);
     // Last, because a prompt this run abandoned mid-key left a thread

@@ -15,7 +15,9 @@ use crate::commands::run_ref::Candidate;
 use crate::commands::verdict::Unrunnable;
 
 /// What a refused workflow is refused for, said before its problems.
-const UNRUNNABLE: &str = "the workflow fails `yunta check`";
+pub(crate) fn unrunnable() -> String {
+    format!("the workflow fails `{}`", advice::check())
+}
 
 impl CliError {
     /// The sentence a person's page opens with when the problems or the
@@ -28,8 +30,8 @@ impl CliError {
                 &report.document.path,
                 report.diagnostics.len(),
             )),
-            CliError::Unrunnable(unrunnable) => {
-                Some(counted_under(UNRUNNABLE, unrunnable.problems.len()))
+            CliError::Unrunnable(refusal) => {
+                Some(counted_under(&unrunnable(), refusal.problems.len()))
             }
             // The runs it could be are rows of the page, under it.
             CliError::AmbiguousRun { said, .. } => Some(name_one(said)),
@@ -50,7 +52,7 @@ impl CliError {
                 .into_iter()
                 .map(Block::from)
                 .collect(),
-            CliError::Unrunnable(unrunnable) => unrunnable.blocks(Vec::new()),
+            CliError::Unrunnable(refusal) => refusal.blocks(Vec::new()),
             _ => Vec::new(),
         }
     }
@@ -173,10 +175,10 @@ pub(crate) fn hinted(problems: Vec<Pointed>) -> Vec<Problem> {
 
 /// A workflow that cannot run here, as plain text says it: its problems
 /// counted and quoted, then what to declare.
-pub(super) fn unrunnable(unrunnable: &Unrunnable) -> String {
+pub(super) fn unrunnable_said(refusal: &Unrunnable) -> String {
     use surco::width::INDENT;
-    let mut said = yunta_render::blocks::diagnostic::plain(UNRUNNABLE, unrunnable.problems.clone());
-    for fix in &unrunnable.declare {
+    let mut said = yunta_render::blocks::diagnostic::plain(&unrunnable(), refusal.problems.clone());
+    for fix in &refusal.declare {
         said.push_str(&format!("\n{INDENT}{}", fix.said));
         for line in &fix.paste {
             said.push_str(&format!("\n{INDENT}{INDENT}{INDENT}{line}"));

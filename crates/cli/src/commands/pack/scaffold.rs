@@ -90,7 +90,7 @@ outcome: { type: completed, summary: "done" }
 
 const PACK_README_TEMPLATE: &str = r#"# {{publisher}}/{{name}}
 
-A yunta pack scaffolded by `yunta pack new`. It ships one workflow,
+A yunta pack scaffolded by `{{pack_new}}`. It ships one workflow,
 `example`, and a self-test that runs it under the mock adapter.
 
 ## example
@@ -100,8 +100,17 @@ work counts as done. Swap the `verify` command for your own test suite.
 
 ## Testing
 
-    yunta test --dir .
+    {{test}} --dir .
 "#;
+
+/// `template` with what a new pack is called, and how the commands it names are typed.
+fn filled(template: &str, pack: &PackRef) -> String {
+    template
+        .replace("{{publisher}}", pack.publisher().as_str())
+        .replace("{{name}}", pack.name().as_str())
+        .replace("{{test}}", &crate::commands::advice::test())
+        .replace("{{pack_new}}", &crate::commands::advice::pack("new"))
+}
 
 /// Scaffolds a new pack at `<cwd>/<name>`: a manifest, one verified
 /// workflow, a self-test config and case, and a README. The manifest
@@ -119,11 +128,7 @@ pub async fn new_pack(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> 
         )));
     }
 
-    let fill = |template: &str| {
-        template
-            .replace("{{publisher}}", pack.publisher().as_str())
-            .replace("{{name}}", pack.name().as_str())
-    };
+    let fill = |template: &str| filled(template, pack);
     let manifest_yaml = fill(PACK_MANIFEST_TEMPLATE);
     let workflow_yaml = fill(PACK_WORKFLOW_TEMPLATE);
 

@@ -50,6 +50,7 @@ pub fn markdown(text: &str, indent: &str, look: &Look) -> Vec<Line> {
         glyphs: look.glyphs,
         lines: Vec::new(),
         paragraph: String::new(),
+        fences: crate::code::Fences::of(text),
         fence: None,
     };
     let mut at = 0;
@@ -66,6 +67,10 @@ pub fn markdown(text: &str, indent: &str, look: &Look) -> Vec<Line> {
 struct Fenced {
     language: Option<crate::code::Language>,
     closing: Option<usize>,
+    /// Where what follows it starts.
+    next: usize,
+    /// How many spaces each of its lines gives up: as many as stand before its marks.
+    indent: usize,
     lines: Vec<String>,
 }
 
@@ -78,6 +83,8 @@ struct Page<'a> {
     lines: Vec<Line>,
     /// The paragraph gathered so far, drawn once it ends.
     paragraph: String,
+    /// The fences of the text, read once for the whole of it.
+    fences: crate::code::Fences,
     /// The fenced block of code being read, if a line is inside one.
     fence: Option<Fenced>,
 }
@@ -87,18 +94,24 @@ impl Page<'_> {
     /// fenced block being read, the opening line of a fence, a blank line, a
     /// heading, a list item, or a line of a paragraph.
     fn read(&mut self, text: &str, at: usize, line: &str) {
+        if self.fence.as_ref().is_some_and(|fenced| at >= fenced.next) {
+            self.close();
+        }
         let trimmed = line.trim();
         if self.fence.is_some() {
             return self.code(at, line);
         }
         let marks = at + line.len() - line.trim_start().len();
-        if let Some(fence) = crate::code::Fence::at(text.as_bytes(), marks) {
+        let opened = self.fences.at(marks).map(|fence| Fenced {
+            language: crate::code::Language::named(&text[fence.info.clone()]),
+            closing: fence.closing.as_ref().map(|closing| closing.start),
+            next: fence.next,
+            indent: fence.indent,
+            lines: Vec::new(),
+        });
+        if let Some(fenced) = opened {
             self.flush();
-            self.fence = Some(Fenced {
-                language: crate::code::Language::named(&text[fence.info]),
-                closing: fence.closing.map(|closing| closing.start),
-                lines: Vec::new(),
-            });
+            self.fence = Some(fenced);
             return;
         }
         if trimmed.is_empty() {
@@ -146,7 +159,10 @@ impl Page<'_> {
             return;
         }
         if let Some(fenced) = self.fence.as_mut() {
-            fenced.lines.push(line.to_string());
+            let lead = line.len() - line.trim_start_matches(' ').len();
+            fenced
+                .lines
+                .push(line[lead.min(fenced.indent)..].to_string());
         }
     }
 
@@ -381,6 +397,41 @@ mod tests {
             ["  ```rust", "  fn a() {}", "  ```"]
         );
         assert_eq!(drawn("~~~\nx\n~~~", 40, Glyphs::Unicode), ["  x"]);
+    }
+
+    /// A fence is code at any depth of a list: its lines keep their breaks, and give up
+    /// the indentation the list gives them.
+    #[test]
+    fn a_fence_deep_in_a_list_is_code() {
+        assert_eq!(
+            drawn(
+                "- one\n  - two\n\n    ```sh\n    cargo test\n      --all\n    ```\n\nAfter.",
+                40,
+                Glyphs::Unicode
+            ),
+            [
+                "- one",
+                "- two",
+                "",
+                "  cargo test",
+                "    --all",
+                "",
+                "After."
+            ]
+        );
+    }
+
+    /// A list item that ends ends the fence it holds, closed or not.
+    #[test]
+    fn a_fence_ends_with_the_list_item_that_holds_it() {
+        assert_eq!(
+            drawn(
+                "- one\n\n  ```sh\n  cargo test\nAfter.",
+                40,
+                Glyphs::Unicode
+            ),
+            ["- one", "", "  cargo test", "After."]
+        );
     }
 
     /// A list item and a heading read their marks in their whole line: a run

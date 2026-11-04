@@ -40,7 +40,7 @@ pub async fn field(look: &Look) -> Result<Outcome, CliError> {
     let page = Doc::new()
         .with(Headline::new(Mark::Absent, "yunta", "not in a repository"))
         .with(Gist::new(
-            "yunta works in a git repository, and this directory is in none",
+            "this directory is in no git repository, and yunta works in one",
         ))
         .with(Next {
             steps: vec![

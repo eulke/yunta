@@ -36,13 +36,8 @@ fn contains_word(code: &[u8], word: &[u8]) -> bool {
         .any(|(at, _)| {
             let before = at.checked_sub(1).and_then(|i| code.get(i)).copied();
             let after = code.get(at + word.len()).copied();
-            !before.is_some_and(is_word) && !after.is_some_and(is_word)
+            !before.is_some_and(surco::code::is_word) && !after.is_some_and(surco::code::is_word)
         })
-}
-
-/// Whether `byte` belongs to a name: a letter, a digit or `_`.
-fn is_word(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 #[cfg(test)]

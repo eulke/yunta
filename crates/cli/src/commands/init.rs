@@ -8,6 +8,9 @@
 //! non-interactive with a warning when stdin isn't a TTY — `init` must
 //! never hang waiting for input that isn't coming.
 
+mod skill;
+
+use skill::MECHANISM_SKILL_DIR;
 use std::path::Path;
 
 use surco::components::{Checklist, Fields, Found, Furrow, Headline, Next, Said};
@@ -22,8 +25,6 @@ use crate::error::{CliError, Outcome};
 use crate::interrupt::Interrupt;
 use crate::render::RunExit;
 use crate::surface::Diagnostics;
-
-const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 
 /// The base branch a project starts from: the remote's default, else the
 /// branch checked out here, else `main`. Only git's "no remote HEAD" answer
@@ -69,7 +70,10 @@ fn render_config_yaml(
     detected: &crate::detect::Detected,
 ) -> String {
     let mut out = String::new();
-    out.push_str("# Written by `yunta init`: team-shared, commit this file.\n");
+    out.push_str(&format!(
+        "# Written by `{}`: team-shared, commit this file.\n",
+        super::advice::init()
+    ));
     out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
     out.push_str("# config layer), never in this file.\n\n");
     out.push_str("project:\n");
@@ -116,7 +120,10 @@ fn render_detected(detected: &crate::detect::Detected) -> String {
     let mut out = String::new();
     if !detected.commands.is_empty() {
         out.push_str("# What this project runs for each capability a workflow names\n");
-        out.push_str("# (`run: { command: lint }`), as `yunta init` detected it.\n");
+        out.push_str(&format!(
+            "# (`run: {{ command: lint }}`), as `{}` detected it.\n",
+            super::advice::init()
+        ));
         out.push_str("commands:\n");
         for (name, text) in &detected.commands {
             out.push_str(&format!("  {name}: {}\n", yaml_string(text)));
@@ -141,7 +148,11 @@ fn yaml_string(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-const GITIGNORE_MARKER: &str = "# added by `yunta init`";
+/// The line `init` writes above the entries it adds to `.gitignore`, and
+/// finds again so a second `init` adds nothing.
+fn gitignore_marker() -> String {
+    format!("# added by `{}`", super::advice::init())
+}
 
 /// Defensive only — `paths.runs`/`paths.worktrees` default to `~/.yunta`,
 /// outside the repo entirely, so none of this exists in a repo with
@@ -149,9 +160,10 @@ const GITIGNORE_MARKER: &str = "# added by `yunta init`";
 /// into the repo on purpose.
 fn gitignore_block() -> String {
     format!(
-        "\n{GITIGNORE_MARKER}: only matters if `paths:` ever points inside \
+        "\n{marker}: only matters if `paths:` ever points inside \
          this repo (defaults keep run state in ~/.yunta):\n.yunta/runs/\n\
-         .yunta/worktrees/\n.yunta/*.db\n.yunta/*.db-*\n"
+         .yunta/worktrees/\n.yunta/*.db\n.yunta/*.db-*\n",
+        marker = gitignore_marker()
     )
 }
 
@@ -166,7 +178,7 @@ fn write_gitignore(repo: &Path) -> std::io::Result<bool> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
-    if existing.contains(GITIGNORE_MARKER) {
+    if existing.contains(&gitignore_marker()) {
         return Ok(false);
     }
     let mut updated = existing;
@@ -175,63 +187,18 @@ fn write_gitignore(repo: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// The mechanism skill: teaches a client agent when to prefer a
-/// verified workflow over ad-hoc implementation and how to discover
-/// what exists (`yunta list` / `list_workflows`) — the skill itself
-/// never embeds a catalog, since the catalog is consulted at the
-/// moment it's needed rather than baked in, and one written at `init`
-/// time would be empty and stale the moment anyone adds a workflow.
-/// Format: a `SKILL.md` with frontmatter, the shape Claude Code's own
-/// skill mechanism reads — no other file format is specified anywhere
-/// in the docs this was built against.
-fn mechanism_skill_content() -> String {
-    "---\n\
-     name: yunta-mechanism\n\
-     description: When and how to use Yunta's verified workflows instead of ad-hoc implementation.\n\
-     ---\n\n\
-     # Using Yunta\n\n\
-     This repo uses Yunta, a deterministic workflow engine: a workflow is a \
-     declarative DAG whose nodes are mechanically verified (criteria, scope, \
-     baseline) before anything is considered done, with a full audit log.\n\n\
-     Before implementing something ad hoc, check whether a Yunta workflow \
-     already covers it: the catalog is never fixed at install time, so \
-     always look it up fresh:\n\n\
-     - From a shell: `yunta list` (catalog) or `yunta list --runs` (local \
-       run state).\n\
-     - From an MCP-connected client: the `list_workflows` tool.\n\n\
-     If a workflow covers the task, prefer `yunta run <workflow>` (or the \
-     `run_workflow` MCP tool) over reimplementing it by hand; that path \
-     gets mechanical verification and an audit trail this one doesn't. If \
-     none covers it, proceed as you normally would; nothing here requires \
-     using Yunta for work it has no workflow for.\n\n\
-     ## Writing a document Yunta reads\n\n\
-     A tasks document, a findings artifact and a questions artifact are \
-     validated strictly: a key that is not in the shape fails the node \
-     that produced it. Never guess the format; ask for it:\n\n\
-     - From a shell: `yunta schema <kind>`, or `yunta schema` to list the \
-       kinds.\n\
-     - From an MCP-connected client: the `document_shape` tool.\n"
-        .to_string()
-}
-
-fn write_mechanism_skill(repo: &Path, force: bool) -> std::io::Result<bool> {
-    let dir = repo.join(MECHANISM_SKILL_DIR);
-    let path = dir.join("SKILL.md");
-    if path.exists() && !force {
-        return Ok(false);
-    }
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(&path, mechanism_skill_content())?;
-    Ok(true)
-}
-
 /// What this repository's CLAUDE.md could say, a line at a time as a
 /// person pastes it.
-const CLAUDE_MD_SUGGESTION: [&str; 3] = [
-    "This repo uses Yunta for verified workflows. Before implementing",
-    "something ad hoc, check `yunta list` (or the `list_workflows` MCP",
-    "tool) for an existing verified workflow that already covers it.",
-];
+fn claude_md_suggestion() -> Vec<String> {
+    vec![
+        "This repo uses Yunta for verified workflows. Before implementing".to_string(),
+        format!(
+            "something ad hoc, check `{}` (or the `list_workflows` MCP",
+            super::advice::list()
+        ),
+        "tool) for an existing verified workflow that already covers it.".to_string(),
+    ]
+}
 
 /// One setting asked for on `console`, or `default` when nobody
 /// answers.
@@ -373,7 +340,7 @@ async fn write_project(
         Err(source) => return Err(CliError::io("update", ".gitignore", source)),
     }
 
-    match write_mechanism_skill(repo, force) {
+    match skill::write_mechanism_skill(repo, force) {
         Ok(true) => wrote.push(format!("{MECHANISM_SKILL_DIR}/SKILL.md")),
         Ok(false) => skipped.push(format!(
             "{MECHANISM_SKILL_DIR}/SKILL.md (already exists, pass --force to rewrite)"
@@ -455,7 +422,7 @@ fn report(init: &Wrote<'_>) -> Doc {
             ),
         }
     }
-    let suggestion = CLAUDE_MD_SUGGESTION.map(str::to_string).to_vec();
+    let suggestion = claude_md_suggestion();
     // The config is written with its runners commented out: a probe
     // names an adapter and never a model, and the model is the project's
     // to choose. Until a runner is declared, no agent node can run, so

@@ -1,6 +1,6 @@
 //! How the lexer reads shell, YAML, TOML, JSON and Markdown.
 
-use super::super::{code_spans, Fence, Kind, Language};
+use super::super::{code_spans, Fences, Kind, Language};
 use super::read;
 
 /// In YAML an apostrophe inside a plain word is text and opens no quote, and
@@ -264,7 +264,8 @@ fn a_shift_in_shell_arithmetic_opens_no_here_document() {
 #[test]
 fn a_fence_reads_its_opening_info_code_and_closing() {
     let source = "```rust title\nfn a() {}\n  ```\nafter";
-    let fence = Fence::at(source.as_bytes(), 0).expect("the fence opens");
+    let fences = Fences::of(source);
+    let fence = fences.at(0).expect("the fence opens");
     assert_eq!(&source[fence.opening.clone()], "```rust title");
     assert_eq!(&source[fence.info.clone()], "rust title");
     assert_eq!(&source[fence.code.clone()], "fn a() {}");
@@ -272,10 +273,10 @@ fn a_fence_reads_its_opening_info_code_and_closing() {
         fence.closing.clone().map(|closing| &source[closing]),
         Some("```")
     );
-    let empty = Fence::at(b"```\n```", 0).expect("the fence opens");
-    assert!(empty.code.is_empty());
-    assert!(Fence::at(b"```a`b`\n```", 0).is_none());
-    assert!(Fence::at(b"x ```\n```", 2).is_none());
+    let empty = Fences::of("```\n```");
+    assert!(empty.at(0).expect("the fence opens").code.is_empty());
+    assert!(Fences::of("```a`b`\n```").at(0).is_none());
+    assert!(Fences::of("x ```\n```").at(2).is_none());
 }
 
 /// The code spans of prose are the runs of backticks a run of as many
@@ -380,11 +381,41 @@ fn a_shift_in_double_quoted_arithmetic_opens_no_here_document() {
     );
 }
 
+/// A fence in a list stands three spaces into the item that holds it, whatever that comes to
+/// on its line; and what ends the item ends the fence.
+#[test]
+fn a_fence_deep_in_a_list_is_read_by_the_item_that_holds_it() {
+    let text = "- a\n  - b\n\n    ```sh\n    x\n    ```\nAfter.\n";
+    let at = text.find("```").expect("the opening marks");
+    let fences = Fences::of(text);
+    let fence = fences.at(at).expect("a fence");
+    assert_eq!(&text[fence.info.clone()], "sh");
+    assert_eq!(&text[fence.code.clone()], "    x");
+    assert_eq!(fence.indent, 4);
+    assert!(fence.closing.is_some());
+    assert_eq!(&text[fence.next..], "After.\n");
+
+    let open = "- a\n\n  ```sh\n  x\nAfter.\n";
+    let at = open.find("```").expect("the opening marks");
+    let fences = Fences::of(open);
+    let fence = fences.at(at).expect("a fence");
+    assert_eq!(&open[fence.code.clone()], "  x");
+    assert!(fence.closing.is_none());
+    assert_eq!(&open[fence.next..], "After.\n");
+
+    let flat = "text\n\n    ```sh\n    x\n    ```\n";
+    let at = flat.find("```").expect("the marks");
+    assert!(
+        Fences::of(flat).at(at).is_none(),
+        "four spaces make it code"
+    );
+}
+
 /// A fence's marks stand three spaces into their line at most: four make
 /// indented code, so such marks open no fence and close none.
 #[test]
 fn a_fence_s_marks_stand_three_spaces_in_at_most() {
-    assert!(Fence::at(b"    ```\nx\n```", 4).is_none());
+    assert!(Fences::of("    ```\nx\n```").at(4).is_none());
     assert_eq!(
         read("```\ncode\n    ```\nafter", Language::Markdown),
         [(Kind::Text, "```\ncode\n    ```\nafter")]

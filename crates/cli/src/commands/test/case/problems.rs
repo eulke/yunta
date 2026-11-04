@@ -108,9 +108,10 @@ fn node_problems(frame: &RunFrame, node_id: &str, expected: &str) -> Vec<String>
 /// clock's alone.
 fn renamed(expected: &str, got: Standing) -> String {
     let said = match (expected, got) {
-        ("waiting", Standing::NeedsYou) => {
-            Some("a node waiting on a person is `needs you` now; `waiting` is a clock's")
-        }
+        ("waiting", Standing::NeedsYou) => Some(format!(
+            "a node waiting on a person is `{}` now; `waiting` is a clock's",
+            Standing::NeedsYou.word()
+        )),
         _ => super::retired(expected),
     };
     said.map(|said| format!(" ({said})")).unwrap_or_default()

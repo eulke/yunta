@@ -8,6 +8,9 @@
 //! baseline, so a stable miscount costs nothing and a wrong answer about
 //! one line never changes a verdict about the tree.
 
+use surco::code::items::{Kind, Text};
+use surco::code::Language;
+
 /// A source file with its inline `#[cfg(test)]` modules blanked, so a
 /// production counter never sees the unit tests that live beside the code:
 /// these patterns are measured *outside* tests.
@@ -176,12 +179,13 @@ pub fn has_parenthesized_plural(line: &str) -> bool {
 
 /// How many function bodies in `source` exceed `max` lines, measured from
 /// the line after the body's opening `{` to its matching `}` — the span a
-/// reader scrolls. String and char literals and comments are blanked first
-/// so a brace inside them never opens or closes a body. A deliberate
-/// heuristic, not a parser: it only ever gates *growth* against a baseline,
-/// so an occasional miscount is stable and harmless.
+/// reader scrolls. The bodies are the ones the language's reader finds
+/// (`surco::code::items`), so a brace inside a string or a comment never
+/// opens or closes a body. A deliberate heuristic, not a parser: it only
+/// ever gates *growth* against a baseline, so an occasional miscount is
+/// stable and harmless.
 pub fn functions_over(source: &str, max: usize) -> usize {
-    bodies(&code_lines(source))
+    bodies(source)
         .iter()
         .filter(|body| body.lines() > max)
         .count()
@@ -199,7 +203,7 @@ pub fn functions_over(source: &str, max: usize) -> usize {
 pub fn sync_fs_in_async(source: &str) -> usize {
     let lines: Vec<&str> = source.lines().collect();
     let blanked = code_lines(source);
-    bodies(&blanked)
+    bodies(source)
         .iter()
         .filter(|body| blanked[body.header].contains("async fn"))
         .map(|body| {
@@ -241,78 +245,29 @@ impl Body {
     }
 }
 
-/// Every function body in `blanked`, in source order. A function nested
-/// inside another is part of the body that holds it, so each span is
-/// reported once, by its outermost function.
-fn bodies(blanked: &[String]) -> Vec<Body> {
+/// Every function body in `source`, in source order: what the language's reader finds at the
+/// top, in a module, an `impl` or a trait. A function nested inside another is part of the body
+/// that holds it, so each span is reported once, by its outermost function.
+fn bodies(source: &str) -> Vec<Body> {
+    let Some(text) = Text::of(source, Language::Rust) else {
+        return Vec::new();
+    };
+    let line_of = |at: usize| source[..at.min(source.len())].matches('\n').count();
     let mut out = Vec::new();
-    let mut i = 0;
-    while i < blanked.len() {
-        // A function header is a line whose code contains `fn <name>(`.
-        if find_fn(&blanked[i]).is_some() {
-            // Walk to the body's opening brace (it may be on a later line
-            // for a multi-line signature or `where` clause).
-            let mut j = i;
-            let mut opened = false;
-            while j < blanked.len() {
-                if blanked[j].contains('{') {
-                    opened = true;
-                    break;
-                }
-                if blanked[j].contains(';') {
-                    break; // a `fn` declaration with no body (trait method).
-                }
-                j += 1;
-            }
-            if opened {
-                let mut depth = 0i32;
-                let mut close = j;
-                'body: for (k, line) in blanked.iter().enumerate().skip(j) {
-                    for ch in line.chars() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                            if depth == 0 {
-                                close = k;
-                                break 'body;
-                            }
-                        }
-                    }
-                }
-                out.push(Body {
-                    header: i,
-                    open: j,
-                    close,
-                });
-                i = close + 1;
-                continue;
-            }
+    let mut held = text.items();
+    while let Some(item) = held.pop() {
+        match (item.kind, &item.bounds.body) {
+            (Kind::Fn, Some(body)) => out.push(Body {
+                header: line_of(item.head),
+                open: line_of(item.bounds.stop),
+                close: line_of(body.end),
+            }),
+            (kind, Some(_)) if kind.holds_members() => held.extend(text.inside(&item)),
+            _ => {}
         }
-        i += 1;
     }
+    out.sort_by_key(|body| body.header);
     out
-}
-
-/// The column where a `fn` keyword introduces a function, or `None`. Only a
-/// `fn` at a word boundary counts, so `transfn` or a `fn` inside an
-/// already-blanked string never matches.
-fn find_fn(code: &str) -> Option<usize> {
-    let bytes = code.as_bytes();
-    let mut idx = 0;
-    while let Some(pos) = code[idx..].find("fn ") {
-        let at = idx + pos;
-        let before_ok = at == 0 || !is_ident(bytes[at - 1]);
-        if before_ok {
-            return Some(at);
-        }
-        idx = at + 2;
-    }
-    None
-}
-
-fn is_ident(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// Whether `line` formats a value with its `Debug` form in text that

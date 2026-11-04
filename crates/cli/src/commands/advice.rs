@@ -159,6 +159,11 @@ pub(crate) fn resume(run: &str) -> String {
     format!("yunta resume {run}")
 }
 
+/// A separate resume, named in a sentence about the command and no run of its own.
+pub(crate) fn resume_any() -> String {
+    "yunta resume".to_string()
+}
+
 /// Stops a run and the whole process tree under it.
 pub(crate) fn cancel(run: &str) -> String {
     format!("yunta cancel {run}")
@@ -208,9 +213,24 @@ pub(crate) fn doctor() -> String {
     "yunta doctor".to_string()
 }
 
+/// Checks a workflow, named by what it is called in a sentence.
+pub(crate) fn check() -> String {
+    "yunta check".to_string()
+}
+
+/// What a run's numbers are read with.
+pub(crate) fn stats() -> String {
+    "yunta stats".to_string()
+}
+
 /// Prepares a repository for yunta.
 pub(crate) fn init() -> String {
     "yunta init".to_string()
+}
+
+/// `yunta pack <verb>`, for `add`, `update`, `remove` or `new`.
+pub(crate) fn pack(verb: &str) -> String {
+    format!("yunta pack {verb}")
 }
 
 /// Lists the workflows this repository can run.

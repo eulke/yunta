@@ -72,8 +72,9 @@ impl Answer for CloseAnswer {
         );
         let gist = format!(
             "closed by {}: its checkouts went back to the project, and its branch stays until \
-             `yunta gc` removes it",
-            self.by
+             `{}` removes it",
+            self.by,
+            super::advice::gc()
         );
         Doc::new().with(headline).with(Gist::new(gist))
     }

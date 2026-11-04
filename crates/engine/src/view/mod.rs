@@ -218,10 +218,7 @@ pub fn run_frame_of(
         .map(|(node, group)| reading.node(node, group))
         .collect();
 
-    let blocking_findings = crate::dedup_findings(&state.unsettled_findings())
-        .iter()
-        .filter(|finding| finding.severity == FindingSeverity::Blocking)
-        .count();
+    let blocking_findings = findings_that_block(state);
     RunFrame {
         run_id: run_id.clone(),
         workflow: workflow.name.clone(),
@@ -244,6 +241,14 @@ pub fn run_frame_of(
         unknown_kinds: unknown_kind_counts(state),
         blocking_findings,
     }
+}
+
+/// How many findings the run has not settled that keep it from being done.
+fn findings_that_block(state: &RunState) -> usize {
+    crate::dedup_findings(&state.unsettled_findings())
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Blocking)
+        .count()
 }
 
 /// The word the run is called by, decided once from its phase, the words

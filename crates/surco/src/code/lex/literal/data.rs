@@ -8,7 +8,7 @@ use super::{bytes_from, is_word, line_end, quoted, run, tripled, Escape, Holes, 
 mod markdown;
 
 pub(super) use markdown::markdown;
-pub(crate) use markdown::Fence;
+pub(crate) use markdown::{fence_left_open, Fences, MIN_FENCE};
 
 /// Where the `#` comment that starts at `at` ends, if one does, in shell or
 /// YAML: a `#` opens one only where a word could start, since one inside a

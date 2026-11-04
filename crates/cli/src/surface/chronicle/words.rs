@@ -119,7 +119,7 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
         H::Rerouted(it) => (
             Some(Mark::Reroute),
             detailed(
-                format!("rerouted to `{}`", it.to),
+                format!("{} to `{}`", Standing::Rerouted.word(), it.to),
                 &one_line(&yunta_render::failure::cause(&it.cause)),
             ),
         ),

@@ -26,6 +26,7 @@ mod mode;
 
 pub(crate) use detach::start_detached;
 
+use super::advice;
 use super::drive::Prepared;
 use super::registry::{create_frozen_run, read_fixture, servable};
 use crate::context::Context;
@@ -136,18 +137,21 @@ fn mock_fixture<'a>(
         // A fixture is read by whoever runs the sessions, and `--detach`
         // makes that a separate `yunta resume` — which resolves the
         // adapters `runners:` names and takes no fixture of its own.
-        (Some(id), _) if *id == MOCK_ID && detach => Err(CliError::msg(
+        (Some(id), _) if *id == MOCK_ID && detach => Err(CliError::msg(format!(
             "`--adapter mock` scripts every session from a fixture, and `--detach` hands \
-             the run to a separate `yunta resume` that resolves the adapters `runners:` \
+             the run to a separate `{resume}` that resolves the adapters `runners:` \
              names and reads no fixture; drop `--detach` to run against a fixture here, \
-             or write a case and run `yunta test`",
-        )),
+             or write a case and run `{test}`",
+            resume = advice::resume_any(),
+            test = advice::test()
+        ))),
         (Some(id), Some(path)) if *id == MOCK_ID => Ok(Some(path)),
-        (Some(id), None) if *id == MOCK_ID => Err(CliError::msg(
+        (Some(id), None) if *id == MOCK_ID => Err(CliError::msg(format!(
             "`--adapter mock` runs the workflow against a scripted fixture; pass \
              `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
-             case and run `yunta test`",
-        )),
+             case and run `{test}`",
+            test = advice::test()
+        ))),
         (_, Some(_)) => Err(CliError::msg(
             "`--fixture` only applies together with `--adapter mock`",
         )),
@@ -243,7 +247,7 @@ pub(super) async fn preflight(
 fn check_refusal(errors: &[CheckError]) -> CliError {
     let words: Vec<String> = errors.iter().map(crate::error::words::check).collect();
     CliError::msg(surco::text::problems(
-        "the workflow fails `yunta check`",
+        crate::error::page::unrunnable(),
         &words,
     ))
 }
@@ -380,8 +384,9 @@ pub(super) async fn create_run_from(
         if active >= cap as usize {
             return Err(CliError::msg(format!(
                 "{} still active and `limits.max_concurrent_runs` is {cap}; resume or \
-                 cancel one (`yunta list` names them) before starting another",
-                surco::text::counted(active, "run")
+                 cancel one (`{list}` names them) before starting another",
+                surco::text::counted(active, "run"),
+                list = advice::list()
             )));
         }
     }

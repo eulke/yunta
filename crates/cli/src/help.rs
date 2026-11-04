@@ -13,6 +13,7 @@ use clap::{ArgMatches, Command, CommandFactory};
 use surco::line::Tone;
 use surco::paint::Paint;
 use surco::width::{GAP, INDENT};
+use surco::words::RUNS_THAT_NEED_YOU_FIRST;
 
 use crate::commands::advice;
 
@@ -46,10 +47,7 @@ fn examples() -> [(String, &'static str); 4] {
             advice::run(".yunta/workflows/lint-fix.yaml"),
             "run a workflow from the catalog",
         ),
-        (
-            advice::list_runs(),
-            "this repository's runs, what needs you first",
-        ),
+        (advice::list_runs(), RUNS_THAT_NEED_YOU_FIRST),
         (
             advice::status("needs"),
             "the run waiting on you, and how to answer it",

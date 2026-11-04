@@ -13,6 +13,10 @@
 //! change that means to change what a surface prints. The new files are
 //! reviewed in the diff like any other change.
 
+// A golden exists to fail a test, so a panic or an unwrap here is the
+// failure itself, not a fallible path in production.
+#![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+
 use std::path::{Path, PathBuf};
 
 use crate::glyphs::ESCAPE;

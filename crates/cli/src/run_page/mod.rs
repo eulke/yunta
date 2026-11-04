@@ -293,7 +293,7 @@ pub(crate) fn gist(frame: &RunFrame, engine: &yunta_engine::Engine) -> Option<St
         (Standing::Stalled, _) => advice::STALLED.to_string(),
         (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => match &engine.prompt {
             Some(prompt) => advice::asking(prompt, None),
-            None => "it needs you".to_string(),
+            None => format!("it {}", Standing::NeedsYou.word()),
         },
         (_, RunPhase::Waiting { on }) => advice::parked_claim(on),
         (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),

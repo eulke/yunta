@@ -15,8 +15,8 @@ mod lex;
 pub(crate) use diff::compared;
 pub(crate) use fold::folded;
 pub(crate) use highlight::{highlighted, painted};
-pub(crate) use lex::{code_spans, heading_level, Fence};
-pub use lex::{fence, masked, Language};
+pub(crate) use lex::{code_spans, fence_left_open, heading_level, Fences, MIN_FENCE};
+pub use lex::{fence, is_word, masked, Language};
 
 /// Whether `word` is one of the words `list` holds, apart by spaces: the way
 /// a reader of code keeps a language's lists of words.

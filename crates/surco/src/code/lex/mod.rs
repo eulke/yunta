@@ -12,8 +12,8 @@ mod tests;
 use std::ops::Range;
 use std::path::Path;
 
-pub(super) use literal::is_word;
-pub(crate) use literal::Fence;
+pub use literal::is_word;
+pub(crate) use literal::{fence_left_open, Fences, MIN_FENCE};
 use literal::{Close, Escape, Hole, Literal};
 
 /// A language the lexer reads, by how its source writes comments and
@@ -270,6 +270,7 @@ fn walk(source: &str, language: Option<Language>, emit: &mut dyn FnMut(Kind, Ran
     Walk {
         source,
         language,
+        fences: Fences::in_markdown(source, language),
         emit,
         nested: 0,
     }
@@ -280,6 +281,8 @@ fn walk(source: &str, language: Option<Language>, emit: &mut dyn FnMut(Kind, Ran
 struct Walk<'a, 'e> {
     source: &'a str,
     language: Option<Language>,
+    /// The fences of a Markdown source, read once for the whole of it.
+    fences: Fences,
     emit: &'e mut dyn FnMut(Kind, Range<usize>),
     /// How many holes deep the reading stands.
     nested: usize,
@@ -313,7 +316,7 @@ impl Walk<'_, '_> {
                     at = end;
                     continue;
                 }
-                if let Some(found) = literal::literal(language, bytes, at) {
+                if let Some(found) = literal::literal(language, bytes, at, &self.fences) {
                     at = self.literal(at, found);
                     continue;
                 }

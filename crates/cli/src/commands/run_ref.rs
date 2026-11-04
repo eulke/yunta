@@ -9,6 +9,7 @@
 use std::str::FromStr;
 
 use surco::components::{Edge, RunLine};
+use surco::words::Standing;
 use yunta_core::RunId;
 
 use super::advice;
@@ -152,7 +153,8 @@ async fn waiting_run(ctx: &Context) -> Result<RunId, CliError> {
     let inbox = Inbox::gather(ctx, false).await?;
     match inbox.needing_a_person().as_slice() {
         [] => Err(CliError::msg(format!(
-            "no run of this repository needs you; `{}` lists them",
+            "no run of this repository {}; `{}` lists them",
+            Standing::NeedsYou.word(),
             advice::list_runs()
         ))),
         [one] => Ok(one.run_id.clone()),

@@ -20,14 +20,11 @@ use nix::sys::signal::{kill, Signal};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, LocalFlags, SetArg};
 use nix::unistd::Pid;
 
-use surco::paint::{SYNC_BEGIN, SYNC_END};
+use surco::paint::{HIDE_CURSOR, SHOW_CURSOR, SYNC_BEGIN, SYNC_END};
 
 use crate::wait::{wait_for, wait_until, WAIT_DEADLINE};
 
-/// What a terminal is told to do, as the bytes a run writes to say it:
-/// the three sequences this harness reads a run's drawing by.
-const HIDE_CURSOR: &str = "\u{1b}[?25l";
-const SHOW_CURSOR: &str = "\u{1b}[?25h";
+/// What a run writes to clear a row, which this harness reads a drawing by.
 const CLEAR_ROW: &str = "\u{1b}[2K";
 
 /// A run under a terminal of a stated size.

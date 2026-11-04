@@ -26,6 +26,7 @@ use yunta_engine::{
     RunSummary, VerificationFindings, WaitingOn,
 };
 
+use crate::commands::advice;
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::output::{emit, Answer, Mode};
@@ -49,12 +50,14 @@ pub async fn stats(
     match (run_id, workflow) {
         (Some(run_id), None) => stats_run(run_id, depth, output, look).await,
         (None, Some(workflow)) => stats_workflow(workflow, output, look).await,
-        (None, None) => Err(CliError::msg(
-            "`yunta stats` needs a run id or `--workflow <name>`",
-        )),
-        (Some(_), Some(_)) => Err(CliError::msg(
-            "`yunta stats` takes a run id or `--workflow <name>`, not both",
-        )),
+        (None, None) => Err(CliError::msg(format!(
+            "`{}` needs a run id or `--workflow <name>`",
+            advice::stats()
+        ))),
+        (Some(_), Some(_)) => Err(CliError::msg(format!(
+            "`{}` takes a run id or `--workflow <name>`, not both",
+            advice::stats()
+        ))),
     }
 }
 

@@ -280,10 +280,11 @@ pub(crate) fn refuse_unrunnable(
     if needs_sessions && adapters.is_empty() {
         return Err(CliError::msg(format!(
             "this workflow has prompt/loop nodes but `runners:` in the merged config\n\
-             names no adapter this binary can run (built: {}). To exercise this\n\
+             names no adapter this binary can run (built: {built}). To exercise this\n\
              workflow with the `mock` adapter instead, declare a test case under\n\
-             .yunta/tests/ and run `yunta test`.",
-            built_adapter_names()
+             .yunta/tests/ and run `{test}`.",
+            built = built_adapter_names(),
+            test = advice::test()
         )));
     }
     Ok(())
@@ -312,7 +313,10 @@ pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError>
         return Ok(());
     }
     Err(CliError::msg(surco::text::problems(
-        "adapter health check failed (run `yunta doctor` for detail)",
+        format!(
+            "adapter health check failed (run `{}` for detail)",
+            advice::doctor()
+        ),
         &unhealthy,
     )))
 }

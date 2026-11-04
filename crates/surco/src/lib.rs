@@ -18,6 +18,15 @@
 //! width, an escape or a glyph: a glyph is written only in [`glyphs`], an
 //! escape only in [`paint`], and a state word only in [`words`].
 
+// A panic is a bug, never a fallible path: production returns a typed
+// error instead of unwrapping, expecting or panicking.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 pub mod bars;
 pub mod code;
 pub mod components;

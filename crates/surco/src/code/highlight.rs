@@ -10,7 +10,7 @@ mod words;
 
 use std::ops::Range;
 
-use super::lex::{heading_level, tokens, Fence, Kind, Language, Token, DEEPEST};
+use super::lex::{heading_level, tokens, Fences, Kind, Language, Token, DEEPEST};
 use crate::line::{Line, Syntax, Tone};
 
 /// The stretches of `text`, code in `language`, a reader of code sees
@@ -31,6 +31,7 @@ fn within(text: &str, language: Option<Language>, depth: usize) -> Vec<(Range<us
     let reading = Reading {
         text,
         language,
+        fences: Fences::in_markdown(text, Some(language)),
         tokens: &tokens,
         closes,
         inside,
@@ -81,6 +82,8 @@ type Read = (Vec<(Range<usize>, Syntax)>, usize);
 struct Reading<'a> {
     text: &'a str,
     language: Language,
+    /// The fences of a Markdown text, read once for the whole of it.
+    fences: Fences,
     tokens: &'a [Token],
     /// For each token that is a `[`, the token of the `]` that closes it.
     closes: Vec<Option<usize>>,
@@ -176,19 +179,14 @@ impl Reading<'_> {
     /// other, a code span, a string's text.
     fn fence(&self, at: usize) -> Vec<(Range<usize>, Syntax)> {
         let range = self.tokens[at].range.clone();
-        let Some(Fence {
-            opening,
-            info,
-            code,
-            closing,
-        }) = Fence::at(self.text.as_bytes(), range.start)
-        else {
+        let Some(fence) = self.fences.at(range.start) else {
             return vec![(range, Syntax::Text)];
         };
+        let (opening, code) = (fence.opening.clone(), fence.code.clone());
         let inner = match self.depth < DEEPEST {
             true => within(
                 &self.text[code.clone()],
-                Language::named(&self.text[info]),
+                Language::named(&self.text[fence.info.clone()]),
                 self.depth + 1,
             ),
             false => Vec::new(),
@@ -198,7 +196,12 @@ impl Reading<'_> {
         });
         std::iter::once((opening, Syntax::Comment))
             .chain(inner)
-            .chain(closing.map(|closing| (closing, Syntax::Comment)))
+            .chain(
+                fence
+                    .closing
+                    .clone()
+                    .map(|closing| (closing, Syntax::Comment)),
+            )
             .filter(|(stretch, _)| !stretch.is_empty())
             .collect()
     }

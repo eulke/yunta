@@ -8,7 +8,7 @@
 //! where a fence starts and ends.
 
 use super::text;
-use crate::code::{heading_level, highlighted, painted, Fence, Language};
+use crate::code::{heading_level, highlighted, painted, Fences, Language};
 use crate::diagram::split::{parts, Part};
 use crate::surface::terminal::markdown::prose::{list_item, marked_spans, spans};
 
@@ -31,7 +31,10 @@ pub(super) fn markdown(text: &str) -> String {
 
 /// The blocks `source` reads as, one line at a time, in the order it says them.
 fn blocks_of(source: &str) -> String {
-    let mut page = Page::default();
+    let mut page = Page {
+        fences: Fences::of(source),
+        ..Page::default()
+    };
     let mut at = 0;
     for line in source.split_inclusive('\n') {
         page.read(source, at, line.trim_end_matches(['\n', '\r']));
@@ -45,6 +48,8 @@ fn blocks_of(source: &str) -> String {
 struct Page {
     blocks: Vec<String>,
     open: Open,
+    /// The fences of the text, read once for the whole of it.
+    fences: Fences,
 }
 
 /// The block that a line of Markdown may continue, until a line that is not
@@ -64,10 +69,13 @@ enum Open {
 }
 
 /// A fenced block of code being read: the language its fence names, where
-/// the marks of the line that closes it stand, and its lines so far.
+/// the marks of the line that closes it stand, where what follows it starts, how many
+/// spaces each of its lines gives up, and its lines so far.
 struct Fenced {
     language: Option<Language>,
     closing: Option<usize>,
+    next: usize,
+    indent: usize,
     lines: Vec<String>,
 }
 
@@ -76,18 +84,24 @@ impl Page {
     /// fenced block being read, the opening line of a fence, a blank line, or
     /// a line that is a heading, a list item, a quote, a run line or text.
     fn read(&mut self, source: &str, at: usize, line: &str) {
+        if matches!(&self.open, Open::Fence(fenced) if at >= fenced.next) {
+            self.close();
+        }
         if matches!(self.open, Open::Fence(_)) {
             return self.code(at, line);
         }
         let trimmed = line.trim();
         let marks = at + line.len() - line.trim_start().len();
-        if let Some(fence) = Fence::at(source.as_bytes(), marks) {
+        let opened = self.fences.at(marks).map(|fence| Fenced {
+            language: Language::named(&source[fence.info.clone()]),
+            closing: fence.closing.as_ref().map(|closing| closing.start),
+            next: fence.next,
+            indent: fence.indent,
+            lines: Vec::new(),
+        });
+        if let Some(fenced) = opened {
             self.close();
-            self.open = Open::Fence(Fenced {
-                language: Language::named(&source[fence.info]),
-                closing: fence.closing.map(|closing| closing.start),
-                lines: Vec::new(),
-            });
+            self.open = Open::Fence(fenced);
             return;
         }
         if trimmed.is_empty() {
@@ -114,7 +128,10 @@ impl Page {
         if closes {
             self.close();
         } else {
-            fenced.lines.push(line.to_string());
+            let lead = line.len() - line.trim_start_matches(' ').len();
+            fenced
+                .lines
+                .push(line[lead.min(fenced.indent)..].to_string());
         }
     }
 

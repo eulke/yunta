@@ -251,9 +251,11 @@ pub async fn add(
     let dest = vendor_dir(&cwd, &pack);
     if dest.exists() {
         return Err(CliError::msg(format!(
-            "`{pack}` is already installed at {}; use `yunta pack update` to change its \
-             ref, or `yunta pack remove` first",
-            dest.display()
+            "`{pack}` is already installed at {}; use `{update}` to change its \
+             ref, or `{remove}` first",
+            dest.display(),
+            update = super::advice::pack("update"),
+            remove = super::advice::pack("remove")
         )));
     }
 
@@ -326,7 +328,8 @@ pub async fn update(
     let lock = load_lock(&cwd)?;
     let Some(entry) = lock.packs.get(pack).cloned() else {
         return Err(CliError::msg(format!(
-            "`{pack}` isn't installed; `yunta pack add` it first, not update"
+            "`{pack}` isn't installed; `{add}` it first, not update",
+            add = super::advice::pack("add")
         )));
     };
 

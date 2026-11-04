@@ -3,6 +3,7 @@
 //! surface has to draw, and what a change to one block is seen against.
 
 mod closing;
+mod kinds;
 
 use std::path::{Path, PathBuf};
 

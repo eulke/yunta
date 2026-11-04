@@ -59,7 +59,7 @@ async fn every_text_a_session_is_shown_names_a_run_tool_the_way_its_cli_does() {
     };
     for wanted in [
         "hand it over with `mcp__yunta-run__yunta_submit_tasks`",
-        "the `tasks` document → `mcp__yunta-run__yunta_submit_tasks`",
+        "the `tasks` document goes through `mcp__yunta-run__yunta_submit_tasks`",
         "`mcp__yunta-run__yunta_submit_tasks`: yunta_submit_tasks",
     ] {
         assert!(planner.contains(wanted), "`{wanted}` in:\n{planner}");

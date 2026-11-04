@@ -128,7 +128,7 @@ impl TryFrom<String> for FinalState {
     /// one that replaced it.
     fn try_from(word: String) -> Result<Self, String> {
         if let Some(retired) = retired(&word) {
-            return Err(retired.to_string());
+            return Err(retired);
         }
         match Standing::named(&word) {
             Some(standing) if Self::ENDS.contains(&standing) => Ok(FinalState(standing)),
@@ -142,13 +142,18 @@ impl TryFrom<String> for FinalState {
 
 /// What a case is told for a word the vocabulary retired: the word that
 /// replaced it, and what it says.
-pub(super) fn retired(word: &str) -> Option<&'static str> {
+pub(super) fn retired(word: &str) -> Option<String> {
     match word {
-        "paused" => Some(
-            "`paused` is called `needs you` now when a person owes an answer, and `stopped` when \
-             a person stopped it",
-        ),
-        "cancelled" => Some("`cancelled` is called `stopped` now: a person stopped it"),
+        "paused" => Some(format!(
+            "`paused` is called `{}` now when a person owes an answer, and `{}` when a person \
+             stopped it",
+            Standing::NeedsYou.word(),
+            Standing::Stopped.word()
+        )),
+        "cancelled" => Some(format!(
+            "`cancelled` is called `{}` now: a person stopped it",
+            Standing::Stopped.word()
+        )),
         _ => None,
     }
 }

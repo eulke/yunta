@@ -8,6 +8,7 @@
 
 use std::fmt::Display;
 
+use surco::words::RUNS_THAT_NEED_YOU_FIRST;
 use yunta_core::RunId;
 
 pub use crate::output::{note, warn};
@@ -15,7 +16,7 @@ pub use crate::output::{note, warn};
 pub(crate) mod page;
 pub(crate) mod words;
 
-use page::{document_problems, unrunnable};
+use page::{document_problems, unrunnable_said};
 
 /// How a subcommand came back when nothing stopped it from running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,7 +182,7 @@ pub enum CliError {
     /// A workflow that cannot run here: every problem `yunta check` finds
     /// in it, each pointed at in its line, and what this project could
     /// declare for the ones a declaration fixes.
-    #[error("{}", unrunnable(.0))]
+    #[error("{}", unrunnable_said(.0))]
     Unrunnable(crate::commands::verdict::Unrunnable),
 
     /// A document this binary does not show. The sentence lists the ones
@@ -407,7 +408,7 @@ impl CliError {
                 vec![
                     (
                         crate::commands::advice::list_runs(),
-                        "this repository's runs, what needs you first",
+                        RUNS_THAT_NEED_YOU_FIRST,
                     ),
                     (
                         crate::commands::advice::list_every_run(),
