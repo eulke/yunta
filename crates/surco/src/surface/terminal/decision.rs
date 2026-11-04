@@ -1,6 +1,6 @@
 //! Every option of a decision, what it costs, and the command that chooses it, if any.
 
-use crate::components::{Chosen, Decision};
+use crate::components::{Chosen, Decision, DecisionOption};
 use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
 use crate::width::{cell_width, wrap, INDENT};
@@ -17,13 +17,7 @@ impl Decision {
         let room = look.width.cells().saturating_sub(cell_width(&under));
         let mut lines = Vec::new();
         for option in &self.options {
-            let mut head = Line::new()
-                .plain(INDENT)
-                .push(Tone::Strong, option.id.as_str());
-            if let Some(label) = option.said_label() {
-                head = head.plain(": ").plain(label);
-            }
-            lines.push(head);
+            lines.extend(head(option, &under, room));
             let mut said: Vec<String> = option.tradeoff.iter().cloned().collect();
             said.extend(option.asks.iter().map(|asks| format!("asks: {asks}")));
             for part in said.iter().flat_map(|text| wrap(text, room)) {
@@ -68,12 +62,34 @@ impl Decision {
     }
 }
 
+/// An option's id, in the strong tone, and its label, wrapped under it where
+/// the line runs out.
+fn head(option: &DecisionOption, under: &str, room: usize) -> Vec<Line> {
+    let id = option.id.as_str();
+    let label = option.said_label().map(|label| format!(": {label}"));
+    let said = format!("{id}{}", label.unwrap_or_default());
+    wrap(&said, room)
+        .into_iter()
+        .enumerate()
+        .map(|(at, part)| match at {
+            0 => {
+                let rest = part.strip_prefix(id).unwrap_or_default().to_string();
+                Line::new()
+                    .plain(INDENT)
+                    .push(Tone::Strong, id)
+                    .plain(rest)
+            }
+            _ => Line::new().plain(under).plain(part),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use crate::components::{Chosen, Decision, DecisionOption};
-    use crate::line::Fill;
+    use crate::line::{Fill, Line};
     use crate::look::Look;
 
     /// A decision with one option that has a cost, and one way out.
@@ -105,6 +121,26 @@ mod tests {
 
     /// Every line a decision draws opens with its edge, in the person's tone,
     /// in place of its first two spaces, so each line keeps its width.
+    #[test]
+    fn a_label_wider_than_its_line_wraps_under_its_option() {
+        let mut decision = decision();
+        decision.options[0].label =
+            Some("Run it again (attempt 2) once something outside the tree changes".to_string());
+        let look = Look {
+            width: crate::look::Width::of(Some(60), None),
+            ..Look::plain()
+        };
+        let drawn: Vec<String> = decision.lines(&look).iter().map(Line::text).collect();
+        assert_eq!(
+            drawn[0],
+            "| approve: Run it again (attempt 2) once something outside"
+        );
+        assert_eq!(drawn[1], "|   the tree changes");
+        for line in &drawn {
+            assert!(crate::width::cell_width(line) <= 60, "{line}");
+        }
+    }
+
     #[test]
     fn every_line_a_decision_draws_opens_with_its_edge() {
         let look = Look::plain();
