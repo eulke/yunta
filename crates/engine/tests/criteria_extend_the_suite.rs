@@ -109,7 +109,7 @@ async fn the_planner_is_told_the_suite_it_extends_and_a_plan_that_does_is_taken(
     assert!(
         planner
             .prompt
-            .contains("extends it — `sh suite.sh --all <selector>`"),
+            .contains("extends it (`sh suite.sh --all <selector>`"),
         "{}",
         planner.prompt
     );

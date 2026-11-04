@@ -89,6 +89,7 @@ mod tests {
             },
             Menu::Gate(AuthorGate {
                 assignee: "lead".into(),
+                node: None,
             }),
             NonEmpty::from((option("approve"), vec![option("abort")])),
         )

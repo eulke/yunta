@@ -51,7 +51,7 @@ pub(crate) async fn require(
         // would have.
         Absence::FailAtCheck => Ok(Decision::Refused(RunError::Broken {
             diagnostic: format!(
-                "node `{}` needs `{capability}` and adapter `{}` declares none — \
+                "node `{}` needs `{capability}` and adapter `{}` declares none; \
                  pick a runner on an adapter that has it",
                 node.id,
                 adapter.id()

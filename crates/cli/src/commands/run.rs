@@ -26,14 +26,15 @@ mod mode;
 
 pub(crate) use detach::start_detached;
 
+use super::advice;
 use super::drive::Prepared;
 use super::registry::{create_frozen_run, read_fixture, servable};
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::json::PreRunWarnings;
 use crate::output::Mode;
-use crate::render::Look;
 use mode::resolve_mode;
+use surco::look::Look;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
@@ -136,18 +137,21 @@ fn mock_fixture<'a>(
         // A fixture is read by whoever runs the sessions, and `--detach`
         // makes that a separate `yunta resume` — which resolves the
         // adapters `runners:` names and takes no fixture of its own.
-        (Some(id), _) if *id == MOCK_ID && detach => Err(CliError::msg(
+        (Some(id), _) if *id == MOCK_ID && detach => Err(CliError::msg(format!(
             "`--adapter mock` scripts every session from a fixture, and `--detach` hands \
-             the run to a separate `yunta resume` that resolves the adapters `runners:` \
-             names and reads no fixture — drop `--detach` to run against a fixture here, \
-             or write a case and run `yunta test`",
-        )),
+             the run to a separate `{resume}` that resolves the adapters `runners:` \
+             names and reads no fixture; drop `--detach` to run against a fixture here, \
+             or write a case and run `{test}`",
+            resume = advice::resume_any(),
+            test = advice::test()
+        ))),
         (Some(id), Some(path)) if *id == MOCK_ID => Ok(Some(path)),
-        (Some(id), None) if *id == MOCK_ID => Err(CliError::msg(
-            "`--adapter mock` runs the workflow against a scripted fixture — pass \
+        (Some(id), None) if *id == MOCK_ID => Err(CliError::msg(format!(
+            "`--adapter mock` runs the workflow against a scripted fixture; pass \
              `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
-             case and run `yunta test`",
-        )),
+             case and run `{test}`",
+            test = advice::test()
+        ))),
         (_, Some(_)) => Err(CliError::msg(
             "`--fixture` only applies together with `--adapter mock`",
         )),
@@ -242,8 +246,8 @@ pub(super) async fn preflight(
 /// person reads.
 fn check_refusal(errors: &[CheckError]) -> CliError {
     let words: Vec<String> = errors.iter().map(crate::error::words::check).collect();
-    CliError::msg(yunta_core::text::problems(
-        "the workflow fails `yunta check`",
+    CliError::msg(surco::text::problems(
+        crate::error::page::unrunnable(),
         &words,
     ))
 }
@@ -379,9 +383,10 @@ pub(super) async fn create_run_from(
         let active = count_non_terminal_runs(storage).await?;
         if active >= cap as usize {
             return Err(CliError::msg(format!(
-                "{} still active and `limits.max_concurrent_runs` is {cap} — resume or \
-                 cancel one (`yunta list` names them) before starting another",
-                yunta_core::text::counted(active, "run")
+                "{} still active and `limits.max_concurrent_runs` is {cap}; resume or \
+                 cancel one (`{list}` names them) before starting another",
+                surco::text::counted(active, "run"),
+                list = advice::list()
             )));
         }
     }
@@ -422,7 +427,7 @@ pub(super) async fn create_run_from(
                 yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid } => {
                     warn(format!(
                         "this checkout's isolation lock belonged to a dead process \
-                         (pid {dead_pid}) — taking it over"
+                         (pid {dead_pid}): taking it over"
                     ));
                 }
             }

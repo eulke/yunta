@@ -1,125 +1,28 @@
-//! Whether a file names a word as code: outside its literals and its
-//! comments, or inside what a literal interpolates. A test fixture that
-//! quotes a plan, or a doc comment that mentions a shape, says the name
-//! and calls nothing; `${store.load()}` in a template calls it.
+//! Whether a file names a word as code: outside its comments and, in a
+//! programming language, outside its literals too, or inside what a
+//! literal interpolates. A test fixture that quotes a plan, or a doc
+//! comment that mentions a shape, says the name and calls nothing;
+//! `${store.load()}` in a template calls it.
 //!
-//! The reading walks code, and each literal and comment it meets in the
-//! way its language writes them — see [`syntax`] — then walks back as
-//! code every hole a literal holds. A file of a type it does not know is
-//! read whole, so an unknown language never loses a real caller.
+//! The reading is surco's: [`surco::code::masked`] turns each comment to
+//! spaces, and in a programming language each literal's text too, in the
+//! language the file's extension names, and leaves as code every hole a
+//! literal holds. In shell, YAML, TOML, JSON and Markdown a quoted word is
+//! the word unquoted, so it stays. A file of a type surco reads no
+//! language in is read whole, so an unknown language never loses a real
+//! caller.
+//!
+//! [`items`] reads, with surco's item reader, what a file holds of the
+//! items a shape declares, in Rust, Go, JavaScript or TypeScript, and
+//! Python.
 
-mod syntax;
-
-use syntax::{is_word, Hole, Lang, Literal};
+pub(super) mod items;
 
 /// Whether `source`, a file whose extension is `kind`, names `word` as
 /// code.
 pub(crate) fn names_in_code(source: &str, kind: &str, word: &str) -> bool {
-    let code = match Lang::of(kind) {
-        Some(lang) => blanked(source.as_bytes(), lang),
-        None => source.as_bytes().to_vec(),
-    };
-    contains_word(&code, word.as_bytes())
-}
-
-/// `source` with what is not code turned to spaces — newlines kept — so
-/// what is left is the code, word boundaries intact.
-fn blanked(source: &[u8], lang: Lang) -> Vec<u8> {
-    let mut walk = Walk {
-        source,
-        lang,
-        out: source.to_vec(),
-    };
-    walk.code(0, None);
-    walk.out
-}
-
-/// One file's walk, and what it has blanked so far.
-struct Walk<'a> {
-    source: &'a [u8],
-    lang: Lang,
-    out: Vec<u8>,
-}
-
-impl Walk<'_> {
-    /// Walks code from `at` to the end — or, in a literal's hole, past
-    /// the `close` that ends it — and answers where it stopped.
-    fn code(&mut self, mut at: usize, close: Option<u8>) -> usize {
-        let open = close.map(|close| match close {
-            b')' => b'(',
-            _ => b'{',
-        });
-        let mut depth = 0usize;
-        while let Some(&byte) = self.source.get(at) {
-            if let Some(end) = self.lang.comment(self.source, at) {
-                self.blank(at, end);
-                at = end;
-                continue;
-            }
-            if let Some(literal) = self.lang.literal(self.source, at) {
-                at = self.literal(at, literal);
-                continue;
-            }
-            if Some(byte) == close && depth == 0 {
-                return at + 1;
-            }
-            if Some(byte) == open {
-                depth += 1;
-            } else if Some(byte) == close {
-                depth -= 1;
-            }
-            at += 1;
-        }
-        at
-    }
-
-    /// Blanks the literal that opens at `at`, but for the holes in its
-    /// text, which it walks as code, and answers where it ends.
-    fn literal(&mut self, at: usize, literal: Literal) -> usize {
-        let mut text = at;
-        let mut index = literal.text;
-        while index < self.source.len() {
-            match literal.holes.at(self.source, index) {
-                Some(Hole::Code { from, close }) => {
-                    self.blank(text, from);
-                    index = self.code(from, Some(close));
-                    text = index;
-                    continue;
-                }
-                Some(Hole::Name { from, to }) => {
-                    self.blank(text, from);
-                    index = to;
-                    text = index;
-                    continue;
-                }
-                Some(Hole::Text { to }) => {
-                    index = to;
-                    continue;
-                }
-                None => {}
-            }
-            if syntax::bytes_from(self.source, index).starts_with(&literal.close) {
-                let end = index + literal.close.len();
-                self.blank(text, end);
-                return end;
-            }
-            index += match literal.escapes && self.source.get(index) == Some(&b'\\') {
-                true => 2,
-                false => 1,
-            };
-        }
-        self.blank(text, self.source.len());
-        self.source.len()
-    }
-
-    fn blank(&mut self, from: usize, to: usize) {
-        let to = to.min(self.out.len());
-        for byte in self.out.iter_mut().take(to).skip(from) {
-            if *byte != b'\n' {
-                *byte = b' ';
-            }
-        }
-    }
+    let code = surco::code::masked(source, surco::code::Language::of_extension(kind));
+    contains_word(code.as_bytes(), word.as_bytes())
 }
 
 /// Whether `word` stands whole somewhere in `code`.
@@ -133,7 +36,7 @@ fn contains_word(code: &[u8], word: &[u8]) -> bool {
         .any(|(at, _)| {
             let before = at.checked_sub(1).and_then(|i| code.get(i)).copied();
             let after = code.get(at + word.len()).copied();
-            !before.is_some_and(is_word) && !after.is_some_and(is_word)
+            !before.is_some_and(surco::code::is_word) && !after.is_some_and(surco::code::is_word)
         })
 }
 
@@ -175,8 +78,37 @@ mod tests {
 
     #[test]
     fn a_language_it_does_not_know_is_read_whole() {
+        assert!(names_in_code("store = \"PackStore\"\n", "ini", "PackStore"));
+        assert!(!names_in_code("PackStores", "ini", "PackStore"));
+    }
+
+    /// In YAML a quoted word is the same word unquoted, so it names what it
+    /// names, and a comment names nothing.
+    #[test]
+    fn yaml_reads_a_quoted_word_as_the_word_and_hides_its_comments() {
         assert!(names_in_code("store: \"PackStore\"\n", "yaml", "PackStore"));
-        assert!(!names_in_code("PackStores", "yaml", "PackStore"));
+        assert!(names_in_code("store: PackStore\n", "yaml", "PackStore"));
+        assert!(!names_in_code(
+            "# PackStore\nstore: x\n",
+            "yaml",
+            "PackStore"
+        ));
+    }
+
+    /// In shell, TOML and Markdown a quoted word is the same word unquoted,
+    /// and a comment names nothing.
+    #[test]
+    fn shell_toml_and_markdown_read_a_quoted_word_and_hide_their_comments() {
+        assert!(names_in_code("echo \"PackStore\"\n", "sh", "PackStore"));
+        assert!(!names_in_code("# PackStore\necho ok\n", "sh", "PackStore"));
+        assert!(names_in_code("name = \"PackStore\"\n", "toml", "PackStore"));
+        assert!(!names_in_code(
+            "# PackStore\nname = 1\n",
+            "toml",
+            "PackStore"
+        ));
+        assert!(names_in_code("Use `PackStore` here\n", "md", "PackStore"));
+        assert!(!names_in_code("<!-- PackStore -->\n", "md", "PackStore"));
     }
 
     #[test]
@@ -198,6 +130,24 @@ mod tests {
             "const s = '${PackStore}';",
         ];
         assert_eq!(read("ts", &sources), [true, true, false, false, false]);
+    }
+
+    /// A quote that does not run on past its line ends at the break, so a
+    /// stray one, as JSX text or a regex writes it, hides nothing on the
+    /// lines after it.
+    #[test]
+    fn a_stray_quote_hides_nothing_past_its_line() {
+        let jsx = "const a = <p>Don't</p>;\nfoo(PackStore);";
+        let regex = "const r = /'/;\nfoo(PackStore);";
+        assert_eq!(read("tsx", &[jsx]), [true]);
+        assert_eq!(read("ts", &[regex]), [true]);
+    }
+
+    /// A template literal runs on over lines, so a name in its text names
+    /// nothing, even on a line of its own.
+    #[test]
+    fn a_template_literal_hides_its_text_across_lines() {
+        assert_eq!(read("ts", &["const s = `one\nPackStore two`;"]), [false]);
     }
 
     #[test]

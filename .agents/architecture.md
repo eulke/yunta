@@ -8,21 +8,22 @@ How Yunta's crates fit and what every run guarantees; a crate's own map is its r
 nodes, and a task's cycle opens sessions through the port on an adapter, each session in a pooled checkout. The
 fence and the rail judge each write at the tool call, and the close judges the diff. Declared criteria the
 engine runs decide a task; an agent's word is never evidence. Every fact is an event in the log, replay derives
-every state from it, and what a person reads is drawn from that data by `yunta-render`.
+every state from it, and what a person reads is drawn from that data in Surco.
 
 ## Crates
 
 | Crate | Owns | Depends on (`[dependencies]`) |
 |---|---|---|
-| `yunta-core` | domain types, the port, shapes, protection | nothing in the workspace |
+| `yunta-surco` | Surco, the language: its words, marks and figures, a `Doc` that a `Surface` draws, one lexer for code | nothing in the workspace |
+| `yunta-core` | domain types, the port, shapes, protection | surco |
 | `yunta-storage` | the append-only log; SQLite stays behind its interface | core |
-| `yunta-render` | Surco: a `Doc` that a `Surface` draws | core |
-| `yunta-adapters` | `claude-code`, `codex` and `mock` behind the port | core, render |
-| `yunta-engine` | scheduling, the task cycle, replay | core, storage |
-| `yunta` | the commands | core, storage, engine, adapters, render |
+| `yunta-render` | Yunta's own facts and documents, said in Surco | core, surco |
+| `yunta-adapters` | `claude-code`, `codex` and `mock` behind the port | core, render, surco |
+| `yunta-engine` | scheduling, the task cycle, replay | core, storage, surco |
+| `yunta` | the commands | core, storage, engine, adapters, render, surco |
 | `yunta-testkit-core` | test scaffolding for the crates below the engine | core |
-| `yunta-testkit` | the whole-run test harness | core, testkit-core, storage, adapters, engine |
-| `xtask` | smells, the docs checker, schemas | core |
+| `yunta-testkit` | the whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
+| `xtask` | smells, the docs checker, schemas | core, surco |
 
 `yunta-engine`'s `[dependencies]` never name `yunta-adapters` or `yunta-render`; its tests may.
 `cargo xtask docs --check` holds this table to every member's manifest.
@@ -32,8 +33,15 @@ every state from it, and what a person reads is drawn from that data by `yunta-r
 - The engine derives data and never draws; the CLI and the adapters draw.
   [test engine/no_adapter_crate_in_engine::the_engine_library_never_links_the_crate_that_draws]
 - What a person reads is a `Doc` a `Surface` draws; new output grows Surco as a principle, a token or a
-  component in `crates/render`. [smell sgr_outside_ink] [review]
-  Paths: `crates/cli/src/**`, `crates/adapters/src/**`, `crates/render/src/**`
+  component in `crates/surco`, and what Yunta says with it stands in `crates/render`. [smell escape_outside_paint]
+  [smell glyph_literal_outside_glyphs] [smell state_phrase_outside_words] [smell look_inside_a_block] [review]
+  Paths: `crates/cli/src/**`, `crates/adapters/src/**`, `crates/render/src/**`, `crates/surco/src/**`
+- A richer layer adds no fact: every layer of a stream writes the same text, so a person without color reads
+  all of it. [review]
+  Paths: `crates/surco/src/paint.rs`, `crates/surco/src/surface/**`
+- A command a person is told to type is spelled in one module. [smell command_outside_advice]
+- A printed sentence carries no dash: a colon explains, a semicolon comes before the hint it ends with.
+  [smell dash_in_prod_strings]
 - Every adapter (`claude-code`, `codex`, `mock`) offers the same features; a gap is a defect.
   [test adapters/contract]
 - A task session's brief names its task, and its contract (notes, scope, criteria) is read through the run's

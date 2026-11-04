@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::stop::TaskCause;
 use crate::events::node::payloads::{Criterion, CriterionResult};
 use crate::glob::ScopeGlob;
-use crate::hash::CommitSha;
+use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{NodeId, Seq, SessionId, TaskId};
 
 /// Where a task of the run stands: the token the log writes, and the word
@@ -268,7 +268,7 @@ pub struct DeviationResolvedPayload {
 /// red; the exit code it saw and the session's reason are recorded. Only
 /// a session's first declaration is. The task does not close on it, and a
 /// loop left with nothing to run fails with `PlanUnpassable`, the failure
-/// a re-route hands to whatever writes the plan again.
+/// a reroute hands to whatever writes the plan again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CriterionUnpassablePayload {
     pub task_id: TaskId,
@@ -279,4 +279,110 @@ pub struct CriterionUnpassablePayload {
     pub exit_code: i32,
     /// The session's reason, never empty.
     pub why: String,
+}
+
+/// What the tree a plan was registered against held of the plan's shapes,
+/// read in the reading that derives each task's reach, at its commit.
+/// Nobody asks for it and nothing is decided by it: every page that draws
+/// the plan reads it here, so each says what the tree held when the plan
+/// was written, wherever it is drawn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ShapesReadPayload {
+    /// The plan, by the hash of the bytes the run accepted.
+    pub plan: ContentHash,
+    /// The commit the tree was read at: its HEAD when the plan was
+    /// registered, which a `scope_derived` the same registration writes
+    /// names too. A registration that changes no task's reach writes none.
+    pub at: CommitSha,
+    /// Each shape the reading followed, in the plan's order: one whose name
+    /// is one word of code, in a file whose extension says its language.
+    pub shapes: Vec<ShapeRead>,
+}
+
+impl ShapesReadPayload {
+    /// The shape the plan calls `name`, when it was read.
+    pub fn shape(&self, name: &str) -> Option<&ShapeRead> {
+        self.shapes.iter().find(|shape| shape.name == name)
+    }
+}
+
+/// One shape of a plan, as the tree held it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ShapeRead {
+    /// What the plan calls it; no other shape of the plan has its name.
+    pub name: String,
+    /// The task that builds it.
+    pub owner: TaskId,
+    /// Its file, as the repository names it.
+    pub file: String,
+    /// What its file held of it.
+    pub in_tree: InTree,
+}
+
+/// What a shape's file held of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InTree {
+    /// Its file's code did not name it, or the file did not exist: the plan
+    /// makes it. A file with a NUL byte in its first 8000 bytes is not code.
+    New,
+    /// Its file's code names it.
+    There {
+        /// What the file holds of the items the shape declares, read the
+        /// way the shape writes them: a function to its signature where the
+        /// shape writes it with no body, a block of members (an `impl`, a
+        /// `trait`, a class) to the members the shape names, attributes and
+        /// decorators where the shape writes some; in the shape's order.
+        /// Items are read in Rust, Go, JavaScript or TypeScript, and Python.
+        /// `None` where no item of it was read: a file in another language,
+        /// or one that only uses the name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+        /// Who else names it.
+        outside: Outside,
+    },
+}
+
+/// The files beyond a plan whose code names one of its shapes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Outside {
+    /// Each file whose code — not a string or a comment in it — names the
+    /// shape, other than its own and every file a task of the plan changes,
+    /// in path order. None is a fact too.
+    Files { paths: Vec<String> },
+    /// So many files of its language carry the name — this many — that it
+    /// is a word of the language more than a shape of the plan, and none of
+    /// them is read to follow it: only the shape's own file is read, for its
+    /// code and to see that its code names the shape.
+    Common { files: usize },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each state of a shape's file is written by its tag, and read back.
+    #[test]
+    fn what_a_shape_s_file_held_is_written_by_its_tags() {
+        let there = |code: Option<&str>, outside| InTree::There {
+            code: code.map(str::to_string),
+            outside,
+        };
+        let files = Outside::Files { paths: Vec::new() };
+        for (in_tree, json) in [
+            (InTree::New, r#"{"type":"new"}"#),
+            (
+                there(None, files),
+                r#"{"type":"there","outside":{"type":"files","paths":[]}}"#,
+            ),
+            (
+                there(Some("fn a();"), Outside::Common { files: 147 }),
+                r#"{"type":"there","code":"fn a();","outside":{"type":"common","files":147}}"#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&in_tree).unwrap(), json);
+            assert_eq!(serde_json::from_str::<InTree>(json).unwrap(), in_tree);
+        }
+    }
 }

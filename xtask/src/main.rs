@@ -107,7 +107,7 @@ fn schema(mode: Mode) -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "these schema files differ from what the types emit — run `cargo xtask schema` and \
+        "these schema files differ from what the types emit: run `cargo xtask schema` and \
          commit the result:\n{}",
         stale
             .iter()

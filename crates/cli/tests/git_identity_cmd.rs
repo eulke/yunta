@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use yunta_testkit::{checked, git, init_repo, stderr, stdout, write, yunta_in};
+use yunta_testkit::{checked, git, init_repo, stderr, stdout, unwrapped, write, yunta_in};
 
 /// A node whose work is a file: closing it makes the run's first commit.
 const ONE_NODE: &str =
@@ -31,7 +31,7 @@ fn a_run_is_refused_where_git_has_no_identity() {
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
 
     assert!(!run.status.success(), "stdout: {}", stdout(&run));
-    let said = stderr(&run);
+    let said = unwrapped(&stderr(&run));
     assert!(
         said.contains("a run commits every node's work, and git cannot name who commits here")
             && said.contains("git config --global user.email")
@@ -40,7 +40,7 @@ fn a_run_is_refused_where_git_has_no_identity() {
     );
     let listed = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(
-        stdout(&listed).starts_with("no runs"),
+        stdout(&listed).contains("no runs yet"),
         "{}",
         stdout(&listed)
     );
@@ -61,7 +61,8 @@ fn doctor_says_who_git_commits_as_and_when_it_cannot() {
 
     git(&repo, &["config", "user.name", "Ada"]);
     git(&repo, &["config", "user.email", "ada@example.com"]);
-    let with = yunta_in!(&repo, &home, &["doctor"]);
+    // A check that holds has a row of its own only on the whole list.
+    let with = yunta_in!(&repo, &home, &["doctor", "--full"]);
     assert_eq!(
         checked(&stdout(&with), "git").as_deref(),
         Some("commits as Ada <ada@example.com>"),

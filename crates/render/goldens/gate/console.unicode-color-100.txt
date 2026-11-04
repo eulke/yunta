@@ -1,0 +1,97 @@
+␛[1;35m◆␛[0m ␛[1mdecision␛[0m␛[2m ·␛[0m␛[1;35m needs you␛[0m
+
+␛[1mplan␛[0m: 2 tasks in 2 steps, 1 decided for you, 1 risk, 1 left out
+  Greet a person by name, and say goodbye too.
+
+  ␛[33m▲␛[0m 2 problems keep this plan from being proven as it is written
+
+  ␛[2myou asked   ␛[0m greet people by their name
+
+  The program says nothing today. It will greet whoever runs it by name, and say goodbye.
+
+  ┌──────┐   ┌──────────┐
+  │ Name │──▶│ Greeting │
+  └──────┘   └──────────┘
+
+  A goodbye follows the greeting, on its own line.
+
+  ␛[1mdecided for you␛[0m
+
+    ␛[1m1  ␛[0m␛[1mWhat does it say when no name is given?␛[0m
+      ␛[2mchose       ␛[0m It greets `world`.
+      ␛[2minstead of  ␛[0m Refuse to run
+      ␛[2m            ␛[0m Ask for a name
+      ␛[2mbecause     ␛[0m A program run with no arguments should still say something.
+
+  ␛[1myou answered␛[0m
+
+    ␛[1m1  ␛[0m␛[1mWhich word should the greeting use?␛[0m
+      ␛[2myou said    ␛[0m hello
+      ␛[2mthe plan    ␛[0m It says `hello`.
+
+  ␛[1mleft out␛[0m
+    ␛[2m◌␛[0m Greeting in other languages.
+
+  ␛[1mdesign␛[0m
+    ␛[1m`Greeter`␛[0m owns the words; ␛[1m`main`␛[0m reads the name and prints.
+
+  ␛[1msteps␛[0m
+    1  greet     Greet by name
+    2  farewell  Say goodbye
+
+    ┌───────┐   ┌──────────┐
+    │ greet │──▶│ farewell │
+    └───────┘   └──────────┘
+
+  ␛[1mstep 1 of 2␛[0m
+
+    ␛[1mgreet␛[0m: Greet by name
+      ␛[2myou will see␛[0m `hello ana` prints `hello, ana`.
+      ␛[2mchanges     ␛[0m src/greet.rs
+      ␛[2mkeeps       ␛[0m With no name it still greets `world`.
+      ␛[2mtested by   ␛[0m the greeting names the person
+      ␛[2m            ␛[0m ␛[1mcargo test --test greet␛[0m
+
+      ␛[1msrc/greet.rs › Greeter␛[0m
+        the type that holds the name and words the greeting
+        ␛[2m│ ␛[0mpub struct Greeter {
+        ␛[2m│ ␛[0m    pub name: String,
+        ␛[2m│ ␛[0m}
+        ␛[2m│␛[0m
+        ␛[2m│ ␛[0mimpl Greeter {
+        ␛[2m│ ␛[0m    pub fn hello(&self) -> String;
+        ␛[2m│ ␛[0m}
+        ␛[2m7 lines␛[0m
+
+  ␛[1mstep 2 of 2␛[0m
+
+    ␛[1mfarewell␛[0m: Say goodbye
+      ␛[2myou will see␛[0m `hello ana` prints a goodbye after the greeting.
+      ␛[2mchanges     ␛[0m src/greet.rs
+      ␛[2mbuilds on   ␛[0m Greeter (from greet)
+      ␛[2mkeeps       ␛[0m The greeting reads as it did.
+
+      ␛[1msrc/greet.rs › Greeter › bye␛[0m
+        the goodbye, beside the greeting
+
+  ␛[1mproof␛[0m
+    ␛[2mspec tests  ␛[0m 1 in 1 file, 5 lines
+    ␛[2m            ␛[0m ␛[1myunta status 7E5PH4 --node specify␛[0m
+    ␛[2mthe suite   ␛[0m every task keeps it passing; green before this run changed anything
+    ␛[2m            ␛[0m ␛[1mcargo test␛[0m
+    ␛[2mguards      ␛[0m `farewell`: the greeting still reads as it did
+    ␛[2m            ␛[0m ␛[1mcargo test --test greet_alone␛[0m
+    ␛[2m◌␛[0m nothing but the suite checks 1 promise the tasks keep
+
+  ␛[1mbefore you decide␛[0m
+
+    ␛[33m`approve` is not offered, because␛[0m
+      ␛[33m▲␛[0m `greet` plans to change `tests/greet.rs`, a test the spec wrote for `greet`
+        ␛[2mso␛[0m           no session may write it, so the task cannot be done as planned
+        ␛[2mfix␛[0m          leave the test as the spec wrote it, and change the code it tests
+      ␛[33m▲␛[0m `farewell` is judged by `cargo test --test greet`, the spec's test of `greet`
+        ␛[2mso␛[0m           it passes once `greet` is done, whatever this task does
+        ␛[2mfix␛[0m          judge the task by a test of its own
+
+    ␛[2m◌␛[0m 1 of 2 changes shows no code
+    ␛[33m▲␛[0m risk: A name with a newline in it breaks the line it is printed on.

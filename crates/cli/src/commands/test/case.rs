@@ -13,18 +13,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Deserialize;
+use surco::words::Standing;
 use yunta_core::events::PauseReason;
 use yunta_core::{ModeName, NodeId, OptionId, WorkflowName};
 use yunta_engine::RunTerminal;
 
 use super::{copy_dir_all, init_git, sandboxed_checkout};
-use crate::commands::advice;
 use crate::commands::registry::{adapters_and_script, execute, Executing, ScriptedPaths};
-use crate::commands::Adapters;
+use crate::commands::{advice, Adapters};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::load_yaml;
-use crate::render::state::RunWord;
 
 mod problems;
 
@@ -78,11 +77,11 @@ struct Expect {
 /// laid out under it. `Debug` would wrap the reason in quotes and escape
 /// every one it contains — noise added to a message already written for
 /// a reader.
-pub(super) fn terminal_label(word: RunWord, terminal: &RunTerminal) -> String {
+pub(super) fn terminal_label(word: Standing, terminal: &RunTerminal) -> String {
     match terminal {
         RunTerminal::Paused { reason } => format!(
             "{word}\n    {}",
-            yunta_core::text::hanging(&yunta_render::pause::sentence(reason), "    ")
+            surco::text::hanging(&yunta_render::pause::sentence(reason), "    ")
         ),
         RunTerminal::Failed { node, failure } => {
             let said = PauseReason::NodeFailed {
@@ -91,71 +90,71 @@ pub(super) fn terminal_label(word: RunWord, terminal: &RunTerminal) -> String {
             };
             format!(
                 "{word}\n    {}",
-                yunta_core::text::hanging(&yunta_render::pause::sentence(&said), "    ")
+                surco::text::hanging(&yunta_render::pause::sentence(&said), "    ")
             )
         }
         RunTerminal::Finished | RunTerminal::Promoted { .. } => word.to_string(),
     }
 }
 
+/// The word a case's run ends on, in the vocabulary every surface reports
+/// a run in: a case is asserted in the words the run is reported in, so
+/// neither can drift from the other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
-enum FinalState {
-    Finished,
-    /// The run stopped on a person: a decision, a question, a budget.
-    NeedsYou,
-    /// The run is parked until a limit resets, and resumes on its own then.
-    Waiting,
-    /// The run finished holding findings that block it.
-    Reported,
-    /// The run closed as failed — a node failed under
-    /// `defaults.on_failure: abort | continue`.
-    Failed,
-    /// The run closed by promoting to a later mode — reached by a case
-    /// whose `decisions:` answers the gate that offers `promote`.
-    Promoted,
+struct FinalState(Standing);
+
+impl FinalState {
+    /// The words a run a case plays can end on.
+    const ENDS: [Standing; 7] = [
+        Standing::Finished,
+        Standing::NeedsYou,
+        Standing::Waiting,
+        Standing::Stopped,
+        Standing::Reported,
+        Standing::Failed,
+        Standing::Promoted,
+    ];
+
+    fn word(self) -> Standing {
+        self.0
+    }
 }
 
 impl TryFrom<String> for FinalState {
     type Error = String;
 
-    /// The word a case writes, in the vocabulary every surface reports a
-    /// run in. `paused` is a word that vocabulary retired, and the case
-    /// is told the one that replaced it.
+    /// The word a case writes. A word the vocabulary retired is told the
+    /// one that replaced it.
     fn try_from(word: String) -> Result<Self, String> {
-        match word.as_str() {
-            "finished" => Ok(FinalState::Finished),
-            "needs you" => Ok(FinalState::NeedsYou),
-            "waiting" => Ok(FinalState::Waiting),
-            "reported" => Ok(FinalState::Reported),
-            "failed" => Ok(FinalState::Failed),
-            "promoted" => Ok(FinalState::Promoted),
-            "paused" => Err(
-                "`paused` is called `needs you` now: a run stopped on a person needs you"
-                    .to_string(),
-            ),
-            other => Err(format!(
-                "`{other}` is not a final state; one of: finished, needs you, waiting, \
-                 reported, failed, promoted"
+        if let Some(retired) = retired(&word) {
+            return Err(retired);
+        }
+        match Standing::named(&word) {
+            Some(standing) if Self::ENDS.contains(&standing) => Ok(FinalState(standing)),
+            _ => Err(format!(
+                "`{word}` is not a final state; one of: {}",
+                Self::ENDS.map(Standing::word).join(", ")
             )),
         }
     }
 }
 
-impl FinalState {
-    /// The word a case file's `final_state` is written in, which is the
-    /// word every surface calls that stop by: a case is asserted in the
-    /// vocabulary the run is reported in, so neither can drift from the
-    /// other.
-    fn word(self) -> RunWord {
-        match self {
-            FinalState::Finished => RunWord::Finished,
-            FinalState::NeedsYou => RunWord::NeedsYou,
-            FinalState::Waiting => RunWord::Waiting,
-            FinalState::Reported => RunWord::Reported,
-            FinalState::Failed => RunWord::Failed,
-            FinalState::Promoted => RunWord::Promoted,
-        }
+/// What a case is told for a word the vocabulary retired: the word that
+/// replaced it, and what it says.
+pub(super) fn retired(word: &str) -> Option<String> {
+    match word {
+        "paused" => Some(format!(
+            "`paused` is called `{}` now when a person owes an answer, and `{}` when a person \
+             stopped it",
+            Standing::NeedsYou.word(),
+            Standing::Stopped.word()
+        )),
+        "cancelled" => Some(format!(
+            "`cancelled` is called `{}` now: a person stopped it",
+            Standing::Stopped.word()
+        )),
+        _ => None,
     }
 }
 

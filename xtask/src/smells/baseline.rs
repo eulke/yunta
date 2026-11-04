@@ -51,12 +51,8 @@ pub(super) fn rises(allowed: &Counts, counts: &Counts) -> Vec<String> {
         .filter_map(|(name, &count)| {
             let held = allowed.get(name).copied();
             let at_most = held.unwrap_or(0);
-            (count > at_most).then(|| {
-                format!(
-                    "  {name}: at most {at_most}, counts {count} — {}",
-                    fix(name)
-                )
-            })
+            (count > at_most)
+                .then(|| format!("  {name}: at most {at_most}, counts {count}; {}", fix(name)))
         })
         .collect()
 }
@@ -64,7 +60,7 @@ pub(super) fn rises(allowed: &Counts, counts: &Counts) -> Vec<String> {
 /// The refusal of `risen` against the baseline at `path`.
 pub(super) fn refusal(path: &Path, risen: &[String]) -> String {
     format!(
-        "these smell counts rose above `{}` — bring each down as it says; a count only \
+        "these smell counts rose above `{}`; bring each down as it says; a count only \
          falls, and the baseline falls with it:\n{}",
         path.display(),
         risen.join("\n")
@@ -124,18 +120,23 @@ pub(super) fn fix(name: &str) -> &'static str {
         "bench_struct_outside_testkit" => "take the bench from yunta-testkit and the clock from yunta-testkit-core",
         "cli_print_outside_output" => "print through the CLI's output module",
         "cli_word_outside_cli" => "say it in the crate's own terms and let the CLI word the command",
+        "command_outside_advice" => "spell the command in the CLI's advice module",
         "copied_test_helpers" => "call the helper the testkit exports: the repository helpers in yunta-testkit, the clocks in yunta-testkit-core",
         "create_run_outside_testkit" => "create the run through the engine's run module or yunta-testkit",
+        "dash_in_prod_strings" => "say it with a colon, a semicolon or parentheses; the one dash a surface draws is the glyph set's",
         "debug_format_reaching_reader" => "format the value for its reader, not with `{:?}`",
         "doc_reference" => "say the behaviour and its reason instead of naming a document",
         "engine_fs_outside_runtime" => "use the runtime's file calls, or put a `// blocking:` reason above the call",
         "env_mutation_in_tests" => "inject what the test needs instead of writing the process environment",
         "env_read_outside_boundary" => "read the variable at the boundary and pass it in",
+        "escape_outside_paint" => "paint through Surco's paint module",
         "event_builder_outside_testkit" => "build the event with yunta-testkit-core's log builder",
         "execute_run_outside_testkit" => "drive the run through the engine's run module or yunta-testkit",
         "exit_failure_in_cli" => "return the error and let `main` map it to an exit status",
         "git_command_outside_git_rs" => "run git through the engine's git module, or in a test through the testkit's git helper",
+        "glyph_literal_outside_glyphs" => "take the glyph from Surco's glyph set",
         "let_underscore_in_prod" => "handle the result, record the degradation it reports, or put a `// best-effort:` reason above it",
+        "look_inside_a_block" => "keep what is said in the block, and leave widths, escapes and glyphs to the surface",
         "mode_name_in_prod" => "read what the run's mode declares; the workflow names its modes",
         "module_docs_over_60_lines" => "keep the `//!` to how the module works; move a rule to the test that holds it",
         "numeric_const_without_reason" => "put a `///` line above the constant saying why it has its value",
@@ -143,13 +144,12 @@ pub(super) fn fix(name: &str) -> &'static str {
         "prod_fns_over_50_lines" | "prod_fns_over_100_lines" => "split the function where a seam shows",
         "reason_built_by_format" => "record the values as fields and let the surface word them",
         "run_tool_named_outside_vocabulary" => "name the tool through the session vocabulary's rule",
-        "separator_literal_outside_glyphs" => "take the glyph from the glyph set",
         "session_request_literal_outside_plan" => "build the request in the session plan",
-        "sgr_outside_ink" => "paint through the render crate's ink",
         "sleep_outside_mock_latency" => "wait for the condition instead of sleeping",
         "space_runs_in_prod_strings" => "end the line with `\\` so the next line's indentation stays out of the text",
         "spanish_prose_lines" => "write it in English",
         "src_files_over_500_lines" => "split the file along a module, or move its tests to a `tests.rs` beside it",
+        "state_phrase_outside_words" => "take the word from Surco's state words",
         "sync_fs_in_async" => "use the async file call",
         "system_clock_outside_boundary" => "take the time from the injected clock",
         "tense_markers" => "say what the code does, in the present tense; a date or a plan goes in the commit message",

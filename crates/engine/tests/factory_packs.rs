@@ -175,7 +175,7 @@ async fn yunta_fragua_runs_end_to_end_in_quick_mode_with_mock() {
             state.nodes.state(node)
         );
     }
-    // `fix-lint` is only in quick mode's node set as a re-route target —
+    // `fix-lint` is only in quick mode's node set as a reroute target —
     // lint passed on the first try, so it must never have run.
     assert!(
         !state.nodes.has_state("fix-lint"),

@@ -1,0 +1,12 @@
+# fragua (quick) ; stopped ; for 32m10s                                   7E5PH4
+========================== .......................... ..........................
+  interrupted by a person.
+
+  progress     1 of 3 nodes done
+  nodes        + 1 finished: plan
+               . 2 never ran: build, test
+
+next
+  yunta resume 7E5PH4          continues it where it stopped
+  yunta close 7E5PH4           closes it for good
+  yunta status 7E5PH4 --full   the whole story, node by node

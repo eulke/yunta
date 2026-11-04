@@ -47,6 +47,9 @@ pub(super) async fn finish(
     terminal: TerminalState,
 ) -> Result<RunState, RunError> {
     let open = ctx.run_view().await?.state;
+    // What the run changed is counted before it closes: nothing is written
+    // after `run_finished`.
+    super::change_count::record(ctx, &open, None).await?;
     let closed = RunFinishedPayload::closed(terminal, open.metrics());
     ctx.emit(None, EventPayload::Run(RunEvent::Finished(closed)))
         .await?;
@@ -109,7 +112,7 @@ pub(super) async fn pause_for_reset(
     pause(ctx, PauseReason::AwaitingReset { node, at }).await
 }
 
-/// Records a node's re-route to another node, then lets the loop schedule the
+/// Records a node's reroute to another node, then lets the loop schedule the
 /// target next.
 pub(super) async fn reroute(
     ctx: &RunCtx<'_>,
@@ -133,7 +136,7 @@ pub(super) async fn reroute(
     Ok(())
 }
 
-/// A failed node with no re-route of its own, put to a person: a choice
+/// A failed node with no reroute of its own, put to a person: a choice
 /// that runs it again — `retry`, `continue-work`, `grant` — is recorded
 /// and the loop continues, where the scheduler starts the node's next
 /// attempt and that attempt applies what was chosen; `abort`, or nobody
@@ -159,10 +162,10 @@ pub(super) async fn failure_escalation(
     ))
 }
 
-/// A node used up its re-routes to `goto`: the engine assembles the
+/// A node used up its reroutes to `goto`: the engine assembles the
 /// escalation from the log (never the failed node, which has no further say)
 /// and asks a human — or consumes a decision a `resolve_gate` MCP call
-/// pre-seeded onto a parked log. `retry` re-routes once more (the loop
+/// pre-seeded onto a parked log. `retry` reroutes once more (the loop
 /// continues), `promote` closes the run into its next mode, and anything
 /// else pauses. `None` means the loop continues; `Some` ends the run.
 pub(super) async fn gate_exhausted(
@@ -366,7 +369,7 @@ pub(super) async fn execute_batch(
     // A node whose run paused — a child run on its own log, or a departure the
     // person aborted — can't close its node: after the whole batch lands, the
     // run pauses too, with the first such reason. A root cancellation takes
-    // precedence: the loop-top check handles it as "cancelled by user".
+    // precedence: the loop-top check pauses on `PauseReason::Cancelled`.
     let mut paused: Option<PauseReason> = None;
     for result in futures::future::join_all(executions).await {
         if let node_exec::NodeEnd::Paused { reason } = result? {
@@ -404,6 +407,10 @@ pub(super) async fn publish_gate(
             ),
         });
     };
+    // The person judges the change the run made: count it before the gate
+    // goes to the forge.
+    let state = ctx.run_view().await?.state;
+    super::change_count::record(ctx, &state, Some(&node.id)).await?;
     let step =
         gate_exec::publish_gate(ctx, node, assignee, message.as_deref(), external, ctx.forge)
             .await?;
@@ -429,6 +436,10 @@ pub(super) async fn resolve_internal_gate(
     node_id: NodeId,
 ) -> Result<Option<RunReport>, RunError> {
     let node = find_node(&ctx.manifest.workflow, &node_id)?;
+    // The person judges the change the run made: count it before the gate
+    // asks. A gate asked again on the same tree counts nothing new.
+    let state = ctx.run_view().await?.state;
+    super::change_count::record(ctx, &state, Some(&node.id)).await?;
     gate_still_waiting(ctx, super::internal_gate::resolve(ctx, node).await?).await
 }
 

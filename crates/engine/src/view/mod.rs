@@ -19,40 +19,41 @@ mod chronicle;
 mod node;
 mod phase;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use surco::words::Standing;
 
 use yunta_core::events::{FindingSeverity, StoredEvent, TaskStatus, TokenUsage};
 use yunta_core::{ModeName, NodeId, RunId, Workflow, WorkflowName};
 
 use crate::history::PriorEstimation;
 use crate::modes::mode_included_nodes;
-use crate::replay::{derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount};
+use crate::process_registry::{Engine, EngineLiveness};
+use crate::replay::{derive, unknown_kind_counts, RunState, UnknownKindCount};
 use crate::stats::stats_observed_at;
 
 use node::Reading;
 
 pub use chronicle::{chronicle, Happening, Moment};
-pub use node::{NodeFrame, NodeStanding, RunningTask};
+pub use node::{node_word, Declares, GateAsks, NodeFrame, NodeStanding, RunningTask};
+
 pub use phase::{RunPhase, WaitingOn};
 pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 
-/// Work split by where it stands, at one level: the DAG's nodes, or the
-/// run's tasks.
+/// The DAG's nodes split by where each stands: the word its row says.
 ///
-/// **No method divides `done` by `total`.** A percentage lies the moment
-/// a re-route grows the denominator, so leaving the division out of the
+/// **No method divides finished by `total`.** A percentage lies the moment
+/// a reroute grows the denominator, so leaving the division out of the
 /// type beats trusting every surface to remember.
 ///
-/// **Nothing here drops in silence.** A task that fails at integration
-/// returns to `ready` and a re-routed node runs again, so a naive
-/// done-over-total walks backwards. Split into buckets, that same event
-/// reads as a move *between* them — `failed` down one, `running` up one
-/// — which a surface can show and attribute to the event that caused
-/// it. The buckets partition the total:
-/// `done + failed + correcting + running + waiting + to_go == total`.
+/// **Nothing here drops in silence.** A rerouted node runs again, so a
+/// naive finished-over-total walks backwards. Split by standing, that same
+/// event reads as a move *between* places — `rerouted` down one, `running`
+/// up one — which a surface can show and attribute to the event that
+/// caused it. The places partition the total: `by` sums to `total`, and a
+/// node is counted under the word its own row is drawn with.
 ///
 /// `skipped` sits outside that sum, because a node the run's mode leaves
 /// out is not work this run will do; `skipped_by` names the mode that
@@ -61,31 +62,42 @@ pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 /// run is not work this run will do either.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Counter {
-    pub done: usize,
-    pub failed: usize,
-    /// Failed and sent on to be corrected, in a run that has not closed:
-    /// the failure is being worked on. Always zero for tasks.
-    pub correcting: usize,
-    pub running: usize,
-    /// Open while the run is paused: a resume starts it again. Always zero
-    /// for tasks.
-    pub paused: usize,
-    /// Parked on something outside the work itself: a node on a person
-    /// (a published gate, unanswered questions), a task on the
-    /// dependencies it declares.
-    pub waiting: usize,
-    /// Included and not begun.
-    pub to_go: usize,
-    /// Everything this run will do at this level, `skipped` excluded.
+    /// How many nodes this run will do stand in each place, in the order
+    /// of [`Standing::ALL`]; a place no node stands in is left out.
+    pub by: Vec<(Standing, usize)>,
+    /// Everything this run will do, `skipped` and `left_out` excluded.
     pub total: usize,
     /// Nodes the run's mode leaves out, counted so the narrowing shows.
-    /// Always zero for tasks: a mode narrows the graph, never a ledger.
     pub skipped: usize,
     /// The mode that skipped them; `None` when nothing is skipped.
     pub skipped_by: Option<ModeName>,
     /// Optional nodes the run leaves out because the project lacks what
     /// they need, with the nodes only they lead to.
     pub left_out: usize,
+}
+
+impl Counter {
+    /// How many nodes stand where `standing` says.
+    pub fn of(&self, standing: Standing) -> usize {
+        self.by
+            .iter()
+            .find(|(place, _)| *place == standing)
+            .map_or(0, |(_, count)| *count)
+    }
+}
+
+/// The run's tasks split by their ledger's status, the words a task is
+/// called by.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TaskCounter {
+    pub done: usize,
+    pub failed: usize,
+    pub running: usize,
+    /// Stopped with a cause the task cannot pass on its own.
+    pub blocked: usize,
+    /// Registered and not begun.
+    pub to_go: usize,
+    pub total: usize,
 }
 
 /// A run as it stands at one instant: every field a pure function of
@@ -98,6 +110,11 @@ pub struct RunFrame {
     pub workflow: WorkflowName,
     /// The mode frozen in `run_created`.
     pub mode: ModeName,
+    /// Where the run stands in the one vocabulary every surface says it in
+    /// — a listing's row, a page's headline, its JSON, the exit code of the
+    /// invocation that drove it — decided here, once.
+    pub standing: Standing,
+    /// What stands behind that word: the close, the pause, the movement.
     pub phase: RunPhase,
     /// The run's wall-clock: to `now` while it has not finished, to its
     /// last event once it has. `None` for an empty log.
@@ -106,7 +123,7 @@ pub struct RunFrame {
     pub flow: Counter,
     /// The run's tasks — `None` until a `task_registered` arrives, so
     /// a run with no tasks reports no tasks instead of `0/0`.
-    pub tasks: Option<Counter>,
+    pub tasks: Option<TaskCounter>,
     /// Every `node_rerouted` on the log: the count that makes a grown
     /// denominator attributable.
     pub reroutes: usize,
@@ -141,11 +158,13 @@ pub struct RunFrame {
 /// averaged into the parent's counters.
 ///
 /// Derives one run's frame from its log, the workflow its manifest
-/// froze, the history the caller read, and the instant it is looked at.
+/// froze, the history the caller read, what its registry says about the
+/// engine driving it, and the instant it is looked at.
 ///
 /// Pure: same inputs, same frame, always. `now` is the caller's own
 /// clock, injected — nothing in this module reads one — so a frame
-/// rendered at a chosen instant is reproducible in a test.
+/// rendered at a chosen instant is reproducible in a test; `engine` is
+/// read by the caller the same way.
 ///
 /// **What it costs.** The log is folded once, by [`derive()`]; the frame
 /// is then read off that state, so each figure after the fold is a read
@@ -157,9 +176,10 @@ pub fn run_frame(
     workflow: &Workflow,
     events: &[StoredEvent],
     prior: Option<&PriorEstimation>,
+    engine: &Engine,
     now: DateTime<Utc>,
 ) -> RunFrame {
-    run_frame_of(run_id, workflow, &derive(events), prior, now)
+    run_frame_of(run_id, workflow, &derive(events), prior, engine, now)
 }
 
 /// [`run_frame`] read from a state the caller has already derived from the
@@ -170,6 +190,7 @@ pub fn run_frame_of(
     workflow: &Workflow,
     state: &RunState,
     prior: Option<&PriorEstimation>,
+    engine: &Engine,
     now: DateTime<Utc>,
 ) -> RunFrame {
     let stats = stats_observed_at(state, workflow, Some(now));
@@ -181,6 +202,7 @@ pub fn run_frame_of(
             .iter()
             .map(|stat| (&stat.node_id, stat))
             .collect(),
+        people: &stats.people_by_node,
         included: mode_included_nodes(workflow, &mode),
         left_out: state.run.left_out(),
         state,
@@ -189,16 +211,19 @@ pub fn run_frame_of(
             phase,
             RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
         ),
+        engine,
     };
     let nodes: Vec<NodeFrame> = workflow
         .iter_nodes_with_group()
         .map(|(node, group)| reading.node(node, group))
         .collect();
 
+    let blocking_findings = findings_that_block(state);
     RunFrame {
         run_id: run_id.clone(),
         workflow: workflow.name.clone(),
         mode: mode.clone(),
+        standing: run_standing(&phase, &nodes, blocking_findings, engine),
         phase,
         elapsed: stats.wall_clock,
         flow: flow_counter(&nodes, &mode),
@@ -214,62 +239,94 @@ pub fn run_frame_of(
         children: state.children.links().to_vec(),
         degraded: state.degradations.all().to_vec(),
         unknown_kinds: unknown_kind_counts(state),
-        blocking_findings: crate::dedup_findings(&state.unsettled_findings())
-            .iter()
-            .filter(|finding| finding.severity == FindingSeverity::Blocking)
-            .count(),
+        blocking_findings,
+    }
+}
+
+/// How many findings the run has not settled that keep it from being done.
+fn findings_that_block(state: &RunState) -> usize {
+    crate::dedup_findings(&state.unsettled_findings())
+        .iter()
+        .filter(|finding| finding.severity == FindingSeverity::Blocking)
+        .count()
+}
+
+/// The word the run is called by, decided once from its phase, the words
+/// of its nodes, the findings that still block it, and what the registry
+/// of the process driving it says.
+///
+/// A run whose log says it moves while the process its registry names is
+/// gone is `stalled`; one whose process is asking a person at its
+/// terminal needs them. A paused run a person stopped is `stopped`, one
+/// with a node that needs a person needs them, and one held only by a
+/// limit's reset is `waiting`, which a clock ends. Only a dead process is
+/// proof of a stall: no registry at all is also what a run looks like for
+/// the instant it is handed to another process.
+pub fn run_standing(
+    phase: &RunPhase,
+    nodes: &[NodeFrame],
+    blocking_findings: usize,
+    engine: &Engine,
+) -> Standing {
+    match phase {
+        RunPhase::Created | RunPhase::Running if engine.liveness == EngineLiveness::Dead => {
+            Standing::Stalled
+        }
+        RunPhase::Created | RunPhase::Running if engine.prompt.is_some() => Standing::NeedsYou,
+        RunPhase::Created => Standing::Created,
+        RunPhase::Running => Standing::Running,
+        RunPhase::Waiting { on } => match on.reason() {
+            Some(reason) if reason.by_a_person() => Standing::Stopped,
+            _ if nodes.iter().any(|node| node.standing == Standing::NeedsYou) => Standing::NeedsYou,
+            Some(reason) if reason.reset_wait().is_some() => Standing::Waiting,
+            _ => Standing::NeedsYou,
+        },
+        RunPhase::Finished if blocking_findings > 0 => Standing::Reported,
+        RunPhase::Finished => Standing::Finished,
+        RunPhase::Failed { .. } => Standing::Failed,
+        RunPhase::Cancelled => Standing::Stopped,
+        RunPhase::Promoted { .. } => Standing::Promoted,
+        RunPhase::Broken { .. } => Standing::Broken,
     }
 }
 
 /// The flow counter, folded from the very node frames a surface shows
-/// beside it, so the count and the list under it cannot disagree.
+/// beside it, so the count and the list under it cannot disagree: each
+/// node is counted under the word its row is drawn with.
 fn flow_counter(nodes: &[NodeFrame], mode: &ModeName) -> Counter {
     let mut counter = Counter::default();
+    let mut by: BTreeMap<Standing, usize> = BTreeMap::new();
     for node in nodes {
         match &node.state {
-            NodeStanding::Skipped => {
-                counter.skipped += 1;
-                continue;
+            NodeStanding::Skipped => counter.skipped += 1,
+            NodeStanding::LeftOut(_) => counter.left_out += 1,
+            _ => {
+                *by.entry(node.standing).or_default() += 1;
+                counter.total += 1;
             }
-            NodeStanding::LeftOut(_) => {
-                counter.left_out += 1;
-                continue;
-            }
-            NodeStanding::ToGo => counter.to_go += 1,
-            NodeStanding::Paused { .. } => counter.paused += 1,
-            NodeStanding::Reached(NodeState::Finished { .. }) => counter.done += 1,
-            NodeStanding::Reached(NodeState::Failed { .. }) if node.correcting => {
-                counter.correcting += 1
-            }
-            NodeStanding::Reached(NodeState::Failed { .. }) => counter.failed += 1,
-            NodeStanding::Reached(NodeState::Running { .. }) => counter.running += 1,
-            NodeStanding::Reached(NodeState::Waiting { .. }) => counter.waiting += 1,
         }
-        counter.total += 1;
     }
+    counter.by = by.into_iter().collect();
     counter.skipped_by = (counter.skipped > 0).then(|| mode.clone());
     counter
 }
 
 /// The ledger's counter, or `None` until a task is registered: a run
 /// with no ledger reports no ledger, never a fabricated `0/0`.
-///
-/// `blocked` is the tasks' own `waiting`: a task held by the
-/// dependencies it declares is parked, not running.
-fn task_counter(state: &RunState) -> Option<Counter> {
+fn task_counter(state: &RunState) -> Option<TaskCounter> {
     if state.tasks.is_empty() {
         return None;
     }
-    let mut counter = Counter {
+    let mut counter = TaskCounter {
         total: state.tasks.len(),
-        ..Counter::default()
+        ..TaskCounter::default()
     };
     for status in state.tasks.statuses() {
         match status {
             TaskStatus::Done => counter.done += 1,
             TaskStatus::Failed => counter.failed += 1,
             TaskStatus::Running => counter.running += 1,
-            TaskStatus::Blocked => counter.waiting += 1,
+            TaskStatus::Blocked => counter.blocked += 1,
             TaskStatus::Pending | TaskStatus::Ready => counter.to_go += 1,
         }
     }

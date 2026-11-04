@@ -27,7 +27,7 @@ fn scope_fence_and_review_read_as_written() {
             }),
         },
         "scope expansion denied for task `task-d`",
-        "scope_expansion mode is deny (the default) — paths asked for: b.txt; agent's stated \
+        "scope_expansion mode is deny (the default); paths asked for: b.txt; agent's stated \
          reason: need an adjacent fix in b.txt",
     );
     reads_as(
@@ -67,7 +67,7 @@ fn unprovable_and_artifacts_read_as_written() {
             },
         },
         "the spec's test of `T001`, `test -f a.txt`, runs none of the files the spec wrote",
-        "it judges the task by tests the task writes itself — run a file the spec wrote — or \
+        "it judges the task by tests the task writes itself: run a file the spec wrote, or \
          give the task no spec, and say why",
     );
     reads_as(
@@ -77,7 +77,7 @@ fn unprovable_and_artifacts_read_as_written() {
         },
         "the run holds artifacts this binary cannot verify",
         "left unchecked: 2 artifacts of this run, named by `artifact_written` before a run kept \
-         the bytes of its artifacts under `objects/` — no object answers for such an artifact, \
+         the bytes of its artifacts under `objects/`: no object answers for such an artifact, \
          and none ever did; verified: 3 artifacts the log accepted",
     );
 }
@@ -101,7 +101,7 @@ fn the_engine_reports_about_the_process_and_the_cleanup_read_as_they_did() {
         &FindingCause::CleanupSkipped,
         "on_finish.cleanup: worktree skipped",
         "the run's tree is not a linked git worktree, so removing it would delete a primary \
-         checkout — nothing was touched",
+         checkout; nothing was touched",
     );
     reads_as(
         &FindingCause::CleanupFailed {
@@ -173,7 +173,7 @@ fn an_owed_request_without_a_reason_says_a_red_criterion_located_the_writes() {
     };
     assert_eq!(
         detail(&owed),
-        "scope_expansion mode is deny (the default) — paths asked for: b.txt; agent's stated \
+        "scope_expansion mode is deny (the default); paths asked for: b.txt; agent's stated \
          reason: a red criterion of the task locates the refused writes"
     );
     assert_eq!(
@@ -201,7 +201,7 @@ fn a_finding_a_session_wrote_reads_as_the_words_it_wrote() {
         (
             "on_finish.cleanup: worktree skipped".to_string(),
             "the run's tree is not a linked git worktree, so removing it would delete a primary \
-             checkout — nothing was touched"
+             checkout; nothing was touched"
                 .to_string(),
         )
     );

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use yunta_testkit::{handle, run_id_from, stderr, stdout, yunta_in, yunta_on_terminal, Checkout};
 
-/// A node that fails with its re-routes already spent: the run parks on
+/// A node that fails with its reroutes already spent: the run parks on
 /// a decision whose menu its log rebuilds.
 const EXHAUSTED: &str = r#"
 name: hopeless
@@ -50,11 +50,14 @@ fn typed(repo: &Path, home: &Path, command: &str) -> std::process::Output {
     yunta_in!(repo, home, &words)
 }
 
-/// The first line of `text` that, trimmed, opens with `command`.
+/// The command a line of `text` opens with, as a person copies it: the
+/// first line that, trimmed and past a decision's edge, opens with
+/// `command`, up to the gloss two spaces set beside it.
 fn line_starting<'a>(text: &'a str, command: &str) -> &'a str {
     text.lines()
-        .map(str::trim)
+        .map(|line| line.trim().trim_start_matches(['|', '▎']).trim_start())
         .find(|line| line.starts_with(command))
+        .and_then(|line| line.split("  ").next())
         .unwrap_or_else(|| panic!("no `{command}` line in:\n{text}"))
 }
 
@@ -66,27 +69,27 @@ fn a_person_learns_a_run_needs_them_from_status_and_the_list() {
     assert_eq!(run.status.code(), Some(3), "{}", stderr(&run));
     let run_id = run_id_from(&run);
 
-    // The page says it in its first two lines: the word, and what holds
-    // the run.
+    // The page says it as it opens: the word in its headline, and what
+    // holds the run under its furrow.
     let status = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
-    let mut lines = status.lines();
+    let lines: Vec<&str> = status.lines().collect();
+    assert!(lines[0].contains("· needs you ·"), "{status}");
     assert!(
-        lines.next().is_some_and(|line| line.ends_with("needs you")),
-        "{status}"
-    );
-    assert!(
-        lines
-            .next()
-            .is_some_and(|line| line.contains("re-routes to `fix-lint` are exhausted")),
+        lines[2].contains("reroutes to `fix-lint` are exhausted"),
         "{status}"
     );
 
     // The list opens with the runs that need someone, this one among
     // them, saying why.
     let list = stdout(&yunta_in!(&repo, &home, &["list", "--runs"]));
-    assert!(list.starts_with("needs you (1)"), "{list}");
     assert!(
-        list.contains(handle(&run_id)) && list.contains("re-routes to `fix-lint` are exhausted"),
+        list.lines()
+            .next()
+            .is_some_and(|line| line.contains("1 needs you")),
+        "{list}"
+    );
+    assert!(
+        list.contains(handle(&run_id)) && list.contains("node `lint` failed"),
         "{list}"
     );
 }
@@ -191,7 +194,7 @@ fn a_person_learns_a_run_asking_at_its_terminal_needs_them() {
         .committed();
     let (repo, home) = (&checkout.repo, &checkout.home);
     let mut terminal = yunta_on_terminal!(repo, home, &["run", "wf.yaml", "--quiet"]);
-    terminal.wait_for("2  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     let run_id = drawn_run_id(&terminal.drawn());
 
     let status = yunta_in!(repo, home, &["status", &run_id]);
@@ -199,14 +202,12 @@ fn a_person_learns_a_run_asking_at_its_terminal_needs_them() {
     let page = stdout(&status);
     let lines: Vec<&str> = page.lines().collect();
     assert!(
-        lines[0].ends_with("needs you")
-            && lines[1].contains("node `approve` is asking at its terminal (pid"),
+        lines[0].contains("· needs you ·")
+            && lines[2].contains("node `approve` is asking at its terminal (pid"),
         "the page says the run needs a person, and where to answer:\n{page}"
     );
     assert!(
-        page.lines().any(|line| line.contains("waiting")
-            && line.contains("approve")
-            && line.ends_with("asking at its terminal")),
+        page.contains("1 needs you: approve"),
         "the node asking is the one waiting on a person:\n{page}"
     );
     assert!(
@@ -218,11 +219,6 @@ fn a_person_learns_a_run_asking_at_its_terminal_needs_them() {
 
     // `abort`, the second option, with nothing to add.
     terminal.keys("\x1b[B\r");
-    terminal.wait_for(
-        "enter records it",
-        "aborting asked for words it does not need",
-    );
-    terminal.keys("\r");
     terminal.ended();
 
     let after = stdout(&yunta_in!(repo, home, &["status", &run_id]));
@@ -245,8 +241,8 @@ fn the_documents_say_it_needs_you(repo: &Path, home: &Path, run_id: &str) {
     let handle = &run_id[run_id.len() - 6..];
     let filed = inbox
         .lines()
-        .skip_while(|line| !line.starts_with("needs you"))
+        .skip_while(|line| *line != "asking now")
         .take_while(|line| !line.is_empty())
         .any(|line| line.contains(handle));
-    assert!(filed, "the inbox files the run under needs you:\n{inbox}");
+    assert!(filed, "the inbox files the run under asking now:\n{inbox}");
 }

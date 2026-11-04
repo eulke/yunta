@@ -64,21 +64,21 @@ fn tree(repo: &Repo) -> Result<Vec<String>, String> {
     for path in &present {
         if !AGENT_DOCS.contains(path) {
             problems.push(format!(
-                "{path}: is not one of the five agent docs — fold it into the one whose subject it is, or move it out of `.agents/`"
+                "{path}: is not one of the five agent docs; fold it into the one whose subject it is, or move it out of `.agents/`"
             ));
         }
     }
     for (mode, path) in &indexed {
         if AGENT_DOCS.contains(&path.as_str()) && mode != "100644" {
             problems.push(format!(
-                "{path}: is mode {mode} — an agent doc is a regular file"
+                "{path}: is mode {mode}; an agent doc is a regular file"
             ));
         }
     }
     for doc in AGENT_DOCS {
         if !present.contains(doc) {
             problems.push(format!(
-                "{doc}: is missing — the agent docs are these five files"
+                "{doc}: is missing; the agent docs are these five files"
             ));
         }
     }
@@ -99,7 +99,7 @@ fn budgets(docs: &Docs) -> Vec<String> {
         .filter_map(|(path, most)| {
             let size = docs.text(path)?.len();
             (size > *most).then(|| {
-                format!("{path}: {size} bytes, past its {most} — cut what the code, a test or a commit already says")
+                format!("{path}: {size} bytes, past its {most}; cut what the code, a test or a commit already says")
             })
         })
         .collect();
@@ -107,7 +107,7 @@ fn budgets(docs: &Docs) -> Vec<String> {
         let count = agents::entries(traps).len();
         if count > MOST_TRAPS {
             problems.push(format!(
-                ".agents/traps.md: {count} traps, past {MOST_TRAPS} — give one a check, or delete one no change meets any more"
+                ".agents/traps.md: {count} traps, past {MOST_TRAPS}; give one a check, or delete one no change meets any more"
             ));
         }
     }
@@ -131,13 +131,13 @@ fn shapes(docs: &Docs) -> Vec<String> {
                 .filter(|field| !entry.fields.contains_key(**field))
             {
                 problems.push(format!(
-                    "{path}:{}: `{}` has no `{field}:` line — every entry here carries one",
+                    "{path}:{}: `{}` has no `{field}:` line; every entry here carries one",
                     entry.line, entry.title
                 ));
             }
             if entry.fields.contains_key("Paths") && entry.paths().is_empty() {
                 problems.push(format!(
-                    "{path}:{}: `{}` has a `Paths:` line that names no path — write each as `<path>`",
+                    "{path}:{}: `{}` has a `Paths:` line that names no path; write each as `<path>`",
                     entry.line, entry.title
                 ));
             }
@@ -173,7 +173,7 @@ fn pointers(repo: &Repo, docs: &Docs) -> Result<Vec<String>, String> {
             };
             if !found {
                 problems.push(format!(
-                    "{path}:{line}: `{span}` is in no tracked path — point at where it lives now, or drop it"
+                    "{path}:{line}: `{span}` is in no tracked path; point at where it lives now, or drop it"
                 ));
             }
         }
@@ -216,18 +216,18 @@ fn selects_nothing(repo: &Repo, span: &str) -> Option<String> {
         return match repo.selected(span) {
             Err(why) => Some(why),
             Ok(found) => found.is_empty().then(|| {
-                format!("`{span}` selects no tracked file — point at where that code lives now")
+                format!("`{span}` selects no tracked file; point at where that code lives now")
             }),
         };
     }
     match (repo.tracks(span), repo.holds(span)) {
         (true, _) => None,
         (false, true) => Some(format!(
-            "`{span}` names a directory, which selects none of its files — write `{}/**`",
+            "`{span}` names a directory, which selects none of its files; write `{}/**`",
             span.trim_end_matches('/')
         )),
         (false, false) => Some(format!(
-            "`{span}` is in no tracked path — point at where it lives now, or drop it"
+            "`{span}` is in no tracked path; point at where it lives now, or drop it"
         )),
     }
 }
@@ -250,12 +250,12 @@ fn rule_tags(repo: &Repo, docs: &Docs) -> Result<Vec<String>, String> {
             let at = format!("{path}:{}", rule.line);
             if rule.tags.is_empty() {
                 problems.push(format!(
-                    "{at}: a rule with no tag — name what holds it: `[test <crate>/<target>]`, `[smell <counter>]` or `[review]`"
+                    "{at}: a rule with no tag; name what holds it: `[test <crate>/<target>]`, `[smell <counter>]` or `[review]`"
                 ));
             }
             if rule.paths_said && rule.paths.is_empty() {
                 problems.push(format!(
-                    "{at}: its `Paths:` names no path — write each as `<path>`"
+                    "{at}: its `Paths:` names no path; write each as `<path>`"
                 ));
             }
             for tag in &rule.tags {
@@ -280,10 +280,10 @@ fn unresolved(
         Tag::Smell(name) => (!counters.contains(name))
             .then(|| format!("`[smell {name}]` names no counter the ratchet measures")),
         Tag::Review => (!has_paths).then(|| {
-            "a rule only a review holds has no `Paths:` line — name where it bites, so `--about` prints it".to_string()
+            "a rule only a review holds has no `Paths:` line; name where it bites, so `--about` prints it".to_string()
         }),
         Tag::Malformed(written) => Some(format!(
-            "`[{written}]` names no crate and target — write `[test <crate>/<target>]` or `[test <crate>/<target>::<test>]`"
+            "`[{written}]` names no crate and target; write `[test <crate>/<target>]` or `[test <crate>/<target>::<test>]`"
         )),
         Tag::Test { krate, target, item } => {
             let files = test_target(repo, krate, target);
@@ -378,7 +378,7 @@ fn map_terms(repo: &Repo, docs: &Docs) -> Vec<String> {
         for term in terms.split(", ").map(str::trim) {
             if !names(&told, term) {
                 problems.push(format!(
-                    "{MAP}:{line}: no module doc the row opens names `{term}` — say it in the `//!` of the file it sends a session to"
+                    "{MAP}:{line}: no module doc the row opens names `{term}`; say it in the `//!` of the file it sends a session to"
                 ));
             }
         }
@@ -424,7 +424,7 @@ fn crate_table(repo: &Repo, docs: &Docs) -> Result<Vec<String>, String> {
             .unwrap_or_default();
         if &said != depends {
             problems.push(format!(
-                "{at}: `{name}` depends on {} — write that in its row",
+                "{at}: `{name}` depends on {}; write that in its row",
                 listed(depends)
             ));
         }
@@ -522,7 +522,7 @@ fn crate_maps(repo: &Repo) -> Result<Vec<String>, String> {
         for module in declared_modules(&text) {
             if !map.contains(&format!("`{module}`")) {
                 problems.push(format!(
-                    "{root}: the crate's map names no `{module}` — say in its `//!` what the module holds"
+                    "{root}: the crate's map names no `{module}`; say in its `//!` what the module holds"
                 ));
             }
         }
@@ -662,7 +662,7 @@ fn separation(repo: &Repo) -> Result<Vec<String>, String> {
         for (at, line) in repo.read(doc)?.lines().enumerate() {
             if crate::smells::names_an_agent_doc(line) {
                 problems.push(format!(
-                    "{doc}:{}: a user doc names an agent doc — say it for the person, or leave it to `.agents/`",
+                    "{doc}:{}: a user doc names an agent doc; say it for the person, or leave it to `.agents/`",
                     at + 1
                 ));
             }
@@ -679,7 +679,7 @@ fn no_design_records(repo: &Repo) -> Vec<String> {
         .filter(|path| path.starts_with("docs/design/"))
         .map(|path| {
             format!(
-                "{path}: design records live nowhere in the tree — put the rule where `AGENTS.md` says knowledge goes"
+                "{path}: design records live nowhere in the tree; put the rule where `AGENTS.md` says knowledge goes"
             )
         })
         .collect()
@@ -691,7 +691,7 @@ fn instructions(repo: &Repo) -> Vec<String> {
     let mut problems = Vec::new();
     if repo.read_if_there("CLAUDE.md").as_deref() != Some("@AGENTS.md\n") {
         problems.push(
-            "CLAUDE.md: is not the one line `@AGENTS.md` — Claude Code loads the map through it, and anything else beside it is a second map"
+            "CLAUDE.md: is not the one line `@AGENTS.md`; Claude Code loads the map through it, and anything else beside it is a second map"
                 .to_string(),
         );
     }
@@ -700,7 +700,7 @@ fn instructions(repo: &Repo) -> Vec<String> {
         .is_some_and(|text| text.lines().any(|line| line.trim() == "/.yunta/knowledge/"));
     if !ignores_knowledge {
         problems.push(
-            ".gitignore: holds no `/.yunta/knowledge/` — what a run distils is the run's, never a doc of the tree".to_string(),
+            ".gitignore: holds no `/.yunta/knowledge/`; what a run distils is the run's, never a doc of the tree".to_string(),
         );
     }
     problems

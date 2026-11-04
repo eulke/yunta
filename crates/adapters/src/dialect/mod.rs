@@ -19,6 +19,7 @@ use yunta_core::{
     ScopeGlob, SessionId, ToolNaming, Unbuildable,
 };
 
+use crate::action::Checkout;
 use crate::failure::classify;
 use crate::mock::{MockOutcome, MockStep};
 use crate::mount::MountPlan;
@@ -122,8 +123,14 @@ impl DialectName {
     /// The reader of this CLI's stream, for a session launched with `plan`.
     pub(crate) fn reader(self, plan: &Plan) -> Box<dyn LineParser> {
         match self {
-            Self::ClaudeCode => Box::new(claude_code::ClaudeParser::new(plan.coverage.clone())),
-            Self::Codex => Box::new(codex::CodexParser::new(plan.coverage.clone())),
+            Self::ClaudeCode => Box::new(claude_code::ClaudeParser::new(
+                plan.coverage.clone(),
+                plan.checkout.clone(),
+            )),
+            Self::Codex => Box::new(codex::CodexParser::new(
+                plan.coverage.clone(),
+                plan.checkout.clone(),
+            )),
         }
     }
 
@@ -164,6 +171,8 @@ pub(crate) struct Plan {
     pub scratch: Vec<(PathBuf, Vec<u8>)>,
     pub mounts: MountPlan,
     pub coverage: Coverage,
+    /// The tree the session works in, which the reader of its stream reads paths against.
+    pub checkout: Checkout,
 }
 
 impl Plan {

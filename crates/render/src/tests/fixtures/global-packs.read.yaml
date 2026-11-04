@@ -1,0 +1,96 @@
+# What the tree held of the shapes of global-packs.tasks.yaml, whose bytes
+# hash to `plan`, read at the commit `at`.
+plan: c28be5ebf2c0cc3773d0f1af569953e2c6be6171b25fa706c3431b28e8f941f5
+at: 71c3fce5c66f7b0363588026239a30fcb7c540c8
+shapes:
+  - name: PackInstallScope
+    owner: global-pack-storage
+    file: crates/cli/src/pack.rs
+    in_tree:
+      type: new
+  - name: installed_packs
+    owner: global-pack-storage
+    file: crates/cli/src/pack.rs
+    in_tree:
+      type: new
+  - name: resolve_workflow
+    owner: global-pack-catalog
+    file: crates/engine/src/catalog.rs
+    in_tree:
+      type: there
+      code: |-
+        pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError>;
+      outside:
+        type: files
+        paths:
+          - crates/cli/src/commands/mod.rs
+          - crates/engine/src/check/refs.rs
+          - crates/engine/src/frozen/read.rs
+          - crates/engine/src/lib.rs
+          - crates/engine/tests/catalog.rs
+  - name: PackAction
+    owner: global-pack-cli
+    file: crates/cli/src/cli/mod.rs
+    in_tree:
+      type: there
+      code: |-
+        #[derive(Subcommand)]
+        enum PackAction {
+            /// Clones, vendors to `.yunta/packs/<publisher>/<name>/`, and locks a
+            /// pack. `<source>` is a git URL or `host/publisher/name` shorthand,
+            /// optionally suffixed `@<ref>` (tag, branch or commit-ish).
+            Add {
+                source: String,
+                /// Confirms installing a pack that ships executors (executable
+                /// code, not just declarative YAML), required whenever the
+                /// pack's `declares.executors` is non-empty; review the audit
+                /// this command prints first.
+                #[arg(long)]
+                yes: bool,
+                /// Runs the pack's own test cases (`.yunta/tests/`, against the
+                /// mock adapter) once it is installed. Without it nothing of the
+                /// pack executes during `add`: the audit is read, not run.
+                #[arg(long)]
+                run_tests: bool,
+            },
+            /// Re-clones an installed pack at a new ref and re-vendors it.
+            Update {
+                /// `publisher/name`.
+                pack: PackRef,
+                r#ref: String,
+                /// Confirms updating to a ref that declares executors, the same
+                /// gate as `add`: a new ref is where new executable code first
+                /// appears. `permissions.packs.executors: deny` refuses
+                /// regardless; `allow` skips the confirmation.
+                #[arg(long)]
+                yes: bool,
+            },
+            /// Scaffolds a new pack at `./<name>`: a manifest, one verified
+            /// workflow, a self-test config and case, and a README. Checks and
+            /// tests it on creation, so the scaffold passes from the first command.
+            New {
+                /// `publisher/name`.
+                pack: PackRef,
+            },
+            /// Removes a pack's vendored directory and its lock entry.
+            Remove {
+                /// `publisher/name`.
+                pack: PackRef,
+            },
+            /// Lists every locked pack, verifying its vendored content against
+            /// the lock.
+            List,
+            /// Full static inventory of an installed pack: every
+            /// command, context source, per-node permission, required agent,
+            /// mcp server, executor, and each workflow's full prompt text,
+            /// plus whether the pack ships tests and whether they pass.
+            /// `add` runs this automatically before vendoring; this is the
+            /// on-demand form.
+            Audit {
+                /// `publisher/name`.
+                pack: PackRef,
+            },
+        }
+      outside:
+        type: files
+        paths: []

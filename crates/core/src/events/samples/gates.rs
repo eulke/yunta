@@ -9,6 +9,7 @@ pub(crate) fn gate_waiting() -> Box<GateWaitingPayload> {
             Claim::Written("Ready to open the PR?".to_string()),
             PublishedGate {
                 url: "https://github.com/example/repo/pull/1".to_string(),
+                folder: Some(".yunta/gates/run-1/approve".to_string()),
             },
             "https://github.com/example/repo/pull/1",
         )

@@ -11,8 +11,8 @@
 use std::path::Path;
 
 use yunta_testkit::{
-    git, handle, run_id_from, stderr, stdout, write, yunta_at, yunta_in, yunta_on_terminal,
-    Checkout, Terminal,
+    git, handle, run_id_from, stderr, stdout, unwrapped, write, yunta_at, yunta_in,
+    yunta_on_terminal, Checkout, Terminal,
 };
 
 /// A repo with `wf.yaml` written and committed, and the state root to run
@@ -69,7 +69,7 @@ fn only_run(home: &Path) -> String {
     handle(&run.file_name().to_string_lossy()).to_string()
 }
 
-/// A node whose re-routes are exhausted the moment it fails: the run
+/// A node whose reroutes are exhausted the moment it fails: the run
 /// parks on a decision whose menu is rebuildable from the log alone.
 const EXHAUSTED: &str = r#"
 name: hopeless
@@ -103,10 +103,11 @@ fn quiet_prints_one_line_and_lets_the_exit_code_carry_the_verdict() {
         run_id,
         "the run's id and nothing else, as its help says: {text:?}"
     );
-    assert_eq!(
-        stderr(&run),
-        "",
-        "quiet has no progress to announce standing down"
+    let said = stderr(&run);
+    assert_eq!(said.lines().count(), 1, "one line of verdict: {said:?}");
+    assert!(
+        said.contains("finished") && said.contains(handle(&run_id)),
+        "what it came to, and which run: {said:?}"
     );
 }
 
@@ -148,9 +149,10 @@ fn resume_is_quiet_on_the_same_terms_run_is() {
         stdout(&resumed)
     );
     assert_eq!(
-        stderr(&resumed),
-        "",
-        "and no progress announcing that it stood down"
+        stderr(&resumed).lines().count(),
+        1,
+        "and one line of verdict, no progress: {:?}",
+        stderr(&resumed)
     );
 }
 
@@ -175,7 +177,7 @@ fn without_a_terminal_line_one_names_the_downgrade_and_nothing_redraws() {
     assert!(
         progress
             .lines()
-            .any(|line| line.contains("touch — running") && line.starts_with('[')),
+            .any(|line| line.contains("touch running") && line.starts_with('[')),
         "one line per moment, in the words a watched terminal uses, each \
          carrying the run's elapsed time: {progress}"
     );
@@ -204,7 +206,7 @@ fn a_run_read_back_from_a_pipe_says_what_a_watched_terminal_kept() {
     // wrote too — the elapsed column and the mark are layout, and the
     // words under them are the same words.
     for node in ["touch", "verify"] {
-        let kept = format!("{node} — finished");
+        let kept = format!("{node} finished");
         assert!(
             drawn.contains(&kept),
             "the terminal kept `{kept}`:\n{drawn}"
@@ -260,9 +262,11 @@ fn a_finished_run_closes_without_empty_rows() {
     let run_id = run_id_from(&run);
     let text = stdout(&run);
 
+    let handle = handle(&run_id);
     assert!(
-        text.contains(&format!("run {run_id}: ")) && text.contains("finished"),
-        "the outcome comes first, as a word: {text}"
+        text.lines()
+            .any(|line| line.contains("· finished ·") && line.trim_end().ends_with(handle)),
+        "the outcome heads the block, as a word: {text}"
     );
     for label in ["progress", "slowest", "branch"] {
         assert!(text.contains(label), "no `{label}` row in: {text}");
@@ -273,17 +277,17 @@ fn a_finished_run_closes_without_empty_rows() {
         assert!(!text.contains(label), "an empty `{label}` row in: {text}");
     }
     assert!(
-        text.contains(&format!("yunta receipt {}", handle(&run_id))),
+        text.contains(&format!("yunta receipt {handle}")),
         "a finished run's next command certifies it: {text}"
     );
     assert!(
-        text.contains("nodes 2/2"),
+        text.contains("2 of 2 nodes done"),
         "counters, never a percentage: {text}"
     );
 }
 
 #[test]
-fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
+fn the_closing_block_ends_with_the_decision_a_parked_run_waits_on() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), EXHAUSTED);
 
@@ -298,7 +302,7 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
         "what it waits on: {text}"
     );
     assert!(
-        text.contains("Pauses here; nothing further executes")
+        text.contains("nothing runs; this decision stays open")
             && text.contains("Uses one extra correction attempt"),
         "every option carries the tradeoff that makes it a choice: {text}"
     );
@@ -309,15 +313,15 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
         );
     }
     assert!(
-        text.contains("close this terminal whenever you like"),
+        unwrapped(&text).contains("close this terminal whenever you like"),
         "the run holds its own state, and says so: {text}"
     );
 
-    // The decision is above the counters: the most actionable thing is
-    // the most prominent thing.
+    // The decision is the last thing the block says: the last lines a
+    // terminal prints are the ones in front of the reader when it stops.
     let decision = text.find("decision on node").expect("the decision block");
     let counters = text.find("progress ").expect("the counters row");
-    assert!(decision < counters, "{text}");
+    assert!(counters < decision, "{text}");
 }
 
 /// A run parked on a decision exits 3 from every way of running it: the
@@ -370,7 +374,7 @@ fn status_and_the_closing_block_print_one_counter_for_one_run() {
         .map(str::trim)
         .expect("the counters row")
         .to_string();
-    assert!(counters.starts_with("nodes 0/2 · 1 failed"), "{closing}");
+    assert_eq!(counters, "0 of 2 nodes done", "{closing}");
 
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let page = stdout(&status);
@@ -555,7 +559,10 @@ fn a_diagnostic_raised_while_the_region_is_drawn_goes_out_above_it() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), HOLDING);
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    terminal.wait_for("nodes ", "the run never pinned its region to the terminal");
+    terminal.wait_for(
+        " done · ",
+        "the run never pinned its region to the terminal",
+    );
 
     terminal.interrupt();
     terminal.wait_for(
@@ -568,7 +575,7 @@ fn a_diagnostic_raised_while_the_region_is_drawn_goes_out_above_it() {
     // copy it left there — so the confirmation a person just asked for
     // is on the terminal for under a second.
     assert!(
-        terminal.cleared_before("nodes ", "interrupt received"),
+        terminal.cleared_before(" done · ", "interrupt received"),
         "the note landed inside the rows the region was redrawing:\n{}",
         terminal.drawn()
     );
@@ -660,9 +667,9 @@ fn the_budget_warning_survives_quiet_and_the_distribution_does_not() {
 #[test]
 fn a_parked_run_is_called_the_same_thing_on_every_surface() {
     // One stop, five surfaces, one word. The vocabulary lives in
-    // `render::state::RunWord`, and this is what holds every surface to
-    // it: a reader who met `paused` on the block that closed the run
-    // meets `paused` again on the status page, in both documents a
+    // `surco::words::Standing`, and this is what holds every surface to
+    // it: a reader who met `needs you` on the block that closed the run
+    // meets `needs you` again on the status page, in both documents a
     // program reads, and in the listing's own grouping.
     const WORD: &str = "needs you";
 
@@ -725,7 +732,10 @@ fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
     let (repo, home) = project(root.path(), EXHAUSTED);
 
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    terminal.wait_for("esc parks the run", "the menu was never put to anyone");
+    terminal.wait_on_screen(
+        "esc leaves it for later",
+        "the card was never put to anyone",
+    );
     terminal.keys("\x1b");
 
     let drawn = terminal.ended();
@@ -737,8 +747,12 @@ fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
         .lines()
         .find_map(|line| line.strip_prefix("run ")?.split(':').next())
         .expect("the run named itself as it started");
+    let handle = yunta_testkit::handle(id);
     assert!(
-        drawn.contains(&format!("run {}: ◆ needs you", yunta_testkit::handle(id))),
+        drawn
+            .lines()
+            .any(|line| line.contains("◆ hopeless (default) · needs you ·")
+                && line.trim_end().ends_with(handle)),
         "{drawn}"
     );
 }
@@ -798,7 +812,7 @@ fn a_run_that_finished_holding_blocking_findings_is_not_a_success() {
     );
     let text = stdout(&run);
     assert!(
-        text.contains("reported\n  finished holding 1 blocking finding"),
+        text.contains("· reported ·") && text.contains("\n  finished holding 1 blocking finding."),
         "the block says what is holding it: {text}\nstderr: {}",
         stderr(&run)
     );
@@ -833,10 +847,10 @@ nodes:
 /// How a node's row is recognised: by the node it is about, and not by
 /// the mark in front of it — that mark says how the node is doing and
 /// changes while it works, while the indentation these cases are about
-/// sits before it either way. The separator is part of the needle
+/// sits before it either way. The word after the id is part of the needle
 /// because `sweep` is a prefix of `sweep-a`.
 fn headline(id: &str) -> String {
-    format!("running {id} ·")
+    format!("{id} running for")
 }
 
 /// The rows of the last painting carrying a row for every one of `ids`,
@@ -915,9 +929,9 @@ fn a_failed_bash_node_leaves_its_tail_above_the_region() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), COMPILER);
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    // A node with nowhere to re-route to asks what to do; Escape parks
+    // A node with nowhere to reroute to asks what to do; Escape parks
     // the run.
-    terminal.wait_for("> 1  retry", "the failure never asked what to do next");
+    terminal.wait_on_screen("▸ retry", "the failure never asked what to do next");
     terminal.keys("\x1b");
     let drawn = terminal.ended();
     assert_eq!(terminal.exit_code(), Some(3), "{drawn}");
@@ -927,7 +941,7 @@ fn a_failed_bash_node_leaves_its_tail_above_the_region() {
     let lines: Vec<&str> = drawn.lines().collect();
     let failed = lines
         .iter()
-        .position(|line| line.contains("build — failed"))
+        .position(|line| line.contains("build failed"))
         .unwrap_or_else(|| panic!("the failure was never kept above the region:\n{drawn}"));
     let after = &lines[failed..];
     let quoted = |text: &str| after.iter().position(|line| line.contains(text));
@@ -951,7 +965,7 @@ fn a_failed_bash_node_is_quoted_in_the_lines_a_pipe_gets() {
     assert_eq!(run.status.code(), Some(3), "{}", stderr(&run));
     let progress = stderr(&run);
     let failed = progress
-        .find("build — failed")
+        .find("build failed")
         .unwrap_or_else(|| panic!("{progress}"));
     assert!(
         progress[failed..].contains("error[E0425]: cannot find value `x` in this scope"),

@@ -69,7 +69,7 @@ pub enum CheckError {
     BothRunnerAndRunners { node: NodeId },
 
     /// Once `review` is many nodes there is no unambiguous
-    /// "return control to review" — a re-route, gate `on:` or context
+    /// "return control to review" — a reroute, gate `on:` or context
     /// artifact reference must name a specific node.
     #[error("fan_out_target")]
     FanOutTarget { node: NodeId, target: NodeId },
@@ -188,6 +188,11 @@ pub enum CheckError {
         detail: String,
     },
 
+    /// More than one input says it is the person's request: a page that
+    /// quotes what they asked for quotes one.
+    #[error("more_than_one_request")]
+    MoreThanOneRequest { names: Vec<InputName> },
+
     /// `check` verifies that every `{{{{inputs.x}}}}` refers to a
     /// declared input — scanned wherever a template can appear inline
     /// in the workflow (prompt text, `bash`/hook commands, `context:`
@@ -222,6 +227,36 @@ pub enum CheckError {
     /// (neither concept is defined for a gate).
     #[error("gate_inside_parallel")]
     GateInsideParallel { node: NodeId, group: NodeId },
+
+    /// A forge opens one pull request per branch and base, and a run finds it by its own
+    /// marker: two gates of a run on one branch would share it, and one approval would
+    /// resolve them both.
+    #[error("external_gates_share_branch")]
+    ExternalGatesShareBranch {
+        first: NodeId,
+        second: NodeId,
+        /// The branch as the gates come to it, with what a run fills in still named.
+        branch: String,
+    },
+
+    /// A gate publishes each file into one folder, and two of them come to one name: the
+    /// second overwrites the first on the branch.
+    #[error("gate_files_collide")]
+    GateFilesCollide {
+        node: NodeId,
+        name: String,
+        first: String,
+        second: String,
+    },
+
+    /// A child of a `parallel` group starts with its group and fails with it, so what it
+    /// declares about either is read by nothing.
+    #[error("child_declares_what_nothing_reads")]
+    ChildDeclaresWhatNothingReads {
+        node: NodeId,
+        group: NodeId,
+        field: &'static str,
+    },
 
     /// A group inside a group. Every surface draws a group's children
     /// one step under it, and the scheduler pairs each node with the
@@ -384,4 +419,17 @@ pub enum CheckError {
     /// A pack's `declares.network: false` closes the network for each node.
     #[error("pack_network_ceiling_exceeded")]
     PackNetworkCeilingExceeded { node: NodeId, pack: String },
+}
+
+impl CheckError {
+    /// The name the refused one is most likely a slip from, when the
+    /// refusal has one.
+    pub fn near(&self) -> Option<&str> {
+        match self {
+            CheckError::UnknownRunner { near, .. }
+            | CheckError::Unset { near, .. }
+            | CheckError::CommandUnsetIn { near, .. } => near.as_deref(),
+            _ => None,
+        }
+    }
 }

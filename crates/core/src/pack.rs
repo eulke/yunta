@@ -187,7 +187,7 @@ impl crate::persisted::Persisted for PackLock {
 /// is vendored under `.yunta/packs/<publisher>/<name>/`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PackManifestError {
-    #[error("`{field}` names `{value}` — every path in `contents` stays inside the pack: relative, with no `..` component")]
+    #[error("`{field}` names `{value}`; every path in `contents` stays inside the pack: relative, with no `..` component")]
     PathEscapes { field: &'static str, value: String },
 }
 

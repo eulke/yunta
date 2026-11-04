@@ -97,7 +97,7 @@ pub enum StorageError {
     /// else has no chain to anchor, so the append is refused instead of
     /// hashed against an invented constant.
     #[error(
-        "run `{run_id}`: the first event of a run must be `run_created` — the hash chain's \
+        "run `{run_id}`: the first event of a run must be `run_created`; the hash chain's \
          genesis is derived from its manifest_hash"
     )]
     GenesisMissing { run_id: RunId },
@@ -107,7 +107,10 @@ pub enum StorageError {
 
     /// The first row is `run_created` but carries no readable
     /// `manifest_hash`, so the chain has no genesis to anchor to.
-    #[error("run `{run_id}`: its `run_created` has no readable manifest_hash — no chain genesis")]
+    #[error(
+        "run `{run_id}`: its `run_created` has no readable manifest_hash, so there is no \
+         chain genesis"
+    )]
     CorruptGenesis { run_id: RunId },
 
     /// A blocking storage call could not be joined from the async

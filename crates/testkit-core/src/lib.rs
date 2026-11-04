@@ -8,8 +8,7 @@
 //!
 //! Its map: `adapter` is what a test of an adapter needs first; `clock` and
 //! `ids` are deterministic clocks and ids; `capture` is a writer a test reads
-//! back; `golden` compares a surface's output with the output written down for
-//! it; `log` writes a log by hand; `persisted` states what every persisted
+//! back; `log` writes a log by hand; `persisted` states what every persisted
 //! document promises; `repo` asks git directly; `spell` is the spelling a
 //! surface writes next steps with; and `stubs` are the scripted CLIs that stand
 //! in for a real `codex` or `claude`.
@@ -19,7 +18,6 @@
 pub mod adapter;
 mod capture;
 mod clock;
-pub mod golden;
 mod ids;
 mod log;
 pub mod persisted;

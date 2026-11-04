@@ -79,6 +79,46 @@ nodes:
     assert_eq!(said.lines().collect::<Vec<_>>(), vec!["warm"]);
 }
 
+/// A measurement an invocation stopped still puts its checkout back: what
+/// the suite wrote goes, and what git ignores stays for the next wake. Being
+/// stopped is no reason to cut off the git that does it, which could leave
+/// its lock behind for whoever takes the checkout next.
+#[tokio::test]
+async fn a_measurement_an_invocation_stopped_puts_its_checkout_back() {
+    let bench = Bench::new();
+    ignore_builds(&bench);
+    let slot = bench.pool().join("slot-1");
+    let warm = slot.join("target/warm");
+    let suite = "touch stray.txt; mkdir -p target; touch target/warm; sleep 30";
+    let config = format!("{MOCK_CONFIG}baseline:\n  suite: \"{suite}\"\n");
+    let workflow = format!(
+        r#"
+name: parked-while-measuring
+nodes:
+  - id: wait
+    kind: bash
+    run: "for i in $(seq 1 600); do test -f {warm} && break; sleep 0.05; done; test -f {warm}"
+  - {{ id: approve, kind: gate, assignee: lead, depends_on: [wait] }}
+  - {{ id: regressions, kind: check, builtin: baseline_compare, depends_on: [approve] }}
+"#,
+        warm = warm.display()
+    );
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(&workflow, "dialect: claude-code\nsessions: []", &config)
+        .await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    assert!(warm.exists(), "what git ignores stays for the next wake");
+    assert!(
+        !slot.join("stray.txt").exists(),
+        "what the suite wrote goes with its checkout's use"
+    );
+}
+
 /// A run working in a person's own checkout measures there, before any
 /// node of its own can change the tree.
 #[tokio::test]

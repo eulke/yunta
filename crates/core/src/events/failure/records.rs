@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::diagnostic::{ArtifactFailure, Report};
 use crate::glob::ScopeGlob;
 use crate::hash::ContentHash;
-use crate::ids::{AdapterId, ExecutorName, NodeId, RunId};
+use crate::ids::{AdapterId, ExecutorName, NodeId, RunId, SkillName};
 use crate::inputs::InputsProblem;
 use crate::protected::Protection;
 use crate::workflow::{ArtifactKind, ArtifactRefId, ReservedIdentity, OBJECTS_DIR};
@@ -120,6 +120,25 @@ pub enum ObjectProblem {
     },
 }
 
+/// What a skill name no root holds says to every reader: the name, the
+/// roots it was searched under when the lookup says them, and what a person
+/// does about it.
+pub fn skill_not_found(name: &SkillName, searched: &[PathBuf]) -> String {
+    let advice =
+        "add the directory, fix `skills.paths` in the config, or install the pack that declares it";
+    match searched {
+        [] => format!("skill `{name}` not found; {advice}"),
+        roots => format!(
+            "skill `{name}` not found under {}; {advice}",
+            roots
+                .iter()
+                .map(|root| format!("`{}`", root.display()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
 impl ObjectProblem {
     /// What the problem says of the object, in the words every surface
     /// shows: the run holds no object under the hash, or the object under
@@ -127,13 +146,13 @@ impl ObjectProblem {
     pub fn sentence(&self) -> String {
         match self {
             ObjectProblem::Missing { hash } => format!(
-                "the run holds no object `{hash}` — an artifact names bytes that are not under \
+                "the run holds no object `{hash}`: an artifact names bytes that are not under \
                  `{OBJECTS_DIR}/`"
             ),
             // The one thing a content-addressed store can state and a path
             // never could: these are not the bytes that were accepted.
             ObjectProblem::Corrupt { hash, found } => format!(
-                "object `{hash}` holds content that hashes to `{found}` — the bytes under \
+                "object `{hash}` holds content that hashes to `{found}`: the bytes under \
                  `{OBJECTS_DIR}/` are not the bytes the run accepted"
             ),
         }
@@ -321,7 +340,7 @@ mod tests {
         assert_eq!(
             ObjectProblem::Missing { hash: hash.clone() }.sentence(),
             format!(
-                "the run holds no object `{hash}` — an artifact names bytes that are not under \
+                "the run holds no object `{hash}`: an artifact names bytes that are not under \
                  `objects/`"
             )
         );
@@ -332,7 +351,7 @@ mod tests {
             }
             .sentence(),
             format!(
-                "object `{hash}` holds content that hashes to `{found}` — the bytes under \
+                "object `{hash}` holds content that hashes to `{found}`: the bytes under \
                  `objects/` are not the bytes the run accepted"
             )
         );

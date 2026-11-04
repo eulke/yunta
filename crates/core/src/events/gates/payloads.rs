@@ -66,7 +66,7 @@ pub struct GateWaitingPayload {
     pub(super) options: Vec<GateOption>,
     /// The forge's own handle for this gate, such as a pull request's
     /// URL; `None` for an internal escalation, such as exhausted
-    /// re-routes. It carries the forge's `PullRequestRef` through the
+    /// reroutes. It carries the forge's `PullRequestRef` through the
     /// log, so a later `poll` from another process knows what to poll
     /// without publishing again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,14 +91,6 @@ impl GateWaitingPayload {
         &self.summary
     }
 
-    /// The same payload with its claim replaced. A copy of a document that
-    /// was already audited, so the claim is not checked against the evidence
-    /// again.
-    pub fn with_claim(mut self, claim: impl Into<Claim>) -> Self {
-        self.summary = claim.into();
-        self
-    }
-
     /// The facts an older log attached beside the claim: empty on a line
     /// written now.
     pub fn evidence(&self) -> &Evidence {
@@ -115,20 +107,20 @@ impl GateWaitingPayload {
         self.menu.as_ref()
     }
 
+    /// The author's gate this escalation asks for, by its node, when its
+    /// menu names one. `None` on every other escalation.
+    pub fn gate(&self) -> Option<&NodeId> {
+        match &self.menu {
+            Some(Menu::Gate(gate)) => gate.node.as_ref(),
+            _ => None,
+        }
+    }
+
     /// The failure a node's escalation is about, with the menu that failure
     /// offers. `None` on every other escalation.
     pub fn failure(&self) -> Option<&FailureMenu> {
         match &self.menu {
             Some(Menu::Failure(menu)) => Some(menu),
-            _ => None,
-        }
-    }
-
-    /// The departure from the plan a task's session declared, as the question
-    /// about it is written. `None` on every other escalation.
-    pub fn departure(&self) -> Option<&DepartureMenu> {
-        match &self.menu {
-            Some(Menu::Departure(menu)) => Some(menu),
             _ => None,
         }
     }
@@ -198,7 +190,7 @@ impl GateWaitingPayload {
 #[serde(from = "GateResolvedWire", into = "GateResolvedWire")]
 pub enum GateResolvedPayload {
     /// A human picked one of the escalation's options: an internal
-    /// gate, exhausted re-routes, a token budget, a scope expansion, or
+    /// gate, exhausted reroutes, a token budget, a scope expansion, or
     /// an external gate degraded to the console.
     Chosen(HumanChoice),
     /// The forge reports an approving review, or a merge, covering
@@ -404,19 +396,19 @@ pub struct FailureMenu {
     /// Why no remedy is offered, when none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stuck: Option<Stuck>,
-    /// The re-route this failure exhausted, when it closes one.
+    /// The reroute this failure exhausted, when it closes one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reroute: Option<ExhaustedReroute>,
 }
 
-/// A re-route the failure exhausted: the node it would send the run to,
+/// A reroute the failure exhausted: the node it would send the run to,
 /// the cap it reached, and the mode a promotion would take the run to,
 /// when the workflow names one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExhaustedReroute {
     /// The node `on_failure.goto` names.
     pub goto: NodeId,
-    /// The cap the re-routes reached.
+    /// The cap the reroutes reached.
     pub max_reroutes: u32,
     /// The mode a promotion would take the run to, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]

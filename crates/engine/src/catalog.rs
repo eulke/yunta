@@ -18,7 +18,7 @@ use yunta_core::{PackManifest, PackName, Publisher};
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CatalogError {
     #[error(
-        "no workflow `{name}` — not in the repo catalog ({repo_path}), and no pack under \
+        "no workflow `{name}`: not in the repo catalog ({repo_path}), and no pack under \
          publisher `{publisher}` declares a workflow named `{workflow}`"
     )]
     NotFound {
@@ -27,10 +27,10 @@ pub enum CatalogError {
         publisher: String,
         workflow: String,
     },
-    #[error("no workflow `{name}` — not in the repo catalog ({repo_path})")]
+    #[error("no workflow `{name}`: not in the repo catalog ({repo_path})")]
     NotFoundNoPacksDir { name: String, repo_path: PathBuf },
     #[error(
-        "`{name}` is ambiguous — {count} packs under publisher `{publisher}` each declare a \
+        "`{name}` is ambiguous: {count} packs under publisher `{publisher}` each declare a \
          workflow named `{workflow}` ({candidates}); disambiguate by installing only one, or by \
          giving the repo its own `{workflow}.yaml` that names the one you mean"
     )]
@@ -42,7 +42,7 @@ pub enum CatalogError {
         candidates: String,
     },
     #[error(
-        "`{name}` is not a workflow reference — a reference is a bare name or `publisher/name`, \
+        "`{name}` is not a workflow reference; a reference is a bare name or `publisher/name`, \
          each one path segment: no further `/`, no `\\`, not `.` or `..`, not empty"
     )]
     InvalidName { name: String },

@@ -1,5 +1,5 @@
-//! The pull requests a `GitHubForge` opens for a branch a run already
-//! pushed, and what it says about the token it holds.
+//! The pull requests a `GitHubForge` opens or redraws for a branch a run
+//! already pushed, and what it says about the token it holds.
 
 use serde::Deserialize;
 use yunta_core::port::{ForgeError, ForgeProbe, PullRequestRef, PullRequestRequest};
@@ -15,7 +15,7 @@ impl GitHubForge {
         req: &PullRequestRequest,
     ) -> Result<PullRequestRef, ForgeError> {
         if let Some(existing) = self.find_open_pr(&req.head, &req.run_id).await? {
-            return Ok(existing);
+            return Ok(existing.reference);
         }
         let body = super::pull_request_body(req, &*self.spell);
         self.create_pr(&req.title, &req.head, &req.base, &body)
@@ -48,6 +48,26 @@ impl GitHubForge {
             url: created.html_url,
             number: created.number,
         })
+    }
+
+    /// PATCH /pulls/{number}: the title and description a lap drew.
+    pub(super) async fn update_pr(
+        &self,
+        number: u64,
+        title: &str,
+        body: &str,
+    ) -> Result<(), ForgeError> {
+        let request = self
+            .request(
+                reqwest::Method::PATCH,
+                &self.repo_path(&format!("/pulls/{number}")),
+            )
+            .json(&serde_json::json!({
+                "title": title,
+                "body": body,
+            }));
+        self.send("update the pull request", request).await?;
+        Ok(())
     }
 
     /// `GET /repos/{owner}/{name}`: whether the repository answers this

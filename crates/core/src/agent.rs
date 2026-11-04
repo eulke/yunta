@@ -35,12 +35,12 @@ struct FrontMatter {
 #[derive(Debug, Error)]
 pub enum AgentDefinitionError {
     #[error(
-        "agent `{name}`: the file opens with no front matter — start it with `---`, its `name` \
+        "agent `{name}`: the file opens with no front matter; start it with `---`, its `name` \
          and `description`, and `---`"
     )]
     NoFrontMatter { name: AgentName },
     #[error(
-        "agent `{name}`: its front matter does not read — it holds `name` and `description` \
+        "agent `{name}`: its front matter does not read: it holds `name` and `description` \
          only; the model is the runner's and the tools are the permission profile's"
     )]
     FrontMatter {

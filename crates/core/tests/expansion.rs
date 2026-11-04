@@ -67,3 +67,33 @@ fn a_refusal_names_each_path_with_the_reason_it_is_protected() {
         "{noted:?}"
     );
 }
+
+#[test]
+fn a_denial_reads_as_one_sentence_naming_what_protects_each_path() {
+    let refused = Denial::ReachesProtected {
+        reached: vec![
+            Reach {
+                path: ScopeGlob::from(".github/ci.yml"),
+                reason: Protection::ProjectDeny,
+            },
+            Reach {
+                path: ScopeGlob::from(".git/config"),
+                reason: Protection::GitRegister,
+            },
+        ],
+    };
+    assert_eq!(
+        refused.sentence(),
+        "it reaches what the task may never write: .github/ci.yml (denied to every run by \
+         `permissions.paths.deny`), .git/config (the run's git register)"
+    );
+    assert_eq!(
+        Denial::PrecheckPasses.sentence(),
+        "proposed criterion already passes, so there is nothing to expand for"
+    );
+    let unnoted = Denial::Chosen {
+        option: "deny".to_string(),
+        note: None,
+    };
+    assert_eq!(unnoted.sentence(), "denied by a human at the gate");
+}

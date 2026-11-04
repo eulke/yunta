@@ -40,6 +40,7 @@ use yunta_core::port::{
 use yunta_core::process::subprocess::{self, Launch, LineParser};
 use yunta_core::rail::RailCommand;
 
+use crate::action::Checkout;
 use crate::dialect::{require_hook, Plan};
 use crate::mount::MountPlan;
 
@@ -81,6 +82,7 @@ pub(crate) fn plan(
         scratch: scratch_files(req)?,
         mounts: MountPlan::of(SKILLS_MOUNT, req),
         coverage: conf.coverage(&req.cwd),
+        checkout: Checkout::at(&req.cwd),
     })
 }
 
@@ -256,6 +258,8 @@ fn session_env(req: &SessionRequest) -> SessionEnv {
 /// The CLI's stream-json lines, one event list per line.
 pub(crate) struct ClaudeParser {
     fence: Coverage,
+    /// The tree the session works in, which its paths are read against.
+    checkout: Checkout,
     run_tool_calls: std::collections::HashMap<String, yunta_core::RunTool>,
     reported: parse::Reported,
     /// What the stream's limit fields have said so far.
@@ -263,10 +267,11 @@ pub(crate) struct ClaudeParser {
 }
 
 impl ClaudeParser {
-    /// A reader for a session whose fence covers `fence`.
-    pub(crate) fn new(fence: Coverage) -> Self {
+    /// A reader for a session whose fence covers `fence`, in the tree `checkout`.
+    pub(crate) fn new(fence: Coverage, checkout: Checkout) -> Self {
         ClaudeParser {
             fence,
+            checkout,
             run_tool_calls: std::collections::HashMap::new(),
             reported: parse::Reported::default(),
             limit: parse::LimitReading::default(),
@@ -279,6 +284,7 @@ impl LineParser for ClaudeParser {
         parse::parse_line(
             line,
             Some(&self.fence),
+            &self.checkout,
             &mut self.run_tool_calls,
             &mut self.reported,
             &mut self.limit,
@@ -324,7 +330,7 @@ impl ClaudeCodeAdapter {
             cwd: &req.cwd,
             env: &planned.env,
             prompt: &req.prompt,
-            parser: Box::new(ClaudeParser::new(planned.coverage)),
+            parser: Box::new(ClaudeParser::new(planned.coverage, planned.checkout)),
             held: Some(Box::new(mounts)),
         })
         .await

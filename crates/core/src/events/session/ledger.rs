@@ -35,11 +35,6 @@ impl DegradationLedger {
         &self.all
     }
 
-    /// Whether the run recorded any.
-    pub fn is_empty(&self) -> bool {
-        self.all.is_empty()
-    }
-
     /// Whether the run already said this capability was missing. A
     /// fallback the whole run works under is stated once: repeating it
     /// per node or per session says nothing new and buries what does.

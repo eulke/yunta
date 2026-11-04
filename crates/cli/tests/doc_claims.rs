@@ -299,3 +299,21 @@ fn every_fence_in_the_user_docs_says_its_language() {
         }
     }
 }
+
+/// A run or a node is called by the words `yunta status` prints. A word it no longer prints
+/// stands nowhere a person learns what those words are: the compatibility document may
+/// still name one, since it says what changed.
+#[test]
+fn what_a_person_reads_first_says_no_retired_word() {
+    for document in [
+        "README.md",
+        "docs/concepts.md",
+        "docs/guide.md",
+        "docs/packs.md",
+    ] {
+        let text = std::fs::read_to_string(repo_root().join(document)).unwrap();
+        for retired in ["`paused`", "`pending →", "`correcting`"] {
+            assert!(!text.contains(retired), "{document} says {retired}");
+        }
+    }
+}

@@ -20,14 +20,11 @@ use nix::sys::signal::{kill, Signal};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, LocalFlags, SetArg};
 use nix::unistd::Pid;
 
+use surco::paint::{HIDE_CURSOR, SHOW_CURSOR, SYNC_BEGIN, SYNC_END};
+
 use crate::wait::{wait_for, wait_until, WAIT_DEADLINE};
 
-/// What a terminal is told to do, as the bytes a run writes to say it:
-/// the introducer every sequence opens with, and the three sequences
-/// this harness reads a run's drawing by.
-const ESCAPE: char = '\u{1b}';
-const HIDE_CURSOR: &str = "\u{1b}[?25l";
-const SHOW_CURSOR: &str = "\u{1b}[?25h";
+/// What a run writes to clear a row, which this harness reads a drawing by.
 const CLEAR_ROW: &str = "\u{1b}[2K";
 
 /// A run under a terminal of a stated size.
@@ -42,6 +39,10 @@ pub struct Terminal {
     reader: Option<std::thread::JoinHandle<()>>,
     /// How the run ended, once it has.
     ended: Option<ExitStatus>,
+    /// The cells one row of this terminal holds, as stated when it was opened.
+    columns: u16,
+    /// The rows this terminal holds, as stated when it was opened.
+    rows: u16,
 }
 
 impl Terminal {
@@ -71,9 +72,22 @@ impl Terminal {
         args: &[&str],
         vars: &[(&str, &str)],
     ) -> Self {
+        Self::open_sized(bin, dir, home, args, vars, (Self::COLUMNS, Self::ROWS))
+    }
+
+    /// [`Terminal::open_with`], on a terminal of `(columns, rows)` cells, for a
+    /// surface that lays out by the room it is given.
+    pub fn open_sized(
+        bin: &Path,
+        dir: &Path,
+        home: &Path,
+        args: &[&str],
+        vars: &[(&str, &str)],
+        (columns, rows): (u16, u16),
+    ) -> Self {
         let screen = Winsize {
-            ws_row: Self::ROWS,
-            ws_col: Self::COLUMNS,
+            ws_row: rows,
+            ws_col: columns,
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
@@ -106,6 +120,8 @@ impl Terminal {
             reader: Some(collect(std::fs::File::from(pty.master), drawn.clone())),
             drawn,
             ended: None,
+            columns,
+            rows,
         }
     }
 
@@ -120,6 +136,42 @@ impl Terminal {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         )
+    }
+
+    /// What a person sees on this terminal now: every row as the screen holds
+    /// it, whatever was drawn over what on the way there. A drawing still on its
+    /// way is out of sight, as a terminal that takes one whole keeps it, so what a
+    /// test reads after waiting for one row of a drawing holds all of its rows.
+    pub fn screen(&self) -> Screen {
+        let mut parser = vt100::Parser::new(self.rows, self.columns, 0);
+        parser.process(
+            drawn_whole(
+                &self
+                    .drawn
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            )
+            .as_bytes(),
+        );
+        let screen = parser.screen();
+        Screen {
+            rows: screen
+                .rows(0, self.columns)
+                .map(|row| row.trim_end().to_string())
+                .collect(),
+            cursor: screen.cursor_position(),
+            cursor_hidden: screen.hide_cursor(),
+            alternate: screen.alternate_screen(),
+        }
+    }
+
+    /// Waits until `needle` stands on the screen, failing with `what` and the
+    /// screen as it is.
+    pub fn wait_on_screen(&self, needle: &str, what: &str) {
+        wait_until(
+            || self.screen().holds(needle),
+            || format!("{what}\non the screen:\n{}", self.screen().rows.join("\n")),
+        );
     }
 
     /// Waits until `needle` has been drawn, failing with `what` and
@@ -226,52 +278,6 @@ impl Terminal {
             .is_some_and(|between| between.contains(CLEAR_ROW))
     }
 
-    /// How many rows a redrawing list wrote after `from`, and how many
-    /// it then went back over to clear them.
-    ///
-    /// Everything from the row `from` names to the first escape
-    /// sequence after it, and the `ESC [ n A` that sequence opens with.
-    /// A list that clears more rows than it wrote takes the rows above
-    /// it with them — the evidence a person is deciding on.
-    pub fn drew_and_cleared(&self, from: &str) -> (usize, usize) {
-        let drawn = self.drawn();
-        let list = drawn
-            .split_once(from)
-            .map(|(_, rest)| rest)
-            .unwrap_or_else(|| panic!("the list never drew `{from}`:\n{drawn}"));
-        let (rows, cleared) = list
-            .split_once(ESCAPE)
-            .unwrap_or_else(|| panic!("the list never went back over what it drew:\n{drawn}"));
-        let cleared = cleared
-            .strip_prefix('[')
-            .and_then(|rest| rest.split_once('A'))
-            .and_then(|(rows, _)| rows.parse().ok())
-            .unwrap_or_else(|| {
-                panic!("what the list did after its rows was not a move back over them:\n{drawn}")
-            });
-        // `from` is the first row's own text, so that row is counted
-        // here rather than read off `lines()`.
-        (
-            rows.lines().count() + usize::from(!rows.starts_with('\n')) - 1,
-            cleared,
-        )
-    }
-
-    /// Every row a line being typed was redrawn on: what followed each
-    /// clearing of that row, up to whatever was written next.
-    pub fn rows_redrawn(&self) -> Vec<String> {
-        self.drawn()
-            .split(CLEAR_ROW)
-            .skip(1)
-            .map(|rest| {
-                rest.split([ESCAPE, '\n', '\r'])
-                    .next()
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .collect()
-    }
-
     /// Whether the run came back saying it did everything it was asked
     /// to do — a run that parked reports a verdict instead.
     pub fn ran_to_the_end(&self) -> bool {
@@ -300,6 +306,30 @@ impl Terminal {
             drop(reader.join());
         }
         self.drawn()
+    }
+}
+
+/// A terminal's screen at one moment, as a person reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Screen {
+    /// Every row, with what it ends in spaces gone.
+    pub rows: Vec<String>,
+    /// The row and the column the cursor stands on.
+    pub cursor: (u16, u16),
+    pub cursor_hidden: bool,
+    /// Whether the terminal is on its other screen.
+    pub alternate: bool,
+}
+
+impl Screen {
+    /// Whether any row holds `needle`.
+    pub fn holds(&self, needle: &str) -> bool {
+        self.rows.iter().any(|row| row.contains(needle))
+    }
+
+    /// How many rows hold `needle`.
+    pub fn count(&self, needle: &str) -> usize {
+        self.rows.iter().filter(|row| row.contains(needle)).count()
     }
 }
 
@@ -344,6 +374,16 @@ fn collect(mut screen: std::fs::File, into: Arc<Mutex<String>>) -> std::thread::
             }
         }
     })
+}
+
+/// `drawn` without a drawing that has opened and not ended: what a terminal that takes
+/// each drawing whole has shown so far.
+fn drawn_whole(drawn: &str) -> &str {
+    match (drawn.rfind(SYNC_BEGIN), drawn.rfind(SYNC_END)) {
+        (Some(begin), Some(end)) if end > begin => drawn,
+        (Some(begin), _) => &drawn[..begin],
+        _ => drawn,
+    }
 }
 
 /// `text` without the sequences that paint it (`ESC [ … m`).

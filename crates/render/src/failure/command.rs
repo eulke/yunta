@@ -2,10 +2,10 @@
 //! project's permissions refused: the line that names what ran and how it
 //! ended, the lines it printed last, and what refused it.
 
+use surco::text;
 use yunta_core::events::{
     CommandExit, CommandOrigin, DeniedBy, DeniedCommand, DeniedRule, RedCheck,
 };
-use yunta_core::text;
 
 /// The line that names a command and how it ended, without what it printed.
 pub fn command_headline(exit: &CommandExit) -> String {

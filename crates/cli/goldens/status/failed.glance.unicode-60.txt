@@ -1,0 +1,16 @@
+✗ fragua (quick) · failed · after 7m41s · 32m10s ago  7E5PH4
+━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  node `lint` failed: exit 101.
+
+  ✗ lint
+    │ error[E0425]: cannot find value `x` in this scope
+    │  --> src/lib.rs:3:5
+    whole output: yunta status 7E5PH4 --node lint
+
+  progress     1 of 3 nodes done
+  nodes        ✓ 1 finished: plan
+               ✗ 1 failed: lint
+               ◌ 1 never ran: test
+
+next
+  yunta status 7E5PH4 --full   the whole story, node by node

@@ -126,8 +126,8 @@ pub(super) async fn hold_inherited_findings(
 }
 
 /// Accepts every birth artifact in order and, for each tasks document,
-/// registers what the run has to do about it and what its tasks may reach
-/// in `tree`.
+/// registers what the run has to do about it, what its tasks may reach in
+/// `tree`, and what `tree` holds of its shapes.
 ///
 /// Interleaved rather than accepted in one pass and registered in
 /// another, so a second tasks document is planned against a log that
@@ -152,7 +152,7 @@ pub(super) async fn register_birth_documents(
         .await?;
         if let Some(birth) = birth {
             crate::tasks::register(log, None, &birth.document, birth.provenance()).await?;
-            crate::tasks::derive_reach(log, None, &birth.document, tree, supervision).await?;
+            crate::tasks::derive_from_tree(log, None, &birth.document, tree, supervision).await?;
         }
     }
     Ok(())

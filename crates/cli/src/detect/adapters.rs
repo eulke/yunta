@@ -4,6 +4,7 @@
 //! A probe reports a version and never a model: a model is the project's
 //! choice, so what is proposed here leaves it for the person to name.
 
+use surco::components::Fix;
 use yunta_core::port::ProbeReport;
 use yunta_core::{AdapterId, AdapterSettings, RunnerName};
 
@@ -61,11 +62,7 @@ const PROPOSED_RUNNER: &str = "implementer";
 /// answered here, and `defaults.runner` when a node names no runner of
 /// its own (`needs_default`). Ready to paste: the one placeholder is the
 /// model, which only the project can choose.
-pub(crate) fn runner_step(
-    roles: &[RunnerName],
-    needs_default: bool,
-    healthy: &[AdapterId],
-) -> Vec<String> {
+pub(crate) fn runner_step(roles: &[RunnerName], needs_default: bool, healthy: &[AdapterId]) -> Fix {
     let proposed = [RunnerName::from_static(PROPOSED_RUNNER)];
     let roles = match roles.is_empty() {
         true => &proposed[..],
@@ -76,7 +73,7 @@ pub(crate) fn runner_step(
             first.to_string(),
             format!(
                 "this machine answers for {}",
-                yunta_core::text::listed(healthy.iter().map(AdapterId::as_str))
+                surco::text::listed(healthy.iter().map(AdapterId::as_str))
             ),
         ),
         None => (
@@ -87,21 +84,19 @@ pub(crate) fn runner_step(
             ),
         ),
     };
-    let mut lines = vec![format!(
-        "declare a runner in .yunta/config.yaml — {where_from}:"
-    )];
-    lines.push("    runners:".to_string());
+    let mut paste = vec!["runners:".to_string()];
     for role in roles {
-        lines.push(format!("      {role}:"));
-        lines.push(format!(
-            "        - {{ adapter: {adapter}, model: <model> }}"
-        ));
+        paste.push(format!("  {role}:"));
+        paste.push(format!("    - {{ adapter: {adapter}, model: <model> }}"));
     }
     if let (true, Some(first)) = (needs_default, roles.first()) {
-        lines.push("    defaults:".to_string());
-        lines.push(format!("      runner: {first}"));
+        paste.push("defaults:".to_string());
+        paste.push(format!("  runner: {first}"));
     }
-    lines
+    Fix {
+        said: format!("declare a runner in .yunta/config.yaml; {where_from}:"),
+        paste,
+    }
 }
 
 #[cfg(test)]
@@ -114,16 +109,20 @@ mod tests {
             AdapterId::from_static("claude-code"),
             AdapterId::from_static("codex"),
         ];
+        let step = runner_step(&[], true, &healthy);
         assert_eq!(
-            runner_step(&[], true, &healthy),
+            step.said,
+            "declare a runner in .yunta/config.yaml; this machine answers for `claude-code`, \
+             `codex`:"
+        );
+        assert_eq!(
+            step.paste,
             vec![
-                "declare a runner in .yunta/config.yaml — this machine answers for \
-                 `claude-code`, `codex`:",
-                "    runners:",
-                "      implementer:",
-                "        - { adapter: claude-code, model: <model> }",
-                "    defaults:",
-                "      runner: implementer",
+                "runners:",
+                "  implementer:",
+                "    - { adapter: claude-code, model: <model> }",
+                "defaults:",
+                "  runner: implementer",
             ]
         );
     }
@@ -134,8 +133,9 @@ mod tests {
             &[RunnerName::from_static("planner")],
             false,
             &[AdapterId::from_static("codex")],
-        );
-        assert!(lines.contains(&"      planner:".to_string()), "{lines:?}");
+        )
+        .paste;
+        assert!(lines.contains(&"  planner:".to_string()), "{lines:?}");
         assert!(
             !lines.iter().any(|line| line.contains("defaults")),
             "a node that names its runner needs no default: {lines:?}"
@@ -144,8 +144,11 @@ mod tests {
 
     #[test]
     fn with_no_adapter_answering_the_step_says_so_and_leaves_it_to_fill() {
-        let lines = runner_step(&[], false, &[]);
-        assert!(lines[0].contains("no adapter CLI answered"), "{lines:?}");
-        assert!(lines.iter().any(|line| line.contains("adapter: <adapter>")));
+        let step = runner_step(&[], false, &[]);
+        assert!(step.said.contains("no adapter CLI answered"), "{step:?}");
+        assert!(step
+            .paste
+            .iter()
+            .any(|line| line.contains("adapter: <adapter>")));
     }
 }

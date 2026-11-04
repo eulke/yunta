@@ -21,8 +21,9 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::PreRunWarnings;
 use crate::output::Mode;
-use crate::render::{Glyphs, Look};
 use crate::surface::{Closing, ClosingEnv, Delivery, Outline, TerminalEnv};
+use surco::glyphs::Glyphs;
+use surco::look::Look;
 
 // The one call into the engine is `registry::execute`; this module keeps the
 // path its callers already name.
@@ -57,8 +58,8 @@ pub(crate) struct Driving<'a> {
     /// this invocation prints says it too — stderr reaches the person
     /// watching, and a `--json` reader is watching nothing.
     pub(crate) warnings: PreRunWarnings,
-    /// How this invocation reports: a live surface for `Human`, the verdict
-    /// in the exit code alone for `Quiet`, and one versioned document with
+    /// How this invocation reports: a live surface for `Human`, the run id
+    /// and one verdict line for `Quiet`, and one versioned document with
     /// no live surface at all for `Json`.
     pub(crate) output: Mode,
     /// The stdout look `main` built, which everything this invocation
@@ -184,7 +185,7 @@ pub(crate) struct Settling<'a> {
     /// Empty on a `resume`: they are said to whoever *creates* a run,
     /// and a resume picks one up.
     pub(crate) warnings: PreRunWarnings,
-    /// How the report is written: the closing block, the verdict alone, or
+    /// How the report is written: the closing block, one verdict line, or
     /// the document.
     pub(crate) output: Mode,
     /// The stdout look the closing block is drawn with.
@@ -210,6 +211,19 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
 async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
     released(&settling).await?;
     resumes_after_reset(&settling).await?;
+    let run_dir = run_dir_of(settling.ctx, &settling.run_id);
+    let closed = Closed {
+        run_id: &settling.run_id,
+        manifest: &settling.manifest,
+        run_dir: &run_dir,
+        worktree: &settling.worktree,
+        storage: settling.storage,
+        clock: &settling.ctx.clock,
+        prior: settling.prior,
+        look: settling.look,
+        cwd: &settling.ctx.cwd,
+        home: settling.ctx.env.home.as_deref(),
+    };
     match settling.output {
         Mode::Json => Ok(report_run_json(
             settling.ctx,
@@ -220,33 +234,11 @@ async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
         )
         .await?
         .verdict()),
-        // The run id already went out when the invocation opened, and
-        // the verdict travels in the exit code — read off the run's own
-        // log, the same reading the document and the closing block take.
-        Mode::Quiet => Ok(documented(
-            settling.ctx,
-            settling.storage,
-            &settling.run_id,
-            &settling.manifest,
-            settling.warnings,
-        )
-        .await?
-        .verdict()),
-        Mode::Human => {
-            report_closing(Closed {
-                run_id: &settling.run_id,
-                manifest: &settling.manifest,
-                run_dir: &run_dir_of(settling.ctx, &settling.run_id),
-                worktree: &settling.worktree,
-                storage: settling.storage,
-                clock: &settling.ctx.clock,
-                prior: settling.prior,
-                look: settling.look,
-                cwd: &settling.ctx.cwd,
-                home: settling.ctx.env.home.as_deref(),
-            })
-            .await
-        }
+        // The run id already went out when the invocation opened. The
+        // verdict line and the exit code come from the one reading the closing
+        // block takes.
+        Mode::Quiet => report_verdict(closed).await,
+        Mode::Human => report_closing(closed).await,
     }
 }
 
@@ -322,23 +314,24 @@ pub(crate) struct Closed<'a> {
     pub(crate) home: Option<&'a Path>,
 }
 
-/// Reads the run's log one last time and prints the block that closes it
-/// out, handing back the verdict the exit code carries.
+/// What closes a run out, read from its log.
 ///
 /// The log, not the report the engine handed back: a run's state is
 /// derived from its own events, so the last word on what happened comes
 /// off the same source every other surface reads.
-pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliError> {
+async fn closing_of(closed: &Closed<'_>) -> Result<Closing, CliError> {
     let events = closed.storage.events_for_run(closed.run_id.clone()).await?;
     let state = yunta_engine::derive(&events);
     let decision = crate::json::decision_of(closed.manifest, closed.run_dir, &state)
         .await?
         .map(|(node, escalation)| (node, escalation.into_payload()));
     let shown = match &decision {
-        Some((_, escalation)) => crate::json::shown_of(closed.run_dir, escalation, &state).await?,
+        Some((_, escalation)) => {
+            crate::json::shown_of(closed.manifest, closed.run_dir, escalation, &state).await?
+        }
         None => Vec::new(),
     };
-    let closing = Closing::of(ClosingEnv {
+    Ok(Closing::of(ClosingEnv {
         run_id: closed.run_id,
         workflow: &closed.manifest.workflow,
         state: &state,
@@ -354,8 +347,23 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
             cwd: closed.cwd,
             home: closed.home,
         },
-    });
-    let page = closing.page(closed.look);
+    }))
+}
+
+/// The one line a quiet run says on stderr: what its closing page opens with.
+pub(crate) async fn report_verdict(closed: Closed<'_>) -> Result<Outcome, CliError> {
+    let closing = closing_of(&closed).await?;
+    let verdict = surco::doc::Doc::new().with(closing.page().headline());
+    let look = crate::render::stderr_look();
+    crate::output::note(crate::render::draw(verdict, &look).trim_end());
+    Ok(closing.outcome())
+}
+
+/// Reads the run's log one last time and prints the block that closes it
+/// out, handing back the verdict the exit code carries.
+pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliError> {
+    let closing = closing_of(&closed).await?;
+    let page = closing.page();
     crate::output::document(closed.look, page.document(closed.look));
     Ok(closing.outcome())
 }
@@ -378,21 +386,23 @@ async fn documented(
     let events = storage.events_for_run(run_id.clone()).await?;
     let state = yunta_engine::derive(&events);
     // This invocation is the engine that drove the run.
-    let engine = crate::render::Engine::this(ctx.clock.now());
+    let engine = yunta_engine::Engine::this(ctx.clock.now());
     let decision = match ctx.project.run_dir(run_id.as_str()) {
         Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &state).await?,
         None => None,
     };
-    Ok(crate::json::RunDocument::of(
+    let mut frame = crate::commands::status::progress::frame_of(
         run_id,
-        &events,
-        &state,
         manifest,
-        ctx.clock.now(),
+        &state,
         &engine,
-        decision,
+        ctx.clock.now(),
+    );
+    frame.prior = crate::commands::stats::budget_prior(ctx, manifest, &frame, &events).await;
+    Ok(
+        crate::json::RunDocument::of(run_id, &events, &state, manifest, &frame, &engine, decision)
+            .warnings(warnings),
     )
-    .warnings(warnings))
 }
 
 /// Prints the run as the one versioned document `run --json`,

@@ -49,6 +49,49 @@ fn check_refuses_every_command_a_node_names_and_the_project_lacks() {
 }
 
 #[test]
+fn a_name_one_slip_from_one_the_project_declares_is_carried_beside_its_refusal() {
+    let workflow: Workflow = parse(
+        "name: w\nnodes:\n  - { id: a, kind: bash, run: { command: lnt } }\n  - { id: b, kind: prompt, prompt: p, runner: implementr }\n  - { id: c, kind: prompt, prompt: p }\n",
+    );
+    let config: ConfigLayer = parse(
+        "commands:\n  lint: \"true\"\n  format: \"cargo fmt\"\nformat:\n  - { paths: [\"**/*.rs\"], run: formt }\nrunners:\n  implementer:\n    - { adapter: mock, model: m }\n",
+    );
+    let errors = yunta_engine::check(&workflow, &config, &|_| None);
+    let near = |refusal: fn(&CheckError) -> bool| {
+        errors
+            .iter()
+            .find(|error| refusal(error))
+            .map(CheckError::near)
+    };
+    assert_eq!(
+        near(|error| matches!(error, CheckError::Unset { .. })),
+        Some(Some("lint")),
+        "{errors:#?}"
+    );
+    assert_eq!(
+        near(|error| matches!(error, CheckError::CommandUnsetIn { .. })),
+        Some(Some("format")),
+        "{errors:#?}"
+    );
+    assert_eq!(
+        near(|error| matches!(error, CheckError::UnknownRunner { .. })),
+        Some(Some("implementer")),
+        "{errors:#?}"
+    );
+    assert_eq!(
+        near(|error| matches!(
+            error,
+            CheckError::Unset {
+                key: yunta_core::ConfigKey::Runner,
+                ..
+            }
+        )),
+        Some(None),
+        "a node that names no runner is refused with no name it meant: {errors:#?}"
+    );
+}
+
+#[test]
 fn node_defaults_hooks_naming_a_missing_command_are_refused() {
     let workflow = "name: w\nnode_defaults:\n  hooks: { after: [{ run: { command: fmt } }] }\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n  - { id: b, kind: bash, run: \"true\" }\n";
 

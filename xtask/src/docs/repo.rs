@@ -164,7 +164,7 @@ fn relative_to(here: &Path, root: &Path, named: &str) -> Result<String, String> 
             Ok(inside.to_string_lossy().replace('\\', "/"))
         }
         _ => Err(format!(
-            "`{named}` names no file inside the repository — name the files you change"
+            "`{named}` names no file inside the repository; name the files you change"
         )),
     }
 }

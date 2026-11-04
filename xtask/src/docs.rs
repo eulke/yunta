@@ -28,7 +28,7 @@ pub fn check() -> Result<(), String> {
     let problems = checks::all(&repo, &docs)?;
     if !problems.is_empty() {
         return Err(format!(
-            "the agent docs do not hold — fix each, rewriting in place:\n{}",
+            "the agent docs do not hold; fix each, rewriting in place:\n{}",
             problems
                 .iter()
                 .map(|problem| format!("  {problem}"))

@@ -1,5 +1,5 @@
 //! One node of the graph: what it resolved to run on, what it started,
-//! what it produced or failed at, what it was re-routed to, and every
+//! what it produced or failed at, what it was rerouted to, and every
 //! mechanical check the engine ran around it.
 
 use std::collections::BTreeMap;
@@ -82,7 +82,7 @@ pub struct RunnerResolvedPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeStartedPayload {
     /// The attempt, counted from one. Each time the node runs again — after
-    /// a re-route, a restart of an interrupted attempt, a person's choice —
+    /// a reroute, a restart of an interrupted attempt, a person's choice —
     /// starts the next.
     pub attempt: u32,
     /// The tree this attempt starts from — what its own diff is judged
@@ -348,7 +348,7 @@ pub struct HookExecutedPayload {
 }
 
 /// `from_node` is the envelope's own `node_id` (the node that failed) —
-/// only the re-route's destination is extra information.
+/// only the reroute's destination is extra information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeReroutedPayload {
     /// Where control goes.
@@ -375,7 +375,7 @@ pub struct NodeReroutedPayload {
 impl NodeReroutedPayload {
     /// Control handed to another node, and why.
     ///
-    /// The retry count belongs to an `on_failure` re-route and to
+    /// The retry count belongs to an `on_failure` reroute and to
     /// nothing else: a gate's routing choice is a decision, not a retry,
     /// and has no cap to count against. Taking the origin and the count
     /// together is what keeps a gate's route from being read as a node

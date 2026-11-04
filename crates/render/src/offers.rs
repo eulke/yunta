@@ -2,11 +2,23 @@
 //! by, what choosing it costs, and the question it asks. An option stores
 //! its id and where it leads, and its escalation's menu says the rest.
 
+use surco::components::DecisionOption;
+use surco::text;
 use yunta_core::events::{Asks, GateOption, GateWaitingPayload, Leads, Menu, ScopeWait};
 use yunta_core::reserved::ReservedOption;
-use yunta_core::{listed_globs, text};
+use yunta_core::{listed_globs, NodeId};
 
 use crate::blocks::{departure_words, remedy_words, reroute_words};
+
+/// The label of an option that pauses the run with its decision open.
+pub(crate) const PAUSE_HERE: &str = "Pause here";
+
+/// What going on past a gate does when no node waits on it.
+const NOTHING_WAITS: &str = "nothing in the workflow waits on it";
+
+/// What choosing an option that pauses the run does: nothing runs, and its
+/// decision stays open.
+pub const STAYS_OPEN: &str = "nothing runs; this decision stays open";
 
 /// The label and the trade-off a person reads beside `option`: the words an
 /// older log stored with it, else the words its data and its menu give it.
@@ -41,6 +53,24 @@ pub fn asked(asks: &Asks) -> String {
     }
 }
 
+/// Every option `escalation` offers, as a decision draws it: its id, the
+/// words it is read by, what choosing it costs and what it asks.
+pub fn decision_options(escalation: &GateWaitingPayload) -> Vec<DecisionOption> {
+    escalation
+        .options()
+        .iter()
+        .map(|option| {
+            let (label, tradeoff) = option_words(escalation, option);
+            DecisionOption {
+                id: option.id.to_string(),
+                label: Some(label),
+                tradeoff,
+                asks: asks(option),
+            }
+        })
+        .collect()
+}
+
 /// The words the option's data gives it: where an author's option leads,
 /// else what its menu offers, else the abort every menu ends with.
 fn written(payload: &GateWaitingPayload, option: &GateOption) -> Option<(String, Option<String>)> {
@@ -64,29 +94,22 @@ fn written(payload: &GateWaitingPayload, option: &GateOption) -> Option<(String,
 }
 
 /// Where an author's option leads, and what going on settles.
-fn leading(leads: &Leads) -> (String, Option<String>) {
+pub(crate) fn leading(leads: &Leads) -> (String, Option<String>) {
     match leads {
         Leads::Back { node, resumes } => {
             let tradeoff = if *resumes {
-                format!("sends what you say back to `{node}`, and asks again once it completes")
+                "sends what you say, and asks again once it completes".to_string()
             } else {
-                format!("re-routes to `{node}` and asks again once it completes")
+                "reroutes there, and asks again once it completes".to_string()
             };
             (format!("Back to `{node}`"), Some(tradeoff))
         }
         Leads::On { next, settles } => {
             let (label, tradeoff) = if next.is_empty() {
-                (
-                    "Resolve the gate".to_string(),
-                    "resolves this gate; nothing in the workflow waits on it".to_string(),
-                )
+                ("Resolve the gate".to_string(), NOTHING_WAITS.to_string())
             } else {
                 let onward = text::listed(next.iter().map(|id| id.as_str()));
-                let runs = text::agreeing(next.len(), "runs", "run");
-                (
-                    format!("On to {onward}"),
-                    format!("resolves this gate; {onward} {runs} next"),
-                )
+                (format!("On to {onward}"), "resolves this gate".to_string())
             };
             let tradeoff = if *settles {
                 format!("{tradeoff}, and settles every finding it shows")
@@ -96,6 +119,17 @@ fn leading(leads: &Leads) -> (String, Option<String>) {
             (label, Some(tradeoff))
         }
     }
+}
+
+/// What going on past a gate does, for a reader whose option does not say where it
+/// goes: on a forge, an approval's label is the forge's own.
+pub(crate) fn resolving(next: &[NodeId]) -> String {
+    if next.is_empty() {
+        return format!("resolves this gate; {NOTHING_WAITS}");
+    }
+    let onward = text::listed(next.iter().map(|id| id.as_str()));
+    let runs = text::agreeing(next.len(), "runs", "run");
+    format!("resolves this gate; {onward} {runs} next")
 }
 
 /// The grant and the denial of a scope request, which name the paths it asks for.
@@ -118,7 +152,8 @@ fn scoped(wait: &ScopeWait, id: ReservedOption) -> Option<(String, Option<String
     }
 }
 
-/// The continue and the abort of a run's token cap that is spent.
+/// The continue of a run's token cap that is spent. Its abort is the one
+/// every menu offers.
 fn over_budget(id: ReservedOption) -> Option<(String, Option<String>)> {
     match id {
         ReservedOption::Continue => Some((
@@ -128,10 +163,6 @@ fn over_budget(id: ReservedOption) -> Option<(String, Option<String>)> {
                  spending more"
                     .to_string(),
             ),
-        )),
-        ReservedOption::Abort => Some((
-            "Pause the run".to_string(),
-            Some("The run pauses with reason `budget`; a resume re-asks".to_string()),
         )),
         _ => None,
     }
@@ -167,7 +198,7 @@ fn at_the_console(id: ReservedOption) -> Option<(String, Option<String>)> {
         )),
         ReservedOption::Reject => Some((
             "Reject".to_string(),
-            Some("Fails the node; its declared re-route (if any) takes over".to_string()),
+            Some("Fails the node; its declared reroute (if any) takes over".to_string()),
         )),
         _ => None,
     }
@@ -175,10 +206,5 @@ fn at_the_console(id: ReservedOption) -> Option<(String, Option<String>)> {
 
 /// The abort every menu offers, which pauses the run.
 fn aborting(id: ReservedOption) -> Option<(String, Option<String>)> {
-    (id == ReservedOption::Abort).then(|| {
-        (
-            "Abort the run".to_string(),
-            Some("Pauses here; nothing further executes".to_string()),
-        )
-    })
+    (id == ReservedOption::Abort).then(|| (PAUSE_HERE.to_string(), Some(STAYS_OPEN.to_string())))
 }

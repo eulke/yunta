@@ -24,6 +24,7 @@ use yunta_core::yaml::{self, Value};
 use yunta_core::{ModelName, RunTool};
 
 use super::check;
+use super::file_act::FileAct;
 use crate::dialect::DialectName;
 
 pub use super::error::FixtureError;
@@ -263,6 +264,14 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
+    /// A call on a file, which each CLI makes its own way: its dedicated tool,
+    /// or a shell command that reads and an item that changes.
+    FileCall {
+        action: FileAct,
+        path: String,
+        #[serde(default)]
+        after_ms: u64,
+    },
     Usage {
         input_tokens: u64,
         output_tokens: u64,
@@ -332,6 +341,7 @@ impl MockStep {
     pub fn after_ms(&self) -> u64 {
         match self {
             MockStep::ToolUse { after_ms, .. }
+            | MockStep::FileCall { after_ms, .. }
             | MockStep::Usage { after_ms, .. }
             | MockStep::Note { after_ms, .. }
             | MockStep::UnknownLine { after_ms }

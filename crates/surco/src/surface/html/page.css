@@ -1,0 +1,148 @@
+/* What a page is dressed in. Every color is a token the page's head sets from the palette. */
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font:400 15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;-webkit-font-smoothing:antialiased}
+code,pre,.cmd,.mark,.pill,.id,dt,th,.foot,figcaption,.toc h2{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+
+/* Three columns on one ground: what the page holds, the page, and what it waits on. */
+.page{display:grid;grid-template-columns:minmax(150px,200px) minmax(0,1fr) minmax(280px,340px);align-items:start;max-width:1320px;margin-inline:auto}
+.page.no-toc{grid-template-columns:minmax(0,1fr) minmax(280px,340px)}
+.page.no-decide{grid-template-columns:minmax(150px,200px) minmax(0,1fr)}
+.page.no-toc.no-decide{grid-template-columns:minmax(0,1fr);max-width:920px}
+.toc{position:sticky;top:0;max-height:100vh;overflow-y:auto;padding:24px 16px;font-size:13px;min-width:0}
+.toc h2{font-size:11.5px;font-weight:500;line-height:1.3;color:var(--muted);margin:0 0 6px}
+.toc a{display:block;padding:4px 8px;border-radius:5px;color:var(--ink);text-decoration:none;overflow-wrap:anywhere}
+.toc a:hover{background:var(--wash)}
+.toc a.sub{padding-left:18px;color:var(--muted)}
+.doc{padding:24px 28px 56px;min-width:0;display:flex;flex-direction:column;gap:22px;border-inline:1px solid var(--rule)}
+.page.no-toc .doc{border-left:0}
+.page.no-decide .doc{border-right:0}
+.decide{position:sticky;top:0;max-height:100vh;overflow-y:auto;padding:24px 20px;min-width:0;display:flex;flex-direction:column;gap:10px}
+.decide section{display:flex;flex-direction:column;gap:10px}
+@media (max-width:1040px){
+  .page,.page.no-toc,.page.no-decide,.page.no-toc.no-decide{grid-template-columns:minmax(0,1fr)}
+  .toc{display:none}
+  .doc{border:0;padding:20px 16px 32px}
+  .decide{position:static;max-height:none;overflow:visible;padding:0 16px 32px}
+}
+
+/* What a line says. */
+.strong{color:var(--strong)}
+.muted{color:var(--muted)}.faint{color:var(--faint)}
+.done{color:var(--done)}.failed{color:var(--failed)}.running{color:var(--running)}.needs{color:var(--needs)}.caution{color:var(--caution)}
+.kw{color:var(--kw)}.ty{color:var(--ty)}.fn{color:var(--fn)}.st{color:var(--st)}.nu{color:var(--nu)}.cm{color:var(--cm)}.at{color:var(--at)}.ma{color:var(--ma)}
+b{color:var(--strong);font-weight:600}
+a{color:inherit}
+code{font-size:.9em;background:var(--wash);padding:1px 4px;border-radius:3px;overflow-wrap:anywhere}
+pre code{background:transparent;padding:0}
+ins{background:var(--added);color:var(--added-text);text-decoration:none;border-radius:2px}
+del{background:var(--removed);color:var(--removed-text);border-radius:2px}
+.mark{font-weight:700}
+
+/* A page's head and its furrow, the one figure every page of a run opens with. */
+.head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.head h1,.head h2{font-size:21px;font-weight:650;line-height:1.25;color:var(--strong);margin:0;text-wrap:balance}
+.head h2{font-size:17px}
+.head .fact{color:var(--muted);font-size:13.5px;font-variant-numeric:tabular-nums}
+.head .id{margin-left:auto;font-size:13px;font-weight:500;color:var(--muted)}
+.title{font-size:21px;font-weight:650;line-height:1.25;color:var(--strong);margin:0;text-wrap:balance;scroll-margin-top:12px}
+.title .fact{display:block;font-size:13.5px;font-weight:400;color:var(--muted)}
+.pill{font-size:12px;font-weight:650;line-height:1;padding:4px 8px;border-radius:4px;color:var(--pill-ink);background:var(--muted);white-space:nowrap}
+.pill.needs{background:var(--needs)}.pill.failed{background:var(--failed)}.pill.done{background:var(--done)}.pill.running{background:var(--running)}.pill.caution{background:var(--caution)}
+.furrow{display:flex;gap:3px;margin:-12px 0 0}
+.furrow i{height:6px;flex:1;border-radius:2px;background:var(--rule)}
+.furrow i.done{background:var(--done)}.furrow i.failed{background:var(--failed)}.furrow i.running{background:var(--running)}.furrow i.needs{background:var(--needs)}.furrow i.caution{background:var(--caution)}
+td .furrow{margin:0;min-width:48px}
+
+/* Words. */
+.gist,.prose{max-width:68ch;margin:0}
+.note{color:var(--muted);font-size:14px;margin:0;font-style:italic}
+.said{margin:0;max-width:68ch}
+section{display:flex;flex-direction:column;gap:12px;scroll-margin-top:12px;min-width:0}
+.sec{font-size:13px;font-weight:600;line-height:1.35;color:var(--strong);margin:0}
+.decide .sec{font-size:15px;font-weight:650}
+.marked,.paths,.checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.marked li{display:flex;gap:8px;align-items:baseline}
+.paths li span{color:var(--muted)}
+.fields{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 16px;margin:0;font-size:14px}
+.fields dt{color:var(--muted);font-size:12.5px;line-height:1.65}
+.fields dd{margin:0;min-width:0;overflow-wrap:anywhere}
+details{border-top:1px solid var(--rule);padding-top:8px;display:flex;flex-direction:column;gap:12px;scroll-margin-top:12px}
+summary{cursor:pointer;font-weight:600;color:var(--strong)}
+details>*:not(summary){margin-top:12px}
+
+/* What failed, what weighs on it, and what a check found. */
+.evidence{border-left:3px solid var(--failed);padding:2px 0 2px 14px;display:flex;flex-direction:column;gap:8px}
+.evidence pre{font-size:12.5px;line-height:1.6;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.evidence .above{color:var(--muted);font-size:13px;margin:0}
+.concern{border-left:3px solid var(--caution);padding:2px 0 2px 14px;font-size:14px;display:flex;flex-direction:column;gap:6px}
+.hung{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 12px;margin:0;font-size:13.5px}
+.hung dt{color:var(--muted);font-size:12.5px}
+.hung dd{margin:0;min-width:0}
+.hung pre{font-size:12.5px;background:var(--code);border-radius:6px;padding:8px 10px;margin:4px 0 0;overflow-x:auto}
+.checks>li{display:grid;grid-template-columns:20px minmax(70px,max-content) minmax(0,1fr);gap:2px 8px;align-items:baseline}
+.checks .hung,.checks .details{grid-column:3}
+.checks .subject{font-weight:600;color:var(--strong)}
+.checks .details{list-style:none;margin:0;padding:0;font-size:13.5px;color:var(--muted)}
+.problem,.refusal{display:flex;flex-direction:column;gap:6px;font-size:14px}
+.problem pre{font-size:12.5px;line-height:1.6;background:var(--code);border-radius:8px;padding:12px 14px;margin:0;overflow-x:auto}
+.problem .at,.problem .help,.refusal .detail{font-size:13.5px;color:var(--muted);margin:0}
+.problem p,.refusal p{margin:0}
+
+/* A table reads like a table; a figure lines up. */
+.scroll{overflow-x:auto;min-width:0}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th{font-size:11.5px;font-weight:500;line-height:1.3;color:var(--muted);text-align:left;padding:0 10px 6px 0;white-space:nowrap}
+td{padding:6px 10px 6px 0;border-top:1px solid var(--rule);vertical-align:baseline}
+tbody tr:first-child td{border-top-color:transparent}
+thead+tbody tr:first-child td{border-top-color:var(--rule)}
+th.figure,td.figure{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;white-space:nowrap}
+td.state{white-space:nowrap}
+td.id{font-weight:600;color:var(--strong);white-space:nowrap;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:13px}
+td.rest{color:var(--muted);font-size:13.5px}
+.diffstat table{width:auto}
+.diffstat td.bar{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:11px;line-height:1;white-space:nowrap}
+.diffstat .foot{margin-top:6px}
+
+/* Code on its own ground, a change marked in it. */
+figure{margin:0;min-width:0;display:flex;flex-direction:column;gap:6px}
+figcaption{font-size:12px;font-weight:500;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
+figcaption span{display:block;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:400;font-size:13.5px;line-height:1.45;color:var(--ink)}
+pre.code{background:var(--code);border-radius:8px;padding:12px 14px;margin:0;font-size:12.5px;line-height:1.6;overflow-x:auto}
+.foot{font-size:12px;line-height:1.4;color:var(--muted);margin:0}
+pre.lines{font-size:12.5px;line-height:1.5;margin:0;overflow-x:auto}
+
+/* What was written by hand. */
+.written{display:flex;flex-direction:column;gap:10px;max-width:72ch}
+.written h1,.written h2,.written h3,.written h4,.written h5,.written h6{font-size:15px;font-weight:650;color:var(--strong);margin:6px 0 0}
+.written h1{font-size:18px}.written h2{font-size:16px}
+.written p,.written ul,.written ol,.written blockquote{margin:0}
+.written ul,.written ol{padding-left:20px}
+.written blockquote{border-left:3px solid var(--rule);padding-left:12px;color:var(--muted)}
+
+/* A diagram. */
+svg.flow{display:block;max-width:none}
+svg.flow rect,svg.flow polygon.node{fill:var(--panel);stroke:var(--muted)}
+svg.flow text{fill:var(--ink);font:500 12.5px ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+svg.flow text.label{fill:var(--muted);font-weight:400;font-size:11.5px}
+svg.flow path{fill:none;stroke:var(--muted)}
+svg.flow path.thick{stroke-width:2.5}
+svg.flow path.dotted{stroke-dasharray:3 3}
+svg.flow polygon.head{fill:var(--muted)}
+
+/* A decision: the one place the color of a person stands. */
+.opt{background:var(--tint);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.opt b{font-size:14.5px}
+.opt .does{font-size:14px}
+.opt .costs{color:var(--muted);font-size:13px}
+.otherwise{font-size:13px;color:var(--muted);margin:6px 0 0}
+.cmd{display:flex;align-items:center;gap:8px;width:100%;min-width:0;text-align:left;font-size:12px;line-height:1.45;color:var(--strong);background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:6px 8px;cursor:pointer}
+.cmd:hover{border-color:var(--muted)}
+.cmd:focus-visible{outline:2px solid var(--running);outline-offset:1px}
+.cmd .line{flex:1;min-width:0;overflow-wrap:anywhere}
+.cmd .act{flex:none;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:11.5px;color:var(--muted)}
+.cmd.copied .act{color:var(--done)}
+.next{display:flex;flex-direction:column;gap:6px}
+.steps{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:6px 12px;align-items:center}
+.steps span.does{color:var(--muted);font-size:13.5px}
+@media (max-width:560px){.steps{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:no-preference){.cmd{transition:border-color .12s}}

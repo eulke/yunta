@@ -7,12 +7,12 @@
 
 use std::path::Path;
 
+use surco::look::Look;
 use yunta_core::ConfigLayer;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::{blank, document};
-use crate::render::Look;
 use crate::{load_yaml, project};
 
 pub async fn check(
@@ -55,7 +55,7 @@ pub async fn check(
     let opened = super::stats::history(&ctx, &workflow.name).await;
     let (history, _) = super::stats::raw_history(&opened);
     let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
-    let outcome = verdict.report(&ctx, workflow_path.display(), look).await?;
+    let outcome = verdict.report(&ctx, &workflow_path, look).await?;
     // Advice after the verdict, which is what was asked for.
     if let Some(advice) = super::stats::verification_findings(&findings) {
         blank();

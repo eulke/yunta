@@ -6,32 +6,49 @@
 use std::io::IsTerminal;
 use std::sync::OnceLock;
 
-use dialoguer::console::Term;
-use yunta_render::color::{ColorPolicy, ColorWhen};
-use yunta_render::glyphs::{parse_choice, GlyphEnv, OVERRIDE_VAR};
-use yunta_render::ink::Ink;
-use yunta_render::{Glyphs, Look, Width};
+use console::Term;
+use surco::glyphs::{parse_choice, GlyphEnv, Glyphs, OVERRIDE_VAR};
+use surco::look::{Look, Width};
+use surco::paint::{look_of, ColorPolicy, ColorWhen, Paint, LOOK_VAR};
 
 static POLICY: OnceLock<ColorPolicy> = OnceLock::new();
 static COLUMNS: OnceLock<Option<usize>> = OnceLock::new();
 static GLYPHS: OnceLock<Glyphs> = OnceLock::new();
 
-/// Fixes this process's color policy. `main` calls it once, before
-/// anything is printed; a later call changes nothing.
+/// Fixes this process's color policy. A value of [`LOOK_VAR`] that names no
+/// layer is named on stderr. `main` calls it once, before anything is
+/// printed; a later call changes nothing.
 ///
-/// The menu a prompt draws is drawn by a library that decides color for
-/// itself, from the environment alone: it is told here what this policy
-/// decided for stderr, so `--color never` and `NO_COLOR` reach the menu
-/// as they reach every other line.
-pub(crate) fn settle_color(policy: ColorPolicy) {
-    dialoguer::console::set_colors_enabled_stderr(paints(&policy, std::io::stderr().is_terminal()));
+/// A library that draws on stderr decides color for itself, from the
+/// environment alone: it is told here what this policy decided for
+/// stderr, so `--color never` and `NO_COLOR` reach it as they reach every
+/// other line.
+pub(crate) fn settle_color(policy: ColorPolicy, look: Option<&str>) {
+    console::set_colors_enabled_stderr(paints(&policy, std::io::stderr().is_terminal()));
     POLICY.get_or_init(|| policy);
+    // Said once the policy is settled, because the word `warning` takes its paint.
+    if let Some(sentence) = unknown_look(look) {
+        crate::error::warn(sentence);
+    }
 }
 
 /// Whether a stream that is a terminal or not, under `policy`, gets
 /// paint at all.
 fn paints(policy: &ColorPolicy, terminal: bool) -> bool {
-    policy.ink(terminal) != Ink::Plain
+    policy.paint(terminal) != Paint::Plain
+}
+
+/// What a reader is told of `look`, the value [`LOOK_VAR`] was set to, when
+/// it names no layer: the stream then draws in what the rest of its
+/// environment names, as with a value of [`OVERRIDE_VAR`] that names no set.
+fn unknown_look(look: Option<&str>) -> Option<String> {
+    let value = look?;
+    look_of(Some(value)).is_none().then(|| {
+        format!(
+            "{LOOK_VAR}=`{value}` is not `plain`, `16` or `24`; drawing in the colors \
+             this environment names"
+        )
+    })
 }
 
 /// Fixes the width this process's reader asked for — `COLUMNS`, when it
@@ -50,7 +67,7 @@ pub(crate) fn settle_glyphs(env: &GlyphEnv) {
     if let Some(value) = &env.explicit {
         if parse_choice(value).is_none() {
             crate::error::warn(format!(
-                "{OVERRIDE_VAR}=`{value}` is neither `unicode` nor `ascii` — drawing with \
+                "{OVERRIDE_VAR}=`{value}` is neither `unicode` nor `ascii`; drawing with \
                  {chosen}, which is what this environment names"
             ));
         }
@@ -80,14 +97,23 @@ fn columns() -> Option<usize> {
     COLUMNS.get().copied().flatten()
 }
 
-/// The ink stdout gets in this process.
-pub(crate) fn stdout_ink() -> Ink {
-    policy().ink(std::io::stdout().is_terminal())
+/// The paint stdout gets in this process.
+pub(crate) fn stdout_paint() -> Paint {
+    policy().paint(std::io::stdout().is_terminal())
 }
 
-/// The ink stderr gets in this process.
-pub(crate) fn stderr_ink() -> Ink {
-    policy().ink(std::io::stderr().is_terminal())
+/// The look stderr gets in this process.
+pub(crate) fn stderr_look() -> Look {
+    Look {
+        glyphs: glyphs(),
+        paint: stderr_paint(),
+        width: stderr_width(),
+    }
+}
+
+/// The paint stderr gets in this process.
+pub(crate) fn stderr_paint() -> Paint {
+    policy().paint(std::io::stderr().is_terminal())
 }
 
 /// The width stdout gets in this process.
@@ -110,7 +136,7 @@ pub(crate) fn row_width(edge: usize) -> Width {
 pub(crate) fn stdout_look() -> Look {
     Look {
         glyphs: glyphs(),
-        ink: stdout_ink(),
+        paint: stdout_paint(),
         width: stdout_width(),
     }
 }
@@ -142,5 +168,22 @@ mod tests {
         assert!(!paints(&no_color, true));
         assert!(paints(&always, false));
         assert!(paints(&ColorPolicy::default(), true));
+    }
+
+    /// A look that names no layer is named, with the layers it could name;
+    /// one that names a layer, or none set, says nothing.
+    #[test]
+    fn an_unknown_look_is_named_and_a_known_one_is_not() {
+        assert_eq!(
+            unknown_look(Some("truecolor")),
+            Some(
+                "YUNTA_LOOK=`truecolor` is not `plain`, `16` or `24`; drawing in the colors \
+                 this environment names"
+                    .to_string()
+            )
+        );
+        assert_eq!(unknown_look(Some("24")), None);
+        assert_eq!(unknown_look(Some(" Plain ")), None);
+        assert_eq!(unknown_look(None), None);
     }
 }

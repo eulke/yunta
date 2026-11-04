@@ -11,8 +11,10 @@ use crate::events::node::kinds::NodeEvent;
 use crate::events::tasks::kinds::TaskEvent;
 use crate::events::tasks::{TaskCause, TaskStop};
 use crate::events::TaskStatus;
-use crate::events::{DeviationDeclaredPayload, DeviationResolvedPayload, TaskStatusChangedPayload};
-use crate::hash::CommitSha;
+use crate::events::{
+    DeviationDeclaredPayload, DeviationResolvedPayload, ShapesReadPayload, TaskStatusChangedPayload,
+};
+use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{NodeId, Seq, SessionId, TaskId};
 
 /// What the log says about one task.
@@ -102,6 +104,9 @@ pub struct TaskLedger {
     checking: BTreeSet<TaskId>,
     /// The events a status change named as the cause of its move.
     caused: BTreeSet<Seq>,
+    /// What the tree each plan was registered against held of its shapes,
+    /// by the plan's hash: the latest reading of each.
+    shapes: BTreeMap<ContentHash, ShapesReadPayload>,
 }
 
 impl TaskLedger {
@@ -229,7 +234,7 @@ impl TaskLedger {
                 }
             }
             // What a node resolved, started, assembled, hooked, closed,
-            // re-routed or opened prices no command.
+            // rerouted or opened prices no command.
             NodeEvent::RunnerResolved(_)
             | NodeEvent::Started(_)
             | NodeEvent::ContextAssembled(_)
@@ -240,6 +245,12 @@ impl TaskLedger {
             | NodeEvent::Rerouted(_)
             | NodeEvent::PullRequestOpened(_) => {}
         }
+    }
+
+    /// What the tree the plan whose bytes hash to `plan` was registered
+    /// against held of its shapes, as the latest reading of it says.
+    pub fn shapes_read(&self, plan: &ContentHash) -> Option<&ShapesReadPayload> {
+        self.shapes.get(plan)
     }
 
     /// Folds one task-domain event. A status change for a task nothing
@@ -281,6 +292,10 @@ impl TaskLedger {
             // A declaration moves nothing the ledger keeps: the status change
             // that blocks the task is its own event.
             TaskEvent::CriterionDeclaredUnpassable(_) => Ok(()),
+            TaskEvent::ShapesRead(p) => {
+                self.shapes.insert(p.plan.clone(), p.clone());
+                Ok(())
+            }
         }
     }
 
@@ -381,3 +396,47 @@ impl Default for TaskRecord {
 /// A status change naming a task no `task_registered` introduced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownTask(pub TaskId);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{InTree, ShapeRead};
+
+    /// What the tree at `at` held of the plan whose bytes are `plan`.
+    fn read(plan: &[u8], at: char) -> TaskEvent {
+        TaskEvent::ShapesRead(ShapesReadPayload {
+            plan: ContentHash::sha256(plan),
+            at: at.to_string().repeat(40).parse().unwrap(),
+            shapes: vec![ShapeRead {
+                name: "build_it".into(),
+                owner: TaskId::from_static("task-h"),
+                file: "a.rs".into(),
+                in_tree: InTree::New,
+            }],
+        })
+    }
+
+    #[test]
+    fn a_plan_s_reading_is_found_by_its_hash_and_a_later_reading_replaces_it() {
+        let mut ledger = TaskLedger::default();
+        for (seq, event) in [read(b"a", 'c'), read(b"b", 'd'), read(b"a", 'e')]
+            .iter()
+            .enumerate()
+        {
+            let meta = EventMeta {
+                seq: Seq::from(seq as u64 + 1),
+                at: chrono::DateTime::UNIX_EPOCH,
+                node: None,
+            };
+            ledger.apply(event, &meta).expect("a reading names no task");
+        }
+        let at = |plan: &[u8]| {
+            ledger
+                .shapes_read(&ContentHash::sha256(plan))
+                .map(|read| read.at.to_string())
+        };
+        assert_eq!(at(b"a"), Some("e".repeat(40)));
+        assert_eq!(at(b"b"), Some("d".repeat(40)));
+        assert_eq!(at(b"c"), None);
+    }
+}

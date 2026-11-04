@@ -92,7 +92,7 @@ fn judge_row(
         return Ok(broken(
             seq,
             format!(
-                "expected seq {expected_seq} but found {} — an event was deleted, \
+                "expected seq {expected_seq} but found {}: an event was deleted, \
                  inserted or reordered",
                 row.seq
             ),
@@ -124,7 +124,7 @@ fn judge_row(
     if recomputed.as_str() != stored_hash.as_str() {
         return Ok(broken(
             seq,
-            "stored hash does not match the recomputed chain — the event or \
+            "stored hash does not match the recomputed chain: the event or \
              its predecessor's hash was altered",
         ));
     }

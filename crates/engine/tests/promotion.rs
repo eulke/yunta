@@ -1,5 +1,5 @@
 //! Promotion at the engine boundary: the escalation
-//! at exhausted re-routes offers a `promote` option exactly when a
+//! at exhausted reroutes offers a `promote` option exactly when a
 //! later mode exists (the modes' declaration order forms a ladder), and
 //! choosing it closes *this* run for good — `run_finished` with
 //! `terminal_state: Promoted`, never reopened — after recording
@@ -30,7 +30,7 @@ const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 
 /// `lint` fails immediately (`test -f` on a file nothing ever creates)
 /// with `max_reroutes: 0` — its very first failure already exhausts
-/// re-routes, so the escalation gate fires on the first wake.
+/// reroutes, so the escalation gate fires on the first wake.
 const PROMOTABLE_WORKFLOW: &str = r#"
 name: promotable
 modes:

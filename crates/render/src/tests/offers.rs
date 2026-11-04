@@ -4,7 +4,8 @@
 
 use yunta_core::events::{
     Asks, AuthorGate, BudgetCap, Claim, ConsoleGate, DepartsFrom, DepartureMenu,
-    DeviationDeclaredPayload, Escalation, GateOption, Leads, LoopCap, Menu, ScopeWait,
+    DeviationDeclaredPayload, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption,
+    Leads, LoopCap, Menu, ScopeWait,
 };
 use yunta_core::expansion::Waiting;
 use yunta_core::reserved::ReservedOption;
@@ -35,6 +36,29 @@ fn said(label: &str, tradeoff: &str) -> (String, Option<String>) {
     (label.to_string(), Some(tradeoff.to_string()))
 }
 
+/// A failed node's menu, with the reroute the failure exhausted when it
+/// exhausted one.
+fn failure_menu(reroute: Option<ExhaustedReroute>) -> Menu {
+    Menu::Failure(Box::new(FailureMenu {
+        attempt: 1,
+        failure: Failure::Message {
+            outcome: "exit 1".into(),
+        },
+        remedies: Vec::new(),
+        stuck: None,
+        reroute,
+    }))
+}
+
+/// The abort `escalation` offers, which must read as the pause every menu's
+/// abort reads: nothing runs, and the decision stays open.
+fn reads_as_a_pause(escalation: &Escalation) {
+    assert_eq!(
+        words(escalation, "abort"),
+        said("Pause here", "nothing runs; this decision stays open")
+    );
+}
+
 /// The option an author's gate offers beside its abort, where `option` leads.
 fn gate(option: GateOption) -> Escalation {
     menu(
@@ -43,6 +67,7 @@ fn gate(option: GateOption) -> Escalation {
         },
         Menu::Gate(AuthorGate {
             assignee: "lead".into(),
+            node: None,
         }),
         vec![option, GateOption::reserved(ReservedOption::Abort)],
     )
@@ -91,10 +116,7 @@ fn token_cap_reads_as_written() {
     );
     assert_eq!(
         words(&tokens, "abort"),
-        said(
-            "Pause the run",
-            "The run pauses with reason `budget`; a resume re-asks"
-        )
+        said("Pause here", "nothing runs; this decision stays open")
     );
 }
 
@@ -148,7 +170,7 @@ fn console_reads_as_written() {
         words(&console, "reject"),
         said(
             "Reject",
-            "Fails the node; its declared re-route (if any) takes over"
+            "Fails the node; its declared reroute (if any) takes over"
         )
     );
 }
@@ -199,14 +221,14 @@ fn back_options_read_as_written() {
         words(&gate(back(true)), "revise"),
         said(
             "Back to `plan`",
-            "sends what you say back to `plan`, and asks again once it completes"
+            "sends what you say, and asks again once it completes"
         )
     );
     assert_eq!(
         words(&gate(back(false)), "revise"),
         said(
             "Back to `plan`",
-            "re-routes to `plan` and asks again once it completes"
+            "reroutes there, and asks again once it completes"
         )
     );
 }
@@ -215,29 +237,25 @@ fn back_options_read_as_written() {
 fn on_options_read_as_written() {
     assert_eq!(
         words(&gate(on(Vec::new(), false)), "proceed"),
-        said(
-            "Resolve the gate",
-            "resolves this gate; nothing in the workflow waits on it"
-        )
+        said("Resolve the gate", "nothing in the workflow waits on it")
     );
     assert_eq!(
         words(&gate(on(Vec::new(), true)), "proceed"),
         said(
             "Resolve the gate",
-            "resolves this gate; nothing in the workflow waits on it, and settles every finding \
-             it shows"
+            "nothing in the workflow waits on it, and settles every finding it shows"
         )
     );
     assert_eq!(
         words(&gate(on(vec!["pr".into()], true)), "proceed"),
         said(
             "On to `pr`",
-            "resolves this gate; `pr` runs next, and settles every finding it shows"
+            "resolves this gate, and settles every finding it shows"
         )
     );
     assert_eq!(
         words(&gate(on(vec!["pr".into()], false)), "abort"),
-        said("Abort the run", "Pauses here; nothing further executes")
+        said("Pause here", "nothing runs; this decision stays open")
     );
 }
 
@@ -277,6 +295,7 @@ fn an_option_an_older_log_wrote_reads_as_the_words_it_stored() {
         },
         Menu::Gate(AuthorGate {
             assignee: "lead".into(),
+            node: None,
         }),
         vec![stored.clone()],
     )
@@ -294,6 +313,36 @@ fn an_option_an_older_log_wrote_reads_as_the_words_it_stored() {
     );
 }
 
+/// An abort an older log stored reads as the words it kept, since the log
+/// records what the decision said when it was asked.
+#[test]
+fn an_abort_a_log_wrote_in_older_words_reads_as_written() {
+    let stored: GateOption = serde_json::from_value(serde_json::json!({
+        "id": "abort",
+        "label": "Abort the run",
+        "tradeoff": "Pauses here; nothing further executes",
+    }))
+    .expect("an older abort reads");
+    let payload = menu(
+        Claim::NeedsDecision {
+            node: "approve".into(),
+        },
+        Menu::Gate(AuthorGate {
+            assignee: "lead".into(),
+            node: None,
+        }),
+        vec![stored.clone()],
+    )
+    .into_payload();
+    assert_eq!(
+        option_words(&payload, &stored),
+        (
+            "Abort the run".to_string(),
+            Some("Pauses here; nothing further executes".to_string())
+        )
+    );
+}
+
 #[test]
 fn an_option_no_menu_words_keeps_its_id_as_its_label() {
     let retry_gate = menu(
@@ -302,6 +351,7 @@ fn an_option_no_menu_words_keeps_its_id_as_its_label() {
         },
         Menu::Gate(AuthorGate {
             assignee: "lead".into(),
+            node: None,
         }),
         vec![
             GateOption::reserved(ReservedOption::Retry),
@@ -350,4 +400,74 @@ fn a_departure_offers_accepting_it_and_sending_it_back() {
             "Its session picks the work back up with what you say"
         )
     );
+}
+
+/// A failed node with no reroute to fall back on offers an abort that pauses
+/// the run.
+#[test]
+fn an_abort_on_a_failure_reads_as_a_pause() {
+    reads_as_a_pause(&menu(
+        Claim::NodeFailed {
+            node: "lint".into(),
+        },
+        failure_menu(None),
+        vec![GateOption::reserved(ReservedOption::Abort)],
+    ));
+}
+
+/// A failed node whose reroute is spent still reads its abort as a pause.
+#[test]
+fn an_abort_on_a_reroute_reads_as_a_pause() {
+    reads_as_a_pause(&menu(
+        Claim::NodeFailed {
+            node: "lint".into(),
+        },
+        failure_menu(Some(ExhaustedReroute {
+            goto: "fix-lint".into(),
+            max_reroutes: 2,
+            next_mode: None,
+        })),
+        vec![GateOption::reserved(ReservedOption::Abort)],
+    ));
+}
+
+/// A task's scope request offers an abort that pauses the run.
+#[test]
+fn an_abort_on_a_scope_request_reads_as_a_pause() {
+    reads_as_a_pause(&menu(
+        Claim::ScopeAsked {
+            task: "t".into(),
+            reason: None,
+        },
+        Menu::Scope(ScopeWait {
+            because: Waiting::ModeAsk,
+            paths: vec!["b.txt".into()],
+            proposed: None,
+        }),
+        vec![GateOption::reserved(ReservedOption::Abort)],
+    ));
+}
+
+/// A task's departure offers an abort that pauses the run.
+#[test]
+fn an_abort_on_a_departure_reads_as_a_pause() {
+    let deviation = DeviationDeclaredPayload {
+        task_id: "greet".into(),
+        from: DepartsFrom::Criterion("grep -q Hello greeting.txt".to_string()),
+        planned: "the greeting names the person".to_string(),
+        instead: "it prints a fixed greeting".to_string(),
+        why: "the person is not known yet".to_string(),
+    };
+    reads_as_a_pause(&menu(
+        Claim::Departs {
+            task: TaskId::from("greet"),
+        },
+        Menu::Departure(Box::new(DepartureMenu {
+            deviations: vec![deviation],
+            waived: Vec::new(),
+            rewritten_by: None,
+            accept_offered: true,
+        })),
+        vec![GateOption::reserved(ReservedOption::Abort)],
+    ));
 }

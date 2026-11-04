@@ -189,19 +189,31 @@ fn status_quotes_the_tail_of_a_failed_command_and_names_where_the_rest_is() {
             && out.contains(" --> src/lib.rs:3:5"),
         "the reason the compiler gave is on the page:\n{out}"
     );
-    let objects = runs_root(&checkout.home).join(&run_id).join("objects");
-    let named = out
-        .lines()
-        .find_map(|line| line.trim_start().strip_prefix("whole output: "))
-        .unwrap_or_else(|| panic!("the page names where the output is kept:\n{out}"));
+    let whole = |out: &str| -> String {
+        out.lines()
+            .find_map(|line| line.trim_start().strip_prefix("whole output: "))
+            .unwrap_or_else(|| panic!("the page says where the output is:\n{out}"))
+            .to_string()
+    };
+    // At a glance, the command that shows the node whole.
+    let handle = &run_id[run_id.len() - 6..];
+    assert_eq!(
+        whole(&out),
+        format!("yunta status {handle} --node build"),
+        "{out}"
+    );
+    // Dug into, the file that holds everything the command printed.
+    let dug = stdout(&yunta_at!(&checkout, &["status", &run_id, "--dig"]));
+    let named = whole(&dug);
     // Shown under `~` when it is under the home the run sees.
     let named = match named.strip_prefix("~/") {
         Some(rest) => checkout.home.join(rest),
         None => std::path::PathBuf::from(named),
     };
+    let objects = runs_root(&checkout.home).join(&run_id).join("objects");
     assert!(
         named.starts_with(&objects) && named.is_file(),
-        "the page names the file that holds everything the command printed:\n{out}"
+        "the page names the file that holds everything the command printed:\n{dug}"
     );
 
     let json = yunta_at!(&checkout, &["status", &run_id, "--json"]);

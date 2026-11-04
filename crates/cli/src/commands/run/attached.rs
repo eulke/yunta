@@ -5,6 +5,8 @@
 
 use std::path::Path;
 
+use surco::look::Look;
+use surco::words::Standing;
 use yunta_core::{AdapterId, ModeName};
 use yunta_storage::AsyncStorage;
 
@@ -14,7 +16,6 @@ use crate::commands::registry::{adapters_for, ScriptedPaths};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::Mode;
-use crate::render::Look;
 
 /// What driving a run here needs: the same workflow reference, inputs and
 /// overrides every run resolves, plus the fixture that scripts its
@@ -67,7 +68,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
     // The documents the run was born with are on its log now; what the
     // rest of the run needs is the manifest.
     let manifest = frozen.manifest;
-    super::super::started(&prepared.run_id, "created", output, look);
+    super::super::started(&prepared.run_id, Standing::Created.word(), output, look);
 
     let adapters = adapters_for(
         &manifest,

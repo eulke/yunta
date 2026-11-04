@@ -129,8 +129,8 @@ pub enum Waiting {
     Person,
 }
 
-/// Why a request was denied, typed. The event log keeps this value; the
-/// words a reader sees are written from it where that reader is.
+/// Why a request was denied, typed. The event log keeps this value, and
+/// every reader, agent or person, reads the one sentence it says.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Denial {
@@ -157,6 +157,45 @@ pub enum Denial {
     Legacy {
         text: LoggedWords,
     },
+}
+
+impl Denial {
+    /// The one sentence the denial reads as, to the session whose request
+    /// it settles and to the person shown it alike: a reached path is named
+    /// with what protects it, and a legacy denial reads back as the text it
+    /// was written with.
+    pub fn sentence(&self) -> String {
+        match self {
+            Denial::ReachesProtected { reached } => format!(
+                "it reaches what the task may never write: {}",
+                reached
+                    .iter()
+                    .map(|reach| format!("{} ({})", reach.path, reach.reason.words()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Denial::ModeDeny => "scope_expansion mode is deny (the default)".to_string(),
+            Denial::NoCriterion => "rules mode requires a proposed_criterion".to_string(),
+            Denial::PrecheckPasses => {
+                "proposed criterion already passes, so there is nothing to expand for".to_string()
+            }
+            Denial::CriterionCouldNotRun => {
+                "proposed criterion could not run, so nothing judges the request".to_string()
+            }
+            Denial::TooManyFiles { touched, bound } => format!(
+                "diff at the requested paths touches {}, over the {bound}-file bound",
+                surco::text::counted(*touched, "file")
+            ),
+            Denial::NothingLeft => {
+                "no requested path is left to widen once the protected ones are out".to_string()
+            }
+            Denial::NotWidenable => "no person may widen this node's scope on this run".to_string(),
+            Denial::Chosen { note, .. } => note
+                .clone()
+                .unwrap_or_else(|| "denied by a human at the gate".to_string()),
+            Denial::Legacy { text } => text.as_str().to_string(),
+        }
+    }
 }
 
 /// A request the protection, mode and batch rules leave open.

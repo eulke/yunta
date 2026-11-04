@@ -80,12 +80,15 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
     assert!(
-        text.lines().any(|line| line.trim() == "draft"),
+        text.lines().any(|line| line.trim() == "✗ draft"),
         "the failing node heads its own detail: {text}"
     );
 
-    let (tasks_heading, tasks_problems) = document_block(&text, &staged("tasks.yaml"));
-    let (findings_heading, findings_problems) = document_block(&text, &staged("findings.yaml"));
+    // The node's evidence, under its id: the claim above it names the
+    // same documents, in one sentence.
+    let evidence = &text[text.find("✗ draft").unwrap_or_default()..];
+    let (tasks_heading, tasks_problems) = document_block(evidence, &staged("tasks.yaml"));
+    let (findings_heading, findings_problems) = document_block(evidence, &staged("findings.yaml"));
 
     // The problems block counts what it lists, and says `errors` for more
     // than one — never the `error(s)` hedge.
@@ -130,13 +133,14 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         "a finding with an empty `detail` says so: {findings_problems:?}"
     );
 
-    // The node list above stays one line per node, cut to the line: it
-    // opens with the first document, and the block under it names every
-    // one.
-    let node_line = text
+    // The table of nodes the whole story draws keeps one line per node,
+    // cut to the line: it opens with the first document, and the block
+    // under the node names every one.
+    let story = stdout(&yunta_in!(&repo, &home, &["status", &run_id, "--full"]));
+    let node_line = story
         .lines()
         .find(|line| line.contains("failed") && line.split_whitespace().any(|word| word == "draft"))
-        .unwrap_or_else(|| panic!("no one-line verdict for `draft` in:\n{text}"));
+        .unwrap_or_else(|| panic!("no one-line verdict for `draft` in:\n{story}"));
     assert!(
         node_line.contains(&staged("tasks.yaml")),
         "the collapsed line names the first document: {node_line}"
@@ -157,7 +161,7 @@ fn every_level_of_a_failure_block_hangs_one_step_under_the_line_above_it() {
     let run_id = run_two_documents(&repo, &home);
 
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
-    let mut lines = text.lines().skip_while(|line| line.trim() != "draft");
+    let mut lines = text.lines().skip_while(|line| line.trim() != "✗ draft");
     let node = lines.next().expect("the node that failed heads its detail");
     let named = staged("tasks.yaml");
     let document = lines
@@ -290,7 +294,7 @@ fn status_attributes_an_artifact_no_run_holds_to_that_artifact() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
     assert!(
-        text.lines().any(|line| line.trim() == "compose"),
+        text.lines().any(|line| line.trim() == "✗ compose"),
         "the failing node heads its own detail: {text}"
     );
     assert!(
@@ -420,8 +424,10 @@ fn status_prints_the_stderr_a_dead_session_left() {
     let run_id = run_a_dying_session(root.path(), &repo, &home);
 
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    // What the page says, read without the breaks a wrapped sentence takes.
+    let said = text.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        text.contains("session `codex` exited with code 2 before any terminal event"),
+        said.contains("session `codex` exited with code 2 before any terminal event"),
         "the node's own line says how the process went: {text}"
     );
     assert!(
@@ -482,7 +488,7 @@ fn status_lists_each_path_a_node_wrote_outside_its_scope() {
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
     let block: Vec<&str> = text
         .lines()
-        .skip_while(|line| line.trim() != "fix")
+        .skip_while(|line| line.trim() != "✗ fix")
         .collect();
     for path in ["Cargo.toml", "clippy.toml"] {
         assert!(

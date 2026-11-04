@@ -25,8 +25,8 @@ means to change what a surface prints, write the new files and review them in
 the diff:
 
 ```bash
-YUNTA_BLESS=1 cargo test -p yunta -p yunta-engine -p yunta-render
-git diff -- crates/cli/goldens crates/engine/goldens crates/render/goldens
+YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine
+git diff -- 'crates/*/goldens'
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. See
@@ -44,11 +44,12 @@ that passes does it publish the GitHub release, each binary with
 ## Where a rule came from
 
 A rule stands in the code that holds it, and why it changed is in the commit
-that changed it. The design records the project kept before that, in Spanish,
-are in git under three tags: `archive/design-corpus` holds them as they last
-stood, `archive/design-fates` holds them beside the table of where each of
-their rules went, and `archive/improve-ux` holds, one by one, the commits of the
-engine's rebuild that its merge squashed into one.
+that changed it. The design records the project kept before that, mostly in
+Spanish, are in git: `archive/design-corpus` holds them as they stood before
+Surco's crate, `git log -- docs/design` finds the records that crate added,
+`archive/design-fates` holds them beside the table of where each of their rules
+went, and `archive/improve-ux` holds, one by one, the commits of the engine's
+rebuild that its merge squashed into one.
 
 ## Pull requests
 

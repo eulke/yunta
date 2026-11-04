@@ -284,12 +284,12 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                 for pattern in &lower_cmds.allow {
                     if higher_cmds.deny.contains(pattern) {
                         conflicts.push(format!(
-                            "layer `{lower_name}` re-allows command pattern `{pattern}` denied by layer `{higher_name}` — permissions only narrow"
+                            "layer `{lower_name}` re-allows command pattern `{pattern}` denied by layer `{higher_name}`: permissions only narrow"
                         ));
                     } else if !higher_cmds.allow.is_empty() && !higher_cmds.allow.contains(pattern)
                     {
                         conflicts.push(format!(
-                            "layer `{lower_name}` allows command pattern `{pattern}` outside layer `{higher_name}`'s allowlist — permissions only narrow"
+                            "layer `{lower_name}` allows command pattern `{pattern}` outside layer `{higher_name}`'s allowlist: permissions only narrow"
                         ));
                     }
                 }
@@ -301,7 +301,7 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                 {
                     if lower_pol.strictness() < higher_pol.strictness() {
                         conflicts.push(format!(
-                            "layer `{lower_name}` loosens `packs.executors` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow",
+                            "layer `{lower_name}` loosens `packs.executors` to `{}` below layer `{higher_name}`'s `{}`: permissions only narrow",
                             lower_pol.as_str(),
                             higher_pol.as_str()
                         ));
@@ -314,7 +314,7 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                         for publisher in &lower_pub.allow {
                             if !higher_pub.allow.contains(publisher) {
                                 conflicts.push(format!(
-                                    "layer `{lower_name}` allows publisher `{publisher}` outside layer `{higher_name}`'s allowlist — permissions only narrow"
+                                    "layer `{lower_name}` allows publisher `{publisher}` outside layer `{higher_name}`'s allowlist: permissions only narrow"
                                 ));
                             }
                         }
@@ -325,7 +325,7 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
             if let (Some(lower_net), Some(higher_net)) = (lower.network, higher.network) {
                 if lower_net.default && !higher_net.default {
                     conflicts.push(format!(
-                        "layer `{lower_name}` re-enables `network.default` turned off by layer `{higher_name}` — permissions only narrow"
+                        "layer `{lower_name}` re-enables `network.default` turned off by layer `{higher_name}`: permissions only narrow"
                     ));
                 }
             }
@@ -335,7 +335,7 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
             {
                 if !higher_se.max_mode.allows(lower_se.max_mode.0) {
                     conflicts.push(format!(
-                        "layer `{lower_name}` softens `scope_expansion.max_mode` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow",
+                        "layer `{lower_name}` softens `scope_expansion.max_mode` to `{}` below layer `{higher_name}`'s `{}`: permissions only narrow",
                         lower_se.max_mode.0.as_str(),
                         higher_se.max_mode.0.as_str()
                     ));

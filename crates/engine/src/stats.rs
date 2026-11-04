@@ -26,7 +26,7 @@
 //!
 //! **Rework rate** is tokens spent on attempts beyond the first — a
 //! node's `attempt` field (`NodeStartedPayload`) already distinguishes a
-//! first try from a retry or a re-route's correction attempt, so no new
+//! first try from a retry or a reroute's correction attempt, so no new
 //! bookkeeping is needed to tell them apart.
 //!
 //! **Blocked wall-clock** (the "blocked fraction" a workflow author
@@ -72,12 +72,13 @@ pub struct NodeStat {
     /// stretch an attempt has open at the observation instant.
     pub active: Duration,
     /// How long the stretch of work still open at the observation instant
-    /// has been running. `None` when the node has no open attempt there,
+    /// has been running: the instant the run's clock is read to, so `now`
+    /// while the run is going, and its last applied event once it has
+    /// finished or broken. `None` when the node has no open attempt there,
     /// and while it waits on a person — a question, or a gate published
     /// to a forge: that wait is the node's state ([`crate::NodeState`]),
-    /// not work. Always `None` from [`compute_run_stats`], which observes
-    /// a run as of its own last event and so has no later instant to
-    /// measure an open attempt against.
+    /// not work. Always `None` from [`compute_run_stats`], which names no
+    /// instant to measure an open attempt against.
     pub open_attempt: Option<Duration>,
     /// Time between the node becoming ready (its dependencies' last
     /// terminal event, or the run's start for a root node) and its first
@@ -168,6 +169,10 @@ pub struct RunStats {
     pub asleep: Duration,
     /// That same wall-clock, by what it went to.
     pub time: TimeSpent,
+    /// The person's share of [`time`](Self::time), credited to each node a
+    /// person was asked about: two nodes asked at once each hold the stretch
+    /// `time.people` counts once. A node no person was asked about is absent.
+    pub people_by_node: BTreeMap<NodeId, Duration>,
     /// Every node that reached at least one `node_started`, in the
     /// workflow's own declaration order.
     pub nodes: Vec<NodeStat>,
@@ -224,25 +229,31 @@ impl RunStats {
 /// been running is unknown, never zero. [`compute_run_stats_at`] is this
 /// same derivation given one.
 pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStats {
-    compute_run_stats_of(workflow, &derive(events))
+    compute_run_stats_of(workflow, &derive(events), None)
 }
 
 /// [`compute_run_stats`] read from a state the caller has already derived
-/// from the run's own log: `state` is `derive(events)` for the events
-/// `compute_run_stats` would have been given, so both return the same
-/// stats. A caller that reads other things off the same state folds the
-/// log once.
-pub fn compute_run_stats_of(workflow: &Workflow, state: &RunState) -> RunStats {
-    stats_observed_at(state, workflow, None)
+/// from the run's own log, at `now`, or as of its own last event when `now`
+/// is `None`: `state` is `derive(events)` for the events
+/// [`compute_run_stats`] or [`compute_run_stats_at`] would have been given,
+/// so each returns the same stats. A caller that reads other things off the
+/// same state folds the log once.
+pub fn compute_run_stats_of(
+    workflow: &Workflow,
+    state: &RunState,
+    now: Option<DateTime<Utc>>,
+) -> RunStats {
+    stats_observed_at(state, workflow, now)
 }
 
 /// Derives one run's stats as they stand at `now` — what a run in
 /// progress needs: the attempt open at `now` reports how long it has
 /// been working ([`NodeStat::open_attempt`]), and a run that has not
-/// finished measures its wall-clock to `now`, so a node that has been
-/// silent for minutes cannot freeze the run's clock at its last event.
-/// `now` is the caller's own instant, injected: this module never reads
-/// a clock.
+/// finished or broken measures its wall-clock to `now`, so a node that
+/// has been silent for minutes cannot freeze the run's clock at its last
+/// event. A run that has finished or broken stops its clock and its open
+/// attempts at its last applied event, whatever `now` is. `now` is the
+/// caller's own instant, injected: this module never reads a clock.
 pub fn compute_run_stats_at(
     workflow: &Workflow,
     events: &[StoredEvent],
@@ -272,6 +283,10 @@ pub(crate) fn stats_observed_at(
         Some(now) if !state.ended() => Some(now),
         _ => state.clock().last_at(),
     };
+    // An open attempt is measured to the instant the clock is read to, so a
+    // run that has stopped stops its attempts with it. A read with no instant
+    // names none, and its attempts stay unmeasured.
+    let open_at = observed_at.and(until);
     let spend = state.spend();
     let total = spend.so_far();
     let activity = state.activity();
@@ -290,7 +305,8 @@ pub(crate) fn stats_observed_at(
             .map(|(start, end)| asleep.asleep_between(start, end))
             .unwrap_or_default(),
         time: state.time_spent(until),
-        nodes: node_stats(state, workflow, asleep, observed_at),
+        people_by_node: state.people_at(until),
+        nodes: node_stats(state, workflow, asleep, open_at),
         unknown_kinds: unknown_kind_counts(state),
         artifact_submissions: activity.submissions,
         submissions_by_node: activity.submissions_by_node.clone(),
@@ -334,12 +350,12 @@ fn node_stats(
     state: &RunState,
     workflow: &Workflow,
     asleep: &Suspensions,
-    observed_at: Option<DateTime<Utc>>,
+    open_at: Option<DateTime<Utc>>,
 ) -> Vec<NodeStat> {
     let run_start = state.clock().first_at();
     workflow
         .iter_nodes()
-        .filter_map(|node| node_stat(state, node, asleep, run_start, observed_at))
+        .filter_map(|node| node_stat(state, node, asleep, run_start, open_at))
         .collect()
 }
 
@@ -350,7 +366,7 @@ fn node_stat(
     node: &Node,
     asleep: &Suspensions,
     run_start: Option<DateTime<Utc>>,
-    observed_at: Option<DateTime<Utc>>,
+    open_at: Option<DateTime<Utc>>,
 ) -> Option<NodeStat> {
     let record = state.nodes.get(&node.id)?;
     let started = record.first_started?;
@@ -371,9 +387,9 @@ fn node_stat(
         tokens: record.spend.so_far(),
         attempts: record.attempts,
         active: record.active,
-        open_attempt: observed_at
+        open_attempt: open_at
             .zip(record.working_since)
-            .map(|(now, since)| asleep.awake_between(since, now)),
+            .map(|(at, since)| asleep.awake_between(since, at)),
         blocked: ready.map_or(Duration::ZERO, |ready| asleep.awake_between(ready, started)),
         models: record.models.clone(),
     })

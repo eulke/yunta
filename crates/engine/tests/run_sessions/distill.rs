@@ -54,7 +54,7 @@ nodes:
 on_finish:
   - distill: [{ node: plan, name: plan.md }, { node: notes, name: notes.md }]
 "#;
-    // `notes` fails before producing its artifact — but with a re-route
+    // `notes` fails before producing its artifact — but with a reroute
     // budget of zero the run pauses... instead: notes produces, then we
     // delete it? Simpler: notes' fixture writes the artifact and the run
     // finishes, then this test only covers the produced path. The

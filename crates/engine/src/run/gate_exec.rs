@@ -5,11 +5,12 @@
 //! decide, and how they are told — and the person who answers needs
 //! neither Yunta nor the run's machine.
 //!
-//! Publishing commits on the gate's branch the bytes the run holds for each
-//! artifact the gate names, under the name its identity gives it, opens a
-//! pull request that asks the gate's question, and leaves the gate waiting
-//! with nothing running. An artifact the run does not hold fails the node
-//! naming it, so a partial review is never published.
+//! Publishing commits on the gate's branch, in a folder of the run's, the
+//! bytes the run holds for each artifact the gate names, under the name its
+//! identity gives it, opens a pull request that asks the gate's question, and
+//! leaves the gate waiting with nothing running. [`gate_publish`] assembles
+//! what goes out: an artifact the run does not hold fails the node naming it,
+//! so a partial review is never published.
 //!
 //! Resolution is pulled, never pushed: no webhook and no daemon, only a poll
 //! of the pull request each time the run wakes, and a review decides only
@@ -18,12 +19,16 @@
 //! on which commit. A request for changes turns each comment into
 //! `finding_posted`, mounted for the corrective node the way `node-output`
 //! is, so a reviewer's words reach the fixing session without a summary in
-//! between, and fails the node toward its `on_failure`; a pull request
-//! closed unmerged fails it. On each wake of a run still open, a passed gate
-//! whose pull request moved past the approved commit waits again. Each answer
-//! becomes the event vocabulary every node kind uses (`node_started`,
-//! `node_finished`, `node_failed`), so nothing downstream needs to know a
-//! gate is different once it is resolved.
+//! between, and fails the node toward its `on_failure`. On each wake of a run
+//! still open, a passed gate whose pull request moved past the approved commit
+//! waits again. Each answer becomes the event vocabulary every node kind uses
+//! (`node_started`, `node_finished`, `node_failed`), so nothing downstream
+//! needs to know a gate is different once it is resolved.
+//!
+//! A pull request a person closed without merging pauses the run at its
+//! gate, as `abort` pauses it at a terminal: the node is not failed. Two answers
+//! that mean "not now" do the same thing, and a reroute from a failed gate would
+//! only poll the closed pull request again.
 //!
 //! **No forge, no credentials: degrades to console.** Both entry points
 //! fall back to [`console_gate`](super::console_gate), which asks here
@@ -32,15 +37,16 @@
 //! [`flawed`](super::flawed) sends it back instead.
 
 use yunta_core::events::{
-    Approval, Claim, EngineFact, Escalation, EventPayload, Failure, Finding, FindingCause,
+    Approval, Claim, EngineFact, EventPayload, Failure, Finding, FindingCause,
     FindingPostedPayload, FindingSays, FindingSeverity, GateResolvedPayload, NodeOutcome,
-    NodeStartedPayload, PauseReason, PublishedGate, Shown, TokenUsage,
+    NodeStartedPayload, PauseReason, TokenUsage,
 };
 use yunta_core::port::{
-    Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewComment, ReviewOutcome,
+    Forge, PolledGate, PublishRequest, PullRequestRef, ReviewComment, ReviewOutcome,
 };
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, Responder};
 
+use super::gate_publish::{self, Assembly};
 use super::node_close::{fail, fail_with, finish_node};
 use super::node_exec::template_vars;
 use super::pull_request_exec::forge_limit;
@@ -81,34 +87,17 @@ pub(super) async fn publish_gate(
         Step::Value(rendered) => rendered,
         Step::Ended(step) => return Ok(step),
     };
-    let Some((artifacts, shows)) = held_for_review(ctx, node, external).await? else {
-        return Ok(GateStep::Resolved);
-    };
-    let state = ctx.run_view().await?.state;
-    let shown = crate::artifacts::shown::documents(ctx.run_dir, &shows, &state).await?;
-    let flaws = super::flawed::unprovable(&shown);
-    if !flaws.is_empty() {
-        return super::flawed::send_back(ctx, node, &flaws).await;
-    }
-
-    let summary = Claim::AwaitsReview {
-        node: node.id.clone(),
-        assignee: Some(assignee.to_string()),
-    };
-    let request = PublishRequest {
-        branch,
-        base_branch: ctx.manifest.base_branch.clone(),
-        run_id: ctx.run_id.clone(),
-        decision: decision(ctx, node, assignee, message),
-        artifacts,
-        shown,
+    let assembled = gate_publish::assemble(ctx, node, external, assignee, message, branch).await?;
+    let request = match assembled {
+        Assembly::Ready(request) => request,
+        Assembly::Ended(step) => return Ok(step),
     };
 
     let Some(published) = publish_or_fail(ctx, node, forge, &request).await? else {
         return Ok(GateStep::Resolved);
     };
 
-    emit_waiting(ctx, node, summary, &published).await?;
+    gate_publish::emit_waiting(ctx, node, &request, &published).await?;
     Ok(GateStep::Waiting(PauseReason::ExternalGate {
         url: published.url,
     }))
@@ -138,88 +127,6 @@ async fn publish_or_fail(
             fail_with(ctx, node, failure, TokenUsage::default()).await?;
             Ok(None)
         }
-    }
-}
-
-/// Emits the gate's waiting event, naming the pull request it waits on.
-async fn emit_waiting(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    summary: Claim,
-    published: &PullRequestRef,
-) -> Result<(), RunError> {
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(Box::new(
-            Escalation::published_to(
-                summary,
-                PublishedGate {
-                    url: published.url.clone(),
-                },
-                encode_ref(published),
-            )
-            .into_payload(),
-        ))),
-    )
-    .await?;
-    Ok(())
-}
-
-/// What the reviewer decides on, as the run holds it: each artifact's
-/// bytes under the name its identity gives it, and the log's name for
-/// each. `None` once the node failed for one the run does not hold — a
-/// partial review is never published.
-async fn held_for_review(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    external: &ExternalGate,
-) -> Result<Option<(Vec<(String, Vec<u8>)>, Vec<Shown>)>, RunError> {
-    let events = ctx.load_events().await?;
-    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
-    let mut artifacts = Vec::new();
-    let mut shows = Vec::new();
-    for spec in &external.artifacts {
-        let wanted = yunta_core::events::ArtifactId::from(spec);
-        let Some(artifact) = held.held(&wanted, None) else {
-            emit_started(ctx, node).await?;
-            let failure = Failure::GateArtifactMissing {
-                node: node.id.clone(),
-                gate_artifact: wanted,
-            };
-            fail(ctx, node, failure).await?;
-            return Ok(None);
-        };
-        let bytes = held
-            .bytes(artifact)
-            .await
-            .map_err(crate::artifacts::HeldError::from)?;
-        artifacts.push((wanted.view_name(), bytes));
-        shows.push(Shown {
-            producer: artifact.producer.clone(),
-            artifact: artifact.artifact.clone(),
-            content_hash: artifact.content_hash.clone(),
-        });
-    }
-    Ok(Some((artifacts, shows)))
-}
-
-/// What the gate's pull request asks, and what each answer a review can
-/// give does to the run: the nodes that wait on it go on once it passes,
-/// and a request for changes goes where its `on_failure` sends it.
-fn decision(ctx: &RunCtx<'_>, node: &Node, assignee: &str, message: Option<&str>) -> GateDecision {
-    GateDecision {
-        node: node.id.clone(),
-        question: super::internal_gate::claim(node, message),
-        assignee: assignee.to_string(),
-        then: ctx
-            .manifest
-            .workflow
-            .nodes
-            .iter()
-            .filter(|next| next.depends_on.contains(&node.id))
-            .map(|next| next.id.clone())
-            .collect(),
-        corrected_by: node.on_failure.as_ref().map(|on| on.goto.clone()),
     }
 }
 
@@ -370,23 +277,26 @@ async fn resolve_changes_requested(
     Ok(GateStep::Resolved)
 }
 
-/// Resolves a gate whose pull request closed without merging: the node fails.
+/// A gate whose pull request a person closed without merging: they paused the
+/// decision there, as `abort` pauses it at a terminal. No `node_started` or
+/// `node_failed` is recorded: the gate's resolution says the pull request
+/// closed, and the run pauses. A gate the SHA-drift check reopened is `Running`
+/// when its pull request closes: it is not restored, its handle is cleared, and
+/// the run pauses.
 async fn resolve_closed(
     ctx: &RunCtx<'_>,
     node: &Node,
     published: &PullRequestRef,
 ) -> Result<GateStep, RunError> {
-    emit_started(ctx, node).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Closed)),
     )
     .await?;
-    let failure = Failure::PullRequestClosed {
-        closed_pull_request: Some(published.url.clone()),
-    };
-    fail(ctx, node, failure).await?;
-    Ok(GateStep::Resolved)
+    Ok(GateStep::Waiting(PauseReason::PullRequestClosed {
+        node: node.id.clone(),
+        url: published.url.clone(),
+    }))
 }
 
 /// Re-checks every already-`Finished` `kind: gate` node against its
@@ -468,8 +378,13 @@ pub(super) async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), Ru
     Ok(())
 }
 
-fn encode_ref(published: &PullRequestRef) -> String {
-    serde_json::to_string(published).unwrap_or_default()
+/// The pull request's handle as the log keeps it: the JSON that `decode_ref`
+/// reads back. A handle that cannot be written is a broken run, not an empty
+/// handle that the next poll would refuse.
+pub(super) fn encode_ref(published: &PullRequestRef) -> Result<String, RunError> {
+    serde_json::to_string(published).map_err(|e| RunError::Broken {
+        diagnostic: format!("gate_waiting.external_ref isn't encodable: {e}"),
+    })
 }
 
 fn decode_ref(external_ref: &str) -> Result<PullRequestRef, RunError> {

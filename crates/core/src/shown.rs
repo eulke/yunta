@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::events::artifacts::HandedOver;
 use crate::events::findings::RunFindings;
 use crate::events::{AcceptedDeparture, Shown};
-use crate::{HeldFindings, QuestionId, SpecFile, TaskId, TasksFile};
+use crate::{HeldFindings, NodeId, QuestionId, SpecFile, TaskId, TasksFile};
 
 /// One document an escalation shows, as the run holds it: what the log
 /// names, where its view sits, and what it says.
@@ -15,6 +15,25 @@ pub struct ShownDocument {
     pub shown: Shown,
     pub path: std::path::PathBuf,
     pub content: ShownContent,
+}
+
+/// The change the first plan among `documents` that says it changes something
+/// names: its summary, trimmed, when it holds a letter or a digit. It is the
+/// change a decision that shows it asks a person to approve. A summary of
+/// punctuation or whitespace alone, such as `...`, says no change, so the next
+/// plan is tried. `None` when no plan among them says one.
+pub fn change_shown(documents: &[ShownDocument]) -> Option<&str> {
+    documents
+        .iter()
+        .find_map(|document| match &document.content {
+            ShownContent::Tasks(review) => review
+                .plan
+                .summary
+                .as_deref()
+                .map(str::trim)
+                .filter(|summary| summary.chars().any(char::is_alphanumeric)),
+            _ => None,
+        })
 }
 
 /// A shown document's content: a tasks document read into its tasks, a
@@ -46,8 +65,15 @@ pub struct PlanReview {
     /// were built — where the work stops being what the plan says.
     pub departed: Vec<AcceptedDeparture>,
     /// The spec the plan is shown with, when a decision shows both: its
-    /// tests are read on their tasks rather than as a second document.
+    /// tests are what proves each task, a step away from the change.
     pub spec: Option<SpecFile>,
+    /// The node whose page shows the spec's tests whole: the one that
+    /// wrote the spec, or the one that wrote the plan when the spec came
+    /// from no node of the run's, since the plan's page shows its spec.
+    pub spec_node: Option<NodeId>,
+    /// What the person asked the run for, as they wrote it: the request
+    /// the plan answers.
+    pub asked: Option<String>,
     /// The commands the run measured green before any work — its suite,
     /// and each `baseline.held` names — which hold every task.
     pub held: Vec<String>,
@@ -58,6 +84,11 @@ pub struct PlanReview {
     /// Each question the run asked that a person answered: a decision
     /// that `answers` one restates what they said.
     pub answered: Vec<Answered>,
+    /// What the tree the plan was registered against held of its shapes, as
+    /// the run read it then. `None` where it read none of them: a plan no
+    /// shape of which is named by one word of code, or a log from before the
+    /// run read them.
+    pub shapes_read: Option<crate::events::ShapesReadPayload>,
 }
 
 /// A question the run asked, and what a person answered.
@@ -152,17 +183,6 @@ pub enum Flaw {
 }
 
 impl Flaw {
-    /// The task the flaw is in.
-    pub fn task(&self) -> &TaskId {
-        match self {
-            Flaw::PassesByAName { task, .. }
-            | Flaw::HollowSpecTest { task, .. }
-            | Flaw::UnrunSpecFile { task, .. }
-            | Flaw::ChangesASpecTest { task, .. }
-            | Flaw::JudgedByAnotherTasksTest { task, .. } => task,
-        }
-    }
-
     /// What the flaw means for the decision.
     pub fn so(&self) -> String {
         match self {
@@ -187,7 +207,7 @@ impl Flaw {
         match self {
             Flaw::PassesByAName { .. } => "run the test that observes the behavior",
             Flaw::HollowSpecTest { .. } => {
-                "run a file the spec wrote — or give the task no spec, and say why"
+                "run a file the spec wrote, or give the task no spec, and say why"
             }
             Flaw::UnrunSpecFile { .. } => "name it in the command of the test that runs it",
             Flaw::ChangesASpecTest { .. } => {
@@ -248,39 +268,9 @@ pub struct TaskReview {
     /// Each change the plan names on a file a person approved as a test,
     /// which no session may write.
     pub denied: Vec<DeniedChange>,
-    /// Each file the spec wrote for the task, with the tests that run it.
-    pub files: Vec<SpecFileReview>,
     /// The task's own guards — what checks what it keeps — the suite
     /// aside.
     pub guards: Vec<JudgedCriterion>,
-}
-
-impl TaskReview {
-    /// How many of the spec's tests the task is held to run a file the
-    /// spec wrote — every one of them when the spec wrote none. A test
-    /// that runs none of the spec's files holds the task to nothing the
-    /// spec says.
-    pub fn spec_tests_that_run(&self) -> usize {
-        self.criteria
-            .iter()
-            .filter(|criterion| matches!(criterion.from, HeldTo::Spec))
-            .filter(|criterion| {
-                self.files.is_empty()
-                    || self
-                        .files
-                        .iter()
-                        .any(|file| file.run_by.contains(&criterion.cmd))
-            })
-            .count()
-    }
-}
-
-/// A file the spec wrote for a task, and the commands of its tests that
-/// run it: none, and the file judges nothing.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SpecFileReview {
-    pub path: String,
-    pub run_by: Vec<String>,
 }
 
 /// One criterion a task is judged by, and what holds the task to it.
@@ -296,8 +286,7 @@ pub struct JudgedCriterion {
 pub enum HeldTo {
     /// The plan declares it, and no test of the spec runs it.
     Plan,
-    /// A test the spec gives this task; which of its files it runs is the
-    /// task's [`SpecFileReview`] to say.
+    /// A test the spec gives this task.
     Spec,
     /// The plan declares it, and it runs the test the spec gives
     /// another task.
@@ -351,5 +340,54 @@ mod tests {
                  wrote for `t1`, is run by none of its tests (and 2 more)"
             )
         );
+    }
+
+    /// A shown document holding `content`.
+    fn shown(content: ShownContent) -> ShownDocument {
+        ShownDocument {
+            shown: Shown {
+                producer: None,
+                artifact: crate::events::ArtifactId::Interpreted {
+                    kind: crate::ArtifactKind::Tasks,
+                },
+                content_hash: crate::ContentHash::sha256(b"plan"),
+            },
+            path: std::path::PathBuf::from("artifacts/plan/tasks.yaml"),
+            content,
+        }
+    }
+
+    /// A plan whose summary is `summary`.
+    fn plan(summary: &str) -> ShownContent {
+        ShownContent::Tasks(Box::new(PlanReview {
+            plan: TasksFile {
+                summary: Some(summary.to_string()),
+                ..TasksFile::of(Vec::new())
+            },
+            departed: Vec::new(),
+            spec: None,
+            spec_node: None,
+            asked: None,
+            held: Vec::new(),
+            tasks: Vec::new(),
+            handed_over: None,
+            answered: Vec::new(),
+            shapes_read: None,
+        }))
+    }
+
+    /// The change is the first plan's trimmed summary that holds a letter or digit, else None.
+    #[test]
+    fn the_change_shown_is_what_the_first_plan_that_says_one_says() {
+        let documents = [
+            shown(ShownContent::Text("a brief".to_string())),
+            shown(plan("  \n ")),
+            shown(plan("  Make it.\n")),
+            shown(plan("Make another")),
+        ];
+        assert_eq!(change_shown(&documents), Some("Make it."));
+        assert_eq!(change_shown(&documents[..2]), None);
+        let punctuated = [shown(plan("...")), shown(plan("Make it"))];
+        assert_eq!(change_shown(&punctuated), Some("Make it"));
     }
 }

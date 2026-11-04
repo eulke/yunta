@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/surco",
     "crates/core",
     "crates/storage",
     "crates/adapters",
@@ -24,6 +25,7 @@ repository = "https://github.com/eulke/yunta"
 # crates carry `version` because crates.io rejects a path dependency
 # without one.
 [workspace.dependencies]
+yunta-surco = { path = "crates/surco", version = "0.0.5" }
 yunta-core = { path = "crates/core", version = "0.0.5" }
 yunta-storage = { path = "crates/storage", version = "0.0.5" }
 yunta-adapters = { path = "crates/adapters", version = "0.0.5" }
@@ -42,10 +44,10 @@ clap = "4"
 clap_complete = "4"
 futures = "0.3"
 globset = "0.4"
-dialoguer = { version = "0.12", default-features = false }
 errno = "0.3"
 indexmap = "2"
 indicatif = "0.18"
+console = "0.16"
 nix = { version = "0.31", features = ["signal", "process"] }
 libc = "0.2"
 rustix = { version = "1.1", features = ["fs", "process"] }

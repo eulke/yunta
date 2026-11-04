@@ -64,7 +64,7 @@ defaults:
   isolation: worktree               # worktree | none; a workflow node says the same word
   timeout_minutes: 45               # the time a session may run while the host is awake
   max_parallel_nodes: 4             # independent nodes the scheduler runs at once
-  on_failure: pause                 # pause | abort | continue, for a node with no re-route
+  on_failure: pause                 # pause | abort | continue, for a node with no reroute
   on_interrupt: restart_node        # restart_node | fail_if_uncertain | resume_session
 
 skills:
@@ -131,6 +131,9 @@ limits:
   inline_context_bytes: 32000       # past this size, context is mounted by reference
   max_expansion_files: 5            # files a rules-mode expansion may name before it is denied
 
+terminal:
+  bell: false                       # rings when a prompt asks its person; the window's title says it either way
+
 pricing:                            # optional; without it stats and the receipt count tokens only
   claude-opus-4-8: { cost_per_1k_tokens: 0.015 }
   claude-sonnet-4-6: { cost_per_1k_tokens: 0.003 }
@@ -155,6 +158,8 @@ inputs:                             # each input has a type, and only that type'
   idea:
     type: string
     required: true
+    request: true                   # what the person asked the run for, which a plan's page quotes;
+                                    # one string input at most says it
     description: "What to build; it becomes the brief"
     min_length: 10
   ticket:
@@ -242,7 +247,7 @@ nodes:                              # an id is a letter, then letters, digits, `
     kind: gate
     depends_on: [plan]
     assignee: lead
-    message: "Plan recorded. Do you approve?"
+                                    # no message, or a blank one: it asks "Approve the plan: <summary>?"
     options: [approve, adjust]
     on: { adjust: plan }            # asks what to change, and resumes plan's session with it
     shows: [{ node: plan, kind: tasks }]   # the plan approved, bound to its hash

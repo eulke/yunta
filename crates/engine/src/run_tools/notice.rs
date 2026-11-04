@@ -68,7 +68,7 @@ pub(crate) fn task_notice(
     let approved = match tests.is_empty() {
         true => String::new(),
         false => words::approved_tests_text(
-            &yunta_core::text::listed(tests.iter().map(|file| file.path.as_str())),
+            &surco::text::listed(tests.iter().map(|file| file.path.as_str())),
             &session.called(RunTool::DeclareDeviation),
         ),
     };

@@ -24,13 +24,13 @@ pub(crate) fn artifact_name_description() -> &'static str {
 /// withdraw one.
 pub(crate) fn post_finding_description(update: &str, withdraw: &str) -> String {
     format!(
-        "Report a structured finding the moment you see it — one call per \
+        "Report a structured finding the moment you see it: one call per \
          finding. The engine validates it at once: unknown keys, wrong types, \
          empty fields, and an id this node already used are refused with what \
          to fix, and nothing else you reported is lost. An accepted finding is \
          counted, deduplicated and consulted with every other finding on the \
-         run, survives this session, and — when this node declares a `findings` \
-         artifact — is written into that file at the end. Never write a findings \
+         run, survives this session, and, when this node declares a `findings` \
+         artifact, is written into that file at the end. Never write a findings \
          file yourself. A `proposed_criterion` is a command that fails on the run's \
          tree now and passes once the finding is fixed: one that already passes, or \
          cannot run, is refused. To change a finding you reported, use `{update}`; to \
@@ -42,7 +42,7 @@ pub(crate) fn post_finding_description(update: &str, withdraw: &str) -> String {
 pub(crate) fn update_finding_description(post: &str) -> String {
     format!(
         "Replace a finding this node already reported, by id, with its whole \
-         new content — same fields as `{post}`, validated the same way. Use it when \
+         new content: same fields as `{post}`, validated the same way. Use it when \
          a finding turns out to be more or less severe, wrongly located, or better \
          explained. Only a finding this node reported can be updated, and a \
          withdrawn one cannot; the previous state stays in the run's log."
@@ -51,7 +51,7 @@ pub(crate) fn update_finding_description(post: &str) -> String {
 
 /// What the tool that takes a finding back does.
 pub(crate) fn withdraw_finding_description() -> &'static str {
-    "Take back a finding this node reported, by id, saying why — a non-empty \
+    "Take back a finding this node reported, by id, saying why: a non-empty \
      `reason`, such as a false positive or something fixed by other work. A \
      withdrawn finding is left out of every count, file and view from now on, \
      but the log keeps it and the reason. Withdrawal is final: a finding that \
@@ -64,9 +64,9 @@ pub(crate) fn findings_description(answer: &str) -> String {
     format!(
         "Every finding the run holds, settled or not: the node that reported it, its id, \
          severity and location, then either the title and detail a node wrote or, for one \
-         the engine reported, its `cause`, and the proposed criterion when there is one — \
-         the view a gate shows. Each lists the `answers` other nodes gave it with `{answer}`. \
-         A finding taken back is not here."
+         the engine reported, its `cause`, and the proposed criterion when there is one. \
+         This is the view a gate shows. Each lists the `answers` other nodes gave it with \
+         `{answer}`. A finding taken back is not here."
     )
 }
 
@@ -75,7 +75,7 @@ pub(crate) fn findings_description(answer: &str) -> String {
 pub(crate) fn answer_finding_description(update: &str, withdraw: &str, findings: &str) -> String {
     format!(
         "Answer a finding another node reported: `fixed` when your work fixed it, \
-         `declined` when it is wrong or its fix belongs to another change — always saying \
+         `declined` when it is wrong or its fix belongs to another change, always saying \
          `why`. Name it by the node that reported it and its id, as `{findings}` shows \
          them. The answer stands beside \
          the finding for a person to read, and answering it again replaces what you \
@@ -96,7 +96,7 @@ pub(crate) fn answer_id_description() -> &'static str {
 
 /// What the tool that reads the run's tasks document by status does.
 pub(crate) fn task_status_description() -> &'static str {
-    "Read-only view of the run's tasks document (task id -> status) — the same data \
+    "Read-only view of the run's tasks document (task id -> status): the same data \
      the `tasks` context source mounts, queryable mid-session."
 }
 
@@ -105,17 +105,17 @@ pub(crate) fn task_description() -> &'static str {
     "Read the task this session works, from the run's tasks document: its id, title \
      and notes; `scope`, the globs every change must stay inside (what the task declared \
      plus what was granted to it); `denied`, what no change may touch whatever the scope \
-     — what the project denies, and the files of every test a person approved, this \
-     task's own among them; `granted`, the instruction files a person let this task \
+     (what the project denies, and the files of every test a person approved, this \
+     task's own among them); `granted`, the instruction files a person let this task \
      write although `denied` holds them; and `criteria`, the commands that must all exit 0 \
-     when your session ends — a criterion is red before the work starts, and a `guard` \
+     when your session ends. A criterion is red before the work starts, and a `guard` \
      is green before it and must stay green; each may say what it `proves`. When the run \
      measured its suite green before changing anything, that suite is among the guards: \
      a change that breaks what passed keeps the task open. `cycles` lists what the engine \
      found each time the task ran, the current cycle last: its pre-check, then each \
      attempt's criteria and the paths it changed outside the scope. `plan` is the plan \
-     the task belongs to: its summary, description and `design` — the shapes it creates, \
-     which your task names rather than restates — its risks, what it leaves out, and \
+     the task belongs to: its summary, description and `design` (the shapes it creates, \
+     which your task names rather than restates), its risks, what it leaves out, and \
      `other_tasks`, which own what your scope leaves out. The tasks document is not \
      in your checkout; this is where it is read."
 }
@@ -127,7 +127,7 @@ pub(crate) fn check_task_description() -> &'static str {
      changed against the task's scope. Its guards run once every other criterion \
      passes, in order and stopping at the first that fails; `guards_waiting` names \
      those not run yet. `closes` is true when every \
-     criterion and guard exits 0 and nothing changed lies outside the scope — the \
+     criterion and guard exits 0 and nothing changed lies outside the scope; the \
      task is then done if the tree does not change again. A scope expansion you \
      asked for counts only once granted. \
      It answers when the criteria have, however long they take. Calling it again on \
@@ -141,10 +141,10 @@ pub(crate) fn check_task_description() -> &'static str {
 pub(crate) fn check_scope_description(ask: &str) -> String {
     format!(
         "Audit what this node changed against its scope exactly as the engine will \
-         when your session ends. `scope` is what you may write — what the node \
-         declared plus what a person granted it — and `outside_scope` lists every \
+         when your session ends. `scope` is what you may write (what the node \
+         declared plus what a person granted it) and `outside_scope` lists every \
          path you changed outside it. A path outside fails the node; if your fix \
-         needs one, ask with `{ask}` instead of writing it — unless no session of \
+         needs one, ask with `{ask}` instead of writing it, unless no session of \
          the run may write it (what the project denies, or a test a person \
          approved), which no request widens."
     )
@@ -171,8 +171,8 @@ pub(crate) fn deviation_description() -> &'static str {
 
 /// What the tool that asks for a wider scope does.
 pub(crate) fn scope_expansion_description() -> &'static str {
-    "Ask for the scope you work to be widened — you never widen it yourself. Provide the \
-     paths and the reason; for a task, also a verifiable criterion that is red today — or, \
+    "Ask for the scope you work to be widened; you never widen it yourself. Provide the \
+     paths and the reason; for a task, also a verifiable criterion that is red today, or, \
      when one of your task's own criteria fails and its output points at each path as \
      `path:line`, that criterion's command as `evidence`: the engine runs it and, if it \
      still points there, grants the paths itself. A task's request its loop's rules would \
@@ -185,7 +185,7 @@ pub(crate) fn scope_expansion_description() -> &'static str {
 
 /// What the tool that reads the group's blackboard does.
 pub(crate) fn blackboard_description() -> &'static str {
-    "Read this group's blackboard — your OWN posts only while the group runs \
+    "Read this group's blackboard: your OWN posts only while the group runs \
      (siblings' posts become readable after the join, through the \
      group's consolidated output, so results never depend on arrival order)."
 }
@@ -195,8 +195,8 @@ pub(crate) fn blackboard_description() -> &'static str {
 pub(crate) fn submit_description(kind: ArtifactKind, runs_under: &str) -> String {
     format!(
         "Submit this node's `{kind}` document as a structured object. The engine \
-         validates it exactly as the node's close will — unknown keys, wrong types, \
-         and the document's own rules — and writes the artifact file itself once it \
+         validates it exactly as the node's close will (unknown keys, wrong types, \
+         and the document's own rules) and writes the artifact file itself once it \
          is accepted. A refusal lists every problem to fix; submit again until it is \
          accepted. An acceptance reports what the engine read, so you can see your \
          meaning survived. Submitting again replaces the document.{runs_under}"

@@ -1,0 +1,16 @@
+␛[31m✗␛[0m ␛[1mfragua (quick)␛[0m␛[2m ·␛[0m␛[31m failed ␛[0m␛[2m· after 7m41s␛[0m␛[2m · 32m10s ago␛[0m                                          7E5PH4
+␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+  node `lint` failed: exit 101.
+
+  ␛[31m✗␛[0m ␛[1mlint␛[0m
+  ␛[2m  │ ␛[0merror[E0425]: cannot find value `x` in this scope
+  ␛[2m  │ ␛[0m --> src/lib.rs:3:5
+    ␛[2mwhole output: ␛[0m␛[1myunta status 7E5PH4 --node lint␛[0m
+
+  ␛[2mprogress    ␛[0m 1 of 3 nodes done
+  ␛[2mnodes       ␛[0m ␛[32m✓ ␛[0m1 finished: plan
+  ␛[2m            ␛[0m ␛[31m✗ ␛[0m1 failed: lint
+  ␛[2m            ␛[0m ␛[2m◌ ␛[0m1 never ran: test
+
+␛[2mnext␛[0m
+  ␛[1myunta status 7E5PH4 --full␛[0m   ␛[2mthe whole story, node by node␛[0m

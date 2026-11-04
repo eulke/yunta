@@ -6,15 +6,14 @@
 
 use std::path::{Path, PathBuf};
 
+use surco::components::{Evidence, PathNote, Paths, Said, Whole};
+use surco::doc::Block;
 use yunta_core::events::{ExhaustedReroute, Failure, FailureMenu, OwedScope, Precondition, Stuck};
 use yunta_core::protected::Protection;
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{listed_globs, ModeName};
 
-use super::{Drawn, Evidence, Whole};
 use crate::failure as words;
-use crate::ink::Line;
-use crate::{indent, Look, INDENT};
 
 /// One failure's detail, as every surface that quotes it quotes it.
 pub struct FailureDetail<'a> {
@@ -24,15 +23,8 @@ pub struct FailureDetail<'a> {
     pub whole: Option<Whole>,
 }
 
-/// A path a failure names, and the reason it is named for, when the
-/// failure gives one.
-pub struct PathNote {
-    pub path: PathBuf,
-    pub reason: Option<String>,
-}
-
 /// What a failure's detail says, whatever medium draws it.
-pub enum FailureSays {
+enum FailureSays {
     /// The end of what a command printed, and where the rest is.
     Evidence(Evidence),
     /// Lines that say it whole.
@@ -47,10 +39,26 @@ pub enum FailureSays {
 }
 
 impl FailureDetail<'_> {
+    /// The blocks this failure says itself in beyond its node's row, on
+    /// every surface: the end of what a command printed, lines said whole,
+    /// or a heading and the paths it names.
+    pub fn blocks(&self) -> Vec<Block> {
+        match self.says() {
+            FailureSays::Evidence(evidence) => vec![Block::Evidence(evidence)],
+            FailureSays::Text(lines) => vec![Block::Said(Said(lines))],
+            FailureSays::Listed { heading, paths } => vec![Block::Paths(Paths { heading, paths })],
+            FailureSays::Nothing => Vec::new(),
+        }
+    }
+
     /// What this failure says beyond its node's row.
-    pub fn says(&self) -> FailureSays {
+    fn says(&self) -> FailureSays {
         let failure = self.failure;
         match failure {
+            // A command that printed nothing has nothing to quote.
+            Failure::Exited { exited } if exited.tail.is_empty() && self.whole.is_none() => {
+                FailureSays::Nothing
+            }
             Failure::Exited { exited } => FailureSays::Evidence(Evidence {
                 tail: exited.tail.clone(),
                 whole: self.whole.clone(),
@@ -117,9 +125,7 @@ fn denied_says(paths: &[PathBuf], reasons: &[Protection]) -> FailureSays {
             .enumerate()
             .map(|(index, path)| PathNote {
                 path: path.clone(),
-                reason: reasons
-                    .get(index)
-                    .map(|reason| words::protection_words(*reason).to_string()),
+                reason: reasons.get(index).map(|reason| reason.words().to_string()),
             })
             .collect(),
     )
@@ -175,28 +181,6 @@ fn listed(heading: &str, paths: Vec<PathNote>) -> FailureSays {
 /// The lines of `said`, without the line breaks that would split a row.
 fn lines_of(said: &str) -> Vec<String> {
     said.lines().map(str::to_string).collect()
-}
-
-impl Drawn for FailureDetail<'_> {
-    fn lines(&self, look: &Look) -> Vec<Line> {
-        let text = |said: &str| Line::new().plain(INDENT).plain(said.to_string());
-        match self.says() {
-            FailureSays::Evidence(evidence) => evidence.lines(look),
-            FailureSays::Text(lines) => lines.iter().map(|said| text(said)).collect(),
-            FailureSays::Listed { heading, paths } => std::iter::once(text(&heading))
-                .chain(paths.iter().map(|note| {
-                    let line = Line::new()
-                        .plain(indent(2))
-                        .plain(note.path.display().to_string());
-                    match &note.reason {
-                        Some(reason) => line.plain(" — ").plain(reason.as_str()),
-                        None => line,
-                    }
-                }))
-                .collect(),
-            FailureSays::Nothing => Vec::new(),
-        }
-    }
 }
 
 /// How a retry starts, which is the same whatever input it waits for.
@@ -396,16 +380,16 @@ fn continue_words(attempt: u32) -> (String, Option<String>) {
     )
 }
 
-/// The words of the options a re-route the failure exhausted offers: the
+/// The words of the options a reroute the failure exhausted offers: the
 /// retry through the corrective node once more, and the promotion. `None`
-/// for an option the re-route does not write.
+/// for an option the reroute does not write.
 pub(crate) fn reroute_words(
     reroute: &ExhaustedReroute,
     option: ReservedOption,
 ) -> Option<(String, Option<String>)> {
     match option {
         ReservedOption::Retry => Some((
-            format!("Re-route to `{}` once more", reroute.goto),
+            format!("Reroute to `{}` once more", reroute.goto),
             Some(format!(
                 "Uses one extra correction attempt beyond the declared max_reroutes ({}); \
                  escalates again if `{}` doesn't fix it",
@@ -417,7 +401,7 @@ pub(crate) fn reroute_words(
     }
 }
 
-/// The words of a promotion to `next_mode`, which a re-route names when the
+/// The words of a promotion to `next_mode`, which a reroute names when the
 /// workflow declares a mode after this one.
 fn promotion_words(next_mode: Option<&ModeName>) -> (String, Option<String>) {
     let (label, target) = match next_mode {
@@ -431,7 +415,7 @@ fn promotion_words(next_mode: Option<&ModeName>) -> (String, Option<String>) {
         label,
         Some(format!(
             "Closes this run (`run_finished: promoted`) and starts a successor in {target}, \
-             inheriting this run's artifacts — there's no mechanism to demote back to the mode \
+             inheriting this run's artifacts; there's no mechanism to demote back to the mode \
              this run is in"
         )),
     )
@@ -441,10 +425,10 @@ fn promotion_words(next_mode: Option<&ModeName>) -> (String, Option<String>) {
 pub(crate) fn stuck_words(stuck: &Stuck) -> String {
     match stuck {
         Stuck::FrozenConfig => "this run's config was frozen when it was created, so no attempt \
-            of it can go differently — declare what is missing in the config and start a new run"
+            of it can go differently: declare what is missing in the config and start a new run"
             .to_string(),
         Stuck::FrozenInput => "a file this run froze when it was created has changed since, and \
-            no attempt of it can read the file as it was — start a new run to read it as it \
+            no attempt of it can read the file as it was: start a new run to read it as it \
             now stands"
             .to_string(),
         Stuck::ProjectDenies => "the project's permissions refuse it, so no attempt goes \

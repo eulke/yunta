@@ -1,0 +1,9 @@
+#[derive(Subcommand)]
+enum PackAction {
+    Add { source: String, #[arg(long)] global: bool, #[arg(long)] yes: bool, #[arg(long)] run_tests: bool },
+    Update { pack: PackRef, r#ref: String, #[arg(long)] global: bool, #[arg(long)] yes: bool },
+    New { pack: PackRef },
+    Remove { pack: PackRef, #[arg(long)] global: bool },
+    List { #[arg(long)] global: bool },
+    Audit { pack: PackRef, #[arg(long)] global: bool },
+}

@@ -1,6 +1,6 @@
 //! `yunta graph <workflow> | --run <id> [--format mermaid|dot]`: pure
 //! derivation of the DAG — `depends_on` edges, `on_failure.goto`
-//! re-route edges visually differentiated (dashed) from them, each
+//! reroute edges visually differentiated (dashed) from them, each
 //! `parallel` group drawn with its children inside it, and, given
 //! `--run`, every node annotated with the state that run's event log
 //! derives for it (`yunta_engine::derive`). No agent involved in
@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_core::{Clock, NodeId, RunId, Workflow};
+use yunta_engine::RunFrame;
 
 use crate::commands::{resolve_workflow_ref, verdict};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use yunta_engine::RunFrame;
 
 type Labels = HashMap<NodeId, String>;
 
@@ -34,6 +34,7 @@ pub async fn graph(
     workflow_path: Option<&Path>,
     run_id: Option<&RunId>,
     format: GraphFormat,
+    look: &surco::look::Look,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
 
@@ -56,24 +57,26 @@ pub async fn graph(
                 verdict::Reach::Workflow,
             )
             .await?;
-            verdict.warn();
+            // A verdict with nothing to say stays off the drawing's way.
+            if !verdict.passes() || verdict.warns() {
+                crate::output::on_stderr(look, verdict.page(&ctx, &path).await?);
+            }
             let outcome = match verdict.passes() {
                 true => Outcome::Success,
-                false => {
-                    crate::error::note(verdict.refusal(&ctx).await?);
-                    Outcome::Reported
-                }
+                false => Outcome::Reported,
             };
             (workflow, None, outcome)
         }
         (None, Some(run_id)) => {
             let open = ctx.open_run(run_id).await?;
             let manifest = open.manifest.doc;
+            let now = ctx.clock.now();
             let frame = crate::commands::status::progress::frame(
                 run_id,
                 &manifest,
                 &open.events,
-                ctx.clock.now(),
+                &crate::render::engine(&open.run_dir, now),
+                now,
             );
             (manifest.workflow, derived_labels(&frame), Outcome::Success)
         }
@@ -114,12 +117,7 @@ fn derived_labels(frame: &RunFrame) -> Option<Labels> {
         frame
             .nodes
             .iter()
-            .map(|node| {
-                (
-                    node.id.clone(),
-                    crate::render::standing(&node.state).label(),
-                )
-            })
+            .map(|node| (node.id.clone(), crate::render::node_display(node).label()))
             .collect(),
     )
 }
@@ -136,7 +134,7 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
             format!(
                 "{indent}{}[\"{}\"]\n",
                 node.id,
-                yunta_core::text::escape_mermaid(&labelled(node, labels))
+                surco::text::escape_mermaid(&labelled(node, labels))
             )
         };
         match children_of(node) {
@@ -146,7 +144,7 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
                 out.push_str(&format!(
                     "  subgraph {}[\"{}\"]\n",
                     node.id,
-                    yunta_core::text::escape_mermaid(&labelled(node, labels))
+                    surco::text::escape_mermaid(&labelled(node, labels))
                 ));
                 for child in children {
                     out.push_str(&declared(child, "    "));
@@ -244,7 +242,7 @@ fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
 /// Escapes a DOT quoted-string label: backslash and double quote are the
 /// two characters DOT reads specially inside `"..."`.
 fn escape_dot(text: &str) -> String {
-    let text = yunta_core::text::one_line(text);
+    let text = surco::text::one_line(text);
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
@@ -259,7 +257,7 @@ fn escape_dot(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::escape_dot;
-    use yunta_core::text::escape_mermaid;
+    use surco::text::escape_mermaid;
 
     #[test]
     fn mermaid_escaping_covers_every_html_significant_character() {

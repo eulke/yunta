@@ -11,7 +11,7 @@ use yunta_core::port::RunToolsEndpoint;
 use yunta_core::rail::RailEvent;
 use yunta_core::{ModelName, RunTool, SessionId, ToolNaming};
 
-use crate::mock::{MockOutcome, MockStep};
+use crate::mock::{FileAct, MockOutcome, MockStep};
 
 /// The lines the CLI prints for one step of a fixture, in the order it
 /// prints them. Usage is not printed here: the CLI reports it on the line
@@ -27,6 +27,25 @@ pub(crate) fn render(step: &MockStep, naming: ToolNaming) -> Vec<String> {
             json!({ "type": "turn.started" }).to_string(),
         ],
         MockStep::ToolUse { name, target, .. } => vec![tool_use(name, target, naming)],
+        MockStep::FileCall {
+            action: FileAct::Read,
+            path,
+            ..
+        } => vec![item(json!({
+            "type": "command_execution",
+            "command": format!("cat '{path}'"),
+            "aggregated_output": "",
+            "exit_code": 0,
+            "status": "completed",
+        }))],
+        MockStep::FileCall { action, path, .. } => vec![item(json!({
+            "type": "file_change",
+            "changes": [{
+                "path": path,
+                "kind": if *action == FileAct::Write { "add" } else { "update" },
+            }],
+            "status": "completed",
+        }))],
         MockStep::RunTool { tool, .. } => vec![run_tool_call(tool)],
         MockStep::Usage { .. } | MockStep::RunToolRejected { .. } => Vec::new(),
     }
@@ -172,6 +191,7 @@ mod tests {
     use yunta_core::rail::{RailAct, RailCall};
 
     use super::*;
+    use crate::action::Checkout;
     use crate::codex::parse::parse_line;
     use crate::codex::rail::CodexRailCodec;
 
@@ -179,7 +199,7 @@ mod tests {
     fn reads_back(lines: &[String]) -> Vec<AgentEvent> {
         lines
             .iter()
-            .flat_map(|line| parse_line(line, "", &Coverage::Exact))
+            .flat_map(|line| parse_line(line, "", &Coverage::Exact, &Checkout::at(Path::new("/"))))
             .collect()
     }
 

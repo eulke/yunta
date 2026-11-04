@@ -3,7 +3,7 @@
 use super::payloads::*;
 
 /// One node of the graph: what it resolved to run on, what it started,
-/// what it closed or failed with, where it was re-routed, the pull
+/// what it closed or failed with, where it was rerouted, the pull
 /// request it opened, and the checks the engine ran around it — one
 /// variant per kind.
 #[derive(Debug, Clone, PartialEq)]

@@ -7,7 +7,7 @@ use yunta_core::events::{
     CriterionResult, Escalation, EventPayload, NodeEvent, Precondition, Remedy, TaskStatus,
 };
 use yunta_core::reserved::ReservedOption;
-use yunta_engine::{current_escalation, RunReport, RunTerminal};
+use yunta_engine::{awaits_decision, current_escalation, ResolveGateError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 mod common;
@@ -150,4 +150,38 @@ async fn a_red_guard_offers_a_retry_that_waits_for_something_outside_the_tree() 
             precondition: Some(Precondition::OutsideTreeChanged),
         }]
     );
+}
+
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
+
+const ASKS_ONCE: &str = "name: asked\nnodes:\n  - id: approve\n    kind: gate\n    assignee: lead\n    message: \"Go?\"\n    options: [go, stop]\n";
+
+/// What a run parked on `approve` has recorded, as every later process reads it.
+fn state_of(bench: &Bench) -> yunta_engine::RunState {
+    yunta_engine::derive(&bench.storage.events_for_run(&bench.run_id).unwrap())
+}
+
+/// A decision answered while its run is parked is on offer to nobody until the resume it
+/// was handed to acts on it: a second answer is refused rather than added, every surface
+/// stops offering the menu, and the first answer is the one the resume applies.
+#[tokio::test]
+async fn a_decision_answered_is_on_offer_to_nobody_until_its_resume_acts_on_it() {
+    let bench = parked(ASKS_ONCE, NO_SESSIONS).await;
+    let manifest = bench.manifest();
+    assert!(awaits_decision(&manifest, &state_of(&bench)).is_some());
+
+    answer_parked(&bench, "go").await.unwrap();
+
+    let second = answer_parked(&bench, "stop").await.unwrap_err();
+    assert!(matches!(second, ResolveGateError::NotPaused), "{second:?}");
+    let state = state_of(&bench);
+    assert_eq!(awaits_decision(&manifest, &state), None);
+    let offered = current_escalation(&manifest, &bench.run_dir(), &state)
+        .await
+        .unwrap();
+    assert!(offered.is_none(), "{offered:?}");
+
+    let RunReport { terminal, state } = bench.wake_on_fixture(NO_SESSIONS).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(state.pre_seeded(&"approve".into()).is_none());
 }

@@ -18,15 +18,39 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::{InputSpec, Workflow};
 
+use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::document;
-use crate::render::blocks::{Fields, Marked, Prose, Section};
-use crate::render::doc::Doc;
-use crate::render::ink::{Line, Tone};
-use crate::render::{Look, Mark};
+use surco::components::{Fields, Gist, Headline, Marked, Next, Prose, Section};
+use surco::doc::{Block, Depth, Doc};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
+use surco::look::Look;
 
 pub use runs::list_runs;
+
+/// `yunta` alone: in a repository, its field — the runs of that
+/// repository; anywhere else, where Yunta works and what to type.
+pub async fn field(look: &Look) -> Result<Outcome, CliError> {
+    let ctx = Context::load()?;
+    if inbox::in_a_repository(&ctx).await? {
+        return list_runs(false, Depth::Glance, crate::output::Mode::Human, look).await;
+    }
+    let page = Doc::new()
+        .with(Headline::new(Mark::Absent, "yunta", "not in a repository"))
+        .with(Gist::new(
+            "this directory is in no git repository, and yunta works in one",
+        ))
+        .with(Next {
+            steps: vec![
+                (advice::list_every_run(), "every run on this machine"),
+                (advice::help(), "what yunta does"),
+            ],
+        });
+    document(look, page);
+    Ok(Outcome::Success)
+}
 
 /// One catalog entry ready to render — `display_name` already carries
 /// the `publisher/` prefix for a pack entry, nothing else needs to know
@@ -53,12 +77,13 @@ pub async fn list_workflows(look: &Look) -> Result<Outcome, CliError> {
 /// terminal and the `list_workflows` control-plane tool answers with it
 /// as Markdown, so the two never drift. Given a project's storage, each
 /// workflow carries its prior estimation; a broken pack is named, never
-/// silently dropped. `glyphs` draws the separators of an estimation.
+/// silently dropped. `glyphs` draws each input's placeholder and the
+/// separators of an estimation.
 pub(crate) async fn catalog(
     cwd: &Path,
     history_source: Option<&Context>,
-    glyphs: crate::render::Glyphs,
-) -> Doc<'static> {
+    glyphs: surco::glyphs::Glyphs,
+) -> Doc {
     let mut entries = repo_catalog_entries(cwd);
     let shadowed: HashSet<String> = entries.iter().map(|e| e.display_name.clone()).collect();
     let (pack_entries, broken_packs) = pack_catalog_entries(cwd);
@@ -96,51 +121,56 @@ pub(crate) async fn catalog(
 async fn listed(
     entry: &CatalogEntry,
     history_source: Option<&Context>,
-    glyphs: crate::render::Glyphs,
-) -> Section<'static> {
+    glyphs: surco::glyphs::Glyphs,
+) -> Section {
     let name = &entry.display_name;
     let workflow = match read_entry(entry).await {
         Ok(workflow) => workflow,
         Err(why) => {
             return Section {
-                mark: None,
+                lead: None,
                 title: Line::new().push(Tone::Strong, name.as_str()),
-                blocks: vec![Marked {
-                    mark: Mark::Failed,
-                    items: vec![why],
-                }
-                .into()],
+                blocks: why,
             }
         }
     };
     let mut title = Line::new().push(Tone::Strong, name.as_str());
     if let Some(description) = workflow.description.as_deref() {
-        title = title.plain(format!(" — {description}"));
+        title = title.plain(format!(": {description}"));
     }
-    let mut fields = input_fields(&workflow);
+    let mut fields = input_fields(&workflow, glyphs);
     if let Some(ctx) = history_source {
         fields = estimation_field(fields, ctx, &workflow, glyphs).await;
     }
-    fields = fields.push_command("run", format!("yunta run {name}"));
+    fields = fields.push_command("run", advice::run(name));
     Section {
-        mark: None,
+        lead: None,
         title,
         blocks: vec![fields.into()],
     }
 }
 
 /// The workflow `entry` names, or the reason its file does not read.
-async fn read_entry(entry: &CatalogEntry) -> Result<Workflow, String> {
-    tokio::fs::read_to_string(&entry.path)
-        .await
-        .map_err(|e| format!("unreadable: {e}"))
-        .and_then(|contents| {
-            yunta_core::workflow::read::read(&contents, &entry.path).map_err(|r| r.to_string())
-        })
+async fn read_entry(entry: &CatalogEntry) -> Result<Workflow, Vec<Block>> {
+    let contents = tokio::fs::read_to_string(&entry.path).await.map_err(|e| {
+        vec![Marked {
+            mark: Mark::Failed,
+            items: vec![format!("unreadable: {e}")],
+        }
+        .into()]
+    })?;
+    yunta_core::workflow::read::read(&contents, &entry.path).map_err(|report| {
+        crate::error::page::document_problems(&report, Some(&contents))
+            .into_iter()
+            .map(Block::from)
+            .collect()
+    })
 }
 
 /// One row per input the workflow takes, the first one carrying the label.
-fn input_fields(workflow: &Workflow) -> Fields {
+/// Each shows its value as a placeholder, which is the look's ellipsis: three
+/// dots under the ASCII look.
+fn input_fields(workflow: &Workflow, glyphs: surco::glyphs::Glyphs) -> Fields {
     let mut fields = Fields::new();
     for (n, (input_name, spec)) in workflow.inputs.iter().enumerate() {
         let optionality = if spec.is_required() {
@@ -150,12 +180,13 @@ fn input_fields(workflow: &Workflow) -> Fields {
         };
         let description = spec
             .description()
-            .map(|description| format!(" — {description}"))
+            .map(|description| format!(": {description}"))
             .unwrap_or_default();
         fields = fields.push_if(
             if n == 0 { "inputs" } else { "" },
             format!(
-                "--input {input_name}=… ({}, {optionality}){description}",
+                "--input {input_name}={} ({}, {optionality}){description}",
+                glyphs.ellipsis(),
                 input_type_label(spec)
             ),
         );
@@ -168,7 +199,7 @@ async fn estimation_field(
     mut fields: Fields,
     ctx: &Context,
     workflow: &Workflow,
-    glyphs: crate::render::Glyphs,
+    glyphs: surco::glyphs::Glyphs,
 ) -> Fields {
     let history = super::stats::summaries(&super::stats::history(ctx, &workflow.name).await);
     if let Some(estimation) = yunta_engine::prior_estimation(&history) {

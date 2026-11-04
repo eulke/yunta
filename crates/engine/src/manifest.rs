@@ -347,95 +347,56 @@ pub(crate) async fn loaded_links(
         .map_err(ManifestError::Links)?;
     let mut files = HashSet::new();
     let mut found = Vec::new();
-    for (mode, object, path) in tree_entries(&listed) {
+    for (mode, path) in tree_entries(&listed) {
         match mode {
-            "120000" => found.push((path, object)),
+            "120000" => found.push(path.to_string()),
             "160000" => {}
             _ => {
                 files.insert(path);
             }
         }
     }
-    let links = link_texts(repo, found, supervision).await?;
+    let links = link_texts(repo, base, found, supervision).await?;
     let is_file = |path: &Path| path.to_str().is_some_and(|path| files.contains(path));
     let fixed = Protected::new(&[], &[])?;
     Ok(fixed.loaded(yunta_core::protected::resolved(&links, is_file))?)
 }
 
-/// The text each of `found`'s links points by, keyed by the link's path: one
-/// `cat-file --batch` read, which never fetches an object the clone lacks.
+/// The text each link of `found` points by, keyed by the link's path: one
+/// batched read of `base`, which never fetches an object the clone lacks. A
+/// link the clone lacks reads as an empty text, which resolves to nothing.
 async fn link_texts(
     repo: &Path,
-    found: Vec<(&str, &str)>,
+    base: &CommitSha,
+    found: Vec<String>,
     supervision: crate::process::Supervision<'_>,
 ) -> Result<BTreeMap<PathBuf, String>, ManifestError> {
-    if found.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-    let asked: String = found
-        .iter()
-        .map(|(_, object)| format!("{object}\n"))
-        .collect();
     let mut env = supervision.env.to_vec();
     env.push(("GIT_NO_LAZY_FETCH".to_string(), "1".to_string()));
-    let batch = ["cat-file", "--batch"];
-    let answered =
-        crate::git::read_batch(repo, &batch, asked.into_bytes(), supervision.with_env(&env))
-            .await
-            .map_err(ManifestError::Links)?;
+    let mut texts = crate::git::blobs(repo, base.as_str(), &found, supervision.with_env(&env))
+        .await
+        .map_err(ManifestError::Links)?;
     Ok(found
         .into_iter()
-        .zip(batch_contents(&answered))
-        .map(|((path, _), text)| (PathBuf::from(path), text))
+        .map(|path| {
+            let text = texts.remove(&path).unwrap_or_default();
+            (PathBuf::from(path), text)
+        })
         .collect())
 }
 
-/// The entries of an `ls-tree -z` listing: each one's mode, object and path.
-/// An entry whose path is not UTF-8 is left out: the manifest keeps a link's
-/// paths as text, so a link there, or a file it resolves to, is not followed.
-fn tree_entries(listed: &[u8]) -> impl Iterator<Item = (&str, &str, &str)> {
+/// The entries of an `ls-tree -z` listing: each one's mode and path. An entry
+/// whose path is not UTF-8 is left out: the manifest keeps a link's paths as
+/// text, so a link there, or a file it resolves to, is not followed.
+fn tree_entries(listed: &[u8]) -> impl Iterator<Item = (&str, &str)> {
     listed
         .split(|byte| *byte == 0)
         .filter_map(|entry| std::str::from_utf8(entry).ok())
         .filter_map(|entry| {
             let (fields, path) = entry.split_once('\t')?;
-            let mut fields = fields.split(' ');
-            let mode = fields.next()?;
-            let object = fields.nth(1)?;
-            Some((mode, object, path))
+            let mode = fields.split(' ').next()?;
+            Some((mode, path))
         })
-}
-
-/// What `cat-file --batch` answered, one text per object asked and in the
-/// order asked. An object it reports missing reads as an empty text, which
-/// resolves to nothing.
-fn batch_contents(answered: &[u8]) -> Vec<String> {
-    let mut contents = Vec::new();
-    let mut rest = answered;
-    while let Some((header, after)) = first_line(rest) {
-        let size = String::from_utf8_lossy(header)
-            .rsplit(' ')
-            .next()
-            .and_then(|size| size.parse::<usize>().ok());
-        match size.and_then(|size| after.split_at_checked(size)) {
-            Some((text, past)) => {
-                contents.push(String::from_utf8_lossy(text).into_owned());
-                rest = past.strip_prefix(b"\n").unwrap_or(past);
-            }
-            None => {
-                contents.push(String::new());
-                rest = after;
-            }
-        }
-    }
-    contents
-}
-
-/// The bytes before the first newline, and those after it.
-fn first_line(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
-    let end = bytes.iter().position(|byte| *byte == b'\n')?;
-    let (line, rest) = bytes.split_at_checked(end)?;
-    Some((line, rest.get(1..).unwrap_or_default()))
 }
 
 /// The git directory the repository's checkouts share, which names the
@@ -467,10 +428,47 @@ async fn git_line(
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_batch_answer_reads_one_text_per_object_and_a_missing_one_as_empty() {
-        let answered = b"a1 blob 4\n../x\nb2 missing\nc3 blob 5\na\nb/c\n";
-        assert_eq!(batch_contents(answered), ["../x", "", "a\nb/c"]);
+    /// A partial clone holds a link's path and not its text: the link reads as
+    /// an empty text, which resolves to nothing, and reading it fetches nothing.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_link_a_partial_clone_lacks_resolves_to_nothing_and_fetches_nothing() {
+        let origin = tempfile::tempdir().unwrap();
+        yunta_testkit::init_repo(origin.path());
+        std::fs::create_dir_all(origin.path().join(".claude")).unwrap();
+        std::os::unix::fs::symlink("../tools", origin.path().join(".claude/hooks")).unwrap();
+        yunta_testkit::git_output(origin.path(), &["add", "-A"]);
+        yunta_testkit::git_output(origin.path(), &["commit", "-q", "-m", "a link"]);
+        yunta_testkit::git_output(origin.path(), &["config", "uploadpack.allowFilter", "true"]);
+        let clone = tempfile::tempdir().unwrap();
+        let url = format!("file://{}", origin.path().display());
+        let into = clone.path().display().to_string();
+        let args = [
+            "clone",
+            "-q",
+            "--no-checkout",
+            "--filter=blob:none",
+            &url,
+            &into,
+        ];
+        yunta_testkit::git_output(origin.path(), &args);
+        let head = yunta_testkit::git_output(clone.path(), &["rev-parse", "HEAD"]);
+        let link = yunta_testkit::git_output(clone.path(), &["rev-parse", "HEAD:.claude/hooks"]);
+
+        let token = tokio_util::sync::CancellationToken::new();
+        let clock = yunta_testkit_core::FixedClock;
+        let supervision = crate::process::Supervision::outside_any_run(&token, &clock);
+        let links = loaded_links(clone.path(), &head.parse().unwrap(), supervision)
+            .await
+            .unwrap();
+
+        assert_eq!(links, Vec::new(), "the link's text never came");
+        let objects = ["rev-list", "--objects", "--missing=print", "HEAD"];
+        let listed = yunta_testkit::git_output(clone.path(), &objects);
+        assert!(
+            listed.lines().any(|line| line == format!("?{link}")),
+            "the read left the link's object where it was: {listed}"
+        );
     }
 
     /// A token that stopped the read of the links is the birth being

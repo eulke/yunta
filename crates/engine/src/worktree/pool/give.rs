@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use tokio_util::sync::CancellationToken;
 use yunta_core::protected::Pathspecs;
 
 use super::{slot, space, CheckoutPool, Lease};
@@ -37,7 +38,15 @@ impl CheckoutPool {
     /// nothing a probe wrote left in it but what git ignores outside the
     /// protected paths, and gives it back. One that cannot be put back stays
     /// out of the pool.
+    ///
+    /// No stop reaches it: its caller has often just been stopped, and a git
+    /// killed mid-way would leave its lock for whoever takes the checkout next.
     pub async fn put_back(&self, lease: Lease, supervision: Supervision<'_>) {
+        let whole = CancellationToken::new();
+        let supervision = Supervision {
+            cancel: &whole,
+            ..supervision
+        };
         let checkout = lease.checkout();
         match clear_work(&checkout, &self.pathspecs(), supervision).await {
             Ok(()) => {

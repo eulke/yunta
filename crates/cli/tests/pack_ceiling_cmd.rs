@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in};
+use yunta_testkit::{git, init_repo, stderr, stdout, unwrapped, yunta_in};
 
 fn write_pack_with_executor(dir: &Path) {
     std::fs::create_dir_all(dir.join("workflows")).unwrap();
@@ -88,7 +88,7 @@ fn add_with_yes_installs_a_pack_with_executors() {
         &["pack", "add", upstream.to_str().unwrap(), "--yes"]
     );
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(stdout(&out).contains("installed acme/automation-pack"));
+    assert!(stdout(&out).contains("pack acme/automation-pack · installed"));
     assert!(repo.join(".yunta/packs/acme/automation-pack").exists());
 }
 
@@ -104,8 +104,11 @@ fn check_refuses_a_node_that_exceeds_the_packs_declared_ceiling() {
     assert!(!check_out.status.success());
     let text = stderr(&check_out);
     assert!(
-        text.lines().any(|l| l
-            == "  node `draft` requests permissions `edit` but pack `acme/review-pack` declares a ceiling of `read-only` — lower the node's permissions or raise the pack's declared ceiling"),
+        unwrapped(&text).contains(
+            "error node `draft` requests permissions `edit` but pack `acme/review-pack` declares \
+             a ceiling of `read-only`; lower the node's permissions or raise the pack's declared \
+             ceiling"
+        ),
         "check names the node, the pack, and the ceiling the node exceeds: {text}"
     );
 }

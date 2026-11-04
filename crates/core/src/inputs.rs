@@ -35,6 +35,10 @@ pub enum InputSpec {
         pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         min_length: Option<u32>,
+        /// Whether this input is what the person asked the run for, in
+        /// their words: what a page about the run's work quotes as asked.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        request: bool,
     },
     Number {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,6 +104,11 @@ impl InputSpec {
         }
     }
 
+    /// Whether this input is what the person asked the run for.
+    pub fn is_request(&self) -> bool {
+        matches!(self, InputSpec::String { request: true, .. })
+    }
+
     pub fn description(&self) -> Option<&str> {
         match self {
             InputSpec::String { description, .. } => description.as_deref(),
@@ -158,13 +167,13 @@ impl Requiredness {
 pub enum InputSpecError {
     /// A number input's `default`, `min` and `max` are finite: NaN and
     /// the infinities compare with nothing and render as nothing.
-    #[error("`{field}` is not a finite number — a number input's default and bounds are finite")]
+    #[error("`{field}` is not a finite number: a number input's default and bounds are finite")]
     NotFinite { field: &'static str },
 
     /// A `default` is what makes an input optional, so `required: true`
     /// next to one cannot be honored.
     #[error(
-        "`required: true` and a `default` contradict each other — the default is what makes \
+        "`required: true` and a `default` contradict each other: the default is what makes \
          an input optional; drop one of them"
     )]
     RequiredWithDefault,
@@ -172,7 +181,7 @@ pub enum InputSpecError {
     /// no value at all, which no `{{inputs.x}}` render site can
     /// represent.
     #[error(
-        "`required: false` with no `default` leaves the input without a value — give it a \
+        "`required: false` with no `default` leaves the input without a value: give it a \
          default, or drop `required: false`"
     )]
     OptionalWithoutDefault,
@@ -195,6 +204,10 @@ enum AuthoredInputSpec {
         pattern: Option<String>,
         #[serde(default)]
         min_length: Option<u32>,
+        /// What the person asks the run for, in their words: a page about
+        /// the run's work quotes it as what they asked. One input at most.
+        #[serde(default)]
+        request: bool,
     },
     Number {
         #[serde(default)]
@@ -266,6 +279,7 @@ impl TryFrom<AuthoredInputSpec> for InputSpec {
                 description,
                 pattern,
                 min_length,
+                request,
             } => {
                 required.check_against(default.is_some())?;
                 InputSpec::String {
@@ -273,6 +287,7 @@ impl TryFrom<AuthoredInputSpec> for InputSpec {
                     description,
                     pattern,
                     min_length,
+                    request,
                 }
             }
             AuthoredInputSpec::Number {

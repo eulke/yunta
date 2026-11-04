@@ -60,6 +60,29 @@ pub enum WorkflowFault {
         source: NodeId,
         node: NodeId,
     },
+    /// A key nothing reads: written at the workflow's top when `kind` is
+    /// none, in a node of that kind otherwise. `nearest` is the key it is
+    /// a slip from; a key retired is told what took its place instead.
+    UnknownKey {
+        key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nearest: Option<String>,
+    },
+    /// A key nothing reads in an entry of a list: `what` says which kind of entry, and
+    /// `nearest` is the key it is a slip from.
+    UnknownEntryKey {
+        key: String,
+        what: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nearest: Option<String>,
+    },
+    /// A `kind` no node can be, a slip from `nearest`, the kind it meant.
+    UnknownKind {
+        kind: String,
+        nearest: String,
+    },
 }
 
 impl WorkflowFault {
@@ -78,6 +101,36 @@ impl WorkflowFault {
             Self::OptionalInParallel { .. }
             | Self::ReroutesToOptional { .. }
             | Self::ReadsWhatMayGo { .. } => RuleCode::IncoherentOptional,
+            Self::UnknownKey { .. } | Self::UnknownEntryKey { .. } => RuleCode::UnknownKey,
+            Self::UnknownKind { .. } => RuleCode::UnknownKind,
+        }
+    }
+
+    /// Whether the clause is about the workflow as a whole, so it reads as
+    /// a sentence about the document.
+    pub fn about_document(&self) -> bool {
+        matches!(self, Self::UnknownKey { kind: None, .. })
+    }
+
+    /// What helps fix it, the most direct first: the name a slip most
+    /// likely meant, or what took the place of a retired key.
+    pub fn help(&self) -> Vec<String> {
+        match self {
+            Self::UnknownKey { key, nearest, .. } => nearest
+                .iter()
+                .map(|nearest| surco::text::suggested(nearest))
+                .chain(super::keys::retired(key).map(str::to_string))
+                .collect(),
+            Self::UnknownReference { nearest, .. } => nearest
+                .iter()
+                .map(|nearest| surco::text::suggested(nearest.as_str()))
+                .collect(),
+            Self::UnknownEntryKey { nearest, .. } => nearest
+                .iter()
+                .map(|nearest| surco::text::suggested(nearest))
+                .collect(),
+            Self::UnknownKind { nearest, .. } => vec![surco::text::suggested(nearest)],
+            _ => Vec::new(),
         }
     }
 
@@ -87,11 +140,7 @@ impl WorkflowFault {
         match self {
             Self::InvariantInParallel { node, group } => invariant_in_parallel(node, group),
             Self::DuplicateNode => DUPLICATE_NODE.to_string(),
-            Self::UnknownReference {
-                field,
-                target,
-                nearest,
-            } => unknown_reference(field, target, nearest.as_ref()),
+            Self::UnknownReference { field, target, .. } => unknown_reference(field, target),
             Self::OverlappingParallelScope {
                 node,
                 glob,
@@ -117,6 +166,16 @@ impl WorkflowFault {
                 source,
                 node,
             } => reads_what_may_go(field, source, node),
+            Self::UnknownKey {
+                key, kind: None, ..
+            } => format!("has an unknown key `{key}`"),
+            Self::UnknownKey {
+                key,
+                kind: Some(kind),
+                ..
+            } => super::parse::unknown_key(key, &format!("a `{kind}` node")),
+            Self::UnknownEntryKey { key, what, .. } => super::parse::unknown_key(key, what),
+            Self::UnknownKind { kind, .. } => format!("unknown kind `{kind}`"),
         }
     }
 }
@@ -131,11 +190,8 @@ fn invariant_in_parallel(node: &NodeId, group: &NodeId) -> String {
     )
 }
 
-fn unknown_reference(field: &str, target: &NodeId, nearest: Option<&NodeId>) -> String {
-    format!(
-        "`{field}` names `{target}`, and no node carries that id{}",
-        crate::text::did_you_mean(target.as_str(), nearest.map(NodeId::as_str))
-    )
+fn unknown_reference(field: &str, target: &NodeId) -> String {
+    format!("`{field}` names `{target}`, and no node carries that id")
 }
 
 fn overlapping_parallel(
@@ -184,7 +240,7 @@ fn optional_in_parallel(node: &NodeId, group: &NodeId) -> String {
 
 fn reroutes_to_optional(target: &NodeId) -> String {
     format!(
-        "re-routes to `{target}`, which is optional: a run that leaves it out would have nowhere \
+        "reroutes to `{target}`, which is optional: a run that leaves it out would have nowhere \
          to go"
     )
 }
@@ -210,7 +266,16 @@ mod tests {
                 nearest: Some(NodeId::from("build")),
             }
             .clause(),
-            "`depends_on` names `buld`, and no node carries that id — did you mean `build`?"
+            "`depends_on` names `buld`, and no node carries that id"
+        );
+        assert_eq!(
+            WorkflowFault::UnknownReference {
+                field: "depends_on".to_string(),
+                target: NodeId::from("buld"),
+                nearest: Some(NodeId::from("build")),
+            }
+            .help(),
+            ["did you mean `build`?"]
         );
         assert_eq!(
             WorkflowFault::UnknownReference {

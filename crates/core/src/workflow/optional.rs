@@ -4,7 +4,7 @@
 //! An optional node that needs a key the config leaves unset — a
 //! command, a forge, a runner — is left out of the run the way a mode
 //! leaves a node out: never scheduled, its dependents waiting on what it
-//! waited on. A node only it leads to — the re-route that fixes what it
+//! waited on. A node only it leads to — the reroute that fixes what it
 //! finds — goes with it. A required node that needs the same key is
 //! refused before the run instead.
 
@@ -116,14 +116,11 @@ fn lacking(node: &Node, config: &ConfigLayer) -> Vec<ConfigKey> {
 }
 
 /// The gone node that alone leads to `node`: it waits on nothing,
-/// nothing waits on it, and every node that re-routes to it is gone.
-/// `None` when anything else reaches it — a node nothing re-routes to
+/// nothing waits on it, and every node that reroutes to it is gone.
+/// `None` when anything else reaches it — a node nothing reroutes to
 /// starts the run on its own.
 fn only_through(workflow: &Workflow, node: &Node, gone: &HashSet<NodeId>) -> Option<NodeId> {
-    let waited_on = workflow
-        .nodes
-        .iter()
-        .any(|other| other.depends_on.contains(&node.id));
+    let waited_on = workflow.dependents(&node.id).next().is_some();
     if !node.depends_on.is_empty() || waited_on {
         return None;
     }
@@ -135,7 +132,7 @@ fn only_through(workflow: &Workflow, node: &Node, gone: &HashSet<NodeId>) -> Opt
         .then(|| (*first).clone())
 }
 
-/// The top-level nodes that re-route to `target` — on failure, or from
+/// The top-level nodes that reroute to `target` — on failure, or from
 /// a gate's option.
 pub fn reroute_sources<'a>(workflow: &'a Workflow, target: &NodeId) -> Vec<&'a NodeId> {
     workflow
@@ -154,7 +151,7 @@ pub fn reroute_sources<'a>(workflow: &'a Workflow, target: &NodeId) -> Vec<&'a N
 /// An optional node is one a run may leave out, so it is declared where
 /// leaving it out leaves the run whole: at the top level, where modes
 /// and the scheduler read, and never as something a node the run keeps
-/// re-routes to or reads from. The node only it leads to goes with it.
+/// reroutes to or reads from. The node only it leads to goes with it.
 pub(super) fn may_go(workflow: &Workflow) -> Vec<Diagnostic> {
     let mut broken = optional_in_groups(workflow);
     let optional: HashSet<NodeId> = workflow
@@ -198,7 +195,7 @@ fn optional_in_groups(workflow: &Workflow) -> Vec<Diagnostic> {
 }
 
 /// What `node`, which a run keeps, would lose if the optional nodes
-/// went: a re-route with nowhere to go, or a read of what nobody made.
+/// went: a reroute with nowhere to go, or a read of what nobody made.
 fn needs_what_may_go(
     index: usize,
     node: &Node,

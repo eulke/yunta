@@ -92,7 +92,7 @@ pub async fn check_context_files(
 
 /// Whether something that can run before `reader` might write `path`: a
 /// `before` hook of its own or of its group, an ancestor in the mode, the
-/// node its failure re-routes to and that node's ancestors (the reader
+/// node its failure reroutes to and that node's ancestors (the reader
 /// runs again after them), or a sibling in its `parallel` group.
 fn reach(
     workflow: &Workflow,

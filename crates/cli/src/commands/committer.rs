@@ -12,7 +12,7 @@ pub(crate) async fn committer(ctx: &Context) -> Result<String, String> {
         Err(unnamed) => Err(format!(
             "cannot name who commits here: set `git config --global user.name \"Your Name\"` \
              and `git config --global user.email you@example.com` (without `--global`, for \
-             this repository alone) — git said: {}",
+             this repository alone); git said: {}",
             unnamed.detail().lines().last().unwrap_or_default()
         )),
     }

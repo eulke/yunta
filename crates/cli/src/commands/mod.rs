@@ -14,6 +14,7 @@ pub mod init;
 pub mod list;
 pub mod mcp;
 pub mod new;
+pub mod open;
 pub mod pack;
 pub mod pack_audit;
 pub(crate) mod pack_needs;
@@ -24,6 +25,7 @@ pub(crate) mod refusals;
 pub(crate) mod registry;
 pub mod resolve_gate;
 pub mod resume;
+pub mod review;
 pub mod run;
 pub(crate) mod run_ref;
 pub mod schema;
@@ -42,11 +44,11 @@ use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, CLAUDE_CODE_ID, CODEX_ID};
 use yunta_core::events::PauseReason;
 use yunta_core::port::{Adapter, ProbeReport};
 use yunta_core::{AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Workflow};
-use yunta_engine::{RunState, UnknownKindCount};
+use yunta_engine::RunState;
 
 use crate::error::CliError;
 use crate::output::Mode;
-use crate::render::Look;
+use surco::look::Look;
 
 /// A detached `yunta resume` that never started, and the run it was
 /// for. Recover by running that command yourself: the run is on disk
@@ -278,10 +280,11 @@ pub(crate) fn refuse_unrunnable(
     if needs_sessions && adapters.is_empty() {
         return Err(CliError::msg(format!(
             "this workflow has prompt/loop nodes but `runners:` in the merged config\n\
-             names no adapter this binary can run (built: {}). To exercise this\n\
+             names no adapter this binary can run (built: {built}). To exercise this\n\
              workflow with the `mock` adapter instead, declare a test case under\n\
-             .yunta/tests/ and run `yunta test`.",
-            built_adapter_names()
+             .yunta/tests/ and run `{test}`.",
+            built = built_adapter_names(),
+            test = advice::test()
         )));
     }
     Ok(())
@@ -301,44 +304,21 @@ pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError>
             // An adapter that reports itself unhealthy without saying
             // why is listed by name alone.
             Ok(ProbeReport::Unhealthy { diagnostic }) => {
-                unhealthy.push(yunta_core::text::detailed(name, &diagnostic));
+                unhealthy.push(surco::text::detailed(name, &diagnostic));
             }
-            Err(e) => unhealthy.push(yunta_core::text::detailed(name, &e.to_string())),
+            Err(e) => unhealthy.push(surco::text::detailed(name, &e.to_string())),
         }
     }
     if unhealthy.is_empty() {
         return Ok(());
     }
-    Err(CliError::msg(yunta_core::text::problems(
-        "adapter health check failed (run `yunta doctor` for detail)",
+    Err(CliError::msg(surco::text::problems(
+        format!(
+            "adapter health check failed (run `{}` for detail)",
+            advice::doctor()
+        ),
         &unhealthy,
     )))
-}
-
-/// How a partially interpreted run says so: every event kind this
-/// binary does not know, with how many events carried it. `None` when
-/// the log is interpreted in full.
-///
-/// `yunta status` folds it into its summary line and `yunta stats`
-/// prints it on its own, so the framing is each caller's and the
-/// sentence is one — a reader meets the same fact worded the same way
-/// on either surface.
-pub(crate) fn unknown_kinds_note(
-    counts: &[UnknownKindCount],
-    glyphs: crate::render::Glyphs,
-) -> Option<String> {
-    if counts.is_empty() {
-        return None;
-    }
-    let kinds: Vec<String> = counts
-        .iter()
-        .map(|count| format!("{} {}{}", count.kind, glyphs.times(), count.events))
-        .collect();
-    Some(format!(
-        "{}, interpreted partially: {}",
-        yunta_core::text::counted(counts.len(), "unknown event kind"),
-        kinds.join(", ")
-    ))
 }
 
 /// Resolves a workflow reference to a file, the one rule `check`, `run`
@@ -408,7 +388,7 @@ pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, output: Mode, loo
         Mode::Human => crate::output::say(
             look,
             format!(
-                "run {run_id}: {doing} — `{}` follows it",
+                "run {run_id}: {doing} (`{}` follows it)",
                 advice::status(run_id.handle())
             ),
         ),

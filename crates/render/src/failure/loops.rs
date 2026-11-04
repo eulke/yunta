@@ -2,8 +2,8 @@
 //! a plan no work can pass, a loop with no task ready, a run that holds no
 //! tasks document for its loop, and a loop that reached its iteration cap.
 
+use surco::text;
 use yunta_core::events::{TaskStop, UnpassableTask};
-use yunta_core::text;
 use yunta_core::NodeId;
 
 use crate::pause::exceeded_loop_cap;
@@ -24,12 +24,12 @@ pub(super) fn tasks_stopped(stopped: &[TaskStop]) -> String {
 
 /// No task of the loop is ready, and not all are done: a decision is owed.
 pub(super) fn loop_stalled() -> String {
-    "no task is ready and not all are done — blocked or failed tasks need a decision".to_string()
+    "no task is ready and not all are done: blocked or failed tasks need a decision".to_string()
 }
 
 /// The run holds no tasks document for the loop to read its tasks from.
 pub(super) fn no_tasks_document() -> String {
-    "this run holds no tasks document — an earlier node declares `produces: [tasks]`, or the \
+    "this run holds no tasks document: an earlier node declares `produces: [tasks]`, or the \
      workflow declares a `type: document` input of `kind: tasks` and the run is given one"
         .to_string()
 }
@@ -37,7 +37,7 @@ pub(super) fn no_tasks_document() -> String {
 /// The plan's unpassable criteria: each task, its criterion and why it cannot pass.
 pub(super) fn plan(unpassable: &[UnpassableTask]) -> String {
     format!(
-        "the plan holds a criterion no work can pass — {}",
+        "the plan holds a criterion no work can pass: {}",
         unpassable
             .iter()
             .map(|task| format!("task `{}`: `{}` ({})", task.task_id, task.cmd, task.why))

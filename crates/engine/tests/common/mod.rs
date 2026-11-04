@@ -622,7 +622,7 @@ limits:
 /// equal-share `Budget` stops it first — so the run-level
 /// check's real scenario is an *overshoot*: one usage burst blows both
 /// the session share and the whole run cap at once, the session is
-/// killed, the node fails, and its `on_failure` re-route asks the
+/// killed, the node fails, and its `on_failure` reroute asks the
 /// scheduler for more work while `spent >= cap`.
 pub const BUDGET_WORKFLOW: &str = r#"
 name: budget
@@ -1004,7 +1004,7 @@ pub fn lint_failure() -> Failure {
     }
 }
 
-/// The node an exhausted re-route of a failed node goes to, when its menu names one.
+/// The node an exhausted reroute of a failed node goes to, when its menu names one.
 pub fn reroute_goto(escalation: &yunta_core::events::Escalation) -> Option<String> {
     let menu = escalation.failure()?;
     menu.reroute

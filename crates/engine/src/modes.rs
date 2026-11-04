@@ -9,7 +9,7 @@
 //! wants, under any names, in the order a run may be promoted along, and
 //! the engine names none. A mode chooses how much deliberation a run gets,
 //! never how much verification — it keeps every `invariant` node, and what
-//! the nodes it keeps re-route to or read from, rules the workflow is held
+//! the nodes it keeps reroute to or read from, rules the workflow is held
 //! to where it is read. A node a mode leaves out is never scheduled, and a
 //! node that waited on it waits on what it waited on, so cutting a node
 //! out keeps the order of the work that remains. A node the project

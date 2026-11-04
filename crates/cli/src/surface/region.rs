@@ -21,19 +21,20 @@ use std::io::Write;
 
 use indicatif::style::TemplateError;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, TermLike};
-
+use surco::glyphs::Glyphs;
+use surco::line::Line;
+use surco::motion::Motion;
+use surco::paint::Paint;
 use yunta_core::RunId;
 use yunta_engine::RunFrame;
-
-use crate::render::ink::{Ink, Line};
-use crate::render::Glyphs;
 
 use super::scrollback::Scrollback;
 use super::{view, Screen};
 
-/// The region's rows carry text and nothing else: no bar, no percentage,
-/// and above all no spinner. What says a node is alive is the age of its
-/// last event, which is measured and grows while the node says nothing.
+/// The region's rows carry text, and beside the footer's words the run's
+/// furrow: no bar of one quantity and no percentage. The furrow is where each
+/// node stands, which the counter beside it says in words. A running node's
+/// spin turns a frame per event it says, and no clock turns it.
 const ROW: &str = "{msg}";
 
 /// A run drawn as rows that stay in place, and the work that has left
@@ -53,13 +54,19 @@ pub(super) struct Region {
     footer: ProgressBar,
     glyphs: Glyphs,
     /// How the stream the rows go on is painted.
-    ink: Ink,
+    paint: Paint,
     /// The style every row is drawn with, parsed once so adding a row
     /// later cannot fail.
     style: ProgressStyle,
     /// The terminal's own history above the region, and the one door
     /// onto it.
     above: Scrollback,
+    /// Whether a running node's mark turns.
+    motion: Motion,
+    /// Whether the person asked for a bell when they are asked something.
+    bell: bool,
+    /// Whether the window's title says a person is being asked.
+    told: bool,
 }
 
 impl Region {
@@ -72,7 +79,7 @@ impl Region {
     pub(super) fn open(
         screen: Screen,
         glyphs: Glyphs,
-        ink: Ink,
+        paint: Paint,
         scrollback: Box<dyn Write + Send>,
     ) -> Result<Self, TemplateError> {
         let style = ProgressStyle::with_template(ROW)?;
@@ -86,10 +93,25 @@ impl Region {
             body: Vec::new(),
             footer,
             glyphs,
-            ink,
+            paint,
             style,
             above,
+            motion: Motion::default(),
+            bell: false,
+            told: false,
         })
+    }
+
+    /// This region, turning as `motion` says.
+    pub(super) fn moving(mut self, motion: Motion) -> Self {
+        self.motion = motion;
+        self
+    }
+
+    /// This region, ringing when a person is asked, if `bell` says to.
+    pub(super) fn ringing(mut self, bell: bool) -> Self {
+        self.bell = bell;
+        self
     }
 
     /// Redraws the region from `frame`, sending up the nodes that stopped
@@ -104,7 +126,7 @@ impl Region {
         self.attend(attention);
         let rows: Vec<String> = view::working(frame)
             .into_iter()
-            .flat_map(|node| view::node_rows(frame, node, self.glyphs))
+            .flat_map(|node| view::node_rows(frame, node, &self.look(), self.motion))
             .map(|row| self.fit(&row))
             .collect();
         self.resize(rows.len());
@@ -112,7 +134,31 @@ impl Region {
             bar.set_message(text);
         }
         self.footer
-            .set_message(self.fit(&view::footer(frame, self.glyphs)));
+            .set_message(self.fit(&view::footer(frame, &self.look())));
+    }
+
+    /// Tells the window a person is being asked, as a prompt takes the terminal:
+    /// its title says so, and the bell rings if the person asked for one.
+    pub(super) fn ask(&mut self, frame: &RunFrame, run_id: &RunId) {
+        if self.told {
+            return;
+        }
+        self.told = true;
+        let title = view::title(frame, run_id, self.glyphs);
+        let bell = if self.bell { surco::paint::BELL } else { "" };
+        // A terminal that refuses the sequence is a terminal nothing could be
+        // reported on either.
+        drop(
+            self.screen
+                .signal(&format!("{}{bell}", surco::paint::title_saved(&title))),
+        );
+    }
+
+    /// Gives the window back the title it had, once the person has answered.
+    pub(super) fn answered(&mut self) {
+        if std::mem::take(&mut self.told) {
+            drop(self.screen.signal(surco::paint::TITLE_RESTORED));
+        }
     }
 
     /// Puts the attention row at the top while there is something to
@@ -165,7 +211,8 @@ impl Region {
     /// draws itself one last time, which would put the region back on
     /// the terminal it had just been taken off — right under the block
     /// that closes the run out.
-    pub(super) fn close(self) {
+    pub(super) fn close(mut self) {
+        self.answered();
         self.lower();
         self.multi.set_draw_target(ProgressDrawTarget::hidden());
     }
@@ -184,10 +231,10 @@ impl Region {
 
     /// The look of the rows this region draws, at the width they have
     /// now.
-    pub(super) fn look(&self) -> crate::render::Look {
-        crate::render::Look {
+    pub(super) fn look(&self) -> surco::look::Look {
+        surco::look::Look {
             glyphs: self.glyphs,
-            ink: self.ink,
+            paint: self.paint,
             width: crate::render::row_width(usize::from(self.screen.width())),
         }
     }
@@ -212,7 +259,7 @@ impl Region {
     /// on the words and painted after, so the paint never counts as
     /// width.
     fn fit(&self, line: &Line) -> String {
-        self.ink.paint(&line.cut(self.width(), self.glyphs))
+        self.paint.line(&line.cut(self.width(), self.glyphs))
     }
 
     /// The cells one row of this region may take: the width a line on
@@ -231,264 +278,4 @@ fn row(style: &ProgressStyle) -> ProgressBar {
 }
 
 #[cfg(test)]
-mod tests {
-    use yunta_core::NodeId;
-    use yunta_engine::{Counter, NodeStanding, NodeState, RunPhase, WaitingOn};
-    use yunta_testkit::{child_link, node_frame, run_frame};
-    use yunta_testkit_core::Captured;
-
-    use crate::surface::Watched;
-
-    use super::*;
-
-    const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
-    const CHILD: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P6");
-
-    /// A region drawn into a buffer: no terminal to stand up, and every
-    /// draw landing before the next assertion.
-    fn region(term: &Watched, scrollback: &Captured) -> Region {
-        Region::open(
-            Screen::immediate(term.clone()),
-            Glyphs::Ascii,
-            crate::render::ink::Ink::Plain,
-            Box::new(scrollback.clone()),
-        )
-        .expect("the region's row template parses")
-    }
-
-    fn running(id: &'static str) -> yunta_engine::NodeFrame {
-        node_frame(
-            &NodeId::from_static(id),
-            NodeStanding::Reached(NodeState::Running { attempt: 1 }),
-        )
-    }
-
-    /// A run of `nodes` in `phase`, counted as the region counts them.
-    fn frame(phase: RunPhase, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
-        RunFrame {
-            phase,
-            flow: Counter {
-                total: nodes.len(),
-                ..Counter::default()
-            },
-            nodes,
-            ..run_frame(&RUN)
-        }
-    }
-
-    /// The run of `nodes`, with a child run still open under `bore`.
-    fn composing(bore: &'static str, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
-        RunFrame {
-            children: vec![child_link(&CHILD, Some(&NodeId::from_static(bore)), None)],
-            ..frame(RunPhase::Running, nodes)
-        }
-    }
-
-    fn rows(term: &Watched) -> Vec<String> {
-        term.shown().lines().map(str::to_string).collect()
-    }
-
-    #[test]
-    fn the_attention_row_opens_the_region_only_while_something_needs_you() {
-        let term = Watched::sized(16, 80);
-        let scrollback = Captured::default();
-        let mut region = region(&term, &scrollback);
-
-        region.show(
-            &frame(RunPhase::Running, vec![running("plan")]),
-            &RUN,
-            false,
-        );
-        let quiet = rows(&term);
-        assert!(
-            quiet
-                .first()
-                .is_some_and(|row| row.contains("running plan")),
-            "with nothing to ask, the work opens the region: {quiet:?}"
-        );
-        assert!(
-            quiet
-                .last()
-                .is_some_and(|row| row.ends_with("nothing needs you")),
-            "and the footer says nothing needs you: {quiet:?}"
-        );
-
-        region.show(
-            &frame(
-                RunPhase::Waiting {
-                    on: WaitingOn::Node {
-                        node: NodeId::from_static("plan"),
-                        on: yunta_engine::NodeWait::Gate { external_ref: None },
-                        reason: None,
-                    },
-                },
-                vec![running("plan")],
-            ),
-            &RUN,
-            true,
-        );
-        let demanded = rows(&term);
-        let first = demanded.first().map(String::as_str).unwrap_or_default();
-        assert!(
-            first.contains("needs you: ")
-                && first.contains(&format!("yunta resolve-gate {}", RUN.handle())),
-            "the row that asks opens the region, with the command that answers: {demanded:?}"
-        );
-        assert_eq!(demanded.len(), quiet.len() + 1, "{demanded:?}");
-
-        region.show(
-            &frame(RunPhase::Running, vec![running("plan")]),
-            &RUN,
-            false,
-        );
-        assert_eq!(rows(&term), quiet, "and it leaves once it is answered");
-    }
-
-    #[test]
-    fn a_closed_region_leaves_nothing_of_itself_on_the_terminal() {
-        let term = Watched::sized(16, 80);
-        let scrollback = Captured::default();
-        let mut region = region(&term, &scrollback);
-        region.show(
-            &frame(RunPhase::Running, vec![running("plan")]),
-            &RUN,
-            false,
-        );
-        assert!(!term.shown().is_empty(), "there is a region to take down");
-
-        let drawn = term.written();
-        region.close();
-        assert_eq!(
-            term.shown(),
-            "",
-            "the block that closes the run out lands on a terminal with nothing pinned to it"
-        );
-        assert_eq!(
-            term.written(),
-            drawn,
-            "and nothing of the region reaches that terminal after it is taken down"
-        );
-    }
-
-    #[test]
-    fn a_row_is_cut_to_the_terminal_and_never_past_the_width_it_is_written_for() {
-        // Below the terminal's edge a row wraps onto the row below,
-        // which the next redraw does not account for: the region loses
-        // its row count and tears. Above the width the rows are written
-        // for, the layout would reflow under a reader every time they
-        // resized the window.
-        const PARKED: &str = "a-node-with-a-name-long-enough-to-fill-a-row";
-        for columns in [40u16, 200] {
-            let term = Watched::sized(16, columns);
-            let scrollback = Captured::default();
-            let mut region = region(&term, &scrollback);
-            region.show(
-                &frame(
-                    RunPhase::Waiting {
-                        on: WaitingOn::Node {
-                            node: NodeId::from_static(PARKED),
-                            on: yunta_engine::NodeWait::Gate { external_ref: None },
-                            reason: None,
-                        },
-                    },
-                    vec![running(PARKED)],
-                ),
-                &RUN,
-                true,
-            );
-            let room = crate::render::row_width(usize::from(columns)).cells();
-            let drawn = rows(&term);
-            assert_eq!(
-                drawn.len(),
-                2 + region.body.len(),
-                "on a terminal {columns} wide the region took more rows than it drew, which is \
-                 a row that wrapped onto the one below: {drawn:?}"
-            );
-            for row in &drawn {
-                assert!(
-                    crate::render::cell_width(row) <= room,
-                    "a row {} cells wide where {room} fit, on a terminal {columns} wide: {row:?}",
-                    crate::render::cell_width(row)
-                );
-            }
-            assert!(
-                term.shown().contains("needs you"),
-                "and the rows are still the run's: {}",
-                term.shown()
-            );
-        }
-    }
-
-    #[test]
-    fn a_child_run_is_drawn_under_the_node_that_bore_it_and_never_as_a_number() {
-        let term = Watched::sized(16, 80);
-        let scrollback = Captured::default();
-        let mut region = region(&term, &scrollback);
-
-        region.show(&composing("compose", vec![running("compose")]), &RUN, false);
-        let drawn = rows(&term);
-        let node = drawn
-            .iter()
-            .position(|row| row.contains("compose"))
-            .expect("the node that bore the child is on the terminal");
-        let child = drawn
-            .get(node + 1)
-            .map(String::as_str)
-            .unwrap_or_default()
-            .to_string();
-        assert!(
-            child.starts_with("    ") && child.contains(&format!("child run {}", CHILD.handle())),
-            "the child sits under the node that bore it: {drawn:?}"
-        );
-        assert!(
-            child.contains("still open"),
-            "and says only what the parent's log says of it: {child}"
-        );
-        assert!(
-            !child.contains('%'),
-            "children are a tree, never a figure averaged over them: {child}"
-        );
-    }
-
-    #[test]
-    fn a_child_row_cut_to_a_narrow_terminal_still_says_where_the_child_stands() {
-        const NARROW: u16 = 40;
-        let term = Watched::sized(16, NARROW);
-        let scrollback = Captured::default();
-        let mut region = region(&term, &scrollback);
-
-        region.show(&composing("compose", vec![running("compose")]), &RUN, false);
-        let drawn = rows(&term);
-        assert!(
-            drawn.iter().any(|row| row.contains("still open")),
-            "a row cut at the terminal's edge loses which child and never that there is \
-             one: {drawn:?}"
-        );
-        for row in &drawn {
-            assert!(
-                crate::render::cell_width(row) <= usize::from(NARROW),
-                "{row:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_footer_stays_the_last_row_as_nodes_come_and_go() {
-        let term = Watched::sized(16, 80);
-        let scrollback = Captured::default();
-        let mut region = region(&term, &scrollback);
-
-        for nodes in [
-            vec![running("plan")],
-            vec![running("plan"), running("build")],
-            vec![running("build")],
-        ] {
-            region.show(&frame(RunPhase::Running, nodes), &RUN, false);
-            let drawn = rows(&term);
-            assert!(
-                drawn.last().is_some_and(|row| row.starts_with("nodes ")),
-                "{drawn:?}"
-            );
-        }
-    }
-}
+mod tests;

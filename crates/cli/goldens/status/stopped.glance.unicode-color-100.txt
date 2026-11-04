@@ -1,0 +1,12 @@
+␛[2m■␛[0m ␛[1mfragua (quick)␛[0m␛[2m ·␛[0m␛[2m stopped ␛[0m␛[2m· for 32m10s␛[0m                                                       7E5PH4
+␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+  interrupted by a person.
+
+  ␛[2mprogress    ␛[0m 1 of 3 nodes done
+  ␛[2mnodes       ␛[0m ␛[32m✓ ␛[0m1 finished: plan
+  ␛[2m            ␛[0m ␛[2m◌ ␛[0m2 never ran: build, test
+
+␛[2mnext␛[0m
+  ␛[1myunta resume 7E5PH4       ␛[0m   ␛[2mcontinues it where it stopped␛[0m
+  ␛[1myunta close 7E5PH4        ␛[0m   ␛[2mcloses it for good␛[0m
+  ␛[1myunta status 7E5PH4 --full␛[0m   ␛[2mthe whole story, node by node␛[0m

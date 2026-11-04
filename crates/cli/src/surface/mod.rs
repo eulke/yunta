@@ -24,6 +24,7 @@ mod fold;
 mod lines;
 mod painter;
 mod region;
+mod screen;
 mod scrollback;
 pub(crate) mod terminal;
 mod turns;
@@ -32,15 +33,16 @@ mod view;
 use std::io::Write;
 use std::sync::Arc;
 
-use dialoguer::console::Term;
-use indicatif::{ProgressDrawTarget, TermLike};
+use console::Term;
+#[cfg(test)]
+use indicatif::TermLike;
 use tokio::task::JoinHandle;
 
 use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::{PriorEstimation, RunObserver};
 use yunta_storage::{AsyncStorage, StorageError};
 
-use crate::render::Glyphs;
+use surco::glyphs::Glyphs;
 
 use feed::{Beat, Feed};
 use lines::Lines;
@@ -49,8 +51,10 @@ use region::Region;
 
 pub(crate) use closing::{Closing, ClosingEnv, Outline};
 pub(crate) use feed::Diagnostics;
+pub(crate) use screen::Screen;
 pub(crate) use terminal::TerminalEnv;
 pub(crate) use turns::Curtain;
+pub(crate) use view::{child_row, children_by_node};
 
 /// Why the live region stood down, in the words the reader is given.
 /// Each one names a property of the environment this process was handed,
@@ -70,21 +74,14 @@ const ROW_TEMPLATE: &str = "this build's region template does not parse";
 /// minute of it.
 const QUEUE_DEPTH: usize = 1024;
 
-/// How many times a second the region may redraw on a terminal a person
-/// is watching. The painter has a beat of its own, once a second; this
-/// is the ceiling for the redraws events ask for in between, so a node
-/// emitting a burst of messages costs the terminal a handful of
-/// repaints rather than one per message.
-const REDRAW_CEILING_HZ: u8 = 20;
-
 /// How a run's progress reaches the person who started it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Delivery {
-    /// One line carrying the run id, and nothing else — the verdict
-    /// travels in the exit code. Quiet is about progress, never about
-    /// problems: a diagnostic and the budget warning are printed either
-    /// way, because one describes what happened and the other asks for a
-    /// decision before anything is spent.
+    /// One line carrying the run id on stdout, and one line of verdict on stderr
+    /// when the run ends. Quiet is about progress, never about problems: a
+    /// diagnostic and the budget warning are printed either way, because one
+    /// describes what happened and the other asks for a decision before
+    /// anything is spent.
     Quiet,
     /// One line per event, appended, never redrawn, each carrying the
     /// run's elapsed time at that event.
@@ -112,7 +109,7 @@ impl Delivery {
                 reason: NOT_A_TERMINAL,
             };
         }
-        if env.term.as_deref() == Some("dumb") {
+        if env.is_dumb() {
             return Self::Lines {
                 reason: DUMB_TERMINAL,
             };
@@ -167,8 +164,12 @@ impl Surface {
             Delivery::Lines { reason } => Draw::Lines(Lines::open(stderr(), reason)),
             Delivery::Live => {
                 let screen = Screen::watched(Term::buffered_stderr());
-                match Region::open(screen, env.glyphs, crate::render::stderr_ink(), stderr()) {
-                    Ok(region) => Draw::Live(Box::new(region)),
+                match Region::open(screen, env.glyphs, crate::render::stderr_paint(), stderr()) {
+                    Ok(region) => Draw::Live(Box::new(
+                        region
+                            .moving(TerminalEnv::settled().motion)
+                            .ringing(env.manifest.config.terminal_bell()),
+                    )),
                     Err(_) => Draw::Lines(Lines::open(stderr(), ROW_TEMPLATE)),
                 }
             }
@@ -212,6 +213,12 @@ impl Surface {
             .map(|feed| Arc::clone(feed) as Arc<dyn RunObserver>)
     }
 
+    /// Whether this surface says what happens in the run as it happens. Nothing does under
+    /// `--quiet`, so whoever else speaks has to say it itself.
+    pub(crate) fn chronicles(&self) -> bool {
+        self.feed.is_some()
+    }
+
     /// Takes the surface down: everything already queued is drawn, then
     /// the region is cleared, so the closing block lands on a terminal
     /// with nothing pinned to it.
@@ -237,94 +244,6 @@ impl Surface {
 /// own result to whatever is reading it.
 fn stderr() -> Box<dyn Write + Send> {
     Box::new(std::io::stderr())
-}
-
-/// The terminal the region draws on and measures its rows against.
-///
-/// One object answers both questions — where a row goes, and how many
-/// cells it may take — so a row is never cut to a width the screen it
-/// lands on does not have. The handle is shared: what indicatif draws
-/// through and what the region measures with are the same terminal, so
-/// a window resized mid-run moves both.
-#[derive(Clone, Debug)]
-pub(crate) struct Screen {
-    term: Arc<dyn TermLike>,
-    /// How many times a second this screen accepts a redraw, `None`
-    /// taking every one of them.
-    hz: Option<u8>,
-}
-
-impl Screen {
-    /// The terminal a person is watching, redrawn at most
-    /// [`REDRAW_CEILING_HZ`] times a second.
-    pub(crate) fn watched(term: impl TermLike + 'static) -> Self {
-        Self {
-            term: Arc::new(term),
-            hz: Some(REDRAW_CEILING_HZ),
-        }
-    }
-
-    /// A screen every draw reaches, for a test that asserts on the rows
-    /// one draw produced: under a ceiling the second of two draws made
-    /// back to back is dropped, and the assertion after it would be
-    /// reading the first.
-    #[cfg(test)]
-    pub(crate) fn immediate(term: impl TermLike + 'static) -> Self {
-        Self {
-            term: Arc::new(term),
-            hz: None,
-        }
-    }
-
-    /// Where indicatif draws this screen.
-    fn target(&self) -> ProgressDrawTarget {
-        match self.hz {
-            Some(hz) => ProgressDrawTarget::term_like_with_hz(Box::new(self.clone()), hz),
-            None => ProgressDrawTarget::term_like(Box::new(self.clone())),
-        }
-    }
-}
-
-impl TermLike for Screen {
-    fn width(&self) -> u16 {
-        self.term.width()
-    }
-
-    fn height(&self) -> u16 {
-        self.term.height()
-    }
-
-    fn move_cursor_up(&self, n: usize) -> std::io::Result<()> {
-        self.term.move_cursor_up(n)
-    }
-
-    fn move_cursor_down(&self, n: usize) -> std::io::Result<()> {
-        self.term.move_cursor_down(n)
-    }
-
-    fn move_cursor_right(&self, n: usize) -> std::io::Result<()> {
-        self.term.move_cursor_right(n)
-    }
-
-    fn move_cursor_left(&self, n: usize) -> std::io::Result<()> {
-        self.term.move_cursor_left(n)
-    }
-
-    fn write_line(&self, line: &str) -> std::io::Result<()> {
-        self.term.write_line(line)
-    }
-
-    fn write_str(&self, text: &str) -> std::io::Result<()> {
-        self.term.write_str(text)
-    }
-
-    fn clear_line(&self) -> std::io::Result<()> {
-        self.term.clear_line()
-    }
-
-    fn flush(&self) -> std::io::Result<()> {
-        self.term.flush()
-    }
 }
 
 /// Writes one line and flushes it, so a reader watching a log sees it
@@ -379,6 +298,12 @@ impl Watched {
 
     fn note(&self, text: &str) {
         use std::io::Write as _;
+        // Opening and closing an update is no row of the transcript a test
+        // reads back; a title and a bell still are, so a test that the surface
+        // wrote nothing under a prompt still catches them.
+        if text == surco::paint::SYNC_BEGIN || text == surco::paint::SYNC_END {
+            return;
+        }
         let mut written = self.written.clone();
         drop(written.write_all(text.as_bytes()));
     }
@@ -432,11 +357,13 @@ impl TermLike for Watched {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use surco::motion::Motion;
 
     fn env(stderr_is_terminal: bool, term: Option<&str>) -> TerminalEnv {
         TerminalEnv {
             stderr_is_terminal,
             term: term.map(str::to_string),
+            motion: Motion::Moves,
         }
     }
 

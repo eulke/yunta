@@ -13,7 +13,7 @@
 //! over here: `check` refuses, before the run, a workflow whose
 //! declarations no candidate can honor. Availability is the only fallback.
 //! Escalating quality — a cheap model first, a costly one if it fails — is
-//! a re-route to a node whose runner costs more, visible in the graph,
+//! a reroute to a node whose runner costs more, visible in the graph,
 //! never a second pick here.
 
 use thiserror::Error;

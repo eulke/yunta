@@ -10,7 +10,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::render::blocks::Found;
+use surco::components::{Check, Fix, Found};
 
 /// How much more than its second run a new binary's first run may cost
 /// before a suite of them slows a run: a tenth of a second, which two
@@ -19,7 +19,7 @@ const NOTICEABLE: Duration = Duration::from_millis(100);
 
 /// The probe's row on `doctor`'s checklist, or `None` where it does not
 /// apply — another system, or no C compiler to link a probe with.
-pub(super) async fn first_run() -> Option<(Found, String)> {
+pub(super) async fn first_run() -> Option<Check> {
     if std::env::consts::OS != "macos" {
         return None;
     }
@@ -63,8 +63,9 @@ async fn timed(binary: &std::path::Path) -> Option<Duration> {
 }
 
 /// What `doctor` says of a new binary whose first run took `first` and
-/// whose second took `then`, given the cost `noticeable` over it.
-pub(super) fn verdict(first: Duration, then: Duration, noticeable: Duration) -> (Found, String) {
+/// whose second took `then`, given the cost `noticeable` over it: what it
+/// costs, and, when that slows a suite, why and how to exempt the terminal.
+pub(super) fn verdict(first: Duration, then: Duration, noticeable: Duration) -> Check {
     let cost = first.saturating_sub(then);
     let said = format!(
         "a new binary's first run takes {} here, its next {}",
@@ -72,16 +73,16 @@ pub(super) fn verdict(first: Duration, then: Duration, noticeable: Duration) -> 
         millis(then)
     );
     match cost >= noticeable {
-        false => (Found::Holds, said),
-        true => (
-            Found::Caution,
-            format!(
-                "{said}: macOS assesses each new executable before its first run, and a \
-                 suite pays that for every test binary it links again — add the terminal that \
-                 runs yunta under System Settings › Privacy & Security › Developer Tools, then \
-                 open it again"
-            ),
-        ),
+        false => Check::new(Found::Holds, "first run", said),
+        true => Check::new(Found::Caution, "first run", said)
+            .so(
+                "macOS assesses each new executable before its first run, and a suite pays \
+                 that for every test binary it links again",
+            )
+            .fix(Fix::said(
+                "add the terminal that runs yunta under System Settings > Privacy & Security \
+                 > Developer Tools, then open it again",
+            )),
     }
 }
 
@@ -95,23 +96,35 @@ mod tests {
 
     #[test]
     fn a_first_run_that_costs_little_more_holds() {
-        let (found, said) = verdict(
+        let check = verdict(
             Duration::from_millis(30),
             Duration::from_millis(8),
             Duration::from_millis(100),
         );
-        assert_eq!(found, Found::Holds);
-        assert!(said.contains("30 ms") && said.contains("8 ms"), "{said}");
+        assert_eq!(check.found, Found::Holds);
+        assert_eq!(
+            check.said,
+            "a new binary's first run takes 30 ms here, its next 8 ms"
+        );
+        assert!(check.fix.is_none(), "{check:?}");
     }
 
     #[test]
     fn a_first_run_that_costs_a_suite_minutes_says_how_to_exempt_the_terminal() {
-        let (found, said) = verdict(
+        let check = verdict(
             Duration::from_millis(450),
             Duration::from_millis(7),
             Duration::from_millis(100),
         );
-        assert_eq!(found, Found::Caution);
-        assert!(said.contains("Developer Tools"), "{said}");
+        assert_eq!(check.found, Found::Caution);
+        assert_eq!(check.subject, "first run");
+        assert_eq!(
+            check.said,
+            "a new binary's first run takes 450 ms here, its next 7 ms"
+        );
+        assert!(check.so.is_some_and(|so| so.contains("macOS assesses")));
+        assert!(check
+            .fix
+            .is_some_and(|fix| fix.said.contains("Developer Tools")));
     }
 }

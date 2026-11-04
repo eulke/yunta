@@ -45,8 +45,8 @@ mod wait;
 
 pub use bench::{no_secrets, Bench, MOCK_CONFIG};
 pub use bin::{
-    checked, checks, full_run_id, handle, hermetic, pool_checkouts, pool_checkouts_in, run_id_from,
-    run_id_in, run_yunta, stderr, stdout, Spawning,
+    checked, checks, full_run_id, handle, hermetic, hung, pool_checkouts, pool_checkouts_in,
+    run_id_from, run_yunta, stderr, stdout, unwrapped, Spawning,
 };
 pub use checkout::Checkout;
 pub use child::{CliChild, ProcessGroupCleanup};
@@ -63,10 +63,9 @@ pub use owner::Owner;
 pub use repo::{bare_origin, git, git_output, init_repo, read, write, INITIAL_BRANCH};
 pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
-pub use terminal::{runs_root, Terminal};
+pub use terminal::{runs_root, Screen, Terminal};
 pub use tools::{tools_environment, ToolsHost};
 pub use wait::{after, wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
-pub use yunta_testkit_core::golden::{assert_golden, visible, Environment, ENVIRONMENTS};
 
 /// Runs the `yunta` binary in a [`Checkout`], with whatever that
 /// checkout says about its state root and its org layer:
@@ -130,6 +129,23 @@ macro_rules! yunta_on_terminal {
             $home,
             $args,
             $vars,
+        )
+    };
+}
+
+/// Runs the `yunta` binary on a terminal of a stated size, `(columns, rows)`:
+/// `yunta_on_terminal_sized!(dir, home, &["review"], (90, 11))`. Same reason as
+/// [`yunta_in!`] for expanding `CARGO_BIN_EXE_yunta` at the call site.
+#[macro_export]
+macro_rules! yunta_on_terminal_sized {
+    ($dir:expr, $home:expr, $args:expr, $size:expr) => {
+        $crate::Terminal::open_sized(
+            ::std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+            $dir,
+            $home,
+            $args,
+            &[],
+            $size,
         )
     };
 }

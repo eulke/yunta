@@ -6,8 +6,9 @@
 //! against their own scripted fake binary, never a real LLM in CI. Its map:
 //! `claude_code`, `codex` and `mock` are the adapters; `dialect` names the CLIs
 //! a session can stand for and `session` holds what every adapter shares;
-//! `mount` puts a session's skills where its CLI finds them; `failure` reads
-//! what a CLI's failure says about a refusal; `reach` tells whether the service
+//! `action` reads what a tool call does; `mount` puts a session's skills where
+//! its CLI finds them; `failure` reads what a CLI's failure says about a refusal;
+//! `reach` tells whether the service
 //! a session talks to answers; `forge` builds the two forges behind
 //! `yunta_core::port::Forge`.
 
@@ -26,6 +27,7 @@
 // separate crates neither reaches.
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
+mod action;
 mod claude_code;
 mod codex;
 mod dialect;

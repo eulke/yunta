@@ -72,6 +72,10 @@ rule_codes! {
     AllCriteriaAreGuards => "all-criteria-are-guards",
     /// `depends_on` names a task nobody declared.
     UnknownDependency => "unknown-dependency",
+    /// A key nothing in the document reads.
+    UnknownKey => "unknown-key",
+    /// A node's `kind` one slip from a kind a node can be.
+    UnknownKind => "unknown-kind",
     DependencyCycle => "dependency-cycle",
     /// Two independent tasks reach for the same files.
     OverlappingScope => "overlapping-scope",
@@ -189,7 +193,7 @@ rule_codes! {
     InvariantInParallel => "invariant-in-parallel",
     /// `optional: true` where leaving the node out would leave the run
     /// without something it cannot do without: on a child of a
-    /// `parallel` group, or on a node a required one re-routes to or
+    /// `parallel` group, or on a node a required one reroutes to or
     /// reads from.
     IncoherentOptional => "incoherent-optional",
 }
@@ -231,6 +235,9 @@ pub enum Problem {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         path: String,
         message: String,
+        /// The name the refused one is most likely a slip from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nearest: Option<String>,
     },
     /// A rule the document broke once it was readable — the tasks document's own
     /// registration rules and their siblings. `code` is what a receipt
@@ -254,9 +261,35 @@ pub enum RuleWords {
 impl Problem {
     /// A value the deserializer refused, at the path it refused it.
     pub fn parse(path: impl Into<String>, message: impl Into<String>) -> Self {
+        Problem::parse_nearest(path, message, None)
+    }
+
+    /// A value the deserializer refused, at the path it refused it, with
+    /// the name it is most likely a slip from.
+    pub fn parse_nearest(
+        path: impl Into<String>,
+        message: impl Into<String>,
+        nearest: Option<String>,
+    ) -> Self {
         Problem::Parse {
             path: path.into(),
             message: message.into(),
+            nearest,
+        }
+    }
+
+    /// What helps fix it, the most direct first.
+    pub fn help(&self) -> Vec<String> {
+        match self {
+            Problem::Parse { nearest, .. } => nearest
+                .iter()
+                .map(|nearest| surco::text::suggested(nearest))
+                .collect(),
+            Problem::Rule {
+                words: RuleWords::Fault { fault },
+                ..
+            } => fault.help(),
+            Problem::Rule { .. } => Vec::new(),
         }
     }
 
@@ -273,7 +306,14 @@ impl Problem {
     /// rendering already reads as a sentence about the document and
     /// must not be prefixed with a subject and a colon.
     pub(super) fn about_document(&self) -> bool {
-        matches!(self, Problem::Parse { .. })
+        match self {
+            Problem::Parse { .. } => true,
+            Problem::Rule {
+                words: RuleWords::Fault { fault },
+                ..
+            } => fault.about_document(),
+            Problem::Rule { .. } => false,
+        }
     }
 
     /// The stable name of this kind of problem: what a receipt counts
@@ -361,7 +401,7 @@ impl ParseCode {
 impl std::fmt::Display for Problem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Problem::Parse { path, message } => match path.as_str() {
+            Problem::Parse { path, message, .. } => match path.as_str() {
                 "" | "." => write!(f, "does not parse: {message}"),
                 path => write!(f, "does not parse at `{path}`: {message}"),
             },

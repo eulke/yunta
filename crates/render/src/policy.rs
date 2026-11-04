@@ -11,26 +11,26 @@ use yunta_core::port::{Policy, PolicyApplied};
 pub fn sentence(policy: &Policy) -> String {
     let said = match policy {
         Policy::PostCheckOnly => {
-            "post-check only — the session edits unguarded and its diff is judged \
+            "post-check only: the session edits unguarded and its diff is judged \
              against the declared scope after the fact"
         }
         Policy::NoTokenBudget => {
-            "no token budget — the session reports no usage, so the run's cap is \
+            "no token budget: the session reports no usage, so the run's cap is \
              recorded against it as zero"
         }
         Policy::NoSkills => {
-            "skills not mounted — the session runs without the skills the node \
+            "skills not mounted: the session runs without the skills the node \
              declares"
         }
         Policy::NoRunTools => {
-            "run tools unreachable — the session holds none of the run's tools, so \
+            "run tools unreachable: the session holds none of the run's tools, so \
              this node ends owing every document it declares"
         }
         Policy::NetworkOpen => {
-            "declarative only — `network: false` is recorded for policy and audit, \
+            "declarative only: `network: false` is recorded for policy and audit, \
              not enforced"
         }
-        Policy::FreshSession => "restart_node — a fresh session replaces the interrupted one",
+        Policy::FreshSession => "restart_node: a fresh session replaces the interrupted one",
         Policy::CapAtSessionEnd => {
             "the turn's token cap is checked when the session ends, because the CLI reports \
              no usage mid-session"
@@ -56,11 +56,11 @@ mod tests {
     fn a_fallback_reads_as_what_the_engine_did_instead() {
         assert_eq!(
             sentence(&Policy::FreshSession),
-            "restart_node — a fresh session replaces the interrupted one"
+            "restart_node: a fresh session replaces the interrupted one"
         );
         assert_eq!(
             sentence(&Policy::NoRunTools),
-            "run tools unreachable — the session holds none of the run's tools, so this node \
+            "run tools unreachable: the session holds none of the run's tools, so this node \
              ends owing every document it declares"
         );
     }
@@ -78,7 +78,7 @@ mod tests {
     fn a_policy_read_from_its_name_reads_as_its_sentence() {
         assert_eq!(
             applied(&PolicyApplied::Known(Policy::NoSkills)),
-            "skills not mounted — the session runs without the skills the node declares"
+            "skills not mounted: the session runs without the skills the node declares"
         );
     }
 

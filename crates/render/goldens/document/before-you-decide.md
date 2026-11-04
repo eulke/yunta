@@ -1,6 +1,6 @@
-### before you decide
+## before you decide
 
-#### `approve` is not offered, because
+### `approve` is not offered, because
 
 - ▲ `greet` plans to change `tests/greet.rs`, a test the spec wrote for `greet`
   - so: no session may write it, so the task cannot be done as planned
@@ -10,8 +10,8 @@
   - so: it passes once `greet` is done, whatever this task does
   - fix: judge the task by a test of its own
 
-- · handed over 16 times; refused 15: criterion-already-passes ×12, shared-criterion ×3
-- · 2 of 3 changes show no code
-- · nothing but the suite checks 1 promise the tasks keep
+- ◌ handed over 16 times; refused 15 times: criterion-already-passes in 12, shared-criterion in 3
+- ◌ 1 of 2 changes shows no code
 
-- ▲ risk: A name with a newline in it breaks the line it is printed on.
+> [!CAUTION]
+> - risk: A name with a newline in it breaks the line it is printed on.

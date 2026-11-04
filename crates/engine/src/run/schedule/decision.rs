@@ -30,7 +30,7 @@ pub enum Decision {
     Pause {
         reason: PauseReason,
     },
-    /// A node failed with no re-route of its own and the run's
+    /// A node failed with no reroute of its own and the run's
     /// `defaults.on_failure` closes the run as failed rather than pausing:
     /// `abort` at the first such failure, `continue` once every node not
     /// blocked behind a failure has run. `failure` is the causing node's
@@ -40,7 +40,7 @@ pub enum Decision {
         node: NodeId,
         failure: Failure,
     },
-    /// A node's re-routes are exhausted — the one pause that
+    /// A node's reroutes are exhausted — the one pause that
     /// carries real options, since "retry the same
     /// destination once more" and "abort" are both well-defined here
     /// (unlike a plain failure with no `on_failure` at all, which stays
@@ -53,7 +53,7 @@ pub enum Decision {
         max_reroutes: u32,
         cause: Failure,
     },
-    /// A node failed with no re-route of its own, and the run's
+    /// A node failed with no reroute of its own, and the run's
     /// `defaults.on_failure` is `pause`: a person decides whether it runs
     /// again. The imperative shell asks — or consumes a decision
     /// `resolve_gate` seeded while the run was parked — and pauses when
@@ -95,7 +95,7 @@ pub enum Decision {
         external_ref: String,
     },
     /// An internal gate (`external: None`) is ready (or came
-    /// back after its chosen option's re-route completed): the
+    /// back after its chosen option's reroute completed): the
     /// imperative shell builds the escalation object from
     /// `message`/`options`/`on` and asks `HumanInteraction`. One at a
     /// time, same reasoning as the other gate steps.

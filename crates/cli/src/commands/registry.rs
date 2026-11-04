@@ -27,7 +27,7 @@ pub(crate) enum ServableError {
     /// The run is pinned to an adapter that a runner the node uses does not
     /// reach: none of that runner's candidates is on it.
     #[error(
-        "node `{node}` runs on runner `{runner}`, which has no candidate on `--adapter {pin}` — \
+        "node `{node}` runs on runner `{runner}`, which has no candidate on `--adapter {pin}`; \
          its candidates are on: {}; add one on `{pin}` to `runners.{runner}`, or drop the flag",
         listed(candidates)
     )]
@@ -40,7 +40,7 @@ pub(crate) enum ServableError {
     /// The pinned adapter is not one `runners:` names that this binary builds.
     /// `runnable` is what the refusal offers instead: those adapters, sorted.
     #[error(
-        "unknown adapter `{pin}` — this binary can run: {}",
+        "unknown adapter `{pin}`; this binary can run: {}",
         runnable_list(runnable)
     )]
     UnbuiltPin {
@@ -73,7 +73,7 @@ fn listed(adapters: &[AdapterId]) -> String {
 /// that this binary builds, or a note that `runners:` names none it builds.
 fn runnable_list(runnable: &[AdapterId]) -> String {
     if runnable.is_empty() {
-        return "(none configured — `runners:` names no adapter this build supports)".to_string();
+        return "(none configured: `runners:` names no adapter this build supports)".to_string();
     }
     listed(runnable)
 }
@@ -162,8 +162,12 @@ fn frozen_children(manifest: &Manifest) -> Result<Vec<(&str, Workflow)>, CliErro
         .iter()
         .flat_map(|frozen| &frozen.workflows)
         .map(|(name, child)| {
-            let workflow = yunta_core::workflow::read::read(&child.text, Path::new(name))
-                .map_err(|report| CliError::msg(report.to_string()))?;
+            let workflow = yunta_core::workflow::read::read(&child.text, Path::new(name)).map_err(
+                |report| CliError::Document {
+                    report,
+                    text: Some(child.text.clone()),
+                },
+            )?;
             Ok((name.as_str(), workflow))
         })
         .collect()
@@ -251,8 +255,8 @@ fn refuse_unchecked(manifest: &Manifest, reach: &Reach<'_>) -> Result<(), CliErr
     if errors.is_empty() {
         return Ok(());
     }
-    Err(CliError::msg(yunta_core::text::problems(
-        "the workflow fails `yunta check`",
+    Err(CliError::msg(surco::text::problems(
+        crate::error::page::unrunnable(),
         &errors,
     )))
 }
@@ -477,11 +481,11 @@ mod tests {
         };
         assert_eq!(
             refused(vec![AdapterId::from("claude-code")]),
-            "unknown adapter `codex` — this binary can run: claude-code"
+            "unknown adapter `codex`; this binary can run: claude-code"
         );
         assert_eq!(
             refused(Vec::new()),
-            "unknown adapter `codex` — this binary can run: (none configured — `runners:` names no adapter this build supports)"
+            "unknown adapter `codex`; this binary can run: (none configured: `runners:` names no adapter this build supports)"
         );
     }
 }

@@ -39,8 +39,9 @@
 use serde_json::Value;
 use yunta_core::{RunTool, SessionId};
 
+use crate::action::{self, Checkout};
 use crate::failure::{classify, has_word};
-use yunta_core::events::{FailureCause, RefusalCause, ToolTarget};
+use yunta_core::events::{FailureCause, RefusalCause, ToolAction, ToolTarget};
 use yunta_core::fence::Coverage;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
@@ -70,7 +71,12 @@ enum ThreadEvent {
     Unknown,
 }
 
-pub(super) fn parse_line(line: &str, last_message: &str, fence: &Coverage) -> Vec<AgentEvent> {
+pub(super) fn parse_line(
+    line: &str,
+    last_message: &str,
+    fence: &Coverage,
+    checkout: &Checkout,
+) -> Vec<AgentEvent> {
     // A line that is not JSON at all is not this protocol: the stream
     // carries whatever the CLI wrote to stdout, warnings included.
     let Ok(parsed) = serde_json::from_str::<ThreadEvent>(line) else {
@@ -78,7 +84,7 @@ pub(super) fn parse_line(line: &str, last_message: &str, fence: &Coverage) -> Ve
     };
     match parsed {
         ThreadEvent::ThreadStarted(value) => thread_started(&value, fence).into_iter().collect(),
-        ThreadEvent::ItemCompleted(value) => item_completed(&value),
+        ThreadEvent::ItemCompleted(value) => item_completed(&value, checkout),
         ThreadEvent::TurnCompleted(value) => turn_completed(&value, last_message),
         ThreadEvent::TurnFailed { error } => vec![failed(error.as_ref(), "turn failed")],
         ThreadEvent::Error(value) => vec![failed(Some(&value), "the CLI reported an error")],
@@ -106,7 +112,7 @@ fn thread_started(value: &Value, fence: &Coverage) -> Option<AgentEvent> {
     })
 }
 
-fn item_completed(value: &Value) -> Vec<AgentEvent> {
+fn item_completed(value: &Value, checkout: &Checkout) -> Vec<AgentEvent> {
     let Some(item) = value.get("item") else {
         return Vec::new();
     };
@@ -118,22 +124,15 @@ fn item_completed(value: &Value) -> Vec<AgentEvent> {
                     text: text.to_string(),
                 })
         }
-        Some("command_execution") => Some(AgentEvent::ToolUse {
-            name: "command_execution".to_string(),
-            target: opaque_field(item, "command"),
-        }),
-        Some("file_change") => Some(AgentEvent::ToolUse {
-            name: "file_change".to_string(),
-            target: file_change_target(item),
-        }),
-        Some("mcp_tool_call") => Some(AgentEvent::ToolUse {
-            name: mcp_tool_name(item),
-            target: mcp_tool_call_target(item),
-        }),
-        Some("web_search") => Some(AgentEvent::ToolUse {
-            name: "web_search".to_string(),
-            target: opaque_field(item, "query"),
-        }),
+        Some("command_execution") => {
+            Some(tool_use("command_execution", command_call(item, checkout)))
+        }
+        Some("file_change") => Some(tool_use("file_change", file_change_call(item, checkout))),
+        Some("mcp_tool_call") => Some(tool_use(&mcp_tool_name(item), mcp_tool_call(item))),
+        Some("web_search") => Some(tool_use(
+            "web_search",
+            (ToolAction::Search, opaque_field(item, "query")),
+        )),
         // "reasoning", "todo_list", "error" (mid-turn, non-fatal): not
         // operator-facing tool activity — see this module's own doc.
         _ => None,
@@ -174,18 +173,68 @@ fn opaque_field(item: &Value, key: &str) -> ToolTarget {
     }
 }
 
-/// `changes` is a list (a single `file_change` item can touch several
-/// paths at once) — the first path represents the call, the same "pick
-/// one meaningful field" convention `claude_code::parse` uses. A path
-/// names the repository, so it is shown.
-fn file_change_target(item: &Value) -> ToolTarget {
-    item.get("changes")
+/// What a `command_execution` did: the reading of its command, or the whole item
+/// where the command is missing.
+fn command_call(item: &Value, checkout: &Checkout) -> (ToolAction, ToolTarget) {
+    match item.get("command").and_then(Value::as_str) {
+        Some(command) => action::of_command(command, checkout),
+        None => (
+            ToolAction::Run,
+            ToolTarget::opaque(item.to_string().as_bytes()),
+        ),
+    }
+}
+
+/// A tool call of this item, logged under `name`.
+fn tool_use(name: &str, (action, target): (ToolAction, ToolTarget)) -> AgentEvent {
+    AgentEvent::ToolUse {
+        name: name.to_string(),
+        action,
+        target,
+    }
+}
+
+/// What a `file_change` did: writes a new file, or edits one, a deletion among
+/// its edits, since the words have none of its own. `changes` is a list (one item
+/// can touch several paths at once), and the first change represents the call,
+/// its path shown where it stays inside the checkout.
+fn file_change_call(item: &Value, checkout: &Checkout) -> (ToolAction, ToolTarget) {
+    let first = item
+        .get("changes")
         .and_then(Value::as_array)
-        .and_then(|changes| changes.first())
+        .and_then(|changes| changes.first());
+    let action = match first
+        .and_then(|change| change.get("kind"))
+        .and_then(Value::as_str)
+    {
+        Some("add") => ToolAction::Write,
+        _ => ToolAction::Edit,
+    };
+    match first
         .and_then(|change| change.get("path"))
         .and_then(Value::as_str)
-        .map(|path| ToolTarget::of_path(std::path::Path::new(path)))
-        .unwrap_or_else(|| ToolTarget::opaque(item.to_string().as_bytes()))
+    {
+        Some(path) => action::of_path(action, path, checkout),
+        None => (action, ToolTarget::opaque(item.to_string().as_bytes())),
+    }
+}
+
+/// What an MCP call did: a run tool of this run's server, or another server's tool.
+fn mcp_tool_call(item: &Value) -> (ToolAction, ToolTarget) {
+    let server = item.get("server").and_then(Value::as_str);
+    let tool = item.get("tool").and_then(Value::as_str);
+    if server == Some(yunta_core::port::RunToolsEndpoint::SERVER_NAME) {
+        if let Some(known) = tool.and_then(RunTool::parse) {
+            return (known.action(), known.target());
+        }
+    }
+    match (server, tool) {
+        (Some(server), Some(tool)) => action::of_other_server(server, tool),
+        _ => (
+            ToolAction::Call,
+            ToolTarget::opaque(item.to_string().as_bytes()),
+        ),
+    }
 }
 
 /// The name of an MCP call. A run tool of this run's server is named as the
@@ -205,18 +254,6 @@ fn mcp_tool_name(item: &Value) -> String {
         || "mcp_tool_call".to_string(),
         |tool| tool.name().to_string(),
     )
-}
-
-/// Which server and which tool — names the workflow itself declares, so
-/// a reader may see them.
-fn mcp_tool_call_target(item: &Value) -> ToolTarget {
-    match (
-        item.get("server").and_then(Value::as_str),
-        item.get("tool").and_then(Value::as_str),
-    ) {
-        (Some(server), Some(tool)) => ToolTarget::named(&format!("{server}:{tool}")),
-        _ => ToolTarget::opaque(item.to_string().as_bytes()),
-    }
 }
 
 fn turn_completed(value: &Value, last_message: &str) -> Vec<AgentEvent> {

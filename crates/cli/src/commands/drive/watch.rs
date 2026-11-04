@@ -90,6 +90,7 @@ pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Wat
                 .map_or_else(Diagnostics::none, Surface::diagnostics),
             cancel.clone(),
             env.ctx.env.clone(),
+            surface.as_ref().is_some_and(Surface::chronicles),
         ),
         announcing: Some(announce(
             surface
@@ -113,7 +114,7 @@ fn announce(diagnostics: Diagnostics, cancel: CancellationToken) -> JoinHandle<(
     tokio::spawn(async move {
         cancel.cancelled().await;
         diagnostics
-            .raise("interrupt received — stopping the run (sessions get interrupt, then kill)")
+            .raise("interrupt received: stopping the run (sessions get interrupt, then kill)")
             .await;
     })
 }

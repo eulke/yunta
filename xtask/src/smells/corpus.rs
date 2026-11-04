@@ -110,9 +110,6 @@ pub(super) struct Corpus {
     pub(super) src: Vec<PathBuf>,
     /// Every `.rs` file under a crate's `tests`.
     pub(super) tests: Vec<PathBuf>,
-    /// The sources a person reads drawn on a terminal: the command line and
-    /// the crate it draws with.
-    pub(super) drawn: Vec<PathBuf>,
     /// The production text of each `src` file that is not test code, with
     /// its unit-test modules blanked.
     pub(super) prod: Vec<String>,
@@ -129,21 +126,12 @@ impl Corpus {
             .iter()
             .flat_map(|dir| rs_files(dir))
             .collect();
-        let drawn: Vec<PathBuf> = ["crates/cli/src", "crates/render/src"]
-            .iter()
-            .flat_map(|dir| rs_files(&root.join(dir)))
-            .collect();
         let prod: Vec<String> = src
             .iter()
             .filter(|path| !is_test_source(path))
             .map(|path| production_only(&read_corpus(path)))
             .collect();
-        Self {
-            src,
-            tests,
-            drawn,
-            prod,
-        }
+        Self { src, tests, prod }
     }
 }
 

@@ -30,7 +30,7 @@ pub enum PackError {
         #[source]
         source: std::io::Error,
     },
-    #[error("`{path}` has no `pack.yaml` at its root — not a pack")]
+    #[error("`{path}` has no `pack.yaml` at its root: not a pack")]
     NoManifest { path: PathBuf },
     #[error("`{path}`: {detail}")]
     InvalidManifest { path: PathBuf, detail: String },
@@ -43,7 +43,7 @@ pub enum PackError {
         source: yunta_core::InvalidId,
     },
     #[error(
-        "`{path}` is a symlink — a pack ships regular files only, so vendoring never follows a \
+        "`{path}` is a symlink: a pack ships regular files only, so vendoring never follows a \
          link out of the pack or copies what one points at"
     )]
     Symlink { path: PathBuf },

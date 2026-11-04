@@ -1,0 +1,111 @@
+◆ decision · needs you
+
+plan: 2 tasks in 2 steps, 1 decided for you, 1 risk,
+      1 left out
+  Greet a person by name, and say goodbye too.
+
+  ▲ 2 problems keep this plan from being proven as it is
+    written
+
+  you asked    greet people by their name
+
+  The program says nothing today. It will greet whoever runs
+  it by name, and say goodbye.
+
+  ┌──────┐   ┌──────────┐
+  │ Name │──▶│ Greeting │
+  └──────┘   └──────────┘
+
+  A goodbye follows the greeting, on its own line.
+
+  decided for you
+
+    1  What does it say when no name is given?
+      chose        It greets `world`.
+      instead of   Refuse to run
+                   Ask for a name
+      because      A program run with no arguments should
+                   still say something.
+
+  you answered
+
+    1  Which word should the greeting use?
+      you said     hello
+      the plan     It says `hello`.
+
+  left out
+    ◌ Greeting in other languages.
+
+  design
+    `Greeter` owns the words; `main` reads the name and
+    prints.
+
+  steps
+    1  greet     Greet by name
+    2  farewell  Say goodbye
+
+    ┌───────┐   ┌──────────┐
+    │ greet │──▶│ farewell │
+    └───────┘   └──────────┘
+
+  step 1 of 2
+
+    greet: Greet by name
+      you will see `hello ana` prints `hello, ana`.
+      changes      src/greet.rs
+      keeps        With no name it still greets `world`.
+      tested by    the greeting names the person
+                   cargo test --test greet
+
+      src/greet.rs › Greeter
+        the type that holds the name and words the greeting
+        │ pub struct Greeter {
+        │     pub name: String,
+        │ }
+        │
+        │ impl Greeter {
+        │     pub fn hello(&self) -> String;
+        │ }
+        7 lines
+
+  step 2 of 2
+
+    farewell: Say goodbye
+      you will see `hello ana` prints a goodbye after the
+                   greeting.
+      changes      src/greet.rs
+      builds on    Greeter (from greet)
+      keeps        The greeting reads as it did.
+
+      src/greet.rs › Greeter › bye
+        the goodbye, beside the greeting
+
+  proof
+    spec tests   1 in 1 file, 5 lines
+                 yunta status 7E5PH4 --node specify
+    the suite    every task keeps it passing; green before
+                 this run changed anything
+                 cargo test
+    guards       `farewell`: the greeting still reads as it
+                 did
+                 cargo test --test greet_alone
+    ◌ nothing but the suite checks 1 promise the tasks keep
+
+  before you decide
+
+    `approve` is not offered, because
+      ▲ `greet` plans to change `tests/greet.rs`, a test the
+        spec wrote for `greet`
+        so           no session may write it, so the task
+                     cannot be done as planned
+        fix          leave the test as the spec wrote it,
+                     and change the code it tests
+      ▲ `farewell` is judged by `cargo test --test greet`,
+        the spec's test of `greet`
+        so           it passes once `greet` is done,
+                     whatever this task does
+        fix          judge the task by a test of its own
+
+    ◌ 1 of 2 changes shows no code
+    ▲ risk: A name with a newline in it breaks the line it
+      is printed on.

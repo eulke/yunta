@@ -170,7 +170,7 @@ pub enum AnswerQuestionsError {
     /// questions are already answered — and a surface answering a round
     /// that closed would be recording a second reply to it.
     #[error(
-        "node `{node}` is not waiting on questions — it asked none, or the ones it asked are \
+        "node `{node}` is not waiting on questions: it asked none, or the ones it asked are \
          already answered"
     )]
     NothingAsked { node: NodeId },
@@ -240,7 +240,7 @@ pub(crate) async fn asked_from(
     })?;
     if found.content_hash != asked.questions_hash {
         return Err(AnswerQuestionsError::Unreadable(format!(
-            "node `{node}` asked from `{}`, and the questions the run holds are `{}` — the \
+            "node `{node}` asked from `{}`, and the questions the run holds are `{}`, so the \
              round would answer a different document than the one it asked",
             asked.questions_hash, found.content_hash
         )));

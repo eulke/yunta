@@ -1,8 +1,8 @@
 //! The words a session's missing capability is said in: a capability the
 //! adapter does not declare, and the policy the engine applied in its place.
 
+use surco::text::{detailed, one_line};
 use yunta_core::port::PolicyApplied;
-use yunta_core::text::{detailed, one_line};
 use yunta_core::{AdapterId, Capability};
 
 /// A capability the adapter does not declare, and the policy the engine

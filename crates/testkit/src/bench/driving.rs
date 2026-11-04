@@ -46,6 +46,25 @@ impl Bench {
         config_yaml: &str,
         secrets: &[(&str, &str)],
     ) -> RunReport {
+        self.run_with_secrets_answering(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            secrets,
+            &NoInteraction,
+        )
+        .await
+    }
+
+    /// The same, with a human answering what the run asks.
+    pub async fn run_with_secrets_answering(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        secrets: &[(&str, &str)],
+        human_interaction: &dyn HumanInteraction,
+    ) -> RunReport {
         let known: std::collections::HashMap<String, String> = secrets
             .iter()
             .map(|(name, value)| (name.to_string(), value.to_string()))
@@ -54,7 +73,7 @@ impl Bench {
             workflow_yaml,
             fixture_yaml,
             config_yaml,
-            &NoInteraction,
+            human_interaction,
             Arc::new(KnownSecrets(known)),
         )
         .await

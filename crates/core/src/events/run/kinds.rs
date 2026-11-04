@@ -23,4 +23,7 @@ pub enum RunEvent {
     /// The host was suspended while the run was open: a fact about the
     /// machine, not something the run did.
     HostSuspended(HostSuspendedPayload),
+    /// The run's change, as git counted it from the run's base to its
+    /// newest tree.
+    ChangesCounted(ChangesCountedPayload),
 }

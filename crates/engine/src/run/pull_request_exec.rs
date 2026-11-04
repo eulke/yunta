@@ -25,6 +25,10 @@ pub(super) async fn execute_pull_request(
     body: Option<&str>,
     receipt: bool,
 ) -> Result<NodeEnd, RunError> {
+    // The run's change is counted into the log before the pull request opens,
+    // and a receipt the pull request carries is built from that log.
+    let state = ctx.run_view().await?.state;
+    super::change_count::record(ctx, &state, Some(&node.id)).await?;
     let (forge, request) = match prepared(ctx, node, title, body, receipt).await? {
         Step::Value(prepared) => prepared,
         Step::Ended(end) => return Ok(end),

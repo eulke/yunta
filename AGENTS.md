@@ -25,7 +25,8 @@ root's `//!` maps its crate. When you know a change by its subject and not yet b
 | run tools, the control plane | `crates/engine/src/run_tools/mod.rs`, `crates/cli/src/commands/mcp.rs` |
 | the port, capabilities | `crates/core/src/port/mod.rs`, `crates/core/src/capabilities.rs` |
 | adapters | `crates/adapters/src/lib.rs` |
-| Surco, a surface | `crates/render/src/lib.rs` |
+| Surco, a state word, a glyph, an escape, a block, surface | `crates/surco/src/lib.rs` |
+| what a failure says, a gate's page, a plan, the receipt | `crates/render/src/lib.rs` |
 | smell counters, the docs checker, CI | `xtask/src/main.rs`, `.github/workflows/ci.yml` |
 
 Before you edit a file, run `cargo xtask docs --about <files>`; before you finish, run it with no paths (your
@@ -74,7 +75,7 @@ and nothing under `.agents/skills/`.
   commits each whole phase with them green, then runs `cargo clean`.
 - Stage paths by name, never `git add -A` or `git stash`: a checkout can hold a person's uncommitted files.
 - A changed document type: `cargo xtask schema`, then commit `crates/core/schemas/`. Output meant to change:
-  `YUNTA_BLESS=1 cargo test -p yunta -p yunta-engine -p yunta-render`, then review the goldens' diff.
+  `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then review the goldens' diff.
 - A change on the run path is proven by real runs before and after: a release build, a run started detached and
   stopped before its `pr` node, gates answered with `yunta resolve-gate`, time read from `yunta stats <run>`.
 - A release is a pushed `vX.Y.Z` tag.

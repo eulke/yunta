@@ -4,12 +4,12 @@
 
 use std::time::Duration;
 
+use surco::figures::duration;
+use surco::text;
 use yunta_core::events::{
     AccountLimit, Failure, LimitSource, RefusalCause, SessionDeath, SessionEnd, SessionRefusal,
     Timed, Unchanged,
 };
-use yunta_core::text;
-use yunta_core::units::duration;
 
 use crate::pause::RESET_FORMAT;
 
@@ -25,7 +25,7 @@ pub fn session_death(death: &SessionDeath) -> String {
         session_end(&exit.end)
     );
     match exit.stderr_tail.last() {
-        Some(last) => format!("{said} — {last}"),
+        Some(last) => format!("{said}: {last}"),
         None => said,
     }
 }
@@ -84,7 +84,7 @@ pub(crate) fn limit_sentence(limit: &AccountLimit) -> String {
 pub(crate) fn unchanged_sentence(since: u32, failed: &str) -> String {
     format!(
         "not run again: nothing in the run's tree changed since attempt {since} failed on \
-         it — change what it failed on there first. Attempt {since} failed: {failed}"
+         it; change what it failed on there first. Attempt {since} failed: {failed}"
     )
 }
 

@@ -358,15 +358,16 @@ async fn a_forge_gate_sends_an_unprovable_plan_back_without_publishing_it() {
         sent_back_with_one_flaw(&gate),
         "the plan goes back with its one flaw"
     );
-    only_the_corrected_plan_is_published(&forge);
+    only_the_corrected_plan_is_published(&forge, bench.run_id.as_str());
 }
 
 /// Only the corrected plan reached the forge: its one pull request carries
 /// the tasks document without the check the flaw named.
-fn only_the_corrected_plan_is_published(forge: &MockForgeState) {
+fn only_the_corrected_plan_is_published(forge: &MockForgeState, run_id: &str) {
     let prs = forge.pull_requests();
     assert_eq!(prs.len(), 1, "only the corrected plan is published");
-    let tasks = String::from_utf8(prs[0].files["tasks.yaml"].clone()).unwrap();
+    let path = format!(".yunta/gates/{run_id}/approve-plan/tasks.yaml");
+    let tasks = String::from_utf8(prs[0].files[path.as_str()].clone()).unwrap();
     assert!(!tasks.contains("a check of the greeting"), "{tasks}");
 }
 

@@ -26,6 +26,9 @@ mod confinement;
 #[path = "check/denied_command.rs"]
 mod denied_command;
 
+#[path = "check/unkept.rs"]
+mod unkept;
+
 /// The rules under test here are about the workflow, not about which
 /// adapter would run it: these check against a binary that builds none,
 /// so a capability nothing declares is a capability nothing can refuse.
@@ -144,7 +147,7 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
             external: Some(yunta_core::ExternalGate {
                 kind: yunta_core::ForgeKind::PullRequest,
                 artifacts: Vec::new(),
-                branch: "{{run.branch}}".to_string(),
+                branch: format!("review/{id}"),
             }),
         },
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
@@ -253,9 +256,9 @@ fn depends_on_cycle_is_reported() {
 
 #[test]
 fn on_failure_goto_never_counts_as_a_depends_on_cycle() {
-    // lint depends_on implement; on failure it re-routes to fix-lint,
+    // lint depends_on implement; on failure it reroutes to fix-lint,
     // which itself depends_on lint. That is a cycle if goto edges were
-    // folded into depends_on — but re-route edges are a
+    // folded into depends_on — but reroute edges are a
     // separate set that never relaxes depends_on's acyclicity, so this
     // must check clean.
     let mut lint = bash("lint", "cargo clippy", &["implement"]);
@@ -798,6 +801,31 @@ fn a_number_input_with_min_above_max_is_a_check_error() {
     assert!(errors
         .iter()
         .any(|e| matches!(e, CheckError::InputMinExceedsMax { name, .. } if name == "n")));
+}
+
+#[test]
+fn a_workflow_whose_request_is_two_inputs_is_a_check_error() {
+    let inputs = std::collections::BTreeMap::from([
+        ("idea".into(), input_spec("type: string\nrequest: true\n")),
+        ("issue".into(), input_spec("type: string\nrequest: true\n")),
+    ]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::MoreThanOneRequest { names } if names.len() == 2
+        )),
+        "{errors:?}"
+    );
+    let one = std::collections::BTreeMap::from([(
+        "idea".into(),
+        input_spec("type: string\nrequest: true\n"),
+    )]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], one);
+    assert!(!check(&wf, &ConfigLayer::default())
+        .iter()
+        .any(|e| matches!(e, CheckError::MoreThanOneRequest { .. })));
 }
 
 #[test]

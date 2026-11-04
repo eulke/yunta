@@ -25,6 +25,7 @@
 //! to describe — each names when reaching for a verified workflow
 //! beats implementing directly.
 
+use super::schema::Shown;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
     ServerCapabilities, ServerConfig, Tool,
@@ -32,7 +33,6 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
-use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
 
@@ -152,23 +152,22 @@ fn empty_schema() -> serde_json::Map<String, Value> {
 /// catalog is visible the moment a client connects, before it calls
 /// anything.
 fn document_kinds() -> Vec<&'static str> {
-    ArtifactKind::ALL.iter().map(|kind| kind.as_str()).collect()
+    Shown::all().map(Shown::as_str).collect()
 }
 
 /// The shape of one document, verbatim from the constant every other
 /// door publishes.
 ///
-/// The kind is parsed by `ArtifactKind`'s own `FromStr`, so this tool
-/// and `yunta schema` answer an unknown kind with the same sentence.
+/// The name is read as `yunta schema` reads it, so the two doors answer
+/// one mistake with one sentence.
 fn tool_document_shape(args: &serde_json::Map<String, Value>) -> Result<String, CliError> {
     let Some(name) = args.get("kind").and_then(Value::as_str) else {
         return Err(CliError::msg(format!(
             "`kind` is required: one of {}",
-            ArtifactKind::listed()
+            surco::text::listed(document_kinds())
         )));
     };
-    let kind = name.parse::<ArtifactKind>()?;
-    Ok(yunta_core::shape::contract(kind))
+    Ok(name.parse::<Shown>()?.shape())
 }
 
 /// The advertised tools, in the order a client is shown them: the reads

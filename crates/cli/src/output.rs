@@ -9,17 +9,21 @@
 //! stdout, with stderr left empty.
 //!
 //! Warnings and notes reach stderr through [`warn`] and [`note`], and a JSON
-//! document reaches stdout through [`print_json`], and a shell's completion
-//! script or a hook's answer through [`completions`] and [`hook_reply`].
-//! Nothing else in the CLI calls a print macro.
+//! document reaches stdout through [`print_json`]. A shell's completion
+//! script, a hook's answer and what clap made of the arguments go through
+//! [`completions`], [`hook_reply`] and [`clap_answer`]. Nothing else in the
+//! CLI calls a print macro.
 
 use std::fmt::Display;
 
+use surco::components::{Next, Refusal};
+use surco::doc::{Block, Doc};
+use surco::line::Line;
+use surco::look::Look;
+
 use crate::error::{warning_word, CliError, Outcome, Reader};
 use crate::json::to_json_string;
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::{self, Look};
+use crate::render;
 
 /// How a command's output is written, decided once from its flags: a
 /// person's terminal, one JSON document, or the bare run id.
@@ -45,7 +49,7 @@ impl Mode {
 pub(crate) trait Answer: serde::Serialize {
     /// The answer as the document a person reads, drawn on a stream that
     /// looks like `look`.
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a>;
+    fn document(&self, look: &Look) -> Doc;
     /// The verdict the answer carries, which the exit code reports.
     fn outcome(&self) -> Outcome;
 }
@@ -57,8 +61,8 @@ pub(crate) fn emit<A: Answer>(mode: Mode, answer: &A, look: &Look) -> Result<Out
             print_json(answer)?;
         }
         Mode::Human => document(look, answer.document(look)),
-        // `--quiet` says the run id and nothing else, and an answer has
-        // nothing to add to that.
+        // `--quiet` says the run id and its verdict, and an answer has nothing
+        // to add to that.
         Mode::Quiet => {}
     }
     Ok(answer.outcome())
@@ -73,7 +77,7 @@ pub(crate) fn progress(mode: Mode, look: &Look, text: String) {
 }
 
 /// A document drawn for a stream that looks like `look`, and written.
-pub(crate) fn document(look: &Look, doc: Doc<'_>) {
+pub(crate) fn document(look: &Look, doc: Doc) {
     print!("{}", render::draw(doc, look));
 }
 
@@ -111,6 +115,17 @@ pub(crate) fn hook_reply(stdout: &[u8], stderr: &[u8]) -> std::io::Result<()> {
     std::io::stdout()
         .write_all(stdout)
         .and_then(|()| std::io::stderr().write_all(stderr))
+}
+
+/// What clap made of the arguments, as it rendered it, to the stream its
+/// kind names: a usage error to stderr, the help and the version to stdout.
+pub(crate) fn clap_answer(error: &clap::Error) -> std::io::Result<()> {
+    use std::io::Write;
+    let rendered = error.render().ansi().to_string();
+    match error.use_stderr() {
+        true => std::io::stderr().write_all(rendered.as_bytes()),
+        false => std::io::stdout().write_all(rendered.as_bytes()),
+    }
 }
 
 /// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
@@ -161,6 +176,16 @@ pub(crate) struct NextCommand {
     why: String,
 }
 
+impl NextCommand {
+    /// A command a reader can type next, with the one line that says what it does.
+    pub(crate) fn new(command: String, why: &str) -> Self {
+        Self {
+            command,
+            why: why.to_string(),
+        }
+    }
+}
+
 impl ErrorDocument {
     /// The refusal `error` is, as `reader` is told it.
     pub(crate) fn of(error: &CliError, reader: Reader) -> Self {
@@ -172,10 +197,7 @@ impl ErrorDocument {
                 detail,
                 next: next
                     .into_iter()
-                    .map(|(command, why)| NextCommand {
-                        command,
-                        why: why.to_string(),
-                    })
+                    .map(|(command, why)| NextCommand::new(command, why))
                     .collect(),
             },
         }
@@ -184,8 +206,9 @@ impl ErrorDocument {
 
 /// Writes the refusal `error` for a command run in `mode`. Under `--json`
 /// it is the one document on stdout, and stderr stays empty. Otherwise a
-/// person reads the sentence on stderr, then where the refusal looked and
-/// the commands that go on from here.
+/// person reads it on stderr as a page: the sentence and where it looked,
+/// each problem it found pointed at in its line, and the commands that go
+/// on from here.
 pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
     if mode == Mode::Json {
         // The whole id, which is what a program copies from a refusal.
@@ -195,35 +218,26 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
         }
         return;
     }
-    // What a person reads on stderr is painted and measured for stderr,
-    // whatever stdout is: a stream redirected away from the terminal does
-    // not decide how the refusal on the terminal looks.
-    let ink = render::stderr_ink();
-    eprintln!(
-        "{}: {}",
-        ink.word(render::ink::Tone::Failed, "error"),
-        error.said_to(Reader::Person)
-    );
-    let (detail, next) = error.advice();
-    if let Some(detail) = detail {
-        eprintln!(
-            "{}{}",
-            render::INDENT,
-            ink.word(render::ink::Tone::Muted, &detail)
-        );
-    }
-    if !next.is_empty() {
-        let stderr = Look {
-            ink,
-            width: render::stderr_width(),
-            ..*look
-        };
-        eprint!(
-            "\n{}",
-            render::draw(
-                Doc::new().with(render::blocks::Next { steps: next }),
-                &stderr
-            )
-        );
-    }
+    let (detail, steps) = error.advice();
+    let page = Doc::new()
+        .with(Refusal {
+            said: error.said_to(Reader::Person),
+            detail,
+        })
+        .with_all(error.blocks())
+        .with(Next { steps });
+    on_stderr(look, page);
+}
+
+/// A page a person reads on stderr: a refusal, or a verdict that fails.
+/// It is painted and measured for stderr, whatever stdout is: a stream
+/// redirected away from the terminal does not decide how a page on the
+/// terminal looks.
+pub(crate) fn on_stderr(look: &Look, doc: Doc) {
+    let stderr = Look {
+        paint: render::stderr_paint(),
+        width: render::stderr_width(),
+        ..*look
+    };
+    eprint!("{}", render::draw(doc, &stderr));
 }

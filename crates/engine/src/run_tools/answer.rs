@@ -65,7 +65,7 @@ impl SessionTools {
         )))
         .await?;
         let reply = Reply::new(format!(
-            "your answer to `{node}`'s finding `{id}` — {} — is recorded: a person reads it \
+            "your answer to `{node}`'s finding `{id}` ({}) is recorded: a person reads it \
              beside the finding, which stands until its own node takes it back",
             answer.as_str()
         ));

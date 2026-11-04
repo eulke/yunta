@@ -102,6 +102,25 @@ impl RunTool {
         Self::all().into_iter().find(|tool| tool.name() == name)
     }
 
+    /// What a call of this tool does: a submission hands a document over, and
+    /// any other is a call.
+    pub fn action(self) -> crate::events::ToolAction {
+        match self {
+            Self::Submit(_) => crate::events::ToolAction::Submit,
+            _ => crate::events::ToolAction::Call,
+        }
+    }
+
+    /// What a reader is told a call of this tool acted on: the kind of
+    /// document a submission hands over, and the name of any other. The same
+    /// under every CLI.
+    pub fn target(self) -> crate::events::ToolTarget {
+        match self {
+            Self::Submit(kind) => crate::events::ToolTarget::named(kind.as_str()),
+            other => crate::events::ToolTarget::named(other.name()),
+        }
+    }
+
     /// What a session whose CLI names tools by `naming` calls this tool.
     pub fn called(self, naming: crate::ToolNaming) -> String {
         naming.call_name(crate::port::RunToolsEndpoint::SERVER_NAME, self.name())

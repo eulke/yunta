@@ -292,6 +292,8 @@ pub enum AgentEvent {
     },
     ToolUse {
         name: String,
+        /// What the call does. Only the adapter sees the text, so it reads it.
+        action: crate::events::ToolAction,
         /// What the call acted on. An adapter that can name a path says
         /// so; one reading the session's own text hands it over opaque,
         /// so what it typed never reaches the log.

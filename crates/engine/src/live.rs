@@ -28,13 +28,11 @@ pub fn running_since(state: &RunState, node: &NodeId) -> Option<DateTime<Utc>> {
         .map(|(_, at)| at)
 }
 
-/// How long ago, at `now`, this node wrote its most recent event.
-///
-/// This is what a view shows instead of a spinner: it is measured, it
-/// grows while the node says nothing, and it never claims progress the
-/// log does not carry. `None` for a node with no events at all;
-/// [`Duration::ZERO`] for an event stamped after `now`, since a node
-/// cannot have been silent for a negative time.
+/// How long ago, at `now`, this node wrote its most recent event: measured, it
+/// grows while the node says nothing, and it never claims progress the log does
+/// not carry. `None` for a node with no events at all; [`Duration::ZERO`] for an
+/// event stamped after `now`, since a node cannot have been silent for a negative
+/// time.
 pub fn last_event_age(state: &RunState, node: &NodeId, now: DateTime<Utc>) -> Option<Duration> {
     let last = state.nodes.get(node)?.last_event_at?;
     Some((now - last).to_std().unwrap_or(Duration::ZERO))

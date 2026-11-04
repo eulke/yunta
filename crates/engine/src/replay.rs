@@ -28,7 +28,7 @@
 //! Replay reads the events and never their hash chain, which storage keeps
 //! and verifies apart.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -179,6 +179,17 @@ impl RunState {
         self.clock.spent(&open, self.run.suspensions(), until)
     }
 
+    /// Each node's share of a person's time, booked as
+    /// [`time_spent`](Self::time_spent) books the run's: every stretch a
+    /// person was asked about the node, and with `until` the stretch from
+    /// the last applied event to it, classified by what is open now. Two
+    /// nodes asked at once each hold the stretch the run counts once. A node
+    /// no person was asked about is absent.
+    pub fn people_at(&self, until: Option<DateTime<Utc>>) -> BTreeMap<NodeId, Duration> {
+        let open = Open::of(&self.run, &self.nodes, &self.gates, &self.tasks);
+        self.clock.people_at(&open, self.run.suspensions(), until)
+    }
+
     /// The awake time from the first event to `until`, or to the last
     /// applied event when `until` is `None`. `None` for a log with no event.
     pub fn elapsed(&self, until: Option<DateTime<Utc>>) -> Option<Duration> {
@@ -220,6 +231,15 @@ impl RunState {
         &self.activity
     }
 
+    /// How many events of `node` the log holds, whatever they are.
+    pub fn events_of(&self, node: &NodeId) -> u64 {
+        self.activity
+            .events_by_node
+            .get(node)
+            .copied()
+            .unwrap_or_default()
+    }
+
     /// Every finding that stands, in the order each was first posted.
     /// Never deduplicated here — two nodes that find the same thing each
     /// keep their own posting; [`dedup_findings`] is the query-side view
@@ -259,29 +279,6 @@ impl RunState {
             }
         });
         answered && owed
-    }
-
-    /// Whether nothing has been derived from this state's log beyond the
-    /// fact that a node was heard from — a node record carrying a
-    /// timestamp and no derivation behind it.
-    ///
-    /// What a kind of event states about the run, told apart from the
-    /// envelope every event carries. The kinds that move no state are listed
-    /// explicitly beside this check. The clock and the activity are not
-    /// compared, as in equality.
-    pub fn derives_nothing(&self) -> bool {
-        let heard_from_only = self.nodes.iter().all(|(_, record)| {
-            *record
-                == yunta_core::events::NodeRecord {
-                    last_event_at: record.last_event_at,
-                    ..Default::default()
-                }
-        });
-        let rest = RunState {
-            nodes: NodeLedger::default(),
-            ..self.clone()
-        };
-        heard_from_only && rest == RunState::default()
     }
 
     /// Folds one event into every ledger its domain reaches.

@@ -81,7 +81,7 @@ pub enum InvalidLocation {
     Empty,
     #[error(
         "`{path}` leaves the run: a location is relative to the work or to `run:`, and never \
-         climbs out of it — an absolute path is this host's, not this run's"
+         climbs out of it; an absolute path is this host's, not this run's"
     )]
     Escapes { path: String },
     #[error("`{text}` is not a line range: `10` or `10-14`")]

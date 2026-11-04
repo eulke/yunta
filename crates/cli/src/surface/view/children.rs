@@ -2,11 +2,11 @@
 //! under the node that bore it, saying where it stands and which run it
 //! is — a tree, never a number.
 
+use surco::glyphs::{Glyphs, Mark};
+use surco::words::Standing;
 use yunta_core::events::TerminalState;
 use yunta_core::NodeId;
 use yunta_engine::{ChildLink, RunFrame};
-
-use crate::render::{Glyphs, Mark};
 
 /// What a child run whose link the log recorded under no node is filed
 /// under: what the log does not say, rather than a node it might not
@@ -26,7 +26,7 @@ const NO_NODE: &str = "under no node on this run's log";
 /// terminal still says a child is open and loses only which one. What
 /// it never becomes is a number: heterogeneous children averaged into
 /// one figure is the lying percentage under another name.
-pub(in crate::surface) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
+pub(crate) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
     let standing = child_standing(child.terminal);
     format!(
         "{} {} {} child run {}",
@@ -39,7 +39,7 @@ pub(in crate::surface) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String
 
 /// Every child this run bore, grouped under the node that bore it, each
 /// group in the order the parent's log recorded it.
-pub(in crate::surface) fn children_by_node(frame: &RunFrame) -> Vec<(String, Vec<&ChildLink>)> {
+pub(crate) fn children_by_node(frame: &RunFrame) -> Vec<(String, Vec<&ChildLink>)> {
     let mut groups: Vec<(String, Vec<&ChildLink>)> = Vec::new();
     for child in &frame.children {
         let parent = match &child.node {
@@ -73,10 +73,10 @@ pub(super) fn children_of<'a>(frame: &'a RunFrame, node: &NodeId) -> Vec<&'a Chi
 pub(in crate::surface) fn child_standing(terminal: Option<TerminalState>) -> (Mark, &'static str) {
     match terminal {
         None => (Mark::Running, "still open"),
-        Some(TerminalState::Done) => (Mark::Done, closed_as(TerminalState::Done)),
-        Some(TerminalState::Failed) => (Mark::Failed, closed_as(TerminalState::Failed)),
-        Some(TerminalState::Cancelled) => (Mark::Failed, closed_as(TerminalState::Cancelled)),
-        Some(TerminalState::Promoted) => (Mark::Reroute, closed_as(TerminalState::Promoted)),
+        Some(terminal) => {
+            let standing = closed_as(terminal);
+            (standing.mark(), standing.word())
+        }
     }
 }
 
@@ -84,16 +84,14 @@ pub(in crate::surface) fn child_standing(terminal: Option<TerminalState>) -> (Ma
 /// the child under the node that bore it, and the event line that
 /// records either.
 ///
-/// A run's terminal state is its own vocabulary, beside the one a
-/// node's state is read in ([`crate::render::StateWord`]) — a run
-/// promotes and a node never does — so it is said here, once, for every
-/// surface that says it.
-pub(in crate::surface) fn closed_as(state: TerminalState) -> &'static str {
+/// The log's close knows how the run ended and nothing of the findings
+/// still standing, so a run that closed done reads finished here.
+pub(in crate::surface) fn closed_as(state: TerminalState) -> Standing {
     match state {
-        TerminalState::Done => "finished",
-        TerminalState::Failed => "failed",
-        TerminalState::Cancelled => "cancelled",
-        TerminalState::Promoted => "promoted",
+        TerminalState::Done => Standing::Finished,
+        TerminalState::Failed => Standing::Failed,
+        TerminalState::Cancelled => Standing::Stopped,
+        TerminalState::Promoted => Standing::Promoted,
     }
 }
 
@@ -161,7 +159,7 @@ mod tests {
     fn a_child_row_says_where_the_child_stands_before_which_child_it_is() {
         let open = child(&FIRST, Some("compose"), None);
         let row = child_row(&open, Glyphs::Ascii);
-        assert_eq!(row, format!("> still open | child run {}", FIRST.handle()));
+        assert_eq!(row, format!("> still open ; child run {}", FIRST.handle()));
         assert!(
             row.find("still open") < row.find(FIRST.handle()),
             "a row cut to a narrow terminal loses which child, never that there is one: {row}"
@@ -173,7 +171,7 @@ mod tests {
         for (terminal, word) in [
             (TerminalState::Done, "finished"),
             (TerminalState::Failed, "failed"),
-            (TerminalState::Cancelled, "cancelled"),
+            (TerminalState::Cancelled, "stopped"),
             (TerminalState::Promoted, "promoted"),
         ] {
             let closed = child(&FIRST, Some("compose"), Some(terminal));

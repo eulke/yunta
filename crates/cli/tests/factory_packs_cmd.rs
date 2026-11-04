@@ -70,7 +70,10 @@ fn yunta_starter_installs_checks_and_self_tests_through_the_real_pack_pipeline()
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
     let add_text = stdout(&add_out);
-    assert!(add_text.contains("tests: 2 cases, 0 failed"), "{add_text}");
+    assert!(
+        add_text.contains("tests        2 cases, 0 failed"),
+        "{add_text}"
+    );
 
     let check_fix = yunta_at!(project, &["check", "yunta/fix"]);
     assert!(check_fix.status.success(), "{}", stderr(&check_fix));
@@ -79,7 +82,7 @@ fn yunta_starter_installs_checks_and_self_tests_through_the_real_pack_pipeline()
 
     let audit = yunta_at!(project, &["pack", "audit", "yunta/starter"]);
     assert!(audit.status.success(), "{}", stderr(&audit));
-    assert!(stdout(&audit).contains("tests: 2 cases, 0 failed"));
+    assert!(stdout(&audit).contains("tests        2 cases, 0 failed"));
 }
 
 #[test]
@@ -112,7 +115,7 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
     // the file `plan` reads as optional; `--run-tests` runs them against
     // the mock once the pack is installed.
     assert!(
-        stdout(&add_out).contains("tests: 4 cases, 0 failed"),
+        stdout(&add_out).contains("tests        4 cases, 0 failed"),
         "{}",
         stdout(&add_out)
     );
@@ -122,7 +125,7 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
     // the actual installed file, not a hand-copied stand-in.
     let check = yunta_at!(project, &["check", "yunta/fragua"]);
     assert!(check.status.success(), "{}", stderr(&check));
-    assert!(stdout(&check).contains("OK"));
+    assert!(stdout(&check).contains(" · can run here"));
 }
 
 /// The plan's gate puts what was asked in front of the person before the
@@ -171,7 +174,8 @@ fn test_dir_runs_a_packs_own_cases_from_outside_its_root() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.lines().any(|l| l == "2 cases, 0 failed"),
+        text.lines()
+            .any(|l| l.ends_with("yunta test · 2 cases, 0 failed")),
         "the pack's own two cases run and pass: {text}"
     );
 }

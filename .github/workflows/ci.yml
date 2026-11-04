@@ -77,7 +77,7 @@ jobs:
 
       - name: check each crate in isolation
         run: |
-          for crate in yunta-core yunta-storage yunta-adapters yunta-engine yunta xtask; do
+          for crate in yunta-surco yunta-core yunta-render yunta-storage yunta-adapters yunta-engine yunta xtask; do
             echo "::group::cargo check -p $crate"
             cargo check -p "$crate" --locked
             echo "::endgroup::"

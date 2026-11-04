@@ -1,5 +1,5 @@
 //! `hooks:` and `on_failure:` — what runs around a node and where it
-//! re-routes when it fails.
+//! reroutes when it fails.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,8 +36,8 @@ pub struct HookStep {
     pub run: RunCommand,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
-    /// Distinct from a node's own `on_failure.goto` re-routing — a hook
-    /// only ever fails or warns, never re-routes.
+    /// Distinct from a node's own `on_failure.goto` rerouting — a hook
+    /// only ever fails or warns, never reroutes.
     #[serde(default, skip_serializing_if = "is_default_hook_failure_policy")]
     pub on_failure: HookFailurePolicy,
 }
@@ -57,14 +57,14 @@ pub enum HookFailurePolicy {
 }
 
 /// `on_failure: {goto, max_reroutes}` — where a failed node sends the run
-/// to be corrected. Re-routes are a second set of edges beside
+/// to be corrected. Reroutes are a second set of edges beside
 /// `depends_on`, which stays acyclic: control goes to `goto`, and once it
 /// and its subgraph complete, the failed node runs again. `max_reroutes`
 /// is mandatory and counted per failed node, and when it runs out the run
-/// pauses for a person: a re-route without an explicit cap is how a
+/// pauses for a person: a reroute without an explicit cap is how a
 /// correction cycle turns infinite, so the schema refuses it. A failure no
 /// correction can change — a key the run's frozen config leaves unset, a
-/// limit that resets at a known time — is never re-routed. Distinct from a
+/// limit that resets at a known time — is never rerouted. Distinct from a
 /// hook's own `on_failure: fail|warn`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

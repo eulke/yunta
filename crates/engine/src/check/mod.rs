@@ -146,6 +146,8 @@ pub fn check_mounted(
 fn check_as_written(workflow: &Workflow, config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     check_runner_fanout(workflow, errors);
     check_workflow_nodes(&workflow.nodes, None, errors);
+    check_child_declarations(&workflow.nodes, errors);
+    check_gates_share_no_branch(workflow, errors);
     check_mounts(workflow, errors);
     check_retired_within(workflow, errors);
     for node in workflow.iter_nodes() {

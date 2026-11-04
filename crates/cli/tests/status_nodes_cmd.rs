@@ -55,13 +55,15 @@ fn status(project: &Checkout, run_id: &str, extra: &[&str]) -> String {
     stdout(&project.run(std::path::Path::new(env!("CARGO_BIN_EXE_yunta")), &args))
 }
 
-/// What each row of the page's node table says after its mark and its
-/// word: the id — a group's child two cells in — and the row's note. The
-/// table is the block that opens after the page's first two lines.
+/// What each row of the node table the whole story draws says after its
+/// mark and its word: the id, a group's child after the branch it hangs
+/// from, the row's note, and what it took. The rows open under the line
+/// that heads the table's figures.
 fn rows(text: &str) -> Vec<String> {
     const AFTER_THE_WORD: usize = 14;
     text.lines()
-        .skip(3)
+        .skip_while(|line| !(line.trim_start().starts_with("node") && line.contains("time")))
+        .skip(1)
         .take_while(|line| !line.is_empty())
         .map(|line| {
             line.chars()
@@ -73,25 +75,38 @@ fn rows(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// A row's id, past the branch a group's child hangs from, in either set
+/// of glyphs.
+fn id(row: &str) -> &str {
+    let row = ["├─ ", "└─ ", "+- ", "`- "]
+        .iter()
+        .find_map(|branch| row.strip_prefix(branch))
+        .unwrap_or(row);
+    row.split_whitespace().next().unwrap_or_default()
+}
+
 /// Declaration order, not alphabetical; every declared node, not only
-/// the ones the log named; and a group's children one step under it.
+/// the ones the log named; and a group's children hanging from it.
 #[test]
 fn status_lists_every_declared_node_in_declaration_order_with_children_under_their_group() {
     let (project, run_id) = shaped_run();
-    let text = status(&project, &run_id, &[]);
+    let text = status(&project, &run_id, &["--full"]);
     let listed = rows(&text);
 
     assert_eq!(
-        listed
-            .iter()
-            .map(|row| row.split_whitespace().next().unwrap_or_default())
-            .collect::<Vec<_>>(),
+        listed.iter().map(|row| id(row)).collect::<Vec<_>>(),
         ["zeta", "review", "review-a", "review-b", "alpha", "omega"],
         "the frame's own order, groups with their children: {text}"
     );
     assert!(
-        listed[2].starts_with("  review-a") && listed[1].starts_with("review"),
-        "a group's children sit one step under it: {text}"
+        ["├─ review-a", "+- review-a"]
+            .iter()
+            .any(|child| listed[2].starts_with(child))
+            && ["└─ review-b", "`- review-b"]
+                .iter()
+                .any(|child| listed[3].starts_with(child))
+            && listed[1].starts_with("review"),
+        "a group's children hang from its branches, the last from its own: {text}"
     );
     assert!(
         text.lines()
@@ -108,7 +123,7 @@ fn status_json_lists_every_declared_node_in_order() {
     let document: serde_json::Value =
         serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
 
-    assert_eq!(document["schema_version"], 7);
+    assert_eq!(document["schema_version"], 8);
     let nodes = document["nodes"].as_array().expect("a list of nodes");
     assert_eq!(
         nodes
@@ -179,13 +194,13 @@ fn corrected_submission_run() -> (Checkout, String) {
 #[test]
 fn a_finished_node_s_failed_call_is_kept_for_programs_and_off_its_page() {
     let (project, run_id) = corrected_submission_run();
-    let text = status(&project, &run_id, &[]);
+    let text = status(&project, &run_id, &["--full"]);
     assert!(
-        !text.contains("last failed call"),
+        !text.contains("failed call"),
         "a node that finished is past the calls it got wrong on its way:\n{text}"
     );
     assert!(
-        text.contains("nodes 1/1") && !text.contains("secret-in-arguments"),
+        text.contains("1 of 1 node done") && !text.contains("secret-in-arguments"),
         "{text}"
     );
 
@@ -269,8 +284,6 @@ fn asking_run() -> (Checkout, String, String) {
     (project, run_id, moments)
 }
 
-/// A node parked on its own questions says which ones, and says it the
-/// same way wherever a reader meets it.
 /// A planner whose first plan is refused — its one criterion passes
 /// before any work — and whose second is accepted.
 const REPLANNED_WORKFLOW: &str = r#"
@@ -306,12 +319,12 @@ sessions:
     outcome: { type: completed, summary: planned }
 "#;
 
-#[test]
-fn a_finished_node_says_how_its_document_got_accepted() {
+/// A run of `workflow` whose planner works as `fixture` says, and what it printed.
+fn planned(workflow: &str, fixture: &str) -> (Checkout, std::process::Output) {
     let project = Checkout::new()
         .config("defaults:\n  isolation: none\nrunners:\n  executor:\n    - { adapter: mock, model: mock-model }\n")
-        .workflow("wf", REPLANNED_WORKFLOW)
-        .file("fixture.yaml", REPLANNED_FIXTURE)
+        .workflow("wf", workflow)
+        .file("fixture.yaml", fixture)
         .committed();
     let run = project.run(
         std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
@@ -324,10 +337,16 @@ fn a_finished_node_says_how_its_document_got_accepted() {
             "fixture.yaml",
         ],
     );
+    (project, run)
+}
+
+#[test]
+fn a_finished_node_says_how_its_document_got_accepted() {
+    let (project, run) = planned(REPLANNED_WORKFLOW, REPLANNED_FIXTURE);
     assert!(run.status.success(), "{}", stderr(&run));
     let run_id = run_id_from(&run);
 
-    let text = status(&project, &run_id, &[]);
+    let text = status(&project, &run_id, &["--full"]);
     let row = text
         .lines()
         .find(|line| line.contains(" plan "))
@@ -345,17 +364,19 @@ fn a_finished_node_says_how_its_document_got_accepted() {
     );
 }
 
+/// A node parked on its own questions says which ones, and says it the
+/// same way wherever a reader meets it.
 #[test]
 fn status_says_which_questions_a_node_is_waiting_on() {
     let (project, run_id, _) = asking_run();
 
-    let text = status(&project, &run_id, &[]);
-    assert_eq!(
-        rows(&text),
-        ["ask  asked 1 question: `summary`"],
+    let text = status(&project, &run_id, &["--full"]);
+    let listed = rows(&text);
+    assert!(
+        listed.len() == 1 && listed[0].starts_with("ask  asked 1 question: `summary`"),
         "the node's own row says what it asked: {text}"
     );
-    assert!(text.contains("waiting   ask"), "{text}");
+    assert!(text.contains("needs you ask"), "{text}");
 
     let document: serde_json::Value =
         serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
@@ -378,14 +399,9 @@ fn status_says_which_questions_a_node_is_waiting_on() {
 fn status_lists_the_nodes_the_frame_declares_in_its_order() {
     let (project, run_id) = shaped_run();
 
-    let printed: Vec<String> = rows(&status(&project, &run_id, &[]))
+    let printed: Vec<String> = rows(&status(&project, &run_id, &["--full"]))
         .iter()
-        .map(|row| {
-            row.split_whitespace()
-                .next()
-                .unwrap_or_default()
-                .to_string()
-        })
+        .map(|row| id(row).to_string())
         .collect();
 
     let document: serde_json::Value =
@@ -437,8 +453,42 @@ fn status_says_why_a_node_is_not_in_this_run() {
     let said = status(&project, &run_id_from(&run), &[]);
 
     assert!(
-        said.contains("not in this run: the project declares no command `lint`"),
+        said.contains("left out     lint: the project declares no command `lint`"),
         "{said}"
     );
-    assert!(said.contains("nodes 1/1 · 1 left out"), "{said}");
+    assert!(said.contains("1 of 1 node done · 1 left out"), "{said}");
+}
+
+/// A decision that shows a plan says how the plan got accepted, with the rules it broke:
+/// the plan's row on the same page leaves that to it, and the node's own page keeps it.
+#[test]
+fn a_plan_a_decision_shows_says_how_it_got_accepted_once() {
+    let workflow = format!(
+        "{REPLANNED_WORKFLOW}  - id: approve\n    kind: gate\n    depends_on: [plan]\n    \
+         assignee: lead\n    message: \"Good?\"\n    shows: [{{ node: plan, kind: tasks }}]\n"
+    );
+    // A plan a person is shown says what it changes and why, as well as what proves it.
+    let fixture = REPLANNED_FIXTURE
+        .replace(
+            "summary: \"Make it\"\n",
+            "summary: \"Make it\"\n            description: \"Writes the file.\"\n",
+        )
+        .replace(
+            "title: \"Make it\",",
+            "title: \"Make it\", description: \"Writes made.txt.\", outcome: \"made.txt exists\",",
+        );
+    let (project, run) = planned(&workflow, &fixture);
+    let run_id = run_id_from(&run);
+
+    let text = status(&project, &run_id, &["--full"]);
+    assert!(
+        text.contains("handed over 2 times; refused 1 time"),
+        "{text}"
+    );
+    assert!(!text.contains("accepted on its 2nd handover"), "{text}");
+    let page = status(&project, &run_id, &["--node", "plan"]);
+    assert!(
+        page.contains("accepted on its 2nd handover (1 refused)"),
+        "{page}"
+    );
 }

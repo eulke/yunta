@@ -103,11 +103,6 @@ impl GrantLedger {
         self.answers.get(task)
     }
 
-    /// The last answer the scope request of `node`'s own scope got.
-    pub fn node_answer_for(&self, node: &NodeId) -> Option<&ScopeAnswer> {
-        self.node_answers.get(node)
-    }
-
     /// What the latest grant to `node`'s own scope added.
     pub fn last_granted_to_node_paths(&self, node: &NodeId) -> &[ScopeGlob] {
         self.per_node
@@ -126,16 +121,6 @@ impl GrantLedger {
     /// counted.
     pub fn granted(&self) -> u32 {
         self.granted
-    }
-
-    /// How many requests were refused.
-    pub fn denied(&self) -> u32 {
-        self.denied
-    }
-
-    /// How many expansions were asked for at all.
-    pub fn requested(&self) -> u32 {
-        self.requested
     }
 
     /// Folds one scope-domain event. A grant that names no task widens

@@ -43,7 +43,7 @@ fn ready_nodes(board: &Board<'_>) -> Option<Decision> {
         .iter()
         .copied()
         // finished, failed-and-handled above, a gate (handled above), or
-        // a node only a re-route may start.
+        // a node only a reroute may start.
         .filter(|node| {
             !board.state.nodes.has_state(&node.id)
                 && !is_gate(node)

@@ -41,11 +41,11 @@ pub struct PoolReport {
 
 impl std::fmt::Display for PoolReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use yunta_core::units::Bytes;
+        use surco::figures::Bytes;
         write!(
             f,
             "{}, builds {} of a {} budget",
-            yunta_core::text::counted(self.checkouts, "checkout"),
+            surco::text::counted(self.checkouts, "checkout"),
             Bytes(self.builds),
             Bytes(self.budget)
         )?;
@@ -53,7 +53,7 @@ impl std::fmt::Display for PoolReport {
             write!(
                 f,
                 " and {} not counted",
-                yunta_core::text::counted(self.uncounted, "build")
+                surco::text::counted(self.uncounted, "build")
             )?;
         }
         write!(

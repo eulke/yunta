@@ -49,11 +49,14 @@ mod render;
 mod run_page;
 mod surface;
 
+use std::ffi::OsString;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use clap::{CommandFactory, FromArgMatches};
+use clap::{FromArgMatches, ValueEnum};
+use surco::paint::ColorWhen;
 use yunta_core::Env;
 
 use crate::error::{CliError, Outcome};
@@ -61,15 +64,25 @@ use crate::error::{CliError, Outcome};
 fn main() -> ExitCode {
     let started = Instant::now();
 
-    let command = cli::Cli::command();
-    let template = help::template(&command);
-    let matches = command.help_template(template).get_matches();
-    let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     // The process environment, read once here at the shell's edge: every
     // color, glyph, width, terminal and log decision below reads this value.
     let env = project::process_env();
+    // The arguments, read once. The help and the usage errors clap refuses
+    // are painted before clap parses them, each rendered by a command built
+    // in the paint of the stream it goes to; `help::exit` writes what that
+    // command rendered.
+    let args: Vec<OsString> = std::env::args_os().collect();
+    let policy = policy_from_args(&env, &args);
+    let stdout_paint = policy.paint(std::io::stdout().is_terminal());
+    let stderr_paint = policy.paint(std::io::stderr().is_terminal());
+    let matches =
+        help::parse(&args, stdout_paint, stderr_paint).unwrap_or_else(|error| help::exit(&error));
+    let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|error| help::exit(&error));
     init_tracing(&env);
-    render::settle_color(color_policy(&env, cli.color));
+    render::settle_color(
+        color_policy(&env, cli.color),
+        set_var(&env, surco::paint::LOOK_VAR),
+    );
     render::settle_columns(columns(&env));
     render::settle_glyphs(&glyph_env(&env));
     surface::terminal::settle(&env);
@@ -77,7 +90,7 @@ fn main() -> ExitCode {
     // writes to stdout takes the same color, width and glyphs.
     let look = render::stdout_look();
     let mode = cli.mode();
-    tracing::debug!("yunta starting");
+    tracing::debug!("starting");
 
     let outcome = drive(cli, started, mode, &look);
     // Last, because a prompt this run abandoned mid-key left a thread
@@ -97,12 +110,10 @@ const FAILED: ExitCode = ExitCode::FAILURE;
 fn exit_status(
     outcome: Result<Outcome, CliError>,
     mode: output::Mode,
-    look: &render::Look,
+    look: &surco::look::Look,
 ) -> ExitCode {
     match outcome {
-        Ok(Outcome::Success) => ExitCode::SUCCESS,
-        Ok(Outcome::Code(code)) => ExitCode::from(code),
-        Ok(Outcome::Reported) => FAILED,
+        Ok(outcome) => ExitCode::from(outcome.code()),
         Err(error) => {
             output::refused(&error, mode, look);
             FAILED
@@ -128,22 +139,59 @@ fn set_var<'a>(env: &'a Env, name: &str) -> Option<&'a str> {
 
 /// What decides whether a stream gets color: the command line, and the
 /// variables the convention reads, as this process was started with them.
-fn color_policy(env: &Env, when: render::ink::ColorWhen) -> render::ink::ColorPolicy {
-    render::ink::ColorPolicy {
+fn color_policy(env: &Env, when: surco::paint::ColorWhen) -> surco::paint::ColorPolicy {
+    surco::paint::ColorPolicy {
         when,
         no_color: set_var(env, "NO_COLOR").is_some(),
         force: set_var(env, "CLICOLOR_FORCE").is_some_and(|value| value != "0"),
         off: set_var(env, "CLICOLOR").is_some_and(|value| value == "0"),
         dumb: set_var(env, "TERM").is_some_and(|value| value == "dumb"),
         links: links(env),
+        look: surco::paint::look_of(set_var(env, surco::paint::LOOK_VAR)),
+        truecolor: set_var(env, "COLORTERM")
+            .is_some_and(|value| matches!(value, "truecolor" | "24bit")),
+        ground: surco::paint::ground_of(set_var(env, "COLORFGBG")),
     }
+}
+
+/// The policy for `env` and the `--color` `args` name. The help is painted
+/// before clap parses the arguments, so the value is read from them here.
+fn policy_from_args(env: &Env, args: &[OsString]) -> surco::paint::ColorPolicy {
+    let words = args
+        .iter()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned());
+    color_policy(env, color_flag(words))
+}
+
+/// The `--color` value among `args`, in the forms clap reads it: `--color
+/// VALUE` or `--color=VALUE`, before a `--` that ends the options. A repeated
+/// `--color` reads as its first value, the one clap takes. A `--color` after a
+/// `--help` still paints the help: clap answers the help before it reaches
+/// that flag, but the reader asked for it. A value clap would refuse reads as
+/// the default, `auto`, and clap refuses it when it parses the arguments. Every
+/// other line takes the value clap parsed; this reading serves only the help
+/// and the refusals, which are painted before clap parses.
+fn color_flag(args: impl IntoIterator<Item = String>) -> ColorWhen {
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        let value = match arg.as_str() {
+            "--" => break,
+            "--color" => args.next(),
+            other => other.strip_prefix("--color=").map(str::to_string),
+        };
+        if let Some(value) = value {
+            return ColorWhen::from_str(&value, false).unwrap_or_default();
+        }
+    }
+    ColorWhen::default()
 }
 
 /// Whether a path is a link on a stream with color: what
 /// `YUNTA_HYPERLINKS` says outright, or what the terminal announced about
 /// itself.
-fn links(env: &Env) -> render::ink::Links {
-    use render::ink::Links;
+fn links(env: &Env) -> surco::paint::Links {
+    use surco::paint::Links;
     match set_var(env, "YUNTA_HYPERLINKS") {
         Some("1") => return Links::Forced,
         Some("0") => return Links::Refused,
@@ -163,10 +211,10 @@ fn links(env: &Env) -> render::ink::Links {
 
 /// The three values the glyph policy reads, as this process was started
 /// with them.
-fn glyph_env(env: &Env) -> render::glyphs::GlyphEnv {
-    render::glyphs::GlyphEnv {
+fn glyph_env(env: &Env) -> surco::glyphs::GlyphEnv {
+    surco::glyphs::GlyphEnv {
         explicit: env
-            .terminal_var(render::glyphs::OVERRIDE_VAR)
+            .terminal_var(surco::glyphs::OVERRIDE_VAR)
             .map(str::to_string),
         locale: ["LC_ALL", "LC_CTYPE", "LANG"]
             .iter()
@@ -207,7 +255,7 @@ fn drive(
     cli: cli::Cli,
     started: Instant,
     mode: output::Mode,
-    look: &render::Look,
+    look: &surco::look::Look,
 ) -> Result<Outcome, CliError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -274,4 +322,68 @@ pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
         .map_err(|source| CliError::io(&format!("read {what} at"), path.display(), source))?;
     yunta_core::yaml::parse(&contents)
         .map_err(|e| CliError::msg(format!("failed to parse {what} at {}: {e}", path.display())))
+}
+
+#[cfg(test)]
+mod tests {
+    use surco::paint::ColorWhen;
+
+    use super::color_flag;
+
+    /// The `--color` value the words name, as the arguments after the
+    /// program's own name.
+    fn named(words: &[&str]) -> ColorWhen {
+        color_flag(words.iter().map(|word| word.to_string()))
+    }
+
+    /// Both spellings of `--color` are read wherever they stand among the
+    /// arguments, before the options end.
+    #[test]
+    fn color_is_read_in_both_forms_wherever_it_stands() {
+        assert_eq!(named(&["--color", "never"]), ColorWhen::Never);
+        assert_eq!(named(&["--color=always"]), ColorWhen::Always);
+        assert_eq!(
+            named(&["run", "wf.yaml", "--color", "never"]),
+            ColorWhen::Never
+        );
+    }
+
+    /// A repeated `--color` reads as its first value, which clap takes, and a
+    /// `--` ends the options before any `--color` after it.
+    #[test]
+    fn the_first_color_before_a_double_dash_decides() {
+        assert_eq!(
+            named(&["--color", "always", "--color=never"]),
+            ColorWhen::Always
+        );
+        assert_eq!(
+            named(&["--color", "never", "--", "--color", "always"]),
+            ColorWhen::Never
+        );
+        assert_eq!(named(&["--", "--color", "always"]), ColorWhen::Auto);
+    }
+
+    /// A `--help` between two `--color`s is answered before the second one is
+    /// read, so the help is painted with the first.
+    #[test]
+    fn a_help_between_two_colors_is_painted_with_the_first() {
+        assert_eq!(
+            named(&["--color", "never", "--help", "--color", "always"]),
+            ColorWhen::Never
+        );
+    }
+
+    /// A `--color` after a `--help` decides the help's paint, though clap
+    /// answers the help before reading it.
+    #[test]
+    fn a_color_after_a_help_still_paints_it() {
+        assert_eq!(named(&["--help", "--color", "always"]), ColorWhen::Always);
+    }
+
+    /// A value clap refuses reads as `auto`, the default.
+    #[test]
+    fn a_value_clap_refuses_reads_as_auto() {
+        assert_eq!(named(&["--color", "sometimes"]), ColorWhen::Auto);
+        assert_eq!(named(&["--color"]), ColorWhen::Auto);
+    }
 }

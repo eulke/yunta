@@ -1,7 +1,7 @@
 //! Shared domain types for the Yunta workspace.
 //!
-//! `yunta-core` is the bottom of the dependency graph: every other crate may
-//! depend on it, and it depends on nothing else in the workspace. Its map:
+//! Every other crate may depend on `yunta-core`, and it depends on `yunta-surco`
+//! alone, whose grammar its refusals are written in. Its map:
 //!
 //! - Documents a person or an agent writes, and how they are read: `workflow`,
 //!   `config`, `inputs`, `pack`, `tasks`, `spec`, `questions`, `findings`,
@@ -15,8 +15,8 @@
 //!   `caution`; `best_effort` names a step a run carries on past.
 //! - Boundaries a decision is handed rather than reaching for: `clock`,
 //!   `id_source`, `process`, `disk`, `durable` and `secret`.
-//! - Values every crate shares: `ids`, `nonempty`, `graph`, `text`, `units`,
-//!   `shell`, `commit_message` and `error`.
+//! - Values every crate shares: `ids`, `nonempty`, `graph`, `units`, `shell`,
+//!   `commit_message` and `error`.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.
@@ -78,7 +78,6 @@ mod spec;
 pub mod step;
 mod tasks;
 pub mod template;
-pub mod text;
 pub mod units;
 pub mod workflow;
 pub mod yaml;
@@ -92,8 +91,8 @@ pub use config::{
     ForgeConfig, GitHubForgeConfig, HomeExpansionError, Isolation, LimitsConfig, McpServerConfig,
     NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
     PoolConfig, PricingEntry, ProcessSecrets, ProjectConfig, PublisherPermissions, Redactor,
-    RunnerCandidate, SecretSource, ShortSecret, SkillsConfig, StorageConfig, MIN_SECRET_CHARS,
-    REDACTED,
+    RunnerCandidate, SecretSource, ShortSecret, SkillsConfig, StorageConfig, TerminalConfig,
+    MIN_SECRET_CHARS, REDACTED,
 };
 pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
 pub use diagnostic::{
@@ -146,7 +145,7 @@ pub use workflow::{
     KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact,
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
     NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
-    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownArtifactKind,
+    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownDocument,
     Workflow, WorkflowFault, ARTIFACTS_DIR, OBJECTS_DIR,
 };
 

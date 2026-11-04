@@ -4,28 +4,29 @@
 //! run's findings read the same way, each with the node that found it
 //! and what other nodes answered.
 
+use surco::components::{Fields, Prose, Section};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
 use yunta_core::events::findings::{RunFindings, Settled, StandingFinding};
 use yunta_core::events::{Finding, FindingSeverity};
 use yunta_core::HeldFindings;
 
-use crate::blocks::{Fields, Prose, Section};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
-use crate::{found, Mark};
+use crate::found;
 
-pub fn document(held: &HeldFindings, of: &str) -> Doc<'static> {
+pub fn document(held: &HeldFindings, of: &str) -> Doc {
     let mut sorted: Vec<Finding> = held.findings.iter().cloned().map(Finding::from).collect();
     sorted.sort_by_key(|finding| finding.severity);
     let counts = counted(sorted.iter().map(|finding| finding.severity));
-    let mut doc = Doc::new().with(Block::Title(heading(
+    let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(heading(
         &format!("findings{of}"),
         &counts,
         String::new(),
-    )));
+    ))));
     for finding in sorted {
         let (title, detail) = found::said(&finding.says);
         doc = doc.with(Section {
-            mark: Some(mark(finding.severity)),
+            lead: Some(surco::components::Lead::Mark(mark(finding.severity))),
             title: titled(finding.severity, &title),
             blocks: vec![
                 Prose(format!("{}, at {}", finding.id, finding.location)).into(),
@@ -36,7 +37,7 @@ pub fn document(held: &HeldFindings, of: &str) -> Doc<'static> {
     doc
 }
 
-pub fn run_document(view: &RunFindings) -> Doc<'static> {
+pub fn run_document(view: &RunFindings) -> Doc {
     let mut sorted: Vec<&StandingFinding> = view.findings.iter().collect();
     sorted.sort_by_key(|standing| standing.finding.severity);
     let counts = counted(sorted.iter().map(|standing| standing.finding.severity));
@@ -48,11 +49,11 @@ pub fn run_document(view: &RunFindings) -> Doc<'static> {
         .iter()
         .filter(|standing| standing.settled.is_some())
         .count();
-    let mut doc = Doc::new().with(Block::Title(heading(
+    let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(heading(
         "the run's findings",
         &counts,
         tally(answered, settled),
-    )));
+    ))));
     for standing in sorted {
         doc = doc.with(standing_section(standing));
     }
@@ -69,7 +70,7 @@ fn heading(what: &str, counts: &[String], tally: String) -> Line {
     Line::new().push(Tone::Strong, what).plain(said)
 }
 
-fn standing_section(standing: &StandingFinding) -> Section<'static> {
+fn standing_section(standing: &StandingFinding) -> Section {
     let finding = &standing.finding;
     let (title, detail) = found::said(&finding.says);
     let found_by = match &standing.node {
@@ -85,7 +86,7 @@ fn standing_section(standing: &StandingFinding) -> Section<'static> {
             .unwrap_or_default();
         fields = fields.push_if(
             "answered",
-            format!("{}{by} — {}", answer.answer.as_str(), answer.why),
+            format!("{}{by}: {}", answer.answer.as_str(), answer.why),
         );
     }
     if let Some(proof) = &standing.proof {
@@ -99,7 +100,7 @@ fn standing_section(standing: &StandingFinding) -> Section<'static> {
         fields = fields.push_if("settled", format!("a person went on past `{gate}`"));
     }
     Section {
-        mark: Some(mark(finding.severity)),
+        lead: Some(surco::components::Lead::Mark(mark(finding.severity))),
         title: titled(finding.severity, &title),
         blocks: vec![
             Prose(found_by).into(),
@@ -114,7 +115,7 @@ fn titled(severity: FindingSeverity, title: &str) -> Line {
     let mark = mark(severity);
     Line::new()
         .push(Tone::of(mark), severity.as_str())
-        .plain(format!(" — {title}"))
+        .plain(format!(": {title}"))
 }
 
 /// The mark a severity is drawn with: a cross for what blocks, caution
@@ -123,7 +124,7 @@ pub fn mark(severity: FindingSeverity) -> Mark {
     match severity {
         FindingSeverity::Blocking => Mark::Failed,
         FindingSeverity::Major => Mark::Caution,
-        FindingSeverity::Minor | FindingSeverity::Note => Mark::Pending,
+        FindingSeverity::Minor | FindingSeverity::Note => Mark::Absent,
     }
 }
 

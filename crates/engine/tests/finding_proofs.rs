@@ -163,7 +163,15 @@ fn blocking(bench: &Bench, workflow: &str) -> usize {
     let workflow: yunta_core::Workflow = yunta_core::yaml::parse(workflow).unwrap();
     let events = bench.events();
     let at = events.last().unwrap().timestamp;
-    yunta_engine::run_frame(&bench.run_id, &workflow, &events, None, at).blocking_findings
+    yunta_engine::run_frame(
+        &bench.run_id,
+        &workflow,
+        &events,
+        None,
+        &yunta_engine::Engine::this(at),
+        at,
+    )
+    .blocking_findings
 }
 
 const WRITES_IT: &str = "      - { path: fixed.txt, content: fixed }\n";

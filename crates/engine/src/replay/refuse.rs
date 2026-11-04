@@ -9,7 +9,8 @@
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{
-    EventMeta, EventPayload, GateEvent, NodeEvent, NodeWait, ScopeEvent, StoredEvent, TaskEvent,
+    EventMeta, EventPayload, GateEvent, NodeEvent, NodeWait, QuestionsAskedPayload, ScopeEvent,
+    StoredEvent, TaskEvent,
 };
 use yunta_core::{NodeId, NonEmpty, Seq, TaskId};
 
@@ -118,7 +119,10 @@ impl RunState {
             TaskEvent::DeviationDeclared(p) => &p.task_id,
             TaskEvent::DeviationResolved(p) => &p.task_id,
             TaskEvent::CriterionDeclaredUnpassable(p) => &p.task_id,
-            TaskEvent::Registered(_) | TaskEvent::CheckStarted(_) | TaskEvent::CheckAnswered(_) => {
+            TaskEvent::Registered(_)
+            | TaskEvent::CheckStarted(_)
+            | TaskEvent::CheckAnswered(_)
+            | TaskEvent::ShapesRead(_) => {
                 return Ok(());
             }
         };
@@ -136,6 +140,14 @@ impl RunState {
     /// questions both suspend a node and restore it, and which state it
     /// comes back to is the node ledger's to hold — so the transition
     /// lives here, where both ledgers are in reach.
+    ///
+    /// A resolution restores only a node still `Waiting`. An external gate's
+    /// poll resolution emits `node_started` before `gate_resolved`, so the node
+    /// is already `Running` and the outcome events own its state. A closed pull
+    /// request's resolution has no `node_started`, so it restores the parked
+    /// gate as `abort` does. A gate the SHA-drift check reopened is `Running`
+    /// when its pull request closes: it is not restored, its handle is cleared,
+    /// and the run pauses.
     pub(super) fn gate_transition(
         &mut self,
         event: &GateEvent,
@@ -154,31 +166,14 @@ impl RunState {
                 self.nodes.stop_working(&node, meta, self.run.suspensions());
             }
             GateEvent::Resolved(_) => {
-                // Only restores while still `Waiting`: an external
-                // gate's poll resolution emits `node_started` *before*
-                // `gate_resolved`, so by then the node is already
-                // `Running` and the outcome events own its state.
+                // Restores only a node still `Waiting`. A gate the drift check
+                // reopened is `Running` when its pull request closes: it is not
+                // restored, its handle is cleared, and the run pauses.
                 if matches!(self.nodes.state(&node), Some(NodeState::Waiting { .. })) {
                     self.unpark(&node, stored.timestamp);
                 }
             }
-            GateEvent::QuestionsAsked(p) => {
-                // The refusal reads the questions first, so a log that
-                // reaches here names at least one; a round with none
-                // would be no wait at all.
-                let Some(asked) = NonEmpty::new(p.questions.clone()) else {
-                    return Err(ReplayError::AskedNothing {
-                        seq: stored.seq,
-                        node,
-                    });
-                };
-                // The attempt's accounting closes here: the session that
-                // asked is done, and no reader counts it again while the
-                // node waits.
-                self.nodes
-                    .settle_asking(&node, p.tokens_used, meta, self.run.suspensions());
-                self.park(&node, NodeWait::Questions { asked });
-            }
+            GateEvent::QuestionsAsked(round) => self.questions_asked(node, round, stored, meta)?,
             // The answer reopens the node exactly where asking left it:
             // `Running`, owed the terminal its close deferred.
             GateEvent::QuestionsAnswered(_) => self.unpark(&node, stored.timestamp),
@@ -189,6 +184,33 @@ impl RunState {
                 self.nodes.stop_working(&node, meta, self.run.suspensions());
             }
         }
+        Ok(())
+    }
+
+    /// Parks `node` on the round of questions it asked, which its answer
+    /// reopens.
+    fn questions_asked(
+        &mut self,
+        node: NodeId,
+        round: &QuestionsAskedPayload,
+        stored: &StoredEvent,
+        meta: &EventMeta<'_>,
+    ) -> Result<(), ReplayError> {
+        // The refusal reads the questions first, so a log that
+        // reaches here names at least one; a round with none
+        // would be no wait at all.
+        let Some(asked) = NonEmpty::new(round.questions.clone()) else {
+            return Err(ReplayError::AskedNothing {
+                seq: stored.seq,
+                node,
+            });
+        };
+        // The attempt's accounting closes here: the session that
+        // asked is done, and no reader counts it again while the
+        // node waits.
+        self.nodes
+            .settle_asking(&node, round.tokens_used, meta, self.run.suspensions());
+        self.park(&node, NodeWait::Questions { asked });
         Ok(())
     }
 

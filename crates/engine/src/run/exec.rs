@@ -1,7 +1,7 @@
 //! Run execution: the scheduler loop that replays the log,
 //! asks [`schedule::decide`] what is next, and runs it until the answer
-//! is terminal — plus the pause paths every stop funnels through and the
-//! node lookup the step handlers share.
+//! is terminal — plus the node lookup the step handlers share. Every stop
+//! that waits for a person funnels through [`super::pause()`].
 //!
 //! Crash, restart and Ctrl-C are the same case: whatever the log says
 //! happened, happened; everything else re-runs. A resume re-enters
@@ -14,66 +14,17 @@ use std::pin::Pin;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventPayload, FindingCause, FindingSeverity, PauseReason, RunMovedPayload, RunPausedPayload,
+    EventPayload, FindingCause, FindingSeverity, PauseReason, RunMovedPayload,
 };
-use yunta_core::{Clock, ContentHash, ModeName, NodeId, Redactor, RunId};
-use yunta_storage::AsyncStorage;
+use yunta_core::{ContentHash, ModeName, NodeId};
 
-use crate::run_log::RunLog;
-
+use super::pause::pause;
 use super::schedule::{self, Decision};
 use super::{
     baseline, gate_exec, protected, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal,
 };
 use yunta_core::events::RunEvent;
 use yunta_core::Location;
-
-/// Records the `run_paused` a post-crash `yunta cancel` writes when it
-/// finds the engine already dead. The CLI never builds an `EventDraft`
-/// itself: event construction and its clock stamp live here, so every
-/// event on the log is emitted by the engine through one injected clock.
-/// The run-level `run_paused` event — built in one place so every path
-/// that stops a run (the scheduler's [`record_pause`], a crash's
-/// [`record_pause_after_crash`]) writes the same event, which stores the
-/// pause as typed data.
-fn run_paused(reason: &PauseReason) -> EventPayload {
-    EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason)))
-}
-
-/// Records the pause of a run whose engine is gone, with the redactor the
-/// caller resolved from the run's manifest before it wrote anything.
-pub async fn record_pause_after_crash(
-    storage: &AsyncStorage,
-    run_id: &RunId,
-    reason: &PauseReason,
-    clock: &dyn Clock,
-    redactor: &Redactor,
-) -> Result<(), RunError> {
-    RunLog::new(storage, run_id, clock, redactor)
-        .record(None, run_paused(reason))
-        .await?;
-    Ok(())
-}
-
-/// Records the run's pause, exports the forensic `events.jsonl`, and returns
-/// the paused report — the one place a run stops for a human to resume,
-/// whatever asked for it (a cancellation, an exhausted budget, an
-/// unanswered gate).
-pub(super) async fn pause(ctx: &RunCtx<'_>, reason: PauseReason) -> Result<RunReport, RunError> {
-    record_pause(ctx, &reason).await?;
-    Ok(RunReport {
-        terminal: RunTerminal::Paused { reason },
-        state: *ctx.run_view().await?.state,
-    })
-}
-
-/// Emits the run-level `run_paused` event and exports the forensic log — the
-/// one place the pause event is written, shared by the scheduler's own pause
-/// and the gate flow's.
-async fn record_pause(ctx: &RunCtx<'_>, reason: &PauseReason) -> Result<(), RunError> {
-    ctx.emit(None, run_paused(reason)).await?;
-    ctx.export_events_jsonl().await
-}
 
 /// Everything the scheduler loop runs on, once the run has woken: its
 /// built context, the loop's own handle on the root cancellation, the

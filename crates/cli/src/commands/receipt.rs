@@ -9,6 +9,8 @@
 
 use std::path::{Path, PathBuf};
 
+use surco::doc::Doc;
+use surco::look::Look;
 use yunta_core::RunId;
 use yunta_engine::{build_receipt, render_receipt_json, EventChainStatus, Receipt};
 use yunta_storage::ChainVerification;
@@ -17,16 +19,14 @@ use super::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::{emit, Answer, Mode};
-use crate::render::doc::Doc;
-use crate::render::Look;
 
 pub async fn receipt(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let (run_dir, receipt) = gathered(&ctx, run_id).await?;
 
     let markdown = {
-        use yunta_render::surface::Surface;
-        yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(
+        use surco::surface::Surface;
+        surco::surface::Markdown.draw(&yunta_render::receipt::document(
             &receipt,
             &advice::spell,
             look.glyphs,
@@ -53,7 +53,7 @@ struct ReceiptAnswer {
 }
 
 impl Answer for ReceiptAnswer {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+    fn document(&self, look: &Look) -> Doc {
         yunta_render::receipt::document(&self.receipt, &advice::spell, look.glyphs)
     }
 
@@ -88,6 +88,6 @@ async fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), C
 
 /// Writes one rendering beside the run, naming the file it could not
 /// write.
-fn save(path: &Path, contents: &str) -> Result<(), CliError> {
+pub(super) fn save(path: &Path, contents: &str) -> Result<(), CliError> {
     std::fs::write(path, contents).map_err(|source| CliError::io("write", path.display(), source))
 }

@@ -4,412 +4,22 @@
 //! reads a list, what a refusal or a silence becomes — is tested
 //! without a token, a repository or the network.
 
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use serde_json::{json, Value};
 use yunta_adapters::GitHubForge;
 use yunta_core::events::Claim;
 use yunta_core::port::{
-    Forge, ForgeError, ForgeProbe, GateDecision, PublishRequest, PullRequestRef,
-    PullRequestRequest, ReviewOutcome,
+    Forge, ForgeError, ForgeProbe, PullRequestRef, PullRequestRequest, ReviewOutcome,
 };
-use yunta_core::{GitHubRepo, Secret};
-use yunta_testkit_core::repo::blob_id;
+use yunta_core::Secret;
 
-#[derive(Clone)]
-struct StubPr {
-    number: u64,
-    branch: String,
-    state: &'static str,
-    merged: bool,
-    merged_by: Option<&'static str>,
-    body: String,
-    head_sha: String,
-    merge_commit_sha: Option<String>,
-    title: String,
-}
+#[path = "forge_github/gate_page.rs"]
+mod gate_page;
+#[path = "forge_github/stub.rs"]
+mod stub;
 
-#[derive(Default)]
-struct StubState {
-    /// What `GET /repos/{owner}/{repo}` says the token may do there.
-    can_push: bool,
-    prs: Vec<StubPr>,
-    reviews: HashMap<u64, Vec<Value>>,
-    comments: HashMap<u64, Vec<Value>>,
-    /// Every request the stub answered: `METHOD path?query`.
-    requests: Vec<String>,
-    /// Answer every call with GitHub's rate-limit refusal.
-    rate_limited: bool,
-    /// Answer every call with this refusal.
-    refusal: Option<(u16, &'static str)>,
-    /// What the branch holds, by path, as the Contents API serves it.
-    files: HashMap<String, Vec<u8>>,
-    /// Answer a read of a file the way the API answers one too large to
-    /// come inline: its blob id, and no bytes.
-    over_inline_limit: bool,
-}
-
-#[derive(Clone, Default)]
-struct Stub(Arc<Mutex<StubState>>);
-
-impl Stub {
-    fn with<T>(&self, f: impl FnOnce(&mut StubState) -> T) -> T {
-        f(&mut self.0.lock().unwrap())
-    }
-
-    fn requests(&self) -> Vec<String> {
-        self.with(|s| s.requests.clone())
-    }
-}
-
-fn record(stub: &Stub, method: &str, path: &str, query: &HashMap<String, String>) {
-    let mut pairs: Vec<String> = query.iter().map(|(k, v)| format!("{k}={v}")).collect();
-    pairs.sort();
-    stub.with(|s| {
-        s.requests
-            .push(format!("{method} {path}?{}", pairs.join("&")))
-    });
-}
-
-/// A refusal the stub answers with: status, headers and body, boxed so
-/// the handlers' `Result` stays small.
-struct Refusal(Box<(StatusCode, HeaderMap, String)>);
-
-impl IntoResponse for Refusal {
-    fn into_response(self) -> Response {
-        (*self.0).into_response()
-    }
-}
-
-fn refuse(status: StatusCode, headers: HeaderMap, body: &str) -> Refusal {
-    Refusal(Box::new((status, headers, body.to_string())))
-}
-
-type Answer = Result<Json<Value>, Refusal>;
-
-fn refused(stub: &Stub) -> Option<Refusal> {
-    stub.with(|s| {
-        if s.rate_limited {
-            let mut headers = HeaderMap::new();
-            headers.insert("x-ratelimit-remaining", "0".parse().unwrap());
-            headers.insert("retry-after", "7".parse().unwrap());
-            return Some(refuse(
-                StatusCode::FORBIDDEN,
-                headers,
-                "API rate limit exceeded",
-            ));
-        }
-        s.refusal.map(|(status, body)| {
-            refuse(
-                StatusCode::from_u16(status).unwrap(),
-                HeaderMap::new(),
-                body,
-            )
-        })
-    })
-}
-
-fn pr_json(pr: &StubPr) -> Value {
-    json!({
-        "number": pr.number,
-        "html_url": format!("https://github.example/pr/{}", pr.number),
-        "state": pr.state,
-        "merged": pr.merged,
-        "merged_by": pr.merged_by.map(|login| json!({ "login": login })),
-        "merge_commit_sha": pr.merge_commit_sha,
-        "body": pr.body,
-        "head": { "sha": pr.head_sha, "ref": pr.branch },
-    })
-}
-
-async fn list_pulls(
-    State(stub): State<Stub>,
-    Path((_owner, _repo)): Path<(String, String)>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Answer {
-    record(&stub, "GET", "/pulls", &query);
-    if let Some(refusal) = refused(&stub) {
-        return Err(refusal);
-    }
-    let head = query.get("head").cloned().unwrap_or_default();
-    let branch = head
-        .split_once(':')
-        .map(|(_, b)| b.to_string())
-        .unwrap_or(head);
-    let state = query
-        .get("state")
-        .cloned()
-        .unwrap_or_else(|| "open".to_string());
-    let prs = stub.with(|s| {
-        s.prs
-            .iter()
-            .filter(|pr| pr.branch == branch && (state == "all" || pr.state == state))
-            .map(pr_json)
-            .collect::<Vec<_>>()
-    });
-    Ok(Json(Value::Array(prs)))
-}
-
-async fn create_pull(
-    State(stub): State<Stub>,
-    Path((_owner, _repo)): Path<(String, String)>,
-    Json(body): Json<Value>,
-) -> Answer {
-    record(&stub, "POST", "/pulls", &HashMap::new());
-    if let Some(refusal) = refused(&stub) {
-        return Err(refusal);
-    }
-    let pr = stub.with(|s| {
-        let number = s.prs.iter().map(|pr| pr.number).max().unwrap_or(0) + 1;
-        let pr = StubPr {
-            number,
-            branch: body["head"].as_str().unwrap_or_default().to_string(),
-            state: "open",
-            merged: false,
-            merged_by: None,
-            body: body["body"].as_str().unwrap_or_default().to_string(),
-            head_sha: format!("{number:040x}"),
-            merge_commit_sha: None,
-            title: body["title"].as_str().unwrap_or_default().to_string(),
-        };
-        s.prs.push(pr.clone());
-        pr
-    });
-    Ok(Json(pr_json(&pr)))
-}
-
-async fn get_pull(
-    State(stub): State<Stub>,
-    Path((_owner, _repo, number)): Path<(String, String, u64)>,
-) -> Answer {
-    record(&stub, "GET", &format!("/pulls/{number}"), &HashMap::new());
-    if let Some(refusal) = refused(&stub) {
-        return Err(refusal);
-    }
-    let pr = stub.with(|s| s.prs.iter().find(|pr| pr.number == number).cloned());
-    match pr {
-        Some(pr) => Ok(Json(pr_json(&pr))),
-        None => Err(refuse(StatusCode::NOT_FOUND, HeaderMap::new(), "Not Found")),
-    }
-}
-
-/// One page of `items`, the way GitHub pages: `per_page` and `page`
-/// (1-based) from the query.
-fn page(items: &[Value], query: &HashMap<String, String>) -> Vec<Value> {
-    let per_page: usize = query
-        .get("per_page")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(30);
-    let page: usize = query.get("page").and_then(|v| v.parse().ok()).unwrap_or(1);
-    items
-        .iter()
-        .skip((page - 1) * per_page)
-        .take(per_page)
-        .cloned()
-        .collect()
-}
-
-async fn list_reviews(
-    State(stub): State<Stub>,
-    Path((_owner, _repo, number)): Path<(String, String, u64)>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Answer {
-    record(&stub, "GET", &format!("/pulls/{number}/reviews"), &query);
-    if let Some(refusal) = refused(&stub) {
-        return Err(refusal);
-    }
-    let items = stub.with(|s| s.reviews.get(&number).cloned().unwrap_or_default());
-    Ok(Json(Value::Array(page(&items, &query))))
-}
-
-async fn list_comments(
-    State(stub): State<Stub>,
-    Path((_owner, _repo, number)): Path<(String, String, u64)>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Answer {
-    record(&stub, "GET", &format!("/pulls/{number}/comments"), &query);
-    if let Some(refusal) = refused(&stub) {
-        return Err(refusal);
-    }
-    let items = stub.with(|s| s.comments.get(&number).cloned().unwrap_or_default());
-    Ok(Json(Value::Array(page(&items, &query))))
-}
-
-async fn get_ref(
-    State(stub): State<Stub>,
-    Path((_owner, _repo, branch)): Path<(String, String, String)>,
-) -> Answer {
-    record(
-        &stub,
-        "GET",
-        &format!("/git/ref/heads/{branch}"),
-        &HashMap::new(),
-    );
-    if let Some(refusal) = refused(&stub) {
-        return Err(refusal);
-    }
-    Ok(Json(json!({ "object": { "sha": "base-sha" } })))
-}
-
-async fn create_ref(
-    State(stub): State<Stub>,
-    Path((_owner, _repo)): Path<(String, String)>,
-) -> Answer {
-    record(&stub, "POST", "/git/refs", &HashMap::new());
-    Ok(Json(json!({ "ref": "refs/heads/x" })))
-}
-
-async fn get_contents(
-    State(stub): State<Stub>,
-    Path((_owner, _repo, path)): Path<(String, String, String)>,
-) -> Answer {
-    record(&stub, "GET", &format!("/contents/{path}"), &HashMap::new());
-    let (stored, over_inline_limit) =
-        stub.with(|s| (s.files.get(&path).cloned(), s.over_inline_limit));
-    match stored {
-        // Over the inline limit the file is named by its blob id, and no
-        // bytes come with it.
-        Some(content) if over_inline_limit => Ok(Json(json!({
-            "sha": blob_id(&content),
-            "encoding": "none",
-            "content": "",
-        }))),
-        // Inline, base64 in lines, the way the Contents API sends it.
-        Some(content) => {
-            let encoded = STANDARD.encode(&content);
-            let lines: Vec<&str> = encoded
-                .as_bytes()
-                .chunks(60)
-                .map(|chunk| std::str::from_utf8(chunk).unwrap())
-                .collect();
-            Ok(Json(json!({
-                "sha": blob_id(&content),
-                "encoding": "base64",
-                "content": lines.join("\n"),
-            })))
-        }
-        None => Err(refuse(StatusCode::NOT_FOUND, HeaderMap::new(), "Not Found")),
-    }
-}
-
-async fn put_contents(
-    State(stub): State<Stub>,
-    Path((_owner, _repo, path)): Path<(String, String, String)>,
-    Json(body): Json<Value>,
-) -> Answer {
-    record(&stub, "PUT", &format!("/contents/{path}"), &HashMap::new());
-    let content = STANDARD.decode(body["content"].as_str().unwrap()).unwrap();
-    stub.with(|s| s.files.insert(path.clone(), content));
-    Ok(Json(json!({ "content": { "path": path } })))
-}
-
-async fn get_repository(
-    State(stub): State<Stub>,
-    Path((_owner, _repo)): Path<(String, String)>,
-) -> Answer {
-    record(&stub, "GET", "/repository", &HashMap::new());
-    if let Some(refusal) = refused(&stub) {
-        return Err(refusal);
-    }
-    let can_push = stub.with(|s| s.can_push);
-    Ok(Json(
-        json!({ "permissions": { "push": can_push, "pull": true } }),
-    ))
-}
-
-/// Serves the stub on a loopback port and returns its address.
-async fn serve(stub: Stub) -> SocketAddr {
-    let app = Router::new()
-        .route("/repos/{owner}/{repo}", get(get_repository))
-        .route(
-            "/repos/{owner}/{repo}/pulls",
-            get(list_pulls).post(create_pull),
-        )
-        .route("/repos/{owner}/{repo}/pulls/{number}", get(get_pull))
-        .route(
-            "/repos/{owner}/{repo}/pulls/{number}/reviews",
-            get(list_reviews),
-        )
-        .route(
-            "/repos/{owner}/{repo}/pulls/{number}/comments",
-            get(list_comments),
-        )
-        .route("/repos/{owner}/{repo}/git/ref/heads/{branch}", get(get_ref))
-        .route("/repos/{owner}/{repo}/git/refs", post(create_ref))
-        .route(
-            "/repos/{owner}/{repo}/contents/{path}",
-            get(get_contents).put(put_contents),
-        )
-        .with_state(stub);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    addr
-}
-
-fn repo() -> GitHubRepo {
-    "octo/widgets".parse().unwrap()
-}
-
-fn forge_at(addr: SocketAddr) -> GitHubForge {
-    GitHubForge::configure(
-        repo(),
-        Secret::new("token".to_string()),
-        yunta_testkit_core::spell(),
-    )
-    .base_url(format!("http://{addr}"))
-    .build()
-    .unwrap()
-}
-
-/// The marker a pull request opened before the comment form carries,
-/// which a run still finds it by.
-fn marker(run_id: &str) -> String {
-    format!("summary\n\n---\nrun_id: `{run_id}`\n")
-}
-
-fn stub_pr(number: u64, branch: &str, run_id: &str, state: &'static str) -> StubPr {
-    StubPr {
-        number,
-        branch: branch.to_string(),
-        state,
-        merged: false,
-        merged_by: None,
-        body: marker(run_id),
-        head_sha: format!("{number:040x}"),
-        merge_commit_sha: None,
-        title: String::new(),
-    }
-}
-
-fn request(branch: &str, run_id: &str) -> PublishRequest {
-    PublishRequest {
-        branch: branch.to_string(),
-        base_branch: "main".to_string(),
-        run_id: run_id.parse().unwrap(),
-        decision: GateDecision {
-            node: "approve-spec".into(),
-            question: Claim::Written("Is the spec ready to build on?".to_string()),
-            assignee: "lead".to_string(),
-            then: vec!["build".into(), "docs".into()],
-            corrected_by: Some("spec".into()),
-        },
-        artifacts: vec![("spec.md".to_string(), b"# spec".to_vec())],
-        shown: Vec::new(),
-    }
-}
+use stub::*;
 
 /// Every file the stub was asked to commit, in order.
 fn commits(stub: &Stub) -> Vec<String> {
@@ -432,22 +42,18 @@ async fn a_gate_pull_request_asks_its_question_and_says_what_each_review_does() 
     let pr = stub.with(|s| s.prs[0].clone());
     assert_eq!(pr.title, "Is the spec ready to build on?");
     for said in [
-        "Gate `approve-spec` of run `run-1` waits on this pull request, for lead.",
-        "**approve** — approve this pull request, or merge it",
-        "the gate passes, and the run goes on to `build` and `docs`",
+        "Gate `approve-spec` waits on this pull request, for lead.",
+        "| **approve** | approve this pull request, or merge it | resolves this gate; `build`, `docs` run next |",
         "each comment reaches `spec` as a finding",
-        "**close** — close this pull request",
-        "`spec.md` — as the run holds it",
+        "| **close** | close this pull request | nothing runs; this decision stays open |",
+        "`.yunta/gates/run-1/approve-spec/spec.md`: as the run holds it",
         "`yunta resume run-1`",
-        "`yunta cancel run-1`",
     ] {
         assert!(pr.body.contains(said), "{said:?} is not in:\n{}", pr.body);
     }
-    assert!(
-        !pr.body.contains("resolve-gate"),
-        "no terminal command answers a published gate: {}",
-        pr.body
-    );
+    for unsaid in ["yunta cancel", "resolve-gate"] {
+        assert!(!pr.body.contains(unsaid), "{unsaid:?} is in:\n{}", pr.body);
+    }
     assert!(
         pr.body.ends_with("<!-- yunta run_id: run-1 -->"),
         "{}",
@@ -462,7 +68,10 @@ async fn a_later_lap_commits_only_what_changed_to_the_pull_request_it_reuses() {
     let mut lap = request("yunta/run-1/gate", "run-1");
 
     let first = forge.publish(&lap).await.unwrap();
-    assert_eq!(commits(&stub), ["PUT /contents/spec.md?"]);
+    assert_eq!(
+        commits(&stub),
+        ["PUT /contents/.yunta/gates/run-1/approve-spec/spec.md?"]
+    );
 
     let again = forge.publish(&lap).await.unwrap();
     assert_eq!(again.number, first.number);
@@ -477,7 +86,7 @@ async fn a_later_lap_commits_only_what_changed_to_the_pull_request_it_reuses() {
     assert_eq!(corrected.number, first.number);
     assert_eq!(commits(&stub).len(), 2);
     assert_eq!(
-        stub.with(|s| s.files["spec.md"].clone()),
+        stub.with(|s| s.files[".yunta/gates/run-1/approve-spec/spec.md"].clone()),
         b"# spec, corrected"
     );
 }

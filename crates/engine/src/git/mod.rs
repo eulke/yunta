@@ -11,22 +11,26 @@
 //! it belonged to is already gone.
 //!
 //! What a call is for decides how it reads git's answer: [`read`] for
-//! output, [`ask`] and [`attempt`] for an exit that means yes or no, and
-//! [`change`] for a mutation. An [`Effect`] says whether a mutation takes
-//! the mutation lock, which only worktree metadata needs.
+//! output, [`ask`] for an exit that means yes or no, and [`change`] for a
+//! mutation. An [`Effect`] says whether a mutation takes the mutation
+//! lock, which only worktree metadata needs.
 
 mod error;
 mod mutation;
+mod numstat;
+mod objects;
 mod program;
 mod repo;
 mod status;
 
 pub use error::{Cause, GitError, Invocation, Stopped};
 pub use mutation::{mutation_lock, MutationLock};
-pub use repo::{committer, common_dir, files_naming, push_branch, remote_url, run_branches};
+pub use numstat::{numstat, Numstat};
+pub use objects::blobs;
+pub use repo::{committer, common_dir, push_branch, remote_url, run_branches, words_in};
 pub use status::{tree_state, Status};
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Output;
 
 use yunta_core::CommitSha;
@@ -90,22 +94,6 @@ pub async fn read_bytes(
     }
 }
 
-/// Raw stdout bytes on exit 0 of a git that reads what it is asked from its
-/// stdin, such as `cat-file --batch`: `input` is written whole, then closed.
-pub async fn read_batch(
-    dir: &Path,
-    args: &[&str],
-    input: Vec<u8>,
-    sup: Supervision<'_>,
-) -> Result<Vec<u8>, GitError> {
-    let output = fed(dir, args, Some(input), sup).await?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        Err(exit_error(dir, args, &output))
-    }
-}
-
 /// A question git answers by its exit. `exits` names the exit that means yes
 /// and the one that means no; any other exit is an error.
 pub async fn ask(
@@ -134,7 +122,7 @@ pub async fn verify(
             said.trim()
                 .parse::<CommitSha>()
                 .map(Some)
-                .map_err(|_| unreadable(dir, &args, said.trim()))
+                .map_err(|_| unreadable(dir, &args, said.trim(), "is no commit id"))
         }
         Some(1) => Ok(None),
         _ => Err(exit_error(dir, &args, &output)),
@@ -160,25 +148,6 @@ pub async fn change(
     }
 }
 
-/// A mutation git may decline, answered by its exit: `exits` names the exit
-/// that means done and the one that means declined, and any other exit is an
-/// error. Takes the lock its `effect` asks for, as [`change`] does.
-pub async fn attempt(
-    dir: &Path,
-    effect: Effect,
-    args: &[&str],
-    exits: Exits,
-    sup: Supervision<'_>,
-) -> Result<bool, GitError> {
-    match effect {
-        Effect::Metadata => {
-            let held = held_for(dir, args, sup).await?;
-            attempt_held(&held, dir, args, exits, sup).await
-        }
-        Effect::Objects | Effect::Refs | Effect::Checkout => yes_or_no(dir, args, exits, sup).await,
-    }
-}
-
 /// [`change`] for a caller that holds the mutation lock already. The call
 /// takes no lock of its own: a nested wait on the lock held would never end.
 pub async fn change_held(
@@ -190,7 +159,9 @@ pub async fn change_held(
     read(dir, args, sup).await
 }
 
-/// [`attempt`] for a caller that holds the mutation lock already.
+/// A mutation git may decline, answered by its exit, for a caller that holds
+/// the mutation lock already. The call takes no lock of its own, as
+/// [`change_held`] does.
 pub async fn attempt_held(
     _held: &MutationLock,
     dir: &Path,
@@ -201,19 +172,21 @@ pub async fn attempt_held(
     yes_or_no(dir, args, exits, sup).await
 }
 
+/// [`run_with`] with nothing for git to read on its stdin.
+async fn run(dir: &Path, args: &[&str], sup: Supervision<'_>) -> Result<Output, GitError> {
+    run_with(dir, args, None, sup).await
+}
+
 /// One governed `git`, run to its end: its exit status and both streams.
+/// `input`, when there is some, is what git reads on its stdin, which is
+/// closed once it is written.
 ///
 /// A git the token or the timeout stopped is an error and not an exit
 /// status: it never answered, and a caller that read "non-zero" out of a
 /// killed child would read a verdict into a run somebody stopped. A drain
 /// that stopped reading is an error too, since what git wrote may not be
 /// all there.
-async fn run(dir: &Path, args: &[&str], sup: Supervision<'_>) -> Result<Output, GitError> {
-    fed(dir, args, None, sup).await
-}
-
-/// [`run`], with `input` written to git's stdin when there is any.
-async fn fed(
+async fn run_with(
     dir: &Path,
     args: &[&str],
     input: Option<Vec<u8>>,
@@ -221,7 +194,25 @@ async fn fed(
 ) -> Result<Output, GitError> {
     let fail = |cause| error_for(dir, args, cause);
     let program = program::program(sup.env, sup).await.map_err(&fail)?;
-    let ran = match spawn_governed(command(program, dir, args, input), sup).await {
+    // The repository's upkeep is left to the person's own git. An automatic
+    // `gc` or `maintenance` a commit starts detaches into the background, out
+    // of the process group the engine supervises, and works on in the run's
+    // repository beside its commits and suites, holding the pipes the engine
+    // reads git through.
+    let mut command = GovernedCommand::new(program, dir)
+        .arg("-c")
+        .arg("gc.auto=0")
+        .arg("-c")
+        .arg("maintenance.auto=false")
+        .stdout(Capture::Collect)
+        .stderr(Capture::Collect);
+    for arg in args {
+        command = command.arg(*arg);
+    }
+    if let Some(input) = input {
+        command = command.stdin(input);
+    }
+    let ran = match spawn_governed(command, sup).await {
         Ok(Outcome::Exited {
             status,
             stdout,
@@ -246,30 +237,6 @@ async fn fed(
         Err(error) => return Err(fail(Cause::Spawn(spawn_io(error)))),
     };
     Ok(ran)
-}
-
-/// The command one git call runs: `args` after the settings every call
-/// carries, and `input` on its stdin when there is any.
-fn command(program: PathBuf, dir: &Path, args: &[&str], input: Option<Vec<u8>>) -> GovernedCommand {
-    // The repository's upkeep is left to the person's own git. An automatic
-    // `gc` or `maintenance` a commit starts detaches into the background, out
-    // of the process group the engine supervises, and works on in the run's
-    // repository beside its commits and suites, holding the pipes the engine
-    // reads git through.
-    let mut command = GovernedCommand::new(program, dir)
-        .arg("-c")
-        .arg("gc.auto=0")
-        .arg("-c")
-        .arg("maintenance.auto=false")
-        .stdout(Capture::Collect)
-        .stderr(Capture::Collect);
-    for arg in args {
-        command = command.arg(*arg);
-    }
-    match input {
-        Some(input) => command.stdin(input),
-        None => command,
-    }
 }
 
 /// The yes-or-no an exit gives: `exits.yes` is true and `exits.no` is false.
@@ -311,16 +278,24 @@ fn exit_error(dir: &Path, args: &[&str], output: &Output) -> GitError {
     )
 }
 
-/// The error for a git that exited zero with an answer that is no commit id.
-fn unreadable(dir: &Path, args: &[&str], said: &str) -> GitError {
+/// The error for a git that exited zero with an answer that cannot be read
+/// as one: what it printed, and `which`, what that is not.
+fn unreadable(dir: &Path, args: &[&str], said: &str, which: &str) -> GitError {
     error_for(
         dir,
         args,
         Cause::Spawn(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("git printed `{said}`, which is no commit id"),
+            format!("git printed `{said}`, which {which}"),
         )),
     )
+}
+
+/// The bytes before the first `delimiter` in `bytes`, and those after it;
+/// `None` where no `delimiter` stands.
+fn split_once(bytes: &[u8], delimiter: u8) -> Option<(&[u8], &[u8])> {
+    let at = bytes.iter().position(|&byte| byte == delimiter)?;
+    Some((bytes.get(..at)?, bytes.get(at + 1..)?))
 }
 
 /// The `io::Error` a spawn that did not run to its end stands for: the OS's

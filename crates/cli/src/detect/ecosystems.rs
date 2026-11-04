@@ -22,8 +22,8 @@ pub(super) fn rust(repo: &Path) -> Option<Found> {
         ecosystem: Ecosystem {
             name: "rust",
             cache_tip: "share a build cache across worktrees: export \
-                        CARGO_TARGET_DIR=$HOME/.cache/yunta-cargo-target before running yunta \
-                        — otherwise every worktree rebuilds the whole dependency tree.",
+                        CARGO_TARGET_DIR=$HOME/.cache/yunta-cargo-target before running yunta; \
+                        otherwise every worktree rebuilds the whole dependency tree.",
         },
         commands: commands(&[
             (
@@ -42,7 +42,7 @@ pub(super) fn go(repo: &Path) -> Option<Found> {
         ecosystem: Ecosystem {
             name: "go",
             cache_tip: "Go's own build and module caches (GOCACHE/GOMODCACHE) are already \
-                        shared machine-wide by default — nothing extra to configure for \
+                        shared machine-wide by default: nothing extra to configure for \
                         worktrees.",
         },
         commands: commands(&[

@@ -53,9 +53,9 @@ pub(super) async fn tool_list_workflows(
     // An agent reads the catalog as Markdown: no terminal's width or
     // locale decides what it is told.
     let catalog =
-        super::super::list::catalog(cwd, ctx.as_ref(), crate::render::Glyphs::Unicode).await;
-    Ok(yunta_render::surface::Surface::draw(
-        &yunta_render::surface::Markdown,
+        super::super::list::catalog(cwd, ctx.as_ref(), surco::glyphs::Glyphs::Unicode).await;
+    Ok(surco::surface::Surface::draw(
+        &surco::surface::Markdown,
         &catalog,
     ))
 }
@@ -68,21 +68,23 @@ pub(super) async fn tool_workflow_status(
     let run_id = required_run_id(args)?;
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
     let open = ctx.open_run(&run_id).await?;
-    let engine = crate::render::Engine::of(&open.run_dir, ctx.clock.now());
+    let engine = crate::render::engine(&open.run_dir, ctx.clock.now());
     let (events, manifest) = (open.events, open.manifest.doc);
     let state = yunta_engine::derive(&events);
     let decision = crate::json::decision_of(&manifest, &open.run_dir, &state).await?;
+    let mut frame = crate::commands::status::progress::frame_of(
+        &run_id,
+        &manifest,
+        &state,
+        &engine,
+        ctx.clock.now(),
+    );
+    frame.prior = crate::commands::stats::budget_prior(&ctx, &manifest, &frame, &events).await;
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.
     crate::json::to_json_string(&crate::json::RunDocument::of(
-        &run_id,
-        &events,
-        &state,
-        &manifest,
-        ctx.clock.now(),
-        &engine,
-        decision,
+        &run_id, &events, &state, &manifest, &frame, &engine, decision,
     ))
     .map_err(CliError::msg)
 }

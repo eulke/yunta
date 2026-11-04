@@ -69,7 +69,7 @@ impl SessionTools {
         // consolidation, never through here.
         let own: Vec<Finding> = FindingLedger::of(&self.events().await?).effective_of(&self.node);
         super::verdicts::json(&json!({
-            "note": "your own posts only — siblings' posts become readable after the \
+            "note": "your own posts only: siblings' posts become readable after the \
                      group's join, through its consolidated output",
             "findings": own,
         }))

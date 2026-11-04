@@ -121,8 +121,10 @@ pub(super) async fn learn(
         if slot.built.is_some() || slot.standing.is_none() {
             continue;
         }
-        let held = slot::hold(home, slot.number, Contention::Refuse, None, supervision);
-        let lease = match held.await {
+        let between = walking.between_records().await;
+        let held = slot::hold(home, slot.number, Contention::Refuse, None, supervision).await;
+        drop(between);
+        let lease = match held {
             Ok(Some(lease)) => lease,
             Ok(None) => continue,
             Err(error) => {
@@ -171,6 +173,7 @@ pub(super) fn count_pending(home: &Path, slots: &[super::survey::Slot], walking:
 pub(super) struct Walking {
     under_way: Arc<Mutex<HashSet<PathBuf>>>,
     clock: Arc<dyn Clock>,
+    recording: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Walking {
@@ -179,7 +182,16 @@ impl Walking {
         Walking {
             under_way: Arc::default(),
             clock,
+            recording: Arc::default(),
         }
+    }
+
+    /// Keeps this process's counts from recording while the guard lasts,
+    /// and waits for one that is. A count holds its checkout only for the
+    /// moment its record takes, which is no reason for whoever is choosing a
+    /// checkout to pass that one over and build from nothing.
+    pub(super) async fn between_records(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.recording.lock().await
     }
 
     /// Counts `built`'s bytes off the caller's way and records them as the
@@ -197,8 +209,9 @@ impl Walking {
         }
         let under_way = self.under_way.clone();
         let clock = self.clock.clone();
+        let recording = self.recording.clone();
         tokio::spawn(async move {
-            count_and_record(&home, number, &path, built, &*clock).await;
+            count_and_record(&home, number, &path, built, &*clock, &recording).await;
             under_way
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -211,7 +224,14 @@ impl Walking {
 /// build of checkout `number`, under a hold taken without waiting: a
 /// checkout somebody holds keeps the build its holder records, and a count
 /// that finds a newer record leaves that record standing.
-async fn count_and_record(home: &Path, number: u32, path: &Path, built: Built, clock: &dyn Clock) {
+async fn count_and_record(
+    home: &Path,
+    number: u32,
+    path: &Path,
+    built: Built,
+    clock: &dyn Clock,
+    recording: &tokio::sync::Mutex<()>,
+) {
     let roots = built.roots.clone();
     let walked = tokio::task::spawn_blocking(move || super::walk::on_disk(&roots)).await;
     let Ok(Some(bytes)) = walked else {
@@ -219,6 +239,7 @@ async fn count_and_record(home: &Path, number: u32, path: &Path, built: Built, c
     };
     let cancel = CancellationToken::new();
     let supervision = Supervision::outside_any_run(&cancel, clock);
+    let _recording = recording.lock().await;
     match slot::hold(home, number, Contention::Refuse, None, supervision).await {
         Ok(Some(_lease)) => {
             let newer = recorded_at(path).await.is_some_and(|at| at > built.at);

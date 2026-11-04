@@ -35,6 +35,18 @@ pub enum Protection {
 }
 
 impl Protection {
+    /// What protects a path, in the words every reader reads after the path
+    /// it names.
+    pub fn words(self) -> &'static str {
+        match self {
+            Protection::ProjectDeny => "denied to every run by `permissions.paths.deny`",
+            Protection::AgentConfig => "an agent CLI's own configuration",
+            Protection::AgentInstructions => "an instruction file, which only a person grants",
+            Protection::ApprovedTest => "a test a person approved",
+            Protection::GitRegister => "the run's git register",
+        }
+    }
+
     /// Whether a person may grant a path this reason protects. Only the
     /// instruction files: nobody grants the rest.
     pub fn person_may_grant(self) -> bool {
@@ -102,12 +114,6 @@ pub struct Pathspecs {
     /// only when a link or a file stands there below real directories, and
     /// never looks under a directory there.
     pub points: Vec<PathBuf>,
-}
-
-impl Pathspecs {
-    pub fn is_empty(&self) -> bool {
-        self.rooted.is_empty() && self.loose.is_empty() && self.points.is_empty()
-    }
 }
 
 /// Serialized as `{reason, glob}`, with `on_the_way` when it is set.
@@ -205,10 +211,6 @@ impl Protected {
         Protected::new(project, approved)?.following(links)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     /// Every protected glob, in the order the reasons are read: what a
     /// session is told it may not write, and what a sandbox denies. A path
     /// held only on the way is left out.
@@ -216,15 +218,6 @@ impl Protected {
         self.entries
             .iter()
             .filter(|entry| !entry.on_the_way)
-            .map(|entry| entry.glob.clone())
-            .collect()
-    }
-
-    /// The globs a loop's close judges: every one but the approved tests.
-    pub fn at_loop_close(&self) -> Vec<ScopeGlob> {
-        self.entries
-            .iter()
-            .filter(|entry| !entry.on_the_way && entry.reason != Protection::ApprovedTest)
             .map(|entry| entry.glob.clone())
             .collect()
     }

@@ -2,7 +2,7 @@
 //! state root and an empty org layer, so what `check` refuses is what
 //! the file says rather than what the machine running the suite carries.
 
-use yunta_testkit::{stderr, stdout, yunta_at, Checkout};
+use yunta_testkit::{stderr, stdout, unwrapped, yunta_at, Checkout};
 
 #[test]
 fn a_well_formed_workflow_checks_clean_with_no_runner_fields() {
@@ -19,7 +19,11 @@ nodes:
 
     let output = yunta_at!(project, &["check", "workflow.yaml"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
-    assert!(stdout(&output).contains("OK"));
+    assert!(
+        stdout(&output).starts_with("✓ workflow.yaml · can run here\n"),
+        "{}",
+        stdout(&output)
+    );
 }
 
 #[test]
@@ -40,11 +44,17 @@ nodes:
     assert!(!output.status.success());
     let refusal = stderr(&output);
     assert!(
-        refusal
-            .lines()
-            .any(|l| l
-                == "  node `plan` references runner `planner`, which `runners:` does not define"),
+        unwrapped(&refusal).contains(
+            "error node `plan` references runner `planner`, which `runners:` does not define"
+        ),
         "check names the unresolved runner and the field that must define it: {refusal}"
+    );
+    let next: Vec<&str> = refusal.lines().skip_while(|line| *line != "next").collect();
+    assert_eq!(
+        next.get(1)
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" ")),
+        Some("yunta check workflow.yaml again, once they are fixed".to_string()),
+        "check offers itself again for once the errors are fixed: {refusal}"
     );
 }
 
@@ -70,10 +80,10 @@ nodes:
     let check = yunta_at!(&project, &["check", "workflow.yaml"]);
     let run = yunta_at!(&project, &["run", "workflow.yaml"]);
     assert!(!check.status.success() && !run.status.success());
-    let problem = "  node `plan` references runner `planner`, which `runners:` does not define";
+    let problem = "error node `plan` references runner `planner`, which `runners:` does not define";
     for (command, said) in [("check", stderr(&check)), ("run", stderr(&run))] {
         assert!(
-            said.lines().any(|line| line == problem),
+            unwrapped(&said).contains(problem),
             "`{command}` names the problem in the words the other uses: {said}"
         );
     }
@@ -147,8 +157,10 @@ fn a_repo_re_allowing_an_org_denied_pattern_fails_check_citing_the_layer() {
     assert!(!output.status.success(), "check must refuse the re-allow");
     let refusal = stderr(&output);
     assert!(
-        refusal.lines().any(|l| l
-            == "  layer `repo` re-allows command pattern `sudo *` denied by layer `org` — permissions only narrow"),
+        unwrapped(&refusal).contains(
+            "error layer `repo` re-allows command pattern `sudo *` denied by layer `org`: \
+             permissions only narrow"
+        ),
         "the refusal cites both layers and the re-allowed pattern: {refusal}"
     );
 }
@@ -167,16 +179,18 @@ fn a_workflow_command_denied_by_the_org_layer_fails_check() {
     assert!(!output.status.success());
     let refusal = stderr(&output);
     assert!(
-        refusal.lines().any(|l| l
-            == "  node `escalate`: command `sudo make install` matches denied pattern `sudo *` (permissions.commands.deny)"),
+        unwrapped(&refusal).contains(
+            "error node `escalate`: command `sudo make install` matches denied pattern `sudo *` \
+             (permissions.commands.deny)"
+        ),
         "the refusal cites the node, its command and the rule it matched: {refusal}"
     );
 }
 
-/// The problems block heads a file's problems with how many there are. It
-/// counts, and it says `error` or `errors` accordingly — one home for
-/// the block means every surface that lists a file's problems reads the
-/// same way.
+/// The page of a file's problems heads them with how many there are. It
+/// counts, and it says `error` or `errors` accordingly: one home for the
+/// count means every surface that lists a file's problems reads the same
+/// way.
 #[test]
 fn the_error_block_counts_what_it_lists_and_pluralises_it() {
     // One node with a runner nothing defines: exactly one error.
@@ -188,7 +202,7 @@ fn the_error_block_counts_what_it_lists_and_pluralises_it() {
     assert!(!output.status.success());
     let refusal = stderr(&output);
     assert!(
-        refusal.lines().any(|l| l == "one.yaml: 1 error"),
+        refusal.lines().any(|l| l == "✗ one.yaml · 1 error"),
         "a single problem reads `1 error`: {refusal}"
     );
 
@@ -202,7 +216,7 @@ fn the_error_block_counts_what_it_lists_and_pluralises_it() {
     assert!(!output.status.success());
     let refusal = stderr(&output);
     assert!(
-        refusal.lines().any(|l| l == "two.yaml: 2 errors"),
+        refusal.lines().any(|l| l == "✗ two.yaml · 2 errors"),
         "two problems read `2 errors`: {refusal}"
     );
     assert!(
@@ -238,7 +252,12 @@ nodes:
         &["check", "workflow.yaml", "--config", "config.yaml"]
     );
     assert!(output.status.success(), "a warning never refuses the run");
-    let said = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(
+        stdout(&output).starts_with("✓ workflow.yaml · can run here · 1 warning\n"),
+        "{}",
+        stdout(&output)
+    );
+    let said = unwrapped(&format!("{}{}", stdout(&output), stderr(&output)));
     assert!(
         said.contains("config declares `baseline.suite` (`make test`)")
             && said.contains("nothing reads the measurement"),
@@ -261,27 +280,54 @@ fn check_points_at_the_line_and_column_of_an_unknown_runner() {
     let output = yunta_at!(project, &["check", "workflow.yaml"]);
     assert!(!output.status.success());
     let said = stderr(&output);
+    assert!(
+        unwrapped(&said).contains("which `runners:` does not define")
+            && said
+                .lines()
+                .any(|line| line.trim() == "help: did you mean `implementer`?"),
+        "the near miss is named under the problem: {said}"
+    );
     let quoted: Vec<&str> = said
         .lines()
-        .skip_while(|line| !line.contains("runner `implementr`"))
-        .take(5)
+        .skip_while(|line| !line.contains("--> workflow.yaml:6:13"))
+        .take(4)
+        .map(str::trim_end)
         .collect();
-    assert!(
-        quoted[0].ends_with("— did you mean `implementer`?"),
-        "the near miss is named: {said}"
-    );
     assert_eq!(
-        quoted[1..]
-            .iter()
-            .map(|line| line.trim_end())
-            .collect::<Vec<_>>(),
+        quoted,
         [
-            "     --> workflow.yaml:6:13",
-            "      |",
-            "    6 |     runner: implementr",
-            "      |             ^^^^^^^^^^",
+            "   --> workflow.yaml:6:13",
+            "    │",
+            "  6 │     runner: implementr",
+            "    │             ^^^^^^^^^^",
         ],
         "{said}"
+    );
+}
+
+#[test]
+fn check_names_the_command_an_unset_one_is_a_slip_from_under_its_place() {
+    let project = Checkout::new()
+        .file(".yunta/config.yaml", "commands:\n  lint: \"true\"\n")
+        .file(
+            "workflow.yaml",
+            "name: fixture\nnodes:\n  - id: lint\n    kind: bash\n    run: { command: lnt }\n",
+        );
+
+    let output = yunta_at!(project, &["check", "workflow.yaml"]);
+    assert!(!output.status.success());
+    let said = stderr(&output);
+    assert!(
+        unwrapped(&said).contains(
+            "node `lint`: it runs the project's command `lnt`, and the config declares none"
+        ) && said
+            .lines()
+            .any(|line| line.trim() == "help: did you mean `lint`?"),
+        "the command it is a slip from is named under the problem: {said}"
+    );
+    assert!(
+        said.contains("--> workflow.yaml:5:21"),
+        "where the command is named: {said}"
     );
 }
 
@@ -305,7 +351,7 @@ fn three_unknown_keys_and_a_bad_runner_are_reported_together() {
         .filter_map(|line| line.trim().strip_prefix("--> workflow.yaml:"))
         .collect();
     assert_eq!(placed, ["5:5", "9:5", "10:13", "11:5"], "{said}");
-    assert!(said.starts_with("workflow.yaml: 4 errors"), "{said}");
+    assert!(said.starts_with("✗ workflow.yaml · 4 errors\n"), "{said}");
     assert!(
         !said.contains("implementr:\n"),
         "a typo of a declared runner is not offered as one to declare: {said}"

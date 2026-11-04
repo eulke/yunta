@@ -122,11 +122,6 @@ impl WorktreeIntegrity {
         })
     }
 
-    /// Where the worktree's HEAD is now.
-    pub fn head(&self) -> &CommitSha {
-        &self.head
-    }
-
     /// Why the state derived from the run's log no longer describes this
     /// worktree, or `None` when the run's base commit is still behind its
     /// HEAD.
@@ -158,8 +153,8 @@ impl WorktreeIntegrity {
         match self.isolation {
             Isolation::Worktree => format!(
                 "Put it back on the run's own branch (`git -C {path} checkout {branch}`), or on \
-                 any commit that still descends from `{base}` — `git -C {path} reflog` shows \
-                 where the run left it. If those commits are gone for good, start a new run \
+                 any commit that still descends from `{base}` (`git -C {path} reflog` shows \
+                 where the run left it). If those commits are gone for good, start a new run \
                  against the tree as it is now.",
                 path = self.path.display(),
                 branch = run_branch(&self.run_id),
@@ -167,7 +162,7 @@ impl WorktreeIntegrity {
             ),
             Isolation::None => format!(
                 "This run has `isolation: none`, so it works directly on this checkout: put it \
-                 back on a commit that still descends from `{base}` — `git -C {path} reflog` \
+                 back on a commit that still descends from `{base}`; `git -C {path} reflog` \
                  shows where the run left it, and a rebase or a pull under a paused run is the \
                  usual way it moves off. If that history is gone for good, start a new run \
                  against the tree as it is now.",

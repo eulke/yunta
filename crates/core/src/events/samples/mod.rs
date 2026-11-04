@@ -33,8 +33,8 @@ pub(crate) use node::{
     node_started, pull_request_opened, runner_resolved, scope_checked,
 };
 pub(crate) use run::{
-    baseline_captured, baseline_held, host_suspended, promotion_signaled, run_created,
-    run_finished, run_moved, run_paused, run_resumed,
+    baseline_captured, baseline_held, changes_counted, host_suspended, promotion_signaled,
+    run_created, run_finished, run_moved, run_paused, run_resumed,
 };
 pub(crate) use scope::{
     scope_derived, scope_expansion_denied, scope_expansion_granted, scope_expansion_requested,
@@ -46,6 +46,6 @@ pub(crate) use session::{
     stop_refused, write_formatted, write_refused,
 };
 pub(crate) use tasks::{
-    criterion_declared_unpassable, deviation_declared, deviation_resolved, task_check_answered,
-    task_check_started, task_registered, task_status_changed,
+    criterion_declared_unpassable, deviation_declared, deviation_resolved, shapes_read,
+    task_check_answered, task_check_started, task_registered, task_status_changed,
 };

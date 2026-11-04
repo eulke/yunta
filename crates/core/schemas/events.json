@@ -44,6 +44,17 @@
       "description": "What a session reported while it ran, and never the words it said: a\ntool it called, the usage it reported, or the digest of a note.",
       "type": "object",
       "properties": {
+        "action": {
+          "description": "What the call does, as its adapter read it. Absent on anything but a\ntool call, and in a log older than the word: see [`Self::tool_action`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolAction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "cached_input_tokens": {
           "description": "The part of `input_tokens` the CLI read from its cache, when it\nsays: a part of the input, never added to it.",
           "type": [
@@ -644,11 +655,22 @@
       }
     },
     "AuthorGate": {
-      "description": "Who an author's gate addresses, as its workflow names them.",
+      "description": "Who an author's gate addresses, as its workflow names them, and the\ngate itself.",
       "type": "object",
       "properties": {
         "assignee": {
           "type": "string"
+        },
+        "node": {
+          "description": "The gate's own node: a run parked on a gate nobody answered names\nit here, since the gate has written nothing of its own. Absent on a\nlog written before gates named themselves.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -995,6 +1017,47 @@
             "type"
           ]
         }
+      ]
+    },
+    "ChangesCountedPayload": {
+      "description": "What the run's change stands at, counted by git from the run's base\ncommit to its newest tree: how many files it touches and how many lines\nit adds and removes, a binary file counting as a file with no lines. It\nis counted when a gate asks a person, before a pull request opens, and\nwhen the engine finishes the run (`done`, `failed` or `promoted`), never\nonce per node: the event names the gate or the pull request node it was\ncounted for, and no node at the run's end. A person's close of a stopped\nrun (`yunta close`) records no count.",
+      "type": "object",
+      "properties": {
+        "added": {
+          "description": "How many lines the change adds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "files": {
+          "description": "How many files the change touches: a renamed file once, binary\nfiles included.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "largest": {
+          "description": "The files the change moves most, the largest first, as many as a page\nnames. Absent in a log older than the field.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FileChange"
+          }
+        },
+        "removed": {
+          "description": "How many lines the change removes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "tree": {
+          "description": "The tree the change was counted to.",
+          "$ref": "#/$defs/TreeId"
+        }
+      },
+      "required": [
+        "tree",
+        "files",
+        "added",
+        "removed"
       ]
     },
     "Channel": {
@@ -1651,7 +1714,7 @@
       ]
     },
     "CriterionUnpassablePayload": {
-      "description": "A criterion of a task that its session declared no work of the plan\ncan pass. The engine ran it on the tree the session left and saw it\nred; the exit code it saw and the session's reason are recorded. Only\na session's first declaration is. The task does not close on it, and a\nloop left with nothing to run fails with `PlanUnpassable`, the failure\na re-route hands to whatever writes the plan again.",
+      "description": "A criterion of a task that its session declared no work of the plan\ncan pass. The engine ran it on the tree the session left and saw it\nred; the exit code it saw and the session's reason are recorded. Only\na session's first declaration is. The task does not close on it, and a\nloop left with nothing to run fails with `PlanUnpassable`, the failure\na reroute hands to whatever writes the plan again.",
       "type": "object",
       "properties": {
         "criterion": {
@@ -1729,7 +1792,7 @@
       ]
     },
     "Denial": {
-      "description": "Why a request was denied, typed. The event log keeps this value; the\nwords a reader sees are written from it where that reader is.",
+      "description": "Why a request was denied, typed. The event log keeps this value, and\nevery reader, agent or person, reads the one sentence it says.",
       "oneOf": [
         {
           "type": "object",
@@ -2246,6 +2309,13 @@
               "properties": {
                 "message": {
                   "type": "string"
+                },
+                "nearest": {
+                  "description": "The name the refused one is most likely a slip from.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "path": {
                   "type": "string"
@@ -3030,7 +3100,7 @@
           "$ref": "#/$defs/Evidence"
         },
         "external_ref": {
-          "description": "The forge's own handle for this gate, such as a pull request's\nURL; `None` for an internal escalation, such as exhausted\nre-routes. It carries the forge's `PullRequestRef` through the\nlog, so a later `poll` from another process knows what to poll\nwithout publishing again.",
+          "description": "The forge's own handle for this gate, such as a pull request's\nURL; `None` for an internal escalation, such as exhausted\nreroutes. It carries the forge's `PullRequestRef` through the\nlog, so a later `poll` from another process knows what to poll\nwithout publishing again.",
           "type": [
             "string",
             "null"
@@ -3078,7 +3148,7 @@
               ]
             },
             {
-              "description": "A node's failure and the remedies it offers, or the re-route it exhausted.",
+              "description": "A node's failure and the remedies it offers, or the reroute it exhausted.",
               "type": "object",
               "properties": {
                 "failure": {
@@ -3455,6 +3525,19 @@
             }
           },
           "$ref": "#/$defs/ScopeDerivedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "shapes_read"
+            }
+          },
+          "$ref": "#/$defs/ShapesReadPayload",
           "required": [
             "kind"
           ]
@@ -3932,6 +4015,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "changes_counted"
+            }
+          },
+          "$ref": "#/$defs/ChangesCountedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "run_paused"
             }
           },
@@ -4022,7 +4118,7 @@
       "minLength": 1
     },
     "ExhaustedReroute": {
-      "description": "A re-route the failure exhausted: the node it would send the run to,\nthe cap it reached, and the mode a promotion would take the run to,\nwhen the workflow names one.",
+      "description": "A reroute the failure exhausted: the node it would send the run to,\nthe cap it reached, and the mode a promotion would take the run to,\nwhen the workflow names one.",
       "type": "object",
       "properties": {
         "goto": {
@@ -4030,7 +4126,7 @@
           "$ref": "#/$defs/NodeId"
         },
         "max_reroutes": {
-          "description": "The cap the re-routes reached.",
+          "description": "The cap the reroutes reached.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -4761,7 +4857,7 @@
           ]
         },
         {
-          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one.",
+          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one. Written by a binary from before a\nclosed pull request paused its gate; read from those logs, never\nwritten.",
           "type": "object",
           "properties": {
             "closed_pull_request": {
@@ -4851,7 +4947,7 @@
           }
         },
         "reroute": {
-          "description": "The re-route this failure exhausted, when it closes one.",
+          "description": "The reroute this failure exhausted, when it closes one.",
           "anyOf": [
             {
               "$ref": "#/$defs/ExhaustedReroute"
@@ -4964,6 +5060,33 @@
         "none",
         "tool_calls",
         "filesystem"
+      ]
+    },
+    "FileChange": {
+      "description": "One file of a change, as git counts it: a renamed file by its new path, and a\nbinary file with no lines.",
+      "type": "object",
+      "properties": {
+        "added": {
+          "description": "How many lines the change adds to it.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "path": {
+          "description": "The file, relative to the repository. A byte of its name that is not\ntext reads as the replacement character.",
+          "type": "string"
+        },
+        "removed": {
+          "description": "How many lines the change removes from it.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "added",
+        "removed"
       ]
     },
     "FileProblem": {
@@ -5832,7 +5955,7 @@
           "$ref": "#/$defs/Evidence"
         },
         "external_ref": {
-          "description": "The forge's own handle for this gate, such as a pull request's\nURL; `None` for an internal escalation, such as exhausted\nre-routes. It carries the forge's `PullRequestRef` through the\nlog, so a later `poll` from another process knows what to poll\nwithout publishing again.",
+          "description": "The forge's own handle for this gate, such as a pull request's\nURL; `None` for an internal escalation, such as exhausted\nreroutes. It carries the forge's `PullRequestRef` through the\nlog, so a later `poll` from another process knows what to poll\nwithout publishing again.",
           "type": [
             "string",
             "null"
@@ -5880,7 +6003,7 @@
               ]
             },
             {
-              "description": "A node's failure and the remedies it offers, or the re-route it exhausted.",
+              "description": "A node's failure and the remedies it offers, or the reroute it exhausted.",
               "type": "object",
               "properties": {
                 "failure": {
@@ -6061,6 +6184,49 @@
       },
       "required": [
         "slept_ms"
+      ]
+    },
+    "InTree": {
+      "description": "What a shape's file held of it.",
+      "oneOf": [
+        {
+          "description": "Its file's code did not name it, or the file did not exist: the plan\nmakes it. A file with a NUL byte in its first 8000 bytes is not code.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "new"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Its file's code names it.",
+          "type": "object",
+          "properties": {
+            "code": {
+              "description": "What the file holds of the items the shape declares, read the\nway the shape writes them: a function to its signature where the\nshape writes it with no body, a block of members (an `impl`, a\n`trait`, a class) to the members the shape names, attributes and\ndecorators where the shape writes some; in the shape's order.\nItems are read in Rust, Go, JavaScript or TypeScript, and Python.\n`None` where no item of it was read: a file in another language,\nor one that only uses the name.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "outside": {
+              "description": "Who else names it.",
+              "$ref": "#/$defs/Outside"
+            },
+            "type": {
+              "type": "string",
+              "const": "there"
+            }
+          },
+          "required": [
+            "type",
+            "outside"
+          ]
+        }
       ]
     },
     "InputName": {
@@ -7612,7 +7778,7 @@
           ]
         },
         {
-          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one.",
+          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one. Written by a binary from before a\nclosed pull request paused its gate; read from those logs, never\nwritten.",
           "type": "object",
           "properties": {
             "closed_pull_request": {
@@ -7741,7 +7907,7 @@
       ]
     },
     "NodeReroutedPayload": {
-      "description": "`from_node` is the envelope's own `node_id` (the node that failed) —\nonly the re-route's destination is extra information.",
+      "description": "`from_node` is the envelope's own `node_id` (the node that failed) —\nonly the reroute's destination is extra information.",
       "type": "object",
       "properties": {
         "attempt": {
@@ -7786,7 +7952,7 @@
       "type": "object",
       "properties": {
         "attempt": {
-          "description": "The attempt, counted from one. Each time the node runs again — after\na re-route, a restart of an interrupted attempt, a person's choice —\nstarts the next.",
+          "description": "The attempt, counted from one. Each time the node runs again — after\na reroute, a restart of an interrupted attempt, a person's choice —\nstarts the next.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -7938,6 +8104,50 @@
       "description": "An option id: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
+    },
+    "Outside": {
+      "description": "The files beyond a plan whose code names one of its shapes.",
+      "oneOf": [
+        {
+          "description": "Each file whose code — not a string or a comment in it — names the\nshape, other than its own and every file a task of the plan changes,\nin path order. None is a fact too.",
+          "type": "object",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "files"
+            }
+          },
+          "required": [
+            "type",
+            "paths"
+          ]
+        },
+        {
+          "description": "So many files of its language carry the name — this many — that it\nis a word of the language more than a shape of the plan, and none of\nthem is read to follow it: only the shape's own file is read, for its\ncode and to see that its code names the shape.",
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "common"
+            }
+          },
+          "required": [
+            "type",
+            "files"
+          ]
+        }
+      ]
     },
     "OwedScope": {
       "description": "One task's request for scope, owed a person's decision: what it asked\nto be allowed to write, and why, in its session's own words. `reason` is\nabsent when a red criterion of the task located the refused writes, rather\nthan its session.",
@@ -8124,7 +8334,7 @@
           ]
         },
         {
-          "description": "A node failed and nothing re-routed it.",
+          "description": "A node failed and nothing rerouted it.",
           "type": "object",
           "properties": {
             "failure": {
@@ -8191,7 +8401,7 @@
           ]
         },
         {
-          "description": "A gate was resolved to abort, with whatever the person wrote.",
+          "description": "A person answered a decision with `abort`: the run pauses where it\nis, its decision still open, with whatever they wrote.",
           "type": "object",
           "properties": {
             "free_text": {
@@ -8211,6 +8421,27 @@
           "required": [
             "type",
             "node"
+          ]
+        },
+        {
+          "description": "A person closed, without merging, the pull request a gate waited on:\nthe decision pauses there, as `abort` pauses it at a terminal. The gate's\nresolution records the close: no `node_failed` is written, and no\n`node_started` unless the SHA-drift check reopened the gate before the\npull request closed. The gate forgets the pull request, and a resume\npublishes it again, on the one a person reopened or a new one. It is a\npause of its own beside `GateAborted`: it names the pull request, and a\nresume publishes the gate again, where after an abort it asks again.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "type": {
+              "type": "string",
+              "const": "pull_request_closed"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "url"
           ]
         },
         {
@@ -8478,11 +8709,11 @@
       ]
     },
     "PromotionCause": {
-      "description": "Where a run's promotion leads: the node that exhausted its re-routes,\nand the node it was routed to.",
+      "description": "Where a run's promotion leads: the node that exhausted its reroutes,\nand the node it was routed to.",
       "type": "object",
       "properties": {
         "failure": {
-          "description": "The failure that exhausted the node's re-routes, when a failure\nasked for the promotion. Absent on a promotion the log wrote\nwithout one.",
+          "description": "The failure that exhausted the node's reroutes, when a failure\nasked for the promotion. Absent on a promotion the log wrote\nwithout one.",
           "anyOf": [
             {
               "$ref": "#/$defs/Failure"
@@ -8607,9 +8838,16 @@
       ]
     },
     "PublishedGate": {
-      "description": "Where the forge published the pull request a gate waits on.",
+      "description": "Where the forge published the pull request a gate waits on, and where on\nits branch the gate put its files.",
       "type": "object",
       "properties": {
+        "folder": {
+          "description": "The folder the gate's files are in, from the repository's root. Absent\nfor a gate that put them at the branch's root: one published before\ngates had a folder, and every later lap of it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "url": {
           "type": "string"
         }
@@ -9196,6 +9434,16 @@
           "const": "unknown-dependency"
         },
         {
+          "description": "A key nothing in the document reads.",
+          "type": "string",
+          "const": "unknown-key"
+        },
+        {
+          "description": "A node's `kind` one slip from a kind a node can be.",
+          "type": "string",
+          "const": "unknown-kind"
+        },
+        {
           "description": "Two independent tasks reach for the same files.",
           "type": "string",
           "const": "overlapping-scope"
@@ -9436,7 +9684,7 @@
           "const": "invariant-in-parallel"
         },
         {
-          "description": "`optional: true` where leaving the node out would leave the run\nwithout something it cannot do without: on a child of a\n`parallel` group, or on a node a required one re-routes to or\nreads from.",
+          "description": "`optional: true` where leaving the node out would leave the run\nwithout something it cannot do without: on a child of a\n`parallel` group, or on a node a required one reroutes to or\nreads from.",
           "type": "string",
           "const": "incoherent-optional"
         }
@@ -10643,6 +10891,60 @@
         "message"
       ]
     },
+    "ShapeRead": {
+      "description": "One shape of a plan, as the tree held it.",
+      "type": "object",
+      "properties": {
+        "file": {
+          "description": "Its file, as the repository names it.",
+          "type": "string"
+        },
+        "in_tree": {
+          "description": "What its file held of it.",
+          "$ref": "#/$defs/InTree"
+        },
+        "name": {
+          "description": "What the plan calls it; no other shape of the plan has its name.",
+          "type": "string"
+        },
+        "owner": {
+          "description": "The task that builds it.",
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "name",
+        "owner",
+        "file",
+        "in_tree"
+      ]
+    },
+    "ShapesReadPayload": {
+      "description": "What the tree a plan was registered against held of the plan's shapes,\nread in the reading that derives each task's reach, at its commit.\nNobody asks for it and nothing is decided by it: every page that draws\nthe plan reads it here, so each says what the tree held when the plan\nwas written, wherever it is drawn.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "The commit the tree was read at: its HEAD when the plan was\nregistered, which a `scope_derived` the same registration writes\nnames too. A registration that changes no task's reach writes none.",
+          "$ref": "#/$defs/CommitSha"
+        },
+        "plan": {
+          "description": "The plan, by the hash of the bytes the run accepted.",
+          "$ref": "#/$defs/ContentHash"
+        },
+        "shapes": {
+          "description": "Each shape the reading followed, in the plan's order: one whose name\nis one word of code, in a file whose extension says its language.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShapeRead"
+          }
+        }
+      },
+      "required": [
+        "plan",
+        "at",
+        "shapes"
+      ]
+    },
     "Shown": {
       "description": "An artifact an escalation puts in front of the person deciding: the\nversion they saw, by its hash, so a decision on it is a decision on\nexactly those bytes.",
       "type": "object",
@@ -10829,6 +11131,22 @@
           "required": [
             "claim",
             "node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "approve_plan"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "claim",
+            "summary"
           ]
         },
         {
@@ -12306,6 +12624,21 @@
         "output"
       ]
     },
+    "ToolAction": {
+      "description": "What a tool call does, as a person reads it: one word, whichever CLI made\nthe call. It says nothing the session typed.",
+      "type": "string",
+      "enum": [
+        "read",
+        "edit",
+        "write",
+        "search",
+        "list",
+        "run",
+        "fetch",
+        "call",
+        "submit"
+      ]
+    },
     "ToolNaming": {
       "description": "How a CLI names the tools of an MCP server it mounts, as its model\ncalls them: a rule over the server's name and the tool's, never a\ntable, so it names every tool — including one added after the\nadapter was written.",
       "oneOf": [
@@ -12849,6 +13182,95 @@
           "additionalProperties": false,
           "required": [
             "reads-what-may-go"
+          ]
+        },
+        {
+          "description": "A key nothing reads: written at the workflow's top when `kind` is\nnone, in a node of that kind otherwise. `nearest` is the key it is\na slip from; a key retired is told what took its place instead.",
+          "type": "object",
+          "properties": {
+            "unknown-key": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "nearest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-key"
+          ]
+        },
+        {
+          "description": "A key nothing reads in an entry of a list: `what` says which kind of entry, and\n`nearest` is the key it is a slip from.",
+          "type": "object",
+          "properties": {
+            "unknown-entry-key": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "nearest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "what": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "what"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-entry-key"
+          ]
+        },
+        {
+          "description": "A `kind` no node can be, a slip from `nearest`, the kind it meant.",
+          "type": "object",
+          "properties": {
+            "unknown-kind": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "nearest": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "nearest"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-kind"
           ]
         }
       ]

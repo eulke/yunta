@@ -69,6 +69,6 @@ fn an_owed_request_a_red_criterion_located_says_so_in_its_line() {
     };
     assert_eq!(
         crate::failure::detail(&failure),
-        vec!["`resolve` — src/a.rs: a red criterion of the task locates the refused writes"]
+        vec!["`resolve` (src/a.rs): a red criterion of the task locates the refused writes"]
     );
 }

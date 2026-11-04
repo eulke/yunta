@@ -1,9 +1,9 @@
-//! A node as authored: the fields every kind shares, the keys a node
-//! accepts at its own level, and the policies that qualify it
-//! (`permissions`, `on_interrupt`, `until`).
+//! A node as authored: the fields every kind shares, and the policies
+//! that qualify it (`permissions`, `on_interrupt`, `until`).
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::keys::{node_keys, NODE_KEYS, RETIRED_NODE_KEYS};
 use super::parse::{describe, list};
 use super::{
     Artifacts, Ask, CliConfig, ContextSpec, Effort, Hooks, NodeKind, NodePermissions, NodeScope,
@@ -177,47 +177,6 @@ impl Node {
     }
 }
 
-/// The keys every node accepts at its own level; `kind` and the keys
-/// that belong to the kind are [`NodeKind`]'s.
-pub(super) const NODE_KEYS: &[&str] = &[
-    "id",
-    "depends_on",
-    "scope",
-    "runner",
-    "runners",
-    "agent",
-    "artifacts",
-    "hooks",
-    "on_failure",
-    "on_interrupt",
-    "description",
-    "permissions",
-    "network",
-    "context",
-    "skills",
-    "invariant",
-    "optional",
-    "ask",
-    "cli_config",
-    "effort",
-];
-
-/// Keys an author reaches for that no node accepts, each with the key
-/// that expresses the intent.
-pub(super) const RETIRED_NODE_KEYS: &[(&str, &str)] = &[
-    ("role", "a node names its runner with `runner:`"),
-    (
-        "interactive",
-        "a node that declares `questions` asks them, and whichever surface is \
-         watching puts them to a person",
-    ),
-    (
-        "fresh_context",
-        "every session starts fresh; `on_interrupt: resume_session` reuses one only when a \
-         run resumes",
-    ),
-];
-
 /// The node-level keys as a struct of their own — what [`Node`]'s
 /// deserializer reads once the kind's keys are split off.
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -303,7 +262,7 @@ impl<'de> Deserialize<'de> for Node {
             return Err(D::Error::custom(format!(
                 "{subject}: unknown kind `{kind_name}`; one of {}{}",
                 list(NodeKind::KINDS),
-                crate::text::did_you_mean(kind_name, NodeKind::KINDS.iter().copied())
+                surco::text::did_you_mean(kind_name, NodeKind::KINDS.iter().copied())
             )));
         };
         let unknown: Vec<&str> = kind_part
@@ -312,15 +271,10 @@ impl<'de> Deserialize<'de> for Node {
             .filter(|key| *key != "kind" && !kind_keys.contains(key))
             .collect();
         if !unknown.is_empty() {
-            let valid: Vec<&str> = NODE_KEYS
-                .iter()
-                .chain(std::iter::once(&"kind"))
-                .chain(kind_keys.iter())
-                .copied()
-                .collect();
+            let valid = node_keys(kind_name).unwrap_or_default();
             let mut message = format!(
                 "{subject}: unknown {} {} for a `{kind_name}` node; valid keys: {}",
-                crate::text::agreeing(unknown.len(), "key", "keys"),
+                surco::text::agreeing(unknown.len(), "key", "keys"),
                 list(&unknown),
                 list(&valid)
             );
@@ -331,9 +285,9 @@ impl<'de> Deserialize<'de> for Node {
             }
             for key in &unknown {
                 let retired = RETIRED_NODE_KEYS.iter().any(|(old, _)| old == key);
-                if let Some(near) = crate::text::nearest(key, valid.iter().copied()) {
+                if let Some(near) = surco::text::nearest(key, valid.iter().copied()) {
                     if !retired {
-                        message.push_str(&format!("; `{key}`: did you mean `{near}`?"));
+                        message.push_str(&format!("; `{key}`: {}", surco::text::suggested(near)));
                     }
                 }
             }

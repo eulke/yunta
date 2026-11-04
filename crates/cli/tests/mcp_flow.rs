@@ -14,7 +14,8 @@ use yunta_core::events::GateEvent;
 use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{
-    git, init_repo, run_id_from, stderr, stdout, wait_for_async, wait_until_async, write, yunta_in,
+    git, init_repo, run_id_from, stderr, stdout, unwrapped, wait_for_async, wait_until_async,
+    write, yunta_in,
 };
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
@@ -88,8 +89,7 @@ nodes:
     // command that runs it in code.
     let said = tool_text(&catalog);
     assert!(
-        said.lines().any(|line| line.starts_with("### greet"))
-            && said.contains("`yunta run greet`"),
+        said.lines().any(|line| line.starts_with("## greet")) && said.contains("`yunta run greet`"),
         "got: {said}"
     );
 
@@ -700,7 +700,14 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
         .find(|t| t.name.as_ref() == "document_shape")
         .expect("document_shape is advertised");
     let advertised = serde_json::to_string(&shape_tool.input_schema).unwrap();
-    for kind in ["tasks", "spec", "findings", "questions"] {
+    for kind in [
+        "tasks",
+        "spec",
+        "findings",
+        "questions",
+        "answers",
+        "workflow",
+    ] {
         assert!(
             advertised.contains(kind),
             "{kind} missing from {advertised}"
@@ -718,6 +725,19 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     assert!(text.contains("tasks:"), "{text}");
     assert!(text.contains("criteria:"), "{text}");
 
+    // A workflow's shape is every key it and each kind of node read.
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("document_shape")
+                .with_arguments(json!({"kind": "workflow"}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let text = tool_text(&result);
+    for key in ["`nodes`", "`depends_on`", "`kind`", "`prompt`", "`run`"] {
+        assert!(text.contains(key), "{key} missing from {text}");
+    }
+
     // A kind that does not exist names the ones that do.
     let result = client
         .call_tool(
@@ -732,9 +752,9 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     client.cancel().await.ok();
 }
 
-/// An unknown document kind is one mistake, so it gets one sentence
-/// whichever door it is made at. Both doors parse the name with
-/// `ArtifactKind`'s own `FromStr`; a second hand-written list is exactly
+/// An unknown document is one mistake, so it gets one sentence whichever
+/// door it is made at. Both doors read the name through the one list of
+/// documents `yunta schema` shows; a second hand-written list is exactly
 /// what let two answers to the same question drift apart.
 #[tokio::test]
 async fn an_unknown_kind_reads_the_same_at_both_doors() {
@@ -767,8 +787,8 @@ async fn an_unknown_kind_reads_the_same_at_both_doors() {
     let from_shell = stderr(&output);
 
     assert_eq!(
-        from_shell.trim(),
-        format!("error: {from_control_plane}"),
+        unwrapped(&from_shell),
+        unwrapped(&format!("error: {from_control_plane}")),
         "the same mistake gets the same sentence at either door"
     );
     assert!(
@@ -1193,8 +1213,8 @@ async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
     assert_eq!(answered.is_error, Some(true), "{answered:#?}");
     // The same refusal, naming the run by the whole id an agent copies.
     assert_eq!(
-        tool_text(&answered),
-        sentence.replace(yunta_testkit::handle(&run_id), &run_id)
+        unwrapped(&tool_text(&answered)),
+        unwrapped(&sentence.replace(yunta_testkit::handle(&run_id), &run_id))
     );
     client.cancel().await.ok();
 }

@@ -1,0 +1,14 @@
+▎ ◆ Plan and its tests registered. Approve?
+▎ approve-plan · 3GQF5Q
+▎ 8 files, +295 −73
+▎
+▎ ▸ approve  On to `implement`: resolves this gate
+▎   adjust   Back to `plan`: sends what you say, and asks
+▎            again once it completes
+▎   abort    Pause here: nothing runs; this decision stays
+▎            open
+▎
+▎ then  review ×2, conform → ship
+▎
+▎ ↑↓ move · enter chooses · n adds a note · esc leaves it
+▎ for later

@@ -18,11 +18,11 @@ fn an_unknown_input_names_each_one_and_what_the_workflow_declares() {
     };
     assert_eq!(
         problem(&refused(vec![name("c")])),
-        "unknown inputs `a`, `b` — this workflow declares only: c"
+        "unknown inputs `a`, `b`: this workflow declares only: c"
     );
     assert_eq!(
         problem(&refused(Vec::new())),
-        "unknown inputs `a`, `b` — this workflow declares no inputs"
+        "unknown inputs `a`, `b`: this workflow declares no inputs"
     );
 }
 
@@ -116,7 +116,7 @@ fn a_path_that_is_missing_or_unreadable_is_named() {
             label: "tasks document".into(),
             detail: "is a directory".to_string(),
         }),
-        "input `d` names `dir`, which cannot be read as a file: is a directory — point the input \
+        "input `d` names `dir`, which cannot be read as a file: is a directory; point the input \
          at the tasks document itself"
     );
 }

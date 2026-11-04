@@ -112,7 +112,7 @@ pub(super) fn artifact_shapes(
                     format!("{SHAPE_KIND}:{kind}"),
                     format!(
                         "{opening}\n\nWhat follows is the whole contract for that \
-                         document — the keys, their types, and the rules. Where any other \
+                         document: the keys, their types, and the rules. Where any other \
                          instruction describes it differently, this is what the engine \
                          enforces.\n\n{shape}{suite}"
                     ),
@@ -130,8 +130,8 @@ fn the_suite_it_extends(kind: ArtifactKind, suite: Option<&yunta_core::Suite>) -
     match (kind, suite) {
         (ArtifactKind::Tasks | ArtifactKind::Spec, Some(suite)) => format!(
             "\n\nThis run measures its suite with `{command}`. A command of this document \
-             that runs the project's tests extends it — `{command} <selector>`, where \
-             `<selector>` picks its tests — so the build the suite leaves serves it; the engine \
+             that runs the project's tests extends it (`{command} <selector>`, where \
+             `<selector>` picks its tests), so the build the suite leaves serves it; the engine \
              refuses one that runs them another way.",
             command = suite.command()
         ),

@@ -37,6 +37,12 @@ the config names under `secrets:`, and the manager a team already uses fills the
 (`op run -- yunta run …`, `vault exec …`). An integration would be one adapter per provider, each with its own
 authentication, and an engine that keeps credentials.
 
+### No library of grammars for code
+Not tree-sitter or another parser. One lexer in Surco reads every language for every reader of code: a grammar per
+language would be compiled into a binary kept under a size ceiling, for a card that compares words. Tokens,
+indentation and brackets fit the languages whose formatters fix their layout, and where they cannot tell, a shape
+reads as not compared.
+
 ### No messages between agents
 Not a tool, a channel or a context source by which one session addresses another. What one node tells another
 passes through the engine and stays on the log: an artifact, the output a later node mounts, a finding, or the

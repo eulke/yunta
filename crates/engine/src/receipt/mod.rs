@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
-use yunta_core::events::{EventPayload, Failure, Phase, RunMetrics, StoredEvent, TerminalState};
+use yunta_core::events::{
+    EventPayload, Failure, FindingSeverity, Phase, RunMetrics, StoredEvent, TerminalState,
+};
 use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId, Seq};
 
 use crate::replay::{derive, unknown_kind_counts, NodeState, RunState};
@@ -37,7 +39,7 @@ pub enum ReceiptError {
     /// which command shows a reader where that run stands is the
     /// caller's own vocabulary, not the engine's.
     #[error(
-        "run `{0}` hasn't reached a terminal state yet — a receipt is only generated \
+        "run `{0}` hasn't reached a terminal state yet: a receipt is only generated \
          once a run finishes"
     )]
     NotFinished(RunId),
@@ -152,7 +154,7 @@ pub fn receipt_so_far(
     receipt(run_id, manifest, events, &state, event_chain, None, metrics)
 }
 
-/// The receipt of `state`'s run. The criteria, scope and re-route counts
+/// The receipt of `state`'s run. The criteria, scope and reroute counts
 /// are read from the log's own events; every other answer comes from
 /// `state`.
 fn receipt(
@@ -187,6 +189,7 @@ fn receipt(
         criteria,
         baseline,
         scope,
+        changed: state.current_change().cloned(),
         runners,
         cost: CostSummary {
             tokens: metrics.tokens,
@@ -197,6 +200,10 @@ fn receipt(
         unknown_kinds,
         diagnostics: diagnostic_counts(state),
         failed: failed_nodes(manifest, state),
+        blocking_findings: crate::dedup_findings(&state.unsettled_findings())
+            .iter()
+            .filter(|finding| finding.severity == FindingSeverity::Blocking)
+            .count(),
     }
 }
 
@@ -306,7 +313,7 @@ fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
 /// one.
 ///
 /// A node resolves its runner once per session it opens — again after a
-/// re-route, again on a retry — and the receipt's line counts
+/// reroute, again on a retry — and the receipt's line counts
 /// runners, not resolutions, so each node appears once. Fan-out siblings
 /// carry distinct ids (`<base>@<runner>`), so they are not collapsed by
 /// this.

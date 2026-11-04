@@ -4,6 +4,10 @@
 //! settles one. Its checkouts go back to the project's pool; its branches
 //! stay for a person to read and for `gc` to remove.
 
+use surco::components::{Gist, Headline};
+use surco::doc::Doc;
+use surco::look::Look;
+use surco::words::Standing;
 use yunta_core::{Redactor, Responder, RunId};
 use yunta_engine::EngineLiveness;
 
@@ -12,11 +16,6 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use crate::render::blocks::Headline;
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::state::RunWord;
-use crate::render::{wrap, Look, INDENT};
 
 pub async fn close(
     run_id: &RunId,
@@ -48,7 +47,7 @@ pub async fn close(
     let answer = CloseAnswer {
         schema_version: SCHEMA_VERSION,
         run_id: run_id.clone(),
-        word: RunWord::Cancelled,
+        word: Standing::Stopped,
         by,
     };
     emit(output, &answer, look)
@@ -60,27 +59,24 @@ pub async fn close(
 pub(crate) struct CloseAnswer {
     schema_version: u32,
     run_id: RunId,
-    word: RunWord,
+    word: Standing,
     by: Responder,
 }
 
 impl Answer for CloseAnswer {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
-        let headline = Headline {
-            subject: format!("run {}", self.run_id.handle()),
-            mark: self.word.mark(),
-            said: self.word.to_string(),
-        };
-        let detail = format!(
-            "closed by {} — its checkouts went back to the project, and its branch stays until \
-             `yunta gc` removes it",
-            self.by
+    fn document(&self, _look: &Look) -> Doc {
+        let headline = Headline::new(
+            self.word.mark(),
+            format!("run {}", self.run_id.handle()),
+            self.word.to_string(),
         );
-        let lines: Vec<Line> = wrap(&detail, look.width.cells().saturating_sub(INDENT.len()))
-            .into_iter()
-            .map(|line| Line::new().plain(INDENT).plain(line))
-            .collect();
-        Doc::new().with(headline).with(Block::Lines(lines))
+        let gist = format!(
+            "closed by {}: its checkouts went back to the project, and its branch stays until \
+             `{}` removes it",
+            self.by,
+            super::advice::gc()
+        );
+        Doc::new().with(headline).with(Gist::new(gist))
     }
 
     fn outcome(&self) -> Outcome {

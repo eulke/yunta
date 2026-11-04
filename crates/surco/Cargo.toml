@@ -1,0 +1,35 @@
+[package]
+name = "yunta-surco"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Surco, Yunta's design language: the words, marks, figures and blocks Yunta tells a reader things in, and the surfaces that draw them."
+
+[lib]
+name = "surco"
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+# `--color`'s values parse straight into the policy's own choice.
+clap = ["dep:clap"]
+# A surface's whole output compared with the output written down for it,
+# for the tests of every crate that draws with Surco.
+golden = []
+
+[dependencies]
+# A word travels on the wire as the word a reader sees.
+serde = { workspace = true, features = ["derive"] }
+# What a character takes on a terminal: the cells every column is laid out in.
+unicode-width.workspace = true
+# The nearest name to one typed wrong, for a "did you mean".
+strsim.workspace = true
+clap = { workspace = true, features = ["derive"], optional = true }
+
+[dev-dependencies]
+# A golden's own tests write and compare files in a directory of their own.
+tempfile.workspace = true

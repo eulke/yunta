@@ -64,7 +64,7 @@ fn a_tampered_payload_breaks_the_chain_at_that_exact_seq() {
             assert_eq!(seq.get(), 2);
             assert_eq!(
                 detail,
-                "stored hash does not match the recomputed chain — the event or its \
+                "stored hash does not match the recomputed chain: the event or its \
                  predecessor's hash was altered"
             );
         }
@@ -100,7 +100,7 @@ fn a_deleted_event_breaks_the_chain_where_the_gap_starts() {
             assert_eq!(seq.get(), 3, "the gap is visible where seq jumps");
             assert_eq!(
                 detail,
-                "expected seq 2 but found 3 — an event was deleted, inserted or reordered"
+                "expected seq 2 but found 3: an event was deleted, inserted or reordered"
             );
         }
         other => panic!("expected a broken chain, got {other:?}"),

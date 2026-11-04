@@ -1,6 +1,6 @@
 //! What sessions handed the run and what the engine answered: every
 //! submission and finding call, counted once for the run and once for the
-//! node each event's envelope names.
+//! node each event's envelope names, and how many events each node has said.
 //!
 //! These counters answer "what was handed over", so they fold on their own
 //! and share no accumulator with the spend or the clock.
@@ -26,6 +26,9 @@ pub(crate) struct Activity {
     pub(crate) findings_by_node: BTreeMap<NodeId, FindingActivity>,
     /// How long the rail's calls took at each moment, over every session's summary.
     pub(crate) rails: BTreeMap<RailEvent, Histogram>,
+    /// How many events each node's envelope names, whatever they are: what a live
+    /// view turns by, so a frame of it comes from the log and from no clock.
+    pub(crate) events_by_node: BTreeMap<NodeId, u64>,
 }
 
 impl Activity {
@@ -33,6 +36,15 @@ impl Activity {
     /// a session's rail summary. Every other kind is nothing to count here.
     pub(crate) fn apply(&mut self, event: &StoredEvent) {
         let node = event.node_id.as_ref();
+        if let Some(id) = node {
+            // The id is copied only the first time the log names the node.
+            match self.events_by_node.get_mut(id) {
+                Some(count) => *count += 1,
+                None => {
+                    self.events_by_node.insert(id.clone(), 1);
+                }
+            }
+        }
         match event.payload() {
             Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => count(
                 &mut self.submissions,

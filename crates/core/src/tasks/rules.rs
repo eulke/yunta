@@ -149,14 +149,14 @@ pub(super) const REVIEW_RULES: &[Rule] = &[
     },
     Rule {
         code: RuleCode::ChangeWithoutCode,
-        demand: "every change shows its `code` — the declarations it adds or changes, each \
-                 type with its fields and each signature whole — unless its task declares a \
+        demand: "every change shows its `code` (the declarations it adds or changes, each \
+                 type with its fields and each signature whole), unless its task declares a \
                  shape in that file",
     },
     Rule {
         code: RuleCode::ChangeCodeMissesAName,
-        demand: "a change's `code` shows every symbol its `at` names — `pack.rs::add/update` \
-                 shows `add` and `update` — or a shape its task declares in that file does",
+        demand: "a change's `code` shows every symbol its `at` names (`pack.rs::add/update` \
+                 shows `add` and `update`), or a shape its task declares in that file does",
     },
     Rule {
         code: RuleCode::ChangeCodeIsAComment,

@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use yunta_testkit::{init_repo, stderr, stdout, write, yunta_in};
+use yunta_testkit::{init_repo, stderr, stdout, unwrapped, write, yunta_in};
 
 const OPENS: &str =
     "name: opens\nnodes:\n  - { id: pr, kind: pull_request, title: \"add dark mode\" }\n";
@@ -31,14 +31,14 @@ fn yunta_run_refuses_before_creating_a_run_when_the_forge_token_is_unset() {
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
 
     assert!(!run.status.success(), "{}", stdout(&run));
-    let said = stderr(&run);
+    let said = unwrapped(&stderr(&run));
     assert!(
         said.contains("`YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`") && said.contains("is not set here"),
         "{said}"
     );
     let listed = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(
-        stdout(&listed).starts_with("no runs"),
+        stdout(&listed).contains("no runs yet"),
         "{}",
         stdout(&listed)
     );
@@ -54,11 +54,22 @@ fn doctor_names_an_unset_forge_token() {
     let doctor = yunta_in!(&repo, &home, &["doctor"]);
 
     assert!(!doctor.status.success());
+    let text = stdout(&doctor);
+    assert_eq!(
+        yunta_testkit::checked(&text, "forge").as_deref(),
+        Some(
+            "github acme/web: `YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`, the variable its token is in, \
+             is not set, and `opens` opens a pull request through it"
+        ),
+        "{text}"
+    );
+    assert_eq!(
+        yunta_testkit::hung(&text, "forge", "fix").as_deref(),
+        Some("export YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS to reach it"),
+        "{text}"
+    );
     assert!(
-        yunta_testkit::checked(&stdout(&doctor), "forge").is_some_and(|said| said.contains(
-            "github acme/web — `YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`, the variable its token is in, is not set, and `opens` opens a pull request through it"
-        )),
-        "{}",
-        stdout(&doctor)
+        yunta_testkit::hung(&text, "forge", "so").is_none(),
+        "{text}"
     );
 }

@@ -68,7 +68,7 @@ fn registered(
         // because only one of them is a broken file on their disk.
         Registry::Corrupt(error) => Err(CliError::msg(format!(
             "run {called}: its `engine.json` is there and this binary cannot read it \
-             ({}) — `{}` recovers the run once its process has stopped.",
+             ({}): `{}` recovers the run once its process has stopped.",
             describe(&error),
             advice::resume(run_id.handle())
         ))),
@@ -81,7 +81,7 @@ fn registered(
                 false => Ok(None),
                 true => Err(CliError::msg(format!(
                     "run {called} has a node in progress but no `engine.json` to signal \
-                     through — the engine that ran it predates this build, or its scratch \
+                     through: the engine that ran it predates this build, or its scratch \
                      directory is gone. `{}` recovers the run once its process has stopped.",
                     advice::resume(run_id.handle())
                 ))),

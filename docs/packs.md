@@ -284,8 +284,9 @@ case — `mode: standard` and `inputs: { idea: "add dark mode" }` — see
 cases.
 
 `expect.nodes` names a node's state in the words `yunta status` prints for it:
-`finished`, `failed`, `running`, `waiting`, `skipped` for a node the case's mode
-leaves out, and `never ran` for one the run did not reach. A node the workflow
+`finished`, `failed`, `running`, `needs you` for one a gate holds, `waiting` for one
+a limit's reset holds, `skipped` for a node the case's mode leaves out, and `never ran`
+for one the run did not reach. A node the workflow
 does not declare fails the case, naming it.
 
 A case answers a gate the way a person does, under `decisions:`, by node id

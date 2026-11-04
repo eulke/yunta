@@ -6,25 +6,49 @@ bugs — Yunta prefers a named, actionable error over guessing what you meant.
 
 ## `yunta check` refuses the workflow
 
-`check` validates statically, before any session opens. The message always
+`check` validates statically, before any session opens. The page always
 names the node and the exact problem, and a problem about the workflow file is
-followed by the line it is about, with carets under the part at fault:
+followed by the line it is about, with carets under the part at fault and what
+helps fix it under them:
 
 ```text
-workflow.yaml: 1 error
-  node `fix` references runner `implementr`, which `runners:` does not define — did you mean `implementer`?
-     --> workflow.yaml:6:13
-      |
-    6 |     runner: implementr
-      |             ^^^^^^^^^^
+✗ bad.yaml · 2 errors
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+  at           .yunta/workflows/bad.yaml
+
+  error  node `lint`: `on_failure.goto` names `fixx`, and no node carries that
+         id
+   --> .yunta/workflows/bad.yaml:6:25
+    │
+  6 │     on_failure: { goto: fixx, max_reroutes: 1 }
+    │                         ^^^^
+    help: did you mean `fix`?
+
+  error  node `fix`: unknown key `promt` for a `prompt` node
+   --> .yunta/workflows/bad.yaml:9:5
+    │
+  9 │     promt: "Fix what lint reported."
+    │     ^^^^^
+    help: did you mean `prompt`? · `yunta schema workflow` lists every key
+
+next
+  yunta check .yunta/workflows/bad.yaml   again, once they are fixed
 ```
 
 A name one or two typos away from one the workflow or the config declares — a
-key, a node id, a runner, a command — is suggested at the end of the sentence.
-`check` reads past a key it does not know — as the key it is one typo from, when
-the node does not write that key already — so every problem in the file is
-listed at once, in the order the file has them, and one round of edits fixes
-them all. `yunta run` refuses a file with any of them.
+key, a kind, a node id, a runner, a command — is suggested in the `help:` under
+the problem, in the plain text an agent or a pipe reads as on a terminal. Where a
+problem is said on one line — a run tool's reply, a log line, a `yunta doctor`
+row — the suggestion follows its sentence after a semicolon, and so does the one
+for a key inside a `context:` source, a `files:` entry, an artifact reference or
+an `on_finish` step. `yunta schema workflow` lists every key a workflow and each
+kind of node read.
+`check` reads past a key it does not know, and a kind one typo from a kind there
+is, each as the one it most likely meant — a key only when the node does not
+write that key already — so every problem in the file is listed at once, in the
+order the file has them, and one round of edits fixes them all. `yunta run`
+refuses a file with any of them.
 
 - **``node `x` references runner `y`, which `runners:` does not define``** —
   add the runner under `runners:` in `.yunta/config.yaml` (see
@@ -79,7 +103,7 @@ them all. `yunta run` refuses a file with any of them.
 ## `yunta doctor` reports an adapter unhealthy
 
 ```text
-  ✗ codex  unhealthy — `codex` not found on PATH
+  ✗ codex      unhealthy: `codex` is not on PATH
 ```
 
 The diagnostic names the actual problem: a binary missing or not answering, a
@@ -187,7 +211,7 @@ node on a failure of its own, headed by the node rather than by a file:
 
 ```text
 node `plan`: 1 error
-  handed over no tasks document — produce it before the node ends, or stop declaring it here
+  handed over no tasks document: produce it before the node ends, or stop declaring it here
 ```
 
 No path is named because none was ever going to be there: such a document is
@@ -252,7 +276,7 @@ terminal; the run keeps it. The last 20 lines of a red criterion are on its
 `yunta_task`, and the whole output, redacted, is the object under the run's
 `objects/` that the event's `output` names.
 
-If the same criterion keeps failing across every re-route
+If the same criterion keeps failing across every reroute
 (`on_failure.goto`) up to `max_reroutes`, the run pauses on a gate instead of
 looping forever — that's expected, not a hang. Widen what the correction
 node is allowed to see (`context:`) or change (`scope:`) before assuming the
@@ -267,13 +291,13 @@ a run commits every node's work, and git cannot name who commits here: …
 Every node's work becomes a commit on the run's branch, so a repository where
 git has no `user.name` and `user.email` — or is told not to guess them, with
 `user.useConfigOnly` — would fail the run at its first commit. Set both, globally
-or for this repository alone, and run again; `yunta doctor` says who git commits
-as.
+or for this repository alone, and run again; `yunta doctor --full` says who git
+commits as.
 
 ## `isolation: none` refuses to start
 
 ```text
-`<path>` has uncommitted changes — isolation `none` requires a clean tree
+`<path>` has uncommitted changes; isolation `none` requires a clean tree: without it, scope-by-diff can't tell the agent's work from what was already there
 ```
 
 `isolation: none` runs directly against your working tree instead of a
@@ -285,7 +309,7 @@ in place.
 ## A run looked stuck after the laptop slept
 
 ```text
-run — host suspended for 1h52m — durations leave it out; new sessions wait until it has been awake 2m00s
+run: host suspended for 1h52m, which durations leave out; new sessions wait until it has been awake 2m00s
 ```
 
 The run noticed the machine slept and recorded it. None of its durations count
@@ -299,7 +323,11 @@ else: check `yunta status`.
 ## A suite takes minutes longer than its tests on macOS
 
 ```text
-▲ first run    a new binary's first run takes 307 ms here, its next 4 ms: macOS assesses each new executable before its first run …
+  ▲ first run  a new binary's first run takes 307 ms here, its next 4 ms
+    so         macOS assesses each new executable before its first run, and a
+               suite pays that for every test binary it links again
+    fix        add the terminal that runs yunta under System Settings > Privacy
+               & Security > Developer Tools, then open it again
 ```
 
 `yunta doctor` links a binary nobody ran before and runs it twice. macOS
@@ -336,9 +364,20 @@ before that time waits for it the same way, and says on the terminal that it is
 waiting. A resume that wakes before the reset pauses again on the same reset. A
 limit that names no reset time is not a wait: the run says `needs you`.
 
+## A run says it `stopped`
+
+A person stopped it: `yunta cancel` on the running run, `abort` chosen at a
+gate, or a gate's pull request closed on its forge. Nothing is asked of anyone and
+nothing is wrong with it: `yunta resume <run>` continues it where it stopped — a
+gate asks its decision again, and one whose pull request was closed publishes
+again, on the pull request if someone reopened it or on a new one — and
+`yunta close <run>` closes it for good. A node whose attempt was open when its run
+stopped says `stopped` too, and the resume starts that attempt again. A run that
+was closed after a stop keeps the word, and nothing resumes it.
+
 ## A node failed and `resume` pauses on the same failure
 
-A node with no `on_failure` re-route that fails leaves the decision to you:
+A node with no `on_failure` reroute that fails leaves the decision to you:
 `yunta status <run>` lists `abort`, and lists `retry` only when what the failure
 waits on may have changed. A check that judges the tree (a coverage gate or a
 baseline comparison), a missing artifact and an unmet criterion wait on the
@@ -389,7 +428,7 @@ session opened. The stop names each guard, and says what the guard is there to
 show when the criteria say so:
 
 ```text
-guard `cargo test -p billing` is already red before any work started — it is there to show that totals match the invoices
+guard `cargo test -p billing` is already red before any work started: it is there to show that totals match the invoices
 ```
 
 The menu offers a `retry` that waits for what the guard reads. Once the log has
@@ -422,7 +461,7 @@ task, and only the plan can change them.
 ```text
 run is broken: run `01J...` no longer holds the bytes its log accepted for 1
 of the 3 artifacts it names: `artifacts/plan/tasks.yaml`: object
-`a1b2...` holds content that hashes to `c3d4...` — the bytes under
+`a1b2...` holds content that hashes to `c3d4...`: the bytes under
 `objects/` are not the bytes the run accepted
 ```
 
@@ -458,8 +497,10 @@ run is broken: run `01J...` works in `/home/me/.yunta/worktrees/01J...`, whose
 HEAD `9f1c...` no longer has the run's base commit `4a77...` behind it: every
 task, scope check and criterion this run's log records was established against
 a tree that this one is not a continuation of. Put it back on the run's own
-branch (`git -C /home/me/.yunta/worktrees/01J... checkout yunta/01J...`), or
-on any commit that still descends from `4a77...` — ...
+branch (`git -C /home/me/.yunta/worktrees/01J... checkout yunta/run/01J...`), or
+on any commit that still descends from `4a77...` (`git -C
+/home/me/.yunta/worktrees/01J... reflog` shows where the run left it). If those
+commits are gone for good, start a new run against the tree as it is now.
 ```
 
 Waking a run asks its worktree two questions, and this is the second one
@@ -475,7 +516,7 @@ What to do:
 
 - **Put the tree back.** `git -C <worktree> reflog` shows every commit that
   tree has been on, including where the run left it. `git -C <worktree>
-  checkout yunta/<run_id>` returns it to the run's own branch; any commit
+  checkout yunta/run/<run_id>` returns it to the run's own branch; any commit
   that still descends from the base commit works.
 - **Under `isolation: none`** the run works directly on your checkout, so a
   `git pull --rebase` or a rebase while the run was paused is the usual way
@@ -496,10 +537,10 @@ that is gone.
 ## `resume` cannot find the run's worktree
 
 ```text
-the run's branch `yunta/01J...` has no worktree at
-`/home/me/.yunta/worktrees/01J...` (there is nothing at that path) — the
+the run's branch `yunta/run/01J...` has no worktree at
+`/home/me/.yunta/worktrees/01J...` (there is nothing at that path); the
 run's history and artifacts are intact; bring the checkout back with `git
-worktree add /home/me/.yunta/worktrees/01J... yunta/01J...`, run from the
+worktree add /home/me/.yunta/worktrees/01J... yunta/run/01J...`, run from the
 repository the run was created in, and resume again
 ```
 
