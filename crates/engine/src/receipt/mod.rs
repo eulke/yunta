@@ -154,7 +154,7 @@ pub fn receipt_so_far(
     receipt(run_id, manifest, events, &state, event_chain, None, metrics)
 }
 
-/// The receipt of `state`'s run. The criteria, scope and re-route counts
+/// The receipt of `state`'s run. The criteria, scope and reroute counts
 /// are read from the log's own events; every other answer comes from
 /// `state`.
 fn receipt(
@@ -313,7 +313,7 @@ fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
 /// one.
 ///
 /// A node resolves its runner once per session it opens — again after a
-/// re-route, again on a retry — and the receipt's line counts
+/// reroute, again on a retry — and the receipt's line counts
 /// runners, not resolutions, so each node appears once. Fan-out siblings
 /// carry distinct ids (`<base>@<runner>`), so they are not collapsed by
 /// this.

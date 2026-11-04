@@ -58,10 +58,13 @@ impl Lines {
     /// failed, what it printed, as a watched terminal keeps it. `run` is
     /// what the run is called by.
     ///
-    /// Every moment, not only the ones a watched terminal keeps: a
+    /// Every moment that says anything, not only the ones a watched terminal keeps: a
     /// reader who arrives after the fact has no region to have watched,
     /// so the log is all there is and it is all written.
     pub(super) fn moment(&mut self, moment: &Moment, run: &str, glyphs: Glyphs) {
+        if !chronicle::says_anything(&moment.happening) {
+            return;
+        }
         let look = Look {
             glyphs,
             paint: self.paint,
@@ -95,6 +98,7 @@ mod pause_reason_tests {
     use crate::commands::advice;
 
     use super::super::chronicle;
+    use super::Lines;
 
     /// One of every reason a run parks on. The `match` is what keeps it
     /// complete: a new variant stops compiling here until it is listed.
@@ -230,6 +234,53 @@ mod pause_reason_tests {
         ]
     }
 
+    /// What `failure` writes on an append-only surface, and whether a watched
+    /// terminal keeps it.
+    fn said_of(failure: yunta_core::events::Failure) -> (String, bool) {
+        use yunta_core::events::{
+            EventBody, EventPayload, NodeEvent, NodeFailedPayload, StoredEvent, TokenUsage,
+        };
+        let event = StoredEvent {
+            seq: 1.into(),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: Some("approve".into()),
+            timestamp: chrono::DateTime::UNIX_EPOCH,
+            body: EventBody::Known(EventPayload::Node(NodeEvent::Failed(
+                NodeFailedPayload::new(failure, TokenUsage::default()),
+            ))),
+        };
+        let moments = yunta_engine::chronicle(&[event]);
+        let moment = moments.first().expect("one moment per event");
+        let written = yunta_testkit_core::Captured::default();
+        let mut lines = Lines {
+            out: Box::new(written.clone()),
+            paint: surco::paint::Paint::Plain,
+        };
+        lines.moment(moment, "Y0P5", surco::glyphs::Glyphs::Unicode);
+        (written.text(), chronicle::kept(&moment.happening))
+    }
+
+    /// A person choosing an option that goes back is no failure on any surface: the node's
+    /// reroute is the line that says it, with what the person wrote. A node that did fail
+    /// still says so on both.
+    #[test]
+    fn a_choice_that_goes_back_is_said_by_its_reroute_and_not_as_a_failure() {
+        let (written, kept) = said_of(yunta_core::events::Failure::GateChose {
+            node: "approve".into(),
+            option: "adjust".into(),
+            target: "plan".into(),
+            said: Some("keep the lock".to_string()),
+        });
+        assert_eq!(written, "");
+        assert!(!kept);
+
+        let (written, kept) = said_of(yunta_core::events::Failure::Message {
+            outcome: "exit 1".into(),
+        });
+        assert!(written.contains("approve failed"), "{written}");
+        assert!(kept);
+    }
+
     #[test]
     fn a_pause_reason_renders_once_at_the_border() {
         for reason in every_reason() {
@@ -299,7 +350,7 @@ mod promotion_tests {
     }
 
     /// The failure a promotion carries is read beside the node whose
-    /// re-routes ran out, after the node and the mode it moves to.
+    /// reroutes ran out, after the node and the mode it moves to.
     #[test]
     fn a_promotion_says_the_failure_that_exhausted_its_re_routes() {
         let cause = PromotionCause {
@@ -321,7 +372,7 @@ mod promotion_tests {
         );
         assert_eq!(
             said.text,
-            "run promoted to `ship`: node `lint` exhausted its re-routes to `fix-lint` (exit 1)"
+            "run promoted to `ship`: node `lint` exhausted its reroutes to `fix-lint` (exit 1)"
         );
     }
 }

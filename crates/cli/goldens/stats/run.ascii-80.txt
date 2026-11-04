@@ -2,7 +2,7 @@
 ======================================== =======================================
 
   task cost    19.8k tokens per verified task ; 1 task done
-  rework       12% of tokens went to retries and re-routes
+  rework       12% of tokens went to retries and reroutes
   cache        1.4x cached tokens per input token
   tokens       18k in / 1.8k out (25.2k cached)
   documents    3 accepted, 1 refused

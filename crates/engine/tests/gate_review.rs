@@ -277,7 +277,7 @@ async fn a_correction_resumes_the_planner_with_the_persons_words() {
             Some(EventPayload::Node(NodeEvent::Rerouted(p))) if yunta_render::failure::sentence(&p.cause).contains(SAID)
         )
     });
-    assert!(rerouted, "the re-route says why the plan went back");
+    assert!(rerouted, "the reroute says why the plan went back");
     let waiting = waiting(&bench);
     assert_ne!(
         waiting[0].shows(),

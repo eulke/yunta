@@ -158,8 +158,8 @@ pub(crate) fn frame(phase: RunPhase, nodes: Vec<NodeFrame>, blocking_findings: u
     }
 }
 
-/// The escalation a node parks on once its re-routes are spent: the failure
-/// of `lint`, whose re-route to `fix-lint` allows no further attempt.
+/// The escalation a node parks on once its reroutes are spent: the failure
+/// of `lint`, whose reroute to `fix-lint` allows no further attempt.
 pub(crate) fn exhausted_escalation() -> Escalation {
     let menu = FailureMenu {
         attempt: 1,
@@ -184,7 +184,7 @@ pub(crate) fn exhausted_escalation() -> Escalation {
     )
 }
 
-/// A run parked on `lint`, whose re-routes are spent: the decision it
+/// A run parked on `lint`, whose reroutes are spent: the decision it
 /// waits on, as the page receives it.
 pub(crate) fn parked_on_lint() -> (RunPhase, Decided) {
     let phase = RunPhase::Waiting {
@@ -365,7 +365,7 @@ pub(crate) fn cases() -> Vec<Case> {
     ]
 }
 
-/// A run parked on `lint`'s exhausted re-route, one task of its four
+/// A run parked on `lint`'s exhausted reroute, one task of its four
 /// blocked, with the decision it waits on.
 fn needs_you() -> Case {
     let (parked, decided) = parked_on_lint();

@@ -2,7 +2,7 @@
 ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m
 
   ␛[2mtask cost   ␛[0m 19.8k tokens per verified task · 1 task done
-  ␛[2mrework      ␛[0m 12% of tokens went to retries and re-routes
+  ␛[2mrework      ␛[0m 12% of tokens went to retries and reroutes
   ␛[2mcache       ␛[0m 1.4× cached tokens per input token
   ␛[2mtokens      ␛[0m 18k in / 1.8k out (25.2k cached)
   ␛[2mdocuments   ␛[0m 3 accepted, 1 refused

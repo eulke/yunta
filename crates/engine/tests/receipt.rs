@@ -277,7 +277,7 @@ baseline:
 
 /// Exercises every receipt section in one run: a task with two
 /// criteria (`plan`/`implement`), two baseline comparisons
-/// (`compare-early`/`compare`), a re-route (`lint` fails once,
+/// (`compare-early`/`compare`), a reroute (`lint` fails once,
 /// `fix-lint` corrects it), and a fan-out review (`runners: [reviewer,
 /// reviewer-alt]`) whose effects stay inside its own declared `scope`.
 const WORKFLOW: &str = r#"
@@ -405,7 +405,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     assert_eq!(base, "review");
     assert_eq!(members.len(), 2);
 
-    assert_eq!(receipt.cost.reroutes, 1, "lint failed once, then re-routed");
+    assert_eq!(receipt.cost.reroutes, 1, "lint failed once, then rerouted");
     assert!(receipt.cost.cptv.is_some(), "one task reached done");
 
     // The formatters accept whatever build_receipt derived without

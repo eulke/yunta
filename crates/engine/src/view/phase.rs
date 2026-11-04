@@ -118,6 +118,9 @@ pub(super) fn phase(workflow: &Workflow, state: &RunState) -> RunPhase {
             Some(finished) => closed(&finished.terminal, state),
             None => RunPhase::Created,
         },
+        // An answer recorded while parked is the instant a run is handed to the resume that
+        // acts on it: it is moving, and nobody is asked.
+        RunPhaseRaw::Paused if state.answer_awaits_its_resume() => RunPhase::Running,
         // A node parked on a person is the more precise answer, and it
         // quotes the same pause, so naming the node costs the prose
         // nothing.

@@ -213,6 +213,12 @@ impl Surface {
             .map(|feed| Arc::clone(feed) as Arc<dyn RunObserver>)
     }
 
+    /// Whether this surface says what happens in the run as it happens. Nothing does under
+    /// `--quiet`, so whoever else speaks has to say it itself.
+    pub(crate) fn chronicles(&self) -> bool {
+        self.feed.is_some()
+    }
+
     /// Takes the surface down: everything already queued is drawn, then
     /// the region is cleared, so the closing block lands on a terminal
     /// with nothing pinned to it.

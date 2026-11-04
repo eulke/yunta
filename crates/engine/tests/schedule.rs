@@ -236,7 +236,7 @@ fn chose(option: &str) -> Vec<(Option<&'static str>, EventPayload)> {
     ]
 }
 
-/// A failed node with no re-route, under `pause`, is a person's decision
+/// A failed node with no reroute, under `pause`, is a person's decision
 /// — and once they chose `retry` after the failure, the decision is the
 /// node's next attempt.
 #[test]

@@ -94,7 +94,7 @@ fn lines_of(said: &str) -> Vec<String> {
 /// The failure as one sentence, the way a log and `--json` read it: every
 /// line a command printed included, and none of it left out. One arm for
 /// each variant, so a new variant must say its words here.
-/// The cause a re-route carries, in the words a reader sees. A gate's choice
+/// The cause a reroute carries, in the words a reader sees. A gate's choice
 /// names the gate that made it; every other cause reads as its sentence.
 pub fn cause(failure: &Failure) -> String {
     match failure {

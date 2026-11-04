@@ -380,16 +380,16 @@ fn continue_words(attempt: u32) -> (String, Option<String>) {
     )
 }
 
-/// The words of the options a re-route the failure exhausted offers: the
+/// The words of the options a reroute the failure exhausted offers: the
 /// retry through the corrective node once more, and the promotion. `None`
-/// for an option the re-route does not write.
+/// for an option the reroute does not write.
 pub(crate) fn reroute_words(
     reroute: &ExhaustedReroute,
     option: ReservedOption,
 ) -> Option<(String, Option<String>)> {
     match option {
         ReservedOption::Retry => Some((
-            format!("Re-route to `{}` once more", reroute.goto),
+            format!("Reroute to `{}` once more", reroute.goto),
             Some(format!(
                 "Uses one extra correction attempt beyond the declared max_reroutes ({}); \
                  escalates again if `{}` doesn't fix it",
@@ -401,7 +401,7 @@ pub(crate) fn reroute_words(
     }
 }
 
-/// The words of a promotion to `next_mode`, which a re-route names when the
+/// The words of a promotion to `next_mode`, which a reroute names when the
 /// workflow declares a mode after this one.
 fn promotion_words(next_mode: Option<&ModeName>) -> (String, Option<String>) {
     let (label, target) = match next_mode {

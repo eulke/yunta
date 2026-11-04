@@ -20,7 +20,7 @@ mod checkout;
 #[path = "parked_runs/menu.rs"]
 mod menu;
 
-/// A node that fails with its one re-route already spent: the run parks
+/// A node that fails with its one reroute already spent: the run parks
 /// on a decision whose menu is rebuilt from the log alone.
 const EXHAUSTED_REROUTE: &str = r#"
 name: hopeless
@@ -142,10 +142,10 @@ fn closing_decision(text: &str) -> Vec<&str> {
     lines
 }
 
-/// Whether `block` names every option of an exhausted re-route with what
+/// Whether `block` names every option of an exhausted reroute with what
 /// it does, and the command that chooses each, carrying the run's handle.
 fn names_every_option(block: &str, handle: &str) -> bool {
-    block.contains("retry: Re-route to `fix-lint` once more")
+    block.contains("retry: Reroute to `fix-lint` once more")
         && block.contains("abort: Pause here")
         && block.contains(&format!("yunta resolve-gate {handle} retry"))
         && block.contains(&format!("yunta resolve-gate {handle} abort"))
@@ -230,7 +230,7 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
     );
     let home = root.path().join("state");
 
-    // An exhausted re-route: the claim names what happened and the
+    // An exhausted reroute: the claim names what happened and the
     // record under it is the failure the log holds. A reader audits the
     // first against the second, which only works while the failure is
     // in one of them.
@@ -268,7 +268,7 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
 /// carries its counters. A program acting on the pause needs the pause,
 /// so the document carries it apart — tagged, because a node parked on
 /// a person and a run that stopped on its own are different shapes and
-/// only one of them has a node to name: an exhausted re-route stops the
+/// only one of them has a node to name: an exhausted reroute stops the
 /// run, and a gate is the node the run waits on.
 #[test]
 fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
@@ -314,7 +314,7 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
 
 #[test]
 fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
-    // A failure nothing re-routes is still a decision: the page offers
+    // A failure nothing reroutes is still a decision: the page offers
     // running the node again, because a resume alone would find it
     // failed and stop on it once more.
     let root = tempfile::tempdir().unwrap();
@@ -439,7 +439,7 @@ fn parked_over_budget(root: &Path) -> (PathBuf, PathBuf, String) {
 #[test]
 fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
     // Three shapes reconstruct a menu — a failed node, an exhausted
-    // re-route and an unresolved internal gate. A budget cap is none of
+    // reroute and an unresolved internal gate. A budget cap is none of
     // them, and the page says so rather than leaving the reader to wonder
     // where the options went.
     let root = tempfile::tempdir().unwrap();

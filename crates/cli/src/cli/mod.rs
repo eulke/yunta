@@ -117,7 +117,7 @@ enum Command {
     /// Answers a paused run's gate decision from a separate process, with
     /// no live surface attached to the run itself. Records the decision
     /// on the log and hands the run to a detached
-    /// resume that applies it: exhausted re-routes (retry/abort/promote)
+    /// resume that applies it: exhausted reroutes (retry/abort/promote)
     /// and unresolved `kind: gate` nodes alike. `yunta status` shows the
     /// pause reason; the option must be on that decision's own menu.
     ResolveGate(ResolveGateArgs),

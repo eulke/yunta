@@ -100,7 +100,7 @@ pub(crate) fn leading(leads: &Leads) -> (String, Option<String>) {
             let tradeoff = if *resumes {
                 "sends what you say, and asks again once it completes".to_string()
             } else {
-                "re-routes there, and asks again once it completes".to_string()
+                "reroutes there, and asks again once it completes".to_string()
             };
             (format!("Back to `{node}`"), Some(tradeoff))
         }
@@ -198,7 +198,7 @@ fn at_the_console(id: ReservedOption) -> Option<(String, Option<String>)> {
         )),
         ReservedOption::Reject => Some((
             "Reject".to_string(),
-            Some("Fails the node; its declared re-route (if any) takes over".to_string()),
+            Some("Fails the node; its declared reroute (if any) takes over".to_string()),
         )),
         _ => None,
     }

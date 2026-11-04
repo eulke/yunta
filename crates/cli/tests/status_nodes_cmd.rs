@@ -319,12 +319,12 @@ sessions:
     outcome: { type: completed, summary: planned }
 "#;
 
-#[test]
-fn a_finished_node_says_how_its_document_got_accepted() {
+/// A run of `workflow` whose planner works as `fixture` says, and what it printed.
+fn planned(workflow: &str, fixture: &str) -> (Checkout, std::process::Output) {
     let project = Checkout::new()
         .config("defaults:\n  isolation: none\nrunners:\n  executor:\n    - { adapter: mock, model: mock-model }\n")
-        .workflow("wf", REPLANNED_WORKFLOW)
-        .file("fixture.yaml", REPLANNED_FIXTURE)
+        .workflow("wf", workflow)
+        .file("fixture.yaml", fixture)
         .committed();
     let run = project.run(
         std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
@@ -337,6 +337,12 @@ fn a_finished_node_says_how_its_document_got_accepted() {
             "fixture.yaml",
         ],
     );
+    (project, run)
+}
+
+#[test]
+fn a_finished_node_says_how_its_document_got_accepted() {
+    let (project, run) = planned(REPLANNED_WORKFLOW, REPLANNED_FIXTURE);
     assert!(run.status.success(), "{}", stderr(&run));
     let run_id = run_id_from(&run);
 
@@ -451,4 +457,38 @@ fn status_says_why_a_node_is_not_in_this_run() {
         "{said}"
     );
     assert!(said.contains("1 of 1 node done · 1 left out"), "{said}");
+}
+
+/// A decision that shows a plan says how the plan got accepted, with the rules it broke:
+/// the plan's row on the same page leaves that to it, and the node's own page keeps it.
+#[test]
+fn a_plan_a_decision_shows_says_how_it_got_accepted_once() {
+    let workflow = format!(
+        "{REPLANNED_WORKFLOW}  - id: approve\n    kind: gate\n    depends_on: [plan]\n    \
+         assignee: lead\n    message: \"Good?\"\n    shows: [{{ node: plan, kind: tasks }}]\n"
+    );
+    // A plan a person is shown says what it changes and why, as well as what proves it.
+    let fixture = REPLANNED_FIXTURE
+        .replace(
+            "summary: \"Make it\"\n",
+            "summary: \"Make it\"\n            description: \"Writes the file.\"\n",
+        )
+        .replace(
+            "title: \"Make it\",",
+            "title: \"Make it\", description: \"Writes made.txt.\", outcome: \"made.txt exists\",",
+        );
+    let (project, run) = planned(&workflow, &fixture);
+    let run_id = run_id_from(&run);
+
+    let text = status(&project, &run_id, &["--full"]);
+    assert!(
+        text.contains("handed over 2 times; refused 1 time"),
+        "{text}"
+    );
+    assert!(!text.contains("accepted on its 2nd handover"), "{text}");
+    let page = status(&project, &run_id, &["--node", "plan"]);
+    assert!(
+        page.contains("accepted on its 2nd handover (1 refused)"),
+        "{page}"
+    );
 }

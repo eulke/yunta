@@ -83,10 +83,10 @@ pub struct NodeFrame {
     /// log can say which task session made a call: the limit is the
     /// event schema's, not this derivation's.
     pub activity: Vec<ToolCall>,
-    /// The last re-route this node took; `None` for one that never
+    /// The last reroute this node took; `None` for one that never
     /// rerouted.
     pub reroute: Option<Reroute>,
-    /// How many times its own `on_failure` re-routed it: what its
+    /// How many times its own `on_failure` rerouted it: what its
     /// `max_reroutes` counts. A person's choice at a gate that sends the run
     /// somewhere is a decision, not counted here.
     pub reroutes: u32,
@@ -302,12 +302,13 @@ impl Reading<'_> {
     /// reset the run waits on, and a question the process driving the run
     /// is asking about it.
     ///
-    /// A failed node a re-route is correcting is `rerouted`: counted as
+    /// A failed node a reroute is correcting is `rerouted`: counted as
     /// failed it would alarm a reader about a correction the workflow
     /// planned for. A node the run waits on a reset for is `waiting`, which
     /// a clock ends. A node a person is being asked about at a terminal
     /// needs them, whatever its log says, and so does the gate a run is
-    /// parked on.
+    /// parked on. A gate answered while its run is parked stands running until the resume that
+    /// acts on the answer starts: it is no longer anyone's to answer.
     fn word(&self, node: &NodeId, state: &NodeStanding, correcting: bool) -> Standing {
         let reset = self.pause().and_then(PauseReason::reset_wait);
         match state {
@@ -315,7 +316,10 @@ impl Reading<'_> {
             // A gate asks before its log says anything of it.
             _ if self.engine.asks_about(node) => Standing::NeedsYou,
             NodeStanding::ToGo if self.pause().and_then(PauseReason::gate) == Some(node) => {
-                Standing::NeedsYou
+                match self.state.pre_seeded(node) {
+                    Some(_) => Standing::Running,
+                    None => Standing::NeedsYou,
+                }
             }
             NodeStanding::Paused { .. } if reset.is_some() => Standing::Waiting,
             NodeStanding::Reached(NodeState::Failed { .. }) if correcting => Standing::Rerouted,

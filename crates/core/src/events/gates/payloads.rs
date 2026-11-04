@@ -56,7 +56,7 @@ pub struct GateWaitingPayload {
     pub(super) options: Vec<GateOption>,
     /// The forge's own handle for this gate, such as a pull request's
     /// URL; `None` for an internal escalation, such as exhausted
-    /// re-routes. It carries the forge's `PullRequestRef` through the
+    /// reroutes. It carries the forge's `PullRequestRef` through the
     /// log, so a later `poll` from another process knows what to poll
     /// without publishing again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -180,7 +180,7 @@ impl GateWaitingPayload {
 #[serde(from = "GateResolvedWire", into = "GateResolvedWire")]
 pub enum GateResolvedPayload {
     /// A human picked one of the escalation's options: an internal
-    /// gate, exhausted re-routes, a token budget, a scope expansion, or
+    /// gate, exhausted reroutes, a token budget, a scope expansion, or
     /// an external gate degraded to the console.
     Chosen(HumanChoice),
     /// The forge reports an approving review, or a merge, covering
@@ -376,12 +376,12 @@ pub struct FailureMenu {
     /// Why no remedy is offered, when none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stuck: Option<Stuck>,
-    /// The re-route this failure exhausted, when it closes one.
+    /// The reroute this failure exhausted, when it closes one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reroute: Option<ExhaustedReroute>,
 }
 
-/// A re-route the failure exhausted: the node it would send the run to,
+/// A reroute the failure exhausted: the node it would send the run to,
 /// the cap it reached, and the mode a promotion would take the run to,
 /// when the workflow names one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

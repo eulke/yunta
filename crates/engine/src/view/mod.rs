@@ -45,10 +45,10 @@ pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 /// The DAG's nodes split by where each stands: the word its row says.
 ///
 /// **No method divides finished by `total`.** A percentage lies the moment
-/// a re-route grows the denominator, so leaving the division out of the
+/// a reroute grows the denominator, so leaving the division out of the
 /// type beats trusting every surface to remember.
 ///
-/// **Nothing here drops in silence.** A re-routed node runs again, so a
+/// **Nothing here drops in silence.** A rerouted node runs again, so a
 /// naive finished-over-total walks backwards. Split by standing, that same
 /// event reads as a move *between* places — `rerouted` down one, `running`
 /// up one — which a surface can show and attribute to the event that

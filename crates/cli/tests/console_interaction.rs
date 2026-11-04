@@ -130,7 +130,7 @@ fn asking(root: &Path, questions: &str) -> Terminal {
     )
 }
 
-/// A run that reaches a gate with its re-routes already spent — an
+/// A run that reaches a gate with its reroutes already spent — an
 /// escalation put to a person with no agent anywhere in it.
 fn gated(root: &Path) -> Terminal {
     let checkout = Checkout::under(root)
@@ -373,6 +373,11 @@ fn a_paste_answers_no_decision() {
 /// A run stopped on a gate that offers to go back with words: only a session picks
 /// its work back up with what it is told, so the node it goes back to is an agent's.
 fn adjusting(root: &Path) -> Terminal {
+    adjusting_with(root, &[])
+}
+
+/// [`adjusting`], with `flags` on its command line.
+fn adjusting_with(root: &Path, flags: &[&str]) -> Terminal {
     let checkout = Checkout::under(root)
         .config(CONFIG)
         .workflow(
@@ -390,18 +395,16 @@ fn adjusting(root: &Path) -> Terminal {
         )
         .committed();
     let (repo, home) = (checkout.repo, checkout.home);
-    yunta_on_terminal!(
-        &repo,
-        &home,
-        &[
-            "run",
-            "wf.yaml",
-            "--adapter",
-            "mock",
-            "--fixture",
-            "fixture.yaml"
-        ]
-    )
+    let mut args = vec![
+        "run",
+        "wf.yaml",
+        "--adapter",
+        "mock",
+        "--fixture",
+        "fixture.yaml",
+    ];
+    args.extend_from_slice(flags);
+    yunta_on_terminal!(&repo, &home, &args)
 }
 
 /// An option that asks opens its field where the card stands, with the cursor on
@@ -457,7 +460,7 @@ fn an_answered_card_leaves_what_was_chosen() {
     terminal.wait_on_screen("what should change?", "the option never asked for words");
     terminal.keys("keep the lock\r");
     terminal.wait_for(
-        "chose `adjust`: keep the lock",
+        "rerouted to `plan`: gate `ok` chose `adjust`: keep the lock",
         "what was chosen was not left in the history",
     );
     // The gate asks again once `plan` has run again.
@@ -465,6 +468,32 @@ fn an_answered_card_leaves_what_was_chosen() {
     let screen = terminal.screen();
     assert_eq!(screen.count(POINTED), 1, "one card at a time: {screen:#?}");
     assert!(!screen.holds("what should change?"), "{screen:#?}");
+    // The chronicle says who chose and where it sends the run, once, and a choice is no
+    // failure.
+    let drawn = terminal.drawn();
+    assert!(drawn.contains("`adjust` chosen by"), "{drawn}");
+    assert!(!drawn.contains("ok failed"), "{drawn}");
+    assert!(!drawn.contains("attributed to"), "{drawn}");
+    assert!(!drawn.contains("\nchose `adjust`"), "{drawn}");
+}
+
+/// With `--quiet` nothing chronicles the run, so what was chosen and whom it is recorded
+/// under are said where it was chosen.
+#[test]
+fn a_quiet_run_says_what_was_chosen_where_it_was_chosen() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = adjusting_with(root.path(), &["--quiet"]);
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
+    terminal.keys("\x1b[B");
+    terminal.wait_on_screen("▸ adjust", "the pointer never moved");
+    terminal.keys("\r");
+    terminal.wait_on_screen("what should change?", "the option never asked for words");
+    terminal.keys("keep the lock\r");
+    terminal.wait_for(
+        "chose `adjust`: keep the lock",
+        "what was chosen was not left in the history",
+    );
+    terminal.wait_for("attributed to", "nobody was named for the choice");
 }
 
 /// A terminal that declares itself dumb has said it draws nothing beyond text, so
@@ -610,7 +639,7 @@ fn an_escalation_says_what_happened_above_the_options_it_offers() {
     terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
     let drawn = terminal.drawn();
     let happened = drawn
-        .find("re-routes to `fix` are exhausted")
+        .find("reroutes to `fix` are exhausted")
         .expect("a decision opens with the account of what raised it");
     let options = drawn.find("▸ retry").unwrap_or_default();
     assert!(
@@ -631,14 +660,14 @@ fn an_escalation_says_the_record_behind_its_claim_once() {
     // second, which only works while the account they are reading is
     // not two copies of one sentence.
     assert!(
-        drawn.contains("re-routes to `fix` are exhausted"),
+        drawn.contains("reroutes to `fix` are exhausted"),
         "the account of what raised the decision never reached the console:\n{drawn}"
     );
     // Scoped to the decision itself: the node's own failure line said
     // `exit 1` too, and that is a different surface reporting a
     // different thing, not this block saying one thing twice.
     let decision = &drawn[drawn
-        .find("re-routes to `fix` are exhausted")
+        .find("reroutes to `fix` are exhausted")
         .expect("the prompt never opened its card")..];
     assert_eq!(
         decision.matches("exit 1").count(),

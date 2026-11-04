@@ -177,7 +177,7 @@ fn a_gate_choice_names_the_option_the_node_it_routes_to_and_what_was_written() {
         target: node("build"),
         said: None,
     };
-    assert_eq!(sentence(&bare), "gate chose `retry`, re-routing to `build`");
+    assert_eq!(sentence(&bare), "gate chose `retry`, rerouting to `build`");
     let written = Failure::GateChose {
         node: yunta_core::NodeId::from("gate"),
         option: OptionId::from_static("retry"),
@@ -186,11 +186,11 @@ fn a_gate_choice_names_the_option_the_node_it_routes_to_and_what_was_written() {
     };
     assert_eq!(
         sentence(&written),
-        "gate chose `retry`, re-routing to `build`: try the other fixture"
+        "gate chose `retry`, rerouting to `build`: try the other fixture"
     );
     assert_eq!(
         headline(&written),
-        "gate chose `retry`, re-routing to `build`"
+        "gate chose `retry`, rerouting to `build`"
     );
     assert_eq!(detail(&written), vec!["try the other fixture"]);
 }

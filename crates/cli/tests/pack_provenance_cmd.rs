@@ -9,7 +9,7 @@ use yunta_testkit::{
     git, init_repo, run_id_from, stderr, stdout, wait_until, yunta_in, INITIAL_BRANCH,
 };
 
-/// `lint` fails until `fixed.txt` exists, exhausts its one re-route
+/// `lint` fails until `fixed.txt` exists, exhausts its one reroute
 /// (`max_reroutes: 0`) and pauses the run — the same proven pattern
 /// `run_flow.rs`'s own `resolve-gate` tests use to get a paused run
 /// with no interactive gate or forge involved. `fix_lint_run` is the
@@ -68,7 +68,7 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
     let run_out = yunta_in!(&repo, &home, &["run", "acme/review"]);
     assert!(
         stdout(&run_out).contains("needs you"),
-        "expected the exhausted re-route to pause the run: {}\nstderr: {}",
+        "expected the exhausted reroute to pause the run: {}\nstderr: {}",
         stdout(&run_out),
         stderr(&run_out)
     );

@@ -9,7 +9,7 @@
 //! manifest froze and the instant it is read at.
 //!
 //! Counters with context, never percentages: a percentage lies the moment
-//! a re-route grows the denominator.
+//! a reroute grows the denominator.
 
 use chrono::{DateTime, Utc};
 use surco::glyphs::Glyphs;

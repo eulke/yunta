@@ -195,7 +195,7 @@ async fn stats_workflow(
 fn findings_of(opened: &[Opened]) -> Option<VerificationFindings> {
     // Needs the raw per-run logs `RunSummary` doesn't keep, and the
     // workflow shape those runs actually exercised to match
-    // criteria/re-routes/gates against.
+    // criteria/reroutes/gates against.
     let (raw_history, workflow) = raw_history(opened);
     workflow.map(|wf| yunta_engine::analyze_verification_effectiveness(&wf, &raw_history))
 }

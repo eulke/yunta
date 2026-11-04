@@ -55,7 +55,7 @@ release, where a closed pull request failed the gate. The fold forgets that pull
 request, so the gate's next publication opens a new one on the same branch, or
 reuses that pull request if a person reopened it. The binary that wrote the log
 polls the closed one instead, and under `on_failure` it fails the gate on it again
-until the re-routes run out. So an upgrade can change how that run's remaining nodes
+until the reroutes run out. So an upgrade can change how that run's remaining nodes
 execute, and the run's outcome can differ. [The event log](#the-event-log) describes
 the replay.
 
@@ -526,7 +526,7 @@ rather than `needs you`, and its document carries `awaiting_reset`. From 8 on, a
 and a node are called by one vocabulary: a run a person stopped is `stopped` rather
 than `cancelled` or `needs you`, a node waiting on a person is `needs you` rather than
 `waiting`, a node whose attempt stopped with its run is `stopped` rather than
-`paused`, and a failed node a re-route is correcting is `rerouted`.
+`paused`, and a failed node a reroute is correcting is `rerouted`.
 
 Under `--json`, `list --runs`, `verify`, `close`, `cancel`, `resolve-gate` and `doctor`
 print one document each: the answer the command gives, with the fields its human view
@@ -773,7 +773,7 @@ that chooses each option keyed by its id. `withheld` lists each option the gate 
 not offer, as `{option, because}`, and is absent when it withholds none. An option a workflow declares on a gate is
 labelled with where it leads — ``Back to `fix` ``, ``On to `deploy` `` — rather
 than with its own id. Two pauses reconstruct one: a node whose
-re-routes are exhausted, and an unresolved internal gate. Every other pause — a
+reroutes are exhausted, and an unresolved internal gate. Every other pause — a
 budget cap, a scope expansion, an unanswered questions artifact, an external
 gate with no reachable forge — carries no `decision` at all, and `summary` says
 what the run is waiting on instead. The `decision` field itself is additive; the
@@ -789,7 +789,7 @@ command that has to run. The menu's `options` name each option once, so `retry` 
 listed there once even when `remedies` holds a `retry` for each input a stop waits
 for. `stuck` says why no remedy is offered, as a word such as
 `frozen_config`, `tree_unchanged` or `criteria_wrong`, and `reroute` is the
-re-route the failure exhausted: its `goto`, `max_reroutes` and `next_mode`. A
+reroute the failure exhausted: its `goto`, `max_reroutes` and `next_mode`. A
 departure's menu is `decision.departure`: the `deviations` declared, the `waived`
 commands, the `rewritten_by` node when accepting rewrites a test, and
 `accept_offered`, which is `false` when no node of the run writes that test again.

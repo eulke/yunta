@@ -11,7 +11,7 @@
 //! red before the work and green after, every time, is working exactly
 //! as intended and never appears here.
 //!
-//! **Evidence threshold is per criterion/re-route/gate, never per
+//! **Evidence threshold is per criterion/reroute/gate, never per
 //! workflow**: [`MIN_SAMPLES`] gates each signal independently, so a
 //! criterion just added to a workflow with 50 historical runs starts
 //! with zero samples of its own, not the workflow's history.
@@ -19,7 +19,7 @@
 //! **Mode-scoped signals**: a declared mode
 //! no run ever chose (with the same evidence floor), and a structural
 //! guard — an `invariant: true` node is never the subject
-//! of a remove-shaped finding (its never-fired re-route or
+//! of a remove-shaped finding (its never-fired reroute or
 //! always-approved gate is the node doing its job, excluded by
 //! construction).
 
@@ -177,9 +177,9 @@ fn never_red_criteria(history: &[Vec<StoredEvent>]) -> Vec<NeverRedCriterion> {
 /// *any* terminal state, finished or failed) — not per run where it
 /// failed: a node that finished clean every single time is exactly
 /// "the prior flow is more reliable than expected", the strongest
-/// possible version of "this re-route never fired". A run where the
+/// possible version of "this reroute never fired". A run where the
 /// node never even executed (blocked behind something else entirely)
-/// says nothing about its re-route either way, so it isn't counted as
+/// says nothing about its reroute either way, so it isn't counted as
 /// a sample.
 fn never_triggered_reroutes(
     workflow: &Workflow,
@@ -247,7 +247,7 @@ fn always_approved_gates(
         .map(|n| n.id.clone())
         .collect();
     // Also every node with `on_failure` — its internal gate escalates
-    // *that* node once its re-routes are exhausted, so it's a gate too,
+    // *that* node once its reroutes are exhausted, so it's a gate too,
     // by the same escalation object, even without `kind: gate`.
     let internal_gate_ids: Vec<NodeId> = workflow
         .iter_nodes()

@@ -36,7 +36,7 @@ fn said(label: &str, tradeoff: &str) -> (String, Option<String>) {
     (label.to_string(), Some(tradeoff.to_string()))
 }
 
-/// A failed node's menu, with the re-route the failure exhausted when it
+/// A failed node's menu, with the reroute the failure exhausted when it
 /// exhausted one.
 fn failure_menu(reroute: Option<ExhaustedReroute>) -> Menu {
     Menu::Failure(Box::new(FailureMenu {
@@ -170,7 +170,7 @@ fn console_reads_as_written() {
         words(&console, "reject"),
         said(
             "Reject",
-            "Fails the node; its declared re-route (if any) takes over"
+            "Fails the node; its declared reroute (if any) takes over"
         )
     );
 }
@@ -228,7 +228,7 @@ fn back_options_read_as_written() {
         words(&gate(back(false)), "revise"),
         said(
             "Back to `plan`",
-            "re-routes there, and asks again once it completes"
+            "reroutes there, and asks again once it completes"
         )
     );
 }
@@ -402,7 +402,7 @@ fn a_departure_offers_accepting_it_and_sending_it_back() {
     );
 }
 
-/// A failed node with no re-route to fall back on offers an abort that pauses
+/// A failed node with no reroute to fall back on offers an abort that pauses
 /// the run.
 #[test]
 fn an_abort_on_a_failure_reads_as_a_pause() {
@@ -415,7 +415,7 @@ fn an_abort_on_a_failure_reads_as_a_pause() {
     ));
 }
 
-/// A failed node whose re-route is spent still reads its abort as a pause.
+/// A failed node whose reroute is spent still reads its abort as a pause.
 #[test]
 fn an_abort_on_a_reroute_reads_as_a_pause() {
     reads_as_a_pause(&menu(

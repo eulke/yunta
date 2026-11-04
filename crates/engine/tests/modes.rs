@@ -209,7 +209,7 @@ nodes:
 
 #[tokio::test]
 async fn on_failure_abort_ends_the_run() {
-    // `abort`: the first failed node with no re-route of its own closes
+    // `abort`: the first failed node with no reroute of its own closes
     // the run as failed at once — nothing new starts after it, not even a
     // node whose own dependencies are already satisfied (`tail`).
     let bench = Bench::with_run_id("run-abort");

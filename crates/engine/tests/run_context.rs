@@ -283,7 +283,7 @@ nodes:
             reason: reason @ PauseReason::Escalation(_),
         } => assert_eq!(
             yunta_render::pause::sentence(&reason),
-            "node `lint` failed and its 1 re-route to `fix-lint` is exhausted (exit 1)"
+            "node `lint` failed and its 1 reroute to `fix-lint` is exhausted (exit 1)"
         ),
         other => panic!(
             "lint stays red, so the run pauses once its single reroute is exhausted, got {other:?}"

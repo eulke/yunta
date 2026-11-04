@@ -115,7 +115,7 @@ nodes:
 const LINT_FIX_TEMPLATE: &str = "\
 name: {{workflow-name}}
 # A verify-then-correct chain: `lint` runs a check; if it fails,
-# `on_failure.goto` re-routes to `fix`, which gets an
+# `on_failure.goto` reroutes to `fix`, which gets an
 # agent session to address what's wrong, then control returns to
 # `lint` to re-verify. `max_reroutes` caps how many correction
 # rounds run before escalating to a person: one, since a round that

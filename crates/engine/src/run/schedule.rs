@@ -3,7 +3,7 @@
 //! [`decide`] looks at the workflow, the state its log derives, and the
 //! policy the run froze, and says what the run does next: execute a
 //! batch of independently-ready nodes (up to `max_parallel_nodes`), emit
-//! a re-route, pause, fail, or finish. It performs no IO and holds no
+//! a reroute, pause, fail, or finish. It performs no IO and holds no
 //! state of its own — the log is the state, which is what makes `yunta
 //! run` and `yunta resume` the same code path: both just keep asking
 //! "what's next" until the answer is terminal.
@@ -63,7 +63,7 @@ fn is_gate(node: &Node) -> bool {
     matches!(node.kind, NodeKind::Gate { .. })
 }
 
-/// The nodes only a re-route or a gate's `on:` may ever start.
+/// The nodes only a reroute or a gate's `on:` may ever start.
 ///
 /// A node named only as an `on_failure.goto` or gate `on:` target — a
 /// node outside the main path, existing only for this — declares no
@@ -79,7 +79,7 @@ fn is_gate(node: &Node) -> bool {
 /// end, so nothing in the ordinary DAG reaches it. `plan` in the usual
 /// `on: { adjust: plan }` pattern fails that test: `approve`
 /// declares `depends_on: [plan]`, so `plan` is a real predecessor that
-/// also happens to be a valid re-route target later.
+/// also happens to be a valid reroute target later.
 fn reroute_only_targets(
     nodes: &[&Node],
     dependencies: &std::collections::HashMap<NodeId, Vec<NodeId>>,
@@ -138,7 +138,7 @@ fn is_external_gate(node: &Node) -> bool {
 
 /// Everything the seven questions read, resolved once so none of them
 /// re-derives it: the nodes this mode includes, the dependencies that
-/// implies, and which of them exist only as a re-route's destination.
+/// implies, and which of them exist only as a reroute's destination.
 struct Board<'a> {
     nodes: Vec<&'a Node>,
     dependencies: std::collections::HashMap<NodeId, Vec<NodeId>>,
@@ -200,7 +200,7 @@ impl<'a> Board<'a> {
         self.deps_of(&node.id).iter().all(|dep| self.finished(dep))
     }
 
-    /// Only a re-route or a gate's `on:` may start this node.
+    /// Only a reroute or a gate's `on:` may start this node.
     fn reroute_only(&self, id: &NodeId) -> bool {
         self.reroute_only.contains(id)
     }

@@ -304,7 +304,7 @@ fn event_chain_check(checks: &mut Checklist, receipt: &Receipt) {
 }
 
 /// What the run spent: every token, in and out, per task once the run
-/// had tasks, and the re-routes it took.
+/// had tasks, and the reroutes it took.
 fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
     let cost = &receipt.cost;
     if cost.tokens.total() == 0 && cost.reroutes == 0 {

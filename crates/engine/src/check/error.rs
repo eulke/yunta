@@ -69,7 +69,7 @@ pub enum CheckError {
     BothRunnerAndRunners { node: NodeId },
 
     /// Once `review` is many nodes there is no unambiguous
-    /// "return control to review" — a re-route, gate `on:` or context
+    /// "return control to review" — a reroute, gate `on:` or context
     /// artifact reference must name a specific node.
     #[error("fan_out_target")]
     FanOutTarget { node: NodeId, target: NodeId },

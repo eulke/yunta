@@ -218,7 +218,7 @@ pub struct DefaultsConfig {
     /// records the suspension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_minutes: Option<u64>,
-    /// What a failed node without its own `on_failure:` re-route does
+    /// What a failed node without its own `on_failure:` reroute does
     /// to the run. Absent is `pause`, the schema's own default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<DefaultOnFailure>,

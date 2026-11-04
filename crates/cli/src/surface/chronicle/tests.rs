@@ -177,7 +177,7 @@ fn a_promotion_names_the_node_whose_reroutes_ran_out() {
     let promoted = PromotionSignaledPayload::new(cause, Evidence::none(), "ship".into());
     assert_eq!(
         said_for(EventPayload::Run(RunEvent::PromotionSignaled(promoted))),
-        "run promoted to `ship`: node `lint` exhausted its re-routes to `fix-lint`"
+        "run promoted to `ship`: node `lint` exhausted its reroutes to `fix-lint`"
     );
 }
 

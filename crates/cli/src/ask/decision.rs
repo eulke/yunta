@@ -73,7 +73,7 @@ pub(crate) fn decide(console: &Console, env: &Env, mut ask: Ask<'_>) -> Answered
         card = card.reading();
     }
     let answer = answered(console, &ask, &mut card, desk.as_mut())?;
-    console.say(&chose(&answer))?;
+    console.say_unless_chronicled(&chose(&answer))?;
     if answer.folded {
         console.say(FOLDED)?;
     }

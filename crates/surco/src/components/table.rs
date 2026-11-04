@@ -55,6 +55,10 @@ pub struct Row {
 pub struct Cell {
     pub text: String,
     pub tone: Tone,
+    /// Where in `text` the id itself stands, for a cell of an id column that says more than
+    /// its id: a surface that sets an id apart sets apart this and nothing else. `None` for
+    /// a cell whose whole text is what its column holds.
+    pub id: Option<std::ops::Range<usize>>,
 }
 
 impl Cell {
@@ -68,6 +72,18 @@ impl Cell {
         Cell {
             text: text.into(),
             tone,
+            id: None,
+        }
+    }
+
+    /// A cell of an id column: `id` after what comes `before` it, and before what comes `after`
+    /// it, in the plain tone.
+    pub fn around(before: String, id: &str, after: String) -> Self {
+        let start = before.len();
+        Cell {
+            text: format!("{before}{id}{after}"),
+            tone: Tone::Plain,
+            id: Some(start..start + id.len()),
         }
     }
 }

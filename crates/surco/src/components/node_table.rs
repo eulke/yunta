@@ -98,7 +98,7 @@ impl NodeRow {
     fn cells(&self, glyphs: Glyphs, took: bool, spent: bool) -> Vec<Cell> {
         let mut cells = vec![
             Cell::toned(Tone::of(self.mark), self.word),
-            Cell::plain(self.id_in(glyphs)),
+            self.id_in(glyphs),
             Cell::toned(Tone::Muted, self.note.as_str()),
         ];
         if took {
@@ -116,7 +116,7 @@ impl NodeRow {
 
     /// The row's id as `glyphs` draws it: after the branch it hangs from,
     /// and before the node its failure returns to.
-    fn id_in(&self, glyphs: Glyphs) -> String {
+    fn id_in(&self, glyphs: Glyphs) -> Cell {
         let branch = match self.branch {
             Some(Branch::Child) => format!("{} ", glyphs.branch(false)),
             Some(Branch::Last) => format!("{} ", glyphs.branch(true)),
@@ -126,7 +126,7 @@ impl NodeRow {
             Some(to) => format!(" {} {to}", glyphs.returns()),
             None => String::new(),
         };
-        format!("{branch}{}{returns}", self.id)
+        Cell::around(branch, &self.id, returns)
     }
 }
 
@@ -169,6 +169,19 @@ mod tests {
         };
         assert_eq!(ids(Glyphs::Unicode), ["├─ lint", "└─ lint ↺ fix-lint"]);
         assert_eq!(ids(Glyphs::Ascii), ["+- lint", "`- lint <> fix-lint"]);
+    }
+
+    /// Of an id's cell, only the id is marked as the id: the branch and the
+    /// return around it are words the cell holds, not what a reader types.
+    #[test]
+    fn only_the_id_of_a_row_is_marked_as_its_id() {
+        let table = NodeTable {
+            rows: vec![row(Some(Branch::Last), Some("fix-lint"), false)],
+        };
+        let drawn = table.table(Glyphs::Unicode);
+        let cell = &drawn.rows[0].cells[1];
+        let range = cell.id.clone().expect("an id cell marks its id");
+        assert_eq!(&cell.text[range], "lint");
     }
 
     /// A person's time reads in the person's tone; a node's own work, plain.

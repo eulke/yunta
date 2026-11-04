@@ -15,3 +15,4 @@
 
 next
   yunta receipt 7E5PH4   certifies what it did
+  yunta open 7E5PH4      the whole page, in a browser

@@ -42,10 +42,10 @@ are valid there. A mistyped key never silently becomes a default.
   settled is at or above a declared `max_severity`). No
   session opens; these read state the engine already derived.
 - **`gate`** — a human decision. `assignee:`, `options: [...]`, and `on: {option:
-  target}` to re-route on a choice exactly like `on_failure.goto` does; every node
+  target}` to reroute on a choice exactly like `on_failure.goto` does; every node
   between the target and the gate runs again, in order, before the gate asks
   again, so it never asks about a plan beside work made from the one it sent back.
-  A gate between a re-route's target and the node it re-routed asks again in its
+  A gate between a reroute's target and the node it rerouted asks again in its
   turn, about what was made again, before that node retries. Renders
   through the console when attended, or as the same structured escalation object via
   `yunta mcp` / `yunta resolve-gate` when it isn't — no surface-specific logic. `external: { kind: pull_request, artifacts: [...], branch: "..." }` turns it
@@ -104,7 +104,7 @@ forge:
     remote: origin              # where the run's branch is pushed; `origin` when absent
 ```
 
-## `depends_on` and re-routing
+## `depends_on` and rerouting
 
 `depends_on: [a, b]` means "wait for `a` and `b` to reach a terminal state." A node
 with none and no `on_failure.goto` pointing at it runs as soon as the DAG lets it
@@ -115,7 +115,7 @@ with none and no `on_failure.goto` pointing at it runs as soon as the DAG lets i
 returns and the original node runs again. `max_reroutes` bounds how many times this
 happens before the run pauses on a gate instead — a correction loop is not allowed to
 retry forever unattended. A failure the run's frozen config causes — a key it
-leaves unset — is never re-routed: the correction reads the same config, so the
+leaves unset — is never rerouted: the correction reads the same config, so the
 failure goes straight to the run's `defaults.on_failure`.
 
 ## Scope and permissions
@@ -129,7 +129,7 @@ node fails afterward for it.
 
 `scope: run` declares a node's reach without naming a path: it may change what the
 run has changed since its base, as that stands when the node starts. It is the scope
-for a node that corrects the run's own work — the fix a failing lint re-routes to —
+for a node that corrects the run's own work — the fix a failing lint reroutes to —
 in a repository whose layout the workflow never saw, which is why a pack reaches for
 it. The engine resolves the paths when the attempt starts and records them on its
 `node_started`, so its close is audited against what it was given. A write elsewhere
@@ -288,7 +288,7 @@ A node that names a command the config does not declare cannot run, and no
 attempt of the run can change that — the run's config is frozen when it is
 created. `yunta check` refuses such a workflow before the first token, naming the
 node and the command, and a run that meets one anyway fails the node without
-offering a retry or spending its `on_failure` re-route.
+offering a retry or spending its `on_failure` reroute.
 
 ### Formatting what a session writes
 
@@ -555,7 +555,7 @@ each as `{ run: "<cmd>", timeout_seconds?, on_failure: fail|warn }` — `run` ta
 project command by name here too. A failed
 `before` hook stops the node before any session opens; `after` hooks run before
 verification, so their own edits are subject to the node's `scope` like anything
-else. Hooks never re-route — that's `on_failure.goto`'s job, not a hook's.
+else. Hooks never reroute — that's `on_failure.goto`'s job, not a hook's.
 
 ## Modes
 
@@ -619,7 +619,7 @@ change before the retry can end differently.
 lacks what it needs — a [project command](#project-commands) the config does not
 declare, or a forge. Such a node is left out of the run the way a mode leaves a node
 out: it never runs, and what waits on it waits on what it waited on. A node that only
-the optional one leads to — the re-route that fixes what a failing lint reports — goes
+the optional one leads to — the reroute that fixes what a failing lint reports — goes
 with it. Where the project does declare what the node needs, it runs like any other.
 
 ```yaml
@@ -646,7 +646,7 @@ counts it apart from the work (`· 1 left out`). A node that is not optional and
 something the project lacks is refused before the run instead. An `invariant` may be
 optional: no mode drops it, but a project may have nothing to run for it. `yunta
 check` refuses `optional` on a child of a `parallel` group, and on a node another
-node the run keeps re-routes to or reads from.
+node the run keeps reroutes to or reads from.
 
 ## Reviewing what a gate approves
 
@@ -818,7 +818,7 @@ same way, from anywhere.
 `yunta receipt <run>` closes a finished run out as a certificate: markdown for a
 PR, JSON for tooling, both derived entirely from the event log — criteria with exit
 codes, baseline regressions, scope, which runners reviewed (and whether that was a
-fan-out of independent ones), cost and CPTV, re-routes, and the event chain's own
+fan-out of independent ones), cost and CPTV, reroutes, and the event chain's own
 integrity. Nothing in it is agent-written prose; every line traces back to a specific
 event kind. It refuses a run that hasn't reached a terminal state yet — there's no
 metrics to certify until `run_finished` lands.

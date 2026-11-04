@@ -203,7 +203,7 @@ rule_codes! {
     InvariantInParallel => "invariant-in-parallel",
     /// `optional: true` where leaving the node out would leave the run
     /// without something it cannot do without: on a child of a
-    /// `parallel` group, or on a node a required one re-routes to or
+    /// `parallel` group, or on a node a required one reroutes to or
     /// reads from.
     IncoherentOptional => "incoherent-optional",
 }

@@ -99,7 +99,7 @@ pub enum NodeKind {
     /// include a gate option: resolved through `HumanInteraction`
     /// (console today, a richer resolution surface later) with the
     /// declared `options`, and `on:` mapping an option to an
-    /// `on_failure.goto`-style re-route.
+    /// `on_failure.goto`-style reroute.
     Gate {
         /// Who the escalation names — a human on the forge (external),
         /// or whoever holds the interactive surface (internal).
@@ -116,8 +116,8 @@ pub enum NodeKind {
         /// always a valid exit, the same convention every escalation uses).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         options: Vec<OptionId>,
-        /// Option → re-route target (`on: { adjust: plan }`): choosing
-        /// a mapped option re-routes exactly like `on_failure.goto`
+        /// Option → reroute target (`on: { adjust: plan }`): choosing
+        /// a mapped option reroutes exactly like `on_failure.goto`
         /// — the target and its subgraph complete, then the
         /// gate returns to ready and asks again. Unbounded on purpose:
         /// each lap is human-driven, not an automatic cycle

@@ -391,7 +391,7 @@ fn a_node_that_reroutes_and_runs_again_moves_between_buckets_without_shrinking_t
     }
     assert!(
         totals.windows(2).all(|pair| pair[1] >= pair[0]),
-        "a re-route never shrinks the denominator: {totals:?}"
+        "a reroute never shrinks the denominator: {totals:?}"
     );
 
     // The re-run of a node sent to be corrected is a move out of
@@ -1327,4 +1327,77 @@ fn a_node_open_when_its_run_paused_reads_stopped() {
     assert_eq!(plan.state, NodeStanding::Paused { attempt: 1 });
     assert_eq!(plan.standing, Standing::Stopped);
     assert_eq!(buckets(&frame.flow), [0, 0, 0, 0, 1, 0, 2]);
+}
+
+/// The question `approve` parks its run on.
+fn approve_asked() -> Escalation {
+    Escalation::new(
+        Claim::NeedsDecision {
+            node: "approve".into(),
+        },
+        Menu::Gate(AuthorGate {
+            assignee: "lead".to_string(),
+            node: Some("approve".into()),
+        }),
+        NonEmpty::from((approve_option(), Vec::new())),
+    )
+}
+
+/// What a process that answers `approve` from outside its parked run writes.
+fn approve_answered() -> [(i64, Option<&'static str>, EventPayload); 2] {
+    let chosen = yunta_core::events::HumanChoice {
+        option: "approve".into(),
+        by: "someone".into(),
+        free_text: None,
+    };
+    [
+        (
+            2,
+            Some("approve"),
+            EventPayload::Gates(GateEvent::Waiting(Box::new(approve_asked().into_payload()))),
+        ),
+        (
+            3,
+            Some("approve"),
+            EventPayload::Gates(GateEvent::Resolved(
+                yunta_core::events::GateResolvedPayload::Chosen(chosen),
+            )),
+        ),
+    ]
+}
+
+/// A gate answered while its run is parked needs nobody: the run stands running from the
+/// answer on, for the instant a resume takes to act on it, the gate with it, and the round
+/// a person answered is still the only round there has been.
+#[test]
+fn a_gate_answered_while_its_run_is_parked_stands_running() {
+    let workflow = workflow(
+        r#"
+name: ship
+nodes:
+  - { id: approve, kind: gate, assignee: lead, message: "Go?" }
+  - { id: after, kind: bash, run: "true", depends_on: [approve] }
+"#,
+    );
+    let mut entries = vec![
+        (0, None, created("alpha")),
+        (
+            1,
+            None,
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Escalation(Box::new(approve_asked())),
+            ))),
+        ),
+    ];
+    let parked = frame(&workflow, &log(entries.clone()), 100);
+    assert_eq!(parked.standing, Standing::NeedsYou);
+    assert_eq!(parked.nodes[0].standing, Standing::NeedsYou);
+
+    entries.extend(approve_answered());
+    let answered = frame(&workflow, &log(entries), 100);
+    assert_eq!(answered.phase, RunPhase::Running);
+    assert_eq!(answered.standing, Standing::Running);
+    assert_eq!(answered.nodes[0].standing, Standing::Running);
+    assert_eq!(answered.nodes[0].person_rounds(), 1);
+    assert_eq!(answered.nodes[1].standing, Standing::NeverRan);
 }

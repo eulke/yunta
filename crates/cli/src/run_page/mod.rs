@@ -52,7 +52,13 @@ pub(crate) enum Scope {
     Closing,
     /// The page `yunta status` prints for a run.
     Status,
+    /// The page `yunta open` writes: a status, drawn where a browser reads it, so it offers
+    /// no way to itself.
+    Browser,
 }
+
+/// What `yunta open` is offered as.
+const IN_A_BROWSER: &str = "the whole page, in a browser";
 
 /// The decision a parked run waits on, as the run's log rebuilds it.
 #[derive(Debug, Clone)]
@@ -158,7 +164,7 @@ impl RunPage<'_> {
             self.frame.phase,
             RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
         );
-        if self.scope == Scope::Status && open {
+        if self.scope != Scope::Closing && open {
             return self.open_for(last).into_iter().collect();
         }
         let Some(took) = self.frame.elapsed else {
@@ -168,7 +174,7 @@ impl RunPage<'_> {
             Standing::Finished | Standing::Reported => format!("in {}", duration(took)),
             _ => format!("after {}", duration(took)),
         }];
-        if let (Scope::Status, false, Some(last)) = (self.scope, open, last) {
+        if let (true, false, Some(last)) = (self.scope != Scope::Closing, open, last) {
             stood.push(format!("{} ago", duration(self.since(last))));
         }
         stood
@@ -217,7 +223,7 @@ impl RunPage<'_> {
         };
         let mut blocks: Vec<Block> = Vec::new();
         // The closing's branch row says where the run works.
-        if self.scope == Scope::Status && !self.depth.reaches(Depth::Full) {
+        if self.scope != Scope::Closing && !self.depth.reaches(Depth::Full) {
             let tree = decision::run_tree_line(self.paths.worktree);
             blocks.push(Prose(tree).into());
         }
@@ -237,9 +243,13 @@ impl RunPage<'_> {
     }
 
     /// What moves a run that waits on a decision without choosing one of
-    /// its options.
+    /// its options, and, for a person reading `status`, where to read all of it.
     fn otherwise(&self) -> Vec<(String, &'static str)> {
-        advice::after(self.frame, self.decided_escalation())
+        let mut steps = advice::after(self.frame, self.decided_escalation());
+        if self.scope == Scope::Status {
+            steps.push((advice::open(self.run_id.handle()), IN_A_BROWSER));
+        }
+        steps
     }
 
     /// What a person types next, for where the run stands, and where to
@@ -253,7 +263,10 @@ impl RunPage<'_> {
                 format!("{} --full", advice::status(handle)),
                 "the whole story, node by node",
             )),
-            (Scope::Status, Depth::Full | Depth::Dig) => {}
+            (Scope::Status, Depth::Full | Depth::Dig) => {
+                steps.push((advice::open(handle), IN_A_BROWSER));
+            }
+            (Scope::Browser, _) => {}
         }
         Next { steps }
     }
@@ -320,7 +333,7 @@ fn failed_claim(frame: &RunFrame, failure: &Failure) -> String {
 
 /// The nodes that stand failed, each with its failure, in declaration order.
 /// A node whose log says it failed can stand otherwise: one a reset holds is
-/// `waiting`, and the pause says what holds it; one a re-route corrects is
+/// `waiting`, and the pause says what holds it; one a reroute corrects is
 /// `rerouted`. Neither is listed.
 pub(crate) fn failed(frame: &RunFrame) -> impl Iterator<Item = (&NodeFrame, &Failure)> {
     frame.nodes.iter().filter_map(|node| match &node.state {

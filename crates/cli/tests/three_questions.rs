@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use yunta_testkit::{handle, run_id_from, stderr, stdout, yunta_in, yunta_on_terminal, Checkout};
 
-/// A node that fails with its re-routes already spent: the run parks on
+/// A node that fails with its reroutes already spent: the run parks on
 /// a decision whose menu its log rebuilds.
 const EXHAUSTED: &str = r#"
 name: hopeless
@@ -75,7 +75,7 @@ fn a_person_learns_a_run_needs_them_from_status_and_the_list() {
     let lines: Vec<&str> = status.lines().collect();
     assert!(lines[0].contains("· needs you ·"), "{status}");
     assert!(
-        lines[2].contains("re-routes to `fix-lint` are exhausted"),
+        lines[2].contains("reroutes to `fix-lint` are exhausted"),
         "{status}"
     );
 

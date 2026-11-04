@@ -1,6 +1,6 @@
 //! What a node's frame says beyond where it stands: what the frozen
 //! workflow declares of it, how long and how often a person answered it,
-//! and how many times its own rule re-routed it.
+//! and how many times its own rule rerouted it.
 
 use super::*;
 use yunta_engine::{Declares, GateAsks, NodeFrame};
@@ -146,7 +146,7 @@ nodes:
     assert_eq!(ask.question_rounds, 1);
 }
 
-/// A node's frame counts the re-routes its own `on_failure` made.
+/// A node's frame counts the reroutes its own `on_failure` made.
 #[test]
 fn a_frame_counts_the_reroutes_a_node_s_own_rule_made() {
     let workflow = chain();

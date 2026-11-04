@@ -18,3 +18,6 @@
   branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off
                main, in
                ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+next
+  yunta open 7E5PH4   the whole page, in a browser

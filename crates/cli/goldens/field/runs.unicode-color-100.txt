@@ -5,7 +5,7 @@
   ␛[1;35m◆␛[0m ␛[1mT1Y0P1␛[0m  ␛[2mreview (default)␛[0m  ␛[32m━━␛[0m␛[1;35m━━␛[0m␛[2m┄┄␛[0m  node `implement` asks at its terminal                      ␛[2m32m␛[0m
 
 ␛[2mneeds you, oldest first␛[0m
-  ␛[1;35m◆␛[0m ␛[1mT1Y0P2␛[0m  ␛[2mreview (default)␛[0m  ␛[32m━━␛[0m␛[1;35m━━␛[0m␛[2m┄┄␛[0m  node `lint` failed and its 0 re-routes to `fix-lint` are…  ␛[2m22d␛[0m
+  ␛[1;35m◆␛[0m ␛[1mT1Y0P2␛[0m  ␛[2mreview (default)␛[0m  ␛[32m━━␛[0m␛[1;35m━━␛[0m␛[2m┄┄␛[0m  node `lint` failed and its 0 reroutes to `fix-lint` are…   ␛[2m22d␛[0m
 
 ␛[2mstopped␛[0m
   ␛[2m■␛[0m ␛[1mT1Y0P3␛[0m  ␛[2mreview (default)␛[0m  ␛[32m━━␛[0m␛[2m━━␛[0m␛[2m┄┄␛[0m  interrupted by a person                    ␛[1myunta resume T1Y0P3␛[0m

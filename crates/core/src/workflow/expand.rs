@@ -10,7 +10,7 @@ use crate::{Node, NodeId, NodeKind, Workflow};
 /// the scheduler needs zero fan-out awareness. Every reference to the
 /// original id follows the expansion: downstream `depends_on` rewires
 /// onto all siblings, and mode include lists name them all (so a mode
-/// that covered `review` still covers the whole review). Re-route and
+/// that covered `review` still covers the whole review). Reroute and
 /// gate targets onto a fan-out node are check errors — there is no
 /// unambiguous "return control to review" once review is many nodes —
 /// so this function never sees one.

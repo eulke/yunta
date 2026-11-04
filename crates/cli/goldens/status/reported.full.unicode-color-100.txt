@@ -14,3 +14,4 @@
 
 ␛[2mnext␛[0m
   ␛[1myunta receipt 7E5PH4␛[0m   ␛[2mcertifies what it did␛[0m
+  ␛[1myunta open 7E5PH4   ␛[0m   ␛[2mthe whole page, in a browser␛[0m

@@ -12,7 +12,7 @@ pub const OVERRIDE_VAR: &str = "YUNTA_GLYPHS";
 ///
 /// Each mark means one thing. `NeedsYou` is for a person and nothing
 /// else — a reader who learns that mark learns where they are wanted —
-/// so a re-route, a caution and a stop have marks of their own.
+/// so a reroute, a caution and a stop have marks of their own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mark {
     Done,
@@ -24,7 +24,7 @@ pub enum Mark {
     /// Worth a reader's attention, and nothing anybody has to answer: a
     /// run nobody drives, findings that still block, a red baseline.
     Caution,
-    /// Control went somewhere else: a re-route, a promotion.
+    /// Control went somewhere else: a reroute, a promotion.
     Reroute,
     /// A person stopped it, and nothing is wrong with it.
     Stopped,

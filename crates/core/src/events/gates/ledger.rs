@@ -71,6 +71,11 @@ impl GateLedger {
         self.per_node.get(node)
     }
 
+    /// Every node the log says anything about its gates.
+    pub fn nodes(&self) -> impl Iterator<Item = &NodeId> {
+        self.per_node.keys()
+    }
+
     /// Whom a person is being asked about right now: a node, or `None` for
     /// a run-level ask.
     pub fn asking(&self) -> &BTreeSet<Option<NodeId>> {

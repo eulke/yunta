@@ -22,7 +22,7 @@ const NAMES: usize = 3;
 
 /// How far a run has come, as its page's `progress` row says it: the
 /// nodes done of the ones this run will do, what narrowed that total, and
-/// the re-routes that grew it. Where each other node stands is said by
+/// the reroutes that grew it. Where each other node stands is said by
 /// [`places`], with its name.
 pub(crate) fn progress(frame: &RunFrame, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
@@ -138,9 +138,9 @@ fn narrowed(counter: &Counter, sep: char) -> String {
 
 /// The counters, at both levels the run has: the DAG's nodes and the
 /// run's tasks, each as `N of M done`, with every other place that holds
-/// anything beside it, and the re-routes when there were any.
+/// anything beside it, and the reroutes when there were any.
 ///
-/// The places are not decoration. A re-routed node runs again, so
+/// The places are not decoration. A rerouted node runs again, so
 /// `finished` alone walks backwards; printed beside `failed`, `rerouted`
 /// and `running`, that same event reads as a move between places, which
 /// is what makes a denominator that grew attributable to the event that

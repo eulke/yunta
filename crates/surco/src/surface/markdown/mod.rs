@@ -4,8 +4,8 @@
 //! character and the word is what carries the meaning.
 
 use crate::components::{
-    Check, Checklist, Concern, Edge, Evidence, Fields, Holds, Lead, Marked, Next, Paths, Problem,
-    Reads, Refusal, Runs, Section, Table, Whole,
+    Cell, Check, Checklist, Concern, Edge, Evidence, Fields, Holds, Lead, Marked, Next, Paths,
+    Problem, Reads, Refusal, Runs, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::{Glyphs, Mark};
@@ -232,7 +232,7 @@ fn table(table: &Table) -> String {
         out.push_str("\n|");
         for (at, (said, column)) in row.cells.iter().zip(&table.columns).enumerate() {
             let mut said = match column.holds {
-                Holds::Id => cell_code_span(&said.text),
+                Holds::Id => id_cell(said),
                 Holds::State | Holds::Words | Holds::Figure | Holds::Rest | Holds::Prose => {
                     cell(&said.text)
                 }
@@ -244,6 +244,22 @@ fn table(table: &Table) -> String {
         }
     }
     out
+}
+
+/// A cell of an id column: its id as code, and whatever the cell says around it as words.
+fn id_cell(said: &Cell) -> String {
+    let Some(id) = &said.id else {
+        return cell_code_span(&said.text);
+    };
+    [
+        cell(&said.text[..id.start]),
+        cell_code_span(&said.text[id.clone()]),
+        cell(&said.text[id.end..]),
+    ]
+    .into_iter()
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(" ")
 }
 
 /// Each run as a table row: where it stands, its handle, what it runs, what

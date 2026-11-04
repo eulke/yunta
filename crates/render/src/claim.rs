@@ -10,8 +10,8 @@ use yunta_core::NodeId;
 use crate::found;
 
 /// The claim in the words a reader sees. `menu` is the failure menu the
-/// escalation carries: when its re-routes are used up, the node's claim
-/// names the re-route it closes.
+/// escalation carries: when its reroutes are used up, the node's claim
+/// names the reroute it closes.
 pub fn sentence(claim: &Claim, menu: Option<&FailureMenu>) -> String {
     match claim {
         Claim::NeedsDecision { node } => format!("gate `{node}` needs a decision"),
@@ -63,13 +63,13 @@ fn recheck_unreachable(node: &NodeId, external_ref: &str) -> String {
     )
 }
 
-/// A node that failed with its re-routes exhausted: the count of re-routes,
+/// A node that failed with its reroutes exhausted: the count of reroutes,
 /// the node they went to, and that they are used up.
 fn exhausted(node: &NodeId, reroute: &ExhaustedReroute) -> String {
     let max = reroute.max_reroutes as usize;
     format!(
         "node `{node}` failed and its {} to `{}` {} exhausted",
-        text::counted(max, "re-route"),
+        text::counted(max, "reroute"),
         reroute.goto,
         text::agreeing(max, "is", "are")
     )

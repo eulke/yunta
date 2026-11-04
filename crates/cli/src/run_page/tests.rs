@@ -62,7 +62,7 @@ fn the_status_page_reads_in_a_browser() {
     for case in &cases() {
         assert_golden(
             &goldens.join(format!("{}.html", case.name)),
-            &Html.body(&case.page(Scope::Status, Depth::Full).document(&look)),
+            &Html.body(&case.page(Scope::Browser, Depth::Full).document(&look)),
         );
     }
 }
@@ -451,7 +451,6 @@ fn the_trace_says_each_nodes_rounds_returns_and_waits() {
     let build = row("build");
     assert!(build.contains("rerouted twice"), "{build}");
     assert!(build.contains("3 attempts"), "{build}");
-    assert!(!build.contains("re-routed"), "{build}");
     let ask = row("ask");
     assert!(
         ask.contains("waited on you 12m04s over 2 rounds of questions"),
@@ -480,3 +479,4 @@ fn the_trace_says_each_nodes_rounds_returns_and_waits() {
 }
 
 mod harvest;
+mod words;

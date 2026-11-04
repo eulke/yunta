@@ -48,7 +48,7 @@ pub struct Policy {
     /// before anything of the run's changes it.
     pub measures_aside: bool,
     /// Whether a later mode follows this run's, so that an exhausted
-    /// re-route offers to promote to it — and a successor is born holding
+    /// reroute offers to promote to it — and a successor is born holding
     /// this run's measurement.
     pub may_promote: bool,
     /// Whether a person may widen a node's scope from the menu of a

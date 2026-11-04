@@ -17,3 +17,4 @@
 next
   yunta resume 7E5PH4   continues it where it stopped
   yunta close 7E5PH4    closes it for good
+  yunta open 7E5PH4     the whole page, in a browser

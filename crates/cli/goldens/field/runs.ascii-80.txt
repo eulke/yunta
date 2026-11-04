@@ -5,7 +5,7 @@ asking now
   ? T1Y0P1  review (default)  ====..  node `implement` asks at its terminal  32m
 
 needs you, oldest first
-  ? T1Y0P2  review (default)  ====..  node `lint` failed and its 0 re-ro...  22d
+  ? T1Y0P2  review (default)  ====..  node `lint` failed and its 0 rerou...  22d
 
 stopped
   # T1Y0P3  review (default)  ====..  interrupted by a p...  yunta resume T1Y0P3

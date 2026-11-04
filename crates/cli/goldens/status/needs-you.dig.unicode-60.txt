@@ -1,6 +1,6 @@
 ◆ fragua (quick) · needs you · for 32m10s             7E5PH4
 ━━━━━━━━━━━ ━━━━━━━━━━━ ━━━━━━━━━━━━ ┄┄┄┄┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄┄┄┄┄
-  node `lint` failed and its 0 re-routes to `fix-lint` are
+  node `lint` failed and its 0 reroutes to `fix-lint` are
   exhausted.
 
   ✗ lint · exit 101
@@ -31,7 +31,7 @@ tasks
   kept in      ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4
 
   ◆ decision on node `lint`
-  ▎ retry: Re-route to `fix-lint` once more
+  ▎ retry: Reroute to `fix-lint` once more
   ▎   Uses one extra correction attempt beyond the declared
   ▎   max_reroutes (0); escalates again if `fix-lint`
   ▎   doesn't fix it
@@ -41,3 +41,4 @@ tasks
   ▎   yunta resolve-gate 7E5PH4 abort
   ▎ or
   ▎   yunta close 7E5PH4   closes it for good
+  ▎   yunta open 7E5PH4    the whole page, in a browser

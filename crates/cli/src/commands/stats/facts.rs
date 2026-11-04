@@ -21,7 +21,7 @@ pub(super) fn cptv(stats: &RunStats, glyphs: Glyphs) -> String {
     }
 }
 
-/// The share of tokens retries and re-routes took. Nothing for a run with
+/// The share of tokens retries and reroutes took. Nothing for a run with
 /// nothing to divide, or none that went to them.
 pub(super) fn rework(stats: &RunStats, glyphs: Glyphs) -> String {
     stats
@@ -29,7 +29,7 @@ pub(super) fn rework(stats: &RunStats, glyphs: Glyphs) -> String {
         .filter(|rate| *rate > 0.0)
         .map(|rate| {
             format!(
-                "{} of tokens went to retries and re-routes",
+                "{} of tokens went to retries and reroutes",
                 Ratio(rate).reads(glyphs.times())
             )
         })

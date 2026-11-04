@@ -32,7 +32,7 @@ pub enum Standing {
     Reported,
     /// Ended in error, with no route and no decision waiting.
     Failed,
-    /// A node that failed and that a re-route is correcting.
+    /// A node that failed and that a reroute is correcting.
     Rerouted,
     /// A person stopped the run, and a resume continues it; a node whose
     /// attempt stopped with its run.

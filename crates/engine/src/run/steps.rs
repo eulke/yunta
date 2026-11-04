@@ -112,7 +112,7 @@ pub(super) async fn pause_for_reset(
     pause(ctx, PauseReason::AwaitingReset { node, at }).await
 }
 
-/// Records a node's re-route to another node, then lets the loop schedule the
+/// Records a node's reroute to another node, then lets the loop schedule the
 /// target next.
 pub(super) async fn reroute(
     ctx: &RunCtx<'_>,
@@ -136,7 +136,7 @@ pub(super) async fn reroute(
     Ok(())
 }
 
-/// A failed node with no re-route of its own, put to a person: a choice
+/// A failed node with no reroute of its own, put to a person: a choice
 /// that runs it again — `retry`, `continue-work`, `grant` — is recorded
 /// and the loop continues, where the scheduler starts the node's next
 /// attempt and that attempt applies what was chosen; `abort`, or nobody
@@ -162,10 +162,10 @@ pub(super) async fn failure_escalation(
     ))
 }
 
-/// A node used up its re-routes to `goto`: the engine assembles the
+/// A node used up its reroutes to `goto`: the engine assembles the
 /// escalation from the log (never the failed node, which has no further say)
 /// and asks a human — or consumes a decision a `resolve_gate` MCP call
-/// pre-seeded onto a parked log. `retry` re-routes once more (the loop
+/// pre-seeded onto a parked log. `retry` reroutes once more (the loop
 /// continues), `promote` closes the run into its next mode, and anything
 /// else pauses. `None` means the loop continues; `Some` ends the run.
 pub(super) async fn gate_exhausted(

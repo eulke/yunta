@@ -274,7 +274,7 @@ terminal; the run keeps it. The last 20 lines of a red criterion are on its
 `yunta_task`, and the whole output, redacted, is the object under the run's
 `objects/` that the event's `output` names.
 
-If the same criterion keeps failing across every re-route
+If the same criterion keeps failing across every reroute
 (`on_failure.goto`) up to `max_reroutes`, the run pauses on a gate instead of
 looping forever — that's expected, not a hang. Widen what the correction
 node is allowed to see (`context:`) or change (`scope:`) before assuming the
@@ -375,7 +375,7 @@ was closed after a stop keeps the word, and nothing resumes it.
 
 ## A node failed and `resume` pauses on the same failure
 
-A node with no `on_failure` re-route that fails leaves the decision to you:
+A node with no `on_failure` reroute that fails leaves the decision to you:
 `yunta status <run>` lists `abort`, and lists `retry` only when what the failure
 waits on may have changed. A check that judges the tree (a coverage gate or a
 baseline comparison), a missing artifact and an unmet criterion wait on the

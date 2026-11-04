@@ -25,9 +25,9 @@ use crate::replay::RunState;
 use crate::run_log::RunLog;
 use yunta_core::events::GateEvent;
 
-/// The escalation object for a node whose re-routes are exhausted: retry once
+/// The escalation object for a node whose reroutes are exhausted: retry once
 /// more, abort, or — when `modes:` has somewhere later to go — promote. The
-/// menu carries the failure that exhausted the re-routes and the re-route it
+/// menu carries the failure that exhausted the reroutes and the reroute it
 /// closes; a surface writes the words of each option from that menu.
 pub(crate) fn build_reroute_escalation(
     workflow: &Workflow,
@@ -53,7 +53,7 @@ pub(crate) fn build_reroute_escalation(
             next_mode: suggested_mode,
         }),
     };
-    // The cause travels in the menu, and the re-route it closes with it, so
+    // The cause travels in the menu, and the reroute it closes with it, so
     // the claim names only the node.
     Escalation::new(
         Claim::NodeFailed { node: node.clone() },
@@ -62,11 +62,11 @@ pub(crate) fn build_reroute_escalation(
     )
 }
 
-/// The escalation object for a node that failed with no re-route of its own
+/// The escalation object for a node that failed with no reroute of its own
 /// while the run's `defaults.on_failure` is `pause`: its options are each
 /// reserved option its remedies name, once, and abort.
 ///
-/// Nothing re-routes such a failure, so a person who fixes its cause — a file
+/// Nothing reroutes such a failure, so a person who fixes its cause — a file
 /// the node reads, a variable a source needs — has no other way to hand the
 /// node back: a resume alone finds it failed and pauses again. The outlook
 /// decides what a way back is: a remedy only where the input it waits for can
@@ -138,6 +138,8 @@ fn named_options(remedies: &[Remedy]) -> Vec<ReservedOption> {
 /// calling machine's own environment, not on the log, so it isn't a
 /// pure question `manifest`+`events` alone can answer). Those pauses
 /// have no menu to reconstruct; the caller keeps its existing reason.
+/// It also covers a decision already answered, that the resume it was handed to has not
+/// acted on yet.
 ///
 /// The `NodeId` alongside the object is the node the decision belongs
 /// to — `resolve_gate` needs it to record `gate_waiting`/`gate_resolved`
@@ -190,7 +192,7 @@ pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<NodeId> 
     }
 }
 
-/// The menu of a decision that reads no document: a node's re-routes
+/// The menu of a decision that reads no document: a node's reroutes
 /// exhausted, or a failure to decide on.
 fn menu_of(
     manifest: &Manifest,
@@ -235,6 +237,10 @@ fn current_decision(
     mode_name: &ModeName,
     protected: Arc<Protected>,
 ) -> Option<Decision> {
+    // What has its answer is on offer to nobody, and every surface reads it here.
+    if state.answer_awaits_its_resume() {
+        return None;
+    }
     let decision = schedule::decide(
         &manifest.workflow,
         state,

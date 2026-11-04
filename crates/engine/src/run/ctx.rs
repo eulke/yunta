@@ -47,7 +47,7 @@ pub(crate) struct RunCtx<'a> {
     /// the next.
     pub pool: Arc<crate::worktree::CheckoutPool>,
     /// The one surface every escalation goes through:
-    /// exhausted re-routes and scope-expansion `ask` alike — on the ctx
+    /// exhausted reroutes and scope-expansion `ask` alike — on the ctx
     /// so the deep execution paths (loop_exec) reach it without threading
     /// one more parameter through every layer.
     pub human_interaction: &'a dyn HumanInteraction,

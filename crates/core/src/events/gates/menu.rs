@@ -14,7 +14,7 @@ use crate::{NodeId, RunId};
 pub enum Menu {
     /// A gate an author declared.
     Gate(AuthorGate),
-    /// A node's failure and the remedies it offers, or the re-route it exhausted.
+    /// A node's failure and the remedies it offers, or the reroute it exhausted.
     Failure(Box<FailureMenu>),
     /// A departure from the plan a task's session declared.
     Departure(Box<DepartureMenu>),

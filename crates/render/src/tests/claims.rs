@@ -1,5 +1,5 @@
 //! The words of an escalation's claim: an engine claim is written from its
-//! node, the assignee it names and the re-route it closes, and a written
+//! node, the assignee it names and the reroute it closes, and a written
 //! claim is kept.
 
 use yunta_core::events::{Claim, ExhaustedReroute, Failure, FailureMenu};
@@ -7,7 +7,7 @@ use yunta_core::{NodeId, RunId, TaskId};
 
 use crate::claim::sentence;
 
-/// A failure menu whose re-routes to `fix-lint` are used up after `max_reroutes`.
+/// A failure menu whose reroutes to `fix-lint` are used up after `max_reroutes`.
 fn exhausted(max_reroutes: u32) -> FailureMenu {
     FailureMenu {
         attempt: max_reroutes + 1,
@@ -47,15 +47,15 @@ fn a_node_whose_re_routes_are_used_up_names_the_route_it_closes() {
     };
     assert_eq!(
         sentence(&claim, Some(&exhausted(1))),
-        "node `lint` failed and its 1 re-route to `fix-lint` is exhausted"
+        "node `lint` failed and its 1 reroute to `fix-lint` is exhausted"
     );
     assert_eq!(
         sentence(&claim, Some(&exhausted(2))),
-        "node `lint` failed and its 2 re-routes to `fix-lint` are exhausted"
+        "node `lint` failed and its 2 reroutes to `fix-lint` are exhausted"
     );
     assert_eq!(
         sentence(&claim, Some(&exhausted(0))),
-        "node `lint` failed and its 0 re-routes to `fix-lint` are exhausted"
+        "node `lint` failed and its 0 reroutes to `fix-lint` are exhausted"
     );
 }
 

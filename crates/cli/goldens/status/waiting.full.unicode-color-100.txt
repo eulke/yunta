@@ -17,3 +17,4 @@
 ␛[2mnext␛[0m
   ␛[1myunta resume 7E5PH4␛[0m   ␛[2mwaits for the reset, then drives on␛[0m
   ␛[1myunta close 7E5PH4 ␛[0m   ␛[2mcloses it for good␛[0m
+  ␛[1myunta open 7E5PH4  ␛[0m   ␛[2mthe whole page, in a browser␛[0m

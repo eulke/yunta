@@ -27,7 +27,7 @@
 //!
 //! **Rework rate** is tokens spent on attempts beyond the first — a
 //! node's `attempt` field (`NodeStartedPayload`) already distinguishes a
-//! first try from a retry or a re-route's correction attempt, so no new
+//! first try from a retry or a reroute's correction attempt, so no new
 //! bookkeeping is needed to tell them apart.
 //!
 //! **Blocked wall-clock** (the "blocked fraction" a workflow author

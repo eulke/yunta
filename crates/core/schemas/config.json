@@ -329,7 +329,7 @@
           "minimum": 0
         },
         "on_failure": {
-          "description": "What a failed node without its own `on_failure:` re-route does\nto the run. Absent is `pause`, the schema's own default.",
+          "description": "What a failed node without its own `on_failure:` reroute does\nto the run. Absent is `pause`, the schema's own default.",
           "anyOf": [
             {
               "$ref": "#/$defs/DefaultOnFailure"

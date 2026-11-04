@@ -42,7 +42,7 @@ pub enum PauseReason {
     ExternalGate { url: String },
     /// A resume found nodes still running whose fate it cannot tell.
     UncertainOrphans { nodes: Vec<NodeId> },
-    /// A node failed and nothing re-routed it.
+    /// A node failed and nothing rerouted it.
     NodeFailed { node: NodeId, failure: Failure },
     /// The account's limit resets at `at`; the run resumes detached then.
     AwaitingReset { node: NodeId, at: DateTime<Utc> },

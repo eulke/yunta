@@ -215,7 +215,7 @@ fn field() -> Vec<RunRow> {
         ..row(OLDEST, Group::NeedsYou, 32 * 60)
     };
     let parked = RunRow {
-        said: "node `lint` failed and its 0 re-routes to `fix-lint` are exhausted".to_string(),
+        said: "node `lint` failed and its 0 reroutes to `fix-lint` are exhausted".to_string(),
         ..row(TIED_A, Group::NeedsYou, 22 * 86_400)
     };
     let stopped = RunRow {

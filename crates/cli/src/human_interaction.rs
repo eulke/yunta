@@ -50,23 +50,28 @@ pub struct ConsoleInteraction {
     /// The ambient environment the answers are attributed by: a copy of
     /// the invocation's, so a prompt never reads the process again.
     env: Env,
+    /// Whether the run's own surface says what was answered, and by whom. Under `--quiet` it
+    /// does not, so the prompt that took the answer says it.
+    chronicled: bool,
 }
 
 impl ConsoleInteraction {
     /// The surface for a run drawn under `curtain`, saying what it has
     /// to say through `diagnostics`, stopped by `cancel`, and attributing
-    /// what a person answers by `env`.
+    /// what a person answers by `env`, and whether the run's surface says what it was.
     pub fn new(
         curtain: Curtain,
         diagnostics: Diagnostics,
         cancel: CancellationToken,
         env: Env,
+        chronicled: bool,
     ) -> Self {
         Self {
             curtain,
             diagnostics,
             cancel,
             env,
+            chronicled,
         }
     }
 
@@ -81,7 +86,9 @@ impl ConsoleInteraction {
         T: Send + 'static,
         P: FnOnce(&Console) -> Answered<T> + Send + 'static,
     {
-        let console = Console::open(&self.diagnostics, Escape::Parks).await?;
+        let console = Console::open(&self.diagnostics, Escape::Parks)
+            .await?
+            .chronicled_by_the_run(self.chronicled);
         let stop = console.stopper();
         self.curtain.lower().await;
         let _turn = Turn(&self.curtain);

@@ -253,9 +253,9 @@ fn depends_on_cycle_is_reported() {
 
 #[test]
 fn on_failure_goto_never_counts_as_a_depends_on_cycle() {
-    // lint depends_on implement; on failure it re-routes to fix-lint,
+    // lint depends_on implement; on failure it reroutes to fix-lint,
     // which itself depends_on lint. That is a cycle if goto edges were
-    // folded into depends_on — but re-route edges are a
+    // folded into depends_on — but reroute edges are a
     // separate set that never relaxes depends_on's acyclicity, so this
     // must check clean.
     let mut lint = bash("lint", "cargo clippy", &["implement"]);

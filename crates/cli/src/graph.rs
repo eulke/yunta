@@ -1,6 +1,6 @@
 //! `yunta graph <workflow> | --run <id> [--format mermaid|dot]`: pure
 //! derivation of the DAG — `depends_on` edges, `on_failure.goto`
-//! re-route edges visually differentiated (dashed) from them, each
+//! reroute edges visually differentiated (dashed) from them, each
 //! `parallel` group drawn with its children inside it, and, given
 //! `--run`, every node annotated with the state that run's event log
 //! derives for it (`yunta_engine::derive`). No agent involved in

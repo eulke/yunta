@@ -69,7 +69,7 @@ fn only_run(home: &Path) -> String {
     handle(&run.file_name().to_string_lossy()).to_string()
 }
 
-/// A node whose re-routes are exhausted the moment it fails: the run
+/// A node whose reroutes are exhausted the moment it fails: the run
 /// parks on a decision whose menu is rebuildable from the log alone.
 const EXHAUSTED: &str = r#"
 name: hopeless
@@ -929,7 +929,7 @@ fn a_failed_bash_node_leaves_its_tail_above_the_region() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), COMPILER);
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    // A node with nowhere to re-route to asks what to do; Escape parks
+    // A node with nowhere to reroute to asks what to do; Escape parks
     // the run.
     terminal.wait_on_screen("▸ retry", "the failure never asked what to do next");
     terminal.keys("\x1b");

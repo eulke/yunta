@@ -193,7 +193,10 @@ impl RunPage<'_> {
                 yunta_engine::run_branch(self.run_id),
                 self.paths.base_branch,
             ),
-            Isolation::None => format!("{}, in this checkout at {tree}", self.paths.base_branch),
+            Isolation::None => match tree.as_str() {
+                "." => format!("{}, in this checkout", self.paths.base_branch),
+                _ => format!("{}, in the checkout at {tree}", self.paths.base_branch),
+            },
         }
     }
 

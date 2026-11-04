@@ -2,7 +2,7 @@
 //!
 //! Two shapes reach a person, and they differ in kind. Almost every
 //! blocking decision the product has is one of them — an internal gate,
-//! an exhausted re-route, a promotion, an external gate with no
+//! an exhausted reroute, a promotion, an external gate with no
 //! reachable forge, a scope expansion, a budget cap, a loop cap — and
 //! all of them arrive as the same object: a summary, the evidence the
 //! engine attached to it, and options that each declare what they trade
@@ -188,6 +188,9 @@ pub(crate) struct Console {
     /// Whether a prompt on this terminal is on its other screen, for the same reason:
     /// one way back for one way there.
     alternate: Arc<AtomicBool>,
+    /// Whether the run this console asks for says what was answered and by whom, in its own
+    /// history. Nobody else does at `resolve-gate` or under `--quiet`, where the console says it.
+    chronicled: bool,
     /// Told by whoever stopped waiting on a prompt: the prompt hears it
     /// within a tick of its read, takes what it drew off the screen and
     /// hands the terminal back, before anything else is drawn.
@@ -252,6 +255,7 @@ impl Console {
             mode: handed_mode(diagnostics).await,
             hidden: Arc::new(AtomicBool::new(false)),
             alternate: Arc::new(AtomicBool::new(false)),
+            chronicled: false,
             stopped: Arc::new(AtomicBool::new(false)),
         };
         *prompted_on() = Some(console.clone());
@@ -264,9 +268,23 @@ impl Console {
         self.escape
     }
 
+    /// This console, for a run that does or does not say what was answered on it.
+    pub(crate) fn chronicled_by_the_run(mut self, chronicled: bool) -> Self {
+        self.chronicled = chronicled;
+        self
+    }
+
     /// One line, drawn as it is.
     pub(crate) fn say(&self, line: &str) -> std::io::Result<()> {
         self.term.write_line(line)
+    }
+
+    /// Says `line` unless the run says the same thing in its own history a moment later.
+    pub(crate) fn say_unless_chronicled(&self, line: &str) -> std::io::Result<()> {
+        match self.chronicled {
+            true => Ok(()),
+            false => self.say(line),
+        }
     }
 
     /// The terminal the prompt libraries draw their own blocks on.
@@ -409,10 +427,12 @@ async fn handed_mode(diagnostics: &Diagnostics) -> Option<Termios> {
 /// Nothing at a console prompt authenticates who is typing, so what the
 /// log gets is the shell's own ambient identity, marked unverified.
 /// Saying so at the moment it is recorded is what keeps an unsigned
-/// decision from reading like a signed one.
+/// decision from reading like a signed one. A run's own history says it
+/// in the identity it records, marked `unverified:`, so a console whose
+/// run keeps one leaves it to that.
 fn attributed(console: &Console, env: &Env) -> std::io::Result<Responder> {
     let responder = crate::identity::responder(None, env.user.as_deref());
-    console.say(&format!(
+    console.say_unless_chronicled(&format!(
         "attributed to `{responder}`: unsigned, nothing here authenticates who typed"
     ))?;
     Ok(responder)
@@ -432,6 +452,7 @@ mod tests {
             mode: None,
             hidden: Arc::new(AtomicBool::new(false)),
             alternate: Arc::new(AtomicBool::new(false)),
+            chronicled: false,
             stopped: Arc::new(AtomicBool::new(false)),
         }
     }

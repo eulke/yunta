@@ -20,3 +20,4 @@
 next
   yunta resume 7E5PH4   waits for the reset, then drives on
   yunta close 7E5PH4    closes it for good
+  yunta open 7E5PH4     the whole page, in a browser

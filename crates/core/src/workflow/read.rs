@@ -69,7 +69,7 @@ pub const RULES: &[crate::diagnostic::Rule] = &[
     crate::diagnostic::Rule {
         code: RuleCode::IncoherentOptional,
         demand: "`optional: true` is declared on a top-level node, and no node a run keeps \
-                 re-routes to an optional node or reads from one, except the node only an \
+                 reroutes to an optional node or reads from one, except the node only an \
                  optional one leads to, which goes with it",
     },
 ];
@@ -352,7 +352,7 @@ fn unlisted_or_invariant(
 }
 
 /// What a mode breaks by cutting a link a node it keeps has: a
-/// re-route, or a read, whose target the mode leaves out.
+/// reroute, or a read, whose target the mode leaves out.
 fn cut_links(
     workflow: &Workflow,
     mode: &ModeName,
@@ -401,7 +401,7 @@ fn cut_links(
     broken
 }
 
-/// Where a node can send control: its re-route, and every option of a
+/// Where a node can send control: its reroute, and every option of a
 /// gate. Both are the same class of reference, so both are read here.
 fn reroute_targets(node: &Node) -> Vec<(&'static str, &NodeId)> {
     let mut targets = Vec::new();

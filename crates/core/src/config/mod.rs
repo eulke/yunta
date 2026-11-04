@@ -279,7 +279,7 @@ impl ConfigLayer {
     }
 
     /// `defaults.on_failure`, with the schema's own default (`pause`)
-    /// applied — what a failed node with no `on_failure:` re-route of its
+    /// applied — what a failed node with no `on_failure:` reroute of its
     /// own does to the run: `pause` freezes it resumable, `abort` closes
     /// it failed at once, `continue` skips the failed node's dependents
     /// and closes failed once the rest of the graph has run.

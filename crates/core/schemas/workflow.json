@@ -421,7 +421,7 @@
       "type": "object",
       "properties": {
         "on_failure": {
-          "description": "Distinct from a node's own `on_failure.goto` re-routing — a hook\nonly ever fails or warns, never re-routes.",
+          "description": "Distinct from a node's own `on_failure.goto` rerouting — a hook\nonly ever fails or warns, never reroutes.",
           "$ref": "#/$defs/HookFailurePolicy"
         },
         "run": {
@@ -1213,7 +1213,7 @@
           ]
         },
         {
-          "description": "A human decision resolved outside this process — v1's\nonly shape is `external: {kind: pull_request, ...}`: the engine\ndelegates the multi-person substrate (identity, permissions,\nnotifications) to the team's forge instead of building a serve\nmode early. With `external: None` this is an **internal gate**\n— the shape the reference workflows' own `approve-plan`/\n`ship` use and the mode-coherence rule requiring every mode to\ninclude a gate option: resolved through `HumanInteraction`\n(console today, a richer resolution surface later) with the\ndeclared `options`, and `on:` mapping an option to an\n`on_failure.goto`-style re-route.",
+          "description": "A human decision resolved outside this process — v1's\nonly shape is `external: {kind: pull_request, ...}`: the engine\ndelegates the multi-person substrate (identity, permissions,\nnotifications) to the team's forge instead of building a serve\nmode early. With `external: None` this is an **internal gate**\n— the shape the reference workflows' own `approve-plan`/\n`ship` use and the mode-coherence rule requiring every mode to\ninclude a gate option: resolved through `HumanInteraction`\n(console today, a richer resolution surface later) with the\ndeclared `options`, and `on:` mapping an option to an\n`on_failure.goto`-style reroute.",
           "type": "object",
           "properties": {
             "assignee": {
@@ -1242,7 +1242,7 @@
               ]
             },
             "on": {
-              "description": "Option → re-route target (`on: { adjust: plan }`): choosing\na mapped option re-routes exactly like `on_failure.goto`\n— the target and its subgraph complete, then the\ngate returns to ready and asks again. Unbounded on purpose:\neach lap is human-driven, not an automatic cycle\n`max_reroutes` exists to cap. An unmapped option resolves\nthe gate and the DAG continues.",
+              "description": "Option → reroute target (`on: { adjust: plan }`): choosing\na mapped option reroutes exactly like `on_failure.goto`\n— the target and its subgraph complete, then the\ngate returns to ready and asks again. Unbounded on purpose:\neach lap is human-driven, not an automatic cycle\n`max_reroutes` exists to cap. An unmapped option resolves\nthe gate and the DAG continues.",
               "type": "object",
               "additionalProperties": {
                 "$ref": "#/$defs/NodeId"
@@ -1418,7 +1418,7 @@
       ]
     },
     "OnFailure": {
-      "description": "`on_failure: {goto, max_reroutes}` — node-level re-routing.\n`max_reroutes` is mandatory: a re-route without an explicit cap\nis how a correction cycle turns infinite, so the schema refuses it.\nDistinct from a hook's own `on_failure: fail|warn`.",
+      "description": "`on_failure: {goto, max_reroutes}` — node-level rerouting.\n`max_reroutes` is mandatory: a reroute without an explicit cap\nis how a correction cycle turns infinite, so the schema refuses it.\nDistinct from a hook's own `on_failure: fail|warn`.",
       "type": "object",
       "properties": {
         "goto": {

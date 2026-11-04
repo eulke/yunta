@@ -269,13 +269,13 @@ pub struct EnvironmentDrift {
     pub reordered: bool,
 }
 
-/// Where a run's promotion leads: the node that exhausted its re-routes,
+/// Where a run's promotion leads: the node that exhausted its reroutes,
 /// and the node it was routed to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PromotionCause {
     pub node: NodeId,
     pub goto: NodeId,
-    /// The failure that exhausted the node's re-routes, when a failure
+    /// The failure that exhausted the node's reroutes, when a failure
     /// asked for the promotion. Absent on a promotion the log wrote
     /// without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]

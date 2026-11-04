@@ -17,3 +17,6 @@
   ␛[2mslowest     ␛[0m plan 12s · lint 12s
   ␛[2mbranch      ␛[0m yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
                ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+␛[2mnext␛[0m
+  ␛[1myunta open 7E5PH4␛[0m   ␛[2mthe whole page, in a browser␛[0m

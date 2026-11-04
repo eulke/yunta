@@ -1,6 +1,6 @@
 ? fragua (quick) ; needs you ; after 7m41s ; exit 3                       7E5PH4
 ================================================================================
-  node `lint` failed and its 0 re-routes to `fix-lint` are exhausted.
+  node `lint` failed and its 0 reroutes to `fix-lint` are exhausted.
 
   ! lint ; exit 101
     | error[E0425]: cannot find value `x` in this scope
@@ -15,7 +15,7 @@
                ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
 
   ? decision on node `lint`
-  | retry: Re-route to `fix-lint` once more
+  | retry: Reroute to `fix-lint` once more
   |   Uses one extra correction attempt beyond the declared max_reroutes (0);
   |   escalates again if `fix-lint` doesn't fix it
   |   yunta resolve-gate 7E5PH4 retry

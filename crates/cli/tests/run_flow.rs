@@ -2918,7 +2918,7 @@ nodes:
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
         stdout(&run).contains("needs you"),
-        "expected the exhausted re-route to pause the run, got: {}\nstderr: {}",
+        "expected the exhausted reroute to pause the run, got: {}\nstderr: {}",
         stdout(&run),
         String::from_utf8_lossy(&run.stderr)
     );
@@ -3393,7 +3393,7 @@ fn every_command_that_opens_a_run_refuses_a_missing_one_with_the_same_sentence()
 }
 
 /// A workflow with somewhere later to go, whose only node exhausts its
-/// re-routes at once — so the decision it parks on is the one that
+/// reroutes at once — so the decision it parks on is the one that
 /// offers `promote`.
 const PROMOTABLE: &str = r#"
 name: promotable

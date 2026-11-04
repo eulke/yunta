@@ -13,6 +13,7 @@ use surco::prose;
 use surco::text::{counted, ordinal};
 use surco::words::{Standing, WAITED_ON_YOU};
 use yunta_core::events::TaskStatus;
+use yunta_core::shown::ShownContent;
 use yunta_core::NodeId;
 use yunta_engine::{NodeFrame, NodeStanding, NodeState, RunState};
 use yunta_render::state::NodeDisplay;
@@ -112,7 +113,8 @@ impl RunPage<'_> {
         });
         [
             said,
-            handed(self.state, &node.id),
+            handed(self.state, &node.id)
+                .filter(|_| !self.decision_says_how_its_plan_got_accepted()),
             attempts(node),
             rerouted,
             rounds(node),
@@ -123,6 +125,21 @@ impl RunPage<'_> {
         .chain(ahead(node))
         .collect::<Vec<_>>()
         .join(&format!(" {} ", glyphs.sep()))
+    }
+
+    /// Whether the decision this page ends on says how its plan got accepted, with the rules
+    /// it broke: the plan's row then leaves that to it.
+    fn decision_says_how_its_plan_got_accepted(&self) -> bool {
+        self.decision
+            .iter()
+            .flat_map(|decided| &decided.shown)
+            .any(|document| {
+                matches!(
+                    &document.content,
+                    ShownContent::Tasks(review)
+                        if review.handed_over.as_ref().is_some_and(|handed| handed.refusals > 0)
+                )
+            })
     }
 
     /// The last call of a run tool each node's attempt made that failed:

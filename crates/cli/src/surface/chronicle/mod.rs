@@ -113,6 +113,22 @@ fn of_its_subject(happening: &Happening) -> bool {
     }
 }
 
+/// Whether this moment says anything of its own. A node a person's choice sends back records
+/// a failure on the log, since that is what reroutes it, and it is no failure: the reroute
+/// that follows says where the choice sent the run, with what the person wrote.
+pub(super) fn says_anything(happening: &Happening) -> bool {
+    !matches!(
+        happening,
+        Happening::Node(node::happening::Happening::Reached {
+            state: yunta_core::events::NodeState::Failed {
+                failure: yunta_core::events::Failure::GateChose { .. },
+                ..
+            },
+            ..
+        })
+    )
+}
+
 /// Whether a terminal a person is watching keeps this above its region.
 ///
 /// What it keeps is what closed something, what asked something of a
@@ -129,7 +145,8 @@ pub(super) fn kept(happening: &Happening) -> bool {
         | Happening::Run(run::happening::Happening::HostSuspended { .. }) => true,
         Happening::Run(_) => false,
         Happening::Node(node::happening::Happening::Reached { state, .. }) => {
-            !matches!(state, yunta_core::events::NodeState::Running { .. })
+            says_anything(happening)
+                && !matches!(state, yunta_core::events::NodeState::Running { .. })
         }
         Happening::Node(node::happening::Happening::Rerouted(_)) => true,
         Happening::Node(_) => false,

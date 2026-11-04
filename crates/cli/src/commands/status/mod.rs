@@ -199,7 +199,8 @@ pub(crate) async fn page_for_a_browser(
     run_id: &RunId,
 ) -> Result<(Doc, PathBuf), CliError> {
     let reading = Reading::of(ctx, run_id).await?;
-    let page = run_page_for(ctx, run_id, &reading, (Mode::Human, Depth::Full)).await?;
+    let mut page = run_page_for(ctx, run_id, &reading, (Mode::Human, Depth::Full)).await?;
+    page.scope = Scope::Browser;
     let doc = page.document(&surco::surface::Html.look());
     let at = doc.decision_at();
     let mut blocks = doc.into_blocks();

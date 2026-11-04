@@ -92,7 +92,7 @@ async fn a_gate_that_declares_abort_pauses_the_run_when_abort_is_chosen() {
             ),
             (
                 "revise",
-                Some("re-routes there, and asks again once it completes".to_string()),
+                Some("reroutes there, and asks again once it completes".to_string()),
             ),
         ],
         "abort sits where the author put it and says what it does"
@@ -139,7 +139,7 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before()
             reason: reason @ PauseReason::Escalation(_),
         } => assert_eq!(
             yunta_render::pause::sentence(&reason),
-            "node `lint` failed and its 1 re-route to `fix-lint` is exhausted (exit 1)"
+            "node `lint` failed and its 1 reroute to `fix-lint` is exhausted (exit 1)"
         ),
         other => panic!("expected Paused, got {other:?}"),
     }

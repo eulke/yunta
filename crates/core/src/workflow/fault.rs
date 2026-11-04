@@ -227,7 +227,7 @@ fn optional_in_parallel(node: &NodeId, group: &NodeId) -> String {
 
 fn reroutes_to_optional(target: &NodeId) -> String {
     format!(
-        "re-routes to `{target}`, which is optional: a run that leaves it out would have nowhere \
+        "reroutes to `{target}`, which is optional: a run that leaves it out would have nowhere \
          to go"
     )
 }

@@ -54,7 +54,7 @@ fn a_parenthesized_plural_in_a_string_counts_and_one_in_a_comment_does_not() {
     assert!(has_parenthesized_plural(
         r#"             artifact(s) it names: {}","#
     ));
-    assert!(has_parenthesized_plural(r#"    "{} re-route(s)","#));
+    assert!(has_parenthesized_plural(r#"    "{} reroute(s)","#));
     assert!(has_parenthesized_plural(r#"    "{} child(ren) finished","#));
     assert!(!has_parenthesized_plural(r#"    "call (with care)","#));
     assert!(!has_parenthesized_plural("    // every file(s) it names"));

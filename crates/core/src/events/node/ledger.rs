@@ -81,7 +81,7 @@ impl NodeState {
     }
 }
 
-/// A re-route as `node_rerouted` recorded it, on the node it left.
+/// A reroute as `node_rerouted` recorded it, on the node it left.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reroute {
     pub to: NodeId,
@@ -96,7 +96,7 @@ pub struct Reroute {
 }
 
 impl Reroute {
-    /// The re-route `payload` records, placed by its envelope.
+    /// The reroute `payload` records, placed by its envelope.
     pub fn of(payload: &NodeReroutedPayload, meta: &EventMeta<'_>) -> Self {
         Reroute {
             to: payload.to_node.clone(),
@@ -159,7 +159,7 @@ pub struct NodeRecord {
     /// Every failure the node recorded, oldest first.
     pub failures: Vec<Failure>,
     pub reroutes: u32,
-    /// The re-routes its own `on_failure` made, which its
+    /// The reroutes its own `on_failure` made, which its
     /// `max_reroutes` counts: a person's choice that sends the run
     /// somewhere is a decision, not a retry.
     pub on_failure_reroutes: u32,
@@ -240,7 +240,7 @@ impl NodeRecord {
         })
     }
 
-    /// A `node_rerouted`: one more re-route, and the latest one kept.
+    /// A `node_rerouted`: one more reroute, and the latest one kept.
     fn rerouted(&mut self, p: &NodeReroutedPayload, meta: &EventMeta<'_>) {
         self.reroutes += 1;
         if p.origin == RerouteOrigin::OnFailure {
@@ -379,7 +379,7 @@ impl NodeLedger {
     }
 
     /// Whether `node` has a derived state: it started, closed, failed
-    /// or is waiting. A node the log only mentions — a re-route target
+    /// or is waiting. A node the log only mentions — a reroute target
     /// named by the node that left, a runner resolved ahead of time —
     /// has a record and no state, and has not run.
     pub fn has_state<Q>(&self, node: &Q) -> bool

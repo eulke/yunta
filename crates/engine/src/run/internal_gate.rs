@@ -264,7 +264,7 @@ fn aborts(option: &OptionId) -> bool {
 
 /// Resolves an internal gate: puts its escalation to the person, or
 /// takes the decision `resolve_gate` seeded onto the log while the run
-/// was parked. An option mapped in `on` re-routes exactly like
+/// was parked. An option mapped in `on` reroutes exactly like
 /// `on_failure.goto` — the gate fails, control transfers, and
 /// once the target's subgraph completes the gate asks again; an
 /// unmapped option finishes the gate with that choice as its outcome;
@@ -391,7 +391,7 @@ async fn land(
     route_back_to(ctx, node, &chosen, target, choice.free_text.as_deref()).await
 }
 
-/// A correction lap: the gate fails, and control re-routes to
+/// A correction lap: the gate fails, and control reroutes to
 /// `target`. Same shape as any other reroute; the scheduler brings the gate
 /// back to ask again once `target`'s subgraph completes.
 async fn route_back_to(
@@ -401,7 +401,7 @@ async fn route_back_to(
     target: &NodeId,
     free_text: Option<&str>,
 ) -> Result<(), RunError> {
-    // The gate's failure and the re-route's cause are the same fact: what the
+    // The gate's failure and the reroute's cause are the same fact: what the
     // person chose, where it sends the run, and the words they gave with it.
     let cause = Failure::GateChose {
         node: node.id.clone(),

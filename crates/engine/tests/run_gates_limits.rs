@@ -285,7 +285,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
 
 #[tokio::test]
 async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
-    // Re-route semantics through a human choice: `revise` re-routes to
+    // Reroute semantics through a human choice: `revise` reroutes to
     // `plan`, plan re-runs, and the gate asks AGAIN — the second answer
     // (`proceed`) lets the DAG continue.
     let bench = Bench::new();
@@ -442,7 +442,7 @@ async fn a_run_over_its_token_budget_pauses_with_reason_budget_when_headless() {
         other => panic!("an exhausted budget with no surface must pause, got {other:?}"),
     }
     // The corrective node never started — the cap is checked before the
-    // re-route hands it work.
+    // reroute hands it work.
     assert!(matches!(
         state.nodes.state("first"),
         Some(NodeState::Failed { .. })

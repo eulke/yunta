@@ -16,7 +16,7 @@
 //! or by the page above it when the page quotes it.
 //!
 //! **Two pauses reconstruct a menu, and only two**: a node whose
-//! re-routes are exhausted, and an unresolved internal gate. A budget
+//! reroutes are exhausted, and an unresolved internal gate. A budget
 //! cap, a scope expansion in ask mode, an unanswered questions artifact
 //! and an external gate with no reachable forge park a run with no menu
 //! to rebuild — the forge one because whether a forge answers depends
@@ -102,7 +102,7 @@ fn account(escalation: &GateWaitingPayload, beside: Beside, shown: &[ShownDocume
 }
 
 /// The claim of a decision in the words a reader sees: what the escalation
-/// says happened, with the re-route a failed node has used up named in it.
+/// says happened, with the reroute a failed node has used up named in it.
 pub(crate) fn claim_words(escalation: &GateWaitingPayload) -> String {
     yunta_render::claim::sentence(escalation.summary(), escalation.failure())
 }
@@ -138,7 +138,7 @@ mod tests {
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
     const NODE: NodeId = NodeId::from_static("lint");
 
-    /// A failed node whose re-route to `fix-lint` is used up: its menu offers
+    /// A failed node whose reroute to `fix-lint` is used up: its menu offers
     /// the retry through `fix-lint` once more, and the abort every menu ends with.
     fn escalation() -> GateWaitingPayload {
         Escalation::new(

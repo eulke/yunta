@@ -143,7 +143,7 @@ fn advice(findings: &yunta_engine::VerificationFindings) -> Checklist {
             Found::Caution,
             format!("node `{}`", r.node),
             format!(
-                "its re-route to `{}` never fired across {}: the flow before it is more \
+                "its reroute to `{}` never fired across {}: the flow before it is more \
                  reliable than expected",
                 r.goto,
                 runs(r.sample_count)
