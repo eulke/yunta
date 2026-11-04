@@ -45,14 +45,11 @@ fn tense_corpus(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The files an agent reads as this repository's own instructions and
-/// knowledge: `AGENTS.md` and `CLAUDE.md` at the root, and the markdown under
-/// `.agents/` but its skills, which a CLI loads as configuration.
+/// knowledge: `AGENTS.md` at the root, and the markdown under `.agents/` but
+/// its skills, which a CLI loads as configuration.
 fn agent_docs(root: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = ["AGENTS.md", "CLAUDE.md"]
-        .iter()
-        .map(|name| root.join(name))
-        .filter(|path| path.is_file())
-        .collect();
+    let map = root.join("AGENTS.md");
+    let mut out: Vec<PathBuf> = map.is_file().then_some(map).into_iter().collect();
     let skills = root.join(".agents/skills");
     collect(&root.join(".agents"), &mut out, &|path| {
         path.extension().is_some_and(|ext| ext == "md") && !path.starts_with(&skills)

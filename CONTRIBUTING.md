@@ -1,8 +1,11 @@
 # Contributing to Yunta
 
 [AGENTS.md](AGENTS.md) is the map a coding agent reads before changing
-Yunta, with the engineering principles a contributor shares. This page lists
-local commands and contribution logistics.
+Yunta, with the engineering principles a contributor shares. Codex and Claude
+Code (2.1.277 or later) read it on their own. A `CLAUDE.md` or `CLAUDE.local.md`
+of your own, here or in a directory above, makes Claude Code read that instead,
+unless its **Project instructions** setting is `claude-md-and-agents-md`. This
+page lists local commands and contribution logistics.
 
 ## Building and testing
 

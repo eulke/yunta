@@ -62,8 +62,8 @@ nothing the code, its tests and its `//!` already say.
 
 Rewrite in place and delete what became false; git keeps the history. Personal memory and plan files hold no
 rule another agent needs. If a sandbox refuses a write under `.agents/`, keep the entry in your report
-(`Knowledge: <file>, refused`); never move it to another home. In a Yunta run, `AGENTS.md` and `CLAUDE.md`
-change only when a person granted them to your task, an `.agents/*.md` file only when your task's scope names it,
+(`Knowledge: <file>, refused`); never move it to another home. In a Yunta run, `AGENTS.md` changes only
+when a person granted it to your task, an `.agents/*.md` file only when your task's scope names it,
 and nothing under `.agents/skills/`.
 
 ## Commands

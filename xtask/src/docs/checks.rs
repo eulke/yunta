@@ -685,16 +685,17 @@ fn no_design_records(repo: &Repo) -> Vec<String> {
         .collect()
 }
 
-/// `CLAUDE.md` is the one line that loads the map, and the layer a run distils
-/// knowledge into stays out of the tree.
+/// `AGENTS.md` is the one map, and the layer a run distils knowledge into stays
+/// out of the tree.
 fn instructions(repo: &Repo) -> Vec<String> {
-    let mut problems = Vec::new();
-    if repo.read_if_there("CLAUDE.md").as_deref() != Some("@AGENTS.md\n") {
-        problems.push(
-            "CLAUDE.md: is not the one line `@AGENTS.md`; Claude Code loads the map through it, and anything else beside it is a second map"
-                .to_string(),
-        );
-    }
+    let mut problems: Vec<String> = repo
+        .tracked()
+        .iter()
+        .filter(|path| displaces_the_map(path))
+        .map(|path| {
+            format!("{path}: Claude Code reads it instead of `AGENTS.md`; say it in the map")
+        })
+        .collect();
     let ignores_knowledge = repo
         .read_if_there(".gitignore")
         .is_some_and(|text| text.lines().any(|line| line.trim() == "/.yunta/knowledge/"));
@@ -704,6 +705,13 @@ fn instructions(repo: &Repo) -> Vec<String> {
         );
     }
     problems
+}
+
+/// Whether Claude Code reads a file at `path` instead of `AGENTS.md`, which it
+/// otherwise reads on its own.
+fn displaces_the_map(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name == "CLAUDE.md" || name == "CLAUDE.local.md"
 }
 
 /// The leading `//!` lines of a Rust file, their markers taken off.
@@ -758,6 +766,16 @@ fn resolve(doc: &str, target: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_claude_code_reads_instead_of_the_map_is_named_at_any_depth() {
+        assert!(displaces_the_map("CLAUDE.md"));
+        assert!(displaces_the_map(".claude/CLAUDE.md"));
+        assert!(displaces_the_map("crates/core/CLAUDE.local.md"));
+        assert!(!displaces_the_map("AGENTS.md"));
+        assert!(!displaces_the_map("docs/claude.md"));
+        assert!(!displaces_the_map("NOT-CLAUDE.md"));
+    }
 
     #[test]
     fn a_term_counts_in_its_plural_or_its_singular() {
