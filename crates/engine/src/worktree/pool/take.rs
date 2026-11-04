@@ -37,14 +37,17 @@ impl CheckoutPool {
             .await?;
         let ordered = nearest_first(ranked, target, supervision).await?;
         for candidate in ordered {
+            let between = self.walking.between_records().await;
             let held = slot::hold(
                 &home,
                 candidate.slot.number,
                 Contention::Refuse,
                 self.holder.as_deref(),
                 supervision,
-            );
-            let Some(lease) = held.await? else {
+            )
+            .await;
+            drop(between);
+            let Some(lease) = held? else {
                 continue;
             };
             let (number, path) = (candidate.slot.number, candidate.slot.path);
