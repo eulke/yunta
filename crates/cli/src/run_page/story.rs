@@ -98,7 +98,8 @@ impl RunPage<'_> {
                 .as_ref()
                 .map(|said| prose::first_sentence(said)),
         };
-        let waited = (!person && !node.people.is_zero()).then(|| match node.person_rounds() {
+        // A wait under a second would read as `0s`, which says nothing.
+        let waited = (!person && node.people.as_secs() > 0).then(|| match node.person_rounds() {
             0 | 1 => format!("{WAITED_ON_YOU} {}", duration(node.people)),
             rounds => format!(
                 "{WAITED_ON_YOU} {} over {rounds} rounds of questions",

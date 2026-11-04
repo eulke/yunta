@@ -430,6 +430,19 @@ fn row_of(drawn: &str, id: &str) -> String {
         .to_string()
 }
 
+/// A wait under a second would read as `0s`, which says nothing.
+#[test]
+fn a_wait_under_a_second_is_not_said() {
+    let nodes = vec![NodeFrame {
+        people: Duration::from_millis(400),
+        ..node_frame(&NodeId::from_static("ask"), finished())
+    }];
+    let drawn = draw(&trace_page(nodes), &Look::plain());
+    let ask = row_of(&drawn, "ask");
+    assert!(ask.contains("finished"), "{drawn}");
+    assert!(!ask.contains("waited on you"), "{ask}");
+}
+
 /// The trace says beside each node what the run did with it, each fact
 /// once: a gate's round, its reroutes and attempts, a wait on a person,
 /// and what a node not yet run will do, where its failure goes said by
