@@ -302,6 +302,15 @@ nodes:
     run_id
 }
 
+/// Whether the engine's registry at `path` names the process group `group`.
+fn registry_names(path: &Path, group: Pid) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|doc| serde_json::from_str::<serde_json::Value>(&doc).ok())
+        .and_then(|doc| doc["process_groups"].as_array().cloned())
+        .is_some_and(|groups| groups.contains(&serde_json::json!(group.as_i32())))
+}
+
 #[test]
 fn yunta_cancel_cleans_up_after_a_crashed_engine() {
     let root = tempfile::tempdir().unwrap();
@@ -331,12 +340,20 @@ nodes:
     let run_id = only_run_id(&home);
     let child_pid = parse_pid(&std::fs::read_to_string(repo.join("child.pid")).unwrap());
     let mut child_group = ProcessGroupCleanup::new(child_pid);
+    let engine_json = home.join("runs").join(&run_id).join("scratch/engine.json");
+
+    // A child starts before the engine writes its group down, and a crash
+    // between the two leaves nothing to clean up from: this crash comes once
+    // the group is written.
+    wait_until(
+        || registry_names(&engine_json, child_pid),
+        || "the engine never registered the child's process group".into(),
+    );
 
     // Simulated crash: SIGKILL gives the engine no chance to clean up —
     // engine.json survives with the orphaned process group in it.
     signal_process(pid_of(&yunta), Signal::SIGKILL).expect("yunta is alive to be killed");
     yunta.wait_until_exit().expect("the killed engine exits");
-    let engine_json = home.join("runs").join(&run_id).join("scratch/engine.json");
     assert!(
         engine_json.exists(),
         "the crash must leave engine.json behind"
