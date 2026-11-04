@@ -9,13 +9,15 @@
 //! field by field rather than as one giant string so a fixture tweak
 //! doesn't need to reprint an entire golden blob.
 
-use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::diagnostic::{ArtifactCode, DiagnosticCode, FileCode, ParseCode, RuleCode};
-use yunta_core::events::{
-    ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, NodeStartedPayload,
-    RunFinishedPayload, RunMetrics, StoredEvent, TerminalState, TokenUsage,
+use surco::golden::assert_golden;
+use yunta_core::diagnostic::{
+    ArtifactCode, ArtifactFailure, DiagnosticCode, FileCode, ParseCode, RuleCode,
 };
-use yunta_core::events::{NodeEvent, RunEvent};
+use yunta_core::events::{
+    ArtifactId, ChangesCountedPayload, EventBody, EventPayload, Failure, NodeEvent,
+    NodeFailedPayload, NodeStartedPayload, RunEvent, RunFinishedPayload, RunMetrics, StoredEvent,
+    TerminalState, TokenUsage,
+};
 use yunta_core::step::NextStep;
 use yunta_core::{ArtifactKind, NodeId, RunId};
 use yunta_engine::{
@@ -24,8 +26,29 @@ use yunta_engine::{
     RunnerUsage, ScopeSummary,
 };
 use yunta_testkit::Bench;
-use yunta_testkit_core::golden::assert_golden;
 use yunta_testkit_core::FixedClock;
+
+#[path = "receipt/from_a_log.rs"]
+mod from_a_log;
+
+#[path = "receipt/artifact_problems.rs"]
+mod artifact_problems;
+
+// --- derivation: build_receipt over a real run's own log --------------------
+
+const CONFIG: &str = r#"
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+  reviewer:
+    - { adapter: mock, model: mock-model }
+  reviewer-alt:
+    - { adapter: mock, model: mock-model }
+baseline:
+  suite: "true"
+"#;
 
 // --- formatters: golden output over a hand-built Receipt --------------------
 
@@ -69,6 +92,13 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
             files_touched: 4,
             violations: Vec::new(),
         },
+        changed: Some(ChangesCountedPayload {
+            tree: "deadbeef".into(),
+            files: 9,
+            added: 412,
+            removed: 87,
+            largest: Vec::new(),
+        }),
         runners: vec![
             RunnerUsage {
                 node_id: NodeId::from("review@reviewer"),
@@ -96,16 +126,17 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         unknown_kinds: Vec::new(),
         diagnostics: Vec::new(),
         failed: Vec::new(),
+        blocking_findings: 0,
     }
 }
 
 /// The receipt as a file holds it.
 fn render_receipt_markdown(receipt: &yunta_engine::Receipt) -> String {
-    use yunta_render::surface::Surface;
-    yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(
+    use surco::surface::Surface;
+    surco::surface::Markdown.draw(&yunta_render::receipt::document(
         receipt,
         &spell,
-        yunta_render::Glyphs::Unicode,
+        surco::glyphs::Glyphs::Unicode,
     ))
 }
 
@@ -248,445 +279,4 @@ fn a_receipt_over_a_red_measurement_certifies_no_comparison() {
         "{markdown}"
     );
     assert!(!markdown.contains("regressions across"), "{markdown}");
-}
-
-// --- derivation: build_receipt over a real run's own log --------------------
-
-const CONFIG: &str = r#"
-runners:
-  planner:
-    - { adapter: mock, model: mock-model }
-  executor:
-    - { adapter: mock, model: mock-model }
-  reviewer:
-    - { adapter: mock, model: mock-model }
-  reviewer-alt:
-    - { adapter: mock, model: mock-model }
-baseline:
-  suite: "true"
-"#;
-
-/// Exercises every receipt section in one run: a task with two
-/// criteria (`plan`/`implement`), two baseline comparisons
-/// (`compare-early`/`compare`), a re-route (`lint` fails once,
-/// `fix-lint` corrects it), and a fan-out review (`runners: [reviewer,
-/// reviewer-alt]`) whose effects stay inside its own declared `scope`.
-const WORKFLOW: &str = r#"
-name: receipt-fixture
-nodes:
-  - id: plan
-    kind: prompt
-    runner: planner
-    prompt: "Write the tasks document."
-    artifacts:
-      produces: [tasks]
-  - id: implement
-    kind: loop
-    runner: executor
-    depends_on: [plan]
-    until: all_tasks_complete
-    prompt: "implement your task"
-  - id: compare-early
-    kind: check
-    builtin: baseline_compare
-    depends_on: [implement]
-  - id: compare
-    kind: check
-    builtin: baseline_compare
-    depends_on: [compare-early]
-  - id: lint
-    kind: bash
-    depends_on: [compare]
-    run: "test -f fixed.txt"
-    on_failure: { goto: fix-lint, max_reroutes: 2 }
-  - id: fix-lint
-    kind: prompt
-    runner: executor
-    prompt: "fix the lint failure"
-  - id: review
-    kind: prompt
-    depends_on: [lint]
-    runners: [reviewer, reviewer-alt]
-    scope: ["notes/**", "hello.txt", "fixed.txt"]
-    prompt: "review the change"
-"#;
-
-/// The tasks document reaches the run through the run tools, so the planning
-/// session names no path at all; every other session's `path` is
-/// relative to the worktree, which is a session's own cwd.
-const FIXTURE: &str = r#"
-dialect: claude-code
-sessions:
-  - match_prompt_contains: "Write the tasks document"
-    steps:
-      - type: run_tool
-        tool: yunta_submit_tasks
-        arguments:
-          document:
-            tasks:
-              - id: T001
-                title: "Say hello"
-                scope: ["hello.txt"]
-                criteria:
-                  - cmd: "test -f hello.txt"
-    outcome: { type: completed, summary: "planned" }
-  - match_prompt_contains: "implement your task"
-    effects:
-      - { path: hello.txt, content: "hi" }
-    outcome: { type: completed, summary: "done" }
-  - match_prompt_contains: "fix the lint failure"
-    effects:
-      - { path: fixed.txt, content: "fixed" }
-    outcome: { type: completed, summary: "fixed it" }
-  - match_prompt_contains: "review the change"
-    effects:
-      - { path: notes/reviewer.md, content: "looks good" }
-    outcome: { type: completed, summary: "reviewed" }
-  - match_prompt_contains: "review the change"
-    effects:
-      - { path: notes/reviewer-alt.md, content: "also good" }
-    outcome: { type: completed, summary: "reviewed" }
-"#;
-
-/// The commands a receipt's criteria summary counts, in its order.
-fn commands(criteria: &CriteriaSummary) -> Vec<&str> {
-    criteria
-        .entries
-        .iter()
-        .map(|entry| entry.cmd.as_str())
-        .collect()
-}
-
-#[tokio::test]
-async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
-    let bench = Bench::new();
-    let RunReport { .. } = bench.run_with_config(WORKFLOW, FIXTURE, CONFIG).await;
-    let manifest = bench.manifest();
-    let events = bench.events();
-
-    let chain = EventChainStatus::Intact {
-        events: events.len(),
-    };
-    let receipt = build_receipt(&bench.run_id, &manifest, &events, chain).unwrap();
-
-    assert_eq!(receipt.terminal_state, Some(TerminalState::Done));
-
-    // T001's one criterion, and the suite the run holds every task to.
-    assert_eq!(commands(&receipt.criteria), ["test -f hello.txt", "true"]);
-    assert_eq!(receipt.criteria.green, 2);
-
-    let baseline = receipt.baseline.clone().expect("baseline_compare was used");
-    assert_eq!(baseline.suite, "true");
-    assert_eq!(
-        baseline.compared, 2,
-        "every `baseline_compare` compares against the capture the run's birth took"
-    );
-    assert_eq!(baseline.regressions, 0);
-
-    assert!(
-        receipt.scope.violations.is_empty(),
-        "every session wrote inside its declared scope: {:?}",
-        receipt.scope.violations
-    );
-    assert!(receipt.scope.files_touched > 0);
-
-    let groups = yunta_render::receipt::fan_out_groups(&receipt.runners);
-    assert_eq!(groups.len(), 1);
-    let (base, members) = &groups[0];
-    assert_eq!(base, "review");
-    assert_eq!(members.len(), 2);
-
-    assert_eq!(receipt.cost.reroutes, 1, "lint failed once, then re-routed");
-    assert!(receipt.cost.cptv.is_some(), "one task reached done");
-
-    // The formatters accept whatever build_receipt derived without
-    // panicking or needing extra data — same contract a real `pr` node
-    // relies on.
-    let markdown = render_receipt_markdown(&receipt);
-    assert!(
-        markdown.contains("by 2 independent runners"),
-        "got: {markdown}"
-    );
-    render_receipt_json(&receipt).unwrap();
-}
-
-#[tokio::test]
-async fn build_receipt_refuses_a_run_that_never_reached_run_finished() {
-    let bench = Bench::new();
-    // `lint` fails with no `on_failure` at all — the run pauses, never
-    // finishes, so there is no `run_finished` metrics to certify.
-    let workflow = r#"
-name: never-finishes
-nodes:
-  - id: broken
-    kind: bash
-    run: "false"
-"#;
-    let RunReport { .. } = bench
-        .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", CONFIG)
-        .await;
-
-    let manifest = bench.manifest();
-    let events = bench.events();
-    let err = build_receipt(
-        &bench.run_id,
-        &manifest,
-        &events,
-        EventChainStatus::Intact {
-            events: events.len(),
-        },
-    )
-    .unwrap_err();
-    assert!(matches!(err, ReceiptError::NotFinished(_)));
-    assert_eq!(
-        err.to_string(),
-        format!(
-            "run `{}` hasn't reached a terminal state yet — a receipt is only generated \
-             once a run finishes",
-            bench.run_id
-        ),
-        "the engine names the run's state; which command shows where it stands is the \
-         caller's vocabulary"
-    );
-}
-
-/// A receipt that had to read prose could only reprint it. Counting is
-/// what a diagnostic being a value buys: "how often did a document come
-/// back unreadable" becomes a number on the receipt instead of a grep
-/// over free text.
-#[test]
-fn the_receipt_counts_artifact_problems_by_their_stable_code() {
-    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
-    receipt.diagnostics = vec![
-        DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks.into()),
-            code: DiagnosticCode::Parse(ParseCode::Parse),
-            occurrences: 2,
-        },
-        DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks.into()),
-            code: DiagnosticCode::Rule(RuleCode::NoCriteria),
-            occurrences: 1,
-        },
-    ];
-    let markdown = render_receipt_markdown(&receipt);
-    assert!(
-        markdown.contains(
-            "3 artifact problems reported during the run: `parse` in the tasks document \u{d7}2, \
-             `no-criteria` in the tasks document \u{d7}1"
-        ),
-        "{markdown}"
-    );
-}
-
-/// A child the workflow names is frozen with the run, so it has to exist for
-/// the run to be born; the receipts here read only the failure they name.
-fn with_producer_child(bench: &Bench) {
-    yunta_testkit::write(
-        &bench.worktree.join(".yunta/workflows/producer.yaml"),
-        "name: producer\nnodes:\n  - { id: make, kind: bash, run: \"true\" }\n",
-    );
-}
-
-/// The receipt a run of `workflow_yaml` earns when its one node failed
-/// on `failure` and the run ended.
-///
-/// Derived from a log built here rather than from a run: a node that
-/// fails on an artifact leaves its run paused, and a receipt certifies
-/// closed work only. What is under test is the derivation from
-/// `node_failed`, and that is exactly what the log carries.
-async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
-    let bench = Bench::new();
-    with_producer_child(&bench);
-    let manifest = bench.manifest_for(workflow_yaml, CONFIG).await;
-
-    // A node fails only while it runs, so the log starts it first: a
-    // failure with no start before it breaks the log before its close.
-    let events = vec![
-        StoredEvent {
-            run_id: bench.run_id.clone(),
-            seq: 1_u64.into(),
-            timestamp: yunta_core::Clock::now(&FixedClock),
-            node_id: Some(NodeId::from(node)),
-            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(
-                NodeStartedPayload::attempt(1),
-            ))),
-        },
-        StoredEvent {
-            run_id: bench.run_id.clone(),
-            seq: 2_u64.into(),
-            timestamp: yunta_core::Clock::now(&FixedClock),
-            node_id: Some(NodeId::from(node)),
-            body: EventBody::Known(EventPayload::Node(NodeEvent::Failed(
-                NodeFailedPayload::new(failure, TokenUsage::default()),
-            ))),
-        },
-        StoredEvent {
-            run_id: bench.run_id.clone(),
-            seq: 3_u64.into(),
-            timestamp: yunta_core::Clock::now(&FixedClock),
-            node_id: None,
-            body: EventBody::Known(EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
-                terminal_state: TerminalState::Failed,
-                metrics: RunMetrics {
-                    cptv: None,
-                    tokens: TokenUsage::default(),
-                },
-                closed_by: None,
-            }))),
-        },
-    ];
-
-    build_receipt(
-        &bench.run_id,
-        &manifest,
-        &events,
-        EventChainStatus::Intact {
-            events: events.len(),
-        },
-    )
-    .unwrap()
-}
-
-/// A `kind: workflow` node declaring what its child run never produced
-/// fails on the artifact itself, and the receipt counts that like any
-/// other artifact failure — by its stable code, with no document kind,
-/// because nothing ever read a document.
-#[tokio::test]
-async fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
-    let receipt = receipt_of_failure(
-        r#"
-name: unheld-fixture
-nodes:
-  - id: compose
-    kind: workflow
-    use: producer
-    artifacts: { produces: [report.md] }
-"#,
-        "compose",
-        Failure::artifacts(vec![ArtifactFailure::Unheld {
-            run: RunId::from("run-child-1"),
-            producer: None,
-            artifact: ArtifactId::of("report.md", None),
-        }]),
-    )
-    .await;
-
-    assert_eq!(
-        receipt.diagnostics,
-        vec![DiagnosticCount {
-            kind: None,
-            code: DiagnosticCode::Artifact(ArtifactCode::Unheld),
-            occurrences: 1,
-        }],
-        "an artifact no run holds is counted by its own code, under no kind"
-    );
-    assert!(
-        render_receipt_markdown(&receipt).contains("`artifact-unheld` \u{d7}1"),
-        "{receipt:?}"
-    );
-}
-
-/// A session node that ended owing the document it declared fails on the
-/// artifact itself too: the receipt counts it by its own code, under no
-/// kind, because nothing ever read a document either.
-#[tokio::test]
-async fn the_receipt_counts_a_document_nobody_handed_over_as_an_artifact_failure() {
-    let receipt = receipt_of_failure(
-        r#"
-name: undelivered-fixture
-nodes:
-  - id: plan
-    kind: prompt
-    runner: planner
-    prompt: "Write the plan."
-    artifacts:
-      produces: [tasks]
-"#,
-        "plan",
-        Failure::artifacts(vec![ArtifactFailure::Undelivered {
-            node: NodeId::from("plan"),
-            artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
-        }]),
-    )
-    .await;
-
-    assert_eq!(
-        receipt.diagnostics,
-        vec![DiagnosticCount {
-            kind: None,
-            code: DiagnosticCode::Artifact(ArtifactCode::Undelivered),
-            occurrences: 1,
-        }],
-        "a document nobody handed over is counted by its own code, under no kind"
-    );
-    assert!(
-        render_receipt_markdown(&receipt).contains("`artifact-undelivered` \u{d7}1"),
-        "{receipt:?}"
-    );
-}
-
-/// `duplicate-id` is one rule asked of three documents. Counting it by
-/// code alone cannot say whether a run hit three broken tasks documents or one
-/// of each, so the count carries the kind and the two never merge.
-#[test]
-fn the_same_rule_in_two_documents_counts_as_two_facts() {
-    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
-    receipt.diagnostics = vec![
-        DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks.into()),
-            code: DiagnosticCode::Rule(RuleCode::DuplicateId),
-            occurrences: 3,
-        },
-        DiagnosticCount {
-            kind: Some(ArtifactKind::Findings.into()),
-            code: DiagnosticCode::Rule(RuleCode::DuplicateId),
-            occurrences: 1,
-        },
-        DiagnosticCount {
-            kind: None,
-            code: DiagnosticCode::File(FileCode::Missing),
-            occurrences: 1,
-        },
-    ];
-    let markdown = render_receipt_markdown(&receipt);
-    assert!(
-        markdown.contains("`duplicate-id` in the tasks document \u{d7}3"),
-        "{markdown}"
-    );
-    assert!(
-        markdown.contains("`duplicate-id` in the findings artifact \u{d7}1"),
-        "{markdown}"
-    );
-    // A file that was never written has no content whose kind could be
-    // wrong, so its count carries the code alone.
-    assert!(
-        markdown.contains("`artifact-missing` \u{d7}1"),
-        "{markdown}"
-    );
-}
-
-/// The same counts as data, so a program reading the JSON receipt never
-/// has to parse the sentence above back apart.
-#[test]
-fn the_json_receipt_carries_the_counts_as_data() {
-    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
-    receipt.diagnostics = vec![DiagnosticCount {
-        kind: Some(ArtifactKind::Tasks.into()),
-        code: DiagnosticCode::Parse(ParseCode::Parse),
-        occurrences: 3,
-    }];
-    let rendered = render_receipt_json(&receipt).expect("the receipt renders");
-    let json: serde_json::Value = serde_json::from_str(&rendered).expect("the receipt is JSON");
-    assert_eq!(json["diagnostics"][0]["kind"], "tasks");
-    assert_eq!(json["diagnostics"][0]["code"], "parse");
-    assert_eq!(json["diagnostics"][0]["occurrences"], 3);
-}
-
-/// A clean run says nothing about problems, rather than a zero line —
-/// the same rule the baseline section already follows.
-#[test]
-fn a_run_with_no_artifact_problems_prints_no_line_about_them() {
-    let receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
-    assert!(!render_receipt_markdown(&receipt).contains("artifact problem"));
 }

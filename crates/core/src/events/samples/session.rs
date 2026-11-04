@@ -38,6 +38,7 @@ pub(crate) fn agent_message() -> AgentMessagePayload {
     AgentMessagePayload {
         message_type: AgentMessageType::Usage,
         tool_name: None,
+        action: None,
         target: None,
         input_tokens: Some(100),
         output_tokens: Some(50),

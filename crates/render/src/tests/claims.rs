@@ -1,5 +1,5 @@
 //! The words of an escalation's claim: an engine claim is written from its
-//! node, the assignee it names and the re-route it closes, and a written
+//! node, the assignee it names and the reroute it closes, and a written
 //! claim is kept.
 
 use yunta_core::events::{Claim, ExhaustedReroute, Failure, FailureMenu};
@@ -7,7 +7,7 @@ use yunta_core::{NodeId, RunId, TaskId};
 
 use crate::claim::sentence;
 
-/// A failure menu whose re-routes to `fix-lint` are used up after `max_reroutes`.
+/// A failure menu whose reroutes to `fix-lint` are used up after `max_reroutes`.
 fn exhausted(max_reroutes: u32) -> FailureMenu {
     FailureMenu {
         attempt: max_reroutes + 1,
@@ -47,15 +47,15 @@ fn a_node_whose_re_routes_are_used_up_names_the_route_it_closes() {
     };
     assert_eq!(
         sentence(&claim, Some(&exhausted(1))),
-        "node `lint` failed and its 1 re-route to `fix-lint` is exhausted"
+        "node `lint` failed and its 1 reroute to `fix-lint` is exhausted"
     );
     assert_eq!(
         sentence(&claim, Some(&exhausted(2))),
-        "node `lint` failed and its 2 re-routes to `fix-lint` are exhausted"
+        "node `lint` failed and its 2 reroutes to `fix-lint` are exhausted"
     );
     assert_eq!(
         sentence(&claim, Some(&exhausted(0))),
-        "node `lint` failed and its 0 re-routes to `fix-lint` are exhausted"
+        "node `lint` failed and its 0 reroutes to `fix-lint` are exhausted"
     );
 }
 
@@ -64,6 +64,13 @@ fn a_written_claim_reads_as_it_was_written_whatever_the_menu_holds() {
     let claim = Claim::Written("Approve the plan?".to_string());
     assert_eq!(sentence(&claim, None), "Approve the plan?");
     assert_eq!(sentence(&claim, Some(&exhausted(1))), "Approve the plan?");
+}
+
+/// A question someone wrote over several lines reads on one line.
+#[test]
+fn a_question_written_over_lines_reads_as_one() {
+    let claim = Claim::Written("Ship it?\n  Now.".to_string());
+    assert_eq!(sentence(&claim, None), "Ship it? Now.");
 }
 
 #[test]
@@ -98,7 +105,7 @@ fn a_gate_that_cannot_publish_for_want_of_a_forge_says_so_and_names_its_assignee
     };
     assert_eq!(
         sentence(&claim, None),
-        "node `approve` wants an external gate (assignee: lead) but no forge is reachable from this machine (no credentials, or none configured) — resolve it here instead"
+        "node `approve` wants an external gate (assignee: lead) but no forge is reachable from this machine (no credentials, or none configured): resolve it here instead"
     );
 }
 
@@ -110,7 +117,7 @@ fn a_gate_that_cannot_be_checked_again_names_the_reference_it_was_published_at()
     };
     assert_eq!(
         sentence(&claim, None),
-        "node `approve`'s external gate (published at example/repo#1) needs re-checking, but no forge is reachable from this machine — resolve it here instead"
+        "node `approve`'s external gate (published at example/repo#1) needs re-checking, but no forge is reachable from this machine: resolve it here instead"
     );
 }
 
@@ -165,5 +172,27 @@ fn a_task_whose_session_departs_from_the_plan_says_so() {
     assert_eq!(
         sentence(&claim, None),
         "task `greet`'s session departs from the plan"
+    );
+}
+
+/// The question a plan's approval asks names the change its summary says: on
+/// one line, with the marks it ends on taken off, so the question ends once.
+#[test]
+fn a_question_about_a_plan_names_its_change() {
+    let asked = |summary: &str| {
+        sentence(
+            &Claim::ApprovePlan {
+                summary: summary.to_string(),
+            },
+            None,
+        )
+    };
+    assert_eq!(asked("Make it"), "Approve the plan: Make it?");
+    assert_eq!(asked("Make it."), "Approve the plan: Make it?");
+    assert_eq!(asked("Make it!"), "Approve the plan: Make it?");
+    assert_eq!(asked("Ship v2?"), "Approve the plan: Ship v2?");
+    assert_eq!(
+        asked("line one\nline two"),
+        "Approve the plan: line one line two?"
     );
 }

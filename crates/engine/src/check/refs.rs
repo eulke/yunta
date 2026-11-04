@@ -251,7 +251,7 @@ fn read_reference(
     yunta_core::workflow::read::read(&text, &resolved.path).map_err(|report| {
         Composition::Unparseable {
             path: resolved.path.clone(),
-            detail: report.to_string(),
+            report: Box::new(report),
         }
     })
 }
@@ -308,7 +308,7 @@ pub enum Composition {
     #[error("composition_unparseable")]
     Unparseable {
         path: std::path::PathBuf,
-        detail: String,
+        report: Box<yunta_core::diagnostic::Report>,
     },
 
     /// A workflow this one composes that its birth would refuse, found

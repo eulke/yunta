@@ -42,10 +42,10 @@ are valid there. A mistyped key never silently becomes a default.
   settled is at or above a declared `max_severity`). No
   session opens; these read state the engine already derived.
 - **`gate`** — a human decision. `assignee:`, `options: [...]`, and `on: {option:
-  target}` to re-route on a choice exactly like `on_failure.goto` does; every node
+  target}` to reroute on a choice exactly like `on_failure.goto` does; every node
   between the target and the gate runs again, in order, before the gate asks
   again, so it never asks about a plan beside work made from the one it sent back.
-  A gate between a re-route's target and the node it re-routed asks again in its
+  A gate between a reroute's target and the node it rerouted asks again in its
   turn, about what was made again, before that node retries. Renders
   through the console when attended, or as the same structured escalation object via
   `yunta mcp` / `yunta resolve-gate` when it isn't — no surface-specific logic. `external: { kind: pull_request, artifacts: [...], branch: "..." }` turns it
@@ -53,18 +53,29 @@ are valid there. A mistyped key never silently becomes a default.
   way `produces:` does — a kind, or an opaque file name — and the engine commits the
   bytes the run holds for each to `branch` and opens a PR for review there, under the
   name that artifact's identity gives it. A run that holds none of one fails the node
-  instead of publishing a partial review. The PR is titled by the gate's `message:`, and
-  its body says how a review answers it and what each answer does: approving or merging
-  lets the run go on, requesting changes sends each comment to the node `on_failure`
-  names as a finding, closing fails the gate. A plan, a spec or a review's findings is
-  also published drawn to read — `tasks.md` beside `tasks.yaml`. After changes are
-  requested, the corrected lap commits what changed to the same PR and waits for a review
-  of it; a review of an earlier commit decides nothing. The run reads the review the
-  next time it wakes on the machine that holds it (`yunta resume <run>`).
+  instead of publishing a partial review. The PR is titled by the change it asks about
+  — `Approve: <summary>` when it publishes a plan, its question otherwise — and its
+  description is the gate's page, as a terminal shows it: each document it publishes as
+  a review reads it, with the order of a plan's steps in Mermaid and a task's card and
+  the proof folded; then the decision under its question: the files it carries, what
+  weighs on it, with the plan's risks in an alert, and a table of the answers a review
+  gives — approving or merging lets the run go on, requesting changes sends each
+  comment to the node `on_failure` names as a finding, closing pauses the run as
+  `abort` does — with the commands of the machine that holds the run after it. A
+  description longer than GitHub keeps leaves out the lines of each code block first,
+  and says so at its top. The files go in `.yunta/gates/<run>/<gate>/` on the branch:
+  each document drawn to read — `tasks.md`, the whole plan — beside the bytes the run
+  holds, `tasks.yaml`. After changes are requested, the corrected lap commits what
+  changed to the same PR, draws its title and description again, and waits for a
+  review of it; a review of an earlier commit decides nothing. A closed PR stops the
+  run with the decision open: the next resume, yours or a scheduled job's, publishes
+  the gate again, on the PR if someone reopened it or on a new one, and
+  `yunta close <run>` ends the run. The run reads the review the next time it wakes on
+  the machine that holds it (`yunta resume <run>`).
 - **`parallel`** — a named group of child nodes run at once, with `join: all` (any
   child failing fails the group) or `join: any` (first success wins, the rest are
   interrupted). Children needing to compare notes mid-flight (not just after `join`)
-  set `coordination: blackboard` on the group — see [MCP per-run tools](#mcp) below.
+  set `coordination: blackboard` on the group — see [MCP per-run tools](#mcp) below. A child starts with its group and its failure is the group's, so `depends_on` and `on_failure` go on the group: `yunta check` refuses them on a child.
 - **`executor`** — the extension point for anything `bash`'s bare exit code and
   `check`'s closed builtin list don't cover: `executor: <name>` (declared in
   `skills.executors:`) gets `with:` as JSON on stdin and returns a verdict as JSON on
@@ -93,7 +104,7 @@ forge:
     remote: origin              # where the run's branch is pushed; `origin` when absent
 ```
 
-## `depends_on` and re-routing
+## `depends_on` and rerouting
 
 `depends_on: [a, b]` means "wait for `a` and `b` to reach a terminal state." A node
 with none and no `on_failure.goto` pointing at it runs as soon as the DAG lets it
@@ -104,7 +115,7 @@ with none and no `on_failure.goto` pointing at it runs as soon as the DAG lets i
 returns and the original node runs again. `max_reroutes` bounds how many times this
 happens before the run pauses on a gate instead — a correction loop is not allowed to
 retry forever unattended. A failure the run's frozen config causes — a key it
-leaves unset — is never re-routed: the correction reads the same config, so the
+leaves unset — is never rerouted: the correction reads the same config, so the
 failure goes straight to the run's `defaults.on_failure`.
 
 ## Scope and permissions
@@ -118,7 +129,7 @@ node fails afterward for it.
 
 `scope: run` declares a node's reach without naming a path: it may change what the
 run has changed since its base, as that stands when the node starts. It is the scope
-for a node that corrects the run's own work — the fix a failing lint re-routes to —
+for a node that corrects the run's own work — the fix a failing lint reroutes to —
 in a repository whose layout the workflow never saw, which is why a pack reaches for
 it. The engine resolves the paths when the attempt starts and records them on its
 `node_started`, so its close is audited against what it was given. A write elsewhere
@@ -140,7 +151,11 @@ the tree the log names; a node or task that works in a checkout of its own commi
 there with `git commit`, and so does distilling knowledge at the end of a run — your
 hooks run for those. Every commit ends in trailers that name the run, and the node and
 task whose work it holds (`Yunta-Run:`, `Yunta-Node:`, `Yunta-Task:`), so
-`git log --grep "Yunta-Run: <run id>"` lists a run's commits.
+`git log --grep "Yunta-Run: <run id>"` lists a run's commits. A commit's subject says what
+it holds: a task's commit says its title, and a node's commit says its `description`, or
+what it changed when it declares none (`node fix-lint: changes crates/cli/src/pack.rs`).
+A subject is one line of at most 72 characters; a longer one stops at a word, and is said
+whole under it.
 
 `permissions: read-only | edit | full` is a separate, coarser ceiling, mapped onto the
 adapter's own session profile: it governs which *tools* the agent may use at all — a
@@ -234,6 +249,13 @@ Two environment variables move all of this:
   machine that keeps its shared baseline somewhere other than
   `/etc/yunta/config.yaml`.
 
+On the live view, when a run asks its person something, the terminal window's title
+says so, and comes back when they have answered. `terminal: { bell: true }` rings the
+bell as well: any layer may set it, and the user layer is where a person sets their
+own. `--quiet` and the lines off a terminal draw no region and tell no window. Separately,
+`YUNTA_MOTION=off` keeps the live view still: a running node's mark stops turning, and
+every word stays.
+
 ## Project commands
 
 A workflow says *what* it needs run; the project says *how*. `commands:` in the
@@ -266,7 +288,7 @@ A node that names a command the config does not declare cannot run, and no
 attempt of the run can change that — the run's config is frozen when it is
 created. `yunta check` refuses such a workflow before the first token, naming the
 node and the command, and a run that meets one anyway fails the node without
-offering a retry or spending its `on_failure` re-route.
+offering a retry or spending its `on_failure` reroute.
 
 ### Formatting what a session writes
 
@@ -308,7 +330,7 @@ command the config lacks and the repository answers for it, `yunta check`,
 `yunta doctor` and `yunta pack add` say what to declare:
 
 ```text
-node `lint`: the project declares no command `lint` — a run is refused until it does
+node `lint`: the project declares no command `lint`; a run is refused until it does
   detected here: declare `commands: { lint: "pnpm lint" }`
 ```
 
@@ -483,18 +505,19 @@ node, so a session can see its meaning survived the parse.
 The same shape is available anywhere else you need it:
 
 ```
-yunta schema                    # the kinds
+yunta schema                    # the documents
 yunta schema tasks              # the shape of the document
 yunta schema findings --json    # JSON Schema, for an editor to validate against
+yunta schema workflow           # every key a workflow and each kind of node read
 ```
 
 and through the `document_shape` tool on `yunta mcp`, so an agent connected to
 the control plane finds it without anyone passing the format along. With no
-arguments it lists what each kind is for:
+arguments it lists what each document is for:
 
 ```console
 $ yunta schema
-Documents Yunta reads and validates:
+documents Yunta reads and validates
   tasks        the plan: one task per independently verifiable unit of work
   spec         the tests a plan's tasks are held to, written before any task is
                built
@@ -502,9 +525,11 @@ Documents Yunta reads and validates:
                forward
   questions    what a node needs a person to decide
   answers      what a person replied, as the engine records it
+  workflow     the nodes a run executes, and how they connect
 
-  yunta schema <kind>          the shape to write
-  yunta schema <kind> --json   the JSON Schema an editor validates against
+next
+  yunta schema <document>          the shape to write
+  yunta schema <document> --json   the JSON Schema an editor validates against
 ```
 
 ### Knowledge layers
@@ -530,7 +555,7 @@ each as `{ run: "<cmd>", timeout_seconds?, on_failure: fail|warn }` — `run` ta
 project command by name here too. A failed
 `before` hook stops the node before any session opens; `after` hooks run before
 verification, so their own edits are subject to the node's `scope` like anything
-else. Hooks never re-route — that's `on_failure.goto`'s job, not a hook's.
+else. Hooks never reroute — that's `on_failure.goto`'s job, not a hook's.
 
 ## Modes
 
@@ -573,6 +598,14 @@ it for every node that asks — `quick: { include: [...], ask: required }` — a
 node's own `ask:` beats its mode's. `yunta check` refuses `ask:` on a node that
 asks nothing.
 
+At a terminal a round is one card that stays where it opened: what was answered, the
+question being answered with its field or its list under it, and what is to come. `enter`
+answers and moves on, `shift-tab` goes back with what was said held in place, and what the
+engine refuses is said under the answer, in its words. A question that may be left says what
+is assumed without an answer. Nothing is recorded until the last one is answered: `esc`
+leaves the round with nothing recorded, and when it ends the card comes off and each question
+stays in the history with its answer whole.
+
 Under the default `defaults.on_failure: pause`, a run also stops for a person when a node
 fails in a way only a person can settle. A usage limit that names the time it resets is
 not a question: the run pauses with `awaiting_reset` and resumes by itself at that time.
@@ -586,7 +619,7 @@ change before the retry can end differently.
 lacks what it needs — a [project command](#project-commands) the config does not
 declare, or a forge. Such a node is left out of the run the way a mode leaves a node
 out: it never runs, and what waits on it waits on what it waited on. A node that only
-the optional one leads to — the re-route that fixes what a failing lint reports — goes
+the optional one leads to — the reroute that fixes what a failing lint reports — goes
 with it. Where the project does declare what the node needs, it runs like any other.
 
 ```yaml
@@ -613,7 +646,7 @@ counts it apart from the work (`· 1 left out`). A node that is not optional and
 something the project lacks is refused before the run instead. An `invariant` may be
 optional: no mode drops it, but a project may have nothing to run for it. `yunta
 check` refuses `optional` on a child of a `parallel` group, and on a node another
-node the run keeps re-routes to or reads from.
+node the run keeps reroutes to or reads from.
 
 ## Reviewing what a gate approves
 
@@ -639,21 +672,44 @@ nodes:
 ```
 
 At the decision you read what was asked first — fragua's plan gate shows the
-brief, titled by its own first heading — then the plan as the run will judge it. It
-opens on its tasks at a glance: the step each runs in, what proves it, how many of
-its changes show their code, and a mark on each task that cannot be proven as it is
-written. Then come what keeps it from being proven, each flaw with what it means and
-what fixes it; what it changes and why, with each diagram its author drew — in boxes
-on a terminal, as the Mermaid itself on a forge and in a file; what you already
-answered when the run asked, apart from what the plan decided for you; its design
-and risks; and step by step each task: what you will see once it is done, what it
-touches and keeps — and what checks that it keeps it, its guards or nothing but the
-suite — the code of each change it makes, and what proves it done, with each test
-the spec wrote whole and what only sets it up folded. Every claim says what backs
-it: a plan whose spec tests run nothing the spec wrote says so in its title, and a
-file of the spec no test runs is never said to test the task.
-`yunta status <run> --node plan` prints the whole plan, every file whole. The log records the
-exact version you saw by its hash, so an approval is an approval of those bytes.
+brief, titled by its own first heading — then the plan as the change it makes. It
+opens on what it is: how many tasks in how many steps, what it decided for you, what
+it risks and leaves out, what keeps it from being proven when anything does, and
+what you asked the run for, quoted from the input the workflow declares as the
+request. Then the change: its description whole, with each diagram its author drew —
+in boxes on a terminal, as the Mermaid itself on a forge and in a file; each choice
+the plan made for you, what it chose instead of what and why; what you already
+answered when the run asked; what it leaves out and its design; its risks are said
+once, beside the decision. Then the
+steps, each task under the step it runs in and the order they wait on each other in,
+drawn; and task by task a card: what you will see once it is done, the files it
+changes, the shapes of another task it builds on, what it keeps, what it implies and
+what tests it — a line a test, in the spec's words, with its command — then the code
+the task writes, each shape and each change once. What a card implies, and what it
+says under its code, come from what the tree held of the plan's shapes when the
+plan was registered: the engine reads it then, from the top of the repository, and
+records it again only when a later registration of the plan reads something else;
+every surface draws that same reading. The search reads every file of a shape's
+language, whatever git's attributes say of it, so a `.ts` shape's `.tsx` callers
+count; it never enters a submodule, and a file with a NUL byte in its first 8000
+bytes is not code. A shape its file already holds implies the files beyond the plan
+whose code names it and no task changes, a line each after
+`Theme is named in 2 files no task changes:`, or says how many files carry its name
+when they are too many to follow. A shape its card calls `unchanged` implies
+nothing, and one whose code the engine does not compare, `exists, not compared`,
+always implies its files. The task that builds the shape may write each file
+listed. Under every block of code a line
+says its size and, before it, for a shape the engine read, what the code is to the
+tree: `new`; `modified`, with the words it puts in marked `{+…+}` and the words it
+takes out `[-…-]`; `unchanged`; `exists, not compared`; or
+`modified, too long to mark` — `modified · 1 line`, say. The proof comes last: how
+many tests the spec wrote and the command that shows them whole — on a forge's page
+the proof names no such command, since the whole plan is a file of the pull request —
+then the suite every task keeps passing, each guard that checks what a task keeps,
+and how many promises no guard checks. No test's code is part of the plan at the
+decision; `yunta status <run> --node plan` prints the whole plan, each file the spec
+wrote whole after the cards, before its proof. The log records the exact version you
+saw by its hash, so an approval is an approval of those bytes.
 A gate after the work that shows the same plan — before a pull request, say —
 reads first every departure from it a person accepted while its tasks were built:
 what the plan said, what was built instead and why, and what they said accepting
@@ -682,13 +738,37 @@ decision that restates what a person answered names the question it `answers`. T
 engine refuses a plan it will show without the summary, the descriptions, the code
 and the `proves`, and tells the planner what is missing in the same answer.
 
-What weighs on the decision is said last, between the question and its options:
-on a terminal the last lines printed are the first ones read. Under "before you
+A gate with no `message:`, or a blank one, that shows a plan asks to approve the change
+its summary names — `Approve the plan: <summary>?`. At a terminal a card stays where the
+decision opened: the question, the node and the run at its far edge, what the plan is
+about and how big it is, what the run changed, each option with what it does, and under
+them what follows the one pointed at. Arrows move, `enter` chooses, `n` adds a note, `r`
+reads the plan and `esc` leaves it for later, with the run parked on it. What was typed
+before the question answers nothing, and neither does a paste. Above the card stands only
+what weighs on the decision, and the documents of a decision that shows no plan. On a
+forge the page ends on the question, what weighs on it and each option with what it does.
+
+`abort` reads `Pause here`: nothing runs, and the decision stays open, so the next resume
+asks again.
+
+`r` opens the plan on the terminal's other screen, and `yunta review <run>` opens it on
+a run parked on the decision. `j` and `k` go from task to task, the arrows, `PgUp`,
+`PgDn` and `space` move what is being read, and the mouse's wheel does too, with
+selecting text still working. `p` turns a task's card over to what proves it, and `d`
+shows what was decided, what the plan risks and what it leaves out. A number chooses an
+option and `enter` confirms it, since a person reading has their hands on the keyboard;
+an option that asks for words goes back to the card with its field open. `esc` goes
+back. Under 90 columns the rail goes and the pane says which task it is; under 12 rows
+or 40 columns `r` prints the plan above the card instead.
+
+What weighs on the decision is said last on the page, right above the card, or between
+the question and its options on a forge: on a terminal the last lines printed are the
+first ones read. Under "before you
 decide" come what the gate does not offer and why, how the planner got the plan
-accepted when that took more than one handover, how many changes show no code, how
-many promises only the suite checks, and the first sentence of each risk. `yunta
-status` prints the same block above the options of a parked run, and a gate's pull
-request says it before how to answer.
+accepted when that took more than one handover, how many changes show no code, and
+each risk the plan names. `yunta status` prints the same block above the options of
+a parked run, and a gate's pull request says it under its question, above the table
+of answers.
 
 The spec governs. A plan that cannot be proven as it is written is refused when it
 is handed over: a criterion that passes once a name is written in a file its task
@@ -738,14 +818,14 @@ same way, from anywhere.
 `yunta receipt <run>` closes a finished run out as a certificate: markdown for a
 PR, JSON for tooling, both derived entirely from the event log — criteria with exit
 codes, baseline regressions, scope, which runners reviewed (and whether that was a
-fan-out of independent ones), cost and CPTV, re-routes, and the event chain's own
+fan-out of independent ones), cost and CPTV, reroutes, and the event chain's own
 integrity. Nothing in it is agent-written prose; every line traces back to a specific
 event kind. It refuses a run that hasn't reached a terminal state yet — there's no
 metrics to certify until `run_finished` lands.
 
 Each check is marked by what it found: `✓` it holds, `✗` it failed, `▲` worth a
 look though nothing failed (a baseline that was already red, an event kind this
-binary does not read), and `·` nothing to check — a workflow that declared no
+binary does not read), and `◌` nothing to check — a workflow that declared no
 criteria is never crossed out for it. A run that did not finish names each node
 that stands failed, with the sentence its failure is told in, the end of what it
 printed and the `yunta status <run> --node <node>` that shows the rest — in
@@ -755,6 +835,17 @@ same data for a program. Both files are written to the run's own directory,
 alongside `manifest.yaml`. A `pull_request` node puts the same document in the pull
 request it opens, read as the run's last step begins: what the run held its work to
 and found so far, under the word `running`.
+
+## A run's page in a browser
+
+`yunta open <run>` writes the run's page into its folder as `page.html` and opens
+it: one file, which asks nothing of the network, and no server behind it. It reads
+as `yunta status <run> --full` does. Where the run waits on a decision, each document
+the decision is about stands whole on the page, its tests included, with the decision
+beside it. A page runs nothing: what moves the run is a command, on a button that
+copies it. From a script it opens nothing and says where the page is; `--json` gives
+`{"page": "<path>"}`. A page is what the run held when it was drawn, and says when
+that was: `yunta open <run>` draws it again.
 
 ## MCP
 
@@ -895,7 +986,8 @@ git ignores goes, the source stays — the least recently used first. A run that
 still leave the disk under its floor stops and says how to make room; `yunta run`
 refuses to start one. `yunta gc` empties the builds nobody used within
 `storage.retention_days`, removes free checkouts that hold no build, and says what the
-pool keeps; `yunta doctor` says it too.
+pool keeps; `yunta doctor` says it too when it is worth a look, and `yunta doctor
+--full` always.
 
 Do not point several checkouts at one build directory. A build is right only at the
 path that made it: build tools name a project's own output the same way in any

@@ -8,10 +8,10 @@
 //! touches the event log or the agents.
 
 use std::path::PathBuf;
-use yunta_core::rail::RailCommand;
 
 use yunta_core::events::StoredEvent;
 use yunta_core::persisted::PersistedDoc;
+use yunta_core::rail::RailCommand;
 use yunta_core::{Clock, Manifest, RunId, SystemClock, SystemIdSource};
 use yunta_storage::{AsyncStorage, Storage};
 
@@ -187,9 +187,7 @@ impl Context {
                 roots: self
                     .run_roots()
                     .iter()
-                    .map(|root| {
-                        crate::render::paths::shown(root, &self.cwd, self.env.home.as_deref())
-                    })
+                    .map(|root| surco::paths::shown(root, &self.cwd, self.env.home.as_deref()))
                     .collect(),
                 near: self.near_run(id),
             });
@@ -213,7 +211,7 @@ impl Context {
             .iter()
             .flat_map(|run| [run.run_id.handle().to_string(), run.run_id.to_string()])
             .collect();
-        yunta_core::text::nearest(&typed, named.iter().map(String::as_str)).map(str::to_string)
+        surco::text::nearest(&typed, named.iter().map(String::as_str)).map(str::to_string)
     }
 
     /// Where a run is looked for, in search order — what a refusal names

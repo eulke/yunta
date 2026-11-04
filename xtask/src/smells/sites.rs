@@ -13,10 +13,11 @@
 
 use std::path::Path;
 
+use Mark::{Macro, Spelled, StructNamed, Text, TextExcept};
+
 use super::cli::{count_cli_print_outside_output, count_exit_failure_in_cli};
 use super::corpus::ratchet_corpus;
 use super::read_corpus;
-use Mark::{Macro, Spelled, StructNamed, Text};
 
 /// A counter: the name it carries in the baseline, and the function that
 /// measures it against a workspace root.
@@ -59,7 +60,7 @@ pub const COUNTERS: &[Counter] = &[
         count_session_request_literal_outside_plan,
     ),
     ("reason_built_by_format", count_reason_built_by_format),
-    ("sgr_outside_ink", count_sgr_outside_ink),
+    ("escape_outside_paint", count_escape_outside_paint),
     (
         "token_count_formatted_outside_units",
         count_token_count_formatted_outside_units,
@@ -77,6 +78,10 @@ pub const COUNTERS: &[Counter] = &[
 pub(super) enum Mark {
     /// The line carries this text anywhere on it.
     Text(&'static str),
+    /// The line carries this text anywhere on it, except in the char literal
+    /// `except`. A check such as `contains('\x1b')` names the byte that way,
+    /// and the counter does not read it.
+    TextExcept(&'static str, &'static str),
     /// The line carries this text followed by a lowercase letter, the way a
     /// message spells a command or a flag: `--input` and `yunta gc` match,
     /// and a delimiter such as `---` does not.
@@ -100,6 +105,7 @@ impl Mark {
         }
         match self {
             Text(text) => line.contains(text),
+            TextExcept(text, except) => line.replace(except, "").contains(text),
             Spelled(text) => line.match_indices(text).any(|(at, _)| {
                 line[at + text.len()..].starts_with(|c: char| c.is_ascii_lowercase())
             }),
@@ -139,26 +145,46 @@ pub(super) fn outside(root: &Path, marks: &[Mark], owners: &[&str]) -> usize {
         .sum()
 }
 
-/// Paint written outside the one place that paints.
+/// The escape byte as Rust source writes it, `\x1b` or `\u{1b}`, in lowercase
+/// hex. Every escape sequence begins with that byte, so a control sequence
+/// introducer and an operating system command are read through it. The char
+/// literals `'\x1b'` and `'\u{1b}'` name the byte in a check, so they are not
+/// read. The other ways Rust writes the byte, such as `\x1B`, `\u{001b}` and
+/// `char::from(0x1b)`, are not read either.
+const ESCAPES: [Mark; 2] = [
+    TextExcept("\\x1b", "'\\x1b'"),
+    TextExcept("\\u{1b}", "'\\u{1b}'"),
+];
+
+/// Paint written outside the files that own it, in every crate's sources
+/// and tests.
 ///
-/// Color only repeats what the words say, and the module that writes it
-/// is what proves a painted line reads the same once the color is gone.
-/// An escape written anywhere else is color nothing holds to that. The
-/// prompt's bracketed-paste switch is a terminal mode, not paint, a test
-/// that types keys into a terminal sends what a keyboard sends, and a
-/// golden shows paint rather than making it.
-fn count_sgr_outside_ink(root: &Path) -> usize {
+/// Color only repeats what the words say, and paint.rs is what proves a
+/// painted line reads the same once the color is gone, so an escape written
+/// anywhere else is color nothing holds to. A line counts once, however many
+/// escapes it writes: each escape sequence begins with the escape byte, so a
+/// control sequence introducer (`\x1b[`) and an operating system command
+/// (`\x1b]`, which is how a link opens) are read through the byte. The owners
+/// are the paint module, paint.rs and the files under paint/ with their tests
+/// (clap's styles among them); the files that send a terminal a control that
+/// is not paint, the testkit's terminal, which sends the keys and the cursor
+/// and row controls of a real one; the CLI's integration tests, which send
+/// keys to a terminal or check its paint; and the golden that writes what a
+/// surface printed.
+fn count_escape_outside_paint(root: &Path) -> usize {
     outside(
         root,
-        &[Text("\\x1b[")],
+        &ESCAPES,
         &[
-            "crates/render/src/ink.rs",
-            "crates/cli/src/ask/keys.rs",
+            "crates/surco/src/paint.rs",
+            // The paint module's own files, and the tests that write the
+            // escapes they check.
+            "crates/surco/src/paint/",
             "crates/cli/tests/",
             "crates/testkit/src/terminal.rs",
             // A golden writes the paint a surface printed where a
             // reviewer can read it, and its test paints to prove that.
-            "crates/testkit-core/src/golden.rs",
+            "crates/surco/src/golden.rs",
         ],
     )
 }
@@ -168,13 +194,13 @@ fn count_sgr_outside_ink(root: &Path) -> usize {
 ///
 /// `1859898 tokens` is a number a reader has to count the digits of, and
 /// two surfaces that each format their own say the same count two ways.
-/// The units module reads it as `1.86M tokens` everywhere, and exactly
+/// Surco's figures read it as `1.86M tokens` everywhere, and exactly
 /// where the count stands beside a limit.
 fn count_token_count_formatted_outside_units(root: &Path) -> usize {
     outside(
         root,
         &[Text("} tok"), Text(", \"token\")")],
-        &["crates/core/src/units.rs"],
+        &["crates/surco/src/figures.rs"],
     )
 }
 
@@ -275,7 +301,7 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             "crates/testkit/src/stubs.rs",
             // Blessing a golden is what a person asks of a test run, and
             // reading that request is what the module is for.
-            "crates/testkit-core/src/golden.rs",
+            "crates/surco/src/golden.rs",
         ],
     )
 }

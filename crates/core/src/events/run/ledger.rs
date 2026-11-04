@@ -14,9 +14,9 @@ use crate::events::run::kinds::RunEvent;
 use crate::events::run::metrics::RunMetrics;
 use crate::events::run::suspensions::{Suspension, Suspensions};
 use crate::events::{
-    BaselineCapturedPayload, BaselineHeldPayload, BaselineOrigin, EnvironmentDrift, Evidence,
-    ExecutionEnvironment, PauseReason, PromotionCause, RunCreatedPayload, RunFinishedPayload,
-    RunResumedPayload, TerminalState,
+    BaselineCapturedPayload, BaselineHeldPayload, BaselineOrigin, ChangesCountedPayload,
+    EnvironmentDrift, Evidence, ExecutionEnvironment, PauseReason, PromotionCause,
+    RunCreatedPayload, RunFinishedPayload, RunResumedPayload, TerminalState,
 };
 use crate::ids::{ModeName, Seq};
 use crate::TreeId;
@@ -43,8 +43,6 @@ pub enum RunPhaseRaw {
 pub struct Promotion {
     pub to: ModeName,
     pub cause: Option<PromotionCause>,
-    /// The sentence an older log stored in place of `cause`.
-    pub legacy_reason: Option<String>,
     pub evidence: Evidence,
     pub at: Seq,
 }
@@ -91,6 +89,9 @@ pub struct RunLedger {
     held: BTreeMap<crate::ids::CommandName, BaselineHeldPayload>,
     /// Every span the host was suspended while the run was open.
     suspensions: Suspensions,
+    /// The run's change as git last counted it, from the run's base to its
+    /// newest tree.
+    changes: Option<ChangesCountedPayload>,
     /// Whether an invocation has woken this run. A birth writes any
     /// number of events — what the run is, what it holds, the
     /// measurement it was handed — and none of them is a wake.
@@ -262,6 +263,13 @@ impl RunLedger {
         &self.suspensions
     }
 
+    /// The run's change as git last counted it, from the run's base to its
+    /// newest tree; `None` until a gate, a pull request or the engine's
+    /// finish of the run counted it.
+    pub fn changes(&self) -> Option<&ChangesCountedPayload> {
+        self.changes.as_ref()
+    }
+
     /// Folds one of the run's own events.
     pub fn apply(&mut self, event: &RunEvent, meta: &EventMeta<'_>) {
         match event {
@@ -297,11 +305,14 @@ impl RunLedger {
                 woke_at: meta.at,
                 slept: p.duration(),
             }),
+            // A count of what the run changed: a fact about its tree, taken
+            // when a person judges it or the engine finishes the run. The
+            // fold sets only the count: `woken` and `phase` stay as they were.
+            RunEvent::ChangesCounted(p) => self.changes = Some(p.clone()),
             RunEvent::PromotionSignaled(p) => {
                 self.promotion = Some(Promotion {
                     to: p.suggested_mode.clone(),
                     cause: p.cause.clone(),
-                    legacy_reason: p.legacy_reason().map(str::to_string),
                     evidence: p.evidence.clone(),
                     at: meta.seq,
                 });

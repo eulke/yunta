@@ -31,26 +31,6 @@ impl<T> NonEmpty<T> {
         (!items.is_empty()).then_some(NonEmpty(items))
     }
 
-    /// The first element — the one this type promises exists.
-    pub fn first(&self) -> &T {
-        // The constructor refuses an empty vector and nothing else
-        // builds one, so index 0 is the element the type stands for.
-        #[allow(clippy::indexing_slicing)]
-        &self.0[0]
-    }
-
-    /// How many elements there are — one or more.
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    /// Always false. Present so a reader reaching for the usual pair
-    /// finds the answer the type already guarantees rather than a
-    /// missing method.
-    pub fn is_empty(&self) -> bool {
-        false
-    }
-
     /// The elements, in order.
     pub fn as_slice(&self) -> &[T] {
         &self.0

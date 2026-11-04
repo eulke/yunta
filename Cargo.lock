@@ -510,17 +510,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dialoguer"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25f104b501bf2364e78d0d3974cbc774f738f5865306ed128e1e0d7499c0ad96"
-dependencies = [
- "console",
- "fuzzy-matcher",
- "shell-words",
-]
-
-[[package]]
 name = "digest"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -747,15 +736,6 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
-]
-
-[[package]]
-name = "fuzzy-matcher"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54614a3312934d066701a80f20f15fa3b56d67ac7722b39eea5b4c9dd1d66c94"
-dependencies = [
- "thread_local",
 ]
 
 [[package]]
@@ -1858,9 +1838,9 @@ checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -2105,12 +2085,6 @@ checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
 ]
-
-[[package]]
-name = "shell-words"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 
 [[package]]
 name = "shlex"
@@ -2772,9 +2746,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+checksum = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -3002,6 +2976,7 @@ dependencies = [
  "regex",
  "serde_json",
  "yunta-core",
+ "yunta-surco",
 ]
 
 [[package]]
@@ -3035,7 +3010,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
- "dialoguer",
+ "console",
  "indicatif",
  "nix",
  "rmcp",
@@ -3047,12 +3022,12 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "unicode-width",
  "yunta-adapters",
  "yunta-core",
  "yunta-engine",
  "yunta-render",
  "yunta-storage",
+ "yunta-surco",
  "yunta-testkit",
  "yunta-testkit-core",
 ]
@@ -3066,7 +3041,6 @@ dependencies = [
  "base64",
  "chrono",
  "futures",
- "nix",
  "reqwest",
  "rmcp",
  "serde",
@@ -3078,6 +3052,7 @@ dependencies = [
  "tracing",
  "yunta-core",
  "yunta-render",
+ "yunta-surco",
  "yunta-testkit-core",
 ]
 
@@ -3104,13 +3079,13 @@ dependencies = [
  "serde_path_to_error",
  "sha1",
  "sha2",
- "strsim",
  "tempfile",
  "thiserror",
  "tokio",
  "tracing",
  "ulid",
  "yunta-core",
+ "yunta-surco",
  "yunta-testkit-core",
 ]
 
@@ -3130,7 +3105,6 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "serde_path_to_error",
  "subtle",
  "tempfile",
  "thiserror",
@@ -3143,6 +3117,7 @@ dependencies = [
  "yunta-core",
  "yunta-render",
  "yunta-storage",
+ "yunta-surco",
  "yunta-testkit",
  "yunta-testkit-core",
 ]
@@ -3151,11 +3126,10 @@ dependencies = [
 name = "yunta-render"
 version = "0.0.5"
 dependencies = [
- "clap",
  "serde",
  "serde_json",
- "unicode-width",
  "yunta-core",
+ "yunta-surco",
  "yunta-testkit-core",
 ]
 
@@ -3176,6 +3150,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "yunta-surco"
+version = "0.0.5"
+dependencies = [
+ "clap",
+ "serde",
+ "strsim",
+ "tempfile",
+ "unicode-width",
+]
+
+[[package]]
 name = "yunta-testkit"
 version = "0.0.5"
 dependencies = [
@@ -3186,10 +3171,12 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "vt100",
  "yunta-adapters",
  "yunta-core",
  "yunta-engine",
  "yunta-storage",
+ "yunta-surco",
  "yunta-testkit-core",
 ]
 
@@ -3200,7 +3187,6 @@ dependencies = [
  "chrono",
  "futures",
  "serde_json",
- "tempfile",
  "tokio",
  "yunta-core",
 ]

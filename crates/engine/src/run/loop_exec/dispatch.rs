@@ -3,21 +3,19 @@
 //! leaves in that worktree is committed here, on the unit's own branch.
 
 use yunta_core::commit_message::CommitMessage;
-use yunta_core::ScopeGlob;
+use yunta_core::events::{
+    EventPayload, StoredEvent, TaskEvent, TaskStatus, TaskStatusChangedPayload,
+};
+use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task};
 
-use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
-use yunta_core::{CommitSha, Node, Seq, Task};
-
+use crate::replay::RunState;
+use crate::run::{RunCtx, RunError};
 use crate::scope_expansion::GrantWindow;
 use crate::task_cycle::{
     run_task, scope_in_force, AttemptEnv, Continuing, ScopeGovernance, TaskCycleError,
     TaskCycleReport,
 };
 use crate::worktree::{commit_work, head_commit, Lease, Unit, UnitHome, UnitId};
-
-use crate::replay::RunState;
-use crate::run::{RunCtx, RunError};
-use yunta_core::events::TaskEvent;
 
 /// How many times this task has already been dispatched `Running` in the
 /// log — 1-indexed, so the first dispatch is attempt 1. Used only to keep
@@ -316,13 +314,7 @@ pub(super) async fn left_work(
     let supervision = ctx.supervision(cancel);
     commit_work(
         unit,
-        &CommitMessage::new(
-            format!("task {}: the work its last attempt left", task.id),
-            ctx.run_id,
-        )
-        .node(&node.id)
-        .task(&task.id)
-        .text(),
+        &CommitMessage::of_left_task(ctx.run_id, &node.id, &task.id).text(),
         supervision,
     )
     .await?;
@@ -342,13 +334,7 @@ pub(super) async fn commit_task_work(
 ) -> Result<(), RunError> {
     commit_work(
         unit,
-        &CommitMessage::new(
-            yunta_core::text::detailed(format!("task {}", task.id), &task.title),
-            ctx.run_id,
-        )
-        .node(&node.id)
-        .task(&task.id)
-        .text(),
+        &CommitMessage::of_task(ctx.run_id, &node.id, &task.id, &task.title).text(),
         supervision,
     )
     .await?;

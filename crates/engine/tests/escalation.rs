@@ -68,7 +68,7 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
 
     let (node_id, escalation) = rebuilt_menu(&manifest, &bench.run_dir(), &events)
         .await
-        .expect("an exhausted re-route must reconstruct an escalation");
+        .expect("an exhausted reroute must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "lint");
     assert_eq!(escalation.summary(), &node_failed("lint"));
     assert_eq!(reroute_goto(&escalation).as_deref(), Some("fix-lint"));

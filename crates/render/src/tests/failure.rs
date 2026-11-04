@@ -99,7 +99,7 @@ fn an_unchanged_attempt_says_what_the_attempt_it_repeats_failed_with() {
     let failure = Failure::unchanged(1, exit_failure(101, &[]));
     assert_eq!(
         sentence(&failure),
-        "not run again: nothing in the run's tree changed since attempt 1 failed on it — \
+        "not run again: nothing in the run's tree changed since attempt 1 failed on it; \
          change what it failed on there first. Attempt 1 failed: exit 101"
     );
 }
@@ -125,7 +125,7 @@ fn a_scope_violation_names_which_files_fell_outside() {
         Failure::scope_violated(vec!["crates/cli/Cargo.toml".into(), "clippy.toml".into()]);
     assert_eq!(
         sentence(&failure),
-        "scope violated: 2 files outside the declared globs — crates/cli/Cargo.toml, clippy.toml"
+        "scope violated: 2 files outside the declared globs: crates/cli/Cargo.toml, clippy.toml"
     );
 }
 
@@ -159,7 +159,7 @@ fn an_artifact_another_run_owes_renders_as_the_run_that_does_not_hold_it() {
     assert_eq!(
         sentence(&failure),
         "run `run-child-1`: 1 error\n  \
-         holds no artifact `report.md` — produce it there, or stop declaring it here"
+         holds no artifact `report.md`: produce it there, or stop declaring it here"
     );
 }
 
@@ -171,7 +171,7 @@ fn a_denial_read_from_a_log_without_reasons_names_its_paths() {
     };
     assert_eq!(
         sentence(&failure),
-        "wrote what no session of the run may write — a.txt, .claude/x: undo those changes"
+        "wrote what no session of the run may write: a.txt, .claude/x; undo those changes"
     );
 }
 
@@ -183,8 +183,9 @@ fn a_denial_says_why_each_path_is_denied() {
     };
     assert_eq!(
         sentence(&failure),
-        "wrote what no session of the run may write — a.txt (denied by the project's \
-         permissions), .claude/x (an agent CLI's own configuration): undo those changes"
+        "wrote what no session of the run may write: a.txt (denied to every run by \
+         `permissions.paths.deny`), .claude/x (an agent CLI's own configuration); undo those \
+         changes"
     );
 }
 
@@ -199,7 +200,7 @@ fn an_unpassable_plan_names_each_task_its_criterion_and_why() {
     };
     assert_eq!(
         headline(&failure),
-        "the plan holds a criterion no work can pass — task `task-u`: `false` (false exits 1)"
+        "the plan holds a criterion no work can pass: task `task-u`: `false` (false exits 1)"
     );
 }
 
@@ -346,7 +347,7 @@ fn a_loop_that_stopped_its_tasks_says_each_task_and_why() {
     };
     assert_eq!(
         sentence(&failure),
-        "no task is ready and not all are done — blocked or failed tasks need a decision; \
+        "no task is ready and not all are done: blocked or failed tasks need a decision; \
          task `greet` blocked: a scope expansion request needs a human decision"
     );
 }

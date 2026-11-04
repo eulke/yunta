@@ -15,25 +15,30 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-
 use yunta_core::caution::Caution;
 use yunta_core::events::StoredEvent;
+use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload};
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{RunPhase, RunState, WaitingOn};
+use yunta_engine::{RunFrame, RunPhase, RunState, WaitingOn};
 use yunta_render::spend::SpendJson;
 
 mod diagnostics;
+mod facts;
 mod node;
 
 use diagnostics::{node_diagnostics, ArtifactProblems};
+use facts::{BranchJson, CountsJson, PullRequestJson};
 use node::{NodeJson, NodeWaitJson};
 
 use crate::commands::advice;
+use crate::commands::stats::json::TimeJson;
 use crate::commands::status::decision_json::DecisionJson;
 use crate::commands::status::progress;
-use crate::error::Outcome;
+use crate::error::{Outcome, Reader};
 pub use crate::output::print_json;
-use crate::render::state::RunWord;
+use crate::output::NextCommand;
+use crate::run_page::{self, artifacts_written};
+use surco::words::Standing;
 
 /// What the invocation that creates a run says before the first token —
 /// on stderr for the person watching, and carried here so the document
@@ -63,7 +68,7 @@ impl PreRunWarnings {
 /// One number covers every `--json` document together, so a bump earned
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// Serializes a DTO as pretty JSON to a string — what the control plane
 /// hands back in a tool result instead of printing, so a `println!` never
@@ -81,28 +86,39 @@ pub fn to_json_string<T: serde::Serialize>(value: &T) -> Result<String, String> 
 /// command that drove a run to its stop and the command that reads that
 /// run an hour later publish the same answer. `outcome` is the word
 /// every text surface prints, spelled the same way here: a reader who
-/// saw `needs you` on a terminal finds `needs_you` in the document.
+/// saw `needs you` on a terminal finds `needs you` in the document.
 #[derive(serde::Serialize)]
 pub(crate) struct RunDocument {
     schema_version: u32,
     run_id: String,
     /// What every line a person reads calls the run by.
     handle: String,
+    /// The frozen workflow's own name.
+    workflow: String,
+    /// The mode it runs in.
+    mode: String,
     /// How the run stands, in the one vocabulary every surface uses.
-    outcome: RunWord,
+    outcome: Standing,
     /// The same standing in a sentence, with the counters a person reads
     /// beside it.
     summary: String,
+    /// The sentence under the headline of the run's page. Absent where the word says it all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    said: Option<String>,
+    /// How far it has come, in numbers.
+    counts: CountsJson,
+    /// What the invocation that drove it to this word exits with.
+    exit_code: u8,
     /// Why the run stopped where it did, when `outcome` alone does not
     /// say it. A parked run says it under `waiting_on` instead, and a
     /// finished one has nothing to add.
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
     /// The cautions this document carries: each one a fact a person can
-    /// act on ahead of the run's spend. Carried only by an invocation that
-    /// holds them — the one that *created* the run, which is the only one
-    /// that has the pre-run estimation, or a status that derives the budget
-    /// caution a parked run stopped on.
+    /// act on ahead of the run's spend. Derived from the run's frame on
+    /// every surface, so a parked run carries the budget caution it stopped
+    /// on wherever it is read. The invocation that created the run adds
+    /// the pre-run estimation to them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     cautions: Vec<Caution>,
     /// The sentence for the budget caution in `cautions`: the declared cap
@@ -127,6 +143,13 @@ pub(crate) struct RunDocument {
     /// about the workflow, and a map cannot carry one.
     nodes: Vec<NodeJson>,
     tasks: BTreeMap<String, &'static str>,
+    /// What the tree held of the shapes of each plan the run holds, as the
+    /// engine read it when the plan was registered: for each shape, whether
+    /// its file held it, its code there, and the files beyond the plan whose
+    /// code names it. One per plan, in the order the run first accepted
+    /// them; absent when the run read none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    shapes_read: Vec<yunta_core::events::ShapesReadPayload>,
     /// Why each failed node failed, in the form a program can act on
     /// rather than parse back out of a sentence: one entry per declared
     /// artifact that did not close, carrying what went wrong with it.
@@ -157,6 +180,24 @@ pub(crate) struct RunDocument {
     /// What the run spent: the work its attempts settled, plus the usage
     /// an open attempt has reported that no settled round has taken in.
     tokens: SpendJson,
+    /// Its wall-clock in seconds. Absent for an empty log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    elapsed_secs: Option<f64>,
+    /// Where that time went, by the shares `stats --json` names.
+    time: TimeJson,
+    /// What it changed from its base to its newest tree, where that was counted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed: Option<ChangesCountedPayload>,
+    /// Where its work is.
+    branch: BranchJson,
+    /// The pull requests it opened.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pull_requests: Vec<PullRequestJson>,
+    /// How many artifacts its nodes wrote.
+    artifacts: usize,
+    /// What a program can run next, each command with what it does: what a person reads at
+    /// the end of the page, naming the run by its whole id.
+    next: Vec<NextCommand>,
 }
 
 /// A run paused on a limit's reset, as the document carries it.
@@ -167,71 +208,82 @@ pub(crate) struct AwaitingResetJson {
 }
 
 impl RunDocument {
-    /// The run as its own log describes it at `now`, which the caller's
-    /// injected clock decides, and as `engine` — what the run's registry
-    /// says about the process driving it — qualifies a run that looks
-    /// like it is moving. `state` is the run derived from `events`; the
-    /// log is read again only for the failures each node's diagnostics
-    /// name.
+    /// The run as its own log describes it. `frame` is the run as the caller framed it, with
+    /// the history it read, and `engine` — what the run's registry says about the process
+    /// driving it — qualifies a run that looks like it is moving; both were read at one
+    /// instant. `state` is the run derived from `events`; the log is read again only for the
+    /// failures each node's diagnostics name.
     pub(crate) fn of(
         run_id: &RunId,
         events: &[StoredEvent],
         state: &RunState,
         manifest: &Manifest,
-        now: DateTime<Utc>,
-        engine: &crate::render::Engine,
+        frame: &RunFrame,
+        engine: &yunta_engine::Engine,
         decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
     ) -> Self {
-        let frame = progress::frame_of(run_id, manifest, state, now);
+        let escalation = parked_escalation(frame, decision.as_ref());
         RunDocument {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
             handle: run_id.handle().to_string(),
-            outcome: crate::render::observed_word(&frame, engine),
+            workflow: frame.workflow.to_string(),
+            mode: frame.mode.to_string(),
+            outcome: frame.standing,
             // A document reads the same whichever terminal asked for it.
-            summary: progress::summary(&frame, engine, crate::render::Glyphs::Unicode),
+            summary: progress::summary(frame, engine, surco::glyphs::Glyphs::Unicode),
+            said: run_page::gist(frame, engine),
+            counts: CountsJson::of(frame),
+            exit_code: crate::render::exit(frame.standing).code(),
             reason: reason(&frame.phase),
-            cautions: Vec::new(),
+            cautions: run_page::cautions(frame),
             budget_warning: None,
             context_warnings: Vec::new(),
             blocking_findings: frame.blocking_findings,
-            nodes: frame
-                .nodes
-                .iter()
-                .map(|node| NodeJson::of(node, state.nodes.get(&node.id)))
-                .collect(),
-            tasks: state
-                .tasks
-                .iter()
-                .map(|(id, record)| (id.to_string(), record.status.as_str()))
-                .collect(),
+            nodes: nodes_of(frame, state),
+            tasks: tasks_of(state),
+            shapes_read: shapes_read(state),
             diagnostics: node_diagnostics(events),
             decision: parked_decision(run_id, decision, &frame.phase),
             waiting_on: WaitingOnJson::of(&frame.phase, engine),
-            awaiting_reset: advice::reset_pause(&frame.phase).map(|(node, at)| AwaitingResetJson {
-                node: node.to_string(),
-                at,
-            }),
+            awaiting_reset: awaiting_reset_of(frame),
             tokens: SpendJson::of(&state.spend()),
+            elapsed_secs: frame.elapsed.map(|elapsed| elapsed.as_secs_f64()),
+            time: TimeJson::of(&state.time_spent((!state.ended()).then_some(engine.at))),
+            changed: state.current_change().cloned(),
+            branch: BranchJson::of(manifest, run_id),
+            pull_requests: PullRequestJson::all_of(frame),
+            artifacts: artifacts_written(frame),
+            next: next_of(frame, escalation.as_ref()),
         }
+        .with_sentences()
     }
 
     /// The same document carrying what was said before the run's first
-    /// token. The two sentences are read off the cautions, so a reader of
-    /// the list and a reader of the sentences see one fact.
+    /// token, added to the cautions the run's frame already holds.
     pub(crate) fn warnings(mut self, pre_run: PreRunWarnings) -> Self {
-        self.budget_warning = pre_run
+        for caution in pre_run.cautions {
+            if !self.cautions.contains(&caution) {
+                self.cautions.push(caution);
+            }
+        }
+        self.with_sentences()
+    }
+
+    /// The two sentences the cautions carry, read off the cautions so a reader of the list
+    /// and a reader of the sentences see one fact.
+    fn with_sentences(mut self) -> Self {
+        self.budget_warning = self
             .cautions
             .iter()
             .find(|caution| matches!(caution, Caution::BudgetBelowHistory { .. }))
             .map(yunta_render::caution::line);
-        self.context_warnings = pre_run
+        self.context_warnings = self
             .cautions
             .iter()
             .filter(|caution| matches!(caution, Caution::ContextFileMissing { .. }))
             .map(yunta_render::caution::line)
             .collect();
-        self.cautions = pre_run.cautions;
         self
     }
 
@@ -242,6 +294,65 @@ impl RunDocument {
     }
 }
 
+/// Every node the run's frozen workflow declares, in its declaration order, each with what
+/// its log says of it.
+fn nodes_of(frame: &RunFrame, state: &RunState) -> Vec<NodeJson> {
+    frame
+        .nodes
+        .iter()
+        .map(|node| NodeJson::of(node, state.nodes.get(&node.id)))
+        .collect()
+}
+
+/// Each task the run registered, by its id, with the word its ledger calls it by.
+fn tasks_of(state: &RunState) -> BTreeMap<String, &'static str> {
+    state
+        .tasks
+        .iter()
+        .map(|(id, record)| (id.to_string(), record.status.as_str()))
+        .collect()
+}
+
+/// The escalation a run parked on a person waits on, as its page reads it. `None` for a run
+/// that is not parked, whatever decision the log rebuilt.
+fn parked_escalation(
+    frame: &RunFrame,
+    decision: Option<&(yunta_core::NodeId, yunta_core::events::Escalation)>,
+) -> Option<GateWaitingPayload> {
+    decision
+        .filter(|_| advice::parked(&frame.phase).is_some())
+        .map(|(_, escalation)| escalation.clone().into_payload())
+}
+
+/// The reset a run paused on a limit's reset waits for, for the document to carry.
+fn awaiting_reset_of(frame: &RunFrame) -> Option<AwaitingResetJson> {
+    advice::reset_pause(&frame.phase).map(|(node, at)| AwaitingResetJson {
+        node: node.to_string(),
+        at,
+    })
+}
+
+/// What a program types next for the run, each command with what it does: the steps a
+/// person reads at the end of the run's page, naming the run by its whole id.
+fn next_of(frame: &RunFrame, escalation: Option<&GateWaitingPayload>) -> Vec<NextCommand> {
+    advice::after_for(frame, escalation, Reader::Agent)
+        .into_iter()
+        .map(|(command, why)| NextCommand::new(command, why))
+        .collect()
+}
+
+/// What the tree held of the shapes of each plan `state` holds, in the
+/// order the run first accepted them: the reading the log states for each
+/// plan's bytes. A plan none of whose shapes was read has none.
+fn shapes_read(state: &RunState) -> Vec<yunta_core::events::ShapesReadPayload> {
+    state
+        .artifacts
+        .of_kind(yunta_core::ArtifactKind::Tasks)
+        .filter_map(|held| state.tasks.shapes_read(&held.content_hash))
+        .cloned()
+        .collect()
+}
+
 /// Why the run stopped where it did, for the phases whose word alone
 /// does not say it: what broke a failed run, and what stopped making
 /// sense in a broken one.
@@ -249,8 +360,8 @@ fn reason(phase: &RunPhase) -> Option<String> {
     match phase {
         RunPhase::Failed { failure } => failure
             .as_ref()
-            .map(|failure| yunta_core::text::one_line(&crate::render::failure::sentence(failure))),
-        RunPhase::Broken { diagnostic } => Some(yunta_core::text::one_line(diagnostic)),
+            .map(|failure| surco::text::one_line(&yunta_render::failure::sentence(failure))),
+        RunPhase::Broken { diagnostic } => Some(surco::text::one_line(diagnostic)),
         RunPhase::Created
         | RunPhase::Running
         | RunPhase::Waiting { .. }
@@ -287,31 +398,35 @@ pub(crate) async fn decision_of(
     Ok(yunta_engine::current_escalation(manifest, run_dir, state).await?)
 }
 
-/// The documents `escalation` shows, as the run whose derived state is
-/// `state` holds them.
+/// The documents `escalation` shows, as the run born with `manifest`,
+/// whose derived state is `state`, holds them.
 pub(crate) async fn shown_of(
+    manifest: &yunta_core::Manifest,
     run_dir: &std::path::Path,
     escalation: &yunta_core::events::GateWaitingPayload,
     state: &RunState,
 ) -> Result<Vec<yunta_engine::ShownDocument>, crate::error::CliError> {
-    Ok(yunta_engine::shown_documents(run_dir, escalation.shows(), state).await?)
+    Ok(
+        yunta_engine::shown_documents(run_dir, escalation.shows(), state, manifest.request())
+            .await?,
+    )
 }
 
 /// What a waiting run is waiting on.
 ///
-/// Tagged by `on`, so a reader matches on the shape instead of
-/// inferring it from which fields are set: a node parked on a person is
-/// a different thing from the run itself stopping, and only one of them
-/// has a node to name.
+/// Told apart by `on`, which each shape carries once, so a reader matches on the shape
+/// instead of inferring it from which fields are set: a node parked on a person is a
+/// different thing from the run itself stopping, and only one of them has a node to name.
 #[derive(serde::Serialize)]
-#[serde(tag = "on", rename_all = "snake_case")]
+#[serde(untagged)]
 pub(crate) enum WaitingOnJson {
     /// A node is parked on a person. With several parked at once this
-    /// is the first in the workflow's declaration order.
+    /// is the first in the workflow's declaration order. `on` is the
+    /// kind of wait the node is in, from the node's own shape.
     Node {
         node: String,
         /// What that node waits on, in the same shape a node of
-        /// `nodes` carries.
+        /// `nodes` carries; it names `on`.
         #[serde(flatten)]
         waiting: NodeWaitJson,
         /// What the run's standing pause recorded, absent for a node
@@ -320,10 +435,11 @@ pub(crate) enum WaitingOnJson {
         reason: Option<String>,
     },
     /// The run itself paused, with the reason it recorded.
-    Run { reason: String },
+    Run { on: &'static str, reason: String },
     /// The engine driving the run is asking a person at its terminal,
     /// where the only answer it takes is given.
     Prompt {
+        on: &'static str,
         #[serde(skip_serializing_if = "Option::is_none")]
         node: Option<String>,
         since: chrono::DateTime<chrono::Utc>,
@@ -335,7 +451,7 @@ impl WaitingOnJson {
     /// The frame's own answer, in the document's shape — or, for a run
     /// that is moving, the question its engine is asking at its terminal.
     /// `None` for a run that is not waiting on anything.
-    fn of(phase: &RunPhase, engine: &crate::render::Engine) -> Option<Self> {
+    fn of(phase: &RunPhase, engine: &yunta_engine::Engine) -> Option<Self> {
         let RunPhase::Waiting { on } = phase else {
             let moving = matches!(phase, RunPhase::Created | RunPhase::Running);
             return engine
@@ -343,6 +459,7 @@ impl WaitingOnJson {
                 .as_ref()
                 .filter(|_| moving)
                 .map(|prompt| WaitingOnJson::Prompt {
+                    on: "prompt",
                     node: prompt.node.as_ref().map(ToString::to_string),
                     since: prompt.since,
                     pid: prompt.pid,
@@ -355,6 +472,7 @@ impl WaitingOnJson {
                 reason: reason.as_ref().map(yunta_render::pause::sentence),
             },
             WaitingOn::Run { reason } => WaitingOnJson::Run {
+                on: "run",
                 reason: yunta_render::pause::sentence(reason),
             },
         })

@@ -22,6 +22,17 @@ impl RunState {
         self.unconsumed(node, *at).then_some((resolution, *at))
     }
 
+    /// Whether a person's answer to what the run is parked on waits for the resume that
+    /// acts on it: the instant a recorded decision takes to reach another process. Nobody
+    /// is needed in that instant, and what was answered is on offer to nobody.
+    pub fn answer_awaits_its_resume(&self) -> bool {
+        self.run.paused().is_some()
+            && self
+                .gates
+                .nodes()
+                .any(|node| self.pre_seeded(node).is_some())
+    }
+
     /// The option a person chose to run `node` again after its latest
     /// failure, while nothing has acted on that choice. Only the node's own
     /// resolutions count: an answer to a question about one of its tasks is
@@ -64,7 +75,7 @@ impl RunState {
     /// that consumed it. Three ledgers answer this together, which is why it
     /// lives here. The gate ledger holds the resolution and whether an
     /// escalation stands after it; the node ledger holds the terminals and
-    /// re-routes that mean the run already acted on it; the run ledger holds
+    /// reroutes that mean the run already acted on it; the run ledger holds
     /// the pause that ends the window the resolution was seeded into. A
     /// decision is unconsumed only while none of those came after it. An
     /// abort is one of those decisions: the pause it leads to ends its

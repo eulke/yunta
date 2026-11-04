@@ -5,10 +5,10 @@
 //! checked. The fact is what the log holds; its sentence is produced here,
 //! once, for every surface that shows how a node ended.
 
+use surco::text;
 use yunta_core::events::{
     Approval, EngineFact, EnvironmentDrift, Evidence, NodeOutcome, PromotionCause,
 };
-use yunta_core::text;
 
 use crate::evidence;
 
@@ -26,7 +26,7 @@ fn fact_sentence(fact: &EngineFact) -> String {
     match fact {
         EngineFact::ExitStatus { code } => format!("exit {code}"),
         EngineFact::PullRequestOpened { number, url } => {
-            format!("pull request #{number} — {url}")
+            format!("pull request {}", pull_request(*number, url))
         }
         EngineFact::ChildrenFinished { count } => {
             format!("{} finished", text::counted_as(*count, "child", "children"))
@@ -56,6 +56,11 @@ fn fact_sentence(fact: &EngineFact) -> String {
             Approval::Merge => format!("merged by {by}"),
         },
     }
+}
+
+/// A pull request as a reader is told it: its number and where it is.
+pub fn pull_request(number: u64, url: &str) -> String {
+    format!("#{number}: {url}")
 }
 
 /// A comparison that found no regression. The memo does not say who asked
@@ -92,7 +97,7 @@ pub fn environment_drift(drift: &EnvironmentDrift) -> String {
     )
 }
 
-/// Why a run promoted, on one line: the node that exhausted its re-routes
+/// Why a run promoted, on one line: the node that exhausted its reroutes
 /// and the record behind it. A log that stored a sentence shows it as
 /// written, and a log that stored neither shows the record it has.
 pub fn promotion_reason(
@@ -103,7 +108,7 @@ pub fn promotion_reason(
     match (cause, legacy) {
         (Some(promoted), _) => text::aside(
             format!(
-                "node `{}` exhausted its re-routes to `{}`",
+                "node `{}` exhausted its reroutes to `{}`",
                 promoted.node, promoted.goto
             ),
             &promotion_record(promoted, evidence),
@@ -114,7 +119,7 @@ pub fn promotion_reason(
 }
 
 /// The record a promotion is read against: the failure that exhausted the
-/// re-routes, when the promotion carries it, and the evidence otherwise.
+/// reroutes, when the promotion carries it, and the evidence otherwise.
 fn promotion_record(promoted: &PromotionCause, evidence: &Evidence) -> String {
     match &promoted.failure {
         Some(failure) => evidence::one_line(&Evidence::from(crate::failure::facts(failure))),
@@ -212,7 +217,7 @@ mod tests {
         let record = Evidence::from(vec![Fact::bare("exit 1")]);
         assert_eq!(
             promotion_reason(Some(&cause), None, &record),
-            "node `lint` exhausted its re-routes to `fix-lint` — exit 1"
+            "node `lint` exhausted its reroutes to `fix-lint` (exit 1)"
         );
         assert_eq!(
             promotion_reason(None, Some("an older sentence"), &record),
@@ -231,7 +236,7 @@ mod tests {
         };
         assert_eq!(
             promotion_reason(Some(&cause), None, &Evidence::none()),
-            "node `lint` exhausted its re-routes to `fix-lint` — exit 1"
+            "node `lint` exhausted its reroutes to `fix-lint` (exit 1)"
         );
     }
 }

@@ -1,7 +1,8 @@
 //! See [`super`]. The config keys each node cannot run without.
 
-use super::*;
 use yunta_core::ConfigKey;
+
+use super::*;
 
 /// Every node whose kind cannot run with a key the config leaves unset:
 /// a coverage gate with no `coverage`, an executor nobody registered, a
@@ -89,6 +90,6 @@ fn near_key(key: &ConfigKey, config: &ConfigLayer) -> Option<String> {
         return None;
     };
     let declared = config.commands.as_ref()?;
-    yunta_core::text::nearest(command.as_str(), declared.keys().map(|name| name.as_str()))
+    surco::text::nearest(command.as_str(), declared.keys().map(|name| name.as_str()))
         .map(str::to_string)
 }

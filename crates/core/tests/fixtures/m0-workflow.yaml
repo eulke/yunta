@@ -2,7 +2,7 @@
 # prompt/bash/loop nodes, depends_on, scope, artifacts.produces (kind:
 # tasks), hooks.after and on_failure.goto/max_reroutes.
 name: fix-lint-loop
-description: "Implement via loop, verify with bash, re-route on failure."
+description: "Implement via loop, verify with bash, reroute on failure."
 nodes:
   - id: implement
     kind: loop

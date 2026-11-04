@@ -5,18 +5,19 @@
 
 use std::path::Path;
 
+use surco::components::{Fields, Headline, Next, Prose, Whole};
+use surco::doc::{Block, Doc};
+use surco::figures::duration;
+use surco::look::Look;
+use surco::paths;
 use yunta_core::events::NodeState;
 use yunta_core::{NodeId, RunId};
 use yunta_engine::{NodeFrame, NodeStanding, RunFrame, RunState};
+use yunta_render::blocks::FailureDetail;
 use yunta_render::spend::Breakdown;
 
 use crate::commands::advice;
 use crate::error::CliError;
-use crate::render::blocks::{Drawn, FailureDetail, Fields, Headline, Next, Whole};
-use crate::render::doc::Doc;
-use crate::render::ink::{Line, Tone};
-use crate::render::{duration, paths, wrap, Look, INDENT};
-use crate::run_page::section;
 
 /// What the page is drawn from.
 pub(super) struct NodePage<'a> {
@@ -49,7 +50,7 @@ pub(super) fn find<'a>(
             CliError::msg(format!(
                 "run {} has no node `{id}`{}",
                 run_id.handle(),
-                yunta_core::text::did_you_mean(id.as_str(), declared)
+                surco::text::did_you_mean(id.as_str(), declared)
             ))
         })
 }
@@ -58,59 +59,49 @@ impl NodePage<'_> {
     /// The page for the node, as one document: where it stands, what it
     /// said or what failed it, its failure whole, what it took, the
     /// documents it produced, and what to type next.
-    pub(super) fn document(&self, look: &Look) -> Doc<'_> {
-        let display = crate::render::standing(&self.node.state);
-        let headline = Headline {
-            subject: format!("node {} of run {}", self.node.id, self.run_id.handle()),
-            mark: display.word.mark(),
-            said: display.word.word().to_string(),
-        };
-        let mut documents = Vec::new();
-        for document in self.documents {
-            let doc = crate::render::shown::document(
+    pub(super) fn document(&self, _look: &Look) -> Doc {
+        let display = crate::render::node_display(self.node);
+        let headline = Headline::new(
+            display.standing.mark(),
+            format!("node {} of run {}", self.node.id, self.run_id.handle()),
+            display.standing.word(),
+        );
+        let documents = self.documents.iter().flat_map(|document| {
+            yunta_render::shown::document(
                 document,
                 self.run_id,
-                crate::render::shown::Form::Whole,
+                yunta_render::shown::Form::Whole,
                 &advice::spell,
-            );
-            documents.extend(crate::render::surface_lines(doc, look));
-        }
-        let doc = section(Doc::new().with(headline), self.said(look));
-        let doc = section(doc, self.evidence(look));
-        let doc = section(doc, self.fields().lines(look));
-        let doc = section(doc, documents);
-        section(doc, self.next().lines(look))
+            )
+            .into_blocks()
+        });
+        Doc::new()
+            .with(headline)
+            .with_all(self.said())
+            .with_all(self.evidence())
+            .with(self.fields())
+            .with_all(documents)
+            .with(self.next())
     }
 
     /// The whole of what the node's state says: its failure, every line
-    /// of it, or what its agent said when it finished.
-    fn said(&self, look: &Look) -> Vec<Line> {
-        let (tone, text) = match &self.node.state {
+    /// of it, or what its agent said when it finished, as it wrote it.
+    fn said(&self) -> Vec<Block> {
+        match &self.node.state {
             NodeStanding::Reached(NodeState::Failed { failure, .. }) => {
-                (Tone::Failed, crate::render::failure::headline(failure))
+                vec![Prose(yunta_render::failure::headline(failure)).into()]
             }
             NodeStanding::Reached(NodeState::Finished { outcome, .. }) => {
-                (Tone::Plain, yunta_render::outcome::sentence(outcome))
+                vec![Block::Markdown(yunta_render::outcome::sentence(outcome))]
             }
-            _ => return Vec::new(),
-        };
-        let room = look.width.cells().saturating_sub(INDENT.len());
-        text.lines()
-            .flat_map(|line| match line.trim().is_empty() {
-                true => vec![String::new()],
-                false => wrap(line, room),
-            })
-            .map(|line| match line.is_empty() {
-                true => Line::new(),
-                false => Line::new().plain(INDENT).push(tone, line),
-            })
-            .collect()
+            _ => Vec::new(),
+        }
     }
 
     /// The end of what the node printed and where the whole of it is
     /// kept, each document it refused, the paths it should not have
     /// touched.
-    fn evidence(&self, look: &Look) -> Vec<Line> {
+    fn evidence(&self) -> Vec<Block> {
         let NodeStanding::Reached(NodeState::Failed { failure, .. }) = &self.node.state else {
             return Vec::new();
         };
@@ -121,7 +112,7 @@ impl NodePage<'_> {
                 self.home,
             )
         });
-        FailureDetail { failure, whole }.lines(look)
+        FailureDetail { failure, whole }.blocks()
     }
 
     /// What the node is and what it took.
@@ -166,7 +157,7 @@ impl NodePage<'_> {
             .push_if("took", node.elapsed.map(duration).unwrap_or_default())
             .push_if(
                 "handed over",
-                super::page::handed(self.state, &node.id).unwrap_or_default(),
+                crate::run_page::handed(self.state, &node.id).unwrap_or_default(),
             )
             .push_if("produced", produced.join(", "))
     }

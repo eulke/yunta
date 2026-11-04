@@ -144,7 +144,7 @@ fn not_on_path(cmd: &str, program: &str, environment: Option<&ExecutionEnvironme
 fn already_passes(cmd: &str, said: Option<&str>) -> String {
     format!(
         "`{cmd}` already exits 0, before any work{}. A criterion that passes before the work \
-         proves nothing: it must fail until the work is done — a test filter that matches no \
+         proves nothing: it must fail until the work is done; a test filter that matches no \
          test passes, and so does a test that checks nothing",
         said_line(said)
     )
@@ -154,7 +154,7 @@ fn unplanned(task: &TaskId, planned: Option<&[TaskId]>) -> String {
     match planned {
         Some(planned) => format!(
             "the run's plan declares no task `{task}`; its tasks are {}",
-            crate::text::listed(planned.iter().map(TaskId::as_str))
+            surco::text::listed(planned.iter().map(TaskId::as_str))
         ),
         None => "the run holds no plan for a spec to hold to".to_string(),
     }
@@ -163,7 +163,7 @@ fn unplanned(task: &TaskId, planned: Option<&[TaskId]>) -> String {
 /// The line a command concluded with, quoted after its verdict; nothing when
 /// it printed none.
 fn said_line(said: Option<&str>) -> String {
-    said.map(|line| format!(" — it said `{line}`"))
+    said.map(|line| format!(": it said `{line}`"))
         .unwrap_or_default()
 }
 
@@ -171,7 +171,7 @@ fn said_line(said: Option<&str>) -> String {
 /// the run recorded no environment.
 fn under(environment: Option<&ExecutionEnvironment>) -> String {
     environment
-        .map(|environment| format!(" — under {environment}"))
+        .map(|environment| format!(" (under {environment})"))
         .unwrap_or_default()
 }
 
@@ -195,8 +195,8 @@ mod tests {
                 environment: Some(environment),
             }
             .clause(),
-            "`./check.sh` exits 127 (command not found) where the engine runs criteria — it said \
-             `sh: ./check.sh: not found` — under sh with PATH=/usr/bin:/bin"
+            "`./check.sh` exits 127 (command not found) where the engine runs criteria: it said \
+             `sh: ./check.sh: not found` (under sh with PATH=/usr/bin:/bin)"
         );
         assert_eq!(
             RunFault::NotOnPath {
@@ -219,7 +219,7 @@ mod tests {
             }
             .clause(),
             "`true` already exits 0, before any work. A criterion that passes before the work \
-             proves nothing: it must fail until the work is done — a test filter that matches no \
+             proves nothing: it must fail until the work is done; a test filter that matches no \
              test passes, and so does a test that checks nothing"
         );
         assert_eq!(

@@ -8,9 +8,12 @@
 
 use std::str::FromStr;
 
+use surco::components::{Edge, RunLine};
+use surco::words::Standing;
 use yunta_core::RunId;
 
-use super::list::inbox::Inbox;
+use super::advice;
+use super::list::inbox::{Inbox, RunRow};
 use crate::context::Context;
 use crate::error::CliError;
 
@@ -40,11 +43,26 @@ impl FromStr for RunRef {
 }
 
 /// A run a reference could mean, and what tells it apart from the
-/// others it could mean.
+/// others it could mean: in words, and as the field's row a person reads,
+/// when the run reads back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Candidate {
     pub(crate) run_id: RunId,
     pub(crate) about: Option<String>,
+    pub(crate) line: Option<RunLine>,
+}
+
+impl Candidate {
+    /// The run `row` is, its row ending with the command that opens it.
+    fn of(row: &RunRow) -> Self {
+        let handle = row.run_id.handle().to_string();
+        let opens = Edge::Command(advice::status(&handle));
+        Candidate {
+            run_id: row.run_id.clone(),
+            about: Some(format!("{} ({})", row.workflow, row.mode)),
+            line: Some(row.line(handle, opens)),
+        }
+    }
 }
 
 /// The run a command takes, as every command that takes one documents
@@ -77,15 +95,16 @@ impl RunRef {
     /// root.
     pub(crate) async fn resolve(&self, ctx: &Context) -> Result<RunId, CliError> {
         match self {
-            RunRef::Typed(typed) => typed_run(ctx, typed),
+            RunRef::Typed(typed) => typed_run(ctx, typed).await,
             RunRef::Last => Inbox::gather(ctx, false)
                 .await?
                 .newest()
                 .cloned()
                 .ok_or_else(|| {
-                    CliError::msg(
-                        "no run in this repository — `yunta list --runs --all` lists every run",
-                    )
+                    CliError::msg(format!(
+                        "no run in this repository; `{}` lists every run",
+                        advice::list_every_run()
+                    ))
                 }),
             RunRef::Needs => waiting_run(ctx).await,
         }
@@ -96,7 +115,7 @@ impl RunRef {
 ///
 /// Text that matches no run is handed on as the id it would be, so the
 /// command that takes it says what it says of a run that does not exist.
-fn typed_run(ctx: &Context, typed: &str) -> Result<RunId, CliError> {
+async fn typed_run(ctx: &Context, typed: &str) -> Result<RunId, CliError> {
     let runs = ctx.storage()?.list_runs()?;
     let ids: Vec<RunId> = runs.into_iter().map(|run| run.run_id).collect();
     match matching(typed, &ids) {
@@ -104,16 +123,28 @@ fn typed_run(ctx: &Context, typed: &str) -> Result<RunId, CliError> {
         Matched::None => {
             RunId::try_from(typed.to_string()).map_err(|error| CliError::msg(error.to_string()))
         }
-        Matched::Several(candidates) => Err(CliError::AmbiguousRun {
-            said: format!("`{typed}` is part of {} ids", candidates.len()),
-            candidates: candidates
+        Matched::Several(several) => {
+            // Each run as the field shows it, so a person tells them apart
+            // by more than an id; one that does not read back is its id.
+            let inbox = Inbox::gather(ctx, true).await?;
+            let candidates = several
                 .into_iter()
-                .map(|run_id| Candidate {
-                    run_id,
-                    about: None,
-                })
-                .collect(),
-        }),
+                .map(
+                    |run_id| match inbox.rows.iter().find(|row| row.run_id == run_id) {
+                        Some(row) => Candidate::of(row),
+                        None => Candidate {
+                            run_id,
+                            about: None,
+                            line: None,
+                        },
+                    },
+                )
+                .collect::<Vec<_>>();
+            Err(CliError::AmbiguousRun {
+                said: format!("`{typed}` is part of {} ids", candidates.len()),
+                candidates,
+            })
+        }
     }
 }
 
@@ -121,22 +152,18 @@ fn typed_run(ctx: &Context, typed: &str) -> Result<RunId, CliError> {
 async fn waiting_run(ctx: &Context) -> Result<RunId, CliError> {
     let inbox = Inbox::gather(ctx, false).await?;
     match inbox.needing_a_person().as_slice() {
-        [] => Err(CliError::msg(
-            "no run of this repository needs you — `yunta list --runs` lists them",
-        )),
+        [] => Err(CliError::msg(format!(
+            "no run of this repository {}; `{}` lists them",
+            Standing::NeedsYou.word(),
+            advice::list_runs()
+        ))),
         [one] => Ok(one.run_id.clone()),
         several => Err(CliError::AmbiguousRun {
             said: format!(
                 "{} of this repository need you",
-                yunta_core::text::counted(several.len(), "run")
+                surco::text::counted(several.len(), "run")
             ),
-            candidates: several
-                .iter()
-                .map(|row| Candidate {
-                    run_id: row.run_id.clone(),
-                    about: Some(format!("{} ({})", row.workflow, row.mode)),
-                })
-                .collect(),
+            candidates: several.iter().map(|row| Candidate::of(row)).collect(),
         }),
     }
 }

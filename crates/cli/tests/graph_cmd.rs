@@ -55,15 +55,15 @@ fn graph_renders_mermaid_with_depends_on_and_differentiated_reroute_edges() {
         "missing depends_on edge lint->tests in: {text}"
     );
     // on_failure.goto must be visually different from a plain depends_on
-    // edge (dashed `-.->`, a differentiated re-route edge) —
+    // edge (dashed `-.->`, a differentiated reroute edge) —
     // and never rendered as a plain `-->`.
     assert!(
         text.contains("lint -.-> fix-lint") || text.contains("lint-.->fix-lint"),
-        "missing differentiated re-route edge lint->fix-lint in: {text}"
+        "missing differentiated reroute edge lint->fix-lint in: {text}"
     );
     assert!(
         !text.contains("lint --> fix-lint"),
-        "re-route edge must not look like a plain dependency edge: {text}"
+        "reroute edge must not look like a plain dependency edge: {text}"
     );
 }
 
@@ -170,7 +170,8 @@ nodes:
     );
     let said = String::from_utf8_lossy(&output.stderr);
     assert!(
-        said.contains("fails `yunta check`") && said.contains("runner `planner`"),
+        said.starts_with("✗ wf.yaml · 1 error\n")
+            && yunta_testkit::unwrapped(&said).contains("runner `planner`"),
         "the verdict goes beside the drawing: {said}"
     );
 }
@@ -298,7 +299,7 @@ fn graph_renders_dot_with_solid_dependencies_and_dashed_reroutes() {
     );
     assert!(
         text.contains("\"lint\" -> \"fix-lint\" [style=dashed];"),
-        "missing dashed re-route edge: {text}"
+        "missing dashed reroute edge: {text}"
     );
     assert!(text.trim_end().ends_with('}'), "got: {text}");
 }

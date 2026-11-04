@@ -183,11 +183,11 @@ impl<'de> Deserialize<'de> for Isolation {
             "worktree" => Ok(Isolation::Worktree),
             "none" => Ok(Isolation::None),
             other if other == retired => Err(serde::de::Error::custom(format!(
-                "`{retired}` is no longer an isolation — write `{replacement}`, which says \
+                "`{retired}` is no longer an isolation: write `{replacement}`, which says \
                  the same thing at every level"
             ))),
             other => Err(serde::de::Error::custom(format!(
-                "unknown isolation `{other}` — expected `worktree` or `none`"
+                "unknown isolation `{other}`: expected `worktree` or `none`"
             ))),
         }
     }
@@ -218,7 +218,7 @@ pub struct DefaultsConfig {
     /// records the suspension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_minutes: Option<u64>,
-    /// What a failed node without its own `on_failure:` re-route does
+    /// What a failed node without its own `on_failure:` reroute does
     /// to the run. Absent is `pause`, the schema's own default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<DefaultOnFailure>,
@@ -301,6 +301,16 @@ pub struct LimitsConfig {
     /// prompt; larger ones are referenced by path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inline_context_bytes: Option<u64>,
+}
+
+/// `terminal:` — how a live view speaks to the terminal it runs on.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalConfig {
+    /// Rings the terminal's bell when a run asks its person something. Off
+    /// unless set: the window's title says so either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bell: Option<bool>,
 }
 
 /// `baseline:` — backs the `baseline_compare` check kind; the suite the engine

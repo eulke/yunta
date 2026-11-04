@@ -94,7 +94,7 @@ async fn a_command_the_frozen_config_lacks_fails_unset() {
 }
 
 /// A correction cannot change the frozen config either: a node's
-/// `on_failure` spends no re-route on such a failure, and the person it
+/// `on_failure` spends no reroute on such a failure, and the person it
 /// goes to is offered no attempt that would meet it again.
 #[tokio::test]
 async fn no_reroute_is_spent_on_a_command_the_frozen_config_lacks() {

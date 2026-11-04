@@ -12,26 +12,32 @@
 //! the install, and every write goes through a staging directory or a
 //! temporary file so a failure leaves the repository as it was.
 
+use std::path::{Path, PathBuf};
+
+use surco::components::{Checklist, Fields, Found, Furrow, Headline};
+use surco::doc::Doc;
+use surco::glyphs::Mark;
+use surco::look::Look;
 use yunta_core::{
-    ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest, PackRef, Publisher,
+    ConfigLayer, ContentHash, PackExecutorPolicy, PackLock, PackLockEntry, PackManifest, PackRef,
+    Publisher,
 };
 use yunta_engine::audit_pack;
 
-use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
+use super::pack_audit::{count_pack_tests, inventory, run_pack_tests};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::output::{blank, document, say};
+use crate::output::{blank, document};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
     vendor_into_place, with_cleanup, PackError, Swap,
 };
-use crate::render::blocks::{Checklist, Fields, Found};
-use crate::render::doc::Doc;
-use crate::render::Look;
 
+mod page;
 mod scaffold;
 
+use page::{about_to, Installed};
 pub use scaffold::new_pack;
 
 /// The merged `permissions.packs` verdicts, with the layers that
@@ -113,8 +119,8 @@ fn enforce_schema_range(manifest: &PackManifest) -> Result<(), CliError> {
         return Ok(());
     }
     Err(CliError::msg(format!(
-        "`{}/{}` declares `yunta_schema: \"{range}\"`, and this binary speaks schema {} — \
-         install a version of yunta inside that range, or a release of the pack that \
+        "`{}/{}` declares `yunta_schema: \"{range}\"`, and this binary speaks schema {}. \
+         Install a version of yunta inside that range, or a release of the pack that \
          accepts this one.",
         manifest.publisher,
         manifest.name,
@@ -134,10 +140,10 @@ fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &Publisher) -> Resu
     }
     Err(CliError::msg(format!(
         "publisher `{publisher}` is not in `permissions.packs.publishers.allow` \
-         (declared by the {} config {}) — allowed: {}. Add the publisher there, or \
+         (declared by the {} config {}); allowed: {}. Add the publisher there, or \
          install a pack from an allowed publisher.",
         declared_by.join("/"),
-        yunta_core::text::agreeing(declared_by.len(), "layer", "layers"),
+        surco::text::agreeing(declared_by.len(), "layer", "layers"),
         allow
             .iter()
             .map(ToString::to_string)
@@ -164,25 +170,52 @@ fn enforce_executor_policy(
         PackExecutorPolicy::Allow => Ok(()),
         PackExecutorPolicy::Deny => Err(CliError::msg(format!(
             "this pack declares {} and `permissions.packs.executors` \
-             is `deny` (declared by the {} config {}) — `--yes` cannot override a \
+             is `deny` (declared by the {} config {}): `--yes` cannot override a \
              permissions ceiling. Change the policy there, or {verb} a pack \
              without executors.",
-            yunta_core::text::counted(manifest.declares.executors.len(), "executor"),
+            surco::text::counted(manifest.declares.executors.len(), "executor"),
             policy.executors_declared_by.join("/"),
-            yunta_core::text::agreeing(policy.executors_declared_by.len(), "layer", "layers"),
+            surco::text::agreeing(policy.executors_declared_by.len(), "layer", "layers"),
         ))),
         PackExecutorPolicy::Prompt => {
             if confirmed {
                 return Ok(());
             }
             Err(CliError::msg(format!(
-                "this pack declares {} — executable code, not just \
+                "this pack declares {}: executable code, not just \
                  declarative YAML. Review the inventory above, then re-run with `--yes` to \
                  confirm the {verb}.",
-                yunta_core::text::counted(manifest.declares.executors.len(), "executor")
+                surco::text::counted(manifest.declares.executors.len(), "executor")
             )))
         }
     }
+}
+
+/// Vendors the clone at `clone` as `pack` through a staging directory and
+/// records it in `lock` with the entry `entry` makes of its content hash,
+/// the lock written atomically. A tree that cannot be vendored leaves the
+/// installed pack and the lock exactly as they were, and a failure after
+/// the swap puts the installed pack back. Answers where the pack is.
+fn vendor_and_lock(
+    cwd: &Path,
+    clone: &Path,
+    pack: &PackRef,
+    mut lock: PackLock,
+    entry: impl FnOnce(ContentHash) -> PackLockEntry,
+) -> Result<PathBuf, CliError> {
+    let dest = vendor_dir(cwd, pack);
+    let staging = staging_dir(cwd, pack);
+    let swap = vendor_into_place(clone, &staging, &dest)?;
+    let content_hash = match hash_tree(&dest) {
+        Ok(hash) => hash,
+        Err(cause) => return Err(with_cleanup(cause, swap.undo()).into()),
+    };
+    lock.packs.insert(pack.clone(), entry(content_hash));
+    if let Err(cause) = save_lock(cwd, &lock) {
+        return Err(with_cleanup(cause, swap.undo()).into());
+    }
+    swap.commit();
+    Ok(dest)
 }
 
 /// `yunta pack add`, in the order that keeps a person in charge:
@@ -218,9 +251,11 @@ pub async fn add(
     let dest = vendor_dir(&cwd, &pack);
     if dest.exists() {
         return Err(CliError::msg(format!(
-            "`{pack}` is already installed at {} — use `yunta pack update` to change its \
-             ref, or `yunta pack remove` first",
-            dest.display()
+            "`{pack}` is already installed at {}; use `{update}` to change its \
+             ref, or `{remove}` first",
+            dest.display(),
+            update = super::advice::pack("update"),
+            remove = super::advice::pack("remove")
         )));
     }
 
@@ -234,9 +269,10 @@ pub async fn add(
     }
 
     // The audit is read, never run: the inventory a person confirms
-    // against, printed before anything is vendored.
+    // against, shown before anything is vendored.
     let audit = audit_pack(clone_dir.path(), manifest.clone());
-    print_report(&audit, look);
+    let headline = about_to(&policy, &manifest, confirmed_executors, "installing");
+    document(look, inventory(&audit, headline));
     blank();
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "install")?;
 
@@ -248,17 +284,8 @@ pub async fn add(
 
     // The lock is loaded before anything is written, so a lock that
     // cannot be read stops the install before it starts.
-    let mut lock = load_lock(&cwd)?;
-
-    let staging = staging_dir(&cwd, &pack);
-    let swap = vendor_into_place(clone_dir.path(), &staging, &dest)?;
-    let content_hash = match hash_tree(&dest) {
-        Ok(hash) => hash,
-        Err(cause) => return Err(with_cleanup(cause, swap.undo()).into()),
-    };
-
-    lock.packs.insert(
-        pack.clone(),
+    let lock = load_lock(&cwd)?;
+    let dest = vendor_and_lock(&cwd, clone_dir.path(), &pack, lock, |content_hash| {
         PackLockEntry {
             publisher: manifest.publisher.clone(),
             name: manifest.name.clone(),
@@ -266,35 +293,27 @@ pub async fn add(
             r#ref: resolved_ref,
             commit: commit.clone(),
             content_hash,
-        },
-    );
-    if let Err(cause) = save_lock(&cwd, &lock) {
-        return Err(with_cleanup(cause, swap.undo()).into());
-    }
-    swap.commit();
-
-    say(
-        look,
-        format!(
-            "installed {}/{} @ {} ({}) {} {}",
-            manifest.publisher,
-            manifest.name,
-            manifest.version,
-            commit.abbreviated(),
-            look.glyphs.arrow(),
-            crate::render::paths::shown(&dest, &cwd, None)
-        ),
-    );
-    super::pack_needs::report(&ctx, &dest, &manifest, look).await?;
+        }
+    })?;
 
     // The pack's own cases run last, on the vendored copy, and only on
-    // request — after the confirmation, never as part of deciding it.
-    let tests = if run_tests {
-        run_pack_tests(&dest, &ctx).await
-    } else {
-        count_pack_tests(&dest)
+    // request: after the confirmation, never as part of deciding it.
+    let tests = match run_tests {
+        true => run_pack_tests(&dest, ctx.interrupt()).await,
+        false => count_pack_tests(&dest),
     };
-    print_test_summary(&tests, look);
+    let needs = super::pack_needs::blocks(&ctx, &dest, &manifest).await;
+    let installed = |needs| Installed {
+        manifest: &manifest,
+        commit: &commit,
+        at: &dest,
+        cwd: &cwd,
+        tests: &tests,
+        needs,
+    };
+    // The pack is installed whatever stopped the reading of its needs.
+    let needs = needs.inspect_err(|_| document(look, installed(Vec::new()).page()))?;
+    document(look, installed(needs).page());
     Ok(Outcome::Success)
 }
 
@@ -306,10 +325,11 @@ pub async fn update(
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let cwd = ctx.cwd.clone();
-    let mut lock = load_lock(&cwd)?;
+    let lock = load_lock(&cwd)?;
     let Some(entry) = lock.packs.get(pack).cloned() else {
         return Err(CliError::msg(format!(
-            "`{pack}` isn't installed — `yunta pack add` it first, not update"
+            "`{pack}` isn't installed; `{add}` it first, not update",
+            add = super::advice::pack("add")
         )));
     };
 
@@ -327,7 +347,7 @@ pub async fn update(
     let manifest = read_manifest(clone_dir.path())?;
     if manifest.reference() != *pack {
         return Err(CliError::msg(format!(
-            "`{new_ref}` of `{}` identifies itself as `{}/{}`, not `{pack}` — \
+            "`{new_ref}` of `{}` identifies itself as `{}/{}`, not `{pack}`; \
              refusing to update a pack into a different one",
             entry.source, manifest.publisher, manifest.name
         )));
@@ -339,11 +359,18 @@ pub async fn update(
     enforce_schema_range(&manifest)?;
     let policy = load_pack_policy(&cwd)?;
     enforce_publisher_allowed(&policy, pack.publisher())?;
+    if policy.executors == PackExecutorPolicy::Deny && !manifest.declares.executors.is_empty() {
+        enforce_executor_policy(&policy, &manifest, confirmed_executors, "update")?;
+    }
     if !manifest.declares.executors.is_empty() {
         // The decision being demanded needs the same evidence `add`
-        // shows — nothing executes until a human has seen the
-        // inventory — printed only when there's a decision to make.
-        print_report(&audit_pack(clone_dir.path(), manifest.clone()), look);
+        // shows: nothing executes until a person has seen the inventory,
+        // shown only when there is a decision to make.
+        let headline = about_to(&policy, &manifest, confirmed_executors, "updating");
+        document(
+            look,
+            inventory(&audit_pack(clone_dir.path(), manifest.clone()), headline),
+        );
         blank();
     }
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "update")?;
@@ -351,19 +378,8 @@ pub async fn update(
     let commit = head_commit(clone_dir.path(), ctx.supervision()).await?;
 
     // The new ref is vendored beside the installed tree and swapped in
-    // only once it is complete: a ref that cannot be vendored leaves the
-    // installed pack, and the lock, exactly as they were. A failure after
-    // the swap puts the installed pack back.
-    let dest = vendor_dir(&cwd, pack);
-    let staging = staging_dir(&cwd, pack);
-    let swap = vendor_into_place(clone_dir.path(), &staging, &dest)?;
-    let content_hash = match hash_tree(&dest) {
-        Ok(hash) => hash,
-        Err(cause) => return Err(with_cleanup(cause, swap.undo()).into()),
-    };
-
-    lock.packs.insert(
-        pack.clone(),
+    // only once it is complete.
+    vendor_and_lock(&cwd, clone_dir.path(), pack, lock, |content_hash| {
         PackLockEntry {
             publisher: pack.publisher().clone(),
             name: pack.name().clone(),
@@ -371,21 +387,13 @@ pub async fn update(
             r#ref: new_ref.to_string(),
             commit: commit.clone(),
             content_hash,
-        },
-    );
-    if let Err(cause) = save_lock(&cwd, &lock) {
-        return Err(with_cleanup(cause, swap.undo()).into());
-    }
-    swap.commit();
+        }
+    })?;
 
-    say(
-        look,
-        format!(
-            "updated {pack} {} {new_ref} ({})",
-            look.glyphs.arrow(),
-            commit.abbreviated()
-        ),
-    );
+    let headline = Headline::new(Mark::Done, format!("pack {pack}"), "updated")
+        .fact(format!("to {new_ref}"))
+        .fact(commit.abbreviated());
+    document(look, Doc::new().with(headline));
     Ok(Outcome::Success)
 }
 
@@ -407,7 +415,8 @@ pub fn remove(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
         swap.commit();
     }
 
-    say(look, format!("removed {pack}"));
+    let headline = Headline::new(Mark::Done, format!("pack {pack}"), "removed");
+    document(look, Doc::new().with(headline));
     Ok(Outcome::Success)
 }
 
@@ -446,12 +455,13 @@ pub fn list(look: &Look) -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let lock = load_lock(&cwd)?;
     if lock.packs.is_empty() {
-        say(
+        let root = surco::paths::shown(&packs_root(&cwd), &cwd, None);
+        document(
             look,
-            format!(
-                "no packs installed under {}",
-                crate::render::paths::shown(&packs_root(&cwd), &cwd, None)
-            ),
+            Doc::new()
+                .with(Headline::new(Mark::Absent, "packs", "none installed"))
+                .with(Furrow(Vec::new()))
+                .with(Fields::new().push_if("looked in", root)),
         );
         return Ok(Outcome::Success);
     }
@@ -467,10 +477,18 @@ pub fn list(look: &Look) -> Result<Outcome, CliError> {
         let (found, said) = vendored_verdict(&dest, entry, &installed);
         checks.push(found, key.to_string(), said);
     }
-    let lock_file = crate::render::paths::shown(&lock_path(&cwd), &cwd, None);
+    let lock_file = surco::paths::shown(&lock_path(&cwd), &cwd, None);
+    let mark = match checks.holds() {
+        true => Mark::Done,
+        false => Mark::Failed,
+    };
+    let installed = Headline::new(mark, "packs", format!("{} installed", lock.packs.len()))
+        .tally(checks.count(Found::Problem), checks.count(Found::Caution));
     document(
         look,
         Doc::new()
+            .with(installed)
+            .with(Furrow(Vec::new()))
             .with(checks)
             .with(Fields::new().push_if("lock", lock_file)),
     );

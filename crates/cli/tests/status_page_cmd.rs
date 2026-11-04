@@ -1,6 +1,7 @@
 //! `yunta status` leads with what a person came for: the word the run is
-//! called by, then what holds it or that nothing does — and quotes why a
-//! node failed rather than leaving it to be dug out of the log.
+//! called by, then — under the furrow — what holds it, which a run its
+//! word already says leaves unsaid; and it quotes why a node failed rather
+//! than leaving it to be dug out of the log.
 
 use yunta_testkit::{run_id_from, stdout, yunta_at, Checkout};
 
@@ -23,17 +24,20 @@ fn page(workflow: &str) -> Vec<String> {
 }
 
 #[test]
-fn status_says_whether_the_run_needs_you_in_its_first_two_lines() {
+fn status_says_whether_the_run_needs_you_in_its_headline_and_what_holds_it_under() {
     let parked = page(FAILS);
-    assert!(parked[0].ends_with("needs you"), "{parked:#?}");
+    assert!(parked[0].contains("· needs you ·"), "{parked:#?}");
     assert_eq!(
-        parked[1], "  node `compile` failed: exit 101",
+        parked[2], "  node `compile` failed: exit 101.",
         "{parked:#?}"
     );
 
     let finished = page(FINISHES);
-    assert!(finished[0].ends_with("finished"), "{finished:#?}");
-    assert_eq!(finished[1], "  nothing needs you", "{finished:#?}");
+    assert!(finished[0].contains("· finished ·"), "{finished:#?}");
+    assert!(
+        !finished.iter().any(|line| line.contains("needs you")),
+        "a finished run needs nobody, and its word says so: {finished:#?}"
+    );
 }
 
 #[test]
@@ -41,7 +45,7 @@ fn status_quotes_why_a_node_failed() {
     let parked = page(FAILS);
     let quoted: Vec<&String> = parked
         .iter()
-        .skip_while(|line| line.trim() != "compile")
+        .skip_while(|line| line.trim() != "✗ compile")
         .collect();
     assert!(
         quoted

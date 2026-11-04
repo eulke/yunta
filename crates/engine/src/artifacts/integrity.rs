@@ -97,7 +97,7 @@ impl ArtifactIntegrity {
             "run `{run_id}` no longer holds the bytes its log accepted for {} of the {} it \
              names: {}",
             self.faults.len(),
-            yunta_core::text::counted(self.verified + self.faults.len(), "artifact"),
+            surco::text::counted(self.verified + self.faults.len(), "artifact"),
             faults.join("; ")
         ))
     }

@@ -12,7 +12,7 @@
 //! is at fault, [`Problem`] is what is wrong, [`ArtifactFailure`] is why
 //! one declared artifact did not close. Layout — how a surface wraps,
 //! indents or counts what it is told — is not here; it is
-//! [`crate::text`].
+//! [`surco::text`].
 
 use std::fmt;
 
@@ -88,15 +88,6 @@ impl DocumentKind {
         match self {
             DocumentKind::Workflow => "workflow",
             DocumentKind::Artifact(kind) => kind.label(),
-        }
-    }
-
-    /// The artifact kind this is, absent for a document that is not an
-    /// artifact.
-    pub fn artifact(self) -> Option<ArtifactKind> {
-        match self {
-            DocumentKind::Workflow => None,
-            DocumentKind::Artifact(kind) => Some(kind),
         }
     }
 }
@@ -178,6 +169,20 @@ impl Diagnostic {
     pub fn code(&self) -> DiagnosticCode {
         self.problem.code()
     }
+
+    /// What helps fix the problem, the most direct first: the name a slip
+    /// most likely meant, or what took the place of a retired key.
+    pub fn help(&self) -> Vec<String> {
+        self.problem.help()
+    }
+
+    /// The rule the document broke, when the problem is a broken rule.
+    pub fn rule(&self) -> Option<RuleCode> {
+        match self.code() {
+            DiagnosticCode::Rule(code) => Some(code),
+            _ => None,
+        }
+    }
 }
 
 impl Diagnostic {
@@ -197,18 +202,55 @@ impl Diagnostic {
     }
 }
 
-impl fmt::Display for Diagnostic {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.said())?;
-        // A document that did not parse says where the parser stopped,
-        // as the parser always has; where a broken rule is written is
-        // the surface's to show beside it.
-        match (&self.problem, &self.at) {
-            (Problem::Parse { .. }, Some(at)) => {
-                write!(f, " at line {} column {}", at.line, at.col)
+impl Diagnostic {
+    /// What is wrong, and where in the text it is, in words: for a surface
+    /// that shows no place.
+    pub fn said_unplaced(&self) -> String {
+        format!("{}{}", self.said(), self.where_in_words())
+    }
+
+    /// Where in its text the problem is, as a line of text says it; nothing
+    /// for a problem with no place.
+    fn where_in_words(&self) -> String {
+        self.at.as_ref().map(Location::in_words).unwrap_or_default()
+    }
+}
+
+impl From<crate::yaml::YamlError> for Diagnostic {
+    /// A refusal of the parser's as the problem the document has: the
+    /// value it refused, the name a slip in it most likely meant, and where
+    /// the parser stopped.
+    fn from(error: crate::yaml::YamlError) -> Self {
+        match error {
+            crate::yaml::YamlError::Parse(refusal) => {
+                let crate::yaml::ParseRefusal {
+                    path,
+                    message,
+                    at,
+                    nearest,
+                } = *refusal;
+                Diagnostic::new(
+                    Subject::Document,
+                    Problem::parse_nearest(path, message, nearest),
+                )
+                .at(at)
             }
-            _ => Ok(()),
+            other => Diagnostic::new(Subject::Document, Problem::parse("", other.to_string())),
         }
+    }
+}
+
+impl fmt::Display for Diagnostic {
+    /// What is wrong, what helps fix it, and where in the text it is, on
+    /// one line.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}{}{}",
+            self.said(),
+            surco::text::hinted(self.help()),
+            self.where_in_words()
+        )
     }
 }
 
@@ -237,7 +279,13 @@ impl Report {
 
     /// This report with every problem placed in `text`, the document it
     /// is about, that was not placed already.
-    pub fn located(mut self, text: &str) -> Self {
+    pub fn located(self, text: &str) -> Self {
+        self.located_in(|| SourceMap::read(text))
+    }
+
+    /// This report with every problem that was not placed already placed
+    /// in the map `read` gives, read only when one is not.
+    pub fn located_in(mut self, read: impl FnOnce() -> SourceMap) -> Self {
         if self
             .diagnostics
             .iter()
@@ -245,7 +293,7 @@ impl Report {
         {
             return self;
         }
-        let map = SourceMap::read(text);
+        let map = read();
         let kind = self.document.kind;
         for diagnostic in &mut self.diagnostics {
             if diagnostic.at.is_none() {
@@ -260,7 +308,7 @@ impl fmt::Display for Report {
     /// The problems block: the file and the count, then
     /// one violation per line.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&crate::text::problems(
+        f.write_str(&surco::text::problems(
             &self.document.path,
             &self.diagnostics,
         ))

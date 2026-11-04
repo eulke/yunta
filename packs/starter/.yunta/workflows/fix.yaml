@@ -9,6 +9,7 @@ inputs:
     type: string
     default: "describe what to fix here"
     description: What to fix, in your own words
+    request: true
 nodes:
   - id: fix
     kind: prompt

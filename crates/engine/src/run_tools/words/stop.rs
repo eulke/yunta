@@ -1,11 +1,10 @@
 //! The sentences a session reads when its stop is refused: what stands
 //! between its work and its close, numbered, and how to go on.
 
+use surco::text::listed;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::expansion::Decision;
-use yunta_core::text::listed;
 
-use super::scope::denial;
 use super::verdicts::failure_heading;
 use crate::process::Printed;
 use crate::run_tools::verdicts::{numbered, Reply};
@@ -19,7 +18,7 @@ use crate::task_cycle::{CriterionRun, Judgement};
 /// in the call that made it.
 pub(crate) fn stop_unfinished(judgement: &Judgement, request_tool: &str) -> String {
     let mut text = Reply::new(
-        "yunta: not done yet — this is your work judged as the engine will judge it when your \
+        "yunta: not done yet; this is your work judged as the engine will judge it when your \
          session ends, and it would not close:",
     )
     .problems(stop_problems(judgement))
@@ -28,7 +27,7 @@ pub(crate) fn stop_unfinished(judgement: &Judgement, request_tool: &str) -> Stri
     match judgement.request.as_ref().map(|outcome| &outcome.decision) {
         Some(Decision::Deny(refusal)) => text.push_str(&format!(
             " Your request was denied in its call: {}. Keep your work within its scope.",
-            denial(refusal)
+            refusal.sentence()
         )),
         _ if !request_tool.is_empty() => text.push_str(&format!(
             " If the fix needs a file outside your scope, ask for it with `{request_tool}` and \
@@ -76,7 +75,7 @@ fn stop_problems(judgement: &Judgement) -> Vec<String> {
             .map(|path| path.display().to_string())
             .collect();
         problems.push(format!(
-            "changed outside the scope — undo these changes: {}",
+            "changed outside the scope; undo these changes: {}",
             listed(paths.iter().map(String::as_str))
         ));
     }
@@ -94,8 +93,8 @@ fn stop_problems(judgement: &Judgement) -> Vec<String> {
 /// the failure says otherwise.
 fn document_problem(spec: &str, failure: &ArtifactFailure) -> String {
     match failure.report() {
-        Some(report) => numbered(format!("{spec} — {}", failure_heading(report)), report),
-        None => format!("{spec} — {failure}"),
+        Some(report) => numbered(format!("{spec}: {}", failure_heading(report)), report),
+        None => format!("{spec}: {failure}"),
     }
 }
 

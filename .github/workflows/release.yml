@@ -161,22 +161,30 @@ jobs:
       # crates.io rejects a crate whose path dependencies aren't yet
       # indexed — dependency order and waiting for each to actually
       # appear aren't optional.
+      - name: publish yunta-surco
+        run: cargo publish -p yunta-surco --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: wait for yunta-surco to index
+        run: ./scripts/wait-for-crate-index.sh yunta-surco "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-surco") | .version')"
       - name: publish yunta-core
         run: cargo publish -p yunta-core --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: wait for yunta-core to index
-        run: ./scripts/wait-for-crate-index.sh yunta-core "$(cargo metadata --no-deps --format-version1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-core") | .version')"
+        run: ./scripts/wait-for-crate-index.sh yunta-core "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-core") | .version')"
+      - name: publish yunta-render
+        run: cargo publish -p yunta-render --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: publish yunta-storage
         run: cargo publish -p yunta-storage --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: wait for yunta-render to index
+        run: ./scripts/wait-for-crate-index.sh yunta-render "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-render") | .version')"
       - name: publish yunta-adapters
         run: cargo publish -p yunta-adapters --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: wait for yunta-storage and yunta-adapters to index
         run: |
-          ./scripts/wait-for-crate-index.sh yunta-storage "$(cargo metadata --no-deps --format-version1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-storage") | .version')"
-          ./scripts/wait-for-crate-index.sh yunta-adapters "$(cargo metadata --no-deps --format-version1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-adapters") | .version')"
+          ./scripts/wait-for-crate-index.sh yunta-storage "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-storage") | .version')"
+          ./scripts/wait-for-crate-index.sh yunta-adapters "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-adapters") | .version')"
       - name: publish yunta-engine
         run: cargo publish -p yunta-engine --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: wait for yunta-engine to index
-        run: ./scripts/wait-for-crate-index.sh yunta-engine "$(cargo metadata --no-deps --format-version1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-engine") | .version')"
+        run: ./scripts/wait-for-crate-index.sh yunta-engine "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-engine") | .version')"
       - name: publish yunta (binary)
         run: cargo publish -p yunta --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 

@@ -15,12 +15,15 @@ mod context;
 mod expand;
 mod fault;
 mod hooks;
+mod keys;
 mod node;
 mod node_kind;
 mod node_policy;
 mod optional;
 mod parse;
 mod place;
+mod ranks;
+mod references;
 mod scope;
 
 use std::collections::{BTreeMap, HashSet};
@@ -38,7 +41,7 @@ pub mod reads;
 
 pub use artifacts::{
     ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, ReservedIdentity,
-    UnknownArtifactKind, ARTIFACTS_DIR, OBJECTS_DIR,
+    UnknownDocument, ARTIFACTS_DIR, OBJECTS_DIR,
 };
 pub use command::{node_commands, Resolved, RunCommand};
 pub use context::{
@@ -47,6 +50,7 @@ pub use context::{
 };
 pub use fault::WorkflowFault;
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
+pub use keys::{NODE_KEYS, WORKFLOW_KEYS};
 pub use node::{Node, NodeDefaults};
 pub use node_kind::{
     CheckBuiltin, Coordination, ExternalGate, ForgeKind, JoinPolicy, MountArtifact, MountSpec,
@@ -140,6 +144,17 @@ impl Workflow {
                 .filter(|node| tops.is_none_or(|ids| ids.contains(&node.id)))
                 .collect(),
         }
+    }
+
+    /// The nodes that wait on `id`: every top-level node whose `depends_on`
+    /// names it, in the order the file declares them. A parallel group's
+    /// children start when their group does, so a child's `depends_on` makes
+    /// it wait on nothing.
+    pub fn dependents<'a>(&'a self, id: &'a NodeId) -> impl Iterator<Item = &'a NodeId> + 'a {
+        self.nodes
+            .iter()
+            .filter(move |node| node.depends_on.contains(id))
+            .map(|node| &node.id)
     }
 
     /// The mode a run starts at when nothing names one: the first declared,
@@ -246,7 +261,7 @@ impl std::fmt::Display for DistillArtifact {
 }
 
 impl OnFinishStep {
-    const KEYS: &'static [&'static str] = &["cleanup", "distill"];
+    pub(super) const KEYS: &'static [&'static str] = &["cleanup", "distill"];
 }
 
 impl<'de> Deserialize<'de> for OnFinishStep {
@@ -371,5 +386,28 @@ nodes:
                 ("right", Some("fan")),
             ],
         );
+    }
+
+    /// A node's dependents are the top-level nodes that wait on it: a parallel
+    /// group's child starts with its group, whatever its `depends_on` names.
+    #[test]
+    fn a_group_child_is_never_among_a_nodes_dependents() {
+        let workflow: Workflow = yaml::parse(
+            r#"
+name: dependents
+nodes:
+  - { id: approve, kind: bash, run: x }
+  - { id: after, kind: bash, run: x, depends_on: [approve] }
+  - id: fan
+    kind: parallel
+    nodes:
+      - { id: left, kind: bash, run: x, depends_on: [approve] }
+      - { id: right, kind: bash, run: x }
+"#,
+        )
+        .unwrap();
+        let approve = NodeId::from_static("approve");
+        let dependents: Vec<&str> = workflow.dependents(&approve).map(NodeId::as_str).collect();
+        assert_eq!(dependents, ["after"]);
     }
 }

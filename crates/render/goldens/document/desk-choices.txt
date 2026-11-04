@@ -1,0 +1,35 @@
+ plan · EKPBGE · fragua (standard) · 4 tasks in 3 steps                                       needs you  approve-plan
+ Install packs in the user's Yunta state directory for use across projects
+ you asked  add pack global instalation support, not only project level as today
+
+     the change                      │ decided for you
+                                     │
+ steps                               │     1 What scope and persistence does a global installation have?
+ 1   global-pack-storage             │
+     global-pack-catalog             │   ▸ 2 How does a user select global rather than project installation?
+ 2   global-pack-cli                 │     chose        Add `--global` to `yunta pack add`; add `--global` selectors
+ 3   global-pack-docs                │                  to pack list, remove, update and audit so lifecycle actions
+                                     │                  address the intended store.
+ order                               │     instead of   A separate `pack install --global` command
+ storage → cli → docs                │                  Global installs as the default
+ catalog → docs                      │     because      The explicit flag preserves the established project-local
+                                     │                  default and makes the target visible on every mutating or
+ decided for you                4  d │                  inspection command.
+ risks                          2  d │
+ left out                       2  d │   3 What happens when local and global installations expose the same workflow
+                                     │   or pack?
+ implies                             │
+ ▲ what it changes is named in 5     │     4 Which lifecycle, permission, and compatibility behaviors are in scope?
+   files outside every task          │
+                                     │   risks
+ impact                              │     ▲ Global lock state is user-specific and is not committed with a project,
+ crates/cli/src/pack.rs      storage │       so different users may have different fallback pack versions.
+ crates/engin…rc/catalog.rs  catalog │     ▲ Global catalog lookup must be threaded through every workflow, skill,
+ crates/engine/src/frozen/   catalog │       agent, frozen-layer and prompt discovery path that currently reads only
+ crates/cli/src/cli/             cli │       project packs.
+ crates/cli/src/commands/        cli │
+ docs/global-install.md         docs │   left out
+                                     │ … 2 more lines
+
+ ◆ Plan and its tests registered. Approve?
+ 1 approve   2 adjust   3 abort                                         j k choice · p proof · d the tasks · esc back

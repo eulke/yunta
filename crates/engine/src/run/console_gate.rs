@@ -115,7 +115,7 @@ async fn unprovable_held(
             content_hash: held.content_hash.clone(),
         })
         .collect();
-    let documents = crate::artifacts::shown::documents(ctx.run_dir, &shows, &state).await?;
+    let documents = crate::artifacts::shown::documents(ctx.run_dir, &shows, &state, None).await?;
     let flaws: Vec<Flaw> = super::flawed::unprovable(&documents)
         .into_iter()
         .map(|(_, flaw)| flaw)

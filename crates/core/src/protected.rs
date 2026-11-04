@@ -31,6 +31,18 @@ pub enum Protection {
 }
 
 impl Protection {
+    /// What protects a path, in the words every reader reads after the path
+    /// it names.
+    pub fn words(self) -> &'static str {
+        match self {
+            Protection::ProjectDeny => "denied to every run by `permissions.paths.deny`",
+            Protection::AgentConfig => "an agent CLI's own configuration",
+            Protection::AgentInstructions => "an instruction file, which only a person grants",
+            Protection::ApprovedTest => "a test a person approved",
+            Protection::GitRegister => "the run's git register",
+        }
+    }
+
     /// Whether a person may grant a path this reason protects. Only the
     /// instruction files: nobody grants the rest.
     pub fn person_may_grant(self) -> bool {
@@ -87,12 +99,6 @@ pub struct Pathspecs {
     pub loose: Vec<String>,
 }
 
-impl Pathspecs {
-    pub fn is_empty(&self) -> bool {
-        self.rooted.is_empty() && self.loose.is_empty()
-    }
-}
-
 /// Serialized as `{reason, glob}`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Entry {
@@ -143,23 +149,10 @@ impl Protected {
         Protected::try_from(entries)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     /// Every protected glob, in the order the reasons are read.
     pub fn every(&self) -> Vec<ScopeGlob> {
         self.entries
             .iter()
-            .map(|entry| entry.glob.clone())
-            .collect()
-    }
-
-    /// The globs a loop's close judges: every one but the approved tests.
-    pub fn at_loop_close(&self) -> Vec<ScopeGlob> {
-        self.entries
-            .iter()
-            .filter(|entry| entry.reason != Protection::ApprovedTest)
             .map(|entry| entry.glob.clone())
             .collect()
     }

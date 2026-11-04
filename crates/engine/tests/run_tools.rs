@@ -262,7 +262,7 @@ async fn blackboard_is_not_mounted_outside_a_blackboard_group() {
         assert!(is_error, "node `{node}` calling anyway must be refused");
         assert_eq!(
             text,
-            "this session's node is not in a `coordination: blackboard` group — the blackboard is never mounted outside one",
+            "this session's node is not in a `coordination: blackboard` group; the blackboard is never mounted outside one",
             "node `{node}`"
         );
         client.cancel().await.unwrap();
@@ -416,7 +416,7 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     assert!(is_error);
     assert_eq!(
         text,
-        "this session has no scope an answer could widen — it works no task, and its node either declares no scope or may not be granted more on this run"
+        "this session has no scope an answer could widen; it works no task, and its node either declares no scope or may not be granted more on this run"
     );
     client.cancel().await.unwrap();
 }
@@ -528,10 +528,7 @@ async fn a_request_naming_no_criterion_takes_the_one_that_names_it() {
     )
     .await;
     assert!(!is_error, "{reply}");
-    assert!(
-        reply.starts_with("request amended — 1 new path "),
-        "{reply}"
-    );
+    assert!(reply.starts_with("request amended: 1 new path "), "{reply}");
     let written = tokio::fs::read_to_string(
         host.attempt_dir()
             .join(yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE),
@@ -958,7 +955,7 @@ async fn the_task_tools_are_served_to_task_sessions_only() {
     assert!(is_error);
     assert_eq!(
         text,
-        "`yunta_task` answers about a task, and this session works none — only a loop's task \
+        "`yunta_task` answers about a task, and this session works none; only a loop's task \
          sessions are served it"
     );
     client.cancel().await.unwrap();
@@ -1170,7 +1167,7 @@ async fn a_spec_accepted_says_how_each_test_fails_before_the_work() {
     client.cancel().await.unwrap();
 
     assert!(!refused, "got: {text}");
-    let said = "`sh tests/greet.sh` (task `greet`): exit 1 — it said `no greeting yet`";
+    let said = "`sh tests/greet.sh` (task `greet`): exit 1 (it said `no greeting yet`)";
     assert!(text.contains(said), "`{said}` is missing from:\n{text}");
 }
 
@@ -1423,7 +1420,7 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
 
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
     assert!(!is_error, "got: {text}");
-    assert!(text.contains("tasks — ok"), "{text}");
+    assert!(text.contains("tasks: ok"), "{text}");
     assert!(
         text.contains("1 task registered: `t1`"),
         "the session sees its meaning survived, not only its syntax: {text}"
@@ -1477,7 +1474,7 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
     .unwrap();
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
     assert!(!is_error, "got: {text}");
-    assert!(text.contains("tasks — ok"), "{text}");
+    assert!(text.contains("tasks: ok"), "{text}");
     assert!(
         text.contains("1 task registered: `t1`"),
         "the verdict is about the document the run holds: {text}"
@@ -1871,7 +1868,7 @@ async fn a_call_it_cannot_read_names_its_cause_once() {
     let (is_error, text) = call(&client, "yunta_answer_finding", json!({"why": "x"})).await;
     assert!(is_error);
     assert!(
-        text.starts_with("invalid answer — requires `node` and `id`"),
+        text.starts_with("invalid answer: requires `node` and `id`"),
         "{text}"
     );
     assert_eq!(

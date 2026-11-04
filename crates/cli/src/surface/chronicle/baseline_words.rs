@@ -1,9 +1,8 @@
 //! What the chronicle says of the lineage's measurement: the suite, and
 //! each command held beside it.
 
+use surco::glyphs::Mark;
 use yunta_core::events::BaselineOrigin;
-
-use crate::render::Mark;
 
 /// The suite, measured or inherited: whether any comparison can find a
 /// regression against it.

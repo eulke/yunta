@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use surco::golden::assert_golden;
 use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{
     EngineError, EngineStep, EventPayload, Failure, NodeEvent, PauseReason, StoredEvent,
@@ -12,7 +13,6 @@ use yunta_core::events::{
 use yunta_core::{ConfigKey, ConfigLayer, Workflow};
 use yunta_engine::{derive, CheckError, RunReport, RunTerminal};
 use yunta_testkit::{bare_origin, git_output, Bench, INITIAL_BRANCH, MOCK_CONFIG};
-use yunta_testkit_core::golden::assert_golden;
 
 const FORGE: &str = "forge:\n  github: { repo: acme/web, token_env: ACME_TOKEN }\n";
 
@@ -251,7 +251,9 @@ async fn a_pull_request_carries_the_receipt_of_the_run_that_opened_it() {
     let handle = bench.run_id.handle();
     assert!(
         body.starts_with("What the run did.")
-            && body.contains(&format!("# receipt for run {handle}: ● running"))
+            && body.contains(&format!(
+                "● **receipt of opens (default)** · running · {handle}"
+            ))
             && body.contains("the run is still open: this is its last step")
             && body.contains("**event chain**"),
         "the author's words, then the receipt read as the run's last step: {body}"
@@ -309,4 +311,54 @@ async fn receipt_false_keeps_only_the_author_s_body() {
             bench.run_id
         )
     );
+}
+
+/// What GitHub keeps of a pull request's description.
+const FORGE_KEEPS: usize = 65_536;
+
+/// A run whose pull request says `words`, and the description it opened with.
+async fn opened_saying(words: &str) -> (Bench, String) {
+    let (bench, state) = forged();
+    let workflow = format!(
+        "name: opens\nnodes:\n  - {{ id: make, kind: bash, run: \"echo made > made.txt\" }}\n  \
+         - {{ id: pr, kind: pull_request, depends_on: [make], title: \"add dark mode\", \
+         body: \"{words}\" }}\n"
+    );
+    let RunReport { terminal, .. } = bench
+        .run_with_config(
+            &workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &config(""),
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    let body = state.pull_requests()[0].body.clone();
+    (bench, body)
+}
+
+/// A receipt the forge would refuse beside the author's words is left out, and what is
+/// left says where it is: the node opens its pull request either way.
+#[tokio::test]
+async fn a_pull_request_too_long_for_its_receipt_says_where_the_receipt_is() {
+    let (bench, body) = opened_saying(&"word ".repeat(13_040)).await;
+    assert!(body.len() <= FORGE_KEEPS, "{}", body.len());
+    assert!(body.starts_with("word word"), "{body}");
+    assert!(!body.contains("**event chain**"), "{body}");
+    assert!(body.contains("leaves out the run's receipt"), "{body}");
+    assert!(
+        body.contains(&format!("yunta receipt {}", bench.run_id.handle())),
+        "{body}"
+    );
+    assert!(body.trim_end().ends_with("-->"), "{body}");
+}
+
+/// An author's words the forge would refuse even alone are cut, and it says so; the
+/// marker a rerun finds the pull request by is never what gives.
+#[tokio::test]
+async fn a_pull_request_too_long_even_alone_is_cut_and_says_so() {
+    let (_bench, body) = opened_saying(&"word ".repeat(14_000)).await;
+    assert!(body.len() <= FORGE_KEEPS, "{}", body.len());
+    assert!(body.starts_with("word word"), "{body}");
+    assert!(body.contains("the end of what this node says"), "{body}");
+    assert!(body.trim_end().ends_with("-->"), "{body}");
 }

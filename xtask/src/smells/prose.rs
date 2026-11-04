@@ -83,8 +83,9 @@ fn exempt(path: &Path, list: &[&str]) -> bool {
 /// `runner:`; `driver` and `backend` are what an adapter is not, except
 /// in `crates/storage`, which really does choose between database
 /// backends; `plugin` is what a pack and an executor are not; `subagente`
-/// is what a named agent is not; and `fence hook`, `fencehook` and
-/// `yunta fence` are the old names of the rail.
+/// is what a named agent is not; `fence hook`, `fencehook` and
+/// `yunta fence` are the old names of the rail; and a word with a hyphen
+/// in `re-route` is the old spelling of `reroute`.
 pub fn banned_vocabulary(root: &Path) -> usize {
     vocabulary_corpus(root)
         .iter()
@@ -101,7 +102,7 @@ pub fn banned_vocabulary(root: &Path) -> usize {
 
 fn names_by_a_retired_word(line: &str, in_storage: bool) -> bool {
     let low = line.to_lowercase();
-    if low.contains("role:") || ledger_names_the_tasks(&low) {
+    if low.contains("role:") || low.contains("re-rout") || ledger_names_the_tasks(&low) {
         return true;
     }
     let mut words = [
@@ -231,6 +232,12 @@ mod tests {
         assert!(contains_word("two backends", "backend"));
         assert!(!contains_word("a webdriver crate", "driver"));
         assert!(!contains_word("driver_name", "driver"));
+    }
+
+    #[test]
+    fn one_spelling_of_a_reroute_stands() {
+        assert!(names_by_a_retired_word("the node re-routes there", false));
+        assert!(!names_by_a_retired_word("the node reroutes there", false));
     }
 
     #[test]

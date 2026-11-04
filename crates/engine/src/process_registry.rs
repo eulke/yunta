@@ -209,6 +209,48 @@ pub fn engine_prompt(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> Opt
     })
 }
 
+/// The engine driving a run, as the run's registry says at an instant:
+/// whether it lives, whom it is asking at its terminal, and when the
+/// registry was read.
+///
+/// A frame takes it the way it takes `now` — an input its caller read —
+/// so the word a run and a node are called by is decided with it, once,
+/// and never corrected after by the surface that draws it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Engine {
+    pub liveness: EngineLiveness,
+    pub prompt: Option<Prompt>,
+    /// When the registry was read: what a question has been waiting from.
+    pub at: DateTime<Utc>,
+}
+
+impl Engine {
+    /// What the registry under `run_dir` says at `at`.
+    pub fn read(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe, at: DateTime<Utc>) -> Self {
+        Engine {
+            liveness: engine_liveness(run_dir, probe),
+            prompt: engine_prompt(run_dir, probe),
+            at,
+        }
+    }
+
+    /// The process reading the run is the engine driving it: alive, and
+    /// asking no one a reader elsewhere could answer.
+    pub fn this(at: DateTime<Utc>) -> Self {
+        Engine {
+            liveness: EngineLiveness::Alive,
+            prompt: None,
+            at,
+        }
+    }
+
+    /// Whether the engine driving the run is asking a person about `node`
+    /// at its terminal.
+    pub fn asks_about(&self, node: &NodeId) -> bool {
+        self.prompt.as_ref().and_then(|prompt| prompt.node.as_ref()) == Some(node)
+    }
+}
+
 /// The pid of a spawned child, or `None` once it has been reaped.
 pub fn child_pid(child: &tokio::process::Child) -> Option<Pid> {
     child.id().and_then(|id| Pid::try_from(id).ok())

@@ -13,11 +13,11 @@ pub(super) fn tools() -> Vec<Tool> {
 fn resolve_gate() -> Tool {
     Tool::new(
         "resolve_gate",
-        "Answers a paused run's decision — call workflow_status first to read \
-         the run's own pause reason and menu of options. Covers exhausted re-routes \
+        "Answers a paused run's decision; call workflow_status first to read \
+         the run's own pause reason and menu of options. Covers exhausted reroutes \
          (retry/abort/promote) and unresolved gate nodes; the decision is recorded on \
          the run's log and a detached process applies it, so this returns \
-         immediately — poll workflow_status to see the outcome.",
+         immediately; poll workflow_status to see the outcome.",
         json!({
             "type": "object",
             "properties": {
@@ -37,12 +37,12 @@ fn resolve_gate() -> Tool {
 fn answer_questions() -> Tool {
     Tool::new(
         "answer_questions",
-        "Answers the questions a paused node asked — call workflow_status first to \
+        "Answers the questions a paused node asked; call workflow_status first to \
          read them, each with its id. Every question the document requires has to be \
          answered, and a value has to be one its type accepts; a reply that is not is \
          refused whole, naming what is wrong, with nothing recorded. The answers are \
          recorded on the run's log and a detached process carries the node on, so this \
-         returns immediately — poll workflow_status to see the outcome.",
+         returns immediately; poll workflow_status to see the outcome.",
         json!({
             "type": "object",
             "properties": {

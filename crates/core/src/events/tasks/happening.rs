@@ -1,9 +1,11 @@
 //! What a task event says happened, read as a person reads it.
 
-use crate::events::{DepartsFrom, TaskEvent, TaskStatus};
+use std::collections::BTreeSet;
+
+use crate::events::{DepartsFrom, InTree, Outside, ShapesReadPayload, TaskEvent, TaskStatus};
 use crate::TaskId;
 
-/// One thing that happened to a task.
+/// One thing that happened to a task, or to the plan its tasks come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Happening {
     Registered {
@@ -41,6 +43,14 @@ pub enum Happening {
         criterion: String,
         why: String,
     },
+    /// The tree its plan was registered against was read for the plan's
+    /// shapes: how many were read, how many of them the tree holds, and
+    /// how many files no task changes name them.
+    ShapesRead {
+        shapes: usize,
+        held: usize,
+        outside: usize,
+    },
 }
 
 impl From<&TaskEvent> for Happening {
@@ -75,6 +85,84 @@ impl From<&TaskEvent> for Happening {
                 criterion: p.criterion.clone(),
                 why: p.why.clone(),
             },
+            TaskEvent::ShapesRead(p) => Happening::ShapesRead {
+                shapes: p.shapes.len(),
+                held: p
+                    .shapes
+                    .iter()
+                    .filter(|shape| matches!(shape.in_tree, InTree::There { .. }))
+                    .count(),
+                outside: outside(p),
+            },
         }
+    }
+}
+
+/// How many files no task of the plan changes name one of its shapes, each
+/// counted once however many it names.
+fn outside(read: &ShapesReadPayload) -> usize {
+    let mut files = BTreeSet::new();
+    for shape in &read.shapes {
+        if let InTree::There {
+            outside: Outside::Files { paths },
+            ..
+        } = &shape.in_tree
+        {
+            files.extend(paths);
+        }
+    }
+    files.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::ShapeRead;
+    use crate::hash::ContentHash;
+
+    /// One shape of a plan, as the tree held it.
+    fn shape(name: &str, in_tree: InTree) -> ShapeRead {
+        ShapeRead {
+            name: name.into(),
+            owner: TaskId::from_static("task-h"),
+            file: "src/lib.rs".into(),
+            in_tree,
+        }
+    }
+
+    /// A shape its file holds, with what names it beyond the plan.
+    fn there(outside: Outside) -> InTree {
+        InTree::There {
+            code: None,
+            outside,
+        }
+    }
+
+    /// Every shape read counts, only those the tree holds are held, and a
+    /// file two shapes are named in counts once; a name too common to follow
+    /// lists no file, so it adds none.
+    #[test]
+    fn a_reading_counts_the_shapes_held_and_each_file_beyond_the_plan_once() {
+        let other = || Outside::Files {
+            paths: vec!["src/other.rs".into()],
+        };
+        let reading = ShapesReadPayload {
+            plan: ContentHash::sha256(b"tasks"),
+            at: "0123456789abcdef0123456789abcdef01234567".into(),
+            shapes: vec![
+                shape("build_it", there(other())),
+                shape("Theme", there(other())),
+                shape("fresh", InTree::New),
+                shape("add", there(Outside::Common { files: 147 })),
+            ],
+        };
+        assert_eq!(
+            Happening::from(&TaskEvent::ShapesRead(reading)),
+            Happening::ShapesRead {
+                shapes: 4,
+                held: 3,
+                outside: 1,
+            }
+        );
     }
 }

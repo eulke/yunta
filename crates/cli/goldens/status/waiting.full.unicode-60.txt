@@ -1,0 +1,21 @@
+● fragua (quick) · waiting · for 32m10s               7E5PH4
+━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  node `build` waits for its limit to reset at 2026-01-01
+  02:00 UTC, and the run resumes on its own then.
+
+              node                                      time
+  ✓ finished  plan   exit 0                              12s
+  ● waiting   build  session `claude-code` hit a limi…   12s
+  ◌ never ran test
+
+  progress     1 of 3 nodes done
+  tokens       18k in / 2.2k out
+  slowest      plan 12s · build 12s
+  branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off
+               main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+next
+  yunta resume 7E5PH4   waits for the reset, then drives on
+  yunta close 7E5PH4    closes it for good
+  yunta open 7E5PH4     the whole page, in a browser

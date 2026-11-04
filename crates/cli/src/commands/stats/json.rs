@@ -19,6 +19,9 @@ struct NodeStatJson {
     active_secs: f64,
     blocked_secs: f64,
     blocked_fraction: Option<f64>,
+    /// How long a person was asked about this node, in seconds: zero for a
+    /// node no person was asked about.
+    waiting_on_people_secs: f64,
     /// The models the node's sessions ran on, as their CLIs reported them.
     models: Vec<String>,
     /// What this node handed over, by what the engine answered. A node
@@ -44,6 +47,10 @@ impl NodeStatJson {
             active_secs: n.active.as_secs_f64(),
             blocked_secs: n.blocked.as_secs_f64(),
             blocked_fraction: n.blocked_fraction(),
+            waiting_on_people_secs: stats
+                .people_by_node
+                .get(&n.node_id)
+                .map_or(0.0, |waited| waited.as_secs_f64()),
             models: n.models.iter().map(ToString::to_string).collect(),
             submissions: stats
                 .submissions_by_node
@@ -96,7 +103,7 @@ pub(super) struct RunStatsJson {
 
 /// A run's wall-clock by share, in seconds.
 #[derive(Serialize)]
-struct TimeJson {
+pub(crate) struct TimeJson {
     working_secs: f64,
     rails_secs: f64,
     checks_secs: f64,
@@ -109,7 +116,8 @@ struct TimeJson {
 }
 
 impl TimeJson {
-    fn of(time: &yunta_engine::TimeSpent) -> Self {
+    /// A run's time by share, read off the time the engine measured for it.
+    pub(crate) fn of(time: &yunta_engine::TimeSpent) -> Self {
         TimeJson {
             working_secs: time.working.as_secs_f64(),
             rails_secs: time.rails.as_secs_f64(),
@@ -316,8 +324,12 @@ impl VerificationFindingsJson {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
     use serde_json::json;
     use yunta_core::events::{Spend, TokenUsage};
+    use yunta_core::NodeId;
     use yunta_core::Workflow;
     use yunta_engine::compute_run_stats;
 
@@ -362,6 +374,47 @@ mod tests {
         assert!(
             value.get("tokens_input").is_none(),
             "one shape for one figure: {value}"
+        );
+    }
+
+    /// A node with no time and no tokens: the test reads only what a person
+    /// waited on it, so nothing else about the node is set.
+    fn idle_node(id: &str) -> NodeStat {
+        NodeStat {
+            node_id: NodeId::from(id),
+            runner: None,
+            tokens: TokenUsage::default(),
+            attempts: 1,
+            active: Duration::ZERO,
+            open_attempt: None,
+            blocked: Duration::ZERO,
+            models: Vec::new(),
+        }
+    }
+
+    /// A node carries the seconds a person was asked about it, and a node no
+    /// person was asked about carries zero.
+    #[test]
+    fn a_node_carries_the_seconds_a_person_was_asked_about_it() {
+        let stats = RunStats {
+            nodes: vec![idle_node("plan"), idle_node("approve-plan")],
+            people_by_node: BTreeMap::from([(
+                NodeId::from("approve-plan"),
+                Duration::from_secs(23_220), // 6h27m
+            )]),
+            ..stats_spending(Spend::default())
+        };
+
+        let document = RunStatsJson::from(&RunId::from("run-json"), "default", &stats, None);
+        let value = serde_json::to_value(&document).expect("the document serializes");
+
+        assert_eq!(
+            value["nodes"][0]["waiting_on_people_secs"].as_f64(),
+            Some(0.0)
+        );
+        assert_eq!(
+            value["nodes"][1]["waiting_on_people_secs"].as_f64(),
+            Some(23_220.0)
         );
     }
 }

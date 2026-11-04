@@ -1,0 +1,8 @@
+✓ fragua (quick) · finished · in 7m41s · 32m10s ago   7E5PH4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  progress     2 of 2 nodes done
+
+next
+  yunta receipt 7E5PH4         certifies what it did
+  yunta status 7E5PH4 --full   the whole story, node by node

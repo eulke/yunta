@@ -112,6 +112,8 @@ event_kinds! {
         => Scope(ScopeEvent::Denied) sample samples::scope_expansion_denied;
     ScopeDerived(ScopeDerivedPayload) = "scope_derived"
         => Scope(ScopeEvent::Derived) sample samples::scope_derived;
+    ShapesRead(ShapesReadPayload) = "shapes_read"
+        => Tasks(TaskEvent::ShapesRead) sample samples::shapes_read;
     ScopeExpansionWithdrawn(ScopeExpansionWithdrawnPayload) = "scope_expansion_withdrawn"
         => Scope(ScopeEvent::Withdrawn) sample samples::scope_expansion_withdrawn;
     NodeFinished(NodeFinishedPayload) = "node_finished"
@@ -184,6 +186,8 @@ event_kinds! {
         => Session(SessionEvent::BestEffortFailed) sample samples::best_effort_failed;
     HostSuspended(HostSuspendedPayload) = "host_suspended"
         => Run(RunEvent::HostSuspended) sample samples::host_suspended;
+    ChangesCounted(ChangesCountedPayload) = "changes_counted"
+        => Run(RunEvent::ChangesCounted) sample samples::changes_counted;
     RunPaused(RunPausedPayload) = "run_paused" => Run(RunEvent::Paused) sample samples::run_paused;
     RunResumed(RunResumedPayload) = "run_resumed"
         => Run(RunEvent::Resumed) sample samples::run_resumed;

@@ -37,8 +37,9 @@ pub use exit::{
     Unanswered, STOPPED_EXIT_CODE, TAIL_LINES,
 };
 pub use records::{
-    CapabilityUse, ChildRefusal, FrozenRead, Interruption, MountError, NameProblem, ObjectProblem,
-    OwedScope, RedCheck, RequestedScope, RunnerRefusal, Timed, Unchanged, UnpassableTask,
+    skill_not_found, CapabilityUse, ChildRefusal, FrozenRead, Interruption, MountError,
+    NameProblem, ObjectProblem, OwedScope, RedCheck, RequestedScope, RunnerRefusal, Timed,
+    Unchanged, UnpassableTask,
 };
 pub use remedy::{Facts, Outlook, Precondition, Remedy, Stuck};
 pub use step::{EngineError, EngineStep};
@@ -244,7 +245,9 @@ pub enum Failure {
         comments: usize,
     },
     /// A pull request closed without approval; `closed_pull_request` is its
-    /// reference when the forge gave one.
+    /// reference when the forge gave one. Written by a binary from before a
+    /// closed pull request paused its gate; read from those logs, never
+    /// written.
     PullRequestClosed {
         #[serde(deserialize_with = "required_option")]
         closed_pull_request: Option<String>,

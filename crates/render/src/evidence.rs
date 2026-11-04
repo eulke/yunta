@@ -1,8 +1,8 @@
 //! The lines an escalation's record is shown on: one fact to a line, or
 //! every fact on one line for a surface with room for exactly one.
 
+use surco::text;
 use yunta_core::events::{Evidence, Fact};
-use yunta_core::text;
 
 /// The fact on one line: its label and value joined the way every labelled
 /// value in this workspace is joined, or the value alone.

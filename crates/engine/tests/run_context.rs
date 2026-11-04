@@ -124,7 +124,7 @@ nodes:
     let RunReport { terminal, state } = bench.run(workflow, fixture).await;
     match &state.nodes.state("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            assert_eq!(yunta_render::failure::sentence(failure), "context `artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
+            assert_eq!(yunta_render::failure::sentence(failure), "context `artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by node `grill`) was never produced; this run's log holds no such artifact");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
     }
@@ -145,7 +145,7 @@ async fn a_missing_optional_file_is_marked_in_the_context_and_recorded() {
     let workflow = context_workflow(
         "      - files: [{ path: docs/architecture.md, optional: true }, \"a.txt\"]\n",
     );
-    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"# docs/architecture.md\\n[absent — declared optional; not in the run's tree]\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"# docs/architecture.md\\n[absent: declared optional; not in the run's tree]\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport { terminal, .. } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -191,7 +191,7 @@ async fn a_missing_file_fails_the_node_saying_where_the_next_attempt_looks() {
         yunta_render::failure::sentence(failure),
         format!(
             "context `files:docs/architecture.md` on node `ask`: `docs/architecture.md` is not \
-             in the run's tree, which starts from commit `{}` — a file that is not committed \
+             in the run's tree, which starts from commit `{}`: a file that is not committed \
              there, or that git ignores, never reaches it; put it at `{}` and choose `retry`, \
              or declare the entry `optional: true` if the node can do without it",
             bench.manifest().base_commit.abbreviated(),
@@ -283,7 +283,7 @@ nodes:
             reason: reason @ PauseReason::Escalation(_),
         } => assert_eq!(
             yunta_render::pause::sentence(&reason),
-            "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
+            "node `lint` failed and its 1 reroute to `fix-lint` is exhausted (exit 1)"
         ),
         other => panic!(
             "lint stays red, so the run pauses once its single reroute is exhausted, got {other:?}"
@@ -730,7 +730,7 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
     let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     match &state.nodes.state("ask") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            assert_eq!(yunta_render::failure::sentence(failure), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
+            assert_eq!(yunta_render::failure::sentence(failure), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs (`acme/pack-a` and `globex/pack-b`), and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
         }
         other => panic!("expected `ask` to fail naming both packs, got {other:?}"),
     }

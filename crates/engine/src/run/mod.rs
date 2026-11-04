@@ -12,7 +12,7 @@
 //! terminal `RunReport` the schedule loop recognizes — `Finish` and
 //! `Pause` alike, via [`RunCtx::export_events_jsonl`] — unconditionally,
 //! independent of whether the workflow declares `on_finish:` at all. The
-//! `ScheduleStep::Broken` path exports too, best-effort before its
+//! `Decision::Broken` path exports too, best-effort before its
 //! `Err` — a corrupt log is exactly the one a forensic reader most wants
 //! on disk. `on_finish.distill` is a deterministic transform — see
 //! `distill.rs`; the close sequence is distill → `run_finished` →
@@ -24,6 +24,7 @@ pub mod baseline;
 mod bash_exec;
 mod budget;
 pub(crate) mod capability;
+mod change_count;
 mod check_exec;
 mod cleanup;
 mod close;
@@ -40,6 +41,7 @@ mod finding_proofs;
 mod flawed;
 mod gate_exec;
 pub(crate) mod gate_findings;
+mod gate_publish;
 mod hooks_exec;
 mod internal_gate;
 mod invocation;
@@ -51,6 +53,7 @@ mod node_scope;
 mod node_start;
 mod owed_scope;
 mod parallel_exec;
+mod pause;
 mod promote;
 mod prompt_exec;
 pub(crate) mod protected;
@@ -92,8 +95,9 @@ pub use create::{create_run, run_redactor, BirthArtifact, BirthOrigin, CreateRun
 pub(crate) use ctx::RunCtx;
 pub use escalation::{awaits_decision, current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
-pub use exec::record_pause_after_crash;
-pub(in crate::run) use exec::{find_node, pause};
+pub(in crate::run) use exec::find_node;
+pub(in crate::run) use pause::pause;
+pub use pause::record_pause_after_crash;
 pub use promote::{
     create_promotion_successor, CallerInfra, Predecessor, PromotionSuccessor, RunRoots,
 };
@@ -149,7 +153,7 @@ pub enum RunError {
     #[error(transparent)]
     Secret(#[from] yunta_core::ShortSecret),
 
-    #[error("run `{run_id}` has no events — create it before executing it")]
+    #[error("run `{run_id}` has no events: create it before executing it")]
     UnknownRun { run_id: RunId },
 
     #[error("run is broken: {diagnostic}")]
@@ -159,8 +163,8 @@ pub enum RunError {
     /// while it was preparing the tree a run works on. A birth has no
     /// log of its own to record a pause on, so it says so to its
     /// caller — a `kind: workflow` node turns it into the parent's
-    /// `run_paused { cancelled by user }`, and a CLI into its own exit.
-    #[error("cancelled by user")]
+    /// `run_paused` for a person's stop, and a CLI into its own exit.
+    #[error("interrupted by a person")]
     Cancelled,
 
     /// The disk has no room for what the run is about to build: the run
@@ -183,7 +187,7 @@ pub enum RunError {
     /// mode's *internal* coherence, but never sees which one a run
     /// actually asks for, so this is where an unknown `--mode` name is
     /// caught, before anything is written.
-    #[error("workflow `{workflow}` declares no mode `{mode}` — declared modes: {declared}")]
+    #[error("workflow `{workflow}` declares no mode `{mode}`; declared modes: {declared}")]
     UnknownMode {
         workflow: WorkflowName,
         mode: ModeName,
@@ -195,7 +199,7 @@ pub enum RunError {
     /// to a birth that stopped before its `run_created` — either way
     /// the id is not free.
     #[error(
-        "run directory `{path}` already exists — a run id names one birth; a directory with \
+        "run directory `{path}` already exists: a run id names one birth; a directory with \
          no run in the log is left from a birth that stopped early and is safe to delete"
     )]
     RunDirExists { path: PathBuf },

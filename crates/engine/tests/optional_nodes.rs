@@ -114,7 +114,14 @@ async fn a_left_out_node_stands_apart_from_a_mode_skipped_one() {
 
     let events = bench.events();
     let closed_at = events.last().expect("the run's log").timestamp;
-    let frame = yunta_engine::run_frame(&bench.run_id, &workflow, &events, None, closed_at);
+    let frame = yunta_engine::run_frame(
+        &bench.run_id,
+        &workflow,
+        &events,
+        None,
+        &yunta_engine::Engine::this(closed_at),
+        closed_at,
+    );
 
     let lint = frame
         .nodes
@@ -128,7 +135,13 @@ async fn a_left_out_node_stands_apart_from_a_mode_skipped_one() {
         })
     );
     assert_eq!((frame.flow.left_out, frame.flow.skipped), (2, 0));
-    assert_eq!((frame.flow.done, frame.flow.total), (2, 2));
+    assert_eq!(
+        (
+            frame.flow.of(surco::words::Standing::Finished),
+            frame.flow.total
+        ),
+        (2, 2)
+    );
 }
 
 #[test]

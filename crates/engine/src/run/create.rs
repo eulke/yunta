@@ -222,7 +222,7 @@ fn check_mode(manifest: &Manifest, mode: &ModeName) -> Result<(), RunError> {
         None => Err(RunError::UnknownMode {
             workflow: manifest.workflow.name.clone(),
             mode: mode.clone(),
-            declared: "(none — this workflow declares no modes:)".to_string(),
+            declared: "(none: this workflow declares no modes)".to_string(),
         }),
     }
 }

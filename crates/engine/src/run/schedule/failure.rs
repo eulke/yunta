@@ -1,4 +1,4 @@
-//! What a failed node does next: it is re-routed to a correction, paused
+//! What a failed node does next: it is rerouted to a correction, paused
 //! on its menu, or left for a person. Its facts come from the log, and the
 //! menu it offers is [`Failure::remedies`].
 
@@ -23,7 +23,7 @@ impl Board<'_> {
     }
 }
 
-/// Failures, one at a time: re-route, hand control to a pending
+/// Failures, one at a time: reroute, hand control to a pending
 /// corrective node, return control to a corrected node, or stop. A
 /// failure this call leaves unresolved is picked up again on the next
 /// (the reroute or restart it emits changes the log, so the next call
@@ -59,7 +59,7 @@ pub(super) fn failure_step(board: &Board<'_>) -> Option<Decision> {
     None
 }
 
-/// A failure with no re-route after it: its own `on_failure` re-routes
+/// A failure with no reroute after it: its own `on_failure` reroutes
 /// or escalates, and a node without one leaves the decision to the
 /// policy. `continue` is the one answer that is not a decision — the
 /// node stays failed, its dependents stay unscheduled, and the rest of
@@ -71,7 +71,7 @@ pub(super) fn failure_step(board: &Board<'_>) -> Option<Decision> {
 /// A correction that cannot change the failure is not offered: a limit
 /// that resets is paused for, and a correction would meet the same limit;
 /// a correction reads the same frozen config the node failed on, so
-/// re-routing to it spends a node on an outcome already known.
+/// rerouting to it spends a node on an outcome already known.
 fn unrerouted(
     board: &Board<'_>,
     node: &Node,
@@ -143,7 +143,7 @@ fn paused_failure(board: &Board<'_>, node: &Node, failure: &Failure, outlook: Ou
     }
 }
 
-/// Whether a re-route can change how `failure` ends. A limit that resets
+/// Whether a reroute can change how `failure` ends. A limit that resets
 /// meets the same limit on the correction's attempt, a frozen config or
 /// frozen input reads the same to every attempt, and a plan that repeats the
 /// declaration its correction already answered is the same plan.
@@ -161,7 +161,7 @@ fn correction_can_change(failure: &Failure, outlook: &Outlook) -> bool {
     !repeats_a_plan && !waits && !frozen
 }
 
-/// A failure already re-routed to `to`: what happens next depends on
+/// A failure already rerouted to `to`: what happens next depends on
 /// where that correction got to.
 fn after_reroute(
     board: &Board<'_>,
@@ -201,7 +201,7 @@ fn after_reroute(
         // itself and this same scan resolves it on its own turn.
         return None;
     }
-    // Re-route emitted, corrective node not run yet.
+    // Reroute emitted, corrective node not run yet.
     Some(Decision::Execute(vec![(
         to.clone(),
         board.next_attempt(to),

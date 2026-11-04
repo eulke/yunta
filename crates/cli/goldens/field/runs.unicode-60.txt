@@ -1,0 +1,18 @@
+◆ runs of this repository · 2 need you · 1 stopped
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+asking now
+  ◆ T1Y0P1  review (defaul…  ━━━━┄┄  node `implement`…   32m
+
+needs you, oldest first
+  ◆ T1Y0P2  review (defaul…  ━━━━┄┄  node `lint` faile…  22d
+
+stopped
+  ■ T1Y0P3  review (defaul…  interrupt…  yunta resume T1Y0P3
+
+  the newest closed 8h ago
+
+next
+  yunta status T1Y0P2
+    opens the run that has waited longest
+  yunta list --runs --full   lists the closed runs too

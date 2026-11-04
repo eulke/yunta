@@ -4,15 +4,15 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use yunta_core::{OptionId, Responder, WorkflowName};
+use surco::doc::Depth;
+use surco::look::Look;
+use yunta_core::{Responder, WorkflowName};
 
-use super::{Command, PackAction};
-use crate::commands;
+use super::{Command, ListArgs, NewArgs, PackAction, ResolveGateArgs, RunArgs};
 use crate::commands::run_ref::{named, RunArg, RunRef};
 use crate::error::{CliError, Outcome};
-use crate::graph;
 use crate::output::{self, Mode};
-use crate::render::Look;
+use crate::{commands, graph};
 
 /// Runs one subcommand, handing back its verdict or the one error the
 /// caller turns into a line on stderr and a failing exit code. `started`
@@ -20,85 +20,50 @@ use crate::render::Look;
 /// is the mode the subcommand's own flags chose, and `look` the stdout look
 /// `main` built: every command writes with those and nothing else.
 pub(super) async fn dispatch(
-    command: Command,
+    command: Option<Command>,
     started: Instant,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
+    let Some(command) = command else {
+        return commands::list::field(look).await;
+    };
     match command {
         Command::Completions { shell } => completions_command(shell),
-        Command::Check { workflow, config } => {
-            commands::check::check(&workflow, config.as_deref(), look).await
-        }
-        Command::Run {
-            workflow,
-            input,
-            adapter,
-            fixture,
-            mode,
-            detach,
-            ..
-        } => {
-            commands::run::run(
-                &workflow,
-                &input,
-                adapter.as_ref(),
-                fixture.as_deref(),
-                mode.as_ref(),
-                output,
-                detach,
-                look,
-            )
-            .await
-        }
-        Command::Status { run, node, .. } => {
-            commands::status::status(&run.named().await?, output, node.as_ref(), look).await
-        }
-        Command::Resume { run, .. } => {
-            commands::resume::resume(&run.named().await?, output, look).await
-        }
-        Command::ResolveGate {
-            run,
-            option,
-            by,
-            free_text,
-            ..
-        } => resolve_gate_command(run, option, by, free_text, output, look).await,
-        Command::Cancel { run, .. } => {
-            commands::cancel::cancel(&run.named().await?, output, look).await
-        }
-        Command::Close { run, by, .. } => {
-            commands::close::close(&run.named().await?, by.as_ref(), output, look).await
-        }
-        Command::List { runs, all, .. } => list_command(runs, all, output, look).await,
-        Command::Doctor { session, .. } => commands::doctor::doctor(session, output, look).await,
+        Command::Check { workflow, config } => check_command(workflow, config, look).await,
+        Command::Run(args) => run_command(args, output, look).await,
+        Command::Status {
+            run, node, depth, ..
+        } => status_command(run, node, depth.depth(), output, look).await,
+        Command::Resume { run, .. } => resume_command(run, output, look).await,
+        Command::ResolveGate(args) => resolve_gate_command(args, output, look).await,
+        Command::Review { run } => review_command(run, output, look).await,
+        Command::Cancel { run, .. } => cancel_command(run, output, look).await,
+        Command::Close { run, by, .. } => close_command(run, by, output, look).await,
+        Command::List(args) => list_command(args, output, look).await,
+        Command::Doctor { session, full, .. } => doctor_command(session, full, output, look).await,
         Command::Mcp => commands::mcp::mcp().await,
         Command::Gc { dry_run } => commands::gc::gc(dry_run, look).await,
         Command::Graph {
             workflow,
             run,
             format,
-        } => graph_command(workflow, run, format).await,
+        } => graph_command(workflow, run, format, look).await,
         Command::Test { dir } => commands::test::test(dir.as_deref(), look).await,
-        Command::Verify { run, .. } => {
-            commands::verify::verify(&run.named().await?, output, look).await
-        }
-        Command::Receipt { run, .. } => {
-            commands::receipt::receipt(&run.named().await?, output, look).await
-        }
+        Command::Verify { run, .. } => verify_command(run, output, look).await,
+        Command::Receipt { run, .. } => receipt_command(run, output, look).await,
+        Command::Open { run, .. } => open_command(run, output, look).await,
         Command::Pack { action } => pack_command(action, look).await,
-        Command::Stats { run, workflow, .. } => stats_command(run, workflow, output, look).await,
-        Command::Init { interactive, force } => {
-            commands::init::init(interactive, force, look).await
-        }
+        Command::Stats {
+            run,
+            workflow,
+            depth,
+            ..
+        } => stats_command(run, workflow, depth.depth(), output, look).await,
+        Command::Init { interactive, force } => init_command(interactive, force, look).await,
         Command::Rail { adapter, event } => rail_hook(&adapter, event, started),
-        Command::Schema { kind, .. } => commands::schema::schema(kind.as_deref(), output, look),
-        Command::New {
-            name,
-            shape,
-            interactive,
-            force,
-        } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force, look).await,
+        Command::Schema { document, .. } => schema_command(document, output, look),
+        Command::New(args) => new_command(args, look).await,
     }
 }
 
@@ -109,38 +74,102 @@ fn completions_command(shell: clap_complete::Shell) -> Result<Outcome, CliError>
     Ok(Outcome::Success)
 }
 
+/// `yunta check`: checks the workflow it names without running it.
+async fn check_command(
+    workflow: PathBuf,
+    config: Option<PathBuf>,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    commands::check::check(&workflow, config.as_deref(), look).await
+}
+
+/// `yunta run`: creates the run its workflow names and drives it here, or
+/// hands it to a detached child that outlives this process.
+async fn run_command(args: RunArgs, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::run::run(
+        &args.workflow,
+        &args.input,
+        args.adapter.as_ref(),
+        args.fixture.as_deref(),
+        args.mode.as_ref(),
+        output,
+        args.detach,
+        look,
+    )
+    .await
+}
+
+/// `yunta status`: where the run stands, or, with `--node`, one node whole.
+async fn status_command(
+    run: RunArg,
+    node: Option<yunta_core::NodeId>,
+    depth: Depth,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let page = (node.as_ref(), depth);
+    commands::status::status(&run.named().await?, output, page, look).await
+}
+
+/// `yunta resume`: resumes the run it names from its event log.
+async fn resume_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::resume::resume(&run.named().await?, output, look).await
+}
+
 /// `yunta resolve-gate`: answers the gate of the run it names.
 async fn resolve_gate_command(
-    run: RunArg,
-    option: Option<OptionId>,
-    by: Option<Responder>,
-    free_text: Option<String>,
+    args: ResolveGateArgs,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     commands::resolve_gate::resolve_gate(
-        &run.named().await?,
-        option.as_ref(),
-        by.as_ref(),
-        free_text.as_deref(),
+        &args.run.named().await?,
+        args.option.as_ref(),
+        args.by.as_ref(),
+        args.free_text.as_deref(),
         output,
         look,
     )
     .await
 }
 
-/// `yunta list`: the runs when `runs` is set, the workflows otherwise.
-async fn list_command(
-    runs: bool,
-    all: bool,
+/// `yunta review`: reads the plan the run it names waits on, and answers it.
+async fn review_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::review::review(&run.named().await?, output, look).await
+}
+
+/// `yunta cancel`: stops the run it names and its sessions.
+async fn cancel_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::cancel::cancel(&run.named().await?, output, look).await
+}
+
+/// `yunta close`: closes a stopped run nobody will continue, as cancelled.
+async fn close_command(
+    run: RunArg,
+    by: Option<Responder>,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    if runs {
-        commands::list::list_runs(all, output, look).await
+    commands::close::close(&run.named().await?, by.as_ref(), output, look).await
+}
+
+/// `yunta list`: the runs when `runs` is set, the workflows otherwise.
+async fn list_command(args: ListArgs, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    if args.runs {
+        commands::list::list_runs(args.all, Depth::of(args.full, args.dig), output, look).await
     } else {
         commands::list::list_workflows(look).await
     }
+}
+
+/// `yunta doctor`: health-checks the adapters, git, the forge and the packs.
+async fn doctor_command(
+    session: bool,
+    full: bool,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    commands::doctor::doctor(session, full, output, look).await
 }
 
 /// `yunta graph`, for the workflow or the run it names.
@@ -148,25 +177,44 @@ async fn graph_command(
     workflow: Option<PathBuf>,
     run: Option<RunRef>,
     format: graph::GraphFormat,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
     graph::graph(
         workflow.as_deref(),
         named(run.as_ref()).await?.as_ref(),
         format,
+        look,
     )
     .await
+}
+
+/// `yunta verify`: checks the run's event chain and its artifacts.
+async fn verify_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::verify::verify(&run.named().await?, output, look).await
+}
+
+/// `yunta open`: writes the run's page and opens it.
+async fn open_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::open::open(&run.named().await?, output, look).await
+}
+
+/// `yunta receipt`: writes the Verified Work Receipt of the finished run.
+async fn receipt_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::receipt::receipt(&run.named().await?, output, look).await
 }
 
 /// `yunta stats`, for the run or the workflow it names.
 async fn stats_command(
     run: Option<RunRef>,
     workflow: Option<WorkflowName>,
+    depth: Depth,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     commands::stats::stats(
         named(run.as_ref()).await?.as_ref(),
         workflow.as_ref(),
+        depth,
         output,
         look,
     )
@@ -189,6 +237,32 @@ async fn pack_command(action: PackAction, look: &Look) -> Result<Outcome, CliErr
         PackAction::List => commands::pack::list(look),
         PackAction::Audit { pack } => commands::pack_audit::audit(&pack, look).await,
     }
+}
+
+/// `yunta init`: prepares this repository for Yunta, once.
+async fn init_command(interactive: bool, force: bool, look: &Look) -> Result<Outcome, CliError> {
+    commands::init::init(interactive, force, look).await
+}
+
+/// `yunta schema`: prints the shape of the document it names, or lists them.
+fn schema_command(
+    document: Option<String>,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    commands::schema::schema(document.as_deref(), output, look)
+}
+
+/// `yunta new`: writes a new workflow from a skeleton.
+async fn new_command(args: NewArgs, look: &Look) -> Result<Outcome, CliError> {
+    commands::new::new_workflow(
+        &args.name,
+        args.shape.as_deref(),
+        args.interactive,
+        args.force,
+        look,
+    )
+    .await
 }
 
 /// Runs the hook and leaves the CLI that called it exactly what its own

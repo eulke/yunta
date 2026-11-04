@@ -2,8 +2,8 @@
 //! wrote around what its failing call reported, which is the one thing the
 //! step says of itself. A sentence an older log stored reads as it was written.
 
+use surco::text;
 use yunta_core::events::{EngineError, EngineStep};
-use yunta_core::text;
 
 /// The failure an engine step records, in the words a reader sees.
 pub fn failed(error: &EngineError) -> String {

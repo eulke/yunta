@@ -1,6 +1,6 @@
 //! End-to-end runs with the mock adapter: the bootstrap
 //! shape — a prompt plan node that produces the tasks document, a loop that
-//! implements it task by task, a bash gate — plus re-routes, hooks,
+//! implements it task by task, a bash gate — plus reroutes, hooks,
 //! findings and the birth of a run, all derived from the event log alone.
 
 use yunta_core::RunId;
@@ -160,8 +160,8 @@ async fn a_goto_target_with_no_depends_on_never_runs_when_its_source_never_fails
     let bench = Bench::new();
 
     // `lint` always passes — `on_failure.goto` never fires. `fix-lint`
-    // names no `depends_on` (it exists solely as a re-route target),
-    // so nothing but an actual re-route may ever start it.
+    // names no `depends_on` (it exists solely as a reroute target),
+    // so nothing but an actual reroute may ever start it.
     // Before the fix, the generic "fresh nodes" batch scheduled
     // it anyway, purely because an empty `depends_on` reads as
     // trivially satisfied — wasting a session on every green run.
@@ -268,7 +268,7 @@ sessions:
             assert!(matches!(&reason, PauseReason::Escalation(_)), "{reason:?}");
             assert_eq!(
                 yunta_render::pause::sentence(&reason),
-                "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
+                "node `lint` failed and its 1 reroute to `fix-lint` is exhausted (exit 1)"
             );
         }
         other => panic!("expected Paused, got {other:?}"),
@@ -1125,7 +1125,7 @@ sessions:
 
 #[tokio::test]
 async fn a_file_left_by_a_failed_attempt_is_not_ingested_by_the_next_one() {
-    // `report` writes its artifact and fails; the re-route fixes what
+    // `report` writes its artifact and fails; the reroute fixes what
     // made it fail and `report` runs again, this time writing nothing.
     // The second attempt owes an artifact it never produced, because it
     // opened on an empty directory — what the first attempt left behind

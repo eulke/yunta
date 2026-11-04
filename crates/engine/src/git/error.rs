@@ -12,7 +12,7 @@ use crate::lock::LockError;
 /// caller that carries the error reads that sentence; a caller that
 /// prints the cause alone reads [`GitError::detail`].
 #[derive(Debug, thiserror::Error)]
-#[error("{}", yunta_core::text::detailed(headline(&self.invocation), &self.detail()))]
+#[error("{}", surco::text::detailed(headline(&self.invocation), &self.detail()))]
 pub struct GitError {
     pub invocation: Invocation,
     pub cause: Cause,

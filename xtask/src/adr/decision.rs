@@ -70,14 +70,14 @@ impl Status {
         match (text, NonEmpty::new(revised_by.clone())) {
             ("accepted", None) => Ok(Status::Accepted),
             ("accepted", Some(_)) => Err(format!(
-                "{file}: `status` is `accepted` and `revised_by` names {} — a decision in \
+                "{file}: `status` is `accepted` and `revised_by` names {}: a decision in \
                  force as written is revised by nobody",
                 named()
             )),
             ("revised", Some(by)) => Ok(Status::Revised { by }),
             ("retired", Some(by)) => Ok(Status::Retired { by }),
             ("revised" | "retired", None) => Err(format!(
-                "{file}: `status` is `{text}` and `revised_by` names no decision — what \
+                "{file}: `status` is `{text}` and `revised_by` names no decision: what \
                  changed it is a decision, and it says which"
             )),
             (other, _) => Err(format!(

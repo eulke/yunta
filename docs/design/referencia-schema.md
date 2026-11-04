@@ -114,6 +114,9 @@ limits:
   max_artifact_bytes: 50000000    # guardia contra accidentes (§4)
   inline_context_bytes: 32000      # sobre este umbral, el contexto se monta por referencia (§9.1)
 
+terminal:
+  bell: false                       # suena cuando un prompt le pide algo a su persona; el título de la ventana lo dice igual
+
 pricing:                            # opcional — sin esto, stats y recibo son solo tokens (§8.4)
   claude-opus-4-8: { cost_per_1k_tokens: 0.015 }
   claude-sonnet-4-6: { cost_per_1k_tokens: 0.003 }
@@ -195,7 +198,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     kind: gate
     depends_on: [plan]
     assignee: lead
-    message: "Plan recorded. Do you approve?"
+                                    # sin message: ni con uno en blanco, pregunta «Approve the plan: <resumen>?»
     options: [approve, adjust]
     on: { adjust: plan }              # pide qué cambiar y retoma la sesión de `plan` con eso (D194)
     shows: [{ node: plan, kind: tasks }]   # el plan que se aprueba, atado a su hash en `gate_waiting`

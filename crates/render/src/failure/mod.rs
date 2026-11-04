@@ -16,8 +16,9 @@ mod setup;
 use yunta_core::events::{ChildRefusal, Fact, Failure, RedCheck};
 
 pub use artifact::{mount, name, object};
+pub use child::past_the_depth_limit;
 pub use command::{command_exit, command_headline, denied};
-pub(crate) use scope::{paths_listed, protection_words};
+pub(crate) use scope::paths_listed;
 pub(crate) use session::{limit_sentence, refusal_sentence, unchanged_sentence};
 pub use session::{session_death, session_end};
 
@@ -93,7 +94,7 @@ fn lines_of(said: &str) -> Vec<String> {
 /// The failure as one sentence, the way a log and `--json` read it: every
 /// line a command printed included, and none of it left out. One arm for
 /// each variant, so a new variant must say its words here.
-/// The cause a re-route carries, in the words a reader sees. A gate's choice
+/// The cause a reroute carries, in the words a reader sees. A gate's choice
 /// names the gate that made it; every other cause reads as its sentence.
 pub fn cause(failure: &Failure) -> String {
     match failure {

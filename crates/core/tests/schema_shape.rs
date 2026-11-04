@@ -85,14 +85,14 @@ fn an_input_that_contradicts_itself_is_refused_at_parse() {
     ));
     assert_eq!(
         text,
-        "`inputs.idea`: `required: true` and a `default` contradict each other — the default is what makes an input optional; drop one of them at line 3 column 9"
+        "`inputs.idea`: `required: true` and a `default` contradict each other: the default is what makes an input optional; drop one of them at line 3 column 9"
     );
     let text = refused::<Workflow>(&format!(
         "name: w\ninputs:\n  idea: {{ type: string, required: false }}\n{BASH}"
     ));
     assert_eq!(
         text,
-        "`inputs.idea`: `required: false` with no `default` leaves the input without a value — give it a default, or drop `required: false` at line 3 column 9"
+        "`inputs.idea`: `required: false` with no `default` leaves the input without a value: give it a default, or drop `required: false` at line 3 column 9"
     );
 }
 

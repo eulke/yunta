@@ -3,7 +3,7 @@ number: D194
 title: "A gate shows what it asks about, and a correction goes back to the session that made the work"
 status: revised
 revises: []
-revised_by: [D227]
+revised_by: [D227, D270]
 ---
 
 # D194 — A gate shows what it asks about, and a correction goes back to the session that made the work

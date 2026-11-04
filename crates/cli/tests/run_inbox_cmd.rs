@@ -31,11 +31,11 @@ fn list_runs_shows_only_runs_of_the_repository_it_runs_in() {
     let root = tempfile::tempdir().unwrap();
     let ((first, first_run), (_, second_run)) = two_projects(root.path());
 
-    let listed = stdout(&yunta_at!(&first, &["list", "--runs"]));
+    let listed = stdout(&yunta_at!(&first, &["list", "--runs", "--full"]));
     assert!(listed.contains(handle(&first_run)), "{listed}");
     assert!(!listed.contains(handle(&second_run)), "{listed}");
     assert!(
-        listed.contains("1 run in other projects — yunta list --runs --all"),
+        listed.contains("1 run in other projects") && listed.contains("yunta list --runs --all"),
         "{listed}"
     );
 }
@@ -45,7 +45,7 @@ fn list_runs_all_shows_every_run() {
     let root = tempfile::tempdir().unwrap();
     let ((first, first_run), (_, second_run)) = two_projects(root.path());
 
-    let listed = stdout(&yunta_at!(&first, &["list", "--runs", "--all"]));
+    let listed = stdout(&yunta_at!(&first, &["list", "--runs", "--all", "--full"]));
     assert!(
         listed.contains(handle(&first_run)) && listed.contains(handle(&second_run)),
         "{listed}"
@@ -81,12 +81,12 @@ fn a_run_from_before_projects_were_recorded_belongs_where_its_branch_is() {
     assert_ne!(without, frozen, "the manifest recorded its project");
     std::fs::write(&manifest, without).unwrap();
 
-    let here = stdout(&yunta_at!(&first, &["list", "--runs"]));
+    let here = stdout(&yunta_at!(&first, &["list", "--runs", "--full"]));
     assert!(
         here.contains(handle(&first_run)),
         "its branch is here: {here}"
     );
-    let there = stdout(&yunta_at!(&second, &["list", "--runs"]));
+    let there = stdout(&yunta_at!(&second, &["list", "--runs", "--full"]));
     assert!(
         !there.contains(handle(&first_run)),
         "its branch is not there: {there}"

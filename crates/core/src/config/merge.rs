@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use super::permissions::merge_permissions;
 use super::{
     AdapterSettings, ConfigLayer, DefaultsConfig, LimitsConfig, PathsConfig, PoolConfig,
-    ProjectConfig, StorageConfig,
+    ProjectConfig, StorageConfig, TerminalConfig,
 };
 
 pub(super) fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
@@ -60,6 +60,7 @@ pub(super) fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLaye
         // org), field by field — the inverted ceiling merge below is
         // exclusive to `permissions`.
         limits: merge_fields(base.limits, more_specific.limits, merge_limits_config),
+        terminal: merge_fields(base.terminal, more_specific.terminal, merge_terminal_config),
         // Every field in these two is required (no internal optionality
         // to merge field-by-field) — a more specific layer replaces the
         // whole group wholesale, same as `runners`' candidate arrays.
@@ -103,6 +104,13 @@ fn merge_limits_config(base: LimitsConfig, more_specific: LimitsConfig) -> Limit
         inline_context_bytes: more_specific
             .inline_context_bytes
             .or(base.inline_context_bytes),
+    }
+}
+
+/// `terminal:`, field by field: the most specific layer wins.
+fn merge_terminal_config(base: TerminalConfig, more_specific: TerminalConfig) -> TerminalConfig {
+    TerminalConfig {
+        bell: more_specific.bell.or(base.bell),
     }
 }
 

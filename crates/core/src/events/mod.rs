@@ -36,12 +36,12 @@ pub use artifacts::{payloads::*, ArtifactEvent};
 pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
 pub use failure::{
-    AccountLimit, CapabilityUse, ChildRefusal, CommandExit, CommandOrigin, DeniedBy, DeniedCommand,
-    DeniedRule, EngineError, EngineStep, Facts, Failure, FailureCause, FrozenRead, Interruption,
-    LimitSource, MountError, NameProblem, ObjectProblem, Outlook, OwedScope, Precondition,
-    RedCheck, RefusalCause, Remedy, RequestedScope, RunnerRefusal, SessionDeath, SessionEnd,
-    SessionExit, SessionRefusal, Stuck, Timed, Unanswered, Unchanged, UnpassableTask,
-    STOPPED_EXIT_CODE, TAIL_LINES,
+    skill_not_found, AccountLimit, CapabilityUse, ChildRefusal, CommandExit, CommandOrigin,
+    DeniedBy, DeniedCommand, DeniedRule, EngineError, EngineStep, Facts, Failure, FailureCause,
+    FrozenRead, Interruption, LimitSource, MountError, NameProblem, ObjectProblem, Outlook,
+    OwedScope, Precondition, RedCheck, RefusalCause, Remedy, RequestedScope, RunnerRefusal,
+    SessionDeath, SessionEnd, SessionExit, SessionRefusal, Stuck, Timed, Unanswered, Unchanged,
+    UnpassableTask, STOPPED_EXIT_CODE, TAIL_LINES,
 };
 pub use findings::{cause::*, payloads::*, FindingEvent};
 pub use gates::{
@@ -57,7 +57,7 @@ pub use registry::sample_payloads;
 pub use registry::KIND_VERSION;
 pub use run::{ledger::*, metrics::*, payloads::*, PauseReason, RunEvent, Suspension, Suspensions};
 pub use scope::{ledger::*, payloads::*, ScopeEvent};
-pub use session::{ledger::*, note::*, payloads::*, SessionEvent};
+pub use session::{ledger::*, note::*, payloads::*, tool_action::*, SessionEvent};
 pub use spend::Spend;
 pub use tasks::{ledger::*, payloads::*, stop::*, TaskEvent};
 pub use unknown::UnknownKindCount;

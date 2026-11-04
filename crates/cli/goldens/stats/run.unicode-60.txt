@@ -1,16 +1,17 @@
-run 01ARZ3NDEKTSV4RRFFQ69G5FAV — mode default
-  CPTV         500 tokens per verified task · 1 task done
-  rework       12% of tokens went to retries and re-routes
+● paced (default) · running · 7m30s so far            9G5FAV
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  task cost    19.8k tokens per verified task · 1 task done
+  rework       12% of tokens went to retries and reroutes
   cache        1.4× cached tokens per input token
-  tokens       18k in / 2.2k out (25.2k cached)
+  tokens       18k in / 1.8k out (25.2k cached)
   documents    3 accepted, 1 refused
-  findings     5 posted, 1 updated, 1 withdrawn, 0 refused —
-               4 standing
-  answers      2 given, 1 proved — 1 settled
+  findings     5 posted, 1 updated, 1 withdrawn; 4 standing
+  answers      2 given, 1 proved; 1 settled
 
 nodes:
-  ✓ finished  plan                          4.4k tokens     50s   20% blocked
-  ✓ finished  implement-the-whole-feature  15.4k tokens   6m15s   20% blocked
+  ✓ finished  plan                     40s     4.4k tokens
+  ✓ finished  implement…le-feature   5m00s    15.4k tokens
 
 runners:
   implementer ████████████████████  19.8k tokens

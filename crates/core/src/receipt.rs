@@ -97,6 +97,11 @@ pub struct Receipt {
     pub criteria: CriteriaSummary,
     pub baseline: Option<BaselineSummary>,
     pub scope: ScopeSummary,
+    /// What the run changed from its base to its newest tree, as git last
+    /// counted it; absent while no count stands on the newest tree. The scope
+    /// counts the files the run's audits saw; this counts the whole change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed: Option<crate::events::ChangesCountedPayload>,
     pub runners: Vec<RunnerUsage>,
     pub cost: CostSummary,
     pub event_chain: EventChainStatus,
@@ -119,6 +124,9 @@ pub struct Receipt {
     /// not finish. Absent while nothing stands failed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failed: Vec<FailedNode>,
+    /// The findings that still block the run, counted once each: a run
+    /// that finished holding any is reported, not finished.
+    pub blocking_findings: usize,
 }
 
 /// A node that stands failed, and why, as the log recorded it.
@@ -150,7 +158,7 @@ impl Receipt {
     /// version is for whoever consumes `receipt.json` outside yunta,
     /// who has no log to derive it from and needs to know what shape
     /// they were handed.
-    pub const SCHEMA_VERSION: u32 = 1;
+    pub const SCHEMA_VERSION: u32 = 2;
 }
 
 impl std::fmt::Display for DiagnosticCount {
@@ -160,12 +168,17 @@ impl std::fmt::Display for DiagnosticCount {
         match self.kind {
             Some(kind) => write!(
                 f,
-                "`{}` in the {} ×{}",
+                "`{}` in the {} {}",
                 self.code,
                 kind.label(),
-                self.occurrences
+                surco::text::counted(self.occurrences, "time")
             ),
-            None => write!(f, "`{}` ×{}", self.code, self.occurrences),
+            None => write!(
+                f,
+                "`{}` {}",
+                self.code,
+                surco::text::counted(self.occurrences, "time")
+            ),
         }
     }
 }

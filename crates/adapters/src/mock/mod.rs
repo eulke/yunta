@@ -21,6 +21,7 @@
 mod check;
 mod effects;
 mod error;
+mod file_act;
 mod fixture;
 mod launch;
 mod run_tool;
@@ -28,6 +29,7 @@ mod script;
 mod session;
 mod stand_in;
 
+pub use file_act::FileAct;
 pub use fixture::{
     FixtureError, KillBehavior, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt,
     RunPaths, SessionScript, ToolExpectation,
@@ -374,9 +376,9 @@ impl MockAdapter {
                     adapter: ID.clone(),
                     message: format!(
                         "fixture exhausted: {}, none left unconsumed and matching this \
-                         request — add a session to the fixture for every session the run \
+                         request; add a session to the fixture for every session the run \
                          opens",
-                        yunta_core::text::counted(self.fixture.sessions.len(), "scripted session"),
+                        surco::text::counted(self.fixture.sessions.len(), "scripted session"),
                     ),
                 })?,
         };
@@ -413,7 +415,7 @@ impl MockAdapter {
                 adapter: ID.clone(),
                 message: format!(
                     "fixture ambiguous: {} unconsumed scripts with different needles match \
-                     this request's prompt (`match_prompt_contains`: {}) — make the needles \
+                     this request's prompt (`match_prompt_contains`: {}); make the needles \
                      tell them apart",
                     matching.len(),
                     needles.join(", ")

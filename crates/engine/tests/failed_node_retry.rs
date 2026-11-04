@@ -1,4 +1,4 @@
-//! A node that fails with no `on_failure` re-route, in a run that pauses
+//! A node that fails with no `on_failure` reroute, in a run that pauses
 //! on failures, is a decision: run it again or stop. A person who fixes
 //! the cause hands the node back with `retry` — at the terminal while
 //! the run asks, or later through `resolve_gate` — and a plain resume
@@ -47,7 +47,7 @@ fn attempts(bench: &Bench, node: &str) -> usize {
 
 #[tokio::test]
 async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
-    // A failure with nothing to re-route it is still a decision: a person
+    // A failure with nothing to reroute it is still a decision: a person
     // who fixes its cause needs a way to hand the node back, and a resume
     // alone would find it failed and pause again.
     let bench = parked(

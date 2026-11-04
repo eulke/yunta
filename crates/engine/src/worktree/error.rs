@@ -34,12 +34,12 @@ pub enum WorktreeError {
         source: InvalidId,
     },
     #[error(
-        "`{path}` has uncommitted changes — isolation `none` requires a clean tree: \
+        "`{path}` has uncommitted changes; isolation `none` requires a clean tree: \
          without it, scope-by-diff can't tell the agent's work from what was already there"
     )]
     DirtyTree { path: PathBuf },
     #[error(
-        "`{path}` already has a run in progress under isolation `none` (pid {pid}) — only one \
+        "`{path}` already has a run in progress under isolation `none` (pid {pid}): only one \
          at a time is allowed on the same checkout; use isolation `worktree` to run concurrently"
     )]
     Locked { path: PathBuf, pid: Pid },
@@ -48,7 +48,7 @@ pub enum WorktreeError {
     /// be told from here, so the lock is never taken from it.
     #[error(
         "`{path}` has an isolation lock held by pid {pid}, a process this user cannot signal \
-         (`{lock_path}`) — if no run is active on this checkout, delete that file by hand and \
+         (`{lock_path}`): if no run is active on this checkout, delete that file by hand and \
          retry"
     )]
     LockedByAnotherUser {
@@ -60,7 +60,7 @@ pub enum WorktreeError {
     /// Conservative on purpose: a lock whose holder cannot be checked is
     /// never taken, so no live run loses its checkout to a guess.
     #[error(
-        "`{path}` has an isolation lock with no readable owner (`{lock_path}`) — written by \
+        "`{path}` has an isolation lock with no readable owner (`{lock_path}`): written by \
          an older build or corrupted; if no other run is active on this checkout, delete \
          that file by hand and retry"
     )]
@@ -77,9 +77,9 @@ pub enum WorktreeError {
     /// pool may empty emptied.
     #[error(
         "the disk has {} free and the checkout needs about {} more, where {} stays free",
-        yunta_core::units::Bytes(.room.available),
-        yunta_core::units::Bytes(.room.need),
-        yunta_core::units::Bytes(.room.keep_free)
+        surco::figures::Bytes(.room.available),
+        surco::figures::Bytes(.room.need),
+        surco::figures::Bytes(.room.keep_free)
     )]
     NoRoom { room: Room },
     /// A checkout of the project's pool a unit went back to is held by
@@ -92,7 +92,7 @@ pub enum WorktreeError {
     /// that are the run's evidence are untouched, and git still holds the
     /// run's branch, so the checkout comes back with one command.
     #[error(
-        "the run's branch `{branch}` has no worktree at `{path}` ({detail}) — the run's \
+        "the run's branch `{branch}` has no worktree at `{path}` ({detail}); the run's \
          history and artifacts are intact; bring the checkout back with `git worktree add \
          {path} {branch}`, run from the repository the run was created in, and resume again"
     )]
@@ -104,7 +104,7 @@ pub enum WorktreeError {
     /// A run under isolation `none` works on the checkout it was created
     /// in, and `resume` was run somewhere that is not one.
     #[error(
-        "`{path}` is not a git working tree ({detail}) — this run has `isolation: none`, so it \
+        "`{path}` is not a git working tree ({detail}): this run has `isolation: none`, so it \
          works directly on the checkout it was created in; resume it from there"
     )]
     NotACheckout { path: PathBuf, detail: String },

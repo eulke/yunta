@@ -8,8 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use yunta_core::events::EventShapeError;
-use yunta_core::events::*;
+use yunta_core::events::{EventShapeError, *};
 use yunta_core::{
     AdapterId, Capability, ConfigKey, NonEmpty, QuestionId, Redactor, RunId, ScopeExpansionMode,
     ScopeGlob, Secret, TaskId,
@@ -70,12 +69,12 @@ fn a_done_task_carries_its_commit_and_nothing_else_does() {
 }
 
 #[test]
-fn there_are_exactly_62_kinds_with_distinct_names() {
+fn there_are_exactly_64_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 62);
+    assert_eq!(kinds.len(), 64);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 62, "expected 62 distinct kind names");
+    assert_eq!(names.len(), 64, "expected 64 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -142,6 +141,7 @@ const KIND_NAMES: &[&str] = &[
     "scope_expansion_granted",
     "scope_expansion_denied",
     "scope_derived",
+    "shapes_read",
     "scope_expansion_withdrawn",
     "node_finished",
     "node_failed",
@@ -178,6 +178,7 @@ const KIND_NAMES: &[&str] = &[
     "service_reachable",
     "best_effort_failed",
     "host_suspended",
+    "changes_counted",
     "run_paused",
     "run_resumed",
     "run_moved",
@@ -550,23 +551,6 @@ fn a_node_that_asked_waits_on_its_questions_in_its_own_state() {
     assert_ne!(
         gate, waiting,
         "a published gate and an unanswered question are two different waits"
-    );
-}
-
-/// The one sentence every surface says a node's unanswered questions
-/// with — the node's own label, the run's pause, the chronicle.
-#[test]
-fn questions_awaiting_an_answer_are_said_one_way() {
-    assert_eq!(
-        yunta_core::text::asked_questions(&[QuestionId::from("q-scope")]),
-        "asked 1 question: `q-scope`"
-    );
-    assert_eq!(
-        yunta_core::text::asked_questions(&[
-            QuestionId::from("q-scope"),
-            QuestionId::from("q-api")
-        ]),
-        "asked 2 questions: `q-scope`, `q-api`"
     );
 }
 

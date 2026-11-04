@@ -45,7 +45,7 @@ fn a_case_declares_the_option_each_gate_is_answered_with() {
     .unwrap();
     assert_eq!(case.decisions["approve-plan"].as_str(), "approve");
     assert_eq!(case.decisions["ship"].as_str(), "promote");
-    assert_eq!(case.expect.final_state, FinalState::Promoted);
+    assert_eq!(case.expect.final_state, FinalState(Standing::Promoted));
 }
 
 #[test]
@@ -56,6 +56,16 @@ fn a_case_written_with_paused_is_refused_naming_needs_you() {
     .expect_err("`paused` is a retired word");
     let said = yunta_core::describe(&refused);
     assert!(said.contains("`needs you`"), "{said}");
+}
+
+#[test]
+fn a_case_written_with_cancelled_is_refused_naming_stopped() {
+    let refused = yunta_core::yaml::parse::<TestCase>(
+        "workflow: review\nfixture: fixtures/review.yaml\nexpect:\n  final_state: cancelled\n",
+    )
+    .expect_err("`cancelled` is a retired word");
+    let said = yunta_core::describe(&refused);
+    assert!(said.contains("`stopped`"), "{said}");
 }
 
 #[test]
@@ -84,5 +94,5 @@ fn a_case_that_expects_a_run_waiting_on_a_limit_reset_parses_waiting() {
         "workflow: review\nfixture: fixtures/review.yaml\nexpect:\n  final_state: waiting\n",
     )
     .unwrap();
-    assert_eq!(case.expect.final_state, FinalState::Waiting);
+    assert_eq!(case.expect.final_state, FinalState(Standing::Waiting));
 }

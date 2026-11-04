@@ -144,9 +144,7 @@ async fn node_unit(
     let base = crate::worktree::snapshot_commit(
         ctx.worktree,
         &crate::run_dir::index_for(ctx.run_dir, &who),
-        &CommitMessage::new("the tree a unit of work started from", ctx.run_id)
-            .node(&node.id)
-            .text(),
+        &CommitMessage::of_unit_start(ctx.run_id, &node.id).text(),
         ctx.root_supervision(),
     )
     .await?;
@@ -305,16 +303,16 @@ fn execute_kind<'a>(
             cancel,
         )),
         // A gate's resolution is a forge round-trip, not a
-        // session — `schedule::next_step` intercepts a ready/orphaned
+        // session — `schedule::decide` intercepts a ready/orphaned
         // gate before it ever becomes an `Execute` step (its own
-        // `ScheduleStep::PublishGate`/`PollGate`, handled in
-        // `run/mod.rs`), and `check::check_no_gate_in_parallel` refuses
+        // `Decision::PublishGate`/`PollGate`, matched in
+        // `run/exec.rs`), and `check::check_no_gate_in_parallel` refuses
         // the only other way a node reaches this function without going
         // through the top-level scheduler (`parallel`'s own children).
         NodeKind::Gate { .. } => {
             let diagnostic = format!(
                 "node `{}` is a `kind: gate` but reached node execution, which only \
-                 dispatches sessions and checks — a gate resolves through its own \
+                 dispatches sessions and checks; a gate resolves through its own \
                  scheduler step (see this arm's own comment)",
                 node.id
             );

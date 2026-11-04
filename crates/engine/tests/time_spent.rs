@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{EventBody, StoredEvent};
-use yunta_engine::{compute_run_stats, derive, TimeSpent};
+use yunta_core::NodeId;
+use yunta_engine::{compute_run_stats, compute_run_stats_of, derive, TimeSpent};
 
 /// A log of `(seconds since the run began, node, payload as the log
 /// persists it)`.
@@ -61,8 +62,11 @@ const WAITING: &str = r#"{"kind":"gate_waiting","summary":"Approve?","evidence":
 const RESOLVED: &str =
     r#"{"kind":"gate_resolved","chosen_option":"approve","resolved_by":"unverified:someone"}"#;
 const PAUSED: &str = r#"{"kind":"run_paused","reason":"cancelled by user"}"#;
+const PARKED_ON_GATE: &str = r#"{"kind":"run_paused","pause":{"type":"escalation","gate":{"assignee":"lead","node":"approve"},"options":[{"id":"approve","leads":{"on":{"next":[],"settles":false}}},{"id":"abort"}],"summary":"Approve?"}}"#;
+const HELD_FOR_RESET: &str = r#"{"kind":"run_paused","pause":{"type":"awaiting_reset","node":"a","at":"2026-01-01T10:00:00Z"}}"#;
 const ASKING: &str = r#"{"kind":"asking_opened"}"#;
 const RESUMED: &str = r#"{"kind":"run_resumed"}"#;
+const RUN_FINISHED: &str = r#"{"kind":"run_finished","terminal_state":"done","metrics":{"tokens":{"input":0,"output":0}}}"#;
 
 /// A check after the work whose own criterion is red, and whose guard ran
 /// for `guard_secs` anyway.
@@ -212,6 +216,160 @@ fn a_person_s_wait_ends_when_the_run_pauses() {
     assert_eq!(time.people, Duration::from_secs(30));
     assert_eq!(time.parked, Duration::from_secs(60));
     assert_eq!(time.between, Duration::from_secs(10));
+}
+
+/// A gate nobody answered at a terminal parks the run on a person: the wait
+/// until it wakes is theirs, and the gate's, which only the pause names.
+#[test]
+fn a_run_parked_on_a_gate_waits_on_a_person_until_it_wakes() {
+    let events = log(&[
+        (0, None, CREATED),
+        (10, None, PARKED_ON_GATE),
+        (70, None, RESUMED),
+    ]);
+
+    let time = time_of(&events);
+
+    assert_eq!(time.people, Duration::from_secs(60));
+    assert_eq!(time.parked, Duration::ZERO);
+    assert_eq!(
+        derive(&events)
+            .people_at(None)
+            .get(&NodeId::from("approve")),
+        Some(&Duration::from_secs(60))
+    );
+}
+
+/// Still parked, a person's wait runs to the instant read, with no event to
+/// close it.
+#[test]
+fn a_run_still_parked_on_a_gate_waits_on_a_person_to_the_instant_read() {
+    let events = log(&[(0, None, CREATED), (10, None, PARKED_ON_GATE)]);
+    let now = events[0].timestamp + chrono::Duration::seconds(70);
+
+    let time = derive(&events).time_spent(Some(now));
+
+    assert_eq!(time.people, Duration::from_secs(60));
+}
+
+/// A wait a clock ends is nobody's answer: parked, as a person's own stop is.
+#[test]
+fn a_run_held_for_a_limit_s_reset_is_parked() {
+    let events = log(&[
+        (0, None, CREATED),
+        (10, None, HELD_FOR_RESET),
+        (70, None, RESUMED),
+    ]);
+
+    let time = time_of(&events);
+
+    assert_eq!(time.parked, Duration::from_secs(60));
+    assert_eq!(time.people, Duration::ZERO);
+}
+
+/// A person's time is credited to each node a person was asked about: two
+/// gates asked at once each hold the stretch the run counts once.
+#[test]
+fn a_person_s_time_is_credited_to_each_node_asked_about() {
+    let events = log(&[
+        (0, None, CREATED),
+        (10, Some("a"), ASKING),
+        (20, Some("b"), ASKING),
+        (50, Some("a"), STARTED),
+        (50, Some("a"), WAITING),
+        (50, Some("a"), RESOLVED),
+        (50, Some("a"), FINISHED),
+        (80, Some("b"), STARTED),
+        (80, Some("b"), WAITING),
+        (80, Some("b"), RESOLVED),
+        (80, Some("b"), FINISHED),
+    ]);
+
+    let state = derive(&events);
+    let people = state.people_at(None);
+
+    assert_eq!(state.time_spent(None).people, Duration::from_secs(70));
+    assert_eq!(
+        people.get(&NodeId::from("a")),
+        Some(&Duration::from_secs(40))
+    );
+    assert_eq!(
+        people.get(&NodeId::from("b")),
+        Some(&Duration::from_secs(60))
+    );
+}
+
+/// A person still asked at the instant read is credited up to that
+/// instant; read as of the last event, the open stretch is not yet booked.
+#[test]
+fn a_person_still_asked_is_credited_up_to_the_instant_read() {
+    let events = log(&[(0, None, CREATED), (10, Some("approve"), ASKING)]);
+    let state = derive(&events);
+    let now = events[0].timestamp + chrono::Duration::seconds(70);
+
+    assert_eq!(
+        state.people_at(Some(now)).get(&NodeId::from("approve")),
+        Some(&Duration::from_secs(60))
+    );
+    assert_eq!(state.people_at(None).get(&NodeId::from("approve")), None);
+}
+
+/// Stats read at an instant hold each node's person time up to it, the
+/// wait still open included, as the run's own person share does.
+#[test]
+fn stats_read_at_an_instant_hold_each_node_s_person_time() {
+    let events = log(&[(0, None, CREATED), (10, Some("a"), ASKING)]);
+    let state = derive(&events);
+    let now = events[0].timestamp + chrono::Duration::seconds(70);
+
+    let stats = compute_run_stats_of(&timed_workflow(), &state, Some(now));
+
+    assert_eq!(stats.time.people, Duration::from_secs(60));
+    assert_eq!(
+        stats.people_by_node.get(&NodeId::from("a")),
+        Some(&Duration::from_secs(60))
+    );
+}
+
+/// A log that breaks stops the run's clock at its last applied event, and an
+/// attempt still open there stops with it: read later, it holds the time it
+/// had at the break.
+#[test]
+fn an_attempt_still_open_at_a_broken_log_stops_at_its_last_event() {
+    let events = log(&[
+        (0, None, CREATED),
+        (0, Some("a"), STARTED),
+        (45, Some("a"), FORMATTED),
+        // Node b never started, so its finish is refused and the log breaks.
+        (60, Some("b"), FINISHED),
+    ]);
+    let state = derive(&events);
+    let later = events[0].timestamp + chrono::Duration::seconds(600);
+
+    assert!(state.broken.is_some());
+    let stats = compute_run_stats_of(&timed_workflow(), &state, Some(later));
+
+    assert_eq!(stats.wall_clock, Some(Duration::from_secs(45)));
+    assert_eq!(stats.nodes[0].open_attempt, Some(Duration::from_secs(45)));
+}
+
+/// A run that finished with an attempt still open stops that attempt at its
+/// close, as it stops the run's clock there.
+#[test]
+fn an_attempt_still_open_at_a_finished_run_stops_at_its_close() {
+    let events = log(&[
+        (0, None, CREATED),
+        (0, Some("a"), STARTED),
+        (45, Some("a"), FORMATTED),
+        (45, None, RUN_FINISHED),
+    ]);
+    let state = derive(&events);
+    let later = events[0].timestamp + chrono::Duration::seconds(600);
+
+    let stats = compute_run_stats_of(&timed_workflow(), &state, Some(later));
+
+    assert_eq!(stats.wall_clock, Some(Duration::from_secs(45)));
+    assert_eq!(stats.nodes[0].open_attempt, Some(Duration::from_secs(45)));
 }
 
 const CUT_OFF: &str = r#"{"kind":"service_unreachable","session_id":"s1","message":"API Error: Can't reach the API server (ENOTFOUND)"}"#;

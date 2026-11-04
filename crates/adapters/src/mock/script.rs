@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{mpsc, Notify};
-use yunta_core::events::{FailureCause, RefusalCause, ToolTarget};
+use yunta_core::events::{FailureCause, RefusalCause, ToolAction, ToolTarget};
 use yunta_core::port::{AgentError, AgentEvent, RunToolsEndpoint};
 use yunta_core::process::stream::StreamGuard;
 use yunta_core::process::subprocess::LineParser;
@@ -251,9 +251,14 @@ impl Stream {
                 ToolExpectation::Refused,
             ) => {
                 let mut events = call_rejection(&tool);
+                let (action, target) = RunTool::parse(&tool).map_or_else(
+                    || (ToolAction::Call, ToolTarget::opaque(tool.as_bytes())),
+                    |known| (known.action(), known.target()),
+                );
                 events.push(AgentEvent::ToolUse {
-                    target: ToolTarget::opaque(tool.as_bytes()),
                     name: tool,
+                    action,
+                    target,
                 });
                 self.emit(events)
             }

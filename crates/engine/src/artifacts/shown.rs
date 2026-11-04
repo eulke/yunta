@@ -20,8 +20,8 @@ pub fn view_of(shown: &Shown) -> std::path::PathBuf {
 /// The documents `shows` names, from the run rooted at `run_dir`: the
 /// exact bytes each hash names, a tasks document read into the plan as
 /// the run `state` will judge it — with the spec it is shown beside, the
-/// suite the run measured and the departures a person accepted — a
-/// findings document into its findings.
+/// suite the run measured, the departures a person accepted and what
+/// they `asked` the run for — a findings document into its findings.
 ///
 /// Every surface that puts a decision to a person reads them here — the
 /// prompt a run asks on and `resolve-gate` alike — so a decision is never
@@ -30,14 +30,16 @@ pub async fn documents(
     run_dir: &Path,
     shows: &[Shown],
     state: &RunState,
+    asked: Option<&str>,
 ) -> Result<Vec<ShownDocument>, crate::run::RunError> {
-    Ok(held_documents(run_dir, shows, state).await?)
+    Ok(held_documents(run_dir, shows, state, asked).await?)
 }
 
 async fn held_documents(
     run_dir: &Path,
     shows: &[Shown],
     state: &RunState,
+    asked: Option<&str>,
 ) -> Result<Vec<ShownDocument>, super::HeldError> {
     let store = ObjectStore::at(run_dir);
     let answered = answered(&store, state).await?;
@@ -47,34 +49,7 @@ async fn held_documents(
         // Where the person deciding opens it: in full, since they read it
         // from wherever they stand and not from the run's directory.
         let path = run_dir.join(view_of(shown));
-        let content = match &shown.artifact {
-            _ if crate::run::gate_findings::shows_view(shown) => {
-                match yunta_core::yaml::parse_bytes::<RunFindings>(&bytes) {
-                    Ok(findings) => ShownContent::RunFindings(findings),
-                    Err(_) => ShownContent::Text(String::from_utf8_lossy(&bytes).into_owned()),
-                }
-            }
-            ArtifactId::Interpreted {
-                kind: ArtifactKind::Tasks,
-            } => {
-                let mut review = plan_reviewed(shown, &bytes, &path, state)?;
-                review.answered = answered.clone();
-                ShownContent::Tasks(Box::new(review))
-            }
-            ArtifactId::Interpreted {
-                kind: ArtifactKind::Spec,
-            } => ShownContent::Spec(yunta_core::shape::read::<yunta_core::SpecFile>(
-                &bytes,
-                path.display().to_string(),
-            )?),
-            ArtifactId::Interpreted {
-                kind: ArtifactKind::Findings,
-            } => ShownContent::Findings(yunta_core::shape::read::<yunta_core::HeldFindings>(
-                &bytes,
-                path.display().to_string(),
-            )?),
-            _ => ShownContent::Text(String::from_utf8_lossy(&bytes).into_owned()),
-        };
+        let content = content(shown, (&bytes, &path), state, (&answered, asked))?;
         documents.push(ShownDocument {
             shown: shown.clone(),
             path,
@@ -84,13 +59,55 @@ async fn held_documents(
     Ok(beside_its_plan(documents))
 }
 
+/// What `bytes`, the document `shown` names read at `path`, says: a plan
+/// as the run in `state` judges it, with what a person `answered` and what
+/// they `asked` for; a spec, a findings document, the run's findings, or
+/// its text.
+fn content(
+    shown: &Shown,
+    (bytes, path): (&[u8], &Path),
+    state: &RunState,
+    (answered, asked): (&[yunta_core::shown::Answered], Option<&str>),
+) -> Result<ShownContent, super::HeldError> {
+    Ok(match &shown.artifact {
+        _ if crate::run::gate_findings::shows_view(shown) => {
+            match yunta_core::yaml::parse_bytes::<RunFindings>(bytes) {
+                Ok(findings) => ShownContent::RunFindings(findings),
+                Err(_) => ShownContent::Text(String::from_utf8_lossy(bytes).into_owned()),
+            }
+        }
+        ArtifactId::Interpreted {
+            kind: ArtifactKind::Tasks,
+        } => {
+            let mut review = plan_reviewed(shown, bytes, path, state)?;
+            review.answered = answered.to_vec();
+            review.asked = asked.map(str::to_string);
+            ShownContent::Tasks(Box::new(review))
+        }
+        ArtifactId::Interpreted {
+            kind: ArtifactKind::Spec,
+        } => ShownContent::Spec(yunta_core::shape::read::<yunta_core::SpecFile>(
+            bytes,
+            path.display().to_string(),
+        )?),
+        ArtifactId::Interpreted {
+            kind: ArtifactKind::Findings,
+        } => ShownContent::Findings(yunta_core::shape::read::<yunta_core::HeldFindings>(
+            bytes,
+            path.display().to_string(),
+        )?),
+        _ => ShownContent::Text(String::from_utf8_lossy(bytes).into_owned()),
+    })
+}
+
 /// The documents `node` produced that a person reads whole — a plan, a
 /// spec, a review's findings — a plan judged with the spec the run holds,
-/// whichever node wrote it.
+/// whichever node wrote it, beside what the person `asked` for.
 pub async fn produced(
     run_dir: &Path,
     node: &yunta_core::NodeId,
     state: &RunState,
+    asked: Option<&str>,
 ) -> Result<Vec<ShownDocument>, crate::run::RunError> {
     let read = |artifact: &ArtifactId| {
         matches!(
@@ -123,13 +140,14 @@ pub async fn produced(
     if plans && !shows.iter().any(|shown| shown.artifact == spec) {
         shows.extend(state.artifacts.latest(&spec, None).map(shown));
     }
-    Ok(held_documents(run_dir, &shows, state).await?)
+    Ok(held_documents(run_dir, &shows, state, asked).await?)
 }
 
 /// The plan `bytes` hold, as the run in `state` will judge it: with the
-/// departures a person accepted, the suite the run measured, and how its
+/// departures a person accepted, the suite the run measured, how its
 /// planner got it accepted — a plan refused fifteen times reads
-/// differently.
+/// differently — and what the tree it was registered against held of its
+/// shapes, as the log states it for these bytes.
 fn plan_reviewed(
     shown: &Shown,
     bytes: &[u8],
@@ -145,6 +163,7 @@ fn plan_reviewed(
         .as_ref()
         .and_then(|node| state.artifacts.handed_over(node, ArtifactKind::Tasks))
         .cloned();
+    review.shapes_read = state.tasks.shapes_read(&shown.content_hash).cloned();
     Ok(review)
 }
 
@@ -195,7 +214,9 @@ async fn held<T: yunta_core::shape::Document>(
 
 /// `documents` with a spec shown beside a plan read on the plan's tasks:
 /// its tests are what judges them, and a second document after the plan
-/// would put each test a screen away from the task it holds.
+/// would put each test a screen away from the task it holds. The plan is
+/// judged again in place, so all it was read with stands beside the
+/// spec's judgement.
 fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
     let has_plan = documents
         .iter()
@@ -206,22 +227,22 @@ fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
     let (true, Some(at)) = (has_plan, spec_at) else {
         return documents;
     };
-    let ShownContent::Spec(spec) = documents.remove(at).content else {
+    let spec_document = documents.remove(at);
+    let ShownContent::Spec(spec) = spec_document.content else {
         return documents;
     };
     for document in &mut documents {
+        let planner = document.shown.producer.clone();
         if let ShownContent::Tasks(review) = &mut document.content {
-            let read = crate::tasks::plan_review(
+            let judged = crate::tasks::plan_review(
                 review.plan.clone(),
                 Some(spec.clone()),
                 &review.held,
                 review.departed.clone(),
             );
-            **review = yunta_core::shown::PlanReview {
-                handed_over: review.handed_over.take(),
-                answered: std::mem::take(&mut review.answered),
-                ..read
-            };
+            review.spec = judged.spec;
+            review.tasks = judged.tasks;
+            review.spec_node = spec_document.shown.producer.clone().or(planner);
         }
     }
     documents
@@ -235,4 +256,105 @@ fn departed(plan: &TasksFile, tasks: &TaskLedger) -> Vec<AcceptedDeparture> {
         .filter_map(|task| tasks.get(&task.id))
         .flat_map(|record| record.departures_accepted.iter().cloned())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use yunta_core::events::artifacts::HandedOver;
+
+    /// A document `producer` produced, holding `content`.
+    fn shown(producer: Option<&str>, kind: ArtifactKind, content: ShownContent) -> ShownDocument {
+        ShownDocument {
+            shown: Shown {
+                producer: producer.map(Into::into),
+                artifact: ArtifactId::Interpreted { kind },
+                content_hash: yunta_core::ContentHash::sha256(b"bytes"),
+            },
+            path: std::path::PathBuf::from("artifacts/plan.yaml"),
+            content,
+        }
+    }
+
+    /// The spec beside a plan is read on its page: the node that wrote it,
+    /// or the plan's, whose page shows the spec when no node of the run
+    /// wrote it.
+    #[test]
+    fn a_plan_shown_beside_its_spec_names_the_page_that_shows_the_spec_whole() {
+        let spec_by = |node: Option<&str>| {
+            let plan = crate::tasks::plan_review(TasksFile::of(Vec::new()), None, &[], Vec::new());
+            let documents = beside_its_plan(vec![
+                shown(
+                    Some("planner"),
+                    ArtifactKind::Tasks,
+                    ShownContent::Tasks(Box::new(plan)),
+                ),
+                shown(
+                    node,
+                    ArtifactKind::Spec,
+                    ShownContent::Spec(yunta_core::SpecFile { specs: Vec::new() }),
+                ),
+            ]);
+            match &documents[0].content {
+                ShownContent::Tasks(review) => review.spec_node.as_ref().map(ToString::to_string),
+                other => panic!("the plan comes first: {other:?}"),
+            }
+        };
+        assert_eq!(spec_by(Some("specify")).as_deref(), Some("specify"));
+        assert_eq!(spec_by(None).as_deref(), Some("planner"));
+    }
+
+    /// A plan judged beside its spec keeps everything it was read with: what
+    /// the tree held of its shapes, how its planner handed it over, and
+    /// what the person asked and answered.
+    #[test]
+    fn a_plan_judged_beside_its_spec_keeps_what_was_read_beside_it() {
+        use yunta_core::events::{ShapeRead, ShapesReadPayload};
+        let read = ShapesReadPayload {
+            plan: yunta_core::ContentHash::sha256(b"bytes"),
+            at: yunta_core::CommitSha::from("0123456789abcdef0123456789abcdef01234567"),
+            shapes: vec![ShapeRead {
+                name: "build_it".to_string(),
+                owner: "build".into(),
+                file: "src/a.rs".to_string(),
+                in_tree: yunta_core::events::InTree::New,
+            }],
+        };
+        let answered = vec![yunta_core::shown::Answered {
+            id: "q1".into(),
+            question: "Which depth?".to_string(),
+            answer: "two".to_string(),
+        }];
+        let mut plan = crate::tasks::plan_review(TasksFile::of(Vec::new()), None, &[], Vec::new());
+        plan.shapes_read = Some(read.clone());
+        plan.handed_over = Some(HandedOver::default());
+        plan.asked = Some("build it deeper".to_string());
+        plan.answered = answered.clone();
+        let spec = yunta_core::SpecFile { specs: Vec::new() };
+
+        let documents = beside_its_plan(vec![
+            shown(
+                Some("planner"),
+                ArtifactKind::Tasks,
+                ShownContent::Tasks(Box::new(plan)),
+            ),
+            shown(
+                Some("specify"),
+                ArtifactKind::Spec,
+                ShownContent::Spec(spec.clone()),
+            ),
+        ]);
+
+        let [document] = &documents[..] else {
+            panic!("the spec is read on the plan: {documents:?}");
+        };
+        let ShownContent::Tasks(review) = &document.content else {
+            panic!("the plan stays a plan: {document:?}");
+        };
+        assert_eq!(review.shapes_read, Some(read));
+        assert_eq!(review.handed_over, Some(HandedOver::default()));
+        assert_eq!(review.asked.as_deref(), Some("build it deeper"));
+        assert_eq!(review.answered, answered);
+        assert_eq!(review.spec, Some(spec));
+    }
 }

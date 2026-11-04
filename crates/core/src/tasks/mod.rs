@@ -111,6 +111,13 @@ impl Change {
     pub fn file(&self) -> &str {
         self.at.split("::").next().unwrap_or(&self.at)
     }
+
+    /// What in its file the change is, outermost first:
+    /// `src/greet.rs::Greeter::bye` is in `Greeter`, then `bye`; a change
+    /// to a file as a whole is in nothing.
+    pub fn within(&self) -> impl Iterator<Item = &str> {
+        self.at.split("::").skip(1)
+    }
 }
 
 impl TasksFile {

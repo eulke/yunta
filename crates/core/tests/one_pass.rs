@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use yunta_core::diagnostic::RuleCode;
 use yunta_core::workflow::read::{read, read_all};
 
 /// What the report says, line by line, with where each problem is.
@@ -21,7 +22,7 @@ fn three_unknown_keys_and_a_broken_reference_are_reported_together() {
     let found = said(text);
     assert_eq!(found.len(), 4, "{found:#?}");
     assert!(
-        found[0].0.contains("unknown field `nodez_note`") && found[0].1 == Some(2),
+        found[0].0.contains("unknown key `nodez_note`") && found[0].1 == Some(2),
         "{found:#?}"
     );
     assert!(
@@ -37,6 +38,82 @@ fn three_unknown_keys_and_a_broken_reference_are_reported_together() {
             && found[3].0.contains("did you mean `lint`?"),
         "{found:#?}"
     );
+}
+
+#[test]
+fn a_slip_in_a_kind_is_named_and_the_node_judged_as_the_kind_meant() {
+    let text = "name: w\nnodes:\n  - id: fix\n    kind: prompy\n    promt: p\n";
+    let found = said(text);
+    assert_eq!(
+        found,
+        [
+            (
+                "node `fix`: unknown kind `prompy`; did you mean `prompt`? at line 4 column 11"
+                    .to_string(),
+                Some(4)
+            ),
+            (
+                "node `fix`: unknown key `promt` for a `prompt` node; did you mean `prompt`? at \
+                 line 5 column 5"
+                    .to_string(),
+                Some(5)
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_slip_in_a_kind_is_refused_under_its_own_rule_where_the_kind_is_written() {
+    let (_, report) = read_all(
+        "name: w\nnodes:\n  - id: fix\n    kind: prompy\n    prompt: p\n",
+        Path::new("w.yaml"),
+    );
+    let slip = &report.diagnostics[0];
+    assert_eq!(slip.rule(), Some(RuleCode::UnknownKind), "{report}");
+    assert_eq!(slip.at.map(|at| (at.line, at.col)), Some((4, 11)));
+}
+
+#[test]
+fn a_kind_no_kind_is_a_slip_from_is_refused_with_every_kind_there_is() {
+    let found = said("name: w\nnodes:\n  - id: fix\n    kind: wibble\n    prompt: p\n");
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        found[0]
+            .0
+            .contains("unknown kind `wibble`; one of `prompt`, `bash`"),
+        "{found:#?}"
+    );
+}
+
+/// The edge an artifact read implies is not a second reference: the read
+/// is refused once, on the `node:` it names.
+#[test]
+fn a_reference_is_judged_once_where_it_is_written() {
+    let text = "name: w\nnodes:\n  - id: plan\n    kind: bash\n    run: \"true\"\n  - id: fix\n    kind: prompt\n    prompt: p\n    depends_on: [plan]\n    context:\n      - files: [README.md]\n      - artifact: { node: plann, name: notes }\n";
+    assert_eq!(
+        said(text),
+        [(
+            "node `fix`: `context: artifact` names `plann`, and no node carries that id; did \
+             you mean `plan`? at line 12 column 27"
+                .to_string(),
+            Some(12)
+        )]
+    );
+}
+
+#[test]
+fn a_reference_a_fan_out_node_writes_is_judged_once() {
+    let text = "name: w\nnodes:\n  - { id: review, kind: prompt, runners: [a, b], prompt: p, on_failure: { goto: fixx, max_reroutes: 1 } }\n  - { id: fix, kind: bash, run: \"true\" }\n";
+    let found = said(text);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        found[0]
+            .0
+            .starts_with("node `review`: `on_failure.goto` names `fixx`"),
+        "{found:#?}"
+    );
+    let named = "name: w\nnodes:\n  - { id: review, kind: prompt, runners: [a, b], prompt: p }\n  - { id: ship, kind: bash, run: \"true\", depends_on: [review@a] }\n";
+    assert_eq!(said(named), [], "a sibling a fan-out generates is a node");
 }
 
 #[test]
@@ -73,14 +150,21 @@ fn the_audit_knows_every_key_a_workflow_accepts_at_its_top() {
     let error = yunta_core::yaml::parse::<yunta_core::Workflow>("name: w\nnodes: []\nnope: 1\n")
         .unwrap_err()
         .to_string();
-    let found = said("name: w\nnodes: []\nnope: 1\n");
-    let audited = &found[0].0;
     let expected = error
         .split("expected one of ")
         .nth(1)
         .and_then(|rest| rest.split(" at line").next())
         .expect("the parser lists what it accepts");
-    assert!(audited.contains(expected), "{audited}\nparser: {error}");
+    let audited: Vec<String> = yunta_core::workflow::WORKFLOW_KEYS
+        .iter()
+        .map(|key| format!("`{key}`"))
+        .collect();
+    assert_eq!(audited.join(", "), expected, "parser: {error}");
+    let found = said("name: w\nnodes: []\nnope: 1\n");
+    assert_eq!(
+        found[0].0,
+        "the document has an unknown key `nope` at line 3 column 1"
+    );
 }
 
 #[test]

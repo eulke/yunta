@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use yunta_core::port::RunToolsEndpoint;
 use yunta_core::RunTool;
 
-use super::subject::{Outcome, Script, Step, STOP_TURN};
+use super::subject::{claude_capabilities, Outcome, Script, Step, STOP_TURN};
 
 /// The session id a Claude stream opens with.
 const CLAUDE_SESSION: &str = "contract-session";
@@ -50,6 +50,18 @@ fn split_open(steps: &[Step]) -> (Vec<&Step>, Vec<&Step>) {
         .partition(|step| matches!(step, Step::BeforeOpen(_)))
 }
 
+/// A tool call a Claude CLI prints, the `n`th of its session.
+fn claude_call(n: usize, name: &str, input: Value) -> Value {
+    claude_message(json!({
+        "content": [{
+            "type": "tool_use",
+            "id": format!("toolu_{n}"),
+            "name": name,
+            "input": input,
+        }],
+    }))
+}
+
 /// The lines a Claude CLI prints for one step. `n` numbers the step so that
 /// every tool call and message it prints has an id of its own.
 fn claude_step(step: &Step, n: usize) -> Vec<Value> {
@@ -63,22 +75,16 @@ fn claude_step(step: &Step, n: usize) -> Vec<Value> {
             )]
         }
         Step::UnknownLine => claude_unread(),
-        Step::ToolUse { name, target } => vec![claude_message(json!({
-            "content": [{
-                "type": "tool_use",
-                "id": format!("toolu_{n}"),
-                "name": name,
-                "input": { "command": target },
-            }],
-        }))],
-        Step::RunToolCalled(tool) => vec![claude_message(json!({
-            "content": [{
-                "type": "tool_use",
-                "id": format!("toolu_{n}"),
-                "name": claude_run_tool(*tool),
-                "input": {},
-            }],
-        }))],
+        Step::ToolUse { name, target } => {
+            vec![claude_call(n, name, json!({ "command": target }))]
+        }
+        Step::RunToolCalled(tool) => vec![claude_call(n, &claude_run_tool(*tool), json!({}))],
+        Step::ReadFile(path) => vec![claude_call(n, "Read", json!({ "file_path": path }))],
+        Step::EditFile(path) => vec![claude_call(n, "Edit", json!({ "file_path": path }))],
+        Step::WriteFile(path) => vec![claude_call(n, "Write", json!({ "file_path": path }))],
+        Step::OtherMcp { server, tool } => {
+            vec![claude_call(n, &format!("mcp__{server}__{tool}"), json!({}))]
+        }
         Step::Usage {
             input,
             output,
@@ -180,6 +186,27 @@ fn codex_step(step: &Step) -> Vec<Value> {
             "command": target,
             "status": "completed",
         }))],
+        Step::ReadFile(path) => vec![completed_item(json!({
+            "type": "command_execution",
+            "command": format!("/bin/zsh -lc 'cat {path}'"),
+            "status": "completed",
+        }))],
+        Step::EditFile(path) => vec![completed_item(json!({
+            "type": "file_change",
+            "changes": [{ "path": path, "kind": "update" }],
+            "status": "completed",
+        }))],
+        Step::WriteFile(path) => vec![completed_item(json!({
+            "type": "file_change",
+            "changes": [{ "path": path, "kind": "add" }],
+            "status": "completed",
+        }))],
+        Step::OtherMcp { server, tool } => vec![completed_item(json!({
+            "type": "mcp_tool_call",
+            "server": server,
+            "tool": tool,
+            "status": "completed",
+        }))],
         Step::RunToolCalled(tool) => vec![completed_item(json!({
             "type": "mcp_tool_call",
             "server": RunToolsEndpoint::SERVER_NAME,
@@ -244,4 +271,52 @@ fn completed_item(item: Value) -> Value {
 /// An agent message item, as a Codex CLI prints the text it says.
 fn agent_message(text: &str) -> Value {
     completed_item(json!({ "type": "agent_message", "text": text }))
+}
+
+/// One step of a script as the mock's fixture spells it: a run tool named the
+/// way the claude-code dialect names it, and a stop refusal as the CLI's text.
+pub(super) fn mock_step(step: &Step) -> Value {
+    match step {
+        Step::Note(text) => json!({ "type": "note", "text": text }),
+        Step::StopRefused { reason } => {
+            json!({ "type": "note", "text": format!("{STOP_TURN}{reason}") })
+        }
+        Step::ToolUse { name, target } => {
+            json!({ "type": "tool_use", "name": name, "target": target })
+        }
+        Step::RunToolCalled(tool) => json!({
+            "type": "tool_use",
+            "name": tool.called(claude_capabilities().tool_naming),
+            "target": "",
+        }),
+        Step::ReadFile(path) => json!({ "type": "file_call", "action": "read", "path": path }),
+        Step::EditFile(path) => json!({ "type": "file_call", "action": "edit", "path": path }),
+        Step::WriteFile(path) => json!({ "type": "file_call", "action": "write", "path": path }),
+        Step::OtherMcp { server, tool } => json!({
+            "type": "tool_use",
+            "name": format!("mcp__{server}__{tool}"),
+            "target": "",
+        }),
+        Step::Usage {
+            input,
+            output,
+            cached,
+        } => json!({
+            "type": "usage",
+            "input_tokens": input,
+            "output_tokens": output,
+            "cached_input_tokens": cached,
+        }),
+        Step::UnknownLine => json!({ "type": "unknown_line" }),
+        Step::BeforeOpen(text) => json!({ "type": "before_open", "text": text }),
+    }
+}
+
+/// A script's outcome as the mock's fixture spells it.
+pub(super) fn mock_outcome(outcome: &Outcome) -> Value {
+    match outcome {
+        Outcome::Completed(summary) => json!({ "type": "completed", "summary": summary }),
+        Outcome::Failed(message) => json!({ "type": "failed", "message": message }),
+        Outcome::Crash => json!({ "type": "crash" }),
+    }
 }

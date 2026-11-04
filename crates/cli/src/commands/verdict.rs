@@ -4,19 +4,25 @@
 //! on it. A workflow one of them accepted and another rejected would
 //! leave a reader to work out which of the two to believe.
 
-use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
+use surco::components::{Fields, Furrow, Headline, Next, Problem};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::look::Look;
+use surco::text::counted;
 use yunta_core::caution::Caution;
-use yunta_core::yaml::{Location, SourceMap};
+use yunta_core::diagnostic::Report;
+use yunta_core::step::NextStep;
+use yunta_core::yaml::SourceMap;
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::CheckError;
+use yunta_engine::{CheckError, Composition};
+use yunta_render::blocks::diagnostic::located;
 
+use super::advice;
 use crate::context::Context;
-use crate::error::{note, warn, CliError, Outcome};
-use crate::output::say;
-use crate::render::blocks::diagnostic::located;
-use crate::render::Look;
+use crate::error::{page, warn, CliError, Outcome};
+use crate::output::{document, on_stderr};
 
 /// How much of the project a verdict reads beyond the workflow itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +147,11 @@ impl Verdict {
         self
     }
 
+    /// Whether the verdict has a warning to say.
+    pub(crate) fn warns(&self) -> bool {
+        !self.warnings.is_empty()
+    }
+
     /// Says what does not stop the workflow but should be heard before it
     /// runs.
     pub(crate) fn warn(&self) {
@@ -149,68 +160,195 @@ impl Verdict {
         }
     }
 
-    /// The verdict as a command that reports it says it: the warnings,
-    /// then `<subject>: OK` on stdout, or every problem on stderr with
-    /// what this project could declare to fix it.
+    /// The verdict as a command that reports it draws it: its page on
+    /// stdout when the workflow can run here, and on stderr, each problem
+    /// pointed at in its line, when it cannot.
     pub(crate) async fn report(
         &self,
         ctx: &Context,
-        subject: impl Display,
+        path: &Path,
         look: &Look,
     ) -> Result<Outcome, CliError> {
-        self.warn();
+        let page = self.page(ctx, path).await?;
         if self.passes() {
-            say(look, format!("{subject}: OK"));
+            document(look, page);
             return Ok(Outcome::Success);
         }
-        note(self.problems(ctx, subject).await?);
+        on_stderr(look, page);
         Ok(Outcome::Reported)
+    }
+
+    /// The verdict as its page: whether the workflow read from `path` can
+    /// run here, what it found, and the check to run again.
+    pub(crate) async fn page(&self, ctx: &Context, path: &Path) -> Result<Doc, CliError> {
+        let found = self.found(ctx).await?;
+        let mark = match found.errors {
+            0 => Mark::Done,
+            _ => Mark::Failed,
+        };
+        let mut headline = Headline::new(mark, file_named(path), found.said());
+        let Found { blocks, errors } = found;
+        if !self.warnings.is_empty() {
+            headline = headline.fact(counted(self.warnings.len(), "warning"));
+        }
+        let steps = match errors {
+            0 => Vec::new(),
+            _ => vec![check_again(&shown(ctx, path))],
+        };
+        Ok(Doc::new()
+            .with(headline)
+            .with(Furrow(Vec::new()))
+            .with(Fields::new().push_if("at", shown(ctx, path)))
+            .with_all(blocks)
+            .with(Next { steps }))
+    }
+
+    /// What the verdict found, as the blocks a page draws: each problem in
+    /// the order the file has them, each warning, and what this project
+    /// could declare; and how many of them stop the workflow.
+    pub(crate) async fn found(&self, ctx: &Context) -> Result<Found, CliError> {
+        let unrunnable = self.unrunnable(ctx).await?;
+        let warnings = self
+            .warnings
+            .iter()
+            .map(|warning| Problem::warning(yunta_render::caution::line(warning)))
+            .collect();
+        Ok(Found {
+            blocks: unrunnable.blocks(warnings),
+            errors: unrunnable.problems.len(),
+        })
     }
 
     /// The verdict as a run is refused with it. A stop while the project's
     /// remote is read is the outer `Err`, not a refusal.
     pub(crate) async fn refusal(&self, ctx: &Context) -> Result<CliError, CliError> {
-        Ok(CliError::msg(
-            self.problems(ctx, "the workflow fails `yunta check`")
-                .await?,
-        ))
+        Ok(CliError::Unrunnable(self.unrunnable(ctx).await?))
     }
 
-    /// Every problem under `heading`, each refusal about the workflow
-    /// quoted from its file, then what this project could declare for the
-    /// ones a declaration fixes.
-    async fn problems(&self, ctx: &Context, heading: impl Display) -> Result<String, CliError> {
+    /// Every problem, each about the workflow quoted from its file in the
+    /// order the file has them, then what has no place in it, and what this
+    /// project could declare for the ones a declaration fixes.
+    async fn unrunnable(&self, ctx: &Context) -> Result<Unrunnable, CliError> {
         let text = tokio::fs::read_to_string(&self.path).await.ok();
         let map = text.as_deref().map(SourceMap::read).unwrap_or_default();
-        let mut all: Vec<(String, Option<Location>)> = self
+        let shown = shown(ctx, &self.path);
+        let mut pointed: Vec<page::Pointed> = self
             .in_file
             .iter()
-            .map(|problem| match problem.at {
-                Some(at) => (problem.said(), Some(at)),
-                None => (problem.to_string(), None),
-            })
-            .chain(self.errors.iter().map(|error| {
-                let at = error.pointer().and_then(|pointer| map.place(&pointer));
-                (crate::error::words::check(error), at)
-            }))
+            .map(|diagnostic| page::found(diagnostic, &shown, text.as_deref()))
             .collect();
-        // In the order the file has them; what has no place in it — a
-        // config layer's conflict among them — after.
-        all.sort_by_key(|(_, at)| at.map_or((usize::MAX, 0), |at| (at.line, at.col)));
-        all.extend(
+        let mut composed = Vec::new();
+        for error in &self.errors {
+            match error {
+                CheckError::Composition(Composition::Unparseable { report, .. }) => {
+                    composed.extend(composed_problems(ctx, report).await);
+                }
+                error => {
+                    let at = error.pointer().and_then(|pointer| map.place(&pointer));
+                    pointed.push(page::refused(error, at, &shown, text.as_deref()).into());
+                }
+            }
+        }
+        // In the order the file has them; what has no place in it, a
+        // config layer's conflict among them, after.
+        pointed.sort_by_key(page::Pointed::order);
+        // A file this one composes is another file: its problems follow, in its own order.
+        pointed.extend(composed);
+        let mut problems = page::hinted(pointed);
+        problems.extend(
             self.conflicts
                 .iter()
-                .map(|conflict| (conflict.clone(), None)),
+                .map(|conflict| located(conflict.clone(), None, &shown, None)),
         );
-        let shown = self.path.display().to_string();
-        let mut said = located(&heading.to_string(), &all, &shown, text.as_deref());
-        let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision())
-            .await?
-            .for_errors(&self.errors)
-            .await;
-        for line in crate::detect::suggestions(&self.errors, &detected) {
-            said.push_str(&format!("\n  {line}"));
-        }
-        Ok(said)
+        let declare = match self.errors.is_empty() {
+            true => Vec::new(),
+            false => {
+                let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision())
+                    .await?
+                    .for_errors(&self.errors)
+                    .await;
+                crate::detect::suggestions(&self.errors, &detected)
+            }
+        };
+        Ok(Unrunnable { problems, declare })
     }
+}
+
+/// Every problem of a workflow this one composes that does not read, each quoted from its
+/// own file.
+async fn composed_problems(ctx: &Context, report: &Report) -> Vec<page::Pointed> {
+    let path = Path::new(&report.document.path);
+    let text = tokio::fs::read_to_string(path).await.ok();
+    let shown = shown(ctx, path);
+    report
+        .diagnostics
+        .iter()
+        .map(|diagnostic| page::found(diagnostic, &shown, text.as_deref()))
+        .collect()
+}
+
+/// Why a workflow cannot run here: every problem, each pointed at in its
+/// line when it has one, and what this project could declare for the ones
+/// a declaration fixes.
+#[derive(Debug)]
+pub(crate) struct Unrunnable {
+    pub(crate) problems: Vec<Problem>,
+    pub(crate) declare: Vec<surco::components::Fix>,
+}
+
+impl Unrunnable {
+    /// The blocks a page draws: each problem, then `warnings`, then what to
+    /// declare.
+    pub(crate) fn blocks(&self, warnings: Vec<Problem>) -> Vec<Block> {
+        self.problems
+            .iter()
+            .cloned()
+            .chain(warnings)
+            .map(Block::from)
+            .chain(self.declare.iter().flat_map(surco::components::Fix::blocks))
+            .collect()
+    }
+}
+
+/// What a verdict found, as a page draws it, and how many of the problems
+/// stop the workflow.
+pub(crate) struct Found {
+    pub(crate) blocks: Vec<Block>,
+    pub(crate) errors: usize,
+}
+
+impl Found {
+    /// The verdict in words: the workflow can run here, or how many
+    /// problems stop it.
+    pub(crate) fn said(&self) -> String {
+        match self.errors {
+            0 => "can run here".to_string(),
+            errors => counted(errors, "error"),
+        }
+    }
+}
+
+/// A workflow file as a headline names it: its name, the folder it is in
+/// being what the lines its problems point at say.
+pub(crate) fn file_named(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+/// The check to run once what a verdict found in the file `shown` names
+/// is fixed.
+pub(crate) fn check_again(shown: &str) -> (String, &'static str) {
+    (
+        advice::spell(&NextStep::Check {
+            workflow: shown.to_string(),
+        }),
+        "again, once they are fixed",
+    )
+}
+
+/// `path` as a reader in this directory names it.
+fn shown(ctx: &Context, path: &Path) -> String {
+    surco::paths::shown(path, &ctx.cwd, ctx.env.home.as_deref())
 }

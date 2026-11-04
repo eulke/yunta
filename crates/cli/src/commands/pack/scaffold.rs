@@ -5,12 +5,16 @@
 
 use std::path::Path;
 
-use yunta_core::text::problems;
+use surco::components::{Fields, Furrow, Headline};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::look::Look;
+use surco::text::counted;
 use yunta_core::{ConfigLayer, PackManifest, PackRef, Workflow};
 
-use crate::error::{note, CliError, Outcome};
-use crate::output::say;
-use crate::render::Look;
+use super::super::pack_audit::run_pack_tests;
+use crate::error::{CliError, Outcome};
+use crate::output::document;
 
 // Written as literal templates (not built from the typed values) so the
 // generated files read exactly as an author would write them; `{{name}}`
@@ -18,10 +22,13 @@ use crate::render::Look;
 // workflow are parsed back into their types before anything is written,
 // so a skeleton that does not parse never reaches disk.
 
+/// Where a new pack keeps the workflow it starts with.
+const EXAMPLE: &str = ".yunta/workflows/example.yaml";
+
 const PACK_MANIFEST_TEMPLATE: &str = r#"name: {{name}}
 publisher: {{publisher}}
 version: 0.1.0
-description: A yunta pack — one verified workflow to build on.
+description: A yunta pack, one verified workflow to build on.
 license: Apache-2.0
 declares:
   permissions: edit
@@ -59,7 +66,7 @@ nodes:
 
 // Self-test config: never shipped in `contents:`, used only when this
 // pack's own `.yunta/tests/` run in isolation.
-const PACK_SELFTEST_CONFIG: &str = r#"# Self-test config only — runs this pack's own .yunta/tests/ under the
+const PACK_SELFTEST_CONFIG: &str = r#"# Self-test config only: runs this pack's own .yunta/tests/ under the
 # mock adapter. A project that installs this pack uses its own config.
 runners:
   executor:
@@ -83,7 +90,7 @@ outcome: { type: completed, summary: "done" }
 
 const PACK_README_TEMPLATE: &str = r#"# {{publisher}}/{{name}}
 
-A yunta pack scaffolded by `yunta pack new`. It ships one workflow,
+A yunta pack scaffolded by `{{pack_new}}`. It ships one workflow,
 `example`, and a self-test that runs it under the mock adapter.
 
 ## example
@@ -93,8 +100,17 @@ work counts as done. Swap the `verify` command for your own test suite.
 
 ## Testing
 
-    yunta test --dir .
+    {{test}} --dir .
 "#;
+
+/// `template` with what a new pack is called, and how the commands it names are typed.
+fn filled(template: &str, pack: &PackRef) -> String {
+    template
+        .replace("{{publisher}}", pack.publisher().as_str())
+        .replace("{{name}}", pack.name().as_str())
+        .replace("{{test}}", &crate::commands::advice::test())
+        .replace("{{pack_new}}", &crate::commands::advice::pack("new"))
+}
 
 /// Scaffolds a new pack at `<cwd>/<name>`: a manifest, one verified
 /// workflow, a self-test config and case, and a README. The manifest
@@ -107,16 +123,12 @@ pub async fn new_pack(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> 
     let dir = cwd.join(pack.name().as_str());
     if dir.exists() {
         return Err(CliError::msg(format!(
-            "{} already exists — choose another name or remove it first",
+            "{} already exists; choose another name or remove it first",
             dir.display()
         )));
     }
 
-    let fill = |template: &str| {
-        template
-            .replace("{{publisher}}", pack.publisher().as_str())
-            .replace("{{name}}", pack.name().as_str())
-    };
+    let fill = |template: &str| filled(template, pack);
     let manifest_yaml = fill(PACK_MANIFEST_TEMPLATE);
     let workflow_yaml = fill(PACK_WORKFLOW_TEMPLATE);
 
@@ -130,7 +142,7 @@ pub async fn new_pack(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> 
     write_under(&dir, "pack.yaml", &manifest_yaml).await?;
     write_under(&dir, "README.md", &fill(PACK_README_TEMPLATE)).await?;
     write_under(&dir, ".yunta/config.yaml", PACK_SELFTEST_CONFIG).await?;
-    write_under(&dir, ".yunta/workflows/example.yaml", &workflow_yaml).await?;
+    write_under(&dir, EXAMPLE, &workflow_yaml).await?;
     write_under(&dir, ".yunta/tests/example.yaml", PACK_CASE_TEMPLATE).await?;
     write_under(
         &dir,
@@ -138,9 +150,19 @@ pub async fn new_pack(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> 
         PACK_FIXTURE_TEMPLATE,
     )
     .await?;
-    say(look, format!("wrote {}", dir.display()));
-
-    verify_scaffold(&dir, &workflow, look).await
+    let page = |mark: Mark, found: Vec<Block>| {
+        Doc::new()
+            .with(Headline::new(mark, format!("pack {pack}"), "written"))
+            .with(Furrow(Vec::new()))
+            .with(Fields::new().push_if("at", surco::paths::shown(&dir, &cwd, None)))
+            .with_all(found)
+    };
+    // The files are on disk whatever stopped the check of them.
+    let (mark, found, outcome) = verify_scaffold(&dir, &workflow)
+        .await
+        .inspect_err(|_| document(look, page(Mark::Done, Vec::new())))?;
+    document(look, page(mark, found));
+    Ok(outcome)
 }
 
 /// Writes one file of the scaffold under `dir`, creating its directory
@@ -158,13 +180,13 @@ async fn write_under(dir: &Path, rel: &str, contents: &str) -> Result<(), CliErr
 }
 
 /// Checks the scaffolded workflow against the pack's own self-test config,
-/// and runs the pack's case when the check passes. A check that fails
-/// reports every problem and runs nothing.
+/// and runs the pack's case when the check passes: the mark the page opens
+/// with, what it found, and the outcome. A check that fails reports every
+/// problem and runs nothing.
 async fn verify_scaffold(
     dir: &Path,
     workflow: &Workflow,
-    look: &Look,
-) -> Result<Outcome, CliError> {
+) -> Result<(Mark, Vec<Block>, Outcome), CliError> {
     let config = ConfigLayer::merge_layers(
         crate::project::load_named_layers(dir)?
             .into_iter()
@@ -173,12 +195,28 @@ async fn verify_scaffold(
     let facts = crate::commands::declared_facts(&config);
     let errors = yunta_engine::check(workflow, &config, &facts);
     if !errors.is_empty() {
-        let words: Vec<String> = errors.iter().map(crate::error::words::check).collect();
-        note(problems(
-            dir.join(".yunta/workflows/example.yaml").display(),
-            &words,
-        ));
-        return Ok(Outcome::Reported);
+        let found = std::iter::once(
+            Fields::new()
+                .push_if(
+                    "check",
+                    format!("{} in {EXAMPLE}", counted(errors.len(), "error")),
+                )
+                .into(),
+        )
+        .chain(
+            errors
+                .iter()
+                .map(|error| crate::error::page::refused(error, None, EXAMPLE, None).into()),
+        )
+        .collect();
+        return Ok((Mark::Caution, found, Outcome::Reported));
     }
-    crate::commands::test::test(Some(dir), look).await
+    let interrupt = crate::interrupt::Interrupt::ctrl_c()
+        .map_err(|source| CliError::io("install the interrupt handler for", "pack new", source))?;
+    let tests = run_pack_tests(dir, interrupt).await;
+    let outcome = match tests.failed {
+        0 => Outcome::Success,
+        _ => Outcome::Reported,
+    };
+    Ok((tests.mark(), tests.blocks(), outcome))
 }

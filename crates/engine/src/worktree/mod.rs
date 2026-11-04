@@ -62,8 +62,8 @@ pub use pool::{
     still_the_runs, Birth, CheckoutPool, Lease, PoolReport, Tidied,
 };
 pub use unit::{
-    carry_work, commit_work, land, lands_units, rebase_onto, snapshot_commit, Carried, Rebase,
-    Unit, UnitHome, UnitId,
+    carry_work, commit_staged, commit_work, land, lands_units, rebase_onto, snapshot_commit,
+    stage_work, Carried, Rebase, Unit, UnitHome, UnitId,
 };
 
 /// What taking isolation `none`'s lock involved — the caller

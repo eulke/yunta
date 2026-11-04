@@ -166,6 +166,24 @@ impl ArtifactId {
             ArtifactId::Opaque { name } => name.clone(),
         }
     }
+
+    /// What the page drawn from this document is called, in a gate's folder on a forge: a
+    /// document the run reads into its parts has one, and a file it only carries does not.
+    pub fn drawn_name(&self) -> Option<String> {
+        match self {
+            ArtifactId::Interpreted { kind } => Some(format!("{kind}.md")),
+            ArtifactId::Opaque { .. } => None,
+        }
+    }
+
+    /// Every name this is published under in a gate's folder: the page drawn from it, where
+    /// it has one, and the bytes the run holds of it.
+    pub fn published_names(&self) -> Vec<String> {
+        self.drawn_name()
+            .into_iter()
+            .chain([self.view_name()])
+            .collect()
+    }
 }
 
 /// What a node declares it produces *is* an identity: the one place a

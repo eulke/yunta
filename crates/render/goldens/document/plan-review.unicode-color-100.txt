@@ -1,98 +1,236 @@
-␛[1mplan of `plan`␛[0m: 2 tasks in 2 steps, held to 1 test from its spec
-  Greet a person by name, and say goodbye too.
+␛[1mplan␛[0m: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
+  Install packs in the user's Yunta state directory for use across projects.
 
-  ␛[1mtasks␛[0m
-    ␛[33m▲␛[0m 1  greet     1 spec test     ␛[33mcode 1/2␛[0m  Greet by name
-    ␛[33m▲␛[0m 2  farewell  ␛[33m`greet`'s test␛[0m  ␛[33mcode 0/1␛[0m  Say goodbye
+  ␛[2myou asked   ␛[0m add pack global instalation support, not only project level as today
 
-  ␛[33mwhat keeps this plan from being proven as it is written␛[0m
-    ␛[33m▲␛[0m `greet` plans to change `tests/greet.rs`, a test the spec wrote for `greet`
-      ␛[2mso          ␛[0m no session may write it, so the task cannot be done as planned
-      ␛[2mfix         ␛[0m leave the test as the spec wrote it, and change the code it tests
-    ␛[33m▲␛[0m `farewell` is judged by `cargo test --test greet`, the spec's test of `greet`
-      ␛[2mso          ␛[0m it passes once `greet` is done, whatever this task does
-      ␛[2mfix         ␛[0m judge the task by a test of its own
-
-  The program says nothing today. It will greet whoever runs it by name, and say goodbye.
-
-  ┌──────┐   ┌──────────┐
-  │ Name │──▶│ Greeting │
-  └──────┘   └──────────┘
-
-  ␛[1myou answered␛[0m
-
-    ␛[1m1  Which word should the greeting use?␛[0m
-      ␛[2myou said    ␛[0m hello
-      ␛[2mthe plan    ␛[0m It says `hello`.
+  Add user-wide pack installation alongside project-local vendoring. A global pack lives under the
+  existing YUNTA_HOME (or ~/.yunta) state root, so every project using that same user state can
+  discover it. ␛[1m`yunta␛[0m ␛[1mpack␛[0m ␛[1madd␛[0m ␛[1m--global`␛[0m installs there; local installs continue to use the
+  repository tree. Resolution prefers a project-local pack when the same workflow is available
+  locally, then falls back to global packs. Pack locks and list/remove operations remain scoped to
+  the selected installation level.
 
   ␛[1mdecided for you␛[0m
 
-    ␛[1m1  What does it say when no name is given?␛[0m
-      ␛[2mchose       ␛[0m It greets `world`.
-      ␛[2mbecause     ␛[0m A program run with no arguments should still say something.
-      ␛[2mnot         ␛[0m Refuse to run
-      ␛[2m            ␛[0m Ask for a name
+    ␛[1m1  ␛[0m␛[1mWhat scope and persistence does a global installation have?␛[0m
+      ␛[2mchose       ␛[0m Store global packs under `$YUNTA_HOME/packs` (or `~/.yunta/packs`) and make them
+                   available to projects run by that user state root.
+      ␛[2minstead of  ␛[0m A system-wide shared directory
+      ␛[2m            ␛[0m A configurable directory per installation
+      ␛[2mbecause     ␛[0m Yunta already defines and shares a user state root through YUNTA_HOME; using it
+                   keeps global availability aligned with existing user state and test isolation.
+
+    ␛[1m2  ␛[0m␛[1mHow does a user select global rather than project installation?␛[0m
+      ␛[2mchose       ␛[0m Add `--global` to `yunta pack add`; add `--global` selectors to pack list,
+                   remove, update and audit so lifecycle actions address the intended store.
+      ␛[2minstead of  ␛[0m A separate `pack install --global` command
+      ␛[2m            ␛[0m Global installs as the default
+      ␛[2mbecause     ␛[0m The explicit flag preserves the established project-local default and makes the
+                   target visible on every mutating or inspection command.
+
+    ␛[1m3  ␛[0m␛[1mWhat happens when local and global installations expose the same workflow or pack?␛[0m
+      ␛[2mchose       ␛[0m Project-local catalog entries take precedence over global entries; global entries
+                   are fallback candidates. Ambiguity within either level remains an error. Permit
+                   same pack identity in both stores and keep independent lock entries.
+      ␛[2minstead of  ␛[0m Global overrides local
+      ␛[2m            ␛[0m Refuse duplicate pack identities across levels
+      ␛[2mbecause     ␛[0m Local project state is the most specific choice, while independent stores allow a
+                   project to pin a different version without changing the user's installation.
+
+    ␛[1m4  ␛[0m␛[1mWhich lifecycle, permission, and compatibility behaviors are in scope?␛[0m
+      ␛[2mchose       ␛[0m Support global add, update, remove, list and audit with separate global locks;
+                   preserve existing audit, schema and executor checks for either target. Do not
+                   migrate existing project installs.
+      ␛[2minstead of  ␛[0m Only add global installs
+      ␛[2m            ␛[0m Automatically migrate project installs
+      ␛[2mbecause     ␛[0m A useful persistent user-level install needs the existing management operations
+                   and safety gates; migration is unnecessary and could unexpectedly change
+                   checked-in project state.
+
+  ␛[1mleft out␛[0m
+    ␛[2m◌␛[0m Migrating existing project installations to global storage.
+    ␛[2m◌␛[0m Sharing global installs between operating system users.
 
   ␛[1mdesign␛[0m
-    `Greeter` owns the words; `main` reads the name and prints.
-    ␛[1mGreeter␛[0m in src/greet.rs␛[2m — its code is in step 1, `greet`␛[0m
+    ␛[1m`PackInstallScope`␛[0m selects the root before the existing staging, vendor, lock and management
+    operations run. Project scope uses ␛[1m`<repo>/.yunta`␛[0m; global scope uses the Yunta user state root.
+    Runtime catalog readers receive the global packs root from the process environment and inspect
+    local packs first, then global packs, retaining the existing ambiguity rule within a source.
+    Locks remain separate: project installs use ␛[1m`.yunta/yunta.lock`␛[0m; global installs use
+    ␛[1m`$YUNTA_HOME/yunta.lock`␛[0m.
 
-  ␛[1mrisks␛[0m
-    ␛[33m▲␛[0m A name with a newline in it breaks the line it is printed on.
+  ␛[1msteps␛[0m
+    1  global-pack-storage  Store packs and locks at a selected install scope
+       global-pack-catalog  Discover global packs after project packs
+    2  global-pack-cli      Expose global pack lifecycle flags
+    3  global-pack-docs     Document global pack installation
 
-  ␛[1mout of scope␛[0m
-    ␛[2m·␛[0m Greeting in other languages.
+    ┌─────────────────────┐
+    │ global-pack-storage │─┐  ┌─────────────────┐
+    └─────────────────────┘ └─▶│ global-pack-cli │─┐  ┌──────────────────┐
+                               └─────────────────┘ └┬▶│ global-pack-docs │
+    ┌─────────────────────┐                         │ └──────────────────┘
+    │ global-pack-catalog │─────────────────────────┘
+    └─────────────────────┘
 
-  ␛[1mevery task keeps passing␛[0m
-    ␛[2mmeasured    ␛[0m green before this run changed anything
-    ␛[2m            ␛[0m ␛[1m$ cargo test␛[0m
+  ␛[1mstep 1 of 3␛[0m
 
-  ␛[1mstep 1 of 2␛[0m
+    ␛[1mglobal-pack-storage␛[0m: Store packs and locks at a selected install scope
+      ␛[2myou will see␛[0m Global storage resolves under the user's Yunta state directory, while project
+                   scope still resolves under the repository.
+      ␛[2mchanges     ␛[0m crates/cli/src/pack.rs
+      ␛[2mkeeps       ␛[0m Pack trees are staged beside their destination and moved into place atomically.
+      ␛[2m            ␛[0m Lock writes are atomic, and failed writes restore the previous vendored tree.
+      ␛[2mtested by   ␛[0m Global and project storage resolve pack directories and lock files under their
+                   separate roots.
+      ␛[2m            ␛[0m ␛[1mcargo test --workspace --test global_pack_storage global_pack_storage␛[0m
 
-    ␛[1mgreet␛[0m — Greet by name
-      ␛[2myou will see␛[0m `hello ana` prints `hello, ana`.
-      ␛[2mtouches     ␛[0m src/{greet.rs, main.rs}, tests/greet.rs
-      ␛[2mkeeps       ␛[0m With no name it still greets `world`.
-      ␛[2mchecked by  ␛[0m nothing but the suite
-
-      ␛[1msrc/greet.rs › Greeter␛[0m                                                                 ␛[2m7 lines␛[0m
-        the type that holds the name and words the greeting
-        ␛[2m│ ␛[0mpub struct Greeter {
-        ␛[2m│ ␛[0m    pub name: String,
+      ␛[1mcrates/cli/src/pack.rs › PackInstallScope␛[0m
+        scope enum and root selection API
+        ␛[2m│ ␛[0m#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        ␛[2m│ ␛[0mpub enum PackInstallScope {
+        ␛[2m│ ␛[0m    Project,
+        ␛[2m│ ␛[0m    Global,
         ␛[2m│ ␛[0m}
         ␛[2m│␛[0m
-        ␛[2m│ ␛[0mimpl Greeter {
-        ␛[2m│ ␛[0m    pub fn hello(&self) -> String;
+        ␛[2m│ ␛[0mimpl PackInstallScope {
+        ␛[2m│ ␛[0m    pub fn root(self, project_root: &Path, user_root: &Path) -> PathBuf;
         ␛[2m│ ␛[0m}
+        ␛[2mnew · 9 lines␛[0m
 
-      ␛[33m▲␛[0m tests/greet.rs — a test the spec wrote for `greet`; no session may write it
+      ␛[1mcrates/cli/src/pack.rs › installed_packs␛[0m
+        scope-aware lock location and pack enumeration
+        ␛[2m│ ␛[0mpub fn installed_packs(scope: PackInstallScope, project_root: &Path, user_root: &Path) ->
+        ␛[2m│ ␛[0m  ↪ Result<(PackLock, PathBuf), PackError>;
+        ␛[2mnew · 1 line␛[0m
 
-      ␛[2mdone when   ␛[0m the greeting names the person
-      ␛[2m            ␛[0m ␛[1m$ cargo test --test greet␛[0m
-      ␛[1mtests/greet.rs␛[0m                                                                         ␛[2m5 lines␛[0m
-        the spec wrote it, and this command runs it
-        ␛[2m│ ␛[0m#[test]
-        ␛[2m│ ␛[0mfn the_greeting_names_the_person() {
-        ␛[2m│ ␛[0m    let said = run(&["ana"]);
-        ␛[2m│ ␛[0m    assert_eq!(said, "hello, ana\n");
+    ␛[1mglobal-pack-catalog␛[0m: Discover global packs after project packs
+      ␛[2myou will see␛[0m A workflow supplied by a global pack can be run from any project using the same
+                   Yunta state root; a matching project pack continues to win.
+      ␛[2mchanges     ␛[0m crates/engine/src/catalog.rs, crates/engine/src/frozen/layers.rs,
+                   crates/engine/src/frozen/prompt.rs, crates/engine/src/frozen/provenance.rs
+      ␛[2mkeeps       ␛[0m Repository workflows shadow pack workflows.
+      ␛[2m            ␛[0m Multiple packs from one publisher declaring the same workflow name are reported
+                   as ambiguous.
+      ␛[2m            ␛[0m Declared pack content paths must stay inside their pack directory.
+      ␛[2m            ␛[0m Frozen provenance records pack identity and lock commit when available.
+      ␛[2mimplies     ␛[0m resolve_workflow is named in 5 files no task changes:
+      ␛[2m            ␛[0m crates/cli/src/commands/mod.rs
+      ␛[2m            ␛[0m crates/engine/src/check/refs.rs
+      ␛[2m            ␛[0m crates/engine/src/frozen/read.rs
+      ␛[2m            ␛[0m crates/engine/src/lib.rs
+      ␛[2m            ␛[0m crates/engine/tests/catalog.rs
+      ␛[2mtested by   ␛[0m Workflow lookup falls back to global packs, prefers project packs, and keeps
+                   declared content inside its pack.
+      ␛[2m            ␛[0m ␛[1mcargo test --workspace --test global_pack_catalog global_pack_catalog␛[0m
+
+      ␛[1mcrates/engine/src/catalog.rs › resolve_workflow␛[0m
+        accept global packs root and search local before global
+        ␛[2m│ ␛[0mpub fn resolve_workflow(repo_root: &Path, ␛[32m{+global_packs_root: &Path+}␛[0m, name: &str) ->
+        ␛[2m│ ␛[0m  ↪ Result<ResolvedWorkflow, CatalogError>;
+        ␛[2mmodified · 1 line␛[0m
+
+      ␛[1mcrates/engine/src/frozen/layers.rs › installed_layers␛[0m
+        include knowledge files from global installed packs
+        ␛[2m│ ␛[0mpub(crate) async fn installed_layers(repo: &Path, global_packs_root: &Path) ->
+        ␛[2m│ ␛[0m  ↪ Result<Vec<LayerFile>, FrozenError>;
+        ␛[2m1 line␛[0m
+
+      ␛[1mcrates/engine/src/frozen/prompt.rs › PromptOrigin␛[0m
+        represent global pack prompt origin with exact pack directory
+        ␛[2m│ ␛[0mpub(crate) enum PromptOrigin {
+        ␛[2m│ ␛[0m    Repo { dir: PathBuf },
+        ␛[2m│ ␛[0m    Pack { pack: String, pack_dir: PathBuf, dir: PathBuf },
         ␛[2m│ ␛[0m}
+        ␛[2m4 lines␛[0m
 
-  ␛[1mstep 2 of 2␛[0m
+      ␛[1mcrates/engine/src/frozen/provenance.rs › pack_provenance␛[0m
+        read manifest and lock provenance for a pack at the resolved directory
+        ␛[2m│ ␛[0mpub(crate) async fn pack_provenance(repo: &Path, pack_dir: &Path, manifest_path: &Path) ->
+        ␛[2m│ ␛[0m  ↪ (Option<PackProvenance>, Vec<ProvenanceGap>);
+        ␛[2m1 line␛[0m
 
-    ␛[1mfarewell␛[0m — Say goodbye
-      ␛[2myou will see␛[0m `hello ana` prints a goodbye after the greeting.
-      ␛[2mtouches     ␛[0m src/greet.rs, tests/greet.rs
-      ␛[2muses        ␛[0m Greeter (from greet)
-      ␛[2mkeeps       ␛[0m The greeting reads as it did.
-      ␛[2mchecked by  ␛[0m the greeting still reads as it did
-      ␛[2m            ␛[0m ␛[1m$ cargo test --test greet_alone␛[0m
-      ␛[2mafter       ␛[0m greet
+  ␛[1mstep 2 of 3␛[0m
 
-      ␛[1msrc/greet.rs › Greeter › bye␛[0m
-        the goodbye, beside the greeting
+    ␛[1mglobal-pack-cli␛[0m: Expose global pack lifecycle flags
+      ␛[2myou will see␛[0m Users can pass `--global` to install or manage a pack in their user store;
+                   commands without it retain repository-local behavior.
+      ␛[2mchanges     ␛[0m crates/cli/src/cli/mod.rs, crates/cli/src/cli/dispatch.rs,
+                   crates/cli/src/commands/pack.rs, crates/cli/src/commands/pack_audit.rs
+      ␛[2mbuilds on   ␛[0m PackInstallScope (from global-pack-storage), installed_packs (from
+                   global-pack-storage)
+      ␛[2mkeeps       ␛[0m Publisher and executor policies are checked before vendoring.
+      ␛[2m            ␛[0m The audit is printed before an executor confirmation gate and pack code runs only
+                   with `--run-tests`.
+      ␛[2m            ␛[0m List verifies the installed tree against the lock.
+      ␛[2mtested by   ␛[0m Global add, list, and remove use the user store while leaving project storage
+                   separate.
+      ␛[2m            ␛[0m ␛[1mcargo test --workspace --test global_pack_cmd global_pack_cmd␛[0m
 
-      ␛[2mdone when   ␛[0m the program also says goodbye
-      ␛[2m            ␛[0m ␛[1m$ cargo test --test greet␛[0m
-      ␛[2m            ␛[0m the same command as the spec test of `greet`
+      ␛[1mcrates/cli/src/cli/mod.rs › PackAction␛[0m
+        global option on supported pack lifecycle actions
+        ␛[2m│ ␛[0m#[derive(Subcommand)]
+        ␛[2m│ ␛[0menum PackAction {
+        ␛[2m│ ␛[0m    Add { source: String, ␛[32m{+#[arg(long)] global: bool+}␛[0m, #[arg(long)] yes: bool,
+        ␛[2m│ ␛[0m      ↪ #[arg(long)] run_tests: bool },
+        ␛[2m│ ␛[0m    Update { pack: PackRef, r#ref: String, ␛[32m{+#[arg(long)] global: bool+}␛[0m, #[arg(long)]
+        ␛[2m│ ␛[0m      ↪ yes: bool },
+        ␛[2m│ ␛[0m    New { pack: PackRef },
+        ␛[2m│ ␛[0m    Remove { pack: PackRef, ␛[32m{+#[arg(long)] global: bool+}␛[0m },
+        ␛[2m│ ␛[0m    List ␛[32m{+{ #[arg(long)] global: bool }+}␛[0m,
+        ␛[2m│ ␛[0m    Audit { pack: PackRef, ␛[32m{+#[arg(long)] global: bool+}␛[0m },
+        ␛[2m│ ␛[0m}
+        ␛[2mmodified · 9 lines␛[0m
 
-  ␛[1myunta status 7E5PH4 --node plan␛[0m   ␛[2mthe whole plan, every file whole␛[0m
+      ␛[1mcrates/cli/src/cli/dispatch.rs › pack_command␛[0m
+        dispatch scope to lifecycle operations
+        ␛[2m│ ␛[0masync fn pack_command(action: PackAction, look: &Look) -> Result<Outcome, CliError>;
+        ␛[2m1 line␛[0m
+
+      ␛[1mcrates/cli/src/commands/pack.rs › add/update/remove/list␛[0m
+        use selected storage and preserve audit and policy sequence
+        ␛[2m│ ␛[0mpub async fn add(source: &str, global: bool, confirmed_executors: bool, run_tests: bool,
+        ␛[2m│ ␛[0m  ↪ look: &Look) -> Result<Outcome, CliError>;
+        ␛[2m│ ␛[0mpub async fn update(pack: &PackRef, ref_: &str, global: bool, confirmed_executors: bool,
+        ␛[2m│ ␛[0m  ↪ look: &Look) -> Result<Outcome, CliError>;
+        ␛[2m│ ␛[0mpub fn remove(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome, CliError>;
+        ␛[2m│ ␛[0mpub fn list(global: bool, look: &Look) -> Result<Outcome, CliError>;
+        ␛[2m4 lines␛[0m
+
+      ␛[1mcrates/cli/src/commands/pack_audit.rs › audit␛[0m
+        audit selected installation scope
+        ␛[2m│ ␛[0mpub async fn audit(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome,
+        ␛[2m│ ␛[0m  ↪ CliError>;
+        ␛[2m1 line␛[0m
+
+  ␛[1mstep 3 of 3␛[0m
+
+    ␛[1mglobal-pack-docs␛[0m: Document global pack installation
+      ␛[2myou will see␛[0m The pack guide shows how to install and manage user-wide packs and explains where
+                   they live and how precedence works.
+      ␛[2mchanges     ␛[0m docs/global-install.md
+      ␛[2mtested by   ␛[0m The pack guide documents global lifecycle commands, storage, precedence, and
+                   separate locks.
+      ␛[2m            ␛[0m ␛[1mcargo test --workspace --test global_pack_docs_cmd global_pack_docs_cmd␛[0m
+
+      ␛[1mdocs/global-install.md␛[0m
+        global install usage and behavior in the installation guide
+        ␛[2m│ ␛[0m```bash
+        ␛[2m│ ␛[0myunta pack add --global github.com/acme/review-pack@v1.2.0
+        ␛[2m│ ␛[0myunta pack list --global
+        ␛[2m│ ␛[0myunta pack update --global acme/review-pack v1.3.0
+        ␛[2m│ ␛[0myunta pack remove --global acme/review-pack
+        ␛[2m│ ␛[0m```
+        ␛[2m│␛[0m
+        ␛[2m│ ␛[0mGlobal packs are stored under `$YUNTA_HOME/packs` (or `~/.yunta/packs`) and are available
+        ␛[2m│ ␛[0m  ↪ to projects using that user state root. Project packs shadow matching global
+        ␛[2m│ ␛[0m  ↪ workflows; each scope has its own lock.
+        ␛[2m8 lines␛[0m
+
+  ␛[1mproof␛[0m
+    ␛[2mspec tests  ␛[0m 4 in 4 files, 37 lines
+    ␛[2m            ␛[0m ␛[1myunta status 7E5PH4 --node specify␛[0m
+    ␛[2mthe suite   ␛[0m every task keeps it passing; green before this run changed anything
+    ␛[2m            ␛[0m ␛[1mcargo clippy --workspace --all-targets -- -D warnings␛[0m
+    ␛[2m            ␛[0m ␛[1mcargo test --workspace␛[0m
+    ␛[2m◌␛[0m nothing but the suite checks 9 promises the tasks keep

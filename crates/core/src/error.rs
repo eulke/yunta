@@ -55,7 +55,7 @@ pub enum AdapterError {
     /// `adapters.<id>.adapter_settings` names a key the adapter does not
     /// read — a typo, or a setting of another adapter.
     #[error(
-        "adapter `{adapter}`: unknown setting `{key}` in `adapter_settings` — it reads {}",
+        "adapter `{adapter}`: unknown setting `{key}` in `adapter_settings`; it reads {}",
         if known.is_empty() { "no settings at all".to_string() } else { format!("only: {}", known.join(", ")) }
     )]
     UnknownSetting {

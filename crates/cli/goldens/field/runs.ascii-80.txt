@@ -1,0 +1,17 @@
+? runs of this repository ; 2 need you ; 1 stopped ; 1 closed
+................................................................................
+
+asking now
+  ? T1Y0P1  review (default)  ====..  node `implement` asks at its terminal  32m
+
+needs you, oldest first
+  ? T1Y0P2  review (default)  ====..  node `lint` failed and its 0 rerou...  22d
+
+stopped
+  # T1Y0P3  review (default)  ====..  interrupted by a p...  yunta resume T1Y0P3
+
+  the newest closed 8h ago
+
+next
+  yunta status T1Y0P2        opens the run that has waited longest
+  yunta list --runs --full   lists the closed runs too

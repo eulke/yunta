@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in, INITIAL_BRANCH};
+use yunta_testkit::{git, init_repo, stderr, stdout, unwrapped, yunta_in, INITIAL_BRANCH};
 
 /// A minimal pack from `publisher`, with or without a declared executor.
 fn write_pack(dir: &Path, publisher: &str, version: &str, executors: &str) {
@@ -64,9 +64,9 @@ fn add_refuses_a_publisher_outside_a_non_empty_allow_list() {
     );
     assert!(!out.status.success());
     assert_eq!(
-        stderr(&out).trim_end(),
+        unwrapped(&stderr(&out)),
         "error: publisher `globex` is not in `permissions.packs.publishers.allow` \
-         (declared by the repo config layer) — allowed: acme. Add the publisher there, \
+         (declared by the repo config layer); allowed: acme. Add the publisher there, \
          or install a pack from an allowed publisher.",
         "the refusal names the publisher, the policy field and the declaring layer"
     );
@@ -83,7 +83,7 @@ fn add_refuses_a_publisher_outside_a_non_empty_allow_list() {
         &["pack", "add", acme.path().to_str().unwrap()]
     );
     assert!(ok.status.success(), "{}", stderr(&ok));
-    assert!(stdout(&ok).contains("installed acme/tools-pack"));
+    assert!(stdout(&ok).contains("pack acme/tools-pack · installed"));
 }
 
 #[test]
@@ -98,9 +98,9 @@ fn executors_deny_refuses_even_with_yes() {
     );
     assert!(!out.status.success());
     assert_eq!(
-        stderr(&out).trim_end(),
+        unwrapped(&stderr(&out)),
         "error: this pack declares 1 executor and `permissions.packs.executors` is `deny` \
-         (declared by the repo config layer) — `--yes` cannot override a permissions ceiling. \
+         (declared by the repo config layer): `--yes` cannot override a permissions ceiling. \
          Change the policy there, or install a pack without executors.",
         "the refusal names the deny policy, the declaring layer and that --yes cannot override it"
     );
@@ -121,7 +121,7 @@ fn executors_allow_installs_without_yes() {
         &["pack", "add", source.path().to_str().unwrap()]
     );
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(stdout(&out).contains("installed acme/tools-pack"));
+    assert!(stdout(&out).contains("pack acme/tools-pack · installed"));
 }
 
 #[test]

@@ -7,6 +7,7 @@ pub(super) fn usage(input: u64, output: u64) -> EventPayload {
     EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
         message_type: AgentMessageType::Usage,
         tool_name: None,
+        action: None,
         target: None,
         input_tokens: Some(input),
         output_tokens: Some(output),
@@ -20,6 +21,7 @@ pub(super) fn tool_use(tool: &str, digest: &str) -> EventPayload {
     EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
         message_type: AgentMessageType::ToolUse,
         tool_name: Some(tool.to_string()),
+        action: None,
         target: Some(yunta_core::events::ToolTarget::opaque(digest.as_bytes())),
         input_tokens: None,
         output_tokens: None,

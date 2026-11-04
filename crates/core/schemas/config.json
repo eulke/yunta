@@ -181,6 +181,17 @@
         }
       ]
     },
+    "terminal": {
+      "description": "`terminal:` — how a live view speaks to the terminal it runs on.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TerminalConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "version": {
       "description": "`version: 1` (reference config) — the layer file's own format\nversion. The loader refuses any value this binary doesn't speak.",
       "type": [
@@ -318,7 +329,7 @@
           "minimum": 0
         },
         "on_failure": {
-          "description": "What a failed node without its own `on_failure:` re-route does\nto the run. Absent is `pause`, the schema's own default.",
+          "description": "What a failed node without its own `on_failure:` reroute does\nto the run. Absent is `pause`, the schema's own default.",
           "anyOf": [
             {
               "$ref": "#/$defs/DefaultOnFailure"
@@ -957,6 +968,20 @@
           ],
           "format": "uint32",
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "TerminalConfig": {
+      "description": "`terminal:` — how a live view speaks to the terminal it runs on.",
+      "type": "object",
+      "properties": {
+        "bell": {
+          "description": "Rings the terminal's bell when a run asks its person something. Off\nunless set: the window's title says so either way.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "additionalProperties": false

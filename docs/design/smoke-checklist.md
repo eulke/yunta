@@ -32,9 +32,11 @@ autenticada (`codex login status`).
      `model` = el pedido: el stream de codex no lo reporta
      (`openai/codex#14736`, sigue así en 0.157.0) y el adapter informa el
      modelo con el que lanzó la sesión.
-   - `agent_message` de tipo `tool_use` con digests: `sha256:` y doce
-     dígitos, nunca el comando ni el path (el mismo digest para dos
-     llamadas idénticas, distinto para dos distintas).
+   - `agent_message` de tipo `tool_use` con su `action` y con digests:
+     `sha256:` y doce dígitos (el mismo digest para dos llamadas
+     idénticas, distinto para dos distintas). `display` lleva sólo una ruta
+     dentro del checkout, o un programa y su subcomando de la tabla: nunca
+     el comando entero.
    - `Usage` con `input_tokens`/`output_tokens`/`cached_input_tokens`
      reales (nombres de campo literales — cualquier rename del CLI
      rompe `parse.rs` y se ve acá).
@@ -62,7 +64,7 @@ usuario.
 1. **Publish**: workflow con un `kind: gate` `external: { kind:
    pull_request, artifacts: [spec.md], branch: "{{run.branch}}" }` (el
    nodo previo produce `spec.md`). Correr → verificar: branch
-   `yunta/<run_id>` pusheado con el artifact commiteado, PR abierto, el
+   `yunta/run/<run_id>` pusheado con el artifact commiteado, PR abierto, el
    log con `gate_waiting.external_ref` = la URL del PR, y el run pausado.
 2. **Poll pendiente**: `yunta resume <run>` sin tocar el PR → sigue
    pausado, sin re-publicar (ni branch nuevo ni PR duplicado).

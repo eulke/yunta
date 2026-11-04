@@ -1,221 +1,231 @@
 //! The decision a person makes when the run stops and asks.
 //!
-//! One component for every escalation the engine raises, because they
-//! are one object: a summary of what happened, the evidence the engine
-//! attached to it where that evidence says more than the summary, and
-//! options that each declare what choosing them trades off. A gate
-//! whose re-routes ran out, a promotion, a scope expansion put to a
-//! person, a budget or loop cap — they differ in what they say, never
-//! in how they are answered.
+//! The decision is a card held where it opened: its question, what a reader
+//! needs to answer it, and each option with what choosing it does and costs,
+//! one pointed at. Arrows move the pointer, Enter chooses, `n` adds a note and
+//! Escape parks the run. What the card stands under is drawn above it, when
+//! there is anything to draw: the documents the desk does not show, and what
+//! weighs on it. `r` reads the plan the decision is on, at the desk on the
+//! terminal's other screen; a person who came to read a plan opens on that
+//! plan first. The card itself lives in [`super::card`] and the desk in
+//! [`super::desk`]; this module gathers what they are drawn from and puts them
+//! to the person.
 
-use yunta_core::events::{GateWaitingPayload, HumanChoice};
-use yunta_core::{Env, OptionId, RunId};
+use std::collections::BTreeMap;
+
+use surco::doc::Doc;
+use surco::glyphs::Glyphs;
+use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
+use yunta_core::{Env, NodeId, OptionId, RunId};
 use yunta_engine::ShownDocument;
+use yunta_render::gate::{self, Route};
+use yunta_render::{changes, plan};
 
-use super::field::ask_line;
-use super::keys::{Stroke, Strokes};
-use super::menu::{choose, Choice};
-use super::{attributed, Answered, Console, NoAnswer, ANSWER};
+use super::card::{Answer, DecisionCard, Reply};
+use super::desk::{Asked, Leaving, Left, PlanDesk};
+use super::field::FOLDED;
+use super::held::hold;
+use super::{attributed, Answered, Console, NoAnswer};
 use crate::commands::advice;
-use crate::commands::status::decision::{account, before_you_decide, Beside};
-use crate::render::blocks::{Drawn, Headline};
-use crate::render::Mark;
 
-/// What settles an option that asks for nothing: the decision as it
-/// stands, or a note sent with it.
-const SETTLE: &str = "enter records it, n adds a note";
+/// The fewest columns a desk is drawn on: under them a task's title and where it is no longer
+/// share a row, and code wraps at every word.
+const DESK_COLUMNS: usize = 40;
 
-/// Puts `escalation` to the person, with the documents it shows, and
-/// returns what they decided. `shown` pairs the run the documents belong
-/// to with the documents; a caller that holds no run shows none. `env`
-/// is the ambient identity the decision is attributed to.
-pub(crate) fn decide(
-    console: &Console,
-    env: &Env,
-    escalation: &GateWaitingPayload,
-    shown: Option<(&RunId, &[ShownDocument])>,
-) -> Answered<HumanChoice> {
-    present(console, escalation, shown)?;
-    let option = choose(console, "choose", options(escalation))?;
-    console.say(&format!("chose `{option}`"))?;
-    let asks = escalation
-        .options()
-        .iter()
-        .find(|offered| offered.id == option)
-        .and_then(yunta_render::offers::asks);
-    let said = match asks {
-        Some(asks) => Some(required(console, &asks)?),
-        None => noted(console)?,
-    };
+/// The fewest rows a desk is drawn on: its head, its foot and the rows left for a person to
+/// read something between them.
+const DESK_ROWS: usize = 12;
+
+/// What a decision is asked with: the escalation, the documents it shows in the run
+/// they belong to, what the run changed, what follows each answer, the node it is
+/// on, the workflow and mode the run follows, and what it opens on.
+pub(crate) struct Ask<'a> {
+    pub(crate) escalation: &'a GateWaitingPayload,
+    pub(crate) shown: Option<(&'a RunId, &'a [ShownDocument])>,
+    pub(crate) changed: Option<&'a ChangesCountedPayload>,
+    pub(crate) routes: BTreeMap<OptionId, Route>,
+    pub(crate) node: Option<&'a NodeId>,
+    /// The workflow and the mode the run follows.
+    pub(crate) called: Option<String>,
+    pub(crate) opens: Opens,
+}
+
+/// What a decision opens on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Opens {
+    /// Its card, with the plan a key away.
+    TheCard,
+    /// The plan it is on, for a person who came to read it.
+    ThePlan,
+}
+
+/// Puts the decision to the person as a card held where it opened, and returns what
+/// they chose. `env` is the ambient identity the choice is attributed to.
+pub(crate) fn decide(console: &Console, env: &Env, mut ask: Ask<'_>) -> Answered<HumanChoice> {
+    present(console, &ask)?;
+    let glyphs = console.look().glyphs;
+    let (edge, about) = (edge(&ask, glyphs), about(&ask, glyphs));
+    let routes = std::mem::take(&mut ask.routes);
+    let mut card =
+        DecisionCard::new(ask.escalation, console.escape(), routes).standing_on(edge, about);
+    let mut desk = desk_of(console, &ask, &card);
+    if desk.is_some() {
+        card = card.reading();
+    }
+    let answer = answered(console, &ask, &mut card, desk.as_mut())?;
+    console.say_unless_chronicled(&chose(&answer))?;
+    if answer.folded {
+        console.say(FOLDED)?;
+    }
     let by = attributed(console, env)?;
     Ok(HumanChoice {
-        option,
+        option: answer.option,
         by,
-        free_text: said,
+        free_text: answer.words,
     })
 }
 
-/// The words an option asks for, asked until they are given: the option
-/// sends them to whoever works next, and an empty answer would send
-/// nothing.
-fn required(console: &Console, asks: &str) -> Answered<String> {
-    console.say(&format!("{asks} ({})", console.escape().said()))?;
-    loop {
-        let said = ask_line(console, ANSWER)?.value;
-        if !said.trim().is_empty() {
-            return Ok(said);
-        }
-        console.say("this option needs an answer")?;
-    }
-}
-
-/// What a person adds to an option that asks for nothing: one key
-/// records the decision as it stands, and `n` opens a line for a note
-/// sent with it. Nothing asked for words, so the common answer costs a
-/// key rather than a line left empty.
-fn noted(console: &Console) -> Answered<Option<String>> {
-    console.say(&format!("{SETTLE}, {}", console.escape().said()))?;
-    let mut strokes = Strokes::default();
-    loop {
-        match strokes.read(console.read_key()?) {
-            Stroke::Enter => return Ok(None),
-            Stroke::Insert('n' | 'N') => {
-                let note = ask_line(console, &format!("note {ANSWER}"))?.value;
-                return Ok((!note.is_empty()).then_some(note));
-            }
-            Stroke::Decline => return Err(NoAnswer::Declined),
-            Stroke::Interrupt => {
-                console.interrupt();
-                return Err(NoAnswer::Interrupted);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Draws what the decision is about: the documents it shows, then that
-/// it needs the person, the claim, the record the engine attached to
-/// audit it against, and what weighs on it.
-///
-/// The documents come first and the question last, beside the menu: on a
-/// terminal the last lines printed are the ones on the screen when the
-/// menu asks, and a plan a screen tall would push the question off it.
-/// The record goes above the options because a menu offered without it
-/// asks for a decision on a claim nobody checked, and what weighs on the
-/// decision goes last, against the options it weighs on. It is drawn as it is
-/// on every surface that shows the decision, so a person who reads the
-/// same run's page later reads the same block.
-fn present(
-    console: &Console,
-    escalation: &GateWaitingPayload,
-    shown: Option<(&RunId, &[ShownDocument])>,
-) -> std::io::Result<()> {
-    let look = console.look();
-    let documents = shown.map_or(&[][..], |(_, documents)| documents);
-    if let Some((run, _)) = shown {
-        for document in documents {
-            console.say("")?;
-            let doc = crate::render::shown::document(
-                document,
-                run,
-                crate::render::shown::Form::Review,
-                &advice::spell,
-            );
-            for line in crate::render::draw(doc, &look).lines() {
-                console.say(line)?;
-            }
-        }
-    }
-    let mut lines = Headline {
-        subject: "decision".to_string(),
-        mark: Mark::NeedsYou,
-        said: "needs you".to_string(),
-    }
-    .lines(&look);
-    let nothing_beside = Beside {
-        claim: false,
-        evidence: false,
+/// The desk of the plan `ask` is on, when it is on one.
+fn desk_of<'a>(console: &Console, ask: &Ask<'a>, card: &DecisionCard) -> Option<PlanDesk<'a>> {
+    let (run, documents) = ask.shown?;
+    let reading = plan::reading(documents, run, &advice::spell)?;
+    let asked = Asked {
+        question: question(ask),
+        node: ask.node.map(ToString::to_string),
+        run: Some(run.handle().to_string()),
+        called: ask.called.clone(),
     };
-    lines.extend(account(escalation, nothing_beside, 1, &look));
-    lines.extend(before_you_decide(escalation, documents, &look));
-    console.say("")?;
-    for line in &lines {
-        console.say(&look.ink.paint(line))?;
+    let leaving = match ask.opens {
+        Opens::TheCard => Leaving::ToTheCard,
+        Opens::ThePlan => Leaving::TheCommand(console.escape()),
+    };
+    Some(PlanDesk::new(reading, asked, card.rows(), leaving))
+}
+
+/// The card and the desk, until the decision is answered.
+fn answered(
+    console: &Console,
+    ask: &Ask<'_>,
+    card: &mut DecisionCard,
+    mut desk: Option<&mut PlanDesk<'_>>,
+) -> Answered<Answer> {
+    if ask.opens == Opens::ThePlan {
+        if let Some(answer) = read(console, ask, card, desk.as_deref_mut())? {
+            return Ok(answer);
+        }
+    }
+    loop {
+        match hold(console, card)? {
+            Reply::Chose(answer) => return Ok(answer),
+            Reply::Read => {
+                if let Some(answer) = read(console, ask, card, desk.as_deref_mut())? {
+                    return Ok(answer);
+                }
+            }
+        }
+    }
+}
+
+/// A stay at the desk: what it answered, or `None` where the card has more to say. A
+/// terminal with no room for a desk gets the plan in its history, over the card. Ctrl-C
+/// reaches the run only once the other screen is gone, so what it says stands on the
+/// screen that stays.
+fn read(
+    console: &Console,
+    ask: &Ask<'_>,
+    card: &mut DecisionCard,
+    desk: Option<&mut PlanDesk<'_>>,
+) -> Answered<Option<Answer>> {
+    let Some(desk) = desk else {
+        return Ok(None);
+    };
+    let (columns, rows) = console.size();
+    if columns < DESK_COLUMNS || rows < DESK_ROWS {
+        print_documents(console, ask)?;
+        return Ok(None);
+    }
+    console.alternate_on()?;
+    let left = hold(console, desk);
+    console.alternate_off()?;
+    match left? {
+        Left::Back if ask.opens == Opens::ThePlan => Err(NoAnswer::Declined),
+        Left::Back => Ok(None),
+        Left::Picked(index) => Ok(card.pick(index)),
+        Left::Interrupted => {
+            console.interrupt();
+            Err(NoAnswer::Interrupted)
+        }
+    }
+}
+
+/// Draws what the card stands under, above it: each document the decision is about that
+/// the desk does not show, in the form a terminal shows it, and what weighs on it. A plan
+/// among the documents is read at the desk and draws nothing here. Nothing is drawn when
+/// there is neither, since the card opens on its question.
+fn present(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
+    let Some(page) = gate::above(ask.shown, ask.escalation, &advice::spell) else {
+        return Ok(());
+    };
+    draw_page(console, page)
+}
+
+/// Draws everything the decision has to say, what weighs on it last, for a terminal with no
+/// room for the desk.
+fn print_documents(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
+    let Some(page) = gate::whole_page(ask.shown, ask.escalation, &advice::spell) else {
+        return Ok(());
+    };
+    draw_page(console, page)
+}
+
+/// Draws `page` the way a prompt draws what it stands under: each line said, then a
+/// blank line that sets the card apart.
+fn draw_page(console: &Console, page: Doc) -> std::io::Result<()> {
+    let look = console.look();
+    for line in crate::render::draw(page, &look).lines() {
+        console.say(line)?;
     }
     console.say("")
 }
 
-/// The menu: every option by its id, with what it does and what
-/// choosing it costs read above the list.
-fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
-    escalation
-        .options()
-        .iter()
-        .map(|option| {
-            let (words, detail) = yunta_render::offers::option_words(escalation, option);
-            // A label that says nothing beyond the id is left off the row, which names it.
-            let label =
-                Some(words).filter(|words| !words.is_empty() && words != option.id.as_str());
-            Choice {
-                label,
-                detail,
-                ..Choice::named(option.id.as_str(), option.id.clone())
-            }
-        })
-        .collect()
+/// The sentence that says what the decision is, as the card and the desk both put it.
+fn question(ask: &Ask<'_>) -> String {
+    yunta_render::claim::sentence(ask.escalation.summary(), ask.escalation.failure())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use yunta_core::events::{AuthorGate, Claim, Escalation, GateOption, Leads, Menu};
-    use yunta_core::reserved::ReservedOption;
-    use yunta_core::{NodeId, NonEmpty};
+/// What stands on the card's far edge: the node the decision is on and the run's
+/// handle, apart by a separator, whichever of them there are.
+fn edge(ask: &Ask<'_>, glyphs: Glyphs) -> Option<String> {
+    let parts: Vec<String> = ask
+        .node
+        .map(|node| node.to_string())
+        .into_iter()
+        .chain(ask.shown.map(|(run, _)| run.handle().to_string()))
+        .collect();
+    let separator = format!(" {} ", glyphs.sep());
+    (!parts.is_empty()).then(|| parts.join(separator.as_str()))
+}
 
-    /// A gate an author declared, offering `option` and nothing else.
-    fn escalation_with(option: GateOption) -> GateWaitingPayload {
-        Escalation::new(
-            Claim::NeedsDecision {
-                node: NodeId::from_static("approve"),
-            },
-            Menu::Gate(AuthorGate {
-                assignee: "lead".to_string(),
-            }),
-            NonEmpty::from((option, Vec::new())),
-        )
-        .into_payload()
-    }
+/// What a reader needs to answer, under the question: the record the engine attached
+/// to it, audited against the documents it stands under, then what the run changed
+/// when the change was counted. A plan the decision is on adds what the plan says about
+/// the question.
+fn about(ask: &Ask<'_>, glyphs: Glyphs) -> Vec<String> {
+    let documents = ask.shown.map_or(&[][..], |(_, documents)| documents);
+    let question = question(ask);
+    let mut about: Vec<String> = yunta_render::shown::plan_among(documents)
+        .map(|(_, review)| plan::about(review, &question, glyphs))
+        .unwrap_or_default();
+    about.extend(gate::record(ask.escalation, documents));
+    about.extend(ask.changed.and_then(|change| changes::of(change, glyphs)));
+    about
+}
 
-    /// An option that takes the run on past the gate, to `ship`.
-    fn leading() -> GateOption {
-        GateOption::leading(
-            OptionId::from_static("approve"),
-            Leads::On {
-                next: vec![NodeId::from_static("ship")],
-                settles: false,
-            },
-        )
-    }
-
-    #[test]
-    fn an_option_is_named_by_its_id_and_carries_what_it_does_and_costs() {
-        let drawn = options(&escalation_with(leading()));
-        let first = drawn.first().expect("the menu offers the option");
-        assert_eq!(first.name, "approve");
-        assert_eq!(first.label.as_deref(), Some("On to `ship`"));
-        assert_eq!(
-            first.detail.as_deref(),
-            Some("resolves this gate; `ship` runs next"),
-            "every option declares what it trades off, and the menu shows it"
-        );
-    }
-
-    #[test]
-    fn a_label_that_only_repeats_the_id_is_left_off_the_row() {
-        let drawn = options(&escalation_with(GateOption::reserved(
-            ReservedOption::Approve,
-        )));
-        let first = drawn.first().expect("the menu offers the option");
-        assert_eq!(first.label, None, "the row already names the option");
+/// The line a choice is kept as in the history: the option, and the words it was
+/// said with, as the person wrote them.
+fn chose(answer: &Answer) -> String {
+    match &answer.words {
+        Some(words) => format!("chose `{}`: {words}", answer.option),
+        None => format!("chose `{}`", answer.option),
     }
 }

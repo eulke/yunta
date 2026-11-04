@@ -1,9 +1,9 @@
 ---
 number: D221
 title: "The words and blocks a reader is told things in are their own crate, and the engine hands it data"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D269]
 ---
 
 # D221 — The words and blocks a reader is told things in are their own crate, and the engine hands it data

@@ -200,7 +200,7 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
                     ))),
                 )
                 .build()
-            // no node_rerouted in any of these — the re-route this node
+            // no node_rerouted in any of these — the reroute this node
             // declares was never observed firing.
         })
         .collect();
@@ -257,7 +257,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
 
 #[test]
 fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
-    // The strongest version of "this re-route never fired": the node
+    // The strongest version of "this reroute never fired": the node
     // ran every time and never even needed it.
     use yunta_core::events::{NodeFinishedPayload, NodeOutcome};
     let on_failure = OnFailure {
@@ -466,7 +466,7 @@ fn a_mode_used_even_once_is_never_flagged() {
 fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
     // Structural guarantee: never suggests removing `invariant:
     // true` nodes — a verification node that never fails is doing its job;
-    // its never-fired re-route and its always-approved gate are
+    // its never-fired reroute and its always-approved gate are
     // excluded from the findings by construction.
     use yunta_core::events::{NodeFinishedPayload, NodeOutcome};
     let mut lint = node(
@@ -494,6 +494,6 @@ fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
     let findings = analyze(&wf, &history);
     assert!(
         findings.never_triggered_reroutes.is_empty(),
-        "an invariant node's never-fired re-route must never be flagged: {findings:?}"
+        "an invariant node's never-fired reroute must never be flagged: {findings:?}"
     );
 }

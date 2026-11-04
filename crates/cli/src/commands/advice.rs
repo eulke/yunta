@@ -16,31 +16,48 @@
 //! id printed as an example gets pasted, and no id printed beside a run
 //! is ever one that run's own menu does not offer.
 
-use yunta_core::events::{GateWaitingPayload, Stuck};
+use surco::words::Standing;
+use yunta_core::events::{ArtifactId, GateWaitingPayload, PauseReason, Stuck};
 use yunta_core::step::NextStep;
-use yunta_core::RunId;
-use yunta_engine::{NodeWait, RunPhase, WaitingOn};
+use yunta_core::{ArtifactKind, RunId};
+use yunta_engine::{NodeWait, RunFrame, RunPhase, WaitingOn};
 
 use crate::error::Reader;
-use crate::render::state::RunWord;
 
 /// What holds a run whose log says it is moving and whose engine is gone.
 pub(crate) const STALLED: &str = "no process is driving it: the engine that ran it is gone";
 
 /// What holds a run whose engine is asking a person at its terminal: a
 /// question asked live is on no log until it is answered, so the only
-/// place to answer it is where it is asked.
-pub(crate) fn asking(prompt: &yunta_engine::Prompt, at: chrono::DateTime<chrono::Utc>) -> String {
+/// place to answer it is where it is asked. With `at`, the sentence says
+/// how long it has been asking; a page whose headline says it leaves it
+/// out.
+pub(crate) fn asking(
+    prompt: &yunta_engine::Prompt,
+    at: Option<chrono::DateTime<chrono::Utc>>,
+) -> String {
     let who = prompt
         .node
         .as_ref()
         .map_or_else(|| "the run".to_string(), |node| format!("node `{node}`"));
-    let waited = (at - prompt.since).to_std().unwrap_or_default();
+    let waited = at.map(|at| {
+        let waited = (at - prompt.since).to_std().unwrap_or_default();
+        format!(" for {}", surco::figures::duration(waited))
+    });
     format!(
-        "{who} is asking at its terminal (pid {}) for {}; answer it there",
+        "{who} is asking at its terminal (pid {}){}; answer it there",
         prompt.pid,
-        yunta_core::units::duration(waited)
+        waited.unwrap_or_default()
     )
+}
+
+/// Whom a live engine is asking, on the one line a row has room for: the
+/// node, and that the answer is given at its terminal.
+pub(crate) fn asking_on(prompt: &yunta_engine::Prompt) -> String {
+    match &prompt.node {
+        Some(node) => format!("node `{node}` asks at its terminal"),
+        None => "the run asks at its terminal".to_string(),
+    }
 }
 
 /// What a run is parked on, or `None` for a run nobody has to touch —
@@ -76,24 +93,26 @@ pub(crate) fn parked_on(on: &WaitingOn) -> String {
                 format!("node `{node}`")
             }
         },
-        WaitingOn::Run { reason } => {
-            yunta_core::text::one_line(&yunta_render::pause::sentence(reason))
-        }
+        WaitingOn::Run { reason } => surco::text::one_line(&yunta_render::pause::sentence(reason)),
     }
 }
 
-/// Whether [`parked_in_full`] says the sentence the engine recorded —
-/// a decision's claim with the record beside it — rather than only the
-/// node it waits on: a surface that printed it never prints that record
-/// twice.
-pub(crate) fn parked_says_why(on: &WaitingOn) -> bool {
-    matches!(
-        on,
+/// What a parked run is waiting on, as a page that quotes the record
+/// beside it says it: an escalation's claim alone — the page quotes its
+/// record as a failed node's evidence or in the decision's account — and
+/// the sentence the engine recorded for any other pause.
+pub(crate) fn parked_claim(on: &WaitingOn) -> String {
+    let escalation = match on {
         WaitingOn::Node {
-            reason: Some(_),
+            reason: Some(PauseReason::Escalation(escalation)),
             ..
-        } | WaitingOn::Run { .. }
-    )
+        }
+        | WaitingOn::Run {
+            reason: PauseReason::Escalation(escalation),
+        } => escalation,
+        WaitingOn::Node { .. } | WaitingOn::Run { .. } => return parked_in_full(on),
+    };
+    crate::commands::status::decision::claim_words(&(**escalation).clone().into_payload())
 }
 
 /// What a parked run is waiting on, at the length a page has room for:
@@ -110,7 +129,7 @@ pub(crate) fn parked_in_full(on: &WaitingOn) -> String {
             ..
         }
         | WaitingOn::Run { reason } => {
-            yunta_core::text::one_line(&yunta_render::pause::sentence(reason))
+            surco::text::one_line(&yunta_render::pause::sentence(reason))
         }
         WaitingOn::Node { reason: None, .. } => parked_on(on),
     }
@@ -128,11 +147,21 @@ pub(crate) fn decide(run: &str) -> String {
     format!("yunta resolve-gate {run}")
 }
 
+/// Reads the plan a parked run waits on, and answers it at a terminal.
+pub(crate) fn review(run: &str) -> String {
+    format!("yunta review {run}")
+}
+
 /// Hands a run back to the engine, once whatever stopped it is settled
 /// somewhere else — a budget, a scope, an answers file, a review on a
 /// forge.
 pub(crate) fn resume(run: &str) -> String {
     format!("yunta resume {run}")
+}
+
+/// A separate resume, named in a sentence about the command and no run of its own.
+pub(crate) fn resume_any() -> String {
+    "yunta resume".to_string()
 }
 
 /// Stops a run and the whole process tree under it.
@@ -145,6 +174,95 @@ pub(crate) fn close(run: &str) -> String {
     format!("yunta close {run}")
 }
 
+/// The command that draws a run's page again and opens it.
+pub(crate) fn open(run: &str) -> String {
+    format!("yunta open {run}")
+}
+
+/// Reclaims the disk runs past their retention hold.
+pub(crate) fn gc() -> String {
+    "yunta gc".to_string()
+}
+
+/// Lists the documents `yunta schema` shows.
+pub(crate) fn schemas() -> String {
+    "yunta schema".to_string()
+}
+
+/// Shows the shape of `document`, a name `yunta schema` lists: as a person
+/// reads it, or with `json` as the JSON Schema an editor validates against.
+pub(crate) fn schema(document: &str, json: bool) -> String {
+    match json {
+        true => format!("{} {document} --json", schemas()),
+        false => format!("{} {document}", schemas()),
+    }
+}
+
+/// The command that lists every key a workflow and each kind of node read.
+pub(crate) fn schema_workflow() -> String {
+    schema(super::schema::Shown::Workflow.as_str(), false)
+}
+
+/// Runs a project's test cases.
+pub(crate) fn test() -> String {
+    "yunta test".to_string()
+}
+
+/// Says whether this machine is ready to run.
+pub(crate) fn doctor() -> String {
+    "yunta doctor".to_string()
+}
+
+/// Checks a workflow, named by what it is called in a sentence.
+pub(crate) fn check() -> String {
+    "yunta check".to_string()
+}
+
+/// What a run's numbers are read with.
+pub(crate) fn stats() -> String {
+    "yunta stats".to_string()
+}
+
+/// Prepares a repository for yunta.
+pub(crate) fn init() -> String {
+    "yunta init".to_string()
+}
+
+/// `yunta pack <verb>`, for `add`, `update`, `remove` or `new`.
+pub(crate) fn pack(verb: &str) -> String {
+    format!("yunta pack {verb}")
+}
+
+/// Lists the workflows this repository can run.
+pub(crate) fn list() -> String {
+    "yunta list".to_string()
+}
+
+/// Lists this repository's runs, what needs you first.
+pub(crate) fn list_runs() -> String {
+    "yunta list --runs".to_string()
+}
+
+/// Lists every run on this machine.
+pub(crate) fn list_every_run() -> String {
+    format!("{} --all", list_runs())
+}
+
+/// Lists this repository's runs, the closed ones too.
+pub(crate) fn list_closed_runs() -> String {
+    format!("{} --full", list_runs())
+}
+
+/// What yunta does, and every command it takes.
+pub(crate) fn help() -> String {
+    "yunta --help".to_string()
+}
+
+/// Starts a workflow, named the way the catalog names it.
+pub(crate) fn run(workflow: &str) -> String {
+    format!("yunta run {workflow}")
+}
+
 /// Shows where a run stands, derived from its own log.
 pub(crate) fn status(run: &str) -> String {
     format!("yunta status {run}")
@@ -154,6 +272,12 @@ pub(crate) fn status(run: &str) -> String {
 /// printed and where all of it is.
 pub(crate) fn status_node(run: &str, node: &str) -> String {
     format!("yunta status {run} --node {node}")
+}
+
+/// Shows a commit a run's work is held in, by the id a reader meets it under: a blocked
+/// task's last attempt left its work in one.
+pub(crate) fn show_commit(commit: &str) -> String {
+    format!("git show {commit}")
 }
 
 /// Gathers a finished run's manifest, log and artifacts into the bundle
@@ -174,37 +298,91 @@ pub(crate) fn verify(run: &str) -> String {
 /// own commands, and a failure that no retry can change until the tree
 /// moves says so beside the command that hands the run back.
 pub(crate) fn after(
-    word: RunWord,
-    run: &str,
+    frame: &RunFrame,
     decision: Option<&GateWaitingPayload>,
 ) -> Vec<(String, &'static str)> {
-    match word {
-        RunWord::Stalled => vec![
+    after_for(frame, decision, Reader::Person)
+}
+
+/// What `reader` types next for a run its word describes: the steps
+/// [`after`] gives a person, with the run named the way `reader` copies it.
+pub(crate) fn after_for(
+    frame: &RunFrame,
+    decision: Option<&GateWaitingPayload>,
+    reader: Reader,
+) -> Vec<(String, &'static str)> {
+    let run = named(&frame.run_id, reader);
+    let open = matches!(
+        frame.phase,
+        RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
+    );
+    match frame.standing {
+        Standing::Stalled => vec![
             (resume(run), "continues it from its log"),
             (close(run), "closes it for good"),
         ],
-        RunWord::Waiting => after_reset(run),
-        RunWord::NeedsYou => match decision {
-            None => vec![
-                (resume(run), "hands it back once that is settled"),
-                (close(run), "closes it for good"),
-            ],
-            Some(decision) => {
-                let mut steps = Vec::new();
-                if waits_for_tree(decision) {
-                    steps.push((resume(run), "offers a retry once the run's tree changed"));
-                }
-                steps.push((close(run), "closes it for good"));
-                steps
-            }
-        },
-        RunWord::Finished | RunWord::Reported => vec![(receipt(run), "certifies what it did")],
-        RunWord::Broken => vec![(verify(run), "says where its log stops reading")],
-        RunWord::Created | RunWord::Running => {
+        Standing::Waiting => after_reset(run),
+        // Asked live, the question is answered where it is asked: what a
+        // command here can do is stop the run.
+        Standing::NeedsYou if matches!(frame.phase, RunPhase::Created | RunPhase::Running) => {
             vec![(cancel(run), "stops it and everything under it")]
         }
-        RunWord::Failed | RunWord::Cancelled | RunWord::Promoted => Vec::new(),
+        Standing::NeedsYou => after_needs_you(run, decision),
+        Standing::Finished | Standing::Reported => vec![(receipt(run), "certifies what it did")],
+        Standing::Broken => vec![(verify(run), "says where its log stops reading")],
+        Standing::Created | Standing::Running => {
+            vec![(cancel(run), "stops it and everything under it")]
+        }
+        Standing::Stopped if open => vec![
+            (resume(run), "continues it where it stopped"),
+            (close(run), "closes it for good"),
+        ],
+        Standing::Failed
+        | Standing::Stopped
+        | Standing::Promoted
+        | Standing::Rerouted
+        | Standing::Skipped
+        | Standing::NeverRan => Vec::new(),
     }
+}
+
+/// What a person types next for a run that needs them. With the decision it
+/// stopped on, a retry is offered when that failure waits for the run's tree
+/// to change; either way the run can be closed for good.
+fn after_needs_you(
+    run: &str,
+    decision: Option<&GateWaitingPayload>,
+) -> Vec<(String, &'static str)> {
+    match decision {
+        None => vec![
+            (resume(run), "hands it back once that is settled"),
+            (close(run), "closes it for good"),
+        ],
+        Some(decision) => {
+            let mut steps = Vec::new();
+            if shows_plan(decision) {
+                steps.push((review(run), "reads its plan, and answers it there"));
+            }
+            if waits_for_tree(decision) {
+                steps.push((resume(run), "offers a retry once the run's tree changed"));
+            }
+            steps.push((close(run), "closes it for good"));
+            steps
+        }
+    }
+}
+
+/// Whether a decision shows a plan, the tasks document a person reads and
+/// answers at a terminal.
+fn shows_plan(decision: &GateWaitingPayload) -> bool {
+    decision.shows().iter().any(|shown| {
+        matches!(
+            shown.artifact,
+            ArtifactId::Interpreted {
+                kind: ArtifactKind::Tasks
+            }
+        )
+    })
 }
 
 /// What a person types next for a run paused on a limit's reset. The resume
@@ -244,7 +422,7 @@ pub(crate) fn spell_for(step: &NextStep, reader: Reader) -> String {
             let answer = if *text { " --text \"<answer>\"" } else { "" };
             format!("yunta resolve-gate {} {option}{answer}", named(run, reader))
         }
-        NextStep::Gc => "yunta gc".to_string(),
+        NextStep::Gc => gc(),
         NextStep::Check { workflow } => format!("yunta check {workflow}"),
     }
 }

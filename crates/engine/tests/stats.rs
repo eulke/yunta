@@ -1,6 +1,6 @@
 //! `compute_run_stats`/`prior_estimation` —
 //! golden tests over a hand-built log fixture with a retry and a
-//! re-route, exercised directly without spinning up a full run (same
+//! reroute, exercised directly without spinning up a full run (same
 //! style `tests/progress.rs` uses for `render_progress`).
 
 use yunta_core::caution::Caution;
@@ -77,7 +77,7 @@ fn tokens(input: u64, output: u64, cached: Option<u64>) -> TokenUsage {
 }
 
 /// Two nodes: `a` runs clean in one attempt; `b` depends on `a`, starts 5s
-/// after `a` finishes (blocked time), fails on attempt 1, re-routes, and
+/// after `a` finishes (blocked time), fails on attempt 1, reroutes, and
 /// finishes on attempt 2 — a retry's tokens count as rework, and the
 /// second `RunnerResolved` re-affirms the same role.
 fn fixture_events() -> Vec<StoredEvent> {

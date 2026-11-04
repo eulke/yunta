@@ -1,6 +1,6 @@
 //! External cancellation of a run. A `CancellationToken` fired while a node
 //! holds a session that never ends on its own interrupts that session,
-//! pauses the run as `cancelled by user`, and leaves a log that resumes
+//! pauses the run with `PauseReason::Cancelled`, and leaves a log that resumes
 //! cleanly — the interrupted node runs again and the run finishes. This is
 //! the in-engine half of what `yunta cancel` drives from outside the
 //! process; the `hang` mock stands in for a stuck agent.
@@ -167,8 +167,8 @@ nodes:
 ";
 
 /// A cancellation that stops the git a step runs outside any node — the
-/// checkout a scoped node is given before it starts — pauses the run as
-/// cancelled by user, and the next wake finishes it.
+/// checkout a scoped node is given before it starts — pauses the run with
+/// `PauseReason::Cancelled`, and the next wake finishes it.
 #[tokio::test]
 async fn a_cancel_that_stops_a_step_s_git_pauses_the_run() {
     let token = CancellationToken::new();

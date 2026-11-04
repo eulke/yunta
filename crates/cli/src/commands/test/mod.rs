@@ -38,10 +38,11 @@ mod case;
 use std::path::{Path, PathBuf};
 
 use crate::error::{CliError, Outcome};
-use crate::output::{document, say};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::{Line, Tone};
-use crate::render::{Look, Mark, INDENT};
+use crate::output::document;
+use surco::components::{Check, Checklist, Found, Headline};
+use surco::doc::Doc;
+use surco::glyphs::Mark;
+use surco::look::Look;
 
 pub(crate) use case::run_case;
 
@@ -53,8 +54,31 @@ pub async fn test(dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> 
     let interrupt = crate::interrupt::Interrupt::ctrl_c()
         .map_err(|source| CliError::io("install the interrupt handler for", "test", source))?;
 
+    let case_paths = cases_under(&root)?;
+
+    // Every case's name is known before the first one runs, so the
+    // verdicts line up in one column as each case finishes.
+    let names: Vec<String> = case_paths.iter().map(|path| case_name(path)).collect();
+    let mut failures = 0usize;
+    for case_path in &case_paths {
+        if !report(&root, case_path, interrupt.shared(), (&names, look)).await {
+            failures += 1;
+        }
+    }
+
+    verdict(case_paths.len(), failures, look);
+    if failures == 0 {
+        Ok(Outcome::Success)
+    } else {
+        Ok(Outcome::Reported)
+    }
+}
+
+/// Every case under `root`'s `.yunta/tests`, refused when there is none
+/// to run or the directory does not read.
+fn cases_under(root: &Path) -> Result<Vec<std::path::PathBuf>, CliError> {
     let tests_dir = root.join(".yunta/tests");
-    let Some(case_paths) = discover_case_paths(&root) else {
+    let Some(case_paths) = discover_case_paths(root) else {
         return Err(CliError::msg(format!(
             "cannot read test cases from {}",
             tests_dir.display()
@@ -66,33 +90,22 @@ pub async fn test(dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> 
             tests_dir.display()
         )));
     }
+    Ok(case_paths)
+}
 
-    // Every case's name is known before the first one runs, so the
-    // verdicts line up in one column as each case finishes.
-    let column = case_paths
-        .iter()
-        .map(|path| crate::render::cell_width(&case_name(path)))
-        .max()
-        .unwrap_or(0);
-    let mut failures = 0usize;
-    for case_path in &case_paths {
-        if !report(&root, case_path, interrupt.shared(), (column, look)).await {
-            failures += 1;
-        }
-    }
-
-    say(
+/// The verdict under the rows it counts, as a run's closing comes under
+/// what it showed while it ran.
+fn verdict(cases: usize, failures: usize, look: &Look) {
+    let tally = format!("{}, {failures} failed", surco::text::counted(cases, "case"));
+    let mark = match failures {
+        0 => Mark::Done,
+        _ => Mark::Failed,
+    };
+    crate::output::blank();
+    document(
         look,
-        format!(
-            "{}, {failures} failed",
-            yunta_core::text::counted(case_paths.len(), "case")
-        ),
+        Doc::new().with(Headline::new(mark, super::advice::test(), tally)),
     );
-    if failures == 0 {
-        Ok(Outcome::Success)
-    } else {
-        Ok(Outcome::Reported)
-    }
 }
 
 /// The project whose `.yunta/` holds the cases: `dir` when given, the
@@ -199,8 +212,9 @@ fn case_name(case_path: &Path) -> String {
         .unwrap_or_else(|| case_path.display().to_string())
 }
 
-/// Runs one case and prints its row — its mark, its name in a column
-/// `column` cells wide, and what it found — with each problem under it.
+/// Runs one case and prints its row — its mark, its name in the column
+/// every one of `names` fits, and what it found — with each problem under
+/// it.
 /// `true` when it passed.
 ///
 /// A case that could not run at all is one problem like any other: the
@@ -210,39 +224,36 @@ async fn report(
     root: &Path,
     case_path: &Path,
     interrupt: crate::interrupt::Interrupt,
-    (column, look): (usize, &crate::render::Look),
+    (names, look): (&[String], &surco::look::Look),
 ) -> bool {
     let name = case_name(case_path);
-    let (mark, said, problems) = match run_case(root, case_path, interrupt).await {
-        Ok(problems) if problems.is_empty() => (Mark::Done, "ok".to_string(), Vec::new()),
+    let (found, said, problems) = case_found(run_case(root, case_path, interrupt).await);
+    let passed = problems.is_empty();
+    // The cases run one at a time and each row is drawn as its case ends:
+    // the column every row shares is the list's, not the row's.
+    let mut row = Checklist::aligned(names.to_vec());
+    row.push_check(Check::new(found, name, said).details(problems));
+    document(look, Doc::new().with(row));
+    passed
+}
+
+/// What a case's run found, as its row says it: whether it held, what its
+/// row says, and each problem, as written. A case that could not run at all
+/// is one problem like any other.
+pub(crate) fn case_found(ran: Result<Vec<String>, CliError>) -> (Found, String, Vec<String>) {
+    match ran {
+        Ok(problems) if problems.is_empty() => (Found::Holds, "ok".to_string(), Vec::new()),
         Ok(problems) => (
-            Mark::Failed,
-            format!(
-                "failed: {}",
-                yunta_core::text::counted(problems.len(), "error")
-            ),
+            Found::Problem,
+            format!("failed: {}", surco::text::counted(problems.len(), "error")),
             problems,
         ),
         Err(error) => (
-            Mark::Failed,
+            Found::Problem,
             "could not run: 1 error".to_string(),
             vec![error.to_string()],
         ),
-    };
-    let gap = " ".repeat(column.saturating_sub(crate::render::cell_width(&name)) + 2);
-    let row = Line::new()
-        .plain(INDENT)
-        .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
-        .plain(" ")
-        .plain(name)
-        .plain(gap)
-        .plain(said);
-    document(look, Doc::new().with(Block::Lines(vec![row])));
-    let margin = format!("{INDENT}{INDENT}{INDENT}");
-    for problem in &problems {
-        say(look, yunta_core::text::indent(problem, &margin));
     }
-    problems.is_empty()
 }
 
 /// Turns the sandbox worktree into a repository whose initial commit
@@ -255,7 +266,7 @@ pub(crate) async fn init_git(
     for args in [
         vec!["init", "-q"],
         vec!["config", "user.email", "yunta-test@localhost"],
-        vec!["config", "user.name", "yunta test"],
+        vec!["config", "user.name", "yunta-test"],
         vec!["add", "-A"],
         vec!["commit", "-q", "--allow-empty", "-m", "sandbox"],
     ] {

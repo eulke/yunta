@@ -9,29 +9,37 @@
 
 use std::time::Duration;
 
-use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
-
+use surco::motion::Motion;
+use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::RunId;
+use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 use yunta_render::spend::Breakdown;
 
 mod children;
 
 use children::children_of;
-pub(super) use children::{child_row, child_standing, children_by_node, closed_as};
+pub(crate) use children::{child_row, children_by_node};
+pub(super) use children::{child_standing, closed_as};
 
 use crate::commands::advice;
-use crate::render::ink::{Line, Tone};
-use crate::render::{duration, indent, Glyphs, Mark, CHILD_DEPTH};
+use surco::figures::duration;
+use surco::glyphs::{Glyphs, Mark};
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::surface::Terminal;
+use surco::width::{cell_width, indent, CHILD_DEPTH};
 
 /// How deep a node's detail sits under the node's own row, in steps of
 /// [`indent`] — the step every surface here shares, so the detail lines
 /// up with the blocks a run's other surfaces nest.
 const DETAIL_DEPTH: usize = 2;
 
-/// The row that opens the region while something needs the person:
-/// the command that answers it, and what it is about. `None` while the
-/// run needs nobody — the footer says so, and a row saying nothing would
-/// cost the work a row.
+/// The row that opens the region while the frame stands as
+/// `Standing::NeedsYou`: the command that answers it, and what it is about.
+/// Any other standing draws none, since the footer says that nothing needs
+/// the person, or that the run waits for a reset: a pause a person chose
+/// stands as `Standing::Stopped`, and a reset that resumes on its own as
+/// `Standing::Waiting`. A row saying nothing would cost the work a row.
 ///
 /// The command comes before what it is about, so that a row cut to fit
 /// loses the subject and never the thing to run. A reader who lost the
@@ -43,16 +51,19 @@ pub(super) fn attention(
     answerable: bool,
     glyphs: Glyphs,
 ) -> Option<Line> {
-    let on = advice::parked(&frame.phase)?;
-    // A limit's reset is nobody's to answer: the run resumes on its own.
-    if advice::reset_pause(&frame.phase).is_some() {
+    if !matches!(frame.standing, Standing::NeedsYou) {
         return None;
     }
+    let on = advice::parked(&frame.phase)?;
     Some(
         Line::new()
             .push(
                 Tone::NeedsYou,
-                format!("{} needs you", glyphs.mark(Mark::NeedsYou)),
+                format!(
+                    "{} {}",
+                    glyphs.mark(Mark::NeedsYou),
+                    Standing::NeedsYou.word()
+                ),
             )
             .plain(": ")
             .push(Tone::Strong, answer_command(run_id, answerable))
@@ -60,41 +71,102 @@ pub(super) fn attention(
     )
 }
 
-/// The region's last row, which answers on every redraw: how far the run
-/// has come, what it has spent, how long it has taken — beside how long
-/// this workflow usually takes, when its history says — and whether
-/// anything needs the person.
+/// The region's last row, which answers on every redraw: the run's furrow
+/// when the row has room for it, then how far the run has come, what it has
+/// spent, how long it has taken — beside how long this workflow usually
+/// takes, when its history says — and whether anything needs the person.
 ///
 /// It is drawn for every phase, including the ones that need nobody,
 /// because a surface that says so only when there is something to say
 /// makes its absence mean two things at once — nothing is needed, or the
-/// surface has not drawn yet.
-pub(super) fn footer(frame: &RunFrame, glyphs: Glyphs) -> Line {
+/// surface has not drawn yet. The words are measured first, and the furrow
+/// takes what the row leaves: whole when it fits, squeezed when the row
+/// leaves it [`FURROW_LEAST`] cells, and left out on a row that leaves fewer.
+pub(super) fn footer(frame: &RunFrame, look: &Look) -> Line {
+    let width = look.width.cells();
+    let words = footer_words(frame, look.glyphs, width);
+    let room = width.saturating_sub(cell_width(&words.text()) + 1);
+    let nodes: Vec<Standing> = frame.nodes.iter().map(|node| node.standing).collect();
+    let terminal = Terminal::on(*look);
+    let whole = terminal.furrow(&nodes, usize::MAX);
+    let furrow = match cell_width(&whole.text()) {
+        0 => return words,
+        drawn if drawn <= room => whole,
+        _ if room >= FURROW_LEAST => terminal.furrow(&nodes, room),
+        _ => return words,
+    };
+    furrow.plain(" ").then(words)
+}
+
+/// The fewest cells a furrow squeezed into a footer is drawn in: fewer say
+/// nothing of where the nodes stand, and the words keep the row.
+const FURROW_LEAST: usize = 8;
+
+/// What a footer says before its answer, in the order it is dropped from a
+/// row too narrow for it: the tokens first, then the usual time, then the
+/// elapsed time, then the counter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Said {
+    Tokens,
+    Usually,
+    Elapsed,
+    Counter,
+}
+
+/// The footer's words within `width` cells, in the order a reader reads
+/// them: the counter, what the run has spent, how long it has taken and
+/// usually takes, and last the word that answers whether anything needs the
+/// person. A row too narrow for them drops what it can spare in [`Said`]'s
+/// order; the answer is never dropped.
+fn footer_words(frame: &RunFrame, glyphs: Glyphs, width: usize) -> Line {
     let sep = format!(" {} ", glyphs.sep());
-    let mut said = vec![crate::render::counter::line(frame, glyphs)];
+    let mut said = vec![(Said::Counter, crate::render::counter::line(frame, glyphs))];
     if frame.tokens.total() > 0 {
-        said.push(Breakdown(&frame.tokens).to_string());
+        said.push((Said::Tokens, Breakdown(&frame.tokens).to_string()));
     }
     if let Some(elapsed) = frame.elapsed {
-        said.push(duration(elapsed));
+        said.push((Said::Elapsed, duration(elapsed)));
     }
     if let Some(usually) = frame
         .prior
         .as_ref()
         .and_then(|prior| prior.wall_clock_secs.as_ref())
     {
-        said.push(format!(
-            "usually ~{}",
-            duration(Duration::from_secs_f64(usually.median))
+        said.push((
+            Said::Usually,
+            format!(
+                "usually ~{}",
+                duration(Duration::from_secs_f64(usually.median))
+            ),
         ));
     }
-    let line = Line::new().push(Tone::Muted, format!("{}{sep}", said.join(&sep)));
-    if advice::reset_pause(&frame.phase).is_some() {
-        return line.push(Tone::Muted, "waiting for a reset");
+    let (tone, answer) = answer(frame);
+    let before = |said: &[(Said, String)]| -> String {
+        said.iter()
+            .map(|(_, words)| format!("{words}{sep}"))
+            .collect()
+    };
+    while cell_width(&format!("{}{answer}", before(&said))) > width {
+        let Some(least) = said.iter().map(|(rank, _)| *rank).min() else {
+            break;
+        };
+        said.retain(|(rank, _)| *rank != least);
     }
-    match advice::parked(&frame.phase) {
-        Some(_) => line.push(Tone::NeedsYou, "needs you"),
-        None => line.push(Tone::Muted, "nothing needs you"),
+    Line::new()
+        .push(Tone::Muted, before(&said))
+        .push(tone, answer)
+}
+
+/// The word the footer answers with, in its tone: that the run waits on a
+/// clock, that it needs the person, or that nothing does.
+fn answer(frame: &RunFrame) -> (Tone, String) {
+    match frame.standing {
+        Standing::Waiting => (
+            Tone::Muted,
+            format!("{} for a reset", Standing::Waiting.word()),
+        ),
+        Standing::NeedsYou => (Tone::NeedsYou, Standing::NeedsYou.word().to_string()),
+        _ => (Tone::Muted, NOTHING_NEEDS_YOU.to_string()),
     }
 }
 
@@ -112,10 +184,15 @@ pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
 /// The rows one working node takes: what it is, what its tasks are doing,
 /// and what its last calls reached for.
 ///
-/// Its liveness is the age of its last event and never a spinner: the age
-/// is measured, it grows while the node says nothing, and it is the one
-/// signal that can tell a busy node from a stuck one.
-pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> Vec<Line> {
+/// A running node's spin turns a frame per event it says, and past
+/// [`QUIET_AFTER`] without one its row says how long.
+pub(super) fn node_rows(
+    frame: &RunFrame,
+    node: &NodeFrame,
+    look: &Look,
+    motion: Motion,
+) -> Vec<Line> {
+    let glyphs = look.glyphs;
     // A `parallel` group's children sit one step under the group, the
     // same step a child run sits under the node that bore it.
     let under = match node.group {
@@ -123,7 +200,7 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
         None => String::new(),
     };
     let detail = format!("{under}{}", indent(DETAIL_DEPTH));
-    let mut rows = vec![headline(node, glyphs).under(&under)];
+    let mut rows = vec![headline(node, glyphs, motion).under(&under)];
     if !node.running_tasks.is_empty() {
         rows.push(Line::new().plain(detail.as_str()).push(
             Tone::Muted,
@@ -136,17 +213,13 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
             ),
         ));
     }
-    let calls = recent_calls(node);
+    let calls = calls_row(node, look, cell_width(&detail));
     if !calls.is_empty() {
         // The envelope names a node and never a session, so at loop
         // concurrency above one no log can say which of a node's
         // sessions made a call: they are the node's, which is the whole
         // truth the log carries.
-        rows.push(
-            Line::new()
-                .plain(detail.as_str())
-                .push(Tone::Muted, format!("calls: {calls}")),
-        );
+        rows.push(Line::new().plain(detail.as_str()).push(Tone::Muted, calls));
     }
     rows.extend(children_of(frame, &node.id).into_iter().map(|child| {
         Line::new()
@@ -156,14 +229,31 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
     rows
 }
 
-/// The node's own row: its state, its id, the runner it resolved through
-/// with the adapter and model behind it, how long it has been working,
-/// and how long ago it last said anything.
-fn headline(node: &NodeFrame, glyphs: Glyphs) -> Line {
-    let state = crate::render::standing(&node.state);
-    let mark = state.word.mark();
-    let tone = Tone::of(mark);
+/// How long a running node goes without an event before its row says so: long
+/// enough that a node between two steps is not called quiet.
+const QUIET_AFTER: Duration = Duration::from_secs(10);
+
+/// The node's own row: its mark, or the frame of its spin; its id; its state and
+/// how long it has worked; how long it has been quiet, past [`QUIET_AFTER`]; and
+/// the runner it resolved through with the adapter and model behind it. When a
+/// row is cut to fit, what it runs on goes first.
+fn headline(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
+    let standing = crate::render::node_display(node).standing;
+    let running = standing == Standing::Running;
+    let quiet = node
+        .last_event_age
+        .filter(|age| running && *age >= QUIET_AFTER);
+    let mut word = standing.word().to_string();
     let mut rest = Vec::new();
+    if let Some(elapsed) = node.elapsed {
+        match running {
+            true => word.push_str(&format!(" for {}", duration(elapsed))),
+            false => rest.push(duration(elapsed)),
+        }
+    }
+    if let Some(age) = quiet {
+        rest.push(format!("quiet {}", duration(age)));
+    }
     if let Some(runner) = &node.runner {
         let mut chose = format!(
             "{} {}/{}",
@@ -174,39 +264,63 @@ fn headline(node: &NodeFrame, glyphs: Glyphs) -> Line {
         }
         rest.push(chose);
     }
-    if let Some(elapsed) = node.elapsed {
-        rest.push(duration(elapsed));
-    }
-    if let Some(age) = node.last_event_age {
-        rest.push(format!("last event {} ago", duration(age)));
-    }
-    let sep = format!(" {} ", glyphs.sep());
+    let sign = match (running, motion) {
+        (true, Motion::Moves) => surco::motion::frame(glyphs, node.events).to_string(),
+        _ => glyphs.mark(standing.mark()).to_string(),
+    };
+    let tone = Tone::of(standing.mark());
+    let sign_tone = if quiet.is_some() { Tone::Muted } else { tone };
     let row = Line::new()
-        .push(tone, format!("{} {}", glyphs.mark(mark), state.word.word()))
+        .push(sign_tone, sign)
         .plain(" ")
-        .push(Tone::Strong, node.id.as_str());
+        .push(Tone::Strong, node.id.as_str())
+        .plain(" ")
+        .push(tone, word);
+    let sep = format!(" {} ", glyphs.sep());
     match rest.is_empty() {
         true => row,
         false => row.push(Tone::Muted, format!("{sep}{}", rest.join(&sep))),
     }
 }
 
-/// The tool calls this node made on the attempt it is running, newest
-/// first, each with what it acted on, as many as a row has room for.
-fn recent_calls(node: &NodeFrame) -> String {
-    /// How many calls a row shows. Enough to see what a node is working
-    /// through, few enough that the names still fit beside the label.
-    const SHOWN: usize = 4;
-    join(node.activity.iter().take(SHOWN).map(|call| {
-        let tool = call
-            .tool_name
-            .clone()
-            .unwrap_or_else(|| "an unnamed tool".to_string());
-        match &call.target {
-            Some(target) => format!("{tool} {}", yunta_render::target::line(target)),
-            None => tool,
+/// The window's title while the run needs its person: the mark, which run, the
+/// word, and what it runs.
+pub(super) fn title(frame: &RunFrame, run_id: &RunId, glyphs: Glyphs) -> String {
+    format!(
+        "{} {} {} {} {} ({})",
+        glyphs.mark(Standing::NeedsYou.mark()),
+        run_id.handle(),
+        Standing::NeedsYou.word(),
+        glyphs.sep(),
+        frame.workflow,
+        frame.mode,
+    )
+}
+
+/// What this node's calls on the attempt it is running came to, as much as a
+/// row has room for past `taken` cells: the oldest let go first, so what it
+/// does now is what stays.
+fn calls_row(node: &NodeFrame, look: &Look, taken: usize) -> String {
+    let room = look.width.cells().saturating_sub(taken);
+    let apart = format!(" {} ", look.glyphs.sep());
+    let gathered = yunta_render::target::gathered(&node.activity, look.glyphs.times());
+    let mut kept: Vec<&str> = Vec::new();
+    let mut used = 0;
+    for group in gathered.iter().rev() {
+        let more = cell_width(group)
+            + if kept.is_empty() {
+                0
+            } else {
+                cell_width(&apart)
+            };
+        if !kept.is_empty() && used + more > room {
+            break;
         }
-    }))
+        used += more;
+        kept.push(group);
+    }
+    kept.reverse();
+    kept.join(apart.as_str())
 }
 
 /// Every node the run is working on right now, in the workflow's own
@@ -233,210 +347,4 @@ fn join(names: impl Iterator<Item = String>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use yunta_core::NodeId;
-    use yunta_engine::RunPhase;
-    use yunta_testkit::run_frame;
-
-    use super::*;
-    use crate::render::ink::Ink;
-
-    fn drawn(rows: Vec<Line>) -> Vec<String> {
-        rows.iter().map(|row| Ink::Plain.paint(row)).collect()
-    }
-
-    const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
-
-    /// A `parallel` group's children sit one step under the group,
-    /// exactly where a child run sits under the node that bore it.
-    #[test]
-    fn the_live_view_indents_a_groups_children_under_it() {
-        let frame = run_frame(&RUN);
-        let group = yunta_testkit::node_frame(&NodeId::from("review"), NodeStanding::ToGo);
-        let mut child = yunta_testkit::node_frame(&NodeId::from("review-a"), NodeStanding::ToGo);
-        child.group = Some(group.id.clone());
-
-        let top = drawn(node_rows(&frame, &group, Glyphs::Ascii));
-        let under = drawn(node_rows(&frame, &child, Glyphs::Ascii));
-        assert!(
-            !top[0].starts_with(' '),
-            "a top-level node starts at the margin: {top:?}"
-        );
-        assert!(
-            under[0].starts_with(&indent(CHILD_DEPTH)) && !under[0].starts_with(&indent(2)),
-            "its children sit exactly one step under it: {under:?}"
-        );
-    }
-
-    #[test]
-    fn a_running_task_no_session_works_is_said_to_be_checking_its_criteria() {
-        let frame = run_frame(&RUN);
-        let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
-        node.running_tasks = vec![
-            yunta_engine::RunningTask {
-                id: "T001".into(),
-                in_session: false,
-            },
-            yunta_engine::RunningTask {
-                id: "T002".into(),
-                in_session: true,
-            },
-        ];
-
-        let rows = drawn(node_rows(&frame, &node, Glyphs::Ascii));
-        assert!(
-            rows.iter()
-                .any(|row| row.trim() == "tasks running: T001 (checking criteria), T002"),
-            "{rows:?}"
-        );
-    }
-
-    #[test]
-    fn a_node_row_names_what_its_calls_touched() {
-        let frame = run_frame(&RUN);
-        let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
-        let call =
-            |tool: &str, target: Option<yunta_core::events::ToolTarget>| yunta_engine::ToolCall {
-                tool_name: Some(tool.to_string()),
-                target,
-                at: chrono::DateTime::UNIX_EPOCH,
-            };
-        node.activity = vec![
-            call(
-                "Edit",
-                Some(yunta_core::events::ToolTarget::of_path(
-                    std::path::Path::new("src/lib.rs"),
-                )),
-            ),
-            call("Bash", None),
-        ];
-
-        let rows = drawn(node_rows(&frame, &node, Glyphs::Ascii));
-        assert!(
-            rows.iter()
-                .any(|row| row.trim() == "calls: Edit src/lib.rs, Bash"),
-            "{rows:?}"
-        );
-    }
-
-    /// A run in `phase`, with `prior` as what its workflow's history
-    /// says.
-    fn standing(phase: RunPhase, prior: Option<yunta_engine::PriorEstimation>) -> RunFrame {
-        RunFrame {
-            phase,
-            prior,
-            elapsed: Some(Duration::from_secs(3)),
-            ..run_frame(&RUN)
-        }
-    }
-
-    fn parked() -> RunPhase {
-        RunPhase::Waiting {
-            on: yunta_engine::WaitingOn::Node {
-                node: NodeId::from_static("plan"),
-                on: yunta_engine::NodeWait::Gate { external_ref: None },
-                reason: None,
-            },
-        }
-    }
-
-    #[test]
-    fn the_footer_says_nothing_needs_you_while_the_run_moves() {
-        let paint = |frame: &RunFrame| Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
-        let moving = paint(&standing(RunPhase::Running, None));
-        assert!(moving.ends_with(" nothing needs you"), "{moving}");
-        assert!(moving.contains("3s"), "how long it has taken: {moving}");
-        let waiting = paint(&standing(parked(), None));
-        assert!(
-            waiting.ends_with(" needs you") && !waiting.contains("nothing"),
-            "{waiting}"
-        );
-    }
-
-    #[test]
-    fn the_footer_names_what_the_run_spent_in_and_out() {
-        let paint = |frame: &RunFrame| Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
-        let spent = RunFrame {
-            tokens: yunta_core::events::TokenUsage {
-                input: 18_000,
-                output: 2_200,
-                cached: None,
-            },
-            ..standing(RunPhase::Running, None)
-        };
-        let line = paint(&spent);
-        assert!(line.contains("18k in / 2.2k out"), "{line}");
-        let quiet = RunFrame {
-            tokens: yunta_core::events::TokenUsage::default(),
-            ..standing(RunPhase::Running, None)
-        };
-        assert!(
-            !paint(&quiet).contains(" in / "),
-            "a run that spent nothing names no tokens"
-        );
-    }
-
-    #[test]
-    fn the_attention_row_is_drawn_only_while_something_needs_you() {
-        assert!(attention(
-            &standing(RunPhase::Running, None),
-            &RUN,
-            false,
-            Glyphs::Ascii
-        )
-        .is_none());
-        let row = attention(&standing(parked(), None), &RUN, true, Glyphs::Ascii)
-            .map(|row| Ink::Plain.paint(&row))
-            .unwrap_or_default();
-        assert!(
-            row.contains(&format!("needs you: yunta resolve-gate {} (", RUN.handle())),
-            "it carries the command that answers it, whole: {row}"
-        );
-        assert!(row.contains("node `plan`"), "and what it is about: {row}");
-    }
-
-    #[test]
-    fn a_run_waiting_on_a_reset_draws_no_attention_row_and_says_it_waits() {
-        let reset = RunPhase::Waiting {
-            on: yunta_engine::WaitingOn::Run {
-                reason: yunta_core::events::PauseReason::AwaitingReset {
-                    node: NodeId::from_static("build"),
-                    at: yunta_testkit_core::fixed_now(),
-                },
-            },
-        };
-        let frame = standing(reset, None);
-        assert!(attention(&frame, &RUN, true, Glyphs::Ascii).is_none());
-        let line = Ink::Plain.paint(&footer(&frame, Glyphs::Ascii));
-        assert!(line.ends_with(" waiting for a reset"), "{line}");
-        assert!(!line.contains("needs you"), "{line}");
-    }
-
-    #[test]
-    fn the_estimate_appears_beside_the_time_once_the_workflow_has_a_history() {
-        let paint = |frame: &RunFrame| Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
-        let known = yunta_engine::PriorEstimation {
-            sample_count: 3,
-            tokens: yunta_engine::Percentiles {
-                median: 1_000.0,
-                p90: 2_000.0,
-            },
-            wall_clock_secs: Some(yunta_engine::Percentiles {
-                median: 6_840.0,
-                p90: 9_000.0,
-            }),
-            tasks: yunta_engine::Percentiles {
-                median: 0.0,
-                p90: 0.0,
-            },
-        };
-        let first = paint(&standing(RunPhase::Running, None));
-        assert!(!first.contains("usually"), "{first}");
-        let later = paint(&standing(RunPhase::Running, Some(known)));
-        let sep = Glyphs::Ascii.sep();
-        assert!(
-            later.contains(&format!("3s {sep} usually ~1h54m")),
-            "{later}"
-        );
-    }
-}
+mod tests;

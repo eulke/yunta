@@ -111,12 +111,7 @@ pub fn read<T: Document>(bytes: &[u8], path: impl Into<String>) -> Result<T, Rep
                 Err(Report::new(document, broken).located(text))
             }
         }
-        Err(crate::yaml::YamlError::Parse { path, message, at }) => Err(Report::new(
-            document.clone(),
-            vec![Diagnostic::new(Subject::Document, Problem::parse(path, message)).at(at)],
-        )
-        .located(text)),
-        Err(other) => Err(one(Problem::parse("", other.to_string()))),
+        Err(error) => Err(Report::new(document, vec![Diagnostic::from(error)]).located(text)),
     }
 }
 
@@ -234,16 +229,16 @@ fn rendered<T: Document>() -> String {
     }
     text.push_str("\n\n# The engine also refuses the document, and fails the node, unless:\n");
     for rule in T::RULES {
-        text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+        text.push_str(&format!("#   - {}\n", surco::text::one_line(rule.demand)));
     }
     if !T::RUN_RULES.is_empty() {
         text.push_str(
             "#\n# When it is submitted, the engine runs every criterion under `sh`, where it \
-             runs criteria — not in your shell, whose tools it may not have — and refuses \
+             runs criteria (not in your shell, whose tools it may not have), and refuses \
              the document unless:\n",
         );
         for rule in T::RUN_RULES {
-            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+            text.push_str(&format!("#   - {}\n", surco::text::one_line(rule.demand)));
         }
     }
     if !T::REVIEW_RULES.is_empty() {
@@ -252,17 +247,17 @@ fn rendered<T: Document>() -> String {
              refuses it unless:\n",
         );
         for rule in T::REVIEW_RULES {
-            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+            text.push_str(&format!("#   - {}\n", surco::text::one_line(rule.demand)));
         }
     }
     if !T::SPECIFIED_RULES.is_empty() {
         text.push_str(
-            "#\n# When it is handed over, the engine holds it to the run it belongs to — the \
-             spec the workflow writes, the questions a person answered — and refuses it \
+            "#\n# When it is handed over, the engine holds it to the run it belongs to (the \
+             spec the workflow writes, the questions a person answered), and refuses it \
              unless:\n",
         );
         for rule in T::SPECIFIED_RULES {
-            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+            text.push_str(&format!("#   - {}\n", surco::text::one_line(rule.demand)));
         }
     }
     text
@@ -339,7 +334,7 @@ mod tests {
             let contract = contract(kind);
             for rule in rules(kind) {
                 assert!(
-                    contract.contains(&crate::text::one_line(rule.demand)),
+                    contract.contains(&surco::text::one_line(rule.demand)),
                     "`{kind}`'s contract states `{}`",
                     rule.code
                 );

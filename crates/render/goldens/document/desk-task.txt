@@ -1,0 +1,35 @@
+ plan · EKPBGE · fragua (standard) · 4 tasks in 3 steps                                       needs you  approve-plan
+ Install packs in the user's Yunta state directory for use across projects
+ you asked  add pack global instalation support, not only project level as today
+
+     the change                      │ Discover global packs after project packs                          step 1 of 3
+                                     │
+ steps                               │   you will see A workflow supplied by a global pack can be run from any
+ 1   global-pack-storage             │                project using the same Yunta state root; a matching project
+   ▸ global-pack-catalog             │                pack continues to win.
+ 2   global-pack-cli                 │   changes      crates/engine/src/catalog.rs,
+ 3   global-pack-docs                │                crates/engine/src/frozen/layers.rs,
+                                     │                crates/engine/src/frozen/prompt.rs,
+ order                               │                crates/engine/src/frozen/provenance.rs
+ storage → cli → docs                │   keeps        Repository workflows shadow pack workflows.
+ catalog → docs                      │                Multiple packs from one publisher declaring the same workflow
+                                     │                name are reported as ambiguous.
+ decided for you                4  d │                Declared pack content paths must stay inside their pack
+ risks                          2  d │                directory.
+ left out                       2  d │                Frozen provenance records pack identity and lock commit when
+                                     │                available.
+ implies                             │   implies      resolve_workflow is named in 5 files no task changes:
+ ▲ what it changes is named in 5     │                crates/cli/src/commands/mod.rs
+   files outside every task          │                crates/engine/src/check/refs.rs
+                                     │                crates/engine/src/frozen/read.rs
+ impact                              │                crates/engine/src/lib.rs
+ crates/cli/src/pack.rs      storage │                crates/engine/tests/catalog.rs
+ crates/engin…rc/catalog.rs  catalog │   tested by    Workflow lookup falls back to global packs, prefers project
+ crates/engine/src/frozen/   catalog │                packs, and keeps declared content inside its pack.
+ crates/cli/src/cli/             cli │                cargo test --workspace --test global_pack_catalog \
+ crates/cli/src/commands/        cli │                  global_pack_catalog
+ docs/global-install.md         docs │
+                                     │ … 26 more lines
+
+ ◆ Plan and its tests registered. Approve?
+ 1 approve   2 adjust   3 abort                                     j k task · p proof · d decided for you · esc back

@@ -2,47 +2,40 @@
 //!
 //! What they decide on is what the run holds, so the words come from the
 //! document itself, cut to the width they read at, and the path under
-//! them is where its file sits, in full. A plan is read the way it is
-//! reviewed: its tasks at a glance, what keeps it from being proven, what
-//! it changes and why — with each diagram the author drew — the choices
-//! it makes, what it risks and leaves out, then task by task what each
-//! does, the code of what it changes and what proves it done. A spec is
-//! read task by task, its tests whole and what only sets them up folded;
-//! what a review found, the most severe first; the run's findings the
-//! same way, each with the node that found it and how others answered
-//! it. What weighs on the decision is said last, beside its menu.
+//! them is where its file sits, in full. A plan is read as the change it
+//! makes, its proof a step away; a spec task by task, its tests whole and
+//! what only sets them up folded; what a review found, the most severe
+//! first; the run's findings the same way, each with the node that found
+//! it and how others answered it. What weighs on the decision is said
+//! last, beside its menu.
 
+use surco::components::{Marked, Section};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
+use surco::text::{agreeing, counted};
 use yunta_core::events::{ArtifactId, Withheld};
-use yunta_core::expansion::Denial;
-use yunta_core::protected::Protection;
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
 use yunta_core::step::NextStep;
-use yunta_core::text::{agreeing, counted};
 use yunta_core::RunId;
 
-use crate::blocks::{Marked, Section};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
-pub use crate::plan::{Form, CODE_SHOWN};
-use crate::Mark;
+pub use crate::plan::Form;
 
-/// What `document` says, for the run `run`, in `form`. Each command it names
-/// is written by `spell`.
+/// What `document` says, for the run `run`, in `form`. Each command it
+/// names is written by `spell`.
 pub fn document(
     document: &ShownDocument,
     run: &RunId,
     form: Form,
     spell: &dyn Fn(&NextStep) -> String,
-) -> Doc<'static> {
-    let of = document
-        .shown
-        .producer
-        .as_ref()
+) -> Doc {
+    let producer = document.shown.producer.as_ref();
+    let of = producer
         .map(|node| format!(" of `{node}`"))
         .unwrap_or_default();
     match &document.content {
-        ShownContent::Tasks(review) => crate::plan::document(review, &of, run, form, spell),
-        ShownContent::Spec(file) => crate::spec::document(file, &of, run, form, spell),
+        ShownContent::Tasks(review) => crate::plan::document(review, run, form, spell),
+        ShownContent::Spec(file) => crate::spec::document(file, (&of, producer), run, form, spell),
         ShownContent::Findings(file) => crate::findings::document(file, &of),
         ShownContent::RunFindings(view) => crate::findings::run_document(view),
         ShownContent::Text(text) => {
@@ -56,16 +49,46 @@ pub fn document(
                 Some((heading, body)) => (
                     Line::new()
                         .push(Tone::Strong, heading)
-                        .push(Tone::Muted, format!(" — {named}")),
+                        .push(Tone::Muted, format!(": {named}")),
                     body,
                 ),
                 None => (Line::new().push(Tone::Strong, named), text.as_str()),
             };
-            Doc::new()
-                .with(Block::Title(title))
-                .with(Block::Markdown(body.to_string()))
+            let doc = Doc::new().with(Block::Title(surco::components::Title::named(title)));
+            match body.trim().is_empty() {
+                true => doc,
+                false => doc.with(Block::Markdown(body.to_string())),
+            }
         }
     }
+}
+
+/// The first document among `documents` that is a plan with something to read,
+/// with the plan it holds: what a person reads at a desk. A plan with no task,
+/// description or design is a document like any other.
+pub fn plan_among(documents: &[ShownDocument]) -> Option<(&ShownDocument, &PlanReview)> {
+    documents
+        .iter()
+        .find_map(|document| match &document.content {
+            ShownContent::Tasks(review) if crate::plan::has_a_place(review) => {
+                Some((document, &**review))
+            }
+            _ => None,
+        })
+}
+
+/// What a document is called on a page that shows it beside others: the
+/// heading a text document opens on, else its artifact, named as `document`
+/// names it without the producer it came from.
+pub(crate) fn called(document: &ShownDocument) -> String {
+    let heading = match &document.content {
+        ShownContent::Text(text) => headed(text).map(|(heading, _)| heading.to_string()),
+        _ => None,
+    };
+    heading.unwrap_or_else(|| match &document.shown.artifact {
+        ArtifactId::Interpreted { kind } => kind.to_string(),
+        ArtifactId::Opaque { name } => name.to_string(),
+    })
 }
 
 /// The heading `text` opens on, and what follows it; `None` when it
@@ -79,19 +102,29 @@ fn headed(text: &str) -> Option<(&str, &str)> {
     ((1..=6).contains(&marks) && !heading.is_empty()).then_some((heading, rest))
 }
 
+/// The line a text document's heading is written on; empty when it opens on none.
+pub(crate) fn heading_line(text: &str) -> String {
+    match headed(text) {
+        Some(_) => text
+            .trim_start()
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_string(),
+        None => String::new(),
+    }
+}
+
 /// What weighs on a decision, said beside its menu: on a terminal the
 /// last lines printed are the first ones read, so what a person should
 /// know before choosing sits between the question and the options.
 ///
 /// What the gate does not offer, and each flaw that keeps the plan from
 /// being proven; how its planner got it accepted, when it took more than
-/// one handover; what of it shows no code, or is checked by nothing but
-/// the suite; and the risks it names. `None` when there is nothing to say.
-pub fn before_you_decide(
-    withheld: &[Withheld],
-    shown: &[ShownDocument],
-) -> Option<Section<'static>> {
-    let mut blocks: Vec<Block<'static>> = Vec::new();
+/// one handover; what of it shows no code; and the risks it names. `None`
+/// when there is nothing to say.
+pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Option<Section> {
+    let mut blocks: Vec<Block> = Vec::new();
     for review in shown.iter().filter_map(|document| match &document.content {
         ShownContent::Tasks(review) => Some(&**review),
         _ => None,
@@ -101,7 +134,7 @@ pub fn before_you_decide(
         if !noted.is_empty() {
             blocks.push(
                 Marked {
-                    mark: Mark::Pending,
+                    mark: Mark::Absent,
                     items: noted,
                 }
                 .into(),
@@ -111,7 +144,7 @@ pub fn before_you_decide(
             .plan
             .risks
             .iter()
-            .map(|risk| format!("risk: {}", first_sentence(risk)))
+            .map(|risk| format!("risk: {risk}"))
             .collect();
         if !risks.is_empty() {
             blocks.push(
@@ -124,15 +157,26 @@ pub fn before_you_decide(
         }
     }
     (!blocks.is_empty()).then(|| Section {
-        mark: None,
+        lead: None,
         title: Line::new().push(Tone::Strong, "before you decide"),
         blocks,
     })
 }
 
+/// Whether the section `before_you_decide` draws over `shown` says why the
+/// options `withheld` names are not offered: it does when a plan among
+/// `shown` has a flaw, under which `unprovable` names each withheld option.
+pub fn says_why(withheld: &[Withheld], shown: &[ShownDocument]) -> bool {
+    !withheld.is_empty()
+        && shown.iter().any(|document| match &document.content {
+            ShownContent::Tasks(review) => !review.flaws().is_empty(),
+            _ => false,
+        })
+}
+
 /// What keeps `review` from being proven, under what the gate withholds
 /// because of it.
-fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block<'static>> {
+fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block> {
     let flaws = review.flaws();
     if flaws.is_empty() {
         return Vec::new();
@@ -152,7 +196,7 @@ fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block<'static>>
         }
     };
     vec![Section {
-        mark: None,
+        lead: None,
         title: Line::new().push(Tone::Caution, heading),
         blocks: crate::plan::concerns(&flaws),
     }
@@ -161,9 +205,9 @@ fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block<'static>>
 
 /// What a person deciding on `review` should know and the plan does not
 /// say about itself: how its planner got it accepted, and what of it
-/// nothing shows or checks.
+/// shows no code.
 fn noted(review: &PlanReview) -> Vec<String> {
-    [handed(review), codeless(review), unguarded(review)]
+    [handed(review), codeless(review)]
         .into_iter()
         .flatten()
         .collect()
@@ -179,118 +223,110 @@ fn handed(review: &PlanReview) -> Option<String> {
     let broke: Vec<String> = handed
         .refused
         .iter()
-        .map(|(code, times)| format!("{code} ×{times}"))
+        // Each rule counts the refusals that broke it, and one refusal can break two.
+        .map(|(code, times)| format!("{code} in {times}"))
         .collect();
     Some(format!(
         "handed over {}; refused {}: {}",
         counted(handed.submissions, "time"),
-        handed.refusals,
+        counted(handed.refusals, "time"),
         broke.join(", ")
     ))
 }
 
-/// How many of the plan's changes show no code: neither their own nor
-/// the shape their task declares in that file.
+/// How many of the changes the plan's cards draw show no code: neither
+/// their own nor a shape of their task's.
 fn codeless(review: &PlanReview) -> Option<String> {
-    let plan = &review.plan;
-    let changes: Vec<bool> = plan
-        .tasks
-        .iter()
-        .flat_map(|task| {
-            task.changes.iter().map(move |change| {
-                change.code.is_some()
-                    || plan
-                        .shapes
-                        .iter()
-                        .any(|shape| shape.owner == task.id && shape.file == change.file())
-            })
-        })
-        .collect();
-    let codeless = changes.iter().filter(|coded| !**coded).count();
+    let (codeless, changes) = crate::plan::codeless(review);
     (codeless > 0).then(|| {
         format!(
             "{codeless} of {} {} no code",
-            counted(changes.len(), "change"),
+            counted(changes, "change"),
             agreeing(codeless, "shows", "show")
         )
     })
 }
 
-/// How many promises the plan's tasks keep that no guard of theirs
-/// checks, only the suite.
-fn unguarded(review: &PlanReview) -> Option<String> {
-    let unguarded: usize = review
-        .plan
-        .tasks
-        .iter()
-        .filter(|task| {
-            review
-                .tasks
-                .iter()
-                .find(|judged| judged.task == task.id)
-                .is_none_or(|judged| judged.guards.is_empty())
-        })
-        .map(|task| task.invariants.len())
-        .sum();
-    (unguarded > 0).then(|| {
-        format!(
-            "nothing but the suite checks {} the tasks keep",
-            counted(unguarded, "promise")
-        )
-    })
-}
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
 
-/// What a refused scope request says to the person it was put to: why it was
-/// refused, naming each path it reached and why that path is protected.
-pub fn denial(denial: &Denial) -> String {
-    match denial {
-        Denial::ReachesProtected { reached } => format!(
-            "it reaches what the task may never write: {}",
-            reached
-                .iter()
-                .map(|reach| format!("{} ({})", reach.path, protected_as(reach.reason)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Denial::ModeDeny => "scope_expansion mode is deny (the default)".to_string(),
-        Denial::NoCriterion => "rules mode requires a proposed_criterion".to_string(),
-        Denial::PrecheckPasses => {
-            "proposed criterion already passes — nothing to expand for".to_string()
+    use surco::components::Section;
+    use surco::doc::Block;
+    use surco::glyphs::Mark;
+    use yunta_core::events::{ArtifactId, Shown};
+    use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
+    use yunta_core::{ArtifactKind, ContentHash, TasksFile};
+
+    use super::before_you_decide;
+
+    /// A plan document that names `risks` and nothing else: no task and no
+    /// spec, so the only thing a decision weighs on it is what it names.
+    fn plan_naming(risks: &[&str]) -> ShownDocument {
+        let plan = TasksFile {
+            summary: None,
+            description: None,
+            design: None,
+            decisions: Vec::new(),
+            shapes: Vec::new(),
+            risks: risks.iter().map(|risk| risk.to_string()).collect(),
+            out_of_scope: Vec::new(),
+            tasks: Vec::new(),
+        };
+        ShownDocument {
+            shown: Shown {
+                producer: Some("plan".into()),
+                artifact: ArtifactId::Interpreted {
+                    kind: ArtifactKind::Tasks,
+                },
+                content_hash: ContentHash::sha256(b"plan"),
+            },
+            path: PathBuf::from("artifacts/plan/tasks.yaml"),
+            content: ShownContent::Tasks(Box::new(PlanReview {
+                plan,
+                departed: Vec::new(),
+                spec: None,
+                spec_node: None,
+                asked: None,
+                held: Vec::new(),
+                tasks: Vec::new(),
+                handed_over: None,
+                answered: Vec::new(),
+                shapes_read: None,
+            })),
         }
-        Denial::CriterionCouldNotRun => {
-            "proposed criterion could not run, so nothing judges the request".to_string()
-        }
-        Denial::TooManyFiles { touched, bound } => format!(
-            "diff at the requested paths touches {}, over the {bound}-file bound",
-            counted(*touched, "file")
-        ),
-        Denial::NothingLeft => {
-            "no requested path is left to widen once the protected ones are out".to_string()
-        }
-        Denial::NotWidenable => "no person may widen this node's scope on this run".to_string(),
-        Denial::Chosen { note, .. } => note
-            .clone()
-            .unwrap_or_else(|| "denied by a human at the gate".to_string()),
-        Denial::Legacy { text: said } => said.as_str().to_string(),
     }
-}
 
-/// The words a path a refused request reached is protected by.
-fn protected_as(reason: Protection) -> &'static str {
-    match reason {
-        Protection::ProjectDeny => "the project denies it to every run: permissions.paths.deny",
-        Protection::AgentConfig => "an agent CLI's own configuration",
-        Protection::AgentInstructions => "an instruction file, which only a person grants",
-        Protection::ApprovedTest => "a test the task is held to",
-        Protection::GitRegister => "the run's git register",
+    /// The items of the caution marks `section` holds, in the order they are
+    /// drawn.
+    fn cautions(section: &Section) -> Vec<String> {
+        section
+            .blocks
+            .iter()
+            .flat_map(|block| match block {
+                Block::Marked(marked) if matches!(marked.mark, Mark::Caution) => {
+                    marked.items.clone()
+                }
+                _ => Vec::new(),
+            })
+            .collect()
     }
-}
 
-/// The first sentence of `text`, for a list that names each thing once.
-fn first_sentence(text: &str) -> &str {
-    let text = text.trim();
-    match text.find(". ") {
-        Some(end) => &text[..=end],
-        None => text,
+    /// A risk of two sentences is said whole as one item, and so is each risk
+    /// after it.
+    #[test]
+    fn each_risk_is_said_whole_as_its_own_item() {
+        let shown = [plan_naming(&[
+            "Two tasks write one file. Their order decides what it holds.",
+            "The spec's test is slow.",
+        ])];
+        let section = before_you_decide(&[], &shown).expect("a named risk weighs on the decision");
+        assert_eq!(
+            cautions(&section),
+            vec![
+                "risk: Two tasks write one file. Their order decides what it holds.",
+                "risk: The spec's test is slow.",
+            ]
+        );
     }
 }

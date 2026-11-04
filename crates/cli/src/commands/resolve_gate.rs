@@ -10,29 +10,37 @@
 //! mechanism as `run --detach`: a control-plane operation never blocks
 //! for the run's own duration.
 
-use yunta_core::events::HumanChoice;
-use yunta_core::step::NextStep;
-use yunta_core::{OptionId, Responder, RunId};
+use std::collections::BTreeMap;
 
-use crate::ask::{Console, Escape, NoAnswer};
+use surco::components::{Gist, Headline, Next};
+use surco::doc::Doc;
+use surco::glyphs::Mark;
+use surco::look::Look;
+use surco::words::Standing;
+use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
+use yunta_core::step::NextStep;
+use yunta_core::{NodeId, OptionId, Responder, RunId};
+use yunta_engine::RunState;
+use yunta_engine::ShownDocument;
+use yunta_render::gate::Route;
+
+use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
 use crate::commands::advice;
-use crate::context::Context;
+use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::{Look, RunExit};
+use crate::render::RunExit;
 use crate::surface::Diagnostics;
 
 /// Records the decision and hands the run back, returning the sentence
 /// that says so.
 ///
 /// The one path a gate is answered through, whichever door asked: the
-/// command answers with the same sentence, and the control plane's
-/// `resolve_gate` tool returns it in a tool result. Two doors, one
-/// decision, one wording — and one place that knows a decision recorded
-/// is not a decision undone when the hand-off fails.
+/// control plane's `resolve_gate` tool returns this sentence in a tool
+/// result, and the command draws the same words as a page. Two doors, one
+/// decision, one wording, and one place that knows a decision recorded is
+/// not a decision undone when the hand-off fails.
 pub(crate) async fn resolve(
     ctx: &Context,
     run_id: &RunId,
@@ -82,9 +90,34 @@ async fn record(
     Ok(())
 }
 
+/// What a resume does with a recorded decision, in the words both doors
+/// say: it applies it, and the menu it was chosen from says what that does.
+const APPLIED: &str = "a resume in the background applies it";
+
+/// What a recorded decision is said to be, at either door.
+fn resolved_as(option: &OptionId) -> String {
+    format!("resolved `{option}`")
+}
+
 /// The sentence a recorded decision is answered with.
 fn sentence(run_id: &RunId, option: &OptionId) -> String {
-    format!("run {run_id}: resolved `{option}`, driving forward independently")
+    format!("run {run_id}: {}; {APPLIED}", resolved_as(option))
+}
+
+/// What a recorded decision is answered with: the option, and that a
+/// resume in the background applies it.
+fn resolved(run_id: &RunId, option: &OptionId) -> Doc {
+    let handle = run_id.handle();
+    Doc::new()
+        .with(Headline::new(
+            Mark::Done,
+            format!("run {handle}"),
+            resolved_as(option),
+        ))
+        .with(Gist::new(APPLIED))
+        .with(Next {
+            steps: vec![(advice::status(handle), "follows it")],
+        })
 }
 
 /// Refuses a `--json` answer that names no option. The menu a decision
@@ -97,8 +130,9 @@ fn needs_an_option(
 ) -> Result<(), CliError> {
     match option {
         None if output == Mode::Json => Err(CliError::msg(format!(
-            "`--json` needs the option: the menu a decision waits on is for a terminal — \
-             name the option, as in `yunta resolve-gate {run_id} <option> --json`"
+            "`--json` needs the option: the menu a decision waits on is for a terminal; \
+             name the option, as in `{}`, and add `--json`",
+            advice::resolve_gate(run_id.as_str())
         ))),
         _ => Ok(()),
     }
@@ -116,23 +150,38 @@ pub async fn resolve_gate(
 ) -> Result<Outcome, CliError> {
     needs_an_option(run_id, option, output)?;
     let ctx = Context::load()?;
-    let choice = match option {
-        Some(option) => HumanChoice {
+    let picked = match option {
+        Some(option) => Chosen::Answered(HumanChoice {
             option: option.clone(),
             by: crate::identity::responder(resolved_by, ctx.env.user.as_deref()),
             free_text: free_text.map(str::to_string),
+        }),
+        None => chosen(&ctx, run_id).await?,
+    };
+    settled(&ctx, run_id, picked, resolved_by, free_text, output, look).await
+}
+
+/// What a person at the menu did, carried through: recorded and handed back, or the page
+/// that says nothing was.
+pub(super) async fn settled(
+    ctx: &Context,
+    run_id: &RunId,
+    chosen: Chosen,
+    by: Option<&Responder>,
+    free_text: Option<&str>,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let choice = match chosen {
+        Chosen::Answered(choice) => HumanChoice {
+            by: by.cloned().unwrap_or(choice.by),
+            free_text: choice.free_text.or_else(|| free_text.map(str::to_string)),
+            ..choice
         },
-        None => match chosen(&ctx, run_id).await? {
-            Chosen::Answered(choice) => HumanChoice {
-                by: resolved_by.cloned().unwrap_or(choice.by),
-                free_text: choice.free_text.or_else(|| free_text.map(str::to_string)),
-                ..choice
-            },
-            Chosen::Not(state) => return emit(output, &answer(run_id, state), look),
-        },
+        Chosen::Not(state) => return emit(output, &answer(run_id, state), look),
     };
     record(
-        &ctx,
+        ctx,
         run_id,
         &choice.option,
         Some(&choice.by),
@@ -152,10 +201,79 @@ pub async fn resolve_gate(
 }
 
 /// What the person at the menu did.
-enum Chosen {
+pub(super) enum Chosen {
     Answered(HumanChoice),
     /// Nothing was recorded, and the invocation ends with this.
     Not(GateState),
+}
+
+/// A decision a run waits on, with what it shows.
+pub(super) struct Waiting {
+    pub(super) node: NodeId,
+    pub(super) escalation: GateWaitingPayload,
+    pub(super) shown: Vec<ShownDocument>,
+    routes: BTreeMap<OptionId, Route>,
+    changed: Option<ChangesCountedPayload>,
+    called: String,
+}
+
+/// The decision `run_id` waits on, before anything it shows is read; a refusal that says
+/// what serves when it waits on none.
+pub(super) async fn asked_of(ctx: &Context, run_id: &RunId) -> Result<Asked, CliError> {
+    let open = ctx.open_run(run_id).await?;
+    let state = yunta_engine::derive(&open.events);
+    let handle = run_id.handle();
+    let decision =
+        yunta_engine::current_escalation(&open.manifest.doc, &open.run_dir, &state).await?;
+    let Some((node, escalation)) = decision else {
+        return Err(CliError::msg(format!(
+            "run {handle} waits on no decision; `{}` says where it stands",
+            advice::status(handle)
+        )));
+    };
+    Ok(Asked {
+        open,
+        state,
+        node,
+        escalation: escalation.into_payload(),
+    })
+}
+
+/// A decision a run waits on, before what it shows is read.
+pub(super) struct Asked {
+    open: Opened,
+    state: RunState,
+    node: NodeId,
+    pub(super) escalation: GateWaitingPayload,
+}
+
+impl Asked {
+    /// The decision with the documents it shows and what the run changed.
+    pub(super) async fn read(self) -> Result<Waiting, CliError> {
+        let Asked {
+            open,
+            state,
+            node,
+            escalation,
+        } = self;
+        let asked = open.manifest.doc.request();
+        let shown =
+            yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state, asked).await?;
+        let routes = yunta_render::gate::routes(
+            &escalation,
+            &open.manifest.doc.workflow,
+            state.run.left_out(),
+            Some(&node),
+        );
+        Ok(Waiting {
+            node,
+            escalation,
+            shown,
+            routes,
+            changed: state.current_change().cloned(),
+            called: crate::render::called(&open.manifest.doc.workflow.name, state.run.mode()),
+        })
+    }
 }
 
 /// What a gate answer did, as a document carries it.
@@ -189,16 +307,24 @@ fn answer(run_id: &RunId, state: GateState) -> ResolveGateAnswer {
 }
 
 impl Answer for ResolveGateAnswer {
-    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
-        let said = match &self.state {
-            GateState::Resolved { option } => sentence(&self.run_id, option),
-            GateState::Declined => format!(
-                "run {}: nothing recorded — it still waits on the decision",
-                self.run_id.handle()
-            ),
-            GateState::Interrupted => return Doc::new(),
-        };
-        Doc::new().with(Block::Lines(vec![Line::new().plain(said)]))
+    fn document(&self, _look: &Look) -> Doc {
+        let handle = self.run_id.handle();
+        match &self.state {
+            GateState::Resolved { option } => resolved(&self.run_id, option),
+            GateState::Declined => Doc::new()
+                .with(Headline::new(
+                    Standing::NeedsYou.mark(),
+                    format!("run {handle}"),
+                    Standing::NeedsYou.word(),
+                ))
+                .with(Gist::new(
+                    "nothing recorded: it still waits on the decision",
+                ))
+                .with(Next {
+                    steps: vec![(advice::decide(handle), "puts the decision to you again")],
+                }),
+            GateState::Interrupted => Doc::new(),
+        }
     }
 
     fn outcome(&self) -> Outcome {
@@ -216,78 +342,147 @@ impl Answer for ResolveGateAnswer {
 /// lists the command that chooses each option, so the next invocation
 /// is one copied line.
 async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
-    let open = ctx.open_run(run_id).await?;
-    let state = yunta_engine::derive(&open.events);
-    let called = run_id.handle();
-    let decision =
-        yunta_engine::current_escalation(&open.manifest.doc, &open.run_dir, &state).await?;
-    let Some((_, escalation)) = decision else {
-        return Err(CliError::msg(format!(
-            "run {called} waits on no decision — `{}` says where it stands",
-            advice::status(called)
-        )));
-    };
-    let escalation = escalation.into_payload();
+    let asked = asked_of(ctx, run_id).await?;
     let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
-        let commands: Vec<String> = escalation
-            .options()
-            .iter()
-            .map(|option| {
-                let step = NextStep::ResolveGate {
-                    run: run_id.clone(),
-                    option: Some(option.id.clone()),
-                    text: option.asks().is_some(),
-                };
-                format!("  {}", advice::spell(&step))
-            })
-            .collect();
-        return Err(CliError::msg(format!(
-            "run {called} waits on a decision, and no option was given — choose one:\n{}",
-            commands.join("\n")
-        )));
+        return Err(off_terminal(run_id, &asked.escalation));
     };
-    let shown = yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state).await?;
-    match crate::ask::decide(&console, &ctx.env, &escalation, Some((run_id, &shown))) {
+    let waiting = asked.read().await?;
+    chosen_on(&console, ctx, run_id, &waiting, Opens::TheCard)
+}
+
+/// The option a person picks off the menu `run_id` waits on, put to them on `console`:
+/// the decision's documents above its card, opened the way `opens` says.
+pub(super) fn chosen_on(
+    console: &Console,
+    ctx: &Context,
+    run_id: &RunId,
+    waiting: &Waiting,
+    opens: Opens,
+) -> Result<Chosen, CliError> {
+    let ask = Ask {
+        escalation: &waiting.escalation,
+        shown: Some((run_id, &waiting.shown)),
+        changed: waiting.changed.as_ref(),
+        routes: waiting.routes.clone(),
+        node: Some(&waiting.node),
+        called: Some(waiting.called.clone()),
+        opens,
+    };
+    match crate::ask::decide(console, &ctx.env, ask) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => Ok(Chosen::Not(GateState::Declined)),
         Err(NoAnswer::Interrupted) => Ok(Chosen::Not(GateState::Interrupted)),
-        Err(NoAnswer::OffMenu) => Err(CliError::msg(
-            "the menu answered with an option it does not offer — nothing recorded",
-        )),
         Err(NoAnswer::Unreadable(error)) => Err(CliError::msg(format!(
-            "this terminal could not be read or drawn on ({error}) — nothing recorded"
+            "this terminal could not be read or drawn on ({error}): nothing recorded"
         ))),
         Err(NoAnswer::Failed(why)) => Err(CliError::msg(format!(
-            "the menu ended without an answer ({why}) — nothing recorded"
+            "the menu ended without an answer ({why}): nothing recorded"
         ))),
     }
+}
+
+/// The command that chooses each option `escalation` offers for `run_id`, in the menu's
+/// order, with the option it chooses.
+pub(super) fn answering_commands(
+    run_id: &RunId,
+    escalation: &GateWaitingPayload,
+) -> Vec<(OptionId, String)> {
+    escalation
+        .options()
+        .iter()
+        .map(|option| {
+            let step = NextStep::ResolveGate {
+                run: run_id.clone(),
+                option: Some(option.id.clone()),
+                text: option.asks().is_some(),
+            };
+            (option.id.clone(), advice::spell(&step))
+        })
+        .collect()
+}
+
+/// What `resolve-gate` says off a terminal, where nobody can be asked: that
+/// the run waits on a decision, and the command that chooses each option it
+/// offers, one to a line.
+fn off_terminal(run_id: &RunId, escalation: &GateWaitingPayload) -> CliError {
+    let commands: Vec<String> = answering_commands(run_id, escalation)
+        .into_iter()
+        .map(|(_, command)| format!("  {command}"))
+        .collect();
+    CliError::msg(format!(
+        "run {} waits on a decision, and no option was given; choose one:\n{}",
+        run_id.handle(),
+        commands.join("\n")
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use yunta_core::{OptionId, RunId};
 
-    use super::{answer, GateState};
+    use super::{answer, sentence, GateState};
     use crate::output::Answer;
-    use crate::render::{draw, Look};
+    use crate::render::draw;
+    use surco::look::Look;
 
     #[test]
-    fn each_gate_answer_keeps_the_words_it_has_always_had() {
+    fn each_gate_answer_says_how_it_ended_and_what_to_type_next() {
         let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
         let said = |state: GateState| {
             let reply = answer(&run, state);
             draw(reply.document(&Look::plain()), &Look::plain())
         };
-        assert_eq!(
-            said(GateState::Resolved {
-                option: OptionId::from_static("retry"),
-            }),
-            "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `retry`, driving forward independently\n"
+        let resolved = said(GateState::Resolved {
+            option: OptionId::from_static("retry"),
+        });
+        assert!(
+            resolved.starts_with("+ run AAAAAA ; resolved `retry`\n"),
+            "{resolved}"
         );
-        assert_eq!(
-            said(GateState::Declined),
-            "run AAAAAA: nothing recorded — it still waits on the decision\n"
+        assert!(resolved.contains("applies it"), "{resolved}");
+        assert!(resolved.contains("yunta status AAAAAA"), "{resolved}");
+        let declined = said(GateState::Declined);
+        assert!(
+            declined.starts_with("? run AAAAAA ; needs you\n"),
+            "{declined}"
         );
+        assert!(
+            declined.contains("nothing recorded: it still waits on the decision."),
+            "{declined}"
+        );
+        assert!(declined.contains("yunta resolve-gate AAAAAA"), "{declined}");
         assert_eq!(said(GateState::Interrupted), "");
+    }
+
+    /// Every recorded decision is answered alike: a resume in the background
+    /// applies it, in the words the page and the MCP sentence share.
+    #[test]
+    fn every_answer_says_a_resume_applies_it() {
+        let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
+        let abort = OptionId::from_static("abort");
+        let reply = answer(
+            &run,
+            GateState::Resolved {
+                option: abort.clone(),
+            },
+        );
+        let page = draw(reply.document(&Look::plain()), &Look::plain());
+        let said = page.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            said.contains("a resume in the background applies it"),
+            "{page}"
+        );
+        assert!(!said.contains("stays open"), "{page}");
+        assert!(!said.contains("drives the run on"), "{page}");
+        assert_eq!(
+            sentence(&run, &abort),
+            "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `abort`; a resume in the background \
+             applies it"
+        );
+        assert_eq!(
+            sentence(&run, &OptionId::from_static("approve")),
+            "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `approve`; a resume in the background \
+             applies it"
+        );
     }
 }

@@ -8,7 +8,7 @@ the way it does.
 
 ## A run is a workflow plus a log, nothing else
 
-A **workflow** is a YAML file: nodes, dependencies, re-routes. It describes
+A **workflow** is a YAML file: nodes, dependencies, reroutes. It describes
 what *could* happen — it isn't itself a record of anything happening.
 
 A **run** is what you get from `yunta run <workflow>`: a **manifest** (the
@@ -98,12 +98,12 @@ must provide — it never assumes a concrete adapter, model or secret. See
 
 ## Where a run's state can pause, and how it resumes
 
-A node can end in one of `finished | failed | skipped | waiting`. `waiting` means
+A node can end in one of `finished | failed | skipped | needs you`. `needs you` means
 a person's answer is what the node is missing: a `gate` asking for a decision,
 or a node that handed its questions over and is waiting on them. Nothing is
 running underneath either, and both survive the engine restarting exactly like
 any other state.
-A node that fails with no `on_failure` re-route pauses the run on a decision
+A node that fails with no `on_failure` reroute pauses the run on a decision
 too (under the default `defaults.on_failure: pause`): run it again or stop. At
 a terminal the run asks right away, so you can fix the cause and choose
 `retry` without leaving it; otherwise `yunta resolve-gate <run> retry`

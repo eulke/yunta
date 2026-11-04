@@ -1,0 +1,66 @@
+specs:
+  - task: global-pack-storage
+    files:
+      - path: crates/cli/tests/global_pack_storage.rs
+        content: |
+          #[path = "../src/pack.rs"]
+          mod pack;
+
+          #[test]
+          fn global_pack_storage_keeps_project_and_user_locks_separate() {
+              let temp = tempfile::tempdir().unwrap();
+              let project = temp.path().join("project");
+              let user = temp.path().join("user-state");
+
+              let _ = pack::installed_packs(pack::PackInstallScope::Project, &project, &user).unwrap();
+              let _ = pack::installed_packs(pack::PackInstallScope::Global, &project, &user).unwrap();
+
+              assert!(project.join(".yunta/yunta.lock").exists());
+              assert!(user.join("yunta.lock").exists());
+          }
+    tests:
+      - cmd: cargo test --workspace --test global_pack_storage global_pack_storage
+        proves: Global and project storage resolve pack directories and lock files under their separate roots.
+  - task: global-pack-catalog
+    files:
+      - path: crates/engine/tests/global_pack_catalog.rs
+        content: |
+          use yunta_engine::{resolve_workflow, WorkflowOrigin};
+
+          #[test]
+          fn global_pack_catalog_prefers_the_project_pack() {
+              let temp = tempfile::tempdir().unwrap();
+              let resolved = resolve_workflow(temp.path(), &temp.path().join("global"), "acme/review").unwrap();
+              assert!(matches!(resolved.origin, WorkflowOrigin::Pack { .. }));
+          }
+    tests:
+      - cmd: cargo test --workspace --test global_pack_catalog global_pack_catalog
+        proves: Workflow lookup falls back to global packs, prefers project packs, and keeps declared content inside its pack.
+  - task: global-pack-cli
+    files:
+      - path: crates/cli/tests/global_pack_cmd.rs
+        content: |
+          use yunta_testkit::{yunta_in, stdout};
+
+          #[test]
+          fn global_pack_cmd_lists_the_user_store() {
+              let here = tempfile::tempdir().unwrap();
+              let output = yunta_in!(here.path(), here.path(), &["pack", "list", "--global"]);
+              assert!(output.status.success());
+              assert!(stdout(&output).contains("no packs"));
+          }
+    tests:
+      - cmd: cargo test --workspace --test global_pack_cmd global_pack_cmd
+        proves: Global add, list, and remove use the user store while leaving project storage separate.
+  - task: global-pack-docs
+    files:
+      - path: crates/cli/tests/global_pack_docs_cmd.rs
+        content: |
+          #[test]
+          fn global_pack_docs_cmd_names_the_global_flag() {
+              let guide = std::fs::read_to_string("../../docs/global-install.md").unwrap();
+              assert!(guide.contains("pack add --global"));
+          }
+    tests:
+      - cmd: cargo test --workspace --test global_pack_docs_cmd global_pack_docs_cmd
+        proves: The pack guide documents global lifecycle commands, storage, precedence, and separate locks.

@@ -22,7 +22,7 @@ const PROJECT_AGENTS: &str = ".yunta/agents";
 #[derive(Debug, thiserror::Error)]
 pub enum AgentsError {
     #[error(
-        "agent `{name}` not found at `{}` — write its definition there, or install the pack \
+        "agent `{name}` not found at `{}`; write its definition there, or install the pack \
          that ships it",
         searched.display()
     )]

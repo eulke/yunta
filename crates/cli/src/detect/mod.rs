@@ -11,10 +11,13 @@ mod adapters;
 mod ecosystems;
 mod js;
 mod remote;
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use surco::components::Fix;
 use yunta_core::{AdapterId, CommandName, ConfigKey, GitHubRepo, RunnerName};
 use yunta_engine::process::Supervision;
 
@@ -73,7 +76,7 @@ impl Detected {
     /// `errors` name a runner the config lacks — the one suggestion that
     /// needs them.
     pub(crate) async fn for_errors(mut self, errors: &[yunta_engine::CheckError]) -> Self {
-        if !runners_wanted(errors).is_empty() || default_wanted(errors) {
+        if wants_runner(errors) {
             self.adapters = healthy(&probe_known_adapters().await);
         }
         self
@@ -105,26 +108,51 @@ impl Detected {
 
 /// What this repository answers for each key `errors` says a workflow
 /// needs and the config lacks, each once, in the order they are named.
-pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detected) -> Vec<String> {
-    let mut said: Vec<String> = Vec::new();
-    for error in errors {
-        let key = match error {
-            yunta_engine::CheckError::Unset { key, .. } => key.clone(),
-            yunta_engine::CheckError::BaselineWithoutSuite { .. } => ConfigKey::BaselineSuite,
-            _ => continue,
-        };
-        if let Some(line) = detected.suggestion(&key) {
-            if !said.contains(&line) {
-                said.push(line);
-            }
+pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detected) -> Vec<Fix> {
+    let mut said: Vec<Fix> = Vec::new();
+    for fix in errors.iter().filter_map(|error| answered(error, detected)) {
+        if !said.contains(&fix) {
+            said.push(fix);
         }
     }
-    let roles = runners_wanted(errors);
-    let needs_default = default_wanted(errors);
-    if !roles.is_empty() || needs_default {
-        said.extend(runner_step(&roles, needs_default, &detected.adapters));
-    }
+    said.extend(runner_fix(errors, detected));
     said
+}
+
+/// What fixes `error` on its own: what this repository answers for the
+/// key it says a workflow lacks, or the runner to declare for it; `None`
+/// when nothing here does.
+pub(crate) fn fix_for(error: &yunta_engine::CheckError, detected: &Detected) -> Option<Fix> {
+    answered(error, detected).or_else(|| runner_fix(std::slice::from_ref(error), detected))
+}
+
+/// Whether `errors` say a node names a runner the config lacks, or needs
+/// the default runner it lacks.
+fn wants_runner(errors: &[yunta_engine::CheckError]) -> bool {
+    !runners_wanted(errors).is_empty() || default_wanted(errors)
+}
+
+/// The runner to declare for `errors`, on the adapters this machine
+/// answers for, when they want one.
+fn runner_fix(errors: &[yunta_engine::CheckError], detected: &Detected) -> Option<Fix> {
+    wants_runner(errors).then(|| {
+        runner_step(
+            &runners_wanted(errors),
+            default_wanted(errors),
+            &detected.adapters,
+        )
+    })
+}
+
+/// What this repository answers for the key `error` says a workflow needs
+/// and the config lacks, when it answers it.
+fn answered(error: &yunta_engine::CheckError, detected: &Detected) -> Option<Fix> {
+    let key = match error {
+        yunta_engine::CheckError::Unset { key, .. } => key.clone(),
+        yunta_engine::CheckError::BaselineWithoutSuite { .. } => ConfigKey::BaselineSuite,
+        _ => return None,
+    };
+    detected.suggestion(&key).map(Fix::said)
 }
 
 /// The runners `errors` say a node names and the config does not

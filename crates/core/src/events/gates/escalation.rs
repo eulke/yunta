@@ -37,6 +37,10 @@ pub enum Refusal {
 pub enum Claim {
     /// A gate's question, which a person decides.
     NeedsDecision { node: NodeId },
+    /// A gate's question about the plan it shows, asked for a gate whose
+    /// author wrote no `message:`, or a blank one: whether to approve the
+    /// change the plan's summary names, as the summary says it.
+    ApprovePlan { summary: String },
     /// A node that failed, whose menu of answers a person chooses from.
     NodeFailed { node: NodeId },
     /// A gate whose pull request waits for an external review, and the
@@ -84,6 +88,9 @@ enum StatedClaim {
     NeedsDecision {
         node: NodeId,
     },
+    ApprovePlan {
+        summary: String,
+    },
     NodeFailed {
         node: NodeId,
     },
@@ -120,6 +127,9 @@ impl From<Claim> for ClaimWire {
     fn from(claim: Claim) -> Self {
         match claim {
             Claim::NeedsDecision { node } => ClaimWire::Stated(StatedClaim::NeedsDecision { node }),
+            Claim::ApprovePlan { summary } => {
+                ClaimWire::Stated(StatedClaim::ApprovePlan { summary })
+            }
             Claim::NodeFailed { node } => ClaimWire::Stated(StatedClaim::NodeFailed { node }),
             Claim::AwaitsReview { node, assignee } => {
                 ClaimWire::Stated(StatedClaim::AwaitsReview { node, assignee })
@@ -146,6 +156,9 @@ impl From<ClaimWire> for Claim {
         match wire {
             ClaimWire::Written(text) => Claim::Written(text),
             ClaimWire::Stated(StatedClaim::NeedsDecision { node }) => Claim::NeedsDecision { node },
+            ClaimWire::Stated(StatedClaim::ApprovePlan { summary }) => {
+                Claim::ApprovePlan { summary }
+            }
             ClaimWire::Stated(StatedClaim::NodeFailed { node }) => Claim::NodeFailed { node },
             ClaimWire::Stated(StatedClaim::AwaitsReview { node, assignee }) => {
                 Claim::AwaitsReview { node, assignee }
@@ -222,6 +235,12 @@ impl Escalation {
     }
 
     /// The payload, for the event that carries it.
+    /// The author's gate this escalation asks for, by its node, when its
+    /// menu names one.
+    pub fn gate(&self) -> Option<&NodeId> {
+        self.0.gate()
+    }
+
     pub fn into_payload(self) -> GateWaitingPayload {
         self.0
     }

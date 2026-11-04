@@ -17,7 +17,7 @@ pub enum ReservedOption {
     /// Pause the run with the decision recorded (every escalation offers it).
     Abort,
     /// Run a failed node again: through its corrective node once more,
-    /// past the reroute cap, or — for a node with no re-route — itself.
+    /// past the reroute cap, or — for a node with no reroute — itself.
     Retry,
     /// Run a failed loop again from the work its blocked tasks left,
     /// judging that work before any session opens.

@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::text::LINE_WIDTH;
+use surco::width::LINE_WIDTH;
 use yunta_testkit::{
     git, handle, run_id_from, stderr, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG,
 };
@@ -20,7 +20,7 @@ mod checkout;
 #[path = "parked_runs/menu.rs"]
 mod menu;
 
-/// A node that fails with its one re-route already spent: the run parks
+/// A node that fails with its one reroute already spent: the run parks
 /// on a decision whose menu is rebuilt from the log alone.
 const EXHAUSTED_REROUTE: &str = r#"
 name: hopeless
@@ -120,7 +120,7 @@ fn repo_with(root: &Path, workflows: &[(&str, &str)]) -> PathBuf {
 /// up to the blank line that closes the block.
 fn decision_block(text: &str) -> Vec<&str> {
     text.lines()
-        .skip_while(|line| !line.trim_start().starts_with("decision on node"))
+        .skip_while(|line| !line.contains("decision on node"))
         .take_while(|line| !line.is_empty())
         .collect()
 }
@@ -130,7 +130,7 @@ fn decision_block(text: &str) -> Vec<&str> {
 fn closing_decision(text: &str) -> Vec<&str> {
     let mut lines: Vec<&str> = text
         .lines()
-        .skip_while(|line| !line.trim_start().starts_with("decision on node"))
+        .skip_while(|line| !line.contains("decision on node"))
         .take_while(|line| !line.trim_start().starts_with("progress "))
         .collect();
     while lines
@@ -142,11 +142,11 @@ fn closing_decision(text: &str) -> Vec<&str> {
     lines
 }
 
-/// Whether `block` names every option of an exhausted re-route with what
+/// Whether `block` names every option of an exhausted reroute with what
 /// it does, and the command that chooses each, carrying the run's handle.
 fn names_every_option(block: &str, handle: &str) -> bool {
-    block.contains("retry — Re-route to `fix-lint` once more")
-        && block.contains("abort — Abort the run")
+    block.contains("retry: Reroute to `fix-lint` once more")
+        && block.contains("abort: Pause here")
         && block.contains(&format!("yunta resolve-gate {handle} retry"))
         && block.contains(&format!("yunta resolve-gate {handle} abort"))
 }
@@ -169,7 +169,7 @@ fn status_of_a_parked_run_shows_every_option_and_the_command_that_answers_it() {
 
     let block = decision_block(&text).join("\n");
     assert!(
-        block.starts_with("  decision on node `lint`"),
+        block.starts_with("  ◆ decision on node `lint`"),
         "the page says which node the decision belongs to: {text}"
     );
     // The option ids a person types, each with what choosing it does and
@@ -230,7 +230,7 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
     );
     let home = root.path().join("state");
 
-    // An exhausted re-route: the claim names what happened and the
+    // An exhausted reroute: the claim names what happened and the
     // record under it is the failure the log holds. A reader audits the
     // first against the second, which only works while the failure is
     // in one of them.
@@ -268,9 +268,8 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
 /// carries its counters. A program acting on the pause needs the pause,
 /// so the document carries it apart — tagged, because a node parked on
 /// a person and a run that stopped on its own are different shapes and
-/// only one of them has a node to name. (The node shape needs a node in
-/// `NodeState::Waiting` — an external gate, unanswered questions — and
-/// is covered where it is derived, in the engine's `view` tests.)
+/// only one of them has a node to name: an exhausted reroute stops the
+/// run, and a gate is the node the run waits on.
 #[test]
 fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
     let root = tempfile::tempdir().unwrap();
@@ -280,7 +279,10 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
     );
     let home = root.path().join("state");
 
-    for workflow in ["hopeless.yaml", "approval.yaml"] {
+    for (workflow, on, node) in [
+        ("hopeless.yaml", "run", None),
+        ("approval.yaml", "gate", Some("approve")),
+    ] {
         let run = yunta_in!(&repo, &home, &["run", workflow]);
         let run_id = run_id_from(&run);
         let state: serde_json::Value =
@@ -289,9 +291,10 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
         let waiting = &state["waiting_on"];
 
         assert_eq!(
-            waiting["on"], "run",
+            waiting["on"], on,
             "the shape is read off a tag, never guessed from which fields are set: {state:#}"
         );
+        assert_eq!(waiting["node"].as_str(), node, "{state:#}");
         let reason = waiting["reason"]
             .as_str()
             .unwrap_or_else(|| panic!("a parked run says what it is parked on: {state:#}"));
@@ -299,10 +302,11 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
             !reason.contains("nodes ·"),
             "the pause alone, not the summary's counters around it: {reason}"
         );
+        // The one line a summary has names the node a run waits on, and
+        // says the pause of a run that stopped on its own.
+        let said = node.map_or_else(|| reason.to_string(), |node| format!("node `{node}`"));
         assert!(
-            state["summary"]
-                .as_str()
-                .is_some_and(|s| s.contains(reason)),
+            state["summary"].as_str().is_some_and(|s| s.contains(&said)),
             "and the same words the sentence carries: {state:#}"
         );
     }
@@ -310,7 +314,7 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
 
 #[test]
 fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
-    // A failure nothing re-routes is still a decision: the page offers
+    // A failure nothing reroutes is still a decision: the page offers
     // running the node again, because a resume alone would find it
     // failed and stop on it once more.
     let root = tempfile::tempdir().unwrap();
@@ -323,14 +327,14 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
     let text = stdout(&status);
 
     assert!(
-        text.contains("  decision on node `boom`"),
+        text.contains("  ◆ decision on node `boom`"),
         "the page says which node the decision belongs to: {text}"
     );
     assert!(
-        text.contains("retry — Run it again (attempt 2) once something outside the tree changes"),
+        text.contains("retry: Run it again (attempt 2) once something outside the tree changes"),
         "{text}"
     );
-    assert!(text.contains("abort — Abort the run"), "{text}");
+    assert!(text.contains("abort: Pause here"), "{text}");
     for option in ["retry", "abort"] {
         assert!(
             text.contains(&format!("yunta resolve-gate {} {option}", handle(&run_id))),
@@ -435,7 +439,7 @@ fn parked_over_budget(root: &Path) -> (PathBuf, PathBuf, String) {
 #[test]
 fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
     // Three shapes reconstruct a menu — a failed node, an exhausted
-    // re-route and an unresolved internal gate. A budget cap is none of
+    // reroute and an unresolved internal gate. A budget cap is none of
     // them, and the page says so rather than leaving the reader to wonder
     // where the options went.
     let root = tempfile::tempdir().unwrap();
@@ -443,9 +447,12 @@ fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
 
-    assert!(text.contains("waiting on:"), "{text}");
     assert!(
-        text.contains("no options to choose"),
+        text.contains("its token budget is spent (100 tokens"),
+        "{text}"
+    );
+    assert!(
+        text.contains("no option answers this pause here"),
         "the absent menu is named, not silently missing: {text}"
     );
     assert!(
@@ -507,8 +514,8 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
     );
     let text = stdout(&list);
 
-    let needs_you = position(&text, "needs you (1)");
-    let in_flight = position(&text, "running (1)");
+    let needs_you = position(&text, "\nneeds you, oldest first\n");
+    let in_flight = position(&text, "\nrunning\n");
     assert!(
         needs_you < in_flight,
         "what waits on a person comes first: {text}"
@@ -521,8 +528,10 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
         text.contains("hopeless (default)"),
         "a row names the workflow and the mode, not only the id: {text}"
     );
+    // One line to a run: what holds it opens its row, and the run's page
+    // says it whole.
     assert!(
-        text.contains("node `lint` failed and its 0 re-routes to `fix-lint` are exhausted"),
+        text.contains("node `lint` failed and its"),
         "the row says what the wait is for, in words: {text}"
     );
     for line in text.lines() {
@@ -576,14 +585,13 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
     let lines: Vec<&str> = text.lines().collect();
     assert!(
-        lines[0].ends_with("needs you") && lines[1] == "  node `ask` asked 1 question: `summary`",
+        lines[0].contains("· needs you ·")
+            && lines[2] == "  node `ask` asked 1 question: `summary`.",
         "the page opens with what the run waits on — the question still unanswered, not \
          only the node: {text}"
     );
-    assert!(
-        text.contains("progress     nodes 0/1 · 1 waiting"),
-        "and counts the parked node: {text}"
-    );
+    let counted = "progress     0 of 1 node done\n  nodes        ◆ 1 needs you: ask";
+    assert!(text.contains(counted), "and counts the parked node: {text}");
     assert!(
         text.contains(&format!("yunta resume {}", handle(&run_id))),
         "the way back into the run is on the page: {text}"
@@ -591,7 +599,8 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
 
     let list = stdout(&yunta_in!(&repo, &home, &["list", "--runs"]));
     assert!(
-        list.contains("needs you (1)") && list.contains("node `ask` asked 1 question: `summary`"),
+        list.contains("\nneeds you, oldest first\n")
+            && list.contains("node `ask` asked 1 question: `summary`"),
         "the listing groups it with what needs a person, under the words the page uses: {list}"
     );
 }
@@ -617,10 +626,14 @@ fn a_run_whose_manifest_does_not_read_back_is_listed_as_itself() {
     let list = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(list.status.success());
     let text = stdout(&list);
-    assert!(text.contains("unreadable (1)"), "{text}");
     assert!(
-        text.contains(handle(&run_id)),
+        text.contains(&format!("{} could not be read", handle(&run_id))),
         "a run that cannot be derived is still named: {text}"
+    );
+    let full = stdout(&yunta_in!(&repo, &home, &["list", "--runs", "--full"]));
+    assert!(
+        full.contains("\ncould not be read\n") && full.contains(&format!("{}: ", handle(&run_id))),
+        "and the whole story says why: {full}"
     );
 }
 
@@ -633,14 +646,12 @@ fn resolve_gate_without_an_option_offers_the_menu() {
     let run_id = run_id_from(&run);
 
     let mut terminal = yunta_testkit::yunta_on_terminal!(&repo, &home, &["resolve-gate", &run_id]);
-    terminal.wait_for(
-        "> 1  retry",
-        "the run's own menu was never put to the terminal",
+    terminal.wait_on_screen(
+        "▸ retry",
+        "the run's own card was never put to the terminal",
     );
     // `abort`, the second option, with nothing to add.
     terminal.keys("\x1b[B\r");
-    terminal.wait_for("enter records it", "choosing never said how it is recorded");
-    terminal.keys("\r");
     let drawn = terminal.ended();
     assert!(terminal.ran_to_the_end(), "{drawn}");
     assert!(drawn.contains("resolved `abort`"), "{drawn}");

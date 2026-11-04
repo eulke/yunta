@@ -76,7 +76,7 @@ fn add_vendors_the_pack_and_writes_a_lock_entry() {
     let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(
-        stdout(&out).contains("installed acme/review-pack"),
+        stdout(&out).contains("pack acme/review-pack · installed"),
         "{}",
         stdout(&out)
     );
@@ -138,6 +138,7 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
     let list_out = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(list_out.status.success(), "{}", stderr(&list_out));
     let listed = stdout(&list_out);
+    assert!(listed.starts_with("✓ packs · 1 installed\n"), "{listed}");
     let row = yunta_testkit::checked(&listed, "acme/review-pack").unwrap_or_default();
     assert!(
         row.starts_with(&format!("{INITIAL_BRANCH} (")) && row.ends_with("as its lock records it"),
@@ -154,6 +155,11 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
     .unwrap();
     let list_after_tamper = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(
+        stdout(&list_after_tamper).starts_with("✓ packs · 1 installed · 1 thing worth a look\n"),
+        "a pack that no longer matches its lock is worth a look: {}",
+        stdout(&list_after_tamper)
+    );
+    assert!(
         yunta_testkit::checked(&stdout(&list_after_tamper), "acme/review-pack")
             .unwrap_or_default()
             .contains("modified: its files no longer match its lock"),
@@ -168,7 +174,7 @@ fn list_with_nothing_installed_says_so_without_erroring() {
     let out = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(
-        stdout(&out).contains("no packs installed"),
+        stdout(&out).contains("packs · none installed"),
         "{}",
         stdout(&out)
     );
@@ -210,8 +216,7 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
     );
     assert!(update_out.status.success(), "{}", stderr(&update_out));
     assert!(
-        ["->", "→"].iter().any(|arrow| stdout(&update_out)
-            .contains(&format!("updated acme/review-pack {arrow} v2.0.0"))),
+        stdout(&update_out).contains("pack acme/review-pack · updated · to v2.0.0"),
         "{}",
         stdout(&update_out)
     );
@@ -251,6 +256,11 @@ fn remove_deletes_the_vendored_tree_and_the_lock_entry() {
 
     let remove_out = yunta_in!(&repo, &home, &["pack", "remove", "acme/review-pack"]);
     assert!(remove_out.status.success(), "{}", stderr(&remove_out));
+    assert!(
+        stdout(&remove_out).starts_with("✓ pack acme/review-pack · removed\n"),
+        "{}",
+        stdout(&remove_out)
+    );
 
     assert!(!repo.join(".yunta/packs/acme/review-pack").exists());
     let lock: yunta_core::yaml::Value =
@@ -377,7 +387,7 @@ fn add_never_executes_before_confirmation() {
         stderr(&confirmed)
     );
     assert!(
-        stdout(&confirmed).contains("tests: 1 case, 0 failed"),
+        stdout(&confirmed).contains("tests        1 case, 0 failed"),
         "{}",
         stdout(&confirmed)
     );
@@ -412,7 +422,7 @@ fn add_runs_the_packs_tests_only_when_asked() {
         "tests ran without `--run-tests`"
     );
     assert!(
-        stdout(&out).contains("tests: 1 case shipped, not run (pass --run-tests)"),
+        stdout(&out).contains("tests        1 case shipped, not run (pass --run-tests)"),
         "{}",
         stdout(&out)
     );
@@ -555,6 +565,14 @@ fn pack_new_produces_a_pack_that_passes_check_and_test() {
     let (_root, _upstream, repo, home) = setup();
     let out = yunta_in!(&repo, &home, &["pack", "new", "acme/demo"]);
     assert!(out.status.success(), "pack new failed: {}", stderr(&out));
+    let page = stdout(&out);
+    assert!(page.starts_with("✓ pack acme/demo · written\n"), "{page}");
+    assert!(
+        page.lines()
+            .any(|line| line.trim_start().starts_with("tests ")
+                && line.trim_end().ends_with("1 case, 0 failed")),
+        "the scaffold's own case ran and held: {page}"
+    );
 
     let pack = repo.join("demo");
     assert!(pack.join("pack.yaml").is_file(), "pack.yaml is written");

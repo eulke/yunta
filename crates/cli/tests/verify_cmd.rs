@@ -86,7 +86,7 @@ fn a_corrupt_object_is_reported_beside_an_intact_chain() {
     );
     assert_eq!(
         checked(&text, "objects").as_deref(),
-        Some("intact — 1 artifact verified"),
+        Some("intact: 1 artifact verified"),
         "the objects are their own report: {text}"
     );
 

@@ -65,7 +65,6 @@ mod spec;
 pub mod step;
 mod tasks;
 pub mod template;
-pub mod text;
 pub mod units;
 pub mod workflow;
 pub mod yaml;
@@ -79,8 +78,8 @@ pub use config::{
     ForgeConfig, GitHubForgeConfig, HomeExpansionError, Isolation, LimitsConfig, McpServerConfig,
     NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
     PoolConfig, PricingEntry, ProcessSecrets, ProjectConfig, PublisherPermissions, Redactor,
-    RunnerCandidate, SecretSource, ShortSecret, SkillsConfig, StorageConfig, MIN_SECRET_CHARS,
-    REDACTED,
+    RunnerCandidate, SecretSource, ShortSecret, SkillsConfig, StorageConfig, TerminalConfig,
+    MIN_SECRET_CHARS, REDACTED,
 };
 pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
 pub use diagnostic::{
@@ -133,7 +132,7 @@ pub use workflow::{
     KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact,
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
     NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
-    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownArtifactKind,
+    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownDocument,
     Workflow, WorkflowFault, ARTIFACTS_DIR, OBJECTS_DIR,
 };
 

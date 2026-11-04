@@ -201,7 +201,7 @@ pub fn run(mode: Mode) -> Result<(), String> {
             Ok(())
         }
         Mode::Check => Err(format!(
-            "`{}` differs from what the decision files say — run `cargo xtask adr`",
+            "`{}` differs from what the decision files say: run `cargo xtask adr`",
             register_path.display()
         )),
     }

@@ -6,6 +6,7 @@ pub mod kinds;
 pub mod ledger;
 pub mod note;
 pub mod payloads;
+pub mod tool_action;
 
 pub use kinds::SessionEvent;
 pub use ledger::*;

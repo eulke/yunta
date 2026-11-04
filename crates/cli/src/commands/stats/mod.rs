@@ -9,7 +9,8 @@
 //! words and glyphs all come from `crate::render`, which is where both
 //! rules live.
 
-mod json;
+mod facts;
+pub(crate) mod json;
 mod run;
 mod time;
 mod workflow;
@@ -19,19 +20,21 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{PauseReason, StoredEvent};
-use yunta_core::{Manifest, ModeName, RunId, Workflow, WorkflowName};
+use yunta_core::{Clock, Manifest, ModeName, RunId, Workflow, WorkflowName};
 use yunta_engine::{
     compute_run_stats_of, prior_estimation, run_summary, PriorEstimation, RunFrame, RunPhase,
     RunSummary, VerificationFindings, WaitingOn,
 };
 
+use crate::commands::advice;
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::output::{emit, Answer, Mode};
-use crate::render::doc::Doc;
-use crate::render::{duration, Look, Tokens};
 use json::{RunStatsJson, WorkflowHistoryJson};
 use run::RunStatsPage;
+use surco::doc::{Depth, Doc};
+use surco::figures::{duration, Tokens};
+use surco::look::Look;
 pub(crate) use workflow::verification_findings;
 use workflow::WorkflowPage;
 
@@ -40,18 +43,21 @@ use workflow::WorkflowPage;
 pub async fn stats(
     run_id: Option<&RunId>,
     workflow: Option<&WorkflowName>,
+    depth: Depth,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     match (run_id, workflow) {
-        (Some(run_id), None) => stats_run(run_id, output, look).await,
+        (Some(run_id), None) => stats_run(run_id, depth, output, look).await,
         (None, Some(workflow)) => stats_workflow(workflow, output, look).await,
-        (None, None) => Err(CliError::msg(
-            "`yunta stats` needs a run id or `--workflow <name>`",
-        )),
-        (Some(_), Some(_)) => Err(CliError::msg(
-            "`yunta stats` takes a run id or `--workflow <name>`, not both",
-        )),
+        (None, None) => Err(CliError::msg(format!(
+            "`{}` needs a run id or `--workflow <name>`",
+            advice::stats()
+        ))),
+        (Some(_), Some(_)) => Err(CliError::msg(format!(
+            "`{}` takes a run id or `--workflow <name>`, not both",
+            advice::stats()
+        ))),
     }
 }
 
@@ -77,7 +83,7 @@ fn currency_line(
     let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
     Some(format!(
         "~{estimate:.2} (avg of {}, never authoritative)",
-        yunta_core::text::counted(pricing.len(), "priced model")
+        surco::text::counted(pricing.len(), "priced model")
     ))
 }
 
@@ -92,7 +98,7 @@ struct RunStatsAnswer<'a> {
 }
 
 impl Answer for RunStatsAnswer<'_> {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+    fn document(&self, look: &Look) -> Doc {
         self.page.document(look)
     }
 
@@ -101,24 +107,39 @@ impl Answer for RunStatsAnswer<'_> {
     }
 }
 
-async fn stats_run(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+async fn stats_run(
+    run_id: &RunId,
+    depth: Depth,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let open = ctx.open_run(run_id).await?;
     let events = open.events;
     let manifest = open.manifest.doc;
 
     let state = yunta_engine::derive(&events);
-    let run_stats = compute_run_stats_of(&manifest.workflow, &state);
+    // The page reads the run at one instant, its headline's: a run still
+    // going counts the wait or the work open now.
+    let now = ctx.clock.now();
+    let run_stats = compute_run_stats_of(&manifest.workflow, &state, Some(now));
     let mode = state.run.mode().as_str();
     let pricing = ctx.project.config.pricing.clone();
+    let frame = yunta_engine::run_frame_of(
+        run_id,
+        &manifest.workflow,
+        &state,
+        None,
+        &crate::render::engine(&open.run_dir, now),
+        now,
+    );
     let answer = RunStatsAnswer {
         json: RunStatsJson::from(run_id, mode, &run_stats, pricing.as_ref()),
         page: RunStatsPage {
-            run_id,
-            mode,
+            frame: &frame,
             stats: &run_stats,
-            state: &state,
             pricing: pricing.as_ref(),
+            depth,
         },
     };
     emit(output, &answer, look)
@@ -135,7 +156,7 @@ struct WorkflowAnswer<'a> {
 }
 
 impl Answer for WorkflowAnswer<'_> {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+    fn document(&self, look: &Look) -> Doc {
         self.page.document(look)
     }
 
@@ -177,7 +198,7 @@ async fn stats_workflow(
 fn findings_of(opened: &[Opened]) -> Option<VerificationFindings> {
     // Needs the raw per-run logs `RunSummary` doesn't keep, and the
     // workflow shape those runs actually exercised to match
-    // criteria/re-routes/gates against.
+    // criteria/reroutes/gates against.
     let (raw_history, workflow) = raw_history(opened);
     workflow.map(|wf| yunta_engine::analyze_verification_effectiveness(&wf, &raw_history))
 }
@@ -307,7 +328,7 @@ pub(crate) fn raw_history(history: &[Opened]) -> (Vec<Vec<StoredEvent>>, Option<
 /// so the three surfaces never phrase the same numbers differently.
 pub(crate) fn format_estimation_line(
     estimation: &yunta_engine::PriorEstimation,
-    glyphs: crate::render::Glyphs,
+    glyphs: surco::glyphs::Glyphs,
 ) -> String {
     let sep = glyphs.sep();
     let wall_clock = match estimation.wall_clock_secs {
@@ -316,7 +337,7 @@ pub(crate) fn format_estimation_line(
     };
     format!(
         "{} {sep} median {}, p90 {} {sep} median wall-clock {}",
-        yunta_core::text::counted(estimation.sample_count, "past run"),
+        surco::text::counted(estimation.sample_count, "past run"),
         Tokens::rounded(estimation.tokens.median),
         Tokens::rounded(estimation.tokens.p90).figure(),
         wall_clock,

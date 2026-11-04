@@ -3,10 +3,12 @@ number: D225
 title: "A gate published to a forge asks its question, says how a review answers it, and asks again after changes"
 status: revised
 revises: [D66]
-revised_by: [D227]
+revised_by: [D227, D272]
 ---
 
 # D225 — A gate published to a forge asks its question, says how a review answers it, and asks again after changes
+
+*(Revised by D272: the pull request is titled by the change its plan names, its description is the gate's page within the forge's limit and is drawn again on every lap, its files go in a folder of the run's on the branch, and closing it pauses the run as `abort` does.)*
 
 ## Context
 

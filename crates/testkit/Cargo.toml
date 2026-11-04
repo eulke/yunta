@@ -19,6 +19,8 @@ doctest = false
 workspace = true
 
 [dependencies]
+# Reads what a run drew as the screen a person sees.
+vt100 = "0.16"
 yunta-core = { workspace = true, features = ["testkit"] }
 # The clocks, the id source and the capturing writer live one layer
 # down, with the crates that have no run to build.
@@ -28,6 +30,8 @@ yunta-adapters.workspace = true
 # The run bench drives the real engine against the mock adapter, so a run
 # can be exercised end to end from a workflow + fixture pair.
 yunta-engine.workspace = true
+# A frame a surface test builds carries the word its run and nodes stand at.
+yunta-surco.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
 # Benches parse workflow/config/fixture YAML literals the tests write.

@@ -84,6 +84,12 @@ fn titled(mut schema: Schema, title: &str) -> Schema {
     schema
 }
 
+/// The published JSON Schema of a workflow, as the repository keeps it:
+/// the committed bytes, as [`json`] gives a document's.
+pub fn workflow_json() -> &'static str {
+    include_str!("../schemas/workflow.json")
+}
+
 /// The published JSON Schema of one interpreted document, as the
 /// repository keeps it.
 ///

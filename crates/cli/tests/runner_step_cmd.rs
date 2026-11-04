@@ -45,7 +45,7 @@ fn init_ends_with_the_runner_step() {
     assert!(
         said.contains("this machine answers for `claude-code`")
             && said.contains(SNIPPET_LINE)
-            && said.contains("      runner: implementer"),
+            && said.contains("    runner: implementer"),
         "{said}"
     );
 }
@@ -119,12 +119,23 @@ fn doctor_only_cautions_about_an_unset_forge_token_when_no_workflow_opens_a_pull
         stdout(&doctor),
         stderr(&doctor)
     );
+    let text = stdout(&doctor);
     assert!(
-        checked(&stdout(&doctor), "forge").is_some_and(|said| {
-            said.contains("`YUNTA_TEST_ABSENT_TOKEN`, the variable its token is in, is not set")
-        }),
-        "{}",
-        stdout(&doctor)
+        checked(&text, "forge").is_some_and(|said| said.ends_with(
+            "`YUNTA_TEST_ABSENT_TOKEN`, the variable its token is in, is not set, and no workflow \
+             here opens a pull request"
+        )),
+        "{text}"
+    );
+    assert_eq!(
+        yunta_testkit::hung(&text, "forge", "so").as_deref(),
+        Some("a gate published there asks on the console instead"),
+        "{text}"
+    );
+    assert_eq!(
+        yunta_testkit::hung(&text, "forge", "fix").as_deref(),
+        Some("export YUNTA_TEST_ABSENT_TOKEN to reach it"),
+        "{text}"
     );
 
     let shipping = project(&root.join("shipping"))
@@ -146,7 +157,8 @@ fn doctor_lists_every_check_with_its_mark() {
     let checkout = project(&root)
         .config(FORGE)
         .file(".yunta/workflows/wf.yaml", AGENT_WORKFLOW);
-    let doctor = yunta_at!(&checkout, &["doctor"]);
+    // A check that holds has a row of its own only on the whole list.
+    let doctor = yunta_at!(&checkout, &["doctor", "--full"]);
     let text = stdout(&doctor);
     let mark = |subject: &str| {
         text.lines().find_map(|line| {
@@ -159,11 +171,11 @@ fn doctor_lists_every_check_with_its_mark() {
     // that stops a run.
     assert!(matches!(mark("git").as_deref(), Some("✓" | "+")), "{text}");
     assert!(
-        matches!(mark("forge").as_deref(), Some("▲" | "!")),
+        matches!(mark("forge").as_deref(), Some("▲" | "^")),
         "{text}"
     );
     assert!(
-        matches!(mark("runners").as_deref(), Some("✗" | "x")),
+        matches!(mark("runners").as_deref(), Some("✗" | "!")),
         "{text}"
     );
     assert!(!doctor.status.success(), "{text}");

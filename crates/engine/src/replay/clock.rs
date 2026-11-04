@@ -13,18 +13,28 @@
 //! A person is being asked from the `asking_opened` the engine writes when
 //! it begins asking until the answer the asking ends with — a gate
 //! resolved, questions answered — or the invocation stops asking: the run
-//! pauses, finishes, or wakes again. Two tasks of a loop working at once
-//! share their stretches, and each stretch counts once, under the first
+//! pauses, finishes, or wakes again. A run parked on a person's answer waits
+//! on them until it wakes; a stop a person made and a wait a clock ends are
+//! parked, since nobody owes those an answer. Two tasks of a loop working at
+//! once share their stretches, and each stretch counts once, under the first
 //! bucket of [`TimeSpent`] that it fits.
+//!
+//! A person's time is also credited to each node a person was asked about
+//! across a stretch: the gate that asks, or the node whose questions or
+//! published gate a person answers elsewhere. Two nodes asked at once each
+//! wait the whole stretch, as two nodes of a group each work theirs, while
+//! the run counts it once.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{
-    CriterionResult, CriterionType, EventPayload, GateLedger, NodeEvent, NodeLedger, Phase,
-    RunEvent, RunLedger, RunPhaseRaw, SessionEvent, StoredEvent, Suspensions, TaskEvent,
+    CriterionResult, CriterionType, EventPayload, GateLedger, NodeEvent, NodeLedger, PauseReason,
+    Phase, RunEvent, RunLedger, RunPhaseRaw, SessionEvent, StoredEvent, Suspensions, TaskEvent,
     TaskLedger,
 };
+use yunta_core::NodeId;
 
 /// A run's wall-clock, by what it was spent on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -49,7 +59,8 @@ pub struct TimeSpent {
     /// Sessions cut off from their service, waiting for it to answer,
     /// with nothing else at work.
     pub offline: Duration,
-    /// Parked between a pause and the wake that followed it.
+    /// Parked between a pause and the wake that followed it, with nobody
+    /// owing it an answer: a stop a person made, a limit's reset.
     pub parked: Duration,
     /// Nothing open: the engine between one step and the next.
     pub between: Duration,
@@ -78,6 +89,9 @@ pub struct Timeline {
     /// The stretches booked so far, by bucket. Write-formatting time is
     /// not in here: it leaves `working` when the clock is read.
     booked: TimeSpent,
+    /// The person's time booked so far, credited to each node a person was
+    /// asked about across each stretch.
+    people_at: BTreeMap<NodeId, Duration>,
     /// How long sessions waited while what they wrote was formatted.
     formatted: Duration,
 }
@@ -103,12 +117,17 @@ impl Timeline {
     /// Books the stretch that ends at `event`, classified by what `open`
     /// holds: the ledgers as they stand before `event` is applied. This runs
     /// before any ledger reads the payload, so a kind this binary does not
-    /// know still books its stretch.
+    /// know still books its stretch. A person's stretch is credited to each
+    /// node a person was asked about across it.
     pub(crate) fn book(&mut self, event: &StoredEvent, open: &Open, asleep: &Suspensions) {
         match self.last_at {
             Some(previous) => {
                 let stretch = asleep.awake_between(previous, event.timestamp);
-                *self.booked.slot(open, event) += stretch;
+                let share = Share::closing(open, event);
+                *self.booked.slot(share) += stretch;
+                if share == Share::People {
+                    credit(&mut self.people_at, open, stretch);
+                }
             }
             None => self.first_at = Some(event.timestamp),
         }
@@ -129,28 +148,52 @@ impl Timeline {
     ) -> TimeSpent {
         let mut spent = self.booked;
         if let (Some(last), Some(until)) = (self.last_at, until) {
-            *spent.slot_open(open) += asleep.awake_between(last, until);
+            *spent.slot(Share::across(open)) += asleep.awake_between(last, until);
         }
         let rails = self.formatted.min(spent.working);
         spent.rails = rails;
         spent.working -= rails;
         spent
     }
+
+    /// Each node's share of a person's time up to `until`, booked as
+    /// [`spent`](Timeline::spent) books the run's: the stretches booked so
+    /// far, and the stretch from the last applied event to `until` when a
+    /// person is asked across it.
+    pub(crate) fn people_at(
+        &self,
+        open: &Open,
+        asleep: &Suspensions,
+        until: Option<DateTime<Utc>>,
+    ) -> BTreeMap<NodeId, Duration> {
+        let mut people = self.people_at.clone();
+        if let (Some(last), Some(until)) = (self.last_at, until) {
+            if Share::across(open) == Share::People {
+                credit(&mut people, open, asleep.awake_between(last, until));
+            }
+        }
+        people
+    }
 }
 
 /// What the ledgers hold open at the moment a stretch closes, read before
 /// the event that closes it is applied.
 pub(crate) struct Open {
-    /// Parked between a pause and the wake that followed it.
+    /// Parked between a pause and the wake that followed it, with nobody
+    /// owing it an answer.
     paused: bool,
     /// Some node has an attempt open.
     attempting: bool,
     /// Some node is cut off from its service, and every open attempt
     /// belongs to a node that is.
     attempts_offline: bool,
-    /// A person is being asked something, or a node waits on a question
-    /// a person answers elsewhere.
+    /// A person is being asked something, a node waits on a question a
+    /// person answers elsewhere, or the run is parked on a person's answer.
     people: bool,
+    /// The nodes a person is asked about: a gate asking, or a node whose
+    /// questions or published gate a person answers elsewhere. A run-level
+    /// ask names none.
+    asked: BTreeSet<NodeId>,
     /// A check of a task's tree is running.
     checking: bool,
 }
@@ -163,11 +206,23 @@ impl Open {
         gates: &GateLedger,
         tasks: &TaskLedger,
     ) -> Self {
+        let owed = run
+            .paused()
+            .map(|(pause, _)| pause)
+            .filter(|pause| pause.waits_on_a_person());
         Open {
-            paused: matches!(run.phase(), RunPhaseRaw::Paused),
+            paused: matches!(run.phase(), RunPhaseRaw::Paused) && owed.is_none(),
             attempting: nodes.attempting(),
             attempts_offline: nodes.attempts_offline(),
-            people: !gates.asking().is_empty() || !gates.awaiting().is_empty(),
+            people: owed.is_some() || !gates.asking().is_empty() || !gates.awaiting().is_empty(),
+            asked: gates
+                .asking()
+                .iter()
+                .flatten()
+                .chain(gates.awaiting())
+                .chain(owed.and_then(PauseReason::gate))
+                .cloned()
+                .collect(),
             checking: !tasks.checking().is_empty(),
         }
     }
@@ -178,28 +233,64 @@ impl Open {
     }
 }
 
-impl TimeSpent {
+/// The share of [`TimeSpent`] a stretch is booked under: one for each
+/// bucket a stretch can fill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Share {
+    Working,
+    Checks,
+    Measuring,
+    People,
+    Offline,
+    Parked,
+    Between,
+}
+
+impl Share {
     /// The share of the stretch that ends at `closing`.
-    fn slot(&mut self, open: &Open, closing: &StoredEvent) -> &mut Duration {
+    fn closing(open: &Open, closing: &StoredEvent) -> Self {
         if open.nothing_running() && is_measurement(closing) {
-            return &mut self.measuring;
+            return Share::Measuring;
         }
         if !open.paused && !open.checking && is_check(closing) {
-            return &mut self.checks;
+            return Share::Checks;
         }
-        self.slot_open(open)
+        Share::across(open)
     }
 
     /// The share a stretch belongs to by what is open across it.
-    fn slot_open(&mut self, open: &Open) -> &mut Duration {
+    fn across(open: &Open) -> Self {
         match () {
-            _ if open.paused => &mut self.parked,
-            _ if open.people => &mut self.people,
-            _ if open.checking => &mut self.checks,
-            _ if open.attempts_offline => &mut self.offline,
-            _ if open.attempting => &mut self.working,
-            _ => &mut self.between,
+            _ if open.paused => Share::Parked,
+            _ if open.people => Share::People,
+            _ if open.checking => Share::Checks,
+            _ if open.attempts_offline => Share::Offline,
+            _ if open.attempting => Share::Working,
+            _ => Share::Between,
         }
+    }
+}
+
+impl TimeSpent {
+    /// The bucket `share` books into.
+    fn slot(&mut self, share: Share) -> &mut Duration {
+        match share {
+            Share::Working => &mut self.working,
+            Share::Checks => &mut self.checks,
+            Share::Measuring => &mut self.measuring,
+            Share::People => &mut self.people,
+            Share::Offline => &mut self.offline,
+            Share::Parked => &mut self.parked,
+            Share::Between => &mut self.between,
+        }
+    }
+}
+
+/// Credits `stretch` of a person's time to each node a person was asked
+/// about across it.
+fn credit(people: &mut BTreeMap<NodeId, Duration>, open: &Open, stretch: Duration) {
+    for node in &open.asked {
+        *people.entry(node.clone()).or_default() += stretch;
     }
 }
 

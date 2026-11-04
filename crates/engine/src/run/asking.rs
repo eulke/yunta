@@ -25,17 +25,30 @@ impl RunCtx<'_> {
     ) -> Result<Option<HumanChoice>, RunError> {
         // A plan is shown as the run judges it — with what a person
         // accepted departing from it and the suite the run measured,
-        // which only the log holds.
+        // which only the log holds. What the run changed is the log's too:
+        // a gate's page says it while the count stands on the tree the run
+        // stands on.
+        let state = self.run_view().await?.state;
         let shown = match escalation.shows().is_empty() {
             true => Vec::new(),
             false => {
-                let state = self.run_view().await?.state;
-                crate::artifacts::shown::documents(self.run_dir, escalation.shows(), &state).await?
+                crate::artifacts::shown::documents(
+                    self.run_dir,
+                    escalation.shows(),
+                    &state,
+                    self.manifest.request(),
+                )
+                .await?
             }
         };
         let asking = crate::Asking {
             shown: &shown,
             run: self.run_id,
+            changed: state.current_change(),
+            workflow: &self.manifest.workflow,
+            left_out: state.run.left_out(),
+            node,
+            mode: state.run.mode(),
         };
         let answered = {
             let _asking = self.asking(node, task).await?;

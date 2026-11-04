@@ -62,7 +62,8 @@ fn add_shows_the_full_inventory_before_vendoring() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.lines().any(|l| l == "pack acme/review-pack @ 1.0.0"),
+        text.lines()
+            .any(|l| l == "● pack acme/review-pack · installing · 1.0.0"),
         "{text}"
     );
     assert!(text.lines().any(|l| l == "    node `noop` bash"), "{text}");
@@ -82,7 +83,10 @@ fn add_shows_the_full_inventory_before_vendoring() {
         text.contains("Line two, still here, not summarized."),
         "{text}"
     );
-    assert!(text.lines().any(|l| l == "tests: none shipped"), "{text}");
+    assert!(
+        text.lines().any(|l| l == "  tests        none shipped"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -97,7 +101,8 @@ fn audit_on_demand_reports_the_same_inventory_for_an_installed_pack() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.lines().any(|l| l == "pack acme/review-pack @ 1.0.0"),
+        text.lines()
+            .any(|l| l == "✓ pack acme/review-pack · audited · 1.0.0"),
         "{text}"
     );
     assert!(
@@ -119,4 +124,26 @@ fn audit_on_an_uninstalled_pack_is_refused() {
     let out = yunta_in!(&repo, &home, &["pack", "audit", "acme/review-pack"]);
     assert!(!out.status.success());
     assert!(stderr(&out).contains("isn't installed"), "{}", stderr(&out));
+}
+
+/// A workflow of a pack that does not read is told problem by problem, each at its place,
+/// as `yunta check` tells it: a person auditing a pack reads what is wrong and where.
+#[test]
+fn a_workflow_that_does_not_read_is_told_problem_by_problem() {
+    let (root, upstream, home) = setup();
+    std::fs::write(
+        upstream.join("workflows/review.yaml"),
+        "name: review\nnodes:\n  - id: one\n    kind: bash\n    run: \"true\"\n    \
+         depend_on: []\n",
+    )
+    .unwrap();
+    git(&upstream, &["add", "."]);
+    git(&upstream, &["commit", "-q", "-m", "a slip"]);
+    let repo = root.path().join("repo");
+
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let page = format!("{}{}", stdout(&out), stderr(&out));
+    assert!(page.contains("unknown key `depend_on`"), "{page}");
+    assert!(page.contains("workflows/review.yaml:6:"), "{page}");
+    assert!(page.contains("did you mean `depends_on`?"), "{page}");
 }

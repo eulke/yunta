@@ -83,7 +83,7 @@ async fn a_tool_use_block_maps_to_tool_use_digesting_its_target() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target }
+        AgentEvent::ToolUse { name, target, .. }
             if name == "Edit" && target.display() == Some("src/lib.rs")
     )));
 }

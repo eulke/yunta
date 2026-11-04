@@ -2,12 +2,12 @@
 //! directory its worktrees share, its remotes and branches, who commits in
 //! it, and the files a commit holds that name a word.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use yunta_core::RunId;
 
-use super::{change, exit_error, lossy, read, run, Effect, GitError};
+use super::{change, exit_error, lossy, read, run, split_once, Effect, GitError};
 use crate::process::Supervision;
 
 /// The git directory every worktree of the repository at `repo` shares,
@@ -25,33 +25,78 @@ pub async fn common_dir(repo: &Path, sup: Supervision<'_>) -> Result<PathBuf, Gi
     Ok(tokio::fs::canonicalize(&dir).await.unwrap_or(dir))
 }
 
-/// The files `commit` holds, among those `pathspec` selects, that name `word`
-/// as a whole word. Finding none is an empty list: git answers that with
-/// exit 1 and nothing on stderr.
-pub async fn files_naming(
+/// The files `commit` holds that name each of `words` as a whole word, by
+/// word, among the files `globs` select from the top of the repository:
+/// one `git grep` however many words. Every file is searched as text,
+/// whatever its attributes say of it, and one with a NUL in it is named
+/// too: what reads the files tells code from bytes. Paths are the
+/// repository's, wherever in it `dir` stands. A word no file names is left
+/// out; git answers a search that finds nothing with exit 1 and nothing on
+/// stderr.
+///
+/// What git prints is read the same whatever the person's settings say:
+/// no color, no line or column numbers, paths from the top, and no file of
+/// a submodule.
+pub async fn words_in(
     dir: &Path,
     commit: &str,
-    word: &str,
-    pathspec: &str,
+    words: &[&str],
+    globs: &[String],
     sup: Supervision<'_>,
-) -> Result<Vec<String>, GitError> {
-    let args = [
-        "grep", "-l", "-z", "-w", "-F", "-e", word, commit, "--", pathspec,
+) -> Result<BTreeMap<String, BTreeSet<String>>, GitError> {
+    // With no word git would read the commit as its pattern, and with no
+    // glob it would search every file: neither asks a question.
+    if words.is_empty() || globs.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut args = vec![
+        "grep",
+        "--no-color",
+        "--no-column",
+        "--no-line-number",
+        "--full-name",
+        "--no-recurse-submodules",
+        "-a",
+        "-o",
+        "-z",
+        "-w",
+        "-F",
     ];
+    for word in words {
+        args.extend(["-e", *word]);
+    }
+    let selected: Vec<String> = globs.iter().map(|glob| format!(":(top){glob}")).collect();
+    args.extend([commit, "--"]);
+    args.extend(selected.iter().map(String::as_str));
     let output = run(dir, &args, sup).await?;
     if output.status.code() == Some(1) && output.stderr.is_empty() {
-        return Ok(Vec::new());
+        return Ok(BTreeMap::new());
     }
     if !output.status.success() {
         return Err(exit_error(dir, &args, &output));
     }
-    let listed = lossy(&output.stdout);
+    Ok(by_word(&output.stdout, commit))
+}
+
+/// What a `grep -a -o -z` printed, by word. Each match is one record, a
+/// binary file's too: the path git names under `<commit>:`, up to a NUL,
+/// then the word it matched, up to the line break that ends the record. A
+/// path is read to its NUL, so one that holds a line break is read whole.
+fn by_word(printed: &[u8], commit: &str) -> BTreeMap<String, BTreeSet<String>> {
     let prefix = format!("{commit}:");
-    Ok(listed
-        .split('\0')
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| entry.strip_prefix(&prefix).unwrap_or(entry).to_string())
-        .collect())
+    let mut named: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut rest = printed;
+    while let Some((name, after)) = split_once(rest, 0) {
+        let (word, after) = split_once(after, b'\n').unwrap_or((after, &[]));
+        let name = lossy(name);
+        let path = name.strip_prefix(&prefix).unwrap_or(&name);
+        named
+            .entry(lossy(word))
+            .or_default()
+            .insert(path.to_string());
+        rest = after;
+    }
+    named
 }
 
 /// Who a commit made in `repo` is by — `Name <email>`, as git resolves its

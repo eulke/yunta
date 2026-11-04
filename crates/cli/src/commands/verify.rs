@@ -13,6 +13,10 @@
 //! alone — so each answers on its own line, and either one failing is a
 //! failing verdict.
 
+use surco::components::{Check, Checklist, Fix, Found, Headline};
+use surco::doc::Doc;
+use surco::glyphs::Mark;
+use surco::look::Look;
 use yunta_core::events::FindingCause;
 use yunta_core::RunId;
 use yunta_engine::{ArtifactIntegrity, StoreError};
@@ -22,9 +26,6 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use crate::render::blocks::{Check, Checklist, Found, Headline};
-use crate::render::doc::Doc;
-use crate::render::{Look, Mark};
 
 pub async fn verify(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -45,31 +46,42 @@ pub(crate) struct VerifyAnswer {
     schema_version: u32,
     run_id: RunId,
     holds: bool,
+    /// The word the headline says: `intact` when every check holds, `broken` otherwise.
+    word: &'static str,
     checks: Vec<CheckRow>,
 }
 
 impl VerifyAnswer {
     fn of(run_id: &RunId, checks: &Checklist) -> Self {
+        let holds = checks.holds();
         Self {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.clone(),
-            holds: checks.holds(),
+            holds,
+            word: word_of(holds),
             checks: checks.checks().map(CheckRow::of).collect(),
         }
     }
 }
 
+/// The word a verdict says: `intact` when every check holds, `broken` when one does not.
+fn word_of(holds: bool) -> &'static str {
+    match holds {
+        true => "intact",
+        false => "broken",
+    }
+}
+
 impl Answer for VerifyAnswer {
-    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
-        let (mark, said) = match self.holds {
-            true => (Mark::Done, "intact"),
-            false => (Mark::Failed, "broken"),
+    fn document(&self, _look: &Look) -> Doc {
+        let mark = match self.holds {
+            true => Mark::Done,
+            false => Mark::Failed,
         };
-        let headline = Headline {
-            subject: format!("run {}", self.run_id.handle()),
-            mark,
-            said: said.to_string(),
-        };
+        let headline = tallied(
+            Headline::new(mark, format!("run {}", self.run_id.handle()), self.word),
+            &self.checks,
+        );
         Doc::new().with(headline).with(checklist(&self.checks))
     }
 
@@ -81,14 +93,28 @@ impl Answer for VerifyAnswer {
     }
 }
 
-/// One check as a document carries it: what it found, what it checked,
-/// and what it found there.
+/// `headline` with how many of `checks` are problems and how many are
+/// worth a look.
+pub(crate) fn tallied(headline: Headline, checks: &[CheckRow]) -> Headline {
+    let count = |found: Found| checks.iter().filter(|check| check.found == found).count();
+    headline.tally(count(Found::Problem), count(Found::Caution))
+}
+
+/// One check as a document carries it: everything a [`Check`] holds but
+/// the lines under its row, what names it in a fold only for the page.
 #[derive(serde::Serialize)]
 pub(crate) struct CheckRow {
     #[serde(serialize_with = "found_word")]
     pub(crate) found: Found,
     pub(crate) subject: String,
     pub(crate) said: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) so: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fix: Option<Fix>,
+    /// What names the check where the checks that hold fold into one row.
+    #[serde(skip)]
+    pub(crate) brief: Option<String>,
 }
 
 impl CheckRow {
@@ -97,6 +123,19 @@ impl CheckRow {
             found: check.found,
             subject: check.subject.clone(),
             said: check.said.clone(),
+            so: check.so.clone(),
+            fix: check.fix.clone(),
+            brief: check.brief.clone(),
+        }
+    }
+
+    /// The check this row carries.
+    fn check(&self) -> Check {
+        Check {
+            so: self.so.clone(),
+            fix: self.fix.clone(),
+            brief: self.brief.clone(),
+            ..Check::new(self.found, self.subject.as_str(), self.said.as_str())
         }
     }
 }
@@ -104,9 +143,7 @@ impl CheckRow {
 /// The rows a document carries, drawn as the checklist a reader sees.
 pub(crate) fn checklist(rows: &[CheckRow]) -> Checklist {
     let mut checklist = Checklist::default();
-    for row in rows {
-        checklist.push(row.found, row.subject.as_str(), row.said.as_str());
-    }
+    checklist.extend(rows.iter().map(CheckRow::check));
     checklist
 }
 
@@ -126,17 +163,14 @@ fn chain(run_id: &RunId, storage: &Storage, checks: &mut Checklist) -> Result<()
         ChainVerification::Intact { events } => checks.push(
             Found::Holds,
             "chain",
-            format!(
-                "intact — {} verified",
-                yunta_core::text::counted(events, "event")
-            ),
+            format!("intact: {} verified", surco::text::counted(events, "event")),
         ),
         // A broken chain is the `broken` reading of the run: the log can
         // no longer be trusted from this point on.
         ChainVerification::Broken { seq, detail } => checks.push(
             Found::Problem,
             "chain",
-            format!("broken at seq {seq} — {detail}"),
+            format!("broken at seq {seq}: {detail}"),
         ),
     }
     Ok(())
@@ -155,7 +189,7 @@ async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage, checks: &mut 
             Found::Caution,
             "objects",
             format!(
-                "not checked — no run directory under {} (or the default state root), so the \
+                "not checked: no run directory under {} (or the default state root), so the \
                  bytes its log names are not here to read",
                 ctx.project.runs_root.display()
             ),
@@ -172,7 +206,7 @@ async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage, checks: &mut 
                 Found::Problem,
                 "objects",
                 format!(
-                    "not checked — the log does not read back as events, so nothing names \
+                    "not checked: the log does not read back as events, so nothing names \
                      them: {error}"
                 ),
             );
@@ -190,8 +224,8 @@ fn report(integrity: &ArtifactIntegrity, checks: &mut Checklist) {
             Found::Holds,
             "objects",
             format!(
-                "intact — {} verified",
-                yunta_core::text::counted(integrity.verified, "artifact")
+                "intact: {} verified",
+                surco::text::counted(integrity.verified, "artifact")
             ),
         ),
         false => {
@@ -199,12 +233,9 @@ fn report(integrity: &ArtifactIntegrity, checks: &mut Checklist) {
                 Found::Problem,
                 "objects",
                 format!(
-                    "broken — {} of {} are not the bytes the run accepted",
+                    "broken: {} of {} are not the bytes the run accepted",
                     integrity.faults.len(),
-                    yunta_core::text::counted(
-                        integrity.verified + integrity.faults.len(),
-                        "artifact"
-                    )
+                    surco::text::counted(integrity.verified + integrity.faults.len(), "artifact")
                 ),
             );
             for fault in &integrity.faults {
@@ -242,18 +273,19 @@ fn fault_said(error: &StoreError) -> String {
 #[cfg(test)]
 mod tests {
     use super::{checklist, CheckRow};
-    use crate::render::blocks::{Checklist, Found};
-    use crate::render::doc::Doc;
-    use crate::render::{draw, Look};
+    use crate::render::draw;
+    use surco::components::{Checklist, Found};
+    use surco::doc::Doc;
+    use surco::look::Look;
 
     #[test]
     fn a_rebuilt_checklist_draws_as_the_one_it_came_from() {
         let mut checks = Checklist::default();
-        checks.push(Found::Holds, "chain", "intact — 3 events verified");
+        checks.push(Found::Holds, "chain", "intact: 3 events verified");
         checks.push(
             Found::Problem,
             "objects",
-            "broken — 1 of 2 are not the bytes the run accepted",
+            "broken: 1 of 2 are not the bytes the run accepted",
         );
         let rows: Vec<CheckRow> = checks.checks().map(CheckRow::of).collect();
         let look = Look::plain();
@@ -265,11 +297,11 @@ mod tests {
 
     #[test]
     fn a_check_names_what_it_found_as_a_word() {
-        let row = CheckRow {
-            found: Found::NotApplicable,
-            subject: "chain".to_string(),
-            said: "nothing to check".to_string(),
-        };
+        let row = CheckRow::of(&surco::components::Check::new(
+            Found::NotApplicable,
+            "chain",
+            "nothing to check",
+        ));
         let json = serde_json::to_value(&row).expect("a check serializes");
         assert_eq!(json["found"], "not_applicable");
     }

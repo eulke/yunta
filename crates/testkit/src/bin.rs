@@ -58,6 +58,10 @@ pub fn hermetic<C: Spawning>(cmd: &mut C, dir: &Path, home: &Path) {
         "VTE_VERSION",
         "KITTY_WINDOW_ID",
         "WT_SESSION",
+        "COLORTERM",
+        "COLORFGBG",
+        "YUNTA_LOOK",
+        "YUNTA_MOTION",
     ] {
         cmd.drops(name);
     }
@@ -137,6 +141,12 @@ pub fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// What `text` says with every run of whitespace one space: a page's
+/// sentences read whole, wherever the width it was drawn at wrapped them.
+pub fn unwrapped(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// The checkouts of every project's pool under the state root `home`: the
 /// checkouts runs worked in, wherever the pool put them.
 pub fn pool_checkouts(home: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -181,12 +191,6 @@ pub fn run_id_from(output: &Output) -> String {
                 stderr(output)
             )
         })
-}
-
-/// The same, from output a test collected some other way — a log file
-/// the command was spawned onto.
-pub fn run_id_in(text: &str) -> String {
-    find_run_id(text).unwrap_or_else(|| panic!("no `run <id>:` line in output:\n{text}"))
 }
 
 /// What every line a person reads calls the run whose id is `id`.
@@ -236,9 +240,60 @@ pub fn checked(text: &str, subject: &str) -> Option<String> {
     checks(text, subject).into_iter().next()
 }
 
+/// What the `label` under the first checklist row about `subject` in
+/// `text` says (`so`, what the finding means; `fix`, how to make it hold),
+/// with the lines its sentence wraps onto, joined with single spaces; never
+/// the lines to paste under a fix. `None` when that row has none.
+pub fn hung(text: &str, subject: &str, label: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let (at, depth) = lines.iter().enumerate().find_map(|(at, row)| {
+        let trimmed = row.trim_start();
+        let (mark, rest) = trimmed.split_once(' ')?;
+        (mark.chars().count() == 1 && rest.starts_with(subject))
+            .then(|| (at, row.len() - trimmed.len()))
+    })?;
+    let under = lines
+        .iter()
+        .skip(at + 1)
+        .take_while(|line| indent(line) > depth);
+    let mut from = under.skip_while(|line| !labeled(line, depth, label));
+    let head = from.next()?;
+    let after = head.trim_start().strip_prefix(label)?;
+    // What the label says goes on at the column it starts at; deeper are
+    // the lines to paste, and shallower what comes next.
+    let column = head.len() - after.trim_start().len();
+    let wrapped = from.take_while(|line| indent(line) == column && !line.trim().is_empty());
+    Some(
+        std::iter::once(after)
+            .chain(wrapped.copied())
+            .flat_map(str::split_whitespace)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+/// How far in `line` starts.
+fn indent(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+/// Whether `line` is the `label` hanging under a checklist row at `depth`.
+fn labeled(line: &str, depth: usize, label: &str) -> bool {
+    indent(line) == depth + 2 && line.trim_start().starts_with(&format!("{label} "))
+}
+
+/// Whether `line` is a label hanging under a checklist row at `depth`:
+/// what the finding means, or how to make it hold.
+fn hangs_a_label(line: &str, depth: usize) -> bool {
+    ["so", "fix"]
+        .iter()
+        .any(|label| labeled(line, depth, label))
+}
+
 /// What every checklist row about `subject` in `text` says, in order: a
 /// row whose mark is followed by `subject`, and the lines it wraps onto,
-/// joined with single spaces.
+/// joined with single spaces. What hangs under the row beside a label is
+/// not what the row says.
 pub fn checks(text: &str, subject: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     let mut found = Vec::new();
@@ -258,7 +313,7 @@ pub fn checks(text: &str, subject: &str) -> Vec<String> {
             .iter()
             .skip(at + 1)
             .take_while(|line| {
-                !line.trim().is_empty() && line.len() - line.trim_start().len() > depth
+                !line.trim().is_empty() && indent(line) > depth && !hangs_a_label(line, depth)
             })
             .copied();
         found.push(

@@ -7,7 +7,7 @@
 //! followed a run on a terminal and a reader who read the same run out
 //! of a CI log met the same sentences.
 //!
-//! Every state word comes from `render::state::NodeDisplay`, every
+//! Every state word comes from `yunta_render::state::NodeDisplay`, every
 //! run or child close from `view::closed_as`, every capability from
 //! `Capability::as_str`. Nothing here formats a domain type with
 //! `Debug`: a reader is owed a word, not a Rust identifier.
@@ -17,18 +17,22 @@ mod capability_words;
 mod format_words;
 mod rail_words;
 mod scope_words;
+mod task_words;
 mod words;
 
+use surco::text::one_line;
 use yunta_core::events::{children, findings, gates, node, run, session};
-use yunta_core::text::{aside, one_line};
 use yunta_engine::{Happening, Moment};
 
 use super::view;
 use crate::commands::advice;
-use crate::render::blocks::{Drawn, FailureDetail, Whole};
-use crate::render::ink::{Line, Tone};
-use crate::render::{indent, Glyphs, Look, Mark, CHILD_DEPTH};
+use surco::components::Whole;
+use surco::glyphs::{Glyphs, Mark};
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::width::{indent, CHILD_DEPTH};
 use words::carried;
+use yunta_render::blocks::FailureDetail;
 
 /// One moment as a surface says it, before any layout decides where it
 /// goes.
@@ -46,11 +50,83 @@ pub(super) fn say(moment: &Moment, glyphs: Glyphs) -> Said {
         Some(node) => node.to_string(),
         None => "run".to_string(),
     };
-    let (mark, carried) = carried(&moment.happening, glyphs.sep());
-    Said {
-        mark,
-        text: aside(subject, &one_line(&carried)),
+    let (mark, carried) = carried(&moment.happening, glyphs);
+    let text = joined(
+        &subject,
+        &one_line(&carried),
+        of_its_subject(&moment.happening),
+    );
+    Said { mark, text }
+}
+
+/// The subject and its words as one line: what the subject did or became
+/// reads after it as a sentence (`lint failed`), a remark about it after a
+/// colon (`lint: called Read`), and words that open by naming the subject
+/// name it once (`approve needs a decision`, not `approve gate `approve`
+/// needs a decision`).
+fn joined(subject: &str, carried: &str, predicate: bool) -> String {
+    if carried.is_empty() {
+        return subject.to_string();
     }
+    if let Some(rest) = naming(subject, carried) {
+        return format!("{subject} {rest}");
+    }
+    match predicate {
+        true => format!("{subject} {carried}"),
+        false => format!("{subject}: {carried}"),
+    }
+}
+
+/// What follows the subject in words that open by naming it: `gate
+/// `approve` …` for `approve`, `run `01K…` …` for the run.
+fn naming<'a>(subject: &str, carried: &'a str) -> Option<&'a str> {
+    if subject == "run" {
+        let (_, rest) = carried.strip_prefix("run `")?.split_once("` ")?;
+        return Some(rest);
+    }
+    ["node", "gate", "loop", "task"]
+        .iter()
+        .find_map(|kind| carried.strip_prefix(format!("{kind} `{subject}` ").as_str()))
+}
+
+/// Whether the moment's words say what its subject did or became: a run's
+/// own moments, a node reaching a state, rerouted or opening its pull
+/// request, and what a gate asks and is answered. The rest are remarks
+/// about the subject.
+fn of_its_subject(happening: &Happening) -> bool {
+    match happening {
+        Happening::Run(
+            run::happening::Happening::HostSuspended { .. }
+            | run::happening::Happening::BaselineCaptured { .. }
+            | run::happening::Happening::BaselineHeld { .. }
+            | run::happening::Happening::ChangesCounted { .. },
+        ) => false,
+        Happening::Run(_) => true,
+        Happening::Node(
+            node::happening::Happening::Reached { .. }
+            | node::happening::Happening::Rerouted(_)
+            | node::happening::Happening::PullRequestOpened { .. },
+        ) => true,
+        Happening::Gates(gates::happening::Happening::Resolved(_)) => false,
+        Happening::Gates(_) => true,
+        _ => false,
+    }
+}
+
+/// Whether this moment says anything of its own. A node a person's choice sends back records
+/// a failure on the log, since that is what reroutes it, and it is no failure: the reroute
+/// that follows says where the choice sent the run, with what the person wrote.
+pub(super) fn says_anything(happening: &Happening) -> bool {
+    !matches!(
+        happening,
+        Happening::Node(node::happening::Happening::Reached {
+            state: yunta_core::events::NodeState::Failed {
+                failure: yunta_core::events::Failure::GateChose { .. },
+                ..
+            },
+            ..
+        })
+    )
 }
 
 /// Whether a terminal a person is watching keeps this above its region.
@@ -69,7 +145,8 @@ pub(super) fn kept(happening: &Happening) -> bool {
         | Happening::Run(run::happening::Happening::HostSuspended { .. }) => true,
         Happening::Run(_) => false,
         Happening::Node(node::happening::Happening::Reached { state, .. }) => {
-            !matches!(state, yunta_core::events::NodeState::Running { .. })
+            says_anything(happening)
+                && !matches!(state, yunta_core::events::NodeState::Running { .. })
         }
         Happening::Node(node::happening::Happening::Rerouted(_)) => true,
         Happening::Node(_) => false,
@@ -160,7 +237,7 @@ pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
             None => advice::status(run),
         })
     });
-    FailureDetail { failure, whole }.lines(look)
+    crate::render::blocks_lines(&FailureDetail { failure, whole }.blocks(), look)
 }
 
 #[cfg(test)]

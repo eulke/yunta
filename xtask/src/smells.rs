@@ -1,14 +1,13 @@
-//! `cargo xtask smells [--check]` — the smell ratchet.
+//! `cargo xtask smells [--check]`: the smell ratchet.
 //!
-//! The audit that this repository's rebuild answered measured a set of
-//! patterns (unwrap outside tests, `Result<_, String>`, wall-clock reads,
-//! git runners, discarded results, oversized files and functions, copied
-//! test helpers). Each is now at or near zero, held there by typed errors,
-//! injected clocks, one git module, and a shared test crate. This ratchet
-//! keeps them there: it counts every pattern against a committed baseline
-//! and, under `--check`, fails naming any count that rose. A number can
-//! only ever go down — the day one does, the baseline moves with it in the
-//! same change.
+//! It counts a set of patterns (unwrap outside tests, `Result<_, String>`,
+//! wall-clock reads, git runners, discarded results, oversized files and
+//! functions, copied test helpers). Each is at or near zero, held there by
+//! typed errors, injected clocks, one git module, and a shared test crate.
+//! The ratchet keeps them there: it counts every pattern against a
+//! committed baseline and, under `--check`, fails naming any count that
+//! rose. A number can only ever go down; the day one does, the baseline
+//! moves with it in the same change.
 //!
 //! Beside them it counts the rules this repository states about itself:
 //! the words it retired, the tense its texts are written in, the sites
@@ -16,18 +15,18 @@
 //! its code names, and a threshold with no reason written beside it. A
 //! rule nothing measures is a rule a change is free to break.
 //!
-//! Counting is line-based (a line matching the pattern), the same measure
-//! the rebuild's own acceptance commands used, so a contributor and CI see
-//! the same number `grep -c` would.
+//! Counting is line-based (a line matching the pattern), so a contributor
+//! and CI see the same number `grep -c` would.
 
 mod cli;
 mod corpus;
 mod disk;
+mod language;
 mod prose;
 mod references;
-mod scan;
 mod shape;
 mod sites;
+mod strings;
 mod thresholds;
 
 use std::collections::BTreeMap;
@@ -36,11 +35,8 @@ use yunta_core::durable::{self, Durability};
 
 use corpus::{crate_src_dirs, crate_test_dirs, is_test_source, rs_files, Corpus};
 use disk::{count_engine_fs_outside_runtime, count_sync_fs_in_async, discarded_results};
-use scan::blanked_lines;
-use shape::{
-    functions_over, has_debug_format, has_inner_space_run, has_parenthesized_plural,
-    production_only,
-};
+use shape::{code_lines, functions_over, production_only};
+use strings::string_counts;
 use thresholds::numeric_consts_without_reason;
 
 /// Where the committed baseline lives, next to this crate.
@@ -78,10 +74,14 @@ fn measure() -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     code_counts(&corpus, &mut counts);
     string_counts(&corpus, &mut counts);
-    text_counts(&root, &corpus, &mut counts);
+    text_counts(&root, &mut counts);
     test_counts(&corpus, &mut counts);
     // The counters that read one question each, from the tree they name.
-    for (name, count) in COUNTERS.iter().chain(sites::COUNTERS) {
+    for (name, count) in COUNTERS
+        .iter()
+        .chain(sites::COUNTERS)
+        .chain(language::COUNTERS)
+    {
         counts.insert((*name).to_string(), count(&root));
     }
     counts
@@ -132,78 +132,9 @@ fn code_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
     );
 }
 
-/// The counters over the text a production string carries: its spacing, its
-/// plurals and the values it formats with `Debug`.
-fn string_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
-    // A run of spaces inside a message is a `\` continuation that went
-    // missing: the reader gets the source's indentation in the text.
-    counts.insert(
-        "space_runs_in_prod_strings".to_string(),
-        corpus
-            .prod
-            .iter()
-            .flat_map(|text| text.lines())
-            .filter(|line| has_inner_space_run(line))
-            .count(),
-    );
-    // A count hedged with `(s)` while its number stands beside it: the
-    // message says `3 file(s)` where it knows to say `3 files`.
-    counts.insert(
-        "parenthesized_plural_in_prod_strings".to_string(),
-        corpus
-            .prod
-            .iter()
-            .flat_map(|text| text.lines())
-            .filter(|line| has_parenthesized_plural(line))
-            .count(),
-    );
-    // A value formatted with `Debug` in text a reader is told. Counted over
-    // the crates that ship: a test-support crate talks to the one who wrote
-    // the code.
-    counts.insert(
-        "debug_format_reaching_reader".to_string(),
-        corpus
-            .src
-            .iter()
-            .filter(|path| {
-                let shown = path.to_string_lossy();
-                !shown.contains("crates/testkit") && !is_test_source(path)
-            })
-            .map(|path| read_corpus(path))
-            .map(|text| {
-                production_only(&text)
-                    .lines()
-                    .filter(|line| has_debug_format(line))
-                    .count()
-            })
-            .sum(),
-    );
-}
-
-/// The counters over the text a reader is shown: the glyphs a line is drawn
-/// with, a ledger's fold, and the words and tense the repository states.
-fn text_counts(root: &Path, corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
-    // A glyph that says how a line reads — the separator between two facts,
-    // the mark of a line that goes on — written as a literal: a surface
-    // drawing with the ASCII set prints it nonetheless, where the glyph set would
-    // have printed what that terminal can draw.
-    counts.insert(
-        "separator_literal_outside_glyphs".to_string(),
-        corpus
-            .drawn
-            .iter()
-            .filter(|path| !path.ends_with("render/src/glyphs.rs") && !is_test_source(path))
-            .map(|path| read_corpus(path))
-            .map(|text| {
-                production_only(&text)
-                    .lines()
-                    .filter(|line| {
-                        !line.trim_start().starts_with("//") && line.contains(['·', '↪'])
-                    })
-                    .count()
-            })
-            .sum(),
-    );
+/// The counters over the text a reader is shown: a ledger's fold, and the
+/// words and tense the repository states.
+fn text_counts(root: &Path, counts: &mut BTreeMap<String, usize>) {
     // A `_ =>` inside a ledger's fold is a kind that derives nothing with
     // nothing saying so: the arm exists, the reader sees no diagnostic, and
     // the state is simply wrong. Every kind is named, and one that moves
@@ -344,7 +275,7 @@ fn wildcards_in_apply(source: &str) -> usize {
     let mut count = 0;
     let mut depth = 0usize;
     let mut inside = false;
-    for code in blanked_lines(source) {
+    for code in code_lines(source) {
         if !inside && code.contains("fn apply") {
             inside = true;
             depth = 0;
@@ -381,7 +312,7 @@ pub fn check() -> Result<(), String> {
     let path = baseline_path();
     let baseline = parse_baseline(&std::fs::read_to_string(&path).map_err(|e| {
         format!(
-            "cannot read `{}` — run `cargo xtask smells`: {e}",
+            "cannot read `{}`; run `cargo xtask smells`: {e}",
             path.display()
         )
     })?);
@@ -399,7 +330,7 @@ pub fn check() -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "these smell counts rose above `{}` — fix them, or lower the baseline in the same \
+        "these smell counts rose above `{}`; fix them, or lower the baseline in the same \
          change if the rise is deliberate:\n{}",
         path.display(),
         risen.join("\n")
@@ -425,7 +356,11 @@ mod tests {
         "git_command_outside_git_rs",
         "reason_built_by_format",
         "run_tool_named_outside_vocabulary",
-        "separator_literal_outside_glyphs",
+        "glyph_literal_outside_glyphs",
+        "command_outside_advice",
+        "state_phrase_outside_words",
+        "look_inside_a_block",
+        "dash_in_prod_strings",
         "sleep_outside_mock_latency",
         "src_files_over_500_lines",
         "prod_fns_over_100_lines",
@@ -458,7 +393,7 @@ mod tests {
         let held: Vec<&String> = baseline.keys().collect();
         assert_eq!(
             measured, held,
-            "a counter enters with the number it measures when it lands — one with no line in \
+            "a counter enters with the number it measures when it lands: one with no line in \
              the baseline gates nothing, and a line with no counter gates a pattern nobody reads"
         );
     }

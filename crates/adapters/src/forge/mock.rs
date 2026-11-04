@@ -1,13 +1,14 @@
 //! `MockForge`: a fixture-driven `Forge` double the engine's own tests
 //! exercise the full gate state machine against — publish, poll,
-//! approve, request changes, close, merge, and push a commit after
-//! approval — all in-memory, no network, under the same rules as the
-//! GitHub forge: a gate keeps the open PR that carries its run marker,
-//! and a closed or merged PR is never reused. Shared via
-//! [`MockForgeState`] so a test can hold one handle to drive "what
-//! person B does on the forge" while a completely separate
-//! `execute_run` call (simulating "person A's machine, a later
-//! `resume`") polls the same state through the ordinary `Forge` trait.
+//! approve, request changes, close, reopen, merge, and push a commit
+//! after approval — all in-memory, no network, under the same rules as
+//! the GitHub forge: a gate keeps the open PR that carries its run
+//! marker, and a closed or merged PR is never reused, unless a person
+//! reopens a closed one. Shared via [`MockForgeState`] so a test can
+//! hold one handle to drive "what person B does on the forge" while a
+//! completely separate `execute_run` call (simulating "person A's
+//! machine, a later `resume`") polls the same state through the
+//! ordinary `Forge` trait.
 
 // A test double whose state lives behind a `Mutex`: the lock is only
 // ever poisoned by a test that already panicked while holding it, so a
@@ -85,17 +86,44 @@ struct Inner {
     rate_limit: Option<Duration>,
 }
 
+/// A full git commit id is a 20-byte SHA-1, which hex-encodes to the 40
+/// digits git prints and a forge reports.
+const COMMIT_ID_BYTES: usize = 20;
+
 impl Inner {
     /// The run's newest PR — what a person acts on.
     fn latest_for(&mut self, run_id: &str) -> Option<&mut MockPr> {
         self.prs.iter_mut().rev().find(|pr| pr.run_id == run_id)
     }
 
-    /// Mints the next commit id — a real hex id, as git would print one,
-    /// so nothing downstream can tell a fixture from a forge.
+    /// The run's newest PR, unless a merge has landed on it: a merge is final,
+    /// so a review, a close, a reopen, a further merge or a commit never reaches
+    /// a merged PR.
+    fn latest_unmerged_for(&mut self, run_id: &str) -> Option<&mut MockPr> {
+        self.latest_for(run_id)
+            .filter(|pr| !matches!(pr.review, Review::Merged { .. }))
+    }
+
+    /// The merge commit the run's newest PR landed with, once a merge has landed on it.
+    fn merge_commit_for(&self, run_id: &str) -> Option<CommitSha> {
+        let newest = self.prs.iter().rev().find(|pr| pr.run_id == run_id)?;
+        match &newest.review {
+            Review::Merged { merge_sha, .. } => Some(merge_sha.clone()),
+            _ => None,
+        }
+    }
+
+    /// Mints the next commit id, as git would print one: the number of ids
+    /// minted so far, written as the 40 lowercase hex digits of a full id,
+    /// so no two ids match.
     fn fresh_sha(&mut self) -> CommitSha {
         self.next_sha += 1;
-        CommitSha::from_bytes(&self.next_sha.to_be_bytes())
+        let counter = self.next_sha.to_be_bytes();
+        let mut id = [0u8; COMMIT_ID_BYTES];
+        for (slot, byte) in id.iter_mut().rev().zip(counter.iter().rev()) {
+            *slot = *byte;
+        }
+        CommitSha::from_bytes(&id)
     }
 }
 
@@ -118,10 +146,11 @@ impl MockForgeState {
 
     /// Person B approves — no Yunta involved on their end, just this
     /// call standing in for "clicked Approve in the forge's own UI".
-    /// The approval covers whatever the PR's head is *right now*.
+    /// The approval covers whatever the PR's head is *right now*; a merged
+    /// PR stays merged.
     pub fn approve(&self, run_id: &str, by: &Responder) {
         let mut inner = self.0.lock().unwrap();
-        if let Some(pr) = inner.latest_for(run_id) {
+        if let Some(pr) = inner.latest_unmerged_for(run_id) {
             pr.review = Review::Approved {
                 by: by.clone(),
                 reviewed_sha: pr.head_sha.clone(),
@@ -129,9 +158,10 @@ impl MockForgeState {
         }
     }
 
+    /// Person B asks for changes with `comments` on the PR; a merged PR stays merged.
     pub fn request_changes(&self, run_id: &str, by: &Responder, comments: Vec<ReviewComment>) {
         let mut inner = self.0.lock().unwrap();
-        if let Some(pr) = inner.latest_for(run_id) {
+        if let Some(pr) = inner.latest_unmerged_for(run_id) {
             pr.review = Review::ChangesRequested {
                 by: by.clone(),
                 reviewed_sha: pr.head_sha.clone(),
@@ -140,20 +170,40 @@ impl MockForgeState {
         }
     }
 
-    /// Person B closes the PR without merging.
+    /// Person B closes the PR without merging; a merged PR stays merged.
     pub fn close(&self, run_id: &str) {
         let mut inner = self.0.lock().unwrap();
-        if let Some(pr) = inner.latest_for(run_id) {
+        if let Some(pr) = inner.latest_unmerged_for(run_id) {
             pr.open = false;
             pr.review = Review::Closed;
         }
     }
 
-    /// Person B merges the PR; returns the merge commit.
+    /// Puts the newest pull request of `run_id` back up for a review, as a
+    /// person reopening it does: a closed pull request that was not merged is
+    /// open again and waits for a review. An open pull request keeps its
+    /// review, since only a closed one can be reopened, and a merged one stays
+    /// merged, since a merge is final.
+    pub fn reopen(&self, run_id: &str) {
+        let mut inner = self.0.lock().unwrap();
+        let Some(pr) = inner.latest_unmerged_for(run_id) else {
+            return;
+        };
+        if !pr.open {
+            pr.open = true;
+            pr.review = Review::Pending;
+        }
+    }
+
+    /// Person B merges the PR; returns the merge commit. A merge is final, so a
+    /// merged PR answers with the merge commit it already landed with.
     pub fn merge(&self, run_id: &str, by: &Responder) -> CommitSha {
         let mut inner = self.0.lock().unwrap();
+        if let Some(merged) = inner.merge_commit_for(run_id) {
+            return merged;
+        }
         let merge_sha = inner.fresh_sha();
-        if let Some(pr) = inner.latest_for(run_id) {
+        if let Some(pr) = inner.latest_unmerged_for(run_id) {
             pr.open = false;
             pr.review = Review::Merged {
                 by: by.clone(),
@@ -169,11 +219,12 @@ impl MockForgeState {
     /// now differs from the new `head_sha`; the engine (not this mock,
     /// not `GitHubForge`) is what compares the two and decides the
     /// approval no longer covers the current code, detecting the drift
-    /// by SHA.
+    /// by SHA. A merged PR keeps the head it merged with: the commit lands on
+    /// the branch, and the pull request does not follow it.
     pub fn push_commit(&self, run_id: &str) -> CommitSha {
         let mut inner = self.0.lock().unwrap();
         let sha = inner.fresh_sha();
-        if let Some(pr) = inner.latest_for(run_id) {
+        if let Some(pr) = inner.latest_unmerged_for(run_id) {
             pr.head_sha = sha.clone();
         }
         sha
@@ -240,8 +291,20 @@ impl MockForge {
         }
     }
 
+    /// Draws pull request `number` again with `title` and `body`, as a
+    /// reused gate's page is drawn on every lap. A body is not a commit, so
+    /// the head stays where it is.
+    fn redraw(&self, number: u64, title: &str, body: &str) {
+        let mut inner = self.state.0.lock().unwrap();
+        if let Some(pr) = inner.prs.iter_mut().find(|pr| pr.number == number) {
+            pr.title = title.to_string();
+            pr.body = body.to_string();
+        }
+    }
+
     /// The open pull request `run_id` has on `head`, or a new one saying
-    /// `title` and `body` — the rule the GitHub forge follows too.
+    /// `title` and `body` — the rule the GitHub forge follows too. Answers
+    /// with the pull request, and whether it reused an open one.
     fn open_or_reuse(
         &self,
         run_id: &str,
@@ -249,17 +312,18 @@ impl MockForge {
         base: &str,
         title: &str,
         body: &str,
-    ) -> PullRequestRef {
+    ) -> (PullRequestRef, bool) {
         let mut inner = self.state.0.lock().unwrap();
         let existing = inner
             .prs
             .iter()
             .find(|pr| pr.open && pr.branch == head && pr.run_id == run_id);
         if let Some(existing) = existing {
-            return PullRequestRef {
+            let found = PullRequestRef {
                 url: existing.url.clone(),
                 number: existing.number,
             };
+            return (found, true);
         }
         inner.next_number += 1;
         let number = inner.next_number;
@@ -278,7 +342,7 @@ impl MockForge {
             review: Review::Pending,
             files: BTreeMap::new(),
         });
-        PullRequestRef { url, number }
+        (PullRequestRef { url, number }, false)
     }
 }
 
@@ -287,13 +351,20 @@ impl Forge for MockForge {
     async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError> {
         // Titled, written and committed the one way every forge does it,
         // so a test reads what a reviewer reads.
-        let published = self.open_or_reuse(
+        let title = super::gate_title(req);
+        let body = super::gate_body(req, &*self.spell)?;
+        let (published, reused) = self.open_or_reuse(
             req.run_id.as_str(),
             &req.branch,
             &req.base_branch,
-            &super::gate_title(req),
-            &super::gate_body(req, &*self.spell),
+            &title,
+            &body,
         );
+        if reused {
+            // A gate's page is drawn again on every lap, so a reused pull
+            // request says what this lap draws.
+            self.redraw(published.number, &title, &body);
+        }
         self.commit(published.number, super::gate_files(req, &*self.spell));
         Ok(published)
     }
@@ -310,9 +381,11 @@ impl Forge for MockForge {
             });
         }
         // The body a forge's page would show, composed the one way every
-        // forge composes it, so a test reads what a reviewer reads.
+        // forge composes it, so a test reads what a reviewer reads. A reused
+        // pull request keeps what it opened with: only `publish` draws again.
         let body = super::pull_request_body(req, &*self.spell);
-        Ok(self.open_or_reuse(&req.run_id, &req.head, &req.base, &req.title, &body))
+        let (opened, _) = self.open_or_reuse(&req.run_id, &req.head, &req.base, &req.title, &body);
+        Ok(opened)
     }
 
     async fn probe(&self) -> Result<ForgeProbe, ForgeError> {

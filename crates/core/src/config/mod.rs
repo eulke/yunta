@@ -43,7 +43,7 @@ pub use sections::{
     is_default_isolation, AdapterSettings, BaselineConfig, CoverageConfig, DefaultOnFailure,
     DefaultsConfig, ExecutorKind, ExecutorRegistration, ForgeConfig, FormatRule, GitHubForgeConfig,
     Isolation, LimitsConfig, McpServerConfig, PathsConfig, PricingEntry, ProjectConfig,
-    RunnerCandidate, SkillsConfig, StorageConfig,
+    RunnerCandidate, SkillsConfig, StorageConfig, TerminalConfig,
 };
 
 /// One config layer as parsed from a single file (project/user/org), and
@@ -97,6 +97,9 @@ pub struct ConfigLayer {
     pub permissions: Option<PermissionsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<LimitsConfig>,
+    /// `terminal:` — how a live view speaks to the terminal it runs on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<TerminalConfig>,
     /// `pricing:` — `{model: cost_per_1k_tokens}`, an
     /// optional currency conversion `yunta stats` and the receipt add
     /// *alongside* their token figures, never in place of them. Absent
@@ -276,7 +279,7 @@ impl ConfigLayer {
     }
 
     /// `defaults.on_failure`, with the schema's own default (`pause`)
-    /// applied — what a failed node with no `on_failure:` re-route of its
+    /// applied — what a failed node with no `on_failure:` reroute of its
     /// own does to the run: `pause` freezes it resumable, `abort` closes
     /// it failed at once, `continue` skips the failed node's dependents
     /// and closes failed once the rest of the graph has run.
@@ -339,5 +342,14 @@ impl ConfigLayer {
             .as_ref()
             .and_then(|limits| limits.inline_context_bytes)
             .unwrap_or(32_000)
+    }
+
+    /// `terminal.bell`: whether a run that asks its person something rings. Off
+    /// unless set.
+    pub fn terminal_bell(&self) -> bool {
+        self.terminal
+            .as_ref()
+            .and_then(|terminal| terminal.bell)
+            .unwrap_or(false)
     }
 }

@@ -22,6 +22,13 @@ pub struct Location {
     pub len: usize,
 }
 
+impl Location {
+    /// Where it is, as a line of text says it after a sentence.
+    pub fn in_words(&self) -> String {
+        format!(" at line {} column {}", self.line, self.col)
+    }
+}
+
 /// One step from a value to one inside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
@@ -39,6 +46,15 @@ pub enum Step {
 /// Where a value is inside a document, from its root.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Pointer(Vec<Step>);
+
+/// A key a reader read as another: the mapping at `at` writes `written`,
+/// and the reader took it to mean `meant`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadAs {
+    pub at: Pointer,
+    pub written: String,
+    pub meant: String,
+}
 
 impl Pointer {
     /// The document's root.
@@ -175,6 +191,25 @@ impl SourceMap {
         None
     }
 
+    /// This map with each key of `read_as` found under the key it was
+    /// read as: a pointer to what a reader meant names what the text
+    /// writes.
+    pub fn reading(mut self, read_as: &[ReadAs]) -> Self {
+        for read in read_as {
+            let Some(Placed {
+                value: Tree::Mapping(entries),
+                ..
+            }) = self.find_mut(&read.at)
+            else {
+                continue;
+            };
+            if let Some(entry) = entries.iter_mut().find(|entry| entry.key == read.written) {
+                entry.key = read.meant.clone();
+            }
+        }
+        self
+    }
+
     /// The keys of the mapping `pointer` names, each with where it is
     /// written, in the order the text has them.
     pub fn keys_at(&self, pointer: &Pointer) -> Vec<(String, Location)> {
@@ -192,6 +227,23 @@ impl SourceMap {
             .steps()
             .iter()
             .try_fold(self.root.as_ref()?, |placed, step| step_into(placed, step))
+    }
+
+    /// The value `pointer` names, through its keys and positions only.
+    fn find_mut(&mut self, pointer: &Pointer) -> Option<&mut Placed> {
+        pointer
+            .steps()
+            .iter()
+            .try_fold(self.root.as_mut()?, |placed, step| {
+                match (&mut placed.value, step) {
+                    (Tree::Mapping(entries), Step::Key(key)) => entries
+                        .iter_mut()
+                        .find(|entry| &entry.key == key)
+                        .map(|entry| &mut entry.value),
+                    (Tree::Sequence(items), Step::Index(index)) => items.get_mut(*index),
+                    _ => None,
+                }
+            })
     }
 }
 
@@ -369,6 +421,23 @@ mod tests {
             at(9, 18, 4)
         );
         assert_eq!(Pointer::parse_path("."), Pointer::root());
+    }
+
+    #[test]
+    fn a_key_read_as_another_is_found_under_the_one_meant() {
+        let map = SourceMap::read("nodes:\n  - id: a\n    depend_on: [b]\n").reading(&[ReadAs {
+            at: Pointer::root().key("nodes").index(0),
+            written: "depend_on".to_string(),
+            meant: "depends_on".to_string(),
+        }]);
+        let at = map.place(
+            &Pointer::root()
+                .key("nodes")
+                .index(0)
+                .key("depends_on")
+                .index(0),
+        );
+        assert_eq!(at.map(|at| (at.line, at.col)), Some((3, 17)));
     }
 
     #[test]

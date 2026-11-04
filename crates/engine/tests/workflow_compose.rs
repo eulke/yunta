@@ -625,7 +625,7 @@ nodes:
     kind: workflow
     use: promotable
 "#;
-    // The child starts in `alpha` (the floor), exhausts its re-route,
+    // The child starts in `alpha` (the floor), exhausts its reroute,
     // and the scripted human promotes — the parent must then create and
     // drive the successor child (`beta`) instead of failing the node.
     let RunReport { terminal, state } = bench

@@ -1,10 +1,11 @@
 //! See [`super`]. One family of workflow-check rules.
 
-use super::capabilities::{all_known_hold, candidate_adapters};
-use super::*;
 use yunta_core::events::ArtifactId;
 use yunta_core::port::PermissionProfile;
 use yunta_core::AdapterId;
+
+use super::capabilities::{all_known_hold, candidate_adapters};
+use super::*;
 
 /// Config `defaults:` values that only `check` can catch before a run:
 /// a `max_parallel_nodes` of zero (which would schedule nothing), and a
@@ -307,6 +308,6 @@ pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Ve
 /// The runner `config` defines that `runner` most likely misspells.
 pub(crate) fn near_runner(config: &ConfigLayer, runner: &RunnerName) -> Option<String> {
     let defined = config.runners.as_ref()?;
-    yunta_core::text::nearest(runner.as_str(), defined.keys().map(RunnerName::as_str))
+    surco::text::nearest(runner.as_str(), defined.keys().map(RunnerName::as_str))
         .map(str::to_string)
 }

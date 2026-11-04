@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use surco::look::Look;
 use yunta_core::{AdapterId, Isolation, ModeName, Pid, RunId};
 use yunta_engine::process::Supervision;
 use yunta_engine::FrozenRun;
@@ -16,7 +17,6 @@ use crate::commands::{spawn_detached_resume, started, DetachedResumeError};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::Mode;
-use crate::render::Look;
 
 /// What a detached start needs to reach a run of its own: the same
 /// workflow reference, inputs and overrides every run resolves, plus how

@@ -3,10 +3,11 @@
 
 use std::fmt;
 
+use surco::figures::Tokens;
 use yunta_core::events::{Spend, TokenUsage};
-use yunta_core::units::Tokens;
 
-/// A count read as its breakdown: `1.86M in / 20.2k out (9k cached)`.
+/// A count read as its breakdown: `1.86M in / 20.2k out (9k cached)`. A cache
+/// that served nothing is no part of it.
 pub struct Breakdown<'a>(pub &'a TokenUsage);
 
 impl fmt::Display for Breakdown<'_> {
@@ -19,6 +20,7 @@ impl fmt::Display for Breakdown<'_> {
         )?;
         self.0
             .cached
+            .filter(|cached| *cached > 0)
             .map_or(Ok(()), |c| write!(f, " ({} cached)", Tokens(c).figure()))
     }
 }
@@ -69,6 +71,21 @@ mod tests {
         assert_eq!(
             Breakdown(&cached).to_string(),
             "1.86M in / 20.2k out (9k cached)"
+        );
+    }
+
+    /// A cache that served nothing is no part of the breakdown: a count that
+    /// reports zero cached tokens names no cache.
+    #[test]
+    fn breakdown_names_no_cache_that_served_nothing() {
+        let served_nothing = TokenUsage {
+            input: 1_860_000,
+            output: 20_200,
+            cached: Some(0),
+        };
+        assert_eq!(
+            Breakdown(&served_nothing).to_string(),
+            "1.86M in / 20.2k out"
         );
     }
 

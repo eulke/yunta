@@ -1,6 +1,7 @@
 //! Whether the run's tree moved since a node's failure left it: the answer
 //! a failure's menu reads for its `tree_moved` fact.
 
+use yunta_core::events::ChangesCountedPayload;
 use yunta_core::{NodeId, Seq, TreeId};
 
 use super::RunState;
@@ -17,6 +18,18 @@ impl RunState {
             .into_iter()
             .chain(self.run.woke_on())
             .max_by_key(|(seq, _)| *seq)
+    }
+
+    /// The run's change as git last counted it, while that count stands on
+    /// the run's newest tree: a count a newer tree has left behind says
+    /// nothing of the run as it stands, and reads as none. A count with no
+    /// tree recorded after it stands.
+    pub fn current_change(&self) -> Option<&ChangesCountedPayload> {
+        let counted = self.run.changes()?;
+        match self.newest_tree(|_| true) {
+            Some((_, tree)) if tree != &counted.tree => None,
+            _ => Some(counted),
+        }
     }
 
     /// Whether the run's tree moved since `node`'s latest failure left it.
@@ -38,8 +51,9 @@ impl RunState {
 mod tests {
     use chrono::DateTime;
     use yunta_core::events::{
-        EventBody, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeFinishedPayload,
-        NodeOutcome, NodeStartedPayload, RunEvent, RunResumedPayload, StoredEvent, TokenUsage,
+        ChangesCountedPayload, EventBody, EventPayload, Failure, NodeEvent, NodeFailedPayload,
+        NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RunEvent, RunResumedPayload,
+        StoredEvent, TokenUsage,
     };
     use yunta_core::{NodeId, Seq, TreeId};
 
@@ -90,6 +104,19 @@ mod tests {
     fn wake_found(tree: &str) -> (Option<&'static str>, EventPayload) {
         let wake = RunResumedPayload::new(Vec::new(), None).finding(tree.parse().unwrap());
         (None, EventPayload::Run(RunEvent::Resumed(wake)))
+    }
+
+    /// The count git gives for the run's change on `tree`: 9 files, with 412
+    /// lines in and 87 out.
+    fn changes_counted(tree: &str) -> (Option<&'static str>, EventPayload) {
+        let change = ChangesCountedPayload {
+            tree: tree.parse().unwrap(),
+            files: 9,
+            added: 412,
+            removed: 87,
+            largest: Vec::new(),
+        };
+        (None, EventPayload::Run(RunEvent::ChangesCounted(change)))
     }
 
     /// Whether the tree moved since `node`'s failure, as `entries` record it.
@@ -207,5 +234,26 @@ mod tests {
         let state = derive(&log(found));
         let c3: TreeId = "c3c3c3c".parse().unwrap();
         assert_eq!(state.newest_tree(counted), Some((Seq::from(5), &c3)));
+    }
+
+    /// A count stands while no newer tree has left it behind.
+    #[test]
+    fn a_count_stands_until_a_newer_tree_leaves_it_behind() {
+        let counted_alone = vec![changes_counted("a1a1a1a")];
+        let state = derive(&log(counted_alone));
+        assert_eq!(state.current_change().map(|change| change.files), Some(9));
+
+        let started_on_it = vec![changes_counted("a1a1a1a"), started("compare", "a1a1a1a")];
+        let state = derive(&log(started_on_it));
+        assert_eq!(state.current_change().map(|change| change.files), Some(9));
+
+        let left_behind = vec![
+            changes_counted("a1a1a1a"),
+            started("compare", "a1a1a1a"),
+            finished("compare", "b2b2b2b"),
+        ];
+        let state = derive(&log(left_behind));
+        assert!(state.current_change().is_none());
+        assert_eq!(state.run.changes().map(|change| change.files), Some(9));
     }
 }

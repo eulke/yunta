@@ -23,6 +23,84 @@ pub fn simple_commands(script: &str) -> Vec<String> {
     Scanner::new(script, Split::Commands).run()
 }
 
+/// The words of one simple command, as a shell hands them to its program: split
+/// at blanks outside quotes, the quotes taken off, and a `\` keeping the sign
+/// after it: outside quotes any sign, and inside double quotes the few a shell
+/// escapes there. What only running it tells, a variable or a substitution, stays
+/// as written.
+pub fn words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word: Option<String> = None;
+    let mut quote = Quote::None;
+    let mut signs = command.chars();
+    while let Some(sign) = signs.next() {
+        match (quote, sign) {
+            (Quote::None, ' ' | '\t' | '\n') => words.extend(word.take()),
+            (Quote::None, '\'') => {
+                quote = Quote::Single;
+                word.get_or_insert_default();
+            }
+            (Quote::None, '"') => {
+                quote = Quote::Double;
+                word.get_or_insert_default();
+            }
+            (Quote::Single, '\'') | (Quote::Double, '"') => quote = Quote::None,
+            (Quote::None, '\\') => word.get_or_insert_default().extend(signs.next()),
+            (Quote::Double, '\\') => {
+                let held = word.get_or_insert_default();
+                match signs.next() {
+                    Some(sign @ ('$' | '`' | '"' | '\\' | '\n')) => held.push(sign),
+                    other => {
+                        held.push('\\');
+                        held.extend(other);
+                    }
+                }
+            }
+            (_, sign) => word.get_or_insert_default().push(sign),
+        }
+    }
+    words.extend(word);
+    words
+}
+
+/// The files one simple command sends its output to, in order: what `>` and `>>`
+/// name outside quotes, glued to the words around them or not. A `2>` sends what
+/// the command says of itself, and a `>&2` names a stream and no file, so neither
+/// is here. What only running it tells, as in [`words`], stays as written.
+pub fn output_files(command: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut quote = Quote::None;
+    let mut signs = command.char_indices().peekable();
+    while let Some((at, sign)) = signs.next() {
+        match (quote, sign) {
+            (Quote::None, '\'') => quote = Quote::Single,
+            (Quote::None, '"') => quote = Quote::Double,
+            (Quote::Single, '\'') | (Quote::Double, '"') => quote = Quote::None,
+            (Quote::None | Quote::Double, '\\') => {
+                signs.next();
+            }
+            (Quote::None, '>') => {
+                signs.next_if(|(_, next)| *next == '>');
+                let to_a_stream = signs.next_if(|(_, next)| *next == '&').is_some();
+                let after = signs.peek().map_or(command.len(), |(next, _)| *next);
+                let stream = stream_before(command.get(..at).unwrap_or_default());
+                if !to_a_stream && matches!(stream, None | Some("1")) {
+                    let rest = command.get(after..).unwrap_or_default();
+                    files.extend(words(rest).into_iter().next());
+                }
+            }
+            _ => {}
+        }
+    }
+    files
+}
+
+/// The stream a redirection names: digits right before it, a word of their own.
+fn stream_before(before: &str) -> Option<&str> {
+    let word = before.rsplit(char::is_whitespace).next().unwrap_or(before);
+    (!word.is_empty() && word.chars().all(|sign| sign.is_ascii_digit())).then_some(word)
+}
+
 /// Whether `|` separates what the scanner hands back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Split {
@@ -254,6 +332,52 @@ mod tests {
             simple_commands("cargo test 2>&1 | tail -5 &> log & make >&2"),
             vec!["cargo test 2>&1", "tail -5 &> log", "make >&2"]
         );
+    }
+
+    #[test]
+    fn output_files_are_what_a_shell_writes_to() {
+        let table: &[(&str, &[&str])] = &[
+            ("cat a > b", &["b"]),
+            ("cat a >> b", &["b"]),
+            ("echo x>b", &["b"]),
+            ("echo x >b", &["b"]),
+            ("x2>b", &["b"]),
+            ("cat a 1> out", &["out"]),
+            ("cmd &> all", &["all"]),
+            ("cmd &>> all", &["all"]),
+            ("cat a > 'my file'", &["my file"]),
+            ("cat > a > b", &["a", "b"]),
+            ("cat a", &[]),
+            ("echo '>' a", &[]),
+            ("echo \">\" a", &[]),
+            ("echo \\> a", &[]),
+            ("echo x >&2", &[]),
+            ("echo x 1>&2", &[]),
+            ("cat a 2> err", &[]),
+            ("cat a 2>err", &[]),
+            ("cat a 2>&1", &[]),
+            ("echo x >", &[]),
+        ];
+        for (command, expected) in table {
+            assert_eq!(output_files(command), *expected, "{command}");
+        }
+    }
+
+    #[test]
+    fn words_are_what_a_shell_hands_its_program() {
+        let table: &[(&str, &[&str])] = &[
+            ("cargo test --quiet", &["cargo", "test", "--quiet"]),
+            ("bash -lc 'cd src && ls'", &["bash", "-lc", "cd src && ls"]),
+            ("zsh -c \"cat \\\"a b\\\"\"", &["zsh", "-c", "cat \"a b\""]),
+            ("cat \"a\\nb\"", &["cat", "a\\nb"]),
+            ("a\\ b  c", &["a b", "c"]),
+            ("FOO='' x", &["FOO=", "x"]),
+            ("''", &[""]),
+            ("   ", &[]),
+        ];
+        for (command, expected) in table {
+            assert_eq!(words(command), *expected, "{command}");
+        }
     }
 
     #[test]

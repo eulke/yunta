@@ -39,7 +39,7 @@ without installing anything.
 
 This walks through writing a workflow file by hand — no pack, no config beyond the
 one file `yunta init` writes. It's the whole mental model: nodes, dependencies, a
-failure re-route, and verification that means something.
+failure reroute, and verification that means something.
 
 **1. Point Yunta at a project.**
 
@@ -77,13 +77,13 @@ nodes:
 Three nodes, three node kinds:
 
 - `lint` is `kind: bash` — a shell command whose exit code *is* the verdict. On
-  failure, `on_failure.goto` re-routes control to `fix-lint` instead of failing the
+  failure, `on_failure.goto` reroutes control to `fix-lint` instead of failing the
   run; `max_reroutes` caps how many correction attempts happen before the run
   escalates to a person instead of looping forever.
 - `fix-lint` is `kind: prompt` — an agent session. `scope` is a hard boundary: any
   edit outside `src/**` fails the node, even if the agent thinks it's related. There's
   no `depends_on` here because reaching this node *is* the dependency: a node named
-  only as an `on_failure.goto` target starts exclusively through that re-route, never
+  only as an `on_failure.goto` target starts exclusively through that reroute, never
   on its own — if `lint` passes, `fix-lint` never opens a session at all.
 - `tests` is `kind: bash` again, gated by `depends_on: [lint]` — it only runs once
   `lint` has actually passed (whether on the first try or after a fix-and-retry).
@@ -120,8 +120,9 @@ that always says whether the run needs you or is waiting for a limit's reset —
 it into your own scrollback, where you can still scroll back through it and select
 text. A node that fails brings the end of what it printed with it. Piped into a file
 or running in CI, every moment of the run arrives as one line instead, in the words
-the live view uses. `--quiet` cuts it down to
-the run id, keeping the budget warning that asks you to decide before the run spends.
+the live view uses. `--quiet` cuts it down to the run id on stdout and one line of
+verdict on stderr, and still gives the budget warning that asks you to decide before
+the run spends.
 
 If `lint` passes clean — likely, for a freshly generated project — the run finishes
 having only ever run `lint` and `tests`; `fix-lint` stays untouched, no session opened,
@@ -134,6 +135,8 @@ actually open a real session and fix it.
 yunta status last
 ```
 
+`yunta` alone shows every run of the repository you are in, what needs you first;
+outside a repository it says so, and what to run instead.
 A run is called by its handle — the last six characters of its id, which every
 line you read prints — and `status`, `resume` and every other command that takes a
 run take it back, along with the whole id, any part that starts or ends it, `last`
@@ -141,7 +144,7 @@ run take it back, along with the whole id, any part that starts or ends it, `las
 
 `status` derives everything it prints from the event log — node states, which task
 ran, token counts — never from an agent's self-report. If the run is mid-flight or
-paused on a gate, `resume` and `resolve-gate` pick it back up from exactly where the
+waiting on a gate's decision, `resume` and `resolve-gate` pick it back up from exactly where the
 log left off, in a different process if you like; nothing about a run depends on
 the terminal that started it staying open.
 
@@ -164,24 +167,26 @@ work held to its plan, PR).
 
 | Command | Does |
 |---|---|
-| `yunta init` | Detects language, the project's commands and suite, the forge `origin` is on, base branch and available adapters; writes `.yunta/config.yaml`. |
-| `yunta new <name> [--shape one-node\|lint-fix\|tasks]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and reports the verdict `check` reaches on it, exit code included. A `lint-fix` skeleton runs the project's own `lint` command when its config declares one. |
-| `yunta schema [<kind>] [--json]` | The shape of a document Yunta reads and validates — `tasks`, `findings`, `questions`, `answers` — as an annotated example to copy, or as JSON Schema for an editor. With no arguments, lists the kinds. Nothing has to be set up first: this is how anyone who has to produce one of these documents, agent or person, learns the shape instead of guessing it. |
-| `yunta check <workflow>` | Validates a workflow statically: cycles, unreachable re-routes, undefined runners, template variables, permission ceilings — no session opened. |
-| `yunta run <workflow> [--input k=v] [--adapter <id>] [--fixture <path>] [--mode] [--quiet] [--detach] [--json]` | Creates a run from a workflow and executes it, showing it live on a terminal: a pinned region of text, with finished work scrolling above it into your own scrollback. Without a terminal — a pipe, CI, `TERM=dumb` — every moment of the run arrives as one line, in the words the live view uses, and the first line says why. `--quiet` cuts the output to the run id, keeping the budget warning that asks for a decision before the run spends. `--adapter` runs every session on that adapter, through every resume of the run: the pin is frozen with the run, so a resume, a detached child or a successor takes the same one. Each role resolves to its candidate on it, and the log records the candidates passed over; a role with no candidate on it refuses the run before it is created, naming the node and the role. `--adapter mock --fixture <path>` runs against a scripted fixture with no LLM, and a resume plays on that fixture. `--detach` returns the run id immediately and keeps running independent of the calling process; `--json` prints the outcome as one versioned JSON document instead of the live view. |
-| `yunta list [--runs [--all] [--json]]` | Without `--runs`: the workflow catalog (repo + packs), each workflow with its description, one line per declared input, and an estimate when history supports one. With `--runs`: this repository's runs as an inbox, and how many runs on the machine belong to other projects (`--all` lists them too) — grouped into what needs a person, what stalled, what is running and what has closed, each run named by its word, handle, workflow and mode; a run that needs someone says what holds it and the command that moves it, longest-waiting first, and only the ten newest closed runs are named. With `--runs`, `--json` prints the same inbox as one JSON document. |
-| `yunta status <run> [--node <id>] [--json]` | A run's derived state: nodes, tasks, tokens — reconstructed from the event log. A run parked on a decision also shows the decision: the evidence, what weighs on it, every option with its tradeoff, and the `resolve-gate` command that answers it. A run whose engine is asking at its terminal says it needs you, and where to answer. `--node` shows one node whole: its whole failure or what its agent said, the end of what it printed and where all of it is kept, and what it produced. A run parked on its budget carries the same caution here: `cautions` under `--json`, and the closing block. |
+| `yunta init [-i] [--force]` | Detects language, the project's commands and suite, the forge `origin` is on, base branch and available adapters; writes `.yunta/config.yaml`. `-i` asks to confirm the project's name and base branch. |
+| `yunta new <name> [--shape one-node\|lint-fix\|tasks] [-i] [--force]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and reports the verdict `check` reaches on it, exit code included. A `lint-fix` skeleton runs the project's own `lint` command when its config declares one. |
+| `yunta schema [<document>] [--json]` | The shape of a document Yunta reads and validates — `tasks`, `spec`, `findings`, `questions`, `answers` — as an annotated example to copy, or as JSON Schema for an editor; `workflow` lists every key a workflow and each kind of node read. With no arguments, lists the documents. Nothing has to be set up first: this is how anyone who has to produce one of these documents, agent or person, learns the shape instead of guessing it. |
+| `yunta check <workflow> [--config <path>]` | Validates a workflow statically: cycles, unreachable reroutes, undefined runners, template variables, permission ceilings — no session opened. `--config` checks it against another config file. |
+| `yunta run <workflow> [--input k=v] [--adapter <id>] [--fixture <path>] [--mode] [--quiet] [--detach] [--json]` | Creates a run from a workflow and executes it, showing it live on a terminal: a pinned region of text, with finished work scrolling above it into your own scrollback. Without a terminal — a pipe, CI, `TERM=dumb` — every moment of the run arrives as one line, in the words the live view uses, and the first line says why. `--quiet` cuts the output to the run id on stdout and one line of verdict on stderr, and still gives the budget warning that asks for a decision before the run spends. `--adapter` runs every session on that adapter, through every resume of the run: the pin is frozen with the run, so a resume, a detached child or a successor takes the same one. Each role resolves to its candidate on it, and the log records the candidates passed over; a role with no candidate on it refuses the run before it is created, naming the node and the role. `--adapter mock --fixture <path>` runs against a scripted fixture with no LLM, and a resume plays on that fixture. `--detach` returns the run id immediately and keeps running independent of the calling process; `--json` prints the outcome as one versioned JSON document instead of the live view. |
+| `yunta list [--runs [--all] [--json] [--full] [--dig]]` | Without `--runs`: the workflow catalog (repo + packs), each workflow with its description, one line per declared input, an estimate when history supports one, and the command that runs it. With `--runs`: this repository's runs as a field — `yunta` alone, in a repository, shows the same — headed by how many need you and how many stand anywhere else, then a group to each thing you can do about them: a run asking at its terminal now, the runs waiting on a decision, the stalled, the ones you stopped and the ones still moving, each on one line with its handle, workflow and mode, a short furrow of its nodes, what holds it, and how long it has been there or the command that moves it on, the longest-waiting first. What has closed, and the runs that do not read back, are counted under it; `--full` lists them, `--dig` names each run by its whole id. `--all` takes every run on the machine instead of this repository's. With `--runs`, `--json` prints the same inbox as one JSON document. |
+| `yunta status <run> [--full] [--dig] [--node <id>] [--json]` | A run's derived state, reconstructed from the event log, at a glance: the workflow, the word the run is called by and how long it has stood there, a furrow with a stroke for each node, what it asks of you, the evidence of what failed, and how far it has come — its nodes and tasks by where they stand. A run parked on a decision ends with the decision: what weighs on it, every option with its tradeoff and the `resolve-gate` command that answers it, then what moves the run without choosing. A run whose engine is asking at its terminal says it needs you, and where to answer. `--full` tells the whole story: every node with what it said or the plan it accepted, how long it worked and what it spent, every task, the runs it composed, its tokens and every other fact; `--dig` adds its whole id, where it is kept and the files that hold whole outputs. `--node` shows one node whole: its whole failure or what its agent said, the end of what it printed and where all of it is kept, and what it produced. A run parked on its budget carries the same caution here: `cautions` under `--json`, and the closing block. |
+| `yunta open <run> [--json]` | Writes the run's page into its folder as `page.html` and opens it in a browser: one file, no server, its buttons copy commands. |
 | `yunta resume <run> [--quiet] [--json]` | Resumes a run from its event log, restarting orphaned nodes per `on_interrupt`. Shows it exactly as `yunta run` does — the same live region, the same one line per moment without a terminal, the same closing block — and takes the same `--quiet` and `--json`: two commands that execute the same thing report it the same way. |
 | `yunta resolve-gate <run> [<option>] [--by] [--text] [--json]` | Answers a paused run's gate decision from a separate process; hands the run to a detached resume that applies it. Without an option, puts the run's own menu to this terminal — and off a terminal, lists the command that chooses each option. An option the gate withholds — going on with a plan that cannot be proven — is refused with why. `--json` prints the answer as one document; it needs an option, since the menu is for a terminal, so without one it is refused. |
+| `yunta review <run>` | Reads the plan a parked run waits on at full screen, and answers it there; off a terminal, prints it with the commands that answer it. |
 | `yunta cancel <run> [--json]` | Sends every running node's session an ordered interrupt, escalating to a full process-tree kill. A run `--detach` has just handed over is stopped once the engine it was handed to starts. `--json` prints the answer as one document. |
 | `yunta close <run> [--by] [--json]` | Closes a stopped run nobody is going to continue, as cancelled and by who closed it, so it stops waiting on a person. A run whose engine died is settled first, as `cancel` settles one; its branch and worktree stay until `gc` removes them. `--json` prints the answer as one document. |
-| `yunta graph <workflow> \| --run <id> [--format mermaid\|dot]` | Renders a workflow's DAG as Mermaid (or DOT): dependencies, re-routes, parallel groups drawn with their children inside them, gates. A path or a catalog name reads the workflow off disk; `--run <id>` draws the one that run froze, annotated with each node's derived state. A file that breaks its own rules is refused as every command refuses it; one that only the project's config cannot run is still drawn, with the verdict on stderr and in the exit code. |
-| `yunta test` | Runs the cases under `.yunta/tests/` with the `mock` adapter — no LLM, no network, deterministic. |
-| `yunta stats [<run>] [--workflow <name>] [--json]` | Verification cost: cost-per-verified-task, rework rate, cache rate, wall-clock breakdown (time the host was suspended left out, and said) — for one run or a workflow's whole history. For one run, where its time went: working, checks (and how much of them guards ran with the task's own criterion already red), measuring the suite while nothing else ran, people deciding — from the moment the engine began asking — parked, and the engine between steps. With `--workflow <name>` and no history, `--json` prints the same document with `runs` empty, where the human view says there are no runs. |
+| `yunta graph <workflow> \| --run <id> [--format mermaid\|dot]` | Renders a workflow's DAG as Mermaid (or DOT): dependencies, reroutes, parallel groups drawn with their children inside them, gates. A path or a catalog name reads the workflow off disk; `--run <id>` draws the one that run froze, annotated with each node's derived state. A file that breaks its own rules is refused as every command refuses it; one that only the project's config cannot run is still drawn, with the verdict on stderr and in the exit code. |
+| `yunta test [--dir <path>]` | Runs the cases under `.yunta/tests/` with the `mock` adapter — no LLM, no network, deterministic. |
+| `yunta stats [<run>] [--workflow <name>] [--full \| --dig] [--json]` | Verification cost: cost-per-verified-task, rework rate, cache rate, wall-clock breakdown (time the host was suspended left out, and said) — for one run or a workflow's whole history. For one run, where its time went, as a bar of its parts: working, rails, checks (and how much of them guards ran with the task's own criterion already red), measuring the suite while nothing else ran, waiting on you — from the moment the engine began asking — offline, parked, and the engine between steps; then each node's time and tokens, and each runner's. `--full` adds the run's rails and each node's blocked share and models; `--dig` keeps each node's id whole. With `--workflow <name>` and no history, `--json` prints the same document with `runs` empty, where the human view says there are no runs. |
 | `yunta verify <run> [--json]` | Checks a run's evidence end to end, reporting the two guarantees apart: its event hash chain, recomputed from the log as persisted, and the bytes of every artifact that log accepted, read back and hashed against its own name. `--json` prints the report as one document. |
 | `yunta receipt <run> [--json]` | Generates a Verified Work Receipt for a finished run — markdown + JSON, derived entirely from the event log, written to the run's own directory; a run that failed names each node that failed and why. A `pull_request` node puts the same receipt in the pull request it opens. |
-| `yunta doctor [--session] [--json]` | Health-checks every adapter your `runners:` name — binary present, version compatible, auth valid — or, when it names none, gives the runner to declare on the adapters this machine answers for. Says who git commits a run's work as, and checks every installed pack's `requires:` against your config: runners resolvable, mcp servers defined, commands on `PATH`. It fails only on what would stop a workflow in the catalog: a runner one needs, a forge token one opening a pull request needs. `--session` goes further and opens one real session per binding, which is the only way to find out whether a CLI accepts the configuration a run writes it; it spends a prompt each. `--json` prints the report as one document. |
-| `yunta pack add <source>[@ref] [--yes] [--run-tests]` / `update <publisher>/<name> <ref> [--yes]` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed; nothing of the pack runs unless `--run-tests` asks for its own cases after the install. Its workflows and skills are then addressable as `publisher/name` (`yunta run acme/review`, `use: acme/qa-review`, `skills: [acme/rubric]`) — see [packs](docs/packs.md). `permissions.packs` governs both verbs: a non-empty publisher allow-list restricts sources, and the executors policy (`prompt` default: `--yes` to confirm; `deny`: refused outright; `allow`: no confirmation) gates packs that ship executable code. `check` refuses any node that exceeds the pack's own declared permissions ceiling. |
+| `yunta doctor [--session] [--full] [--json]` | Health-checks every adapter your `runners:` name — binary present, version compatible, auth valid — or, when it names none, gives the runner to declare on the adapters this machine answers for. At a glance the checks that hold fold into one row that names each, and every other check has its own row with what it means and how to make it hold; `--full` gives every check its own row, who git commits a run's work as among them. It checks every installed pack's `requires:` against your config: runners resolvable, mcp servers defined, commands on `PATH`. It fails only on what would stop a workflow in the catalog: a runner one needs, a forge token one opening a pull request needs. `--session` goes further and opens one real session per binding, which is the only way to find out whether a CLI accepts the configuration a run writes it; it spends a prompt each. `--json` prints the report as one document. |
+| `yunta pack add <source>[@ref] [--yes] [--run-tests]` / `new <publisher>/<name>` / `update <publisher>/<name> <ref> [--yes]` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed; nothing of the pack runs unless `--run-tests` asks for its own cases after the install. Its workflows and skills are then addressable as `publisher/name` (`yunta run acme/review`, `use: acme/qa-review`, `skills: [acme/rubric]`) — see [packs](docs/packs.md). `permissions.packs` governs both verbs: a non-empty publisher allow-list restricts sources, and the executors policy (`prompt` default: `--yes` to confirm; `deny`: refused outright; `allow`: no confirmation) gates packs that ship executable code. `check` refuses any node that exceeds the pack's own declared permissions ceiling. |
 | `yunta pack audit <publisher>/<name>` | Prints a full static inventory of a pack's own workflows — every command, context source, per-node permission, agent, mcp server, executor and full untrimmed prompt — plus whether it ships tests and whether they pass. `add` runs this automatically before vendoring. |
 | `yunta mcp` | Runs the MCP control plane over stdio: `document_shape`, `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`. |
 | `yunta gc [--dry-run]` | Removes orphaned run and worktree directories, respecting `storage.retention_days`. |
@@ -206,12 +211,13 @@ Nothing about a run's state lives anywhere else — `status`, `resume` and `stat
 derive their answer by replaying that log, which is what makes killing the process at
 any point and resuming safe.
 
-Each node moves through `pending → ready → running → finished | failed | skipped |
-waiting`. `waiting` is a node paused on a gate — a human decision point — with nothing
-running underneath it; it survives the engine restarting just like any other state. A
-node whose run paused while its attempt was open reads `paused`: nothing runs it, and
+A node that has not started reads `never ran`, one at work reads `running`, and it ends
+`finished`, `failed` or `skipped`. A node held by a gate — a human decision point — reads
+`needs you`, with nothing running underneath it; it survives the engine restarting just
+like any other state. `waiting` is only ever a clock: a node held until a limit resets. A
+node whose run was stopped while its attempt was open reads `stopped`: nothing runs it, and
 the run's resume starts it again.
-A failed node either ends the run or, if it declared `on_failure.goto`, re-routes to a
+A failed node either ends the run or, if it declared `on_failure.goto`, reroutes to a
 correction node and tries again, up to `max_reroutes` before escalating to a gate
 instead of looping forever.
 

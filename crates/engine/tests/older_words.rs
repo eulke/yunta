@@ -202,7 +202,7 @@ fn owed_reason(event: &StoredEvent, line: &Value) {
     assert_eq!(
         failure::detail(node_failure),
         [format!(
-            "`resolve-global` — crates/engine/src/catalog.rs: {reason}"
+            "`resolve-global` (crates/engine/src/catalog.rs): {reason}"
         )]
     );
 }

@@ -17,6 +17,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use surco::components::{Check, Found};
+use surco::words::Standing;
 use yunta_core::events::{ArtifactId, Failure, PauseReason, SessionDeath};
 use yunta_core::{
     AdapterId, ArtifactKind, NodeId, RunTool, RunnerCandidate, RunnerName, ToolNaming,
@@ -25,7 +27,6 @@ use yunta_core::{
 use crate::commands::test::{init_git, sandboxed_checkout, SandboxedCheckout};
 use crate::context::Context;
 use crate::error::CliError;
-use crate::render::blocks::{Check, Found};
 
 /// The workflow every probe run drives: one node, one prompt, the run
 /// tools a real node is given. The verdict requires the submission to be
@@ -129,26 +130,23 @@ impl SessionProbe {
         let (found, said) = match &self.outcome {
             Outcome::Ok { tokens } => (
                 Found::Holds,
-                format!("ok — {}", yunta_core::units::Tokens(*tokens)),
+                format!("ok: {}", surco::figures::Tokens(*tokens)),
             ),
             Outcome::Died(died) => (
                 Found::Problem,
                 format!(
-                    "session died — {}",
-                    crate::render::failure::session_death(died)
+                    "session died: {}",
+                    yunta_render::failure::session_death(died)
                 ),
             ),
             Outcome::NoDelivery(why) => (
                 Found::Problem,
-                format!("session opened, no questions document — {why}"),
+                format!("session opened, no questions document: {why}"),
             ),
-            Outcome::Refused(why) => (Found::Problem, format!("probe failed — {why}")),
+            Outcome::Refused(why) => (Found::Problem, format!("probe failed: {why}")),
         };
-        Check {
-            found,
-            subject: format!("{} ({})", self.binding, self.named_by),
-            said,
-        }
+        Check::new(found, format!("{} ({})", self.binding, self.named_by), said)
+            .brief(self.binding.to_string())
     }
 }
 
@@ -236,9 +234,9 @@ fn verdict(report: &yunta_engine::RunReport) -> Outcome {
         Some(Failure::SessionDied { died }) => Outcome::Died(Box::new(died)),
         other if facts.opened && !facts.accepted => Outcome::NoDelivery(other.map_or_else(
             || "the run ended without artifact_accepted".to_string(),
-            |failure| crate::render::failure::sentence(&failure),
+            |failure| yunta_render::failure::sentence(&failure),
         )),
-        Some(other) => Outcome::Refused(crate::render::failure::sentence(&other)),
+        Some(other) => Outcome::Refused(yunta_render::failure::sentence(&other)),
         None => match &report.terminal {
             yunta_engine::RunTerminal::Finished
                 if facts.accepted && facts.node_finished && facts.run_finished =>
@@ -316,168 +314,28 @@ fn probe_context(
 /// How a run ended, said the way the rest of a refusal reads.
 fn ended(terminal: &yunta_engine::RunTerminal) -> String {
     match terminal {
-        yunta_engine::RunTerminal::Finished => "finished".to_string(),
-        yunta_engine::RunTerminal::Paused { reason } => {
-            format!("waiting ({})", yunta_render::pause::sentence(reason))
-        }
+        yunta_engine::RunTerminal::Finished => Standing::Finished.word().to_string(),
+        yunta_engine::RunTerminal::Paused { reason } => format!(
+            "{} ({})",
+            yunta_render::pause::standing(reason),
+            yunta_render::pause::sentence(reason)
+        ),
         yunta_engine::RunTerminal::Failed { node, failure } => {
             let said = PauseReason::NodeFailed {
                 node: node.clone(),
                 failure: failure.clone(),
             };
-            format!("failed ({})", yunta_render::pause::sentence(&said))
+            format!(
+                "{} ({})",
+                Standing::Failed,
+                yunta_render::pause::sentence(&said)
+            )
         }
         yunta_engine::RunTerminal::Promoted { suggested_mode } => {
-            format!("promoted to mode `{suggested_mode}`")
+            format!("{} to mode `{suggested_mode}`", Standing::Promoted)
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use yunta_core::events::{
-        AgentSessionOpenedPayload, ArtifactAcceptedPayload, ArtifactEvent, EventPayload, NodeEvent,
-        NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RecordedOrigin,
-        RunEvent, RunFinishedPayload, RunMetrics, SessionEvent, StoredEvent, TerminalState,
-        TokenUsage,
-    };
-    use yunta_core::{RunId, Workflow};
-    use yunta_engine::RunPhase;
-    use yunta_testkit_core::{fixed_now, Log};
-
-    fn node_started(attempt: u32) -> EventPayload {
-        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(attempt)))
-    }
-
-    fn node_failed(text: &str) -> EventPayload {
-        EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-            Failure::Message {
-                outcome: text.into(),
-            },
-            TokenUsage::default(),
-        )))
-    }
-
-    fn node_finished() -> EventPayload {
-        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-            NodeOutcome::Summary("ok".into()),
-            TokenUsage::default(),
-        )))
-    }
-
-    fn run_failed() -> EventPayload {
-        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
-            terminal_state: TerminalState::Failed,
-            metrics: RunMetrics {
-                cptv: None,
-                tokens: TokenUsage::default(),
-            },
-            closed_by: None,
-        }))
-    }
-
-    /// A finished run's report over `events`, as the run left its log.
-    fn finished_report(events: &[StoredEvent]) -> yunta_engine::RunReport {
-        yunta_engine::RunReport {
-            terminal: yunta_engine::RunTerminal::Finished,
-            state: yunta_engine::derive(events),
-        }
-    }
-
-    #[test]
-    fn accepted_questions_and_both_terminals_are_required_for_success() {
-        let opened = EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
-            session_id: "doctor-session".into(),
-            agent: None,
-            effort: None,
-            model: None,
-            capabilities: yunta_core::Capabilities::default(),
-            fence: None,
-            confinement: None,
-            task_id: None,
-            continues: None,
-        }));
-        let accepted =
-            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
-                ArtifactId::Interpreted {
-                    kind: yunta_core::ArtifactKind::Questions,
-                },
-                yunta_core::sha256_hex(b"questions: []\n"),
-                RecordedOrigin::Submitted,
-            )));
-        let finished = node_finished();
-        let closed = EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
-            terminal_state: TerminalState::Done,
-            metrics: RunMetrics {
-                cptv: None,
-                tokens: TokenUsage::default(),
-            },
-            closed_by: None,
-        }));
-        let only_reply = Log::for_run("doctor-test")
-            .node("probe", opened.clone())
-            .build();
-        assert!(matches!(
-            verdict(&finished_report(&only_reply)),
-            Outcome::NoDelivery(_)
-        ));
-        let delivered = Log::for_run("doctor-test")
-            .node("probe", node_started(1))
-            .node("probe", opened)
-            .node("probe", accepted)
-            .node("probe", finished)
-            .event(closed)
-            .build();
-        assert!(matches!(
-            verdict(&finished_report(&delivered)),
-            Outcome::Ok { .. }
-        ));
-    }
-
-    #[test]
-    fn doctor_and_the_phase_page_name_the_same_last_failure() {
-        // "build" failed and stayed failed. "probe" failed later, then ran again
-        // to its finish. The page names the failure still standing; doctor must too.
-        let events = Log::for_run("doctor-test")
-            .node("build", node_started(1))
-            .node("build", node_failed("build broke"))
-            .node("probe", node_started(1))
-            .node("probe", node_failed("probe broke"))
-            .node("probe", node_started(2))
-            .node("probe", node_finished())
-            .event(run_failed())
-            .build();
-        let workflow: Workflow = yunta_core::yaml::parse(
-            "name: doctor-test\nnodes:\n  - { id: build, kind: bash, run: \"true\" }\n  - { id: probe, kind: bash, run: \"true\" }\n",
-        )
-        .unwrap();
-        let frame = yunta_engine::run_frame(
-            &RunId::from("doctor-test"),
-            &workflow,
-            &events,
-            None,
-            fixed_now(),
-        );
-        let RunPhase::Failed { failure: page } = frame.phase else {
-            panic!("the run closed failed");
-        };
-        assert_eq!(ProbeFacts::from_events(&events).failure, page);
-    }
-
-    #[test]
-    fn the_probe_names_the_submit_tool_the_way_its_adapter_calls_it() {
-        let claude = yunta_adapters::CLAUDE_CODE_ID.clone();
-        let text = probe_workflow(&format!("Call {} with exactly", submit_called(&claude)));
-        assert!(text.contains("prompt: 'Call mcp__yunta-run__"), "{text}");
-    }
-
-    #[test]
-    fn an_adapter_this_binary_does_not_build_names_the_submit_tool_bare() {
-        let unbuilt = AdapterId::from_static("unbuilt");
-        assert_eq!(
-            submit_called(&unbuilt),
-            RunTool::Submit(ArtifactKind::Questions).name()
-        );
-    }
-}
+mod tests;

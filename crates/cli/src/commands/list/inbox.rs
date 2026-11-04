@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use surco::words::Standing;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
 use yunta_engine::{RunFrame, RunPhase, RunState};
 use yunta_storage::Storage;
@@ -19,7 +20,6 @@ use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::project::Project;
-use crate::render::state::RunWord;
 
 /// The part of a listing a run belongs in — the inbox's own grouping,
 /// derived from the run's phase so a heading can never disagree with the
@@ -30,7 +30,7 @@ use crate::render::state::RunWord;
 /// before what is already closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Standing {
+pub(crate) enum Group {
     /// Stopped until a person acts: a decision to answer, or a log that
     /// stopped making sense.
     NeedsYou,
@@ -38,62 +38,50 @@ pub(crate) enum Standing {
     /// it waits on a person as surely as a decision does, but what it
     /// takes is a resume, not an answer.
     Stalled,
+    /// A person stopped it, and nothing is owed: a resume continues it
+    /// whenever they choose.
+    Stopped,
     /// Moving on its own, parked until a limit resets, or created and not
-    /// yet started.
-    InFlight,
+    /// yet started: the runs the listing calls `running`.
+    Running,
     /// Closed, however it closed.
     Closed,
 }
 
-impl Standing {
-    /// Every group, in printing order.
-    pub(crate) const ALL: [Standing; 4] = [
-        Standing::NeedsYou,
-        Standing::Stalled,
-        Standing::InFlight,
-        Standing::Closed,
-    ];
-
-    /// Which group a run called `word` belongs in. A log that stopped
-    /// making sense needs a person as much as a decision does: nothing
-    /// moves it on its own again.
+impl Group {
+    /// Which group a run called `standing` belongs in, `closed` saying
+    /// whether its log closed it. A log that stopped making sense needs a
+    /// person as much as a decision does: nothing moves it on its own
+    /// again.
     ///
     /// The grouping is read off the word every other surface calls the
     /// run by, so a heading and the summary under it are two views of
     /// one answer rather than two readings of a phase.
-    fn of(word: RunWord) -> Self {
-        match word {
-            RunWord::NeedsYou | RunWord::Broken => Standing::NeedsYou,
-            RunWord::Stalled => Standing::Stalled,
-            RunWord::Created | RunWord::Running | RunWord::Waiting => Standing::InFlight,
-            RunWord::Finished
-            | RunWord::Reported
-            | RunWord::Failed
-            | RunWord::Cancelled
-            | RunWord::Promoted => Standing::Closed,
-        }
-    }
-
-    /// The heading a group of runs prints under. It says what the reader
-    /// can do about the rows below it, which is what a listing is read
-    /// for.
-    pub(crate) fn heading(self) -> &'static str {
-        match self {
-            Self::NeedsYou => "needs you",
-            Self::Stalled => "stalled",
-            Self::InFlight => "running",
-            Self::Closed => "closed",
+    fn of(standing: Standing, closed: bool) -> Self {
+        match standing {
+            _ if closed => Group::Closed,
+            Standing::NeedsYou | Standing::Broken => Group::NeedsYou,
+            Standing::Stalled => Group::Stalled,
+            Standing::Stopped => Group::Stopped,
+            Standing::Created | Standing::Running | Standing::Waiting => Group::Running,
+            Standing::Finished
+            | Standing::Reported
+            | Standing::Failed
+            | Standing::Rerouted
+            | Standing::Promoted
+            | Standing::Skipped
+            | Standing::NeverRan => Group::Closed,
         }
     }
 }
 
 /// One run as the listing shows it, read off that run's own frame.
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct RunRow {
     pub(crate) run_id: RunId,
-    pub(crate) standing: Standing,
+    pub(crate) group: Group,
     /// What the run is called, as every surface calls it.
-    pub(crate) word: RunWord,
+    pub(crate) word: Standing,
     pub(crate) workflow: WorkflowName,
     pub(crate) mode: ModeName,
     /// How long the run has been where it is — what the rows of a group
@@ -105,6 +93,32 @@ pub(crate) struct RunRow {
     pub(crate) reason: Option<String>,
     /// The command that moves it on, when a person has one to run.
     pub(crate) command: Option<String>,
+    /// What holds the run, on the one line a field's row has room for.
+    pub(crate) said: String,
+    /// Where each of its nodes stands, in declaration order.
+    pub(crate) furrow: Vec<Standing>,
+    /// Whether its engine is asking a person at a terminal now.
+    pub(crate) asking: bool,
+}
+
+impl RunRow {
+    /// The run as a field's row draws it, named `handle`, with `edge` at
+    /// its far end.
+    pub(crate) fn line(
+        &self,
+        handle: String,
+        edge: surco::components::Edge,
+    ) -> surco::components::RunLine {
+        surco::components::RunLine {
+            standing: self.word,
+            handle,
+            workflow: self.workflow.to_string(),
+            mode: self.mode.to_string(),
+            furrow: self.furrow.clone(),
+            said: self.said.clone(),
+            edge,
+        }
+    }
 }
 
 /// A run the listing can name but not derive: its log or the manifest it
@@ -125,6 +139,10 @@ pub(crate) struct Inbox {
     pub(crate) rows: Vec<RunRow>,
     pub(crate) unreadable: Vec<Unreadable>,
     pub(crate) elsewhere: usize,
+    /// Whether the listing is the runs of the repository it was asked in,
+    /// rather than every run on the machine.
+    #[serde(skip)]
+    pub(crate) here: bool,
 }
 
 impl Inbox {
@@ -135,7 +153,7 @@ impl Inbox {
         let run_ids: Vec<RunId> = storage
             .list_runs()
             .map(|runs| runs.into_iter().map(|run| run.run_id).collect())?;
-        let here = match all || run_ids.is_empty() {
+        let here = match all {
             true => None,
             false => Here::of(ctx).await?,
         };
@@ -144,6 +162,7 @@ impl Inbox {
             rows: Vec::new(),
             unreadable: Vec::new(),
             elsewhere: 0,
+            here: here.is_some(),
         };
         for run_id in run_ids {
             match run_row(&ctx.project, &storage, run_id, now) {
@@ -167,18 +186,13 @@ impl Inbox {
         Ok(inbox)
     }
 
-    /// Whether no run under the state root reads as anything at all.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.rows.is_empty() && self.unreadable.is_empty() && self.elsewhere == 0
-    }
-
     /// The runs of this listing that wait on a person, the one that has
     /// waited longest first.
     pub(crate) fn needing_a_person(&self) -> Vec<&RunRow> {
         let mut waiting: Vec<&RunRow> = self
             .rows
             .iter()
-            .filter(|row| row.standing == Standing::NeedsYou)
+            .filter(|row| row.group == Group::NeedsYou)
             .collect();
         waiting.sort_by(|a, b| b.age.cmp(&a.age).then_with(|| a.run_id.cmp(&b.run_id)));
         waiting
@@ -243,18 +257,31 @@ impl RunRow {
     /// One row from the run's own frame: which group it belongs in, what
     /// the run is, what holds it and what moves it. `menu` says whether
     /// the run stopped on a decision whose options `yunta status` lists.
-    fn of(frame: &RunFrame, engine: &crate::render::Engine, age: Duration, menu: bool) -> Self {
-        let word = crate::render::observed_word(frame, engine);
+    fn of(frame: &RunFrame, engine: &yunta_engine::Engine, age: Duration, menu: bool) -> Self {
+        let word = frame.standing;
         let (reason, command) = held(frame, engine, word, menu);
+        let asking = word == Standing::NeedsYou
+            && matches!(frame.phase, RunPhase::Created | RunPhase::Running)
+            && engine.prompt.is_some();
+        let closed = matches!(
+            frame.phase,
+            RunPhase::Finished
+                | RunPhase::Failed { .. }
+                | RunPhase::Cancelled
+                | RunPhase::Promoted { .. }
+        );
         RunRow {
             run_id: frame.run_id.clone(),
-            standing: Standing::of(word),
+            group: Group::of(word, closed),
             word,
             workflow: frame.workflow.clone(),
             mode: frame.mode.clone(),
             age,
             reason,
             command,
+            said: said(frame, engine),
+            furrow: frame.nodes.iter().map(|node| node.standing).collect(),
+            asking,
         }
     }
 }
@@ -264,23 +291,23 @@ impl RunRow {
 /// options of.
 fn held(
     frame: &RunFrame,
-    engine: &crate::render::Engine,
-    word: RunWord,
+    engine: &yunta_engine::Engine,
+    word: Standing,
     menu: bool,
 ) -> (Option<String>, Option<String>) {
     let handle = frame.run_id.handle();
     match (word, &frame.phase) {
-        (RunWord::Stalled, _) => (
+        (Standing::Stalled, _) => (
             Some(advice::STALLED.to_string()),
             Some(advice::resume(handle)),
         ),
         // Asked live, the question is answered where it is asked: no
         // command here reaches it.
-        (RunWord::NeedsYou, RunPhase::Created | RunPhase::Running) => (
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => (
             engine
                 .prompt
                 .as_ref()
-                .map(|prompt| advice::asking(prompt, engine.at)),
+                .map(|prompt| advice::asking(prompt, Some(engine.at))),
             None,
         ),
         (_, RunPhase::Waiting { on }) => (
@@ -291,7 +318,7 @@ fn held(
             }),
         ),
         (_, RunPhase::Broken { diagnostic }) => (
-            Some(yunta_core::text::one_line(diagnostic)),
+            Some(surco::text::one_line(diagnostic)),
             Some(advice::verify(handle)),
         ),
         (_, RunPhase::Created | RunPhase::Running) => (
@@ -303,7 +330,7 @@ fn held(
             RunPhase::Failed {
                 failure: Some(failure),
             },
-        ) => (Some(crate::render::failure::headline(failure)), None),
+        ) => (Some(yunta_render::failure::headline(failure)), None),
         (
             _,
             RunPhase::Finished
@@ -350,17 +377,13 @@ fn run_row(
             )
         })?;
     let state = yunta_engine::derive(&events);
-    let frame = progress::frame_of(&run_id, &manifest, &state, now);
+    let engine = crate::render::engine(&run_dir, now);
+    let frame = progress::frame_of(&run_id, &manifest, &state, &engine, now);
     // Only a parked run has a menu to rebuild, and rebuilding one is a
     // walk of the run's state.
     let menu = matches!(frame.phase, RunPhase::Waiting { .. })
         && yunta_engine::awaits_decision(&manifest, &state).is_some();
-    let row = RunRow::of(
-        &frame,
-        &crate::render::Engine::of(&run_dir, now),
-        time_in_state(&state, now),
-        menu,
-    );
+    let row = RunRow::of(&frame, &engine, time_in_state(&state, now), menu);
     Ok((row, manifest.project.map(|project| project.git_common_dir)))
 }
 
@@ -387,6 +410,45 @@ fn time_in_state(state: &RunState, now: DateTime<Utc>) -> Duration {
         .unwrap_or(Duration::ZERO)
 }
 
+/// What holds a run, on the one line a field's row has room for: the node
+/// a live engine asks about, the claim a parked run stopped on, the stall,
+/// how far a moving run has come, what failed a closed one. Nothing for a
+/// run that finished.
+fn said(frame: &RunFrame, engine: &yunta_engine::Engine) -> String {
+    match (frame.standing, &frame.phase) {
+        (Standing::Stalled, _) => advice::STALLED.to_string(),
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => engine
+            .prompt
+            .as_ref()
+            .map(advice::asking_on)
+            .unwrap_or_default(),
+        (_, RunPhase::Waiting { on }) => advice::parked_claim(on),
+        (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
+        (_, RunPhase::Created | RunPhase::Running) => {
+            crate::render::counter::progress(frame, crate::render::glyphs())
+        }
+        (
+            _,
+            RunPhase::Failed {
+                failure: Some(failure),
+            },
+        ) => yunta_render::failure::headline(failure),
+        (
+            _,
+            RunPhase::Finished
+            | RunPhase::Failed { failure: None }
+            | RunPhase::Cancelled
+            | RunPhase::Promoted { .. },
+        ) => String::new(),
+    }
+}
+
+/// Whether `ctx` is run inside a git repository: what decides whether a
+/// listing is that repository's runs.
+pub(crate) async fn in_a_repository(ctx: &Context) -> Result<bool, CliError> {
+    Ok(Here::of(ctx).await?.is_some())
+}
+
 /// A run's age in seconds, as a JSON reader compares it.
 fn as_secs<S: serde::Serializer>(age: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_f64(age.as_secs_f64())
@@ -400,20 +462,21 @@ mod tests {
     fn the_word_a_run_is_called_by_decides_the_group_it_is_listed_under() {
         // A log that stopped making sense needs a person as much as a
         // decision does: nothing moves it on its own again.
-        for word in [RunWord::NeedsYou, RunWord::Broken] {
-            assert_eq!(Standing::of(word), Standing::NeedsYou, "{word}");
+        for word in [Standing::NeedsYou, Standing::Broken] {
+            assert_eq!(Group::of(word, false), Group::NeedsYou, "{word}");
         }
-        for word in [RunWord::Created, RunWord::Running, RunWord::Waiting] {
-            assert_eq!(Standing::of(word), Standing::InFlight, "{word}");
+        for word in [Standing::Created, Standing::Running, Standing::Waiting] {
+            assert_eq!(Group::of(word, false), Group::Running, "{word}");
         }
+        assert_eq!(Group::of(Standing::Stopped, false), Group::Stopped);
         for word in [
-            RunWord::Finished,
-            RunWord::Reported,
-            RunWord::Failed,
-            RunWord::Cancelled,
-            RunWord::Promoted,
+            Standing::Finished,
+            Standing::Reported,
+            Standing::Failed,
+            Standing::Stopped,
+            Standing::Promoted,
         ] {
-            assert_eq!(Standing::of(word), Standing::Closed, "{word}");
+            assert_eq!(Group::of(word, true), Group::Closed, "{word}");
         }
     }
 
@@ -421,7 +484,10 @@ mod tests {
     fn every_word_a_run_can_be_called_by_has_a_group() {
         // The listing is an inbox: a run whose word fell through would
         // be a run nobody goes looking for.
-        let groups: Vec<Standing> = RunWord::ALL.into_iter().map(Standing::of).collect();
-        assert_eq!(groups.len(), RunWord::ALL.len());
+        let groups: Vec<Group> = Standing::ALL
+            .into_iter()
+            .map(|word| Group::of(word, false))
+            .collect();
+        assert_eq!(groups.len(), Standing::ALL.len());
     }
 }

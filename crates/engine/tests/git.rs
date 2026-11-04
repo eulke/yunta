@@ -4,15 +4,22 @@
 //! that is not a repository, a `worktree remove` on a path already
 //! gone — that what those messages do with an empty stderr is behavior,
 //! not an edge case.
+//!
+//! Beside it, what the engine reads of a repository through git: which
+//! files a commit holds that name a word, and their text.
 
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::describe;
-use yunta_engine::git::{Cause, GitError, Invocation};
+use yunta_engine::git::{blobs, words_in, Cause, GitError, Invocation};
 use yunta_engine::process::Supervision;
 use yunta_engine::scope_expansion::ScopeExpansionError;
 use yunta_engine::{RunError, ScopeCheckError, WorktreeError};
+
+#[path = "git/numstat.rs"]
+mod numstat;
 
 /// A git run in `/repo` with the given arguments.
 fn invocation(args: &[&str]) -> Invocation {
@@ -216,5 +223,244 @@ async fn a_cancelled_scope_check_is_not_a_git_failure() {
     assert!(
         matches!(err, ScopeCheckError::Git(ref e) if e.cancelled()),
         "got {err:?}"
+    );
+}
+
+/// A repository whose last commit holds `files`, each a path and its bytes,
+/// with that commit's id.
+fn a_repo_holding(files: &[(&str, &[u8])]) -> (tempfile::TempDir, PathBuf, String) {
+    let (root, repo) = a_repo();
+    for (path, bytes) in files {
+        let path = repo.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+    }
+    yunta_testkit::git(&repo, &["add", "."]);
+    yunta_testkit::git(&repo, &["commit", "-q", "-m", "files"]);
+    let head = yunta_testkit::git_output(&repo, &["rev-parse", "HEAD"]);
+    (root, repo, head)
+}
+
+/// A Rust file at the top that declares `build_it`, one below it that calls
+/// `build_it` and `other`, and a Python file that calls `build_it`.
+fn a_repo_naming_build_it() -> (tempfile::TempDir, PathBuf, String) {
+    a_repo_holding(&[
+        ("a.rs", b"pub fn build_it() {}".as_slice()),
+        ("sub/b.rs", b"fn b() { build_it(); other(); }".as_slice()),
+        ("c.py", b"build_it()".as_slice()),
+    ])
+}
+
+/// What a search for `build_it`, `other` and `absent` among the Rust files
+/// of [`a_repo_naming_build_it`] finds: no file names `absent`.
+fn build_it_and_other_named() -> BTreeMap<String, BTreeSet<String>> {
+    BTreeMap::from([
+        (
+            "build_it".to_string(),
+            BTreeSet::from(["a.rs".to_string(), "sub/b.rs".to_string()]),
+        ),
+        (
+            "other".to_string(),
+            BTreeSet::from(["sub/b.rs".to_string()]),
+        ),
+    ])
+}
+
+#[tokio::test]
+async fn one_search_names_every_word_s_files_from_the_top_of_the_repository() {
+    let owner = yunta_testkit::Owner::new();
+    let (_root, repo, head) = a_repo_naming_build_it();
+
+    let named = words_in(
+        &repo.join("sub"),
+        &head,
+        &["build_it", "other", "absent"],
+        &["*.rs".to_string()],
+        owner.supervision(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(named, build_it_and_other_named());
+}
+
+#[tokio::test]
+async fn a_search_that_finds_nothing_is_an_empty_answer() {
+    let owner = yunta_testkit::Owner::new();
+    let (_root, repo, head) = a_repo_naming_build_it();
+
+    let named = words_in(
+        &repo,
+        &head,
+        &["absent"],
+        &["*.rs".to_string()],
+        owner.supervision(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(named, BTreeMap::new());
+}
+
+/// Adds to `repo` a submodule, cloned from a repository beside it under
+/// `root`, whose Rust file calls `build_it`, and answers with the commit
+/// that holds it.
+fn with_a_submodule_calling_build_it(root: &Path, repo: &Path) -> String {
+    let sdk = root.join("sdk");
+    std::fs::create_dir_all(&sdk).unwrap();
+    yunta_testkit::init_repo(&sdk);
+    std::fs::write(sdk.join("lib.rs"), "fn sdk() { build_it(); }\n").unwrap();
+    yunta_testkit::git(&sdk, &["add", "."]);
+    yunta_testkit::git(&sdk, &["commit", "-q", "-m", "sdk"]);
+    // git clones a submodule over the file protocol only when told it may.
+    let allowed = "protocol.file.allow=always";
+    let from = sdk.to_str().unwrap();
+    let add = ["-c", allowed, "submodule", "add", "-q", from, "vendor/sdk"];
+    yunta_testkit::git(repo, &add);
+    yunta_testkit::git(repo, &["commit", "-q", "-m", "sdk"]);
+    yunta_testkit::git_output(repo, &["rev-parse", "HEAD"])
+}
+
+/// The settings hold `submodule.recurse` too, and the repository a
+/// submodule whose Rust file calls `build_it`: the search stays in the
+/// repository's own files.
+#[tokio::test]
+async fn the_person_s_grep_settings_do_not_change_the_answer() {
+    let owner = yunta_testkit::Owner::new();
+    let (root, repo, _) = a_repo_naming_build_it();
+    let head = with_a_submodule_calling_build_it(root.path(), &repo);
+    for (name, value) in [
+        ("grep.lineNumber", "true"),
+        ("grep.column", "true"),
+        ("color.grep", "always"),
+        ("submodule.recurse", "true"),
+    ] {
+        yunta_testkit::git(&repo, &["config", name, value]);
+    }
+
+    let named = words_in(
+        &repo.join("sub"),
+        &head,
+        &["build_it", "other", "absent"],
+        &["*.rs".to_string()],
+        owner.supervision(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(named, build_it_and_other_named());
+}
+
+/// What git's attributes say of a file's diff does not keep it out of
+/// the search.
+#[tokio::test]
+async fn a_file_its_attributes_call_binary_is_searched_all_the_same() {
+    let owner = yunta_testkit::Owner::new();
+    let (_root, repo, head) = a_repo_holding(&[
+        (".gitattributes", b"*.rs -diff\n".as_slice()),
+        ("a.rs", b"pub fn build_it() {}\n".as_slice()),
+    ]);
+
+    let named = words_in(
+        &repo,
+        &head,
+        &["build_it"],
+        &["*.rs".to_string()],
+        owner.supervision(),
+    )
+    .await
+    .unwrap();
+
+    let only = BTreeSet::from(["a.rs".to_string()]);
+    assert_eq!(named, BTreeMap::from([("build_it".to_string(), only)]));
+}
+
+/// A file with a NUL in it is named like any other, and what git prints
+/// of it leaves the next file's records whole.
+#[tokio::test]
+async fn a_binary_file_is_named_and_the_file_after_it_is_read_whole() {
+    let owner = yunta_testkit::Owner::new();
+    let (_root, repo, head) = a_repo_holding(&[
+        ("bin.rs", b"build_it\0".as_slice()),
+        ("z.rs", b"fn z() { build_it(); other(); }\n".as_slice()),
+    ]);
+
+    let named = words_in(
+        &repo,
+        &head,
+        &["build_it", "other"],
+        &["*.rs".to_string()],
+        owner.supervision(),
+    )
+    .await
+    .unwrap();
+
+    let both = BTreeSet::from(["bin.rs".to_string(), "z.rs".to_string()]);
+    let text = BTreeSet::from(["z.rs".to_string()]);
+    assert_eq!(
+        named,
+        BTreeMap::from([("build_it".to_string(), both), ("other".to_string(), text)])
+    );
+}
+
+#[tokio::test]
+async fn one_batch_reads_each_file_and_leaves_out_what_the_commit_lacks() {
+    let owner = yunta_testkit::Owner::new();
+    let (_root, repo, head) = a_repo_holding(&[
+        ("a.rs", b"fn a() {}\n".as_slice()),
+        ("b.txt", b"\x66\xff\x0a".as_slice()),
+        ("with space.rs", b"x\n".as_slice()),
+    ]);
+    let asked = ["a.rs", "b.txt", "with space.rs", "missing.rs"].map(String::from);
+
+    let read = blobs(&repo, &head, &asked, owner.supervision())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        read,
+        BTreeMap::from([
+            ("a.rs".to_string(), "fn a() {}\n".to_string()),
+            ("b.txt".to_string(), "f\u{FFFD}\n".to_string()),
+            ("with space.rs".to_string(), "x\n".to_string()),
+        ])
+    );
+}
+
+/// A batch reads its paths a line each, so a path that holds a line break
+/// is read alone; the search names it whole all the same.
+#[tokio::test]
+async fn a_path_that_holds_a_line_break_is_named_and_read_whole() {
+    let owner = yunta_testkit::Owner::new();
+    let (_root, repo, head) = a_repo_holding(&[
+        ("two\nlines.rs", b"fn build_it() {}\n".as_slice()),
+        ("a.rs", b"fn a() {}\n".as_slice()),
+    ]);
+    let asked = ["two\nlines.rs", "a.rs"].map(String::from);
+
+    let named = words_in(
+        &repo,
+        &head,
+        &["build_it"],
+        &["*.rs".to_string()],
+        owner.supervision(),
+    )
+    .await
+    .unwrap();
+    let read = blobs(&repo, &head, &asked, owner.supervision())
+        .await
+        .unwrap();
+
+    let only = BTreeSet::from(["two\nlines.rs".to_string()]);
+    assert_eq!(named, BTreeMap::from([("build_it".to_string(), only)]));
+    assert_eq!(
+        read,
+        BTreeMap::from([
+            (
+                "two\nlines.rs".to_string(),
+                "fn build_it() {}\n".to_string()
+            ),
+            ("a.rs".to_string(), "fn a() {}\n".to_string()),
+        ])
     );
 }

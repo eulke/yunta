@@ -135,11 +135,11 @@ mod tests {
     use yunta_testkit::wait_until_async;
     use yunta_testkit_core::{Captured, FixedClock, Log};
 
-    use crate::render::Glyphs;
     use crate::surface::feed::{Beat, Diagnostics, Feed};
     use crate::surface::painter::{paint, Draw, Painter};
     use crate::surface::region::Region;
     use crate::surface::{Delivery, Screen, SurfaceEnv, Watched};
+    use surco::glyphs::Glyphs;
 
     use super::*;
     use yunta_core::events::NodeEvent;
@@ -236,7 +236,7 @@ mod tests {
                     Region::open(
                         Screen::immediate(screen.clone()),
                         Glyphs::Ascii,
-                        crate::render::ink::Ink::Plain,
+                        surco::paint::Paint::Plain,
                         Box::new(scrollback.clone()),
                     )
                     .expect("the region's row template parses"),
@@ -341,8 +341,13 @@ mod tests {
         let screen = drawing.screen.clone();
         drawing.drained().await;
 
+        // A run that ends with the prompt still open gives the window its title
+        // back as the surface closes, and that is all it writes.
+        let written = screen.written();
         assert_eq!(
-            screen.written(),
+            written
+                .strip_suffix(surco::paint::TITLE_RESTORED)
+                .unwrap_or(&written),
             before,
             "the surface wrote to the terminal a person was answering on"
         );

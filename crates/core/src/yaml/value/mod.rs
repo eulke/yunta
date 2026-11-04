@@ -167,10 +167,6 @@ impl Value {
         }
     }
 
-    pub fn is_null(&self) -> bool {
-        matches!(self, Value::Null)
-    }
-
     /// The value under `key`, when this is a mapping that has one.
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.as_mapping().and_then(|mapping| mapping.get(key))

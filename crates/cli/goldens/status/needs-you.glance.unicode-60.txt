@@ -1,0 +1,32 @@
+◆ fragua (quick) · needs you · for 32m10s             7E5PH4
+━━━━━━━━━━━ ━━━━━━━━━━━ ━━━━━━━━━━━━ ┄┄┄┄┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄┄┄┄┄
+  node `lint` failed and its 0 reroutes to `fix-lint` are
+  exhausted.
+
+  ✗ lint · exit 101
+    │ error[E0425]: cannot find value `x` in this scope
+    │  --> src/lib.rs:3:5
+    whole output: yunta status 7E5PH4 --node lint
+
+  progress     2 of 5 nodes done · 1 reroute
+  nodes        ✓ 2 finished: plan, build
+               ✗ 1 failed: lint
+               ◌ 2 never ran: fix-lint, ship
+  tasks        1 of 4 done · 1 blocked: global-pack-storage
+
+  the run works in:
+  /home/me/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4 (a
+  node run again starts from what is there)
+
+  ◆ decision on node `lint`
+  ▎ retry: Reroute to `fix-lint` once more
+  ▎   Uses one extra correction attempt beyond the declared
+  ▎   max_reroutes (0); escalates again if `fix-lint`
+  ▎   doesn't fix it
+  ▎   yunta resolve-gate 7E5PH4 retry
+  ▎ abort: Pause here
+  ▎   nothing runs; this decision stays open
+  ▎   yunta resolve-gate 7E5PH4 abort
+  ▎ or
+  ▎   yunta close 7E5PH4   closes it for good
+  ▎   yunta open 7E5PH4    the whole page, in a browser

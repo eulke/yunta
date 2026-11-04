@@ -124,41 +124,60 @@ fn registered(config: &ConfigLayer, executor: &ExecutorName) -> bool {
         .is_some_and(|skills| skills.executors.iter().any(|e| e.name == *executor))
 }
 
+impl ConfigKey {
+    /// What a node lacks when the config leaves this key unset, naming no
+    /// node: the caller already says which node it is about.
+    pub fn fact(&self) -> String {
+        match self {
+            ConfigKey::BaselineSuite => "`baseline_compare` has nothing to compare against: the \
+                                         config declares no `baseline.suite`, so nothing is \
+                                         measured before the first node"
+                .to_string(),
+            ConfigKey::Coverage => {
+                "`coverage_gate` has nothing to measure: the config declares no `coverage`"
+                    .to_string()
+            }
+            ConfigKey::Executor { executor } => format!("executor `{executor}` is not registered"),
+            ConfigKey::Runner => "it opens a session and names no runner, and the config \
+                                  declares no `defaults.runner`"
+                .to_string(),
+            ConfigKey::Command { command } => {
+                format!("it runs the project's command `{command}`, and the config declares none")
+            }
+            ConfigKey::Forge => "it opens a pull request through the project's forge, and the \
+                                 config declares no `forge`"
+                .to_string(),
+            ConfigKey::RunBranch => "it pushes the run's own branch, and a run under \
+                                     `defaults.isolation: none` works in a person's checkout \
+                                     and has none"
+                .to_string(),
+        }
+    }
+
+    /// What to declare, or do, so the node has what it lacks.
+    pub fn remedy(&self) -> String {
+        match self {
+            ConfigKey::BaselineSuite => "declare `baseline.suite`".to_string(),
+            ConfigKey::Coverage => "declare `coverage.cmd` and `coverage.threshold`".to_string(),
+            ConfigKey::Executor { .. } => "declare it under `skills.executors`".to_string(),
+            ConfigKey::Runner => {
+                "name a `runner:` on the node, or declare `defaults.runner`".to_string()
+            }
+            ConfigKey::Command { command } => {
+                format!("declare what this project runs for it under `commands.{command}`")
+            }
+            ConfigKey::Forge => "declare `forge.github` with the repository and the variable \
+                                 its token is in"
+                .to_string(),
+            ConfigKey::RunBranch => "run with `isolation: worktree`".to_string(),
+        }
+    }
+}
+
 impl fmt::Display for ConfigKey {
-    /// What is missing and what to declare, in one sentence that names
+    /// What is missing, then what to declare, in one sentence that names
     /// no node: the caller already says which node it is about.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConfigKey::BaselineSuite => f.write_str(
-                "`baseline_compare` has nothing to compare against: the config declares no \
-                 `baseline.suite`, so nothing is measured before the first node — declare one",
-            ),
-            ConfigKey::Coverage => f.write_str(
-                "`coverage_gate` has nothing to measure: the config declares no `coverage` — \
-                 declare `coverage.cmd` and `coverage.threshold`",
-            ),
-            ConfigKey::Executor { executor } => write!(
-                f,
-                "executor `{executor}` is not registered — declare it under `skills.executors`"
-            ),
-            ConfigKey::Runner => f.write_str(
-                "it opens a session and names no runner, and the config declares no \
-                 `defaults.runner` — name a `runner:` on the node, or declare `defaults.runner`",
-            ),
-            ConfigKey::Command { command } => write!(
-                f,
-                "it runs the project's command `{command}`, and the config declares none — \
-                 declare what this project runs for it under `commands.{command}`"
-            ),
-            ConfigKey::Forge => f.write_str(
-                "it opens a pull request through the project's forge, and the config declares \
-                 no `forge` — declare `forge.github` with the repository and the variable its \
-                 token is in",
-            ),
-            ConfigKey::RunBranch => f.write_str(
-                "it pushes the run's own branch, and a run under `defaults.isolation: none` \
-                 works in a person's checkout and has none — run with `isolation: worktree`",
-            ),
-        }
+        write!(f, "{}; {}", self.fact(), self.remedy())
     }
 }

@@ -12,7 +12,9 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 52 rows and **62 `kind` names**.
+The current Run Contract event table has 54 rows and **64 `kind` names**.
+It had 53 rows and 63 kinds before `changes_counted` was added.
+It had 52 rows and 62 kinds before `shapes_read` was added.
 It had 51 rows and 61 kinds before `best_effort_failed` was added.
 It had 49 rows and 59 kinds before `rail_failed` and `rail_summary` were added.
 It had 47 rows and 57 kinds before `scope_expansion_withdrawn` and
@@ -30,7 +32,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 59 names in this document. A changed shape takes a new name, never a higher version. |
+| `kind` | string | One of the 64 names in this document. A changed shape takes a new name, never a higher version. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | `KIND_VERSION`: 1 para todo kind — ver la política de versionado más abajo |
 
@@ -125,7 +127,7 @@ rechazada: la registra el engine desde el riel de la sesión.
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
 
-## 5. Los 62 tipos de evento, campo por campo
+## 5. Los 64 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -241,7 +243,8 @@ que `from_tree` es exactamente el árbol de `found` (D201).
 |---|---|---|---|
 | `message_type` [inferido] | enum `tool_use \| usage \| note` | sí | distingue cuál variante de `AgentEvent` originó el mensaje |
 | `tool_name` [inferido] | `Option<string>` | solo si `tool_use` | de `ToolUse.name` |
-| `target` [inferido] | `Option<ToolTarget>` | solo si `tool_use` | de `ToolUse.target`: `digest` siempre, `display` solo cuando el argumento nombra el repositorio — nunca contenido completo |
+| `action` [inferido] | `Option<enum read \| edit \| write \| search \| list \| run \| fetch \| call \| submit>` | no | de `ToolUse.action`: qué hace la llamada, leído por el adapter. Un log anterior no lo trae, y se lee por `tool_name` |
+| `target` [inferido] | `Option<ToolTarget>` | solo si `tool_use` | de `ToolUse.target`: `digest` siempre: del texto entero de un comando, y de una ruta tal como se muestra, así dos grafías de un archivo son un solo objetivo; `display` solo lo que el engine puede garantizar: una ruta dentro del checkout, o un programa y su subcomando de una tabla fija — nunca contenido completo |
 | `input_tokens` / `output_tokens` [inferido] | `Option<u64>` | solo si `usage` | de `Usage` |
 | `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché. Es parte de `input_tokens`, nunca un total aparte: `cached ≤ input`. El gasto suma `input` y `output`, y el caché ya está dentro del input |
 | `note` [inferido] | `Option<{bytes, sha256}>` | solo si `note` | resumen mecánico del texto de `Note`: `bytes` y los doce primeros dígitos hexadecimales de su sha256 — jamás el contenido: el log no debe poder portar un secreto que la nota contenía, así que el resumen es contenido-cero, no meramente acotado. La crónica escribe «N bytes, sha256 <prefijo>» desde estos dos datos |
@@ -359,6 +362,48 @@ they are gone, and the task's next cycle reads the answer.
 
 Una tarea con este evento no cierra. Cuando el loop ya no tiene nada que correr, su nodo de implementación falla con `PlanUnpassable` y el planner recibe la declaración por la re-ruta (§11.2). El handover no la ve: una spec imposible sigue rechazada allí, porque la declaración es un hecho de la ejecución.
 
+### 5.11d `shapes_read` — engine
+**Fuente:** el plan por su hash, el commit, y por shape: si su archivo la tiene, su código ahí y los archivos fuera del plan que la nombran
+
+Lo que el árbol contra el que se registró un plan tenía de sus shapes. El engine
+lo lee en la misma lectura que deriva el alcance de cada tarea (§5.14a): al
+registrar el documento de tareas —al nacer el run o cuando un nodo lo produce—,
+en el HEAD del árbol del run, el commit que nombra también todo `scope_derived`
+que escribe ese mismo registro (D271). Nadie lo pide y nada se decide por él:
+toda página que dibuja el plan lo lee de acá —el prompt de un gate,
+`resolve-gate`, `status --node` y el plan que publica un forge—, y
+`status --json` lo lleva como dato, así que cada una dice qué tenía el árbol
+cuando se escribió el plan, dondequiera que se dibuje y sin correr git. Una
+lectura se escribe de nuevo solo cuando difiere de la que el log ya tiene para
+ese plan, comparadas las dos en la forma en que el log la guarda, redactada, y
+entonces la reemplaza.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `plan` | `ContentHash` | sí | el plan, por el hash de los bytes que el run aceptó |
+| `at` | sha de commit git | sí | el commit en que se leyó el árbol: el HEAD del árbol del run al registrar el plan, el mismo que nombra un `scope_derived` que escriba ese registro. Un registro que no cambia el alcance de ninguna tarea no escribe ninguno |
+| `shapes` | lista de `{name, owner, file, in_tree}` | sí | cada shape que sigue la lectura —una cuyo nombre es una palabra de código, en un archivo cuya extensión dice su lenguaje—, en el orden del plan: cómo la llama el plan, la tarea que la construye, su archivo como lo nombra el repositorio desde su raíz, y lo que ese archivo tenía de ella |
+| `shapes.in_tree.type` | enum `new \| there` | sí | `new`: el código de su archivo no la nombra, el archivo no es código —tiene un byte NUL entre sus primeros 8000— o no existe, y el plan la crea. `there`: el código de su archivo la nombra |
+| `shapes.in_tree.code` | string | no, en `there` | lo que el archivo tiene de los ítems que la shape declara, leído como la shape los escribe: una función hasta su firma donde la shape la escribe sin cuerpo, un bloque de miembros (un `impl`, un `trait`, una clase) hasta los miembros que la shape nombra, los atributos y decoradores solo donde la shape escribe alguno; en el orden de la shape. Los ítems se leen en Rust, Go, JavaScript o TypeScript y Python. Ausente donde no se leyó ningún ítem: un archivo en otro lenguaje, o uno que solo usa el nombre |
+| `shapes.in_tree.outside.type` | enum `files \| common` | en `there` | quién más la nombra |
+| `shapes.in_tree.outside.paths` | lista de paths | en `files` | cada archivo cuyo código —no un string ni un comentario— nombra la shape, salvo el suyo y todo archivo que cambia una tarea del plan —por sus cambios, no por sus scopes—, en orden de path. Vacía también es un hecho |
+| `shapes.in_tree.outside.files` | entero | en `common` | cuántos archivos de su familia de lenguaje llevan el nombre, cuando son más de 20: demasiados para seguirlos. De ellos solo se lee el de la shape, por su código y para ver que su código la nombra; ningún otro se lee para seguir el nombre |
+
+`in_tree` se escribe así en cada una de sus formas.
+
+```json
+{"type":"new"}
+{"type":"there","code":"pub fn build_it(depth: u32);","outside":{"type":"files","paths":["src/other.rs"]}}
+{"type":"there","outside":{"type":"common","files":147}}
+```
+
+`code` no es el archivo (§6): lleva solo los ítems que la shape declara, y se
+redacta como el resto del payload, así que un secreto de ese código queda como su
+marcador. El diff entre `code` y el código del plan no se guarda: es una función
+de los dos, y cada página lo dibuja al leer el plan. Ninguna tarea cambia de
+estado por este evento, y el replay no lo ata a ninguna; `TaskLedger` guarda la
+última lectura de cada plan, por su hash.
+
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones
 
@@ -402,16 +447,16 @@ Lo escribe el engine cuando decide el pedido: en la llamada de una tarea, si lo 
 
 Lo que una tarea puede escribir además de su scope porque ahí se nombra una shape
 que es suya: el engine lo lee del árbol del run al registrar el documento de
-tareas —al nacer el run o cuando un nodo lo produce— y nadie lo pide ni lo decide
-(D239). No es una concesión: no cuenta para `max_per_run` ni toca el registro de
-la tarea.
+tareas —al nacer el run o cuando un nodo lo produce—, en la misma lectura que
+da `shapes_read` (§5.11d), y nadie lo pide ni lo decide (D239, D271). No es
+una concesión: no cuenta para `max_per_run` ni toca el registro de la tarea.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `task_id` | string | sí | la dueña de las shapes |
-| `paths` | lista de globs | sí | cada archivo exacto fuera del scope declarado cuyo código —no un string ni un comentario— nombra, como palabra entera, una shape de la tarea con nombre de identificador, entre los del tipo de archivo de la shape. Reemplaza lo que dijo una derivación anterior |
+| `paths` | lista de globs | sí | cada archivo exacto fuera del scope declarado cuyo código —no un string ni un comentario— nombra, como palabra entera, una shape de la tarea con nombre de identificador, entre todos los archivos de la familia de lenguaje del archivo de la shape, digan lo que digan de ellos los atributos de git —una shape de un `.ts` alcanza archivos `.tsx`, y una extensión que el engine no lee es su propia familia—, en todo el repositorio salvo sus submódulos, diga lo que diga `submodule.recurse`, nombrados desde su raíz y leídos en el commit en una sola búsqueda. Un archivo con un byte NUL entre sus primeros 8000 no es código, y no alcanza. Reemplaza lo que dijo una derivación anterior |
 | `shapes` | lista de strings | sí | las shapes que nombran esos archivos |
-| `common` | lista de strings | sí; vacía —y omitida del log— cuando no hay ninguna | las shapes que nombran más de 20 archivos: no alcanzan ninguno |
+| `common` | lista de strings | sí; vacía —y omitida del log— cuando no hay ninguna | las shapes cuyo nombre llevan más de 20 archivos de toda su familia de lenguaje: no alcanzan ninguno, aunque los de su sola extensión sean 20 o menos |
 | `at` | sha de commit git | sí | el commit en que se leyeron los archivos |
 
 ### 5.14b `scope_expansion_withdrawn` — engine
@@ -440,7 +485,7 @@ Lo que una tarea deja al cerrar y nadie decidió. No es una concesión ni una de
 | `release_failed` | `Option<string>` | no; solo en `node_failed` | en `session_not_stopped`, lo que informó soltar lo que la sesión dejó montado, cuando eso también falló; `session_not_stopped` es lo que informó la parada. Ausente en cualquier otra falla |
 | `child_failure` | `Option<Failure>` | no; solo en `node_failed` | la falla con que cerró el run hijo, cuando el padre la conoce; ausente en las demás fallas |
 | `adapter` / `after_ms` / `artifact` / `at_or_above` / `capability` / `children_failed` / `comments` / `confinement` / `denied_rule` / `depth` / `engine_error` / `error` / `frozen_read` / `gate_artifact` / `interrupted_by` / `join` / `loop_cap` / `max` / `max_depth` / `missing_skill` / `name` / `node` / `not_ready` / `on` / `open_findings` / `option` / `owed_by` / `problem` / `refusal` / `rejected_by` / `requested_by` / `reviewed_sha` / `runner` / `runner_refusal` / `searched` / `sent_back` / `target` / `task` / `tasks_for` / `template` / `timed` / `uncertain` / `used` / `workflow` | varía según la variante | solo en `node_failed` | campos planos de las variantes de `Failure`: cada uno lo escribe `render::failure`, con la falla de la que es parte |
-| `agent` / `closed_pull_request` / `input` / `said` / `used_for` | varía según la variante | no; solo en `node_failed` | campos opcionales de esas variantes: ausentes cuando la variante no los lleva; `closed_pull_request` va siempre, en `null` cuando el forge no dio su referencia |
+| `agent` / `closed_pull_request` / `input` / `said` / `used_for` | varía según la variante | no; solo en `node_failed` | campos opcionales de esas variantes: ausentes cuando la variante no los lleva; `closed_pull_request` va siempre, en `null` cuando el forge no dio su referencia, y solo en un log anterior: un pull request cerrado pausa el run (§5.18) |
 
 **La falla es dato, no prosa.** La falla toma una de cuarenta y siete formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
@@ -558,7 +603,7 @@ mismo número (D207).
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `summary` | objeto con `claim` y los campos de la afirmación (`node`, `assignee` o `external_ref`, según la afirmación; `run` o `task`), o string | solo en `gate_waiting` | la afirmación de la escalación. Un objeto con `claim` la dice el engine: `needs_decision` (la pregunta de un gate interno sin `message:`), `node_failed` (el menú de una falla de nodo), `awaits_review` (el pull request de un gate externo espera una revisión; `assignee` es quien el gate nombra, y se omite si no nombra a nadie), `forge_unreachable` (un gate externo no puede publicar su pull request porque no hay forge alcanzable desde esta máquina; `assignee` es quien el gate nombra) `recheck_unreachable` (un gate ya publicado no puede volver a consultarse porque no hay forge alcanzable desde esta máquina; `external_ref` es la referencia que dejó su publicación); `tokens_spent` (el run agotó su tope de tokens; `run`), `loop_cap_spent` (un loop pide otra iteración y su tope está agotado; `node`), `scope_asked` (una tarea de un loop pide scope más allá del suyo; `task`, y `reason`, la razón de su sesión, que falta cuando un criterio en rojo de la tarea ubicó las escrituras rechazadas) o `departs` (la sesión de una tarea se aparta del plan; `task`). Un string es lo que escribió quien escala: el `message:` del gate. Un log anterior a las afirmaciones trae el string, también el que el engine escribía cuando un gate externo caía a la consola, y se lee como ese resumen escrito; render escribe las palabras de cada una |
+| `summary` | objeto con `claim` y los campos de la afirmación (`node`, `assignee` o `external_ref`, según la afirmación; `run` o `task`), o string | solo en `gate_waiting` | la afirmación de la escalación. Un objeto con `claim` la dice el engine: `needs_decision` (la pregunta de un gate interno sin `message:` (ni con uno en blanco) que no muestra un plan con resumen), `approve_plan` (la pregunta de un gate interno sin `message:` (ni con uno en blanco) que muestra un plan: si aprobar el cambio que nombra su resumen; `summary`, el resumen tal como lo escribió el plan), `node_failed` (el menú de una falla de nodo), `awaits_review` (el pull request de un gate externo espera una revisión; `assignee` es quien el gate nombra, y se omite si no nombra a nadie), `forge_unreachable` (un gate externo no puede publicar su pull request porque no hay forge alcanzable desde esta máquina; `assignee` es quien el gate nombra) `recheck_unreachable` (un gate ya publicado no puede volver a consultarse porque no hay forge alcanzable desde esta máquina; `external_ref` es la referencia que dejó su publicación); `tokens_spent` (el run agotó su tope de tokens; `run`), `loop_cap_spent` (un loop pide otra iteración y su tope está agotado; `node`), `scope_asked` (una tarea de un loop pide scope más allá del suyo; `task`, y `reason`, la razón de su sesión, que falta cuando un criterio en rojo de la tarea ubicó las escrituras rechazadas) o `departs` (la sesión de una tarea se aparta del plan; `task`). Un string es lo que escribió quien escala: el `message:` del gate. Un log anterior a las afirmaciones trae el string, también el que el engine escribía cuando un gate externo caía a la consola, y se lee como ese resumen escrito; render escribe las palabras de cada una |
 | `evidence` | lista de `{label?, value}` | solo en `gate_waiting` | de un log anterior: lo que el engine adjuntaba al escalar. Un gate que se escribe hoy no la lleva: los hechos que se muestran los escribe render desde el menú y las opciones que retiene. Un hecho que se nombra solo (`exit 1`) no lleva `label`. Un log anterior a la estructura trae un string y se lee como el único hecho sin etiqueta que siempre fue |
 | `options` | lista de `{id, leads?}` | solo en `gate_waiting` | `leads` es adónde lleva la opción que declaró un autor: `{back: {node, resumes}}` o `{on: {next, settles}}`. La que reserva el engine no lo lleva, y su menú dice lo que hace. Render escribe la etiqueta, el `tradeoff` y la pregunta de cada opción desde esos datos: `label`, `tradeoff` y `asks` solo aparecen en un log anterior, que los guardó con la opción. La pregunta la deriva la opción: la de un gate que devuelve el run a un nodo con sesión reanudable es `what should change?`, y la de un `send-back` de desvío es `what should it do instead?`. Una respuesta sin `free_text` a una opción que pregunta se rechaza |
 | `external_ref` | `Option<string>` | solo en `gate_waiting` | la referencia propia del forge para este gate: la URL del pull request (Contrato §5.6); ausente en la escalación interna, que no sale del run |
@@ -567,17 +612,19 @@ mismo número (D207).
 | `scope` | `{because, paths?, proposed?}` | solo en `gate_waiting` | clave de menú de un pedido de scope: por qué el loop espera a una persona. `because` es la razón tipada (`type`: `mode_ask`, `shared_with_batch`, `cap_exhausted`, `instructions` o `person`); `paths`, las rutas que el pedido quiere permitir, que un log anterior nombraba como hecho `paths` de `evidence`; y `proposed` el criterio que propuso la sesión (`cmd`) con el `precheck` que el engine halló al correrlo (`type`: `passes`, `red`, `could_not_run` o `not_run`). Ausente en cualquier otra escalación |
 | `failure` | `{attempt, failure, remedies, stuck?, reroute?}` | solo en `gate_waiting` | clave de menú de la falla de un nodo que pide a una persona, con el menú que esa falla ofrece: `attempt` es el intento que empezarían las opciones; `failure`, la falla como dato (§5.15); `remedies`, lo que puede cambiarla, cada uno con su `option` (un id reservado) y la `precondition` que tiene que cambiar; `stuck`, por qué no se ofrece ninguno; y `reroute`, la re-ruta que la falla agotó, con su `goto`, su `max_reroutes` y su `next_mode`. Ausente en cualquier otra escalación |
 | `departure` | `{deviations, waived?, rewritten_by?, accept_offered}` | solo en `gate_waiting` | clave de menú del desvío del plan que declaró la sesión de una tarea, como dato: `deviations`, lo que declaró; `waived`, los criterios del plan que aceptarlo deja de exigir; `rewritten_by`, el nodo que escribe otra vez los tests de la tarea, cuando aceptarlo lo hace; y `accept_offered`, si `accept` se ofrece, que no ocurre cuando un test del que se desvía vino con el run y ningún nodo del run lo escribe otra vez. Ausente en cualquier otra escalación |
-| `gate` | `{assignee}` | solo en `gate_waiting` | clave de menú de un gate que un autor declaró: `assignee` es quien el gate nombra |
+| `gate` | `{assignee, node?}` | solo en `gate_waiting` | clave de menú de un gate que un autor declaró: `assignee` es quien el gate nombra, y `node`, el gate mismo: un run que pausa en un gate que nadie contestó lo nombra acá, porque el gate no escribió nada propio (D126). Falta en un log anterior |
 | `budget` | `{cap, spent}` | solo en `gate_waiting` | clave de menú de `limits.max_tokens_per_run` agotado: `cap` es el tope, y `spent`, los tokens de entrada y de salida que el log dice gastados contra él |
 | `loop_cap` | `{cap, ran}` | solo en `gate_waiting` | clave de menú del tope de iteraciones de un loop agotado: `cap` es `limits.max_loop_iterations`, y `ran`, las iteraciones que corrió esta invocación |
 | `console` | `{}` | solo en `gate_waiting` | clave de menú de un gate externo que se contesta en la consola, porque ningún forge contesta; su afirmación dice por qué |
-| `published` | `{url}` | solo en `gate_waiting` | clave de menú de un gate externo cuyo pull request revisa un forge: `url` es el pull request que el forge publicó |
+| `published` | `{url, folder?}` | solo en `gate_waiting` | clave de menú de un gate externo cuyo pull request revisa un forge: `url` es el pull request que el forge publicó, y `folder`, la carpeta de la rama donde el gate puso sus archivos, desde la raíz del repositorio. Falta cuando el gate los puso en la raíz de la rama: el de un log anterior a las carpetas, que los sigue poniendo ahí en cada vuelta |
 | `chosen_option` | `Option<string>` | solo en `gate_resolved` | — |
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
 | `approved_sha` | `Option<CommitSha>` | solo en `gate_resolved` | el commit que cubre la aprobación del forge: contra él se compara la cabeza del pull request para decidir si la aprobación sigue en pie |
 | `free_text` | `Option<string>` | solo en `gate_resolved` | siempre disponible como canal para quien resuelve |
 
 Un escalamiento tiene **un solo menú**, y su clave dice de qué trata: `gate`, `failure`, `departure`, `scope`, `budget`, `loop_cap`, `console` o `published`. Un gate que se escribe hoy lo lleva; un log anterior puede no llevar ninguno. El log guarda los datos de cada clave y ninguna palabra: las opciones, los hechos del menú y las razones de las opciones retenidas se escriben al mostrarse, en render.
+
+Un pull request cerrado sin mergear escribe `gate_resolved` sin campos y ningún evento del nodo: el gate queda como antes de publicarse, sin el pull request, y el run pausa con `pull_request_closed` (§5.26), como pausa un `abort` (D272). Un log anterior lo escribía entre `node_started` y `node_failed` con `closed_pull_request`, y se lee así.
 
 ### 5.19 `questions_asked` / `questions_answered` — engine
 **Fuente:** node_id; hash e ids del documento `questions` y tokens de la sesión que
@@ -977,12 +1024,24 @@ the run reports leaves the span out (D199).
 |---|---|---|---|
 | `slept_ms` | `u64` | yes | How long the host slept, in milliseconds. |
 
+### 5.25c `changes_counted` — engine
+
+El cambio del run tal como lo cuenta git, desde su commit de partida hasta su árbol más reciente: `git diff --numstat` con renombres detectados, de modo que un archivo renombrado cuenta una vez, y un archivo binario cuenta como archivo sin líneas. El engine lo cuenta cuando un gate pregunta a una persona, antes de abrir un pull request y cuando el engine termina el run (`done`, `failed` o `promoted`), nunca una vez por nodo: el evento nombra el gate o el nodo `pull_request` para el que se contó, y ningún nodo al terminar el run. Un cierre de una persona (`yunta close`) no registra ninguna cuenta. Si ningún nodo ni el último `run_resumed` registra un árbol, el run no registra ninguna cuenta. El engine lee la última cuenta para no contar otra vez un árbol ya contado, y la crónica del run la muestra como un momento. La página de cierre, `status --full`, la página de un gate (en la terminal y en el pull request que publica), el cuerpo de un pull request y el recibo la dicen mientras la cuenta esté sobre el árbol más reciente del run; una cuenta de cero archivos no se dice. Los archivos tocados del recibo siguen contando lo que vieron sus auditorías.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `tree` | `TreeId` | sí | el árbol al que se contó el cambio. |
+| `files` | `u32` | sí | cuántos archivos toca el cambio: un archivo renombrado cuenta una vez, y los binarios también. |
+| `added` | `u64` | sí | cuántas líneas agrega el cambio. |
+| `removed` | `u64` | sí | cuántas líneas elimina el cambio. |
+| `largest` | lista de `{path, added, removed}` | sí; vacía —y omitida del log— en un cambio sin archivos, y ausente en un log anterior al campo | los archivos que más mueve el cambio, el mayor primero, hasta cuatro; un archivo renombrado por su ruta nueva, un binario sin líneas. Un byte de una ruta que no es texto se lee como el carácter de reemplazo. |
+
 ### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** pausa / estado terminal, métricas
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `pause` | `PauseReason` | sí, en `run_paused` | el hecho por el que el run se detuvo, con `type`: `budget_exhausted` (con `spent` y `cap`), `uncertain_orphans` (con `nodes`), `awaiting_reset` (con `node` y `at`: el límite de una cuenta se reinicia en `at`, y el run se retoma solo entonces), `escalation` (con el mismo payload que `gate_waiting`, §5.18, y su `summary`), `child_paused`, entre otros. Un log escrito antes guarda la frase en `reason`: se lee como `{"type": "recorded", "sentence": "<frase>"}` y no se escribe |
+| `pause` | `PauseReason` | sí, en `run_paused` | el hecho por el que el run se detuvo, con `type`: `budget_exhausted` (con `spent` y `cap`), `uncertain_orphans` (con `nodes`), `awaiting_reset` (con `node` y `at`: el límite de una cuenta se reinicia en `at`, y el run se retoma solo entonces), `escalation` (con el mismo payload que `gate_waiting`, §5.18, y su `summary`), `pull_request_closed` (con `node` y `url`: alguien cerró sin mergear el pull request de un gate; la decisión queda abierta), `child_paused`, entre otros. Un log escrito antes guarda la frase en `reason`: se lee como `{"type": "recorded", "sentence": "<frase>"}` y no se escribe |
 | `policies` | lista de `{node, on_interrupt}` | solo en `run_resumed` (puede ser vacía) | cada nodo que el log dejó `running` sin evento terminal y la política a la que resolvió: la propia o el default de la config. De aquí sale la política común de los huérfanos (`agreed_policy`), que el log no guarda: la que todos resolvieron, ausente sin huérfanos o con políticas distintas. La lectura ignora el `resume_policy_applied` de un log viejo |
 | `environment` | `{shell, path}` | no, solo en `run_resumed` | con qué corren los comandos desde este wake; si difiere del de `run_created`, `yunta status` lo dice |
 | `checkout` | ruta | no, solo en `run_resumed` | el checkout en que trabaja el run desde este wake, cuando no es el último que nombró su log (D235) |

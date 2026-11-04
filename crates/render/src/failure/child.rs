@@ -3,8 +3,9 @@
 //! last stopped, the loser of a join-any race, and a composed workflow that
 //! could not start, nested too deep, or whose run failed.
 
+use surco::text;
 use yunta_core::events::{ChildRefusal, Failure, Interruption};
-use yunta_core::{text, JoinPolicy, NodeId, RunId};
+use yunta_core::{JoinPolicy, NodeId, RunId};
 
 use super::headline;
 use crate::inputs;
@@ -49,7 +50,7 @@ pub(super) fn children_failed(failure: &Failure) -> String {
             None => "a child failed under join: all".to_string(),
         },
         JoinPolicy::Any => format!(
-            "join: any — no child succeeded ({} failed)",
+            "no child succeeded under join: any ({} failed)",
             children_failed.len()
         ),
     }
@@ -59,7 +60,7 @@ pub(super) fn children_failed(failure: &Failure) -> String {
 /// that its `on_interrupt` policy will not let run again.
 pub(super) fn uncertain(node: &NodeId) -> String {
     format!(
-        "`{node}` was running with no terminal event when the engine last stopped — \
+        "`{node}` was running with no terminal event when the engine last stopped; \
          `on_interrupt: fail_if_uncertain` refuses to guess whether it finished; verify manually \
          before resuming"
     )
@@ -110,8 +111,14 @@ pub(super) fn nested_too_deep(failure: &Failure) -> String {
         false => format!("child workflow `{workflow}`"),
     };
     format!(
-        "creating {child} would nest {} deep but `limits.max_workflow_depth` is {max_depth} — \
-         flatten the composition or raise the limit",
-        text::counted(*depth as usize, "level")
+        "creating {child} would nest {} deep {}",
+        text::counted(*depth as usize, "level"),
+        past_the_depth_limit(*max_depth)
     )
+}
+
+/// What a composition says after how deep it nests: the limit it passes and
+/// what a person does about it, whether a run or a check found it.
+pub fn past_the_depth_limit(max: u32) -> String {
+    format!("but `limits.max_workflow_depth` is {max}; flatten the composition or raise the limit")
 }

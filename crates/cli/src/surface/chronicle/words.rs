@@ -6,29 +6,32 @@
 //! `view::closed_as`, every enum its own published word — nothing here
 //! formats a domain type with `Debug`.
 
+use surco::figures::duration;
+use surco::glyphs::{Glyphs, Mark};
+use surco::text::{detailed, one_line};
+use surco::words::Standing;
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
-    artifacts, children, findings, gates, node, run, session, tasks, AgentMessageType,
-    GateResolvedPayload, LoggedWords, NoteDigest, TokenUsage, ToolTarget,
+    artifacts, children, findings, gates, node, run, session, AgentMessageType,
+    GateResolvedPayload, LoggedWords, NoteDigest, TokenUsage,
 };
 use yunta_core::fence::Coverage;
-use yunta_core::text::{detailed, one_line};
 use yunta_core::NonEmpty;
 use yunta_engine::{Happening, NodeState, NodeWait};
 use yunta_render::spend::Breakdown;
+use yunta_render::state::NodeDisplay;
 
 use super::super::view;
-use crate::render::{duration, Mark, NodeDisplay, StateWord};
-use tasks::happening as tasks_happening;
 
 /// What the moment carries beyond its subject, and the state it is
 /// marked with.
-pub(super) fn carried(happening: &Happening, sep: char) -> (Option<Mark>, String) {
+pub(super) fn carried(happening: &Happening, glyphs: Glyphs) -> (Option<Mark>, String) {
+    let sep = glyphs.sep();
     match happening {
-        Happening::Run(it) => run_words(it),
+        Happening::Run(it) => run_words(it, glyphs),
         Happening::Node(it) => node_words(it, sep),
         Happening::Session(it) => (None, session_words(it, sep)),
-        Happening::Tasks(it) => (None, task_words(it)),
+        Happening::Tasks(it) => (None, super::task_words::task_words(it)),
         Happening::Scope(it) => (None, super::scope_words::scope_words(it)),
         Happening::Findings(it) => (None, finding_words(it)),
         Happening::Artifacts(it) => (None, artifact_words(it)),
@@ -41,17 +44,14 @@ pub(super) fn carried(happening: &Happening, sep: char) -> (Option<Mark>, String
     }
 }
 
-fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
+fn run_words(happening: &run::happening::Happening, glyphs: Glyphs) -> (Option<Mark>, String) {
     use run::happening::Happening as H;
     let said = match happening {
-        H::Created { mode, base_branch } => format!("created — mode `{mode}` off {base_branch}"),
+        H::Created { mode, base_branch } => format!("created: mode `{mode}` off {base_branch}"),
         H::Paused { pause } => yunta_render::pause::said(pause),
         H::Resumed { policies } => match policies.len() {
             0 => "resumed".to_string(),
-            n => format!(
-                "resumed — {} settled",
-                yunta_core::text::counted(n, "orphan")
-            ),
+            n => format!("resumed: {} settled", surco::text::counted(n, "orphan")),
         },
         H::BaselineCaptured { origin, red } => {
             return super::baseline_words::measured(origin, *red)
@@ -64,19 +64,28 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
             checkout.display()
         ),
         H::HostSuspended { slept } => format!(
-            "host suspended for {} — durations leave it out; new sessions wait until it has \
+            "host suspended for {}, which durations leave out; new sessions wait until it has \
              been awake {}",
             duration(*slept),
             duration(yunta_engine::SETTLE_AFTER_SUSPENSION)
         ),
-        H::Closed { terminal, .. } => view::closed_as(*terminal).to_string(),
+        H::ChangesCounted {
+            files,
+            added,
+            removed,
+        } => format!(
+            "the change counted: {}",
+            yunta_render::changes::said(*files, *added, *removed, glyphs)
+                .unwrap_or_else(|| "no file changed".to_string())
+        ),
+        H::Closed { terminal, .. } => view::closed_as(*terminal).word().to_string(),
         H::PromotionSignaled {
             to,
             cause,
             legacy_reason,
             evidence,
         } => detailed(
-            format!("promotion to `{to}`"),
+            format!("promoted to `{to}`"),
             &one_line(&yunta_render::outcome::promotion_reason(
                 cause.as_ref(),
                 legacy_reason.as_deref(),
@@ -98,19 +107,19 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
             format!("{} on {}/{}", it.runner, it.chosen.adapter, it.chosen.model),
         ),
         H::Reached { state, elapsed, .. } => {
-            let display = NodeDisplay::of(Some(state));
+            let display = NodeDisplay::of(yunta_engine::node_word(state), Some(state));
             let worked = elapsed
                 .map(|elapsed| format!(" {sep} {}", duration(elapsed)))
                 .unwrap_or_default();
             (
-                Some(display.word.mark()),
+                Some(display.standing.mark()),
                 format!("{}{worked}", display.label()),
             )
         }
         H::Rerouted(it) => (
             Some(Mark::Reroute),
             detailed(
-                format!("rerouted to `{}`", it.to),
+                format!("{} to `{}`", Standing::Rerouted.word(), it.to),
                 &one_line(&yunta_render::failure::cause(&it.cause)),
             ),
         ),
@@ -126,12 +135,11 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
         } => (None, criteria_checked(task, (*phase, *checked), red, sep)),
         H::ScopeChecked { violations } => (
             None,
-            format!(
-                "{} out of scope",
-                yunta_core::text::counted(*violations, "path")
-            ),
+            format!("{} out of scope", surco::text::counted(*violations, "path")),
         ),
-        H::PullRequestOpened { url, number } => (None, format!("pull request #{number} — {url}")),
+        H::PullRequestOpened { url, number } => {
+            (None, format!("opened pull request #{number} ({url})"))
+        }
     }
 }
 
@@ -142,7 +150,7 @@ fn context_assembled(absent: &[String], sep: char) -> String {
     }
     format!(
         "context assembled {sep} {} absent (optional)",
-        yunta_core::text::listed(absent.iter().map(String::as_str))
+        surco::text::listed(absent.iter().map(String::as_str))
     )
 }
 
@@ -159,13 +167,13 @@ fn criteria_checked(
     let mut said = format!(
         "{task} {}: {}",
         phase.as_str(),
-        yunta_core::text::counted_as(checked, "criterion", "criteria")
+        surco::text::counted_as(checked, "criterion", "criteria")
     );
     if !red.is_empty() {
         let named: Vec<String> = red
             .iter()
             .map(|red| match &red.said {
-                Some(line) => format!("`{}` exit {} — {line}", red.cmd, red.exit_code),
+                Some(line) => format!("`{}` exit {} ({line})", red.cmd, red.exit_code),
                 None => format!("`{}` exit {}", red.cmd, red.exit_code),
             })
             .collect();
@@ -182,7 +190,11 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             model,
             fence,
         } => opened(agent.as_ref(), model.as_ref(), fence.as_ref(), sep),
-        H::Called { tool, target } => called(tool.as_deref(), target.as_ref()),
+        H::Called {
+            tool,
+            action,
+            target,
+        } => yunta_render::target::said(*action, tool.as_deref(), target.as_ref()),
         H::Message {
             kind,
             note,
@@ -272,20 +284,8 @@ fn service_words(lost: Option<&str>, waited: Option<std::time::Duration>) -> Str
         ),
         (None, waited) => format!(
             "its service answers again after {}; the session goes on",
-            yunta_core::units::duration(waited.unwrap_or_default())
+            surco::figures::duration(waited.unwrap_or_default())
         ),
-    }
-}
-
-/// A tool call, with what it acted on when the log says.
-fn called(tool: Option<&str>, target: Option<&ToolTarget>) -> String {
-    let called = match tool {
-        Some(tool) => format!("called {tool}"),
-        None => "called a tool it did not name".to_string(),
-    };
-    match target {
-        Some(target) => format!("{called} on {}", yunta_render::target::line(target)),
-        None => called,
     }
 }
 
@@ -311,40 +311,6 @@ fn message(
         (Some(it), _) => detailed(said, &format!("{} bytes, sha256 {}", it.bytes, it.sha256)),
         (None, Some(text)) => detailed(said, &one_line(text.as_str())),
         (None, None) => said,
-    }
-}
-
-fn task_words(happening: &tasks_happening::Happening) -> String {
-    use tasks_happening::Happening as H;
-    match happening {
-        H::Registered { task } => format!("task {task} registered"),
-        H::Moved { task, to } => format!("{task} is {}", to.as_str()),
-        H::Checking { task } => format!("{task} asked for a check"),
-        H::Checked {
-            task,
-            closes,
-            red,
-            duration_ms,
-        } => {
-            let took = duration(std::time::Duration::from_millis(*duration_ms));
-            match (closes, red) {
-                (true, _) => format!("{task} checked in {took}: it would close"),
-                (false, 0) => {
-                    format!("{task} checked in {took}: its work reaches paths it may not change")
-                }
-                (false, red) => format!("{task} checked in {took}: {red} of its criteria red"),
-            }
-        }
-        H::Departed { task, from } => format!("{task} departs from the plan: {from}"),
-        H::Answered { task, accepted } => match accepted {
-            true => format!("{task}'s departure from the plan was accepted"),
-            false => format!("{task}'s departure from the plan was sent back"),
-        },
-        H::Unpassable {
-            task,
-            criterion,
-            why,
-        } => detailed(format!("{task} declared `{criterion}` cannot pass"), why),
     }
 }
 
@@ -389,7 +355,7 @@ fn finding_words(happening: &findings::happening::Happening) -> String {
         } => format!(
             "{named} {} refused: {}",
             operation.as_str(),
-            yunta_core::text::counted(*problems, "problem")
+            surco::text::counted(*problems, "problem")
         ),
     }
 }
@@ -423,15 +389,18 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String)
         H::Asked { questions } => (
             Some(Mark::NeedsYou),
             match NonEmpty::new(questions.clone()) {
-                Some(asked) => NodeDisplay::of(Some(&NodeState::Waiting {
-                    on: NodeWait::Questions { asked },
-                }))
+                Some(asked) => NodeDisplay::of(
+                    Standing::NeedsYou,
+                    Some(&NodeState::Waiting {
+                        on: NodeWait::Questions { asked },
+                    }),
+                )
                 .label(),
                 // A `questions_asked` naming nothing is a log this
                 // binary never wrote — its constructor refuses one — so
                 // the chronicle says what it has rather than a list it
                 // would be inventing.
-                None => StateWord::Waiting.word().to_string(),
+                None => Standing::NeedsYou.word().to_string(),
             },
         ),
         H::Answered { channel, responder } => (
@@ -473,7 +442,7 @@ fn fence_covered(coverage: &Coverage) -> String {
         Coverage::Exact => "fence exact".to_string(),
         Coverage::WidenedToRoots { roots } => format!(
             "fence widened to {}",
-            yunta_core::text::counted(roots.len(), "root")
+            surco::text::counted(roots.len(), "root")
         ),
         Coverage::ToolsOnly => "fence on tool calls".to_string(),
     }

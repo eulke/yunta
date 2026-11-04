@@ -1,0 +1,8 @@
+{"base_branch":"main","base_commit":"5866a83d841ab46863aa93584979c6929610f9e4","checkout":"/var/folders/jm/klvlxj3d4pd8whpcy3c8l7cw0000gn/T/.tmpiQ1Vn7/worktree","inputs":{},"kind":"run_created","manifest_hash":"e6d7bd527601798a8550b76e2abfa8a283cb43cce784f75cb2571fa1d358e1ee","mode":"default","opens_on_base":true,"run_id":"run-gate-1","seq":1,"timestamp":"2026-01-01T00:00:00Z","yunta_schema":"=1"}
+{"external_ref":"{\"url\":\"https://mock.forge/pr/1\",\"number\":1}","kind":"gate_waiting","node_id":"approve","options":[],"published":{"url":"https://mock.forge/pr/1"},"run_id":"run-gate-1","seq":2,"summary":{"assignee":"reviewer","claim":"awaits_review","node":"approve"},"timestamp":"2026-01-01T00:00:00Z"}
+{"kind":"run_paused","pause":{"type":"external_gate","url":"https://mock.forge/pr/1"},"run_id":"run-gate-1","seq":3,"timestamp":"2026-01-01T00:00:00Z"}
+{"kind":"run_resumed","run_id":"run-gate-1","seq":4,"timestamp":"2026-01-01T00:00:00Z"}
+{"attempt":1,"kind":"node_started","node_id":"approve","run_id":"run-gate-1","seq":5,"timestamp":"2026-01-01T00:00:00Z"}
+{"kind":"gate_resolved","node_id":"approve","run_id":"run-gate-1","seq":6,"timestamp":"2026-01-01T00:00:00Z"}
+{"closed_pull_request":"https://mock.forge/pr/1","kind":"node_failed","node_id":"approve","run_id":"run-gate-1","seq":7,"timestamp":"2026-01-01T00:00:00Z","tokens_used":{"input":0,"output":0},"tree":"d564d0bc3dd917926892c55e3706cc116d5b165e"}
+{"kind":"run_paused","pause":{"failure":{"closed_pull_request":"https://mock.forge/pr/1"},"node":"approve","type":"node_failed"},"run_id":"run-gate-1","seq":8,"timestamp":"2026-01-01T00:00:00Z"}

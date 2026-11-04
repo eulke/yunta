@@ -56,7 +56,7 @@ fn an_unknown_node_suggests_the_closest_id() {
     let page = yunta_at!(&checkout, &["status", &run_id, "--node", "biuld"]);
     assert!(!page.status.success());
     assert!(
-        stderr(&page).contains("has no node `biuld` — did you mean `build`?"),
+        stderr(&page).contains("has no node `biuld`; did you mean `build`?"),
         "{}",
         stderr(&page)
     );

@@ -141,7 +141,14 @@ async fn an_answered_blocking_finding_still_keeps_the_run_from_success() {
     let workflow: yunta_core::Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
     let events = bench.events();
     let at = events.last().unwrap().timestamp;
-    let frame = yunta_engine::run_frame(&bench.run_id, &workflow, &events, None, at);
+    let frame = yunta_engine::run_frame(
+        &bench.run_id,
+        &workflow,
+        &events,
+        None,
+        &yunta_engine::Engine::this(at),
+        at,
+    );
     assert_eq!(
         frame.blocking_findings, 1,
         "a node's answer is its word, not evidence: the finding it answered still stands"

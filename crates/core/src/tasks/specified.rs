@@ -12,8 +12,8 @@ pub(super) const SPECIFIED_RULES: &[Rule] = &[
     Rule {
         code: RuleCode::CriterionChecksPresence,
         demand: "a criterion runs the behavior: none passes once a name is written in a file \
-                 its task changes — a `grep` of that file, or a `test -f` of it nothing runs \
-                 after — unless the file is a document whose words are the work",
+                 its task changes (a `grep` of that file, or a `test -f` of it nothing runs \
+                 after), unless the file is a document whose words are the work",
     },
     Rule {
         code: RuleCode::SharedCriterion,
@@ -22,8 +22,8 @@ pub(super) const SPECIFIED_RULES: &[Rule] = &[
     },
     Rule {
         code: RuleCode::OutsideTheSuite,
-        demand: "a criterion that runs the project's tests extends the suite the run measures — \
-                 `<suite> <selector>`, where `<selector>` picks the task's tests — so the build \
+        demand: "a criterion that runs the project's tests extends the suite the run measures (\
+                 `<suite> <selector>`, where `<selector>` picks the task's tests), so the build \
                  the suite leaves serves it",
     },
     Rule {

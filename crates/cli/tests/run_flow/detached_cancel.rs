@@ -62,5 +62,5 @@ fn a_run_cancelled_as_soon_as_it_is_detached_is_cancelled() {
     assert!(cancel.status.success(), "{said}");
     assert!(!said.contains("nothing to cancel"), "{said}");
     let status = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
-    assert!(status.contains("cancelled"), "{status}");
+    assert!(status.contains("interrupted by a person"), "{status}");
 }

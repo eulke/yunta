@@ -44,8 +44,8 @@ pub(super) fn writer(ctx: &RunCtx<'_>, state: &RunState) -> Option<NodeId> {
 
 /// Sends the run back to the node that writes the spec when a person
 /// accepted that a task's tests are wrong and that node has not written
-/// them again: the loop fails and re-routes there, as a person's choice
-/// does — it spends none of the loop's own re-routes.
+/// them again: the loop fails and reroutes there, as a person's choice
+/// does — it spends none of the loop's own reroutes.
 pub(super) async fn send_back(
     ctx: &RunCtx<'_>,
     node: &Node,

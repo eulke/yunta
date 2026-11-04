@@ -81,16 +81,16 @@ fn pack_add_reports_what_the_pack_needs_with_what_it_detected() {
     let said = stdout(&out);
     let needs: Vec<&str> = said
         .lines()
-        .skip_while(|l| *l != "acme/lint-pack needs from this project:")
+        .skip_while(|l| *l != "needs from this project")
         .take(5)
         .collect();
     assert_eq!(
         needs,
         [
-            "acme/lint-pack needs from this project:",
-            "  node `lint`: the project declares no command `lint` — a run is refused until it does",
+            "needs from this project",
+            "  node `lint`: the project declares no command `lint`; a run is refused until it does",
             "    detected here: declare `commands: { lint: \"pnpm lint\" }`",
-            "  node `types`: the project declares no command `typecheck` — a run leaves the node out until it does",
+            "  node `types`: the project declares no command `typecheck`; a run leaves the node out until it does",
             "    detected here: declare `commands: { typecheck: \"pnpm typecheck\" }`",
         ],
         "{said}"
@@ -114,9 +114,9 @@ fn doctor_names_what_a_pack_needs_with_the_detected_value() {
         yunta_testkit::checked(&said, "pack acme/lint-pack").is_some(),
         "the pack's gap is a row of its own: {said}"
     );
-    assert!(
-        said.lines()
-            .any(|l| l.trim() == "detected here: declare `commands: { lint: \"pnpm lint\" }`"),
-        "and the step under the list names the detected value: {said}"
+    assert_eq!(
+        yunta_testkit::hung(&said, "pack acme/lint-pack", "fix").as_deref(),
+        Some("detected here: declare `commands: { lint: \"pnpm lint\" }`"),
+        "and how to fix it names the detected value: {said}"
     );
 }

@@ -5,6 +5,7 @@
 //! The process cases need a process of their own to kill, interrupt or read
 //! the stderr of, so only the real subjects run them.
 
+mod actions;
 mod cases;
 mod process;
 mod subject;
@@ -127,6 +128,11 @@ macro_rules! adapter_contract {
             #[tokio::test]
             async fn a_tool_use_never_persists_the_command_it_ran() {
                 cases::a_tool_use_never_persists_the_command_it_ran(&$subject).await
+            }
+
+            #[tokio::test]
+            async fn a_tool_call_reads_as_the_same_action_under_every_cli() {
+                actions::a_tool_call_reads_as_the_same_action_under_every_cli(&$subject).await
             }
 
             #[tokio::test]

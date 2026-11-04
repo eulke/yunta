@@ -9,15 +9,14 @@
 //! manifest froze and the instant it is read at.
 //!
 //! Counters with context, never percentages: a percentage lies the moment
-//! a re-route grows the denominator.
+//! a reroute grows the denominator.
 
-use crate::render::state::RunWord;
-use crate::render::Glyphs;
 use chrono::{DateTime, Utc};
-
+use surco::glyphs::Glyphs;
+use surco::words::Standing;
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{RunFrame, RunPhase, RunState};
+use yunta_engine::{Engine, RunFrame, RunPhase, RunState};
 
 use crate::commands::advice;
 
@@ -39,9 +38,10 @@ pub(crate) fn frame(
     run_id: &RunId,
     manifest: &Manifest,
     events: &[StoredEvent],
+    engine: &Engine,
     now: DateTime<Utc>,
 ) -> RunFrame {
-    frame_of(run_id, manifest, &yunta_engine::derive(events), now)
+    frame_of(run_id, manifest, &yunta_engine::derive(events), engine, now)
 }
 
 /// The frame of a run whose state the caller already derived from its
@@ -51,9 +51,10 @@ pub(crate) fn frame_of(
     run_id: &RunId,
     manifest: &Manifest,
     state: &RunState,
+    engine: &Engine,
     now: DateTime<Utc>,
 ) -> RunFrame {
-    yunta_engine::run_frame_of(run_id, &manifest.workflow, state, None, now)
+    yunta_engine::run_frame_of(run_id, &manifest.workflow, state, None, engine, now)
 }
 
 /// The counters and the phase on one line: the counters every surface
@@ -63,14 +64,14 @@ pub(crate) fn frame_of(
 /// `engine` is what the run's registry says about the process driving
 /// it, which is what tells a run that is moving from one whose engine is
 /// gone.
-pub(crate) fn summary(frame: &RunFrame, engine: &crate::render::Engine, glyphs: Glyphs) -> String {
+pub(crate) fn summary(frame: &RunFrame, engine: &yunta_engine::Engine, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
     let mut summary = format!(
         "{} {sep} {}",
         crate::render::counter::line(frame, glyphs),
         phase_label(frame, engine)
     );
-    if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds, glyphs) {
+    if let Some(note) = yunta_render::receipt::unknown_kinds(&frame.unknown_kinds) {
         summary.push_str(&format!(" {sep} {note}"));
     }
     summary
@@ -78,20 +79,20 @@ pub(crate) fn summary(frame: &RunFrame, engine: &crate::render::Engine, glyphs: 
 
 /// The phase on one line, for the end of a summary: the word every
 /// surface calls it by, and what qualifies it when something does.
-fn phase_label(frame: &RunFrame, engine: &crate::render::Engine) -> String {
-    let word = crate::render::observed_word(frame, engine);
-    if word == RunWord::Stalled {
-        return format!("{word} — no process is driving it");
+fn phase_label(frame: &RunFrame, engine: &yunta_engine::Engine) -> String {
+    let word = frame.standing;
+    if word == Standing::Stalled {
+        return format!("{word}: no process is driving it");
     }
-    if let (RunWord::NeedsYou, Some(prompt)) = (word, &engine.prompt) {
-        return format!("{word} — {}", advice::asking(prompt, engine.at));
+    if let (Standing::NeedsYou, Some(prompt)) = (word, &engine.prompt) {
+        return format!("{word}: {}", advice::asking(prompt, Some(engine.at)));
     }
     match &frame.phase {
         // A parked run is waiting on a person, not stuck, and what it is
         // parked on is the thing a reader acts on next.
-        RunPhase::Waiting { on } => format!("{word} — {}", advice::parked_on(on)),
+        RunPhase::Waiting { on } => format!("{word}: {}", advice::parked_on(on)),
         RunPhase::Broken { diagnostic } => {
-            format!("{word} — {}", yunta_core::text::one_line(diagnostic))
+            format!("{word}: {}", surco::text::one_line(diagnostic))
         }
         RunPhase::Created
         | RunPhase::Running

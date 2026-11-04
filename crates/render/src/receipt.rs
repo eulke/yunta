@@ -6,22 +6,22 @@
 //! derivation is what makes "the receipt IS the evidence" checkable: the
 //! engine reads the log, this reads the receipt.
 
-use yunta_core::events::{BaselineOrigin, TerminalState};
+use surco::components::{Checklist, Fields, Found, Gist, Headline, Next, Section, Whole};
+use surco::doc::{Block, Doc};
+use surco::figures::Tokens;
+use surco::glyphs::{Glyphs, Mark};
+use surco::line::{Line, Tone};
+use surco::text::counted;
+use surco::words::Standing;
+use yunta_core::events::{BaselineOrigin, TerminalState, UnknownKindCount};
 use yunta_core::receipt::{
     BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode, Receipt, RunnerUsage,
 };
 use yunta_core::step::NextStep;
-use yunta_core::text::counted;
-use yunta_core::units::Tokens;
 use yunta_core::{NodeId, RunId};
 
-use crate::blocks::{
-    Checklist, FailureDetail, Fields, Found, Headline, Next, Prose, Section, Whole,
-};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
+use crate::blocks::FailureDetail;
 use crate::spend::Breakdown;
-use crate::{Glyphs, Mark, RunWord};
 
 /// Fan-out siblings share their base id (`<base>@<runner>`, see
 /// `manifest.rs`) — grouped here purely for the receipt's review check; the JSON receipt exposes the flat
@@ -50,32 +50,29 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>
 /// `·` for what was never asked for — then each criterion and each path
 /// outside the scope, and the command that checks it all again. `glyphs`
 /// draws the separators between the facts a line states.
-pub fn document<'a>(
-    receipt: &'a Receipt,
-    spell: &dyn Fn(&NextStep) -> String,
-    glyphs: Glyphs,
-) -> Doc<'a> {
+pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: Glyphs) -> Doc {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
-    let word = receipt.terminal_state.map_or(RunWord::Running, run_word);
-    let mut doc = Doc::new().with(Headline {
-        subject: format!("receipt for run {handle}"),
-        mark: word.mark(),
-        said: word.word().to_string(),
+    let word = receipt.terminal_state.map_or(Standing::Running, |state| {
+        standing(state, receipt.blocking_findings)
     });
+    let headline = Headline::new(
+        word.mark(),
+        format!("receipt of {} ({})", receipt.workflow, receipt.mode),
+        word.word().to_string(),
+    )
+    .edge(handle);
+    let mut doc = Doc::new().with(headline);
     if receipt.terminal_state.is_none() {
-        doc = doc.with(Prose(
-            "the run is still open: this is its last step".to_string(),
-        ));
+        doc = doc.with(Gist::new("the run is still open: this is its last step"));
     }
     let mut doc = doc
         .with(
             Fields::new()
-                .push_if("workflow", receipt.workflow.to_string())
-                .push_if("mode", receipt.mode.to_string())
                 .push_if("run", receipt.run_id.to_string())
-                .push_if("cost", cost(receipt, glyphs)),
+                .push_if("cost", cost(receipt, glyphs))
+                .push_if("changed", changed(receipt, glyphs)),
         )
         .with(checks(receipt));
     for failed in &receipt.failed {
@@ -103,25 +100,22 @@ pub fn document<'a>(
 
 /// A node that stands failed: its id and the sentence its failure is
 /// told in, then what it printed and the command that shows the rest.
-fn failed_node<'a>(
-    failed: &'a FailedNode,
-    run: &RunId,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Section<'a> {
+fn failed_node(failed: &FailedNode, run: &RunId, spell: &dyn Fn(&NextStep) -> String) -> Section {
     let node = &failed.node;
     Section {
-        mark: Some(Mark::Failed),
+        lead: Some(surco::components::Lead::Mark(Mark::Failed)),
         title: Line::new()
             .push(Tone::Strong, format!("node `{node}`"))
-            .plain(" — ")
+            .plain(": ")
             .plain(crate::failure::headline(&failed.failure)),
-        blocks: vec![Block::Failure(FailureDetail {
+        blocks: FailureDetail {
             failure: &failed.failure,
             whole: Some(Whole::Command(spell(&NextStep::Status {
                 run: run.clone(),
                 node: Some(node.clone()),
             }))),
-        })],
+        }
+        .blocks(),
     }
 }
 
@@ -157,13 +151,15 @@ fn outside(receipt: &Receipt) -> Option<Checklist> {
     Some(outside)
 }
 
-/// The word a run that closed this way is called by.
-fn run_word(state: TerminalState) -> RunWord {
+/// The word a run that closed this way is called by: one that finished
+/// holding findings that block it is reported, as every surface says it.
+fn standing(state: TerminalState, blocking_findings: usize) -> Standing {
     match state {
-        TerminalState::Done => RunWord::Finished,
-        TerminalState::Failed => RunWord::Failed,
-        TerminalState::Cancelled => RunWord::Cancelled,
-        TerminalState::Promoted => RunWord::Promoted,
+        TerminalState::Done if blocking_findings > 0 => Standing::Reported,
+        TerminalState::Done => Standing::Finished,
+        TerminalState::Failed => Standing::Failed,
+        TerminalState::Cancelled => Standing::Stopped,
+        TerminalState::Promoted => Standing::Promoted,
     }
 }
 
@@ -194,29 +190,34 @@ fn criteria_check(checks: &mut Checklist, receipt: &Receipt) {
         (total, all) => checks.push(
             if all { Found::Holds } else { Found::Problem },
             "criteria",
-            format!("{}/{total} green, each command below", criteria.green),
+            format!("{} of {total} green, each command below", criteria.green),
         ),
     }
+}
+
+/// How a partially interpreted run says so, on the receipt and on every
+/// page about the run: every event kind this binary does not know, with
+/// how many events carried it. `None` when the log is interpreted in full.
+pub fn unknown_kinds(counts: &[UnknownKindCount]) -> Option<String> {
+    if counts.is_empty() {
+        return None;
+    }
+    let kinds: Vec<String> = counts
+        .iter()
+        .map(|count| format!("`{}` {}", count.kind, counted(count.events, "time")))
+        .collect();
+    Some(format!(
+        "{} this binary does not know, interpreted partially: {}",
+        counted(counts.len(), "event kind"),
+        kinds.join(", ")
+    ))
 }
 
 /// The event kinds this binary reads only in part, and the artifact problems
 /// reported during the run, when there are any.
 fn caution_checks(checks: &mut Checklist, receipt: &Receipt) {
-    if !receipt.unknown_kinds.is_empty() {
-        let kinds: Vec<String> = receipt
-            .unknown_kinds
-            .iter()
-            .map(|count| format!("`{}` ×{}", count.kind, count.events))
-            .collect();
-        checks.push(
-            Found::Caution,
-            "event kinds",
-            format!(
-                "{} this binary does not know — interpreted partially: {}",
-                counted(receipt.unknown_kinds.len(), "event kind"),
-                kinds.join(", ")
-            ),
-        );
+    if let Some(said) = unknown_kinds(&receipt.unknown_kinds) {
+        checks.push(Found::Caution, "event kinds", said);
     }
     if !receipt.diagnostics.is_empty() {
         let kinds: Vec<String> = receipt
@@ -297,13 +298,13 @@ fn event_chain_check(checks: &mut Checklist, receipt: &Receipt) {
         EventChainStatus::Broken { seq, detail } => checks.push(
             Found::Problem,
             "event chain",
-            yunta_core::text::detailed(format!("broken at seq {seq}"), detail),
+            surco::text::detailed(format!("broken at seq {seq}"), detail),
         ),
     }
 }
 
 /// What the run spent: every token, in and out, per task once the run
-/// had tasks, and the re-routes it took.
+/// had tasks, and the reroutes it took.
 fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
     let cost = &receipt.cost;
     if cost.tokens.total() == 0 && cost.reroutes == 0 {
@@ -316,7 +317,7 @@ fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
     );
     if let Some(cptv) = cost.cptv {
         said.push_str(&format!(
-            " {} CPTV: {} per task",
+            " {} cost per verified task: {}",
             glyphs.sep(),
             Tokens::rounded(cptv)
         ));
@@ -327,6 +328,16 @@ fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
         counted(cost.reroutes, "reroute")
     ));
     said
+}
+
+/// What the run changed from its base to its newest tree, as git last
+/// counted it; nothing when nothing counted it, or it touched no file.
+fn changed(receipt: &Receipt, glyphs: Glyphs) -> String {
+    receipt
+        .changed
+        .as_ref()
+        .and_then(|change| crate::changes::of(change, glyphs))
+        .unwrap_or_default()
 }
 
 /// What the run's comparisons against its baseline found — or, when the
