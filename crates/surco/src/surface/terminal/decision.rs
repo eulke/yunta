@@ -74,10 +74,7 @@ fn head(option: &DecisionOption, under: &str, room: usize) -> Vec<Line> {
         .map(|(at, part)| match at {
             0 => {
                 let rest = part.strip_prefix(id).unwrap_or_default().to_string();
-                Line::new()
-                    .plain(INDENT)
-                    .push(Tone::Strong, id)
-                    .plain(rest)
+                Line::new().plain(INDENT).push(Tone::Strong, id).plain(rest)
             }
             _ => Line::new().plain(under).plain(part),
         })
