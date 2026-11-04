@@ -56,6 +56,31 @@ fn a_run_in_this_checkout_says_so_without_naming_the_directory_it_stands_in() {
     );
 }
 
+/// The page at a glance, for a run that worked in this checkout, read from `cwd`.
+fn glance_read_from(cwd: &'static Path) -> String {
+    let case = decided_and_not().0;
+    let mut page = case.page(Scope::Status, Depth::Glance);
+    page.paths = Outline {
+        worktree: Path::new("/home/me/project"),
+        isolation: Isolation::None,
+        cwd,
+        ..outline()
+    };
+    draw(&page, &Look::plain())
+}
+
+/// A reader elsewhere copies the tree into another terminal; one standing in it has it.
+#[test]
+fn a_glance_names_the_tree_only_to_a_reader_who_stands_elsewhere() {
+    let here = glance_read_from(Path::new("/home/me/project"));
+    assert!(!here.contains("the run works in"), "{here}");
+    let elsewhere = glance_read_from(Path::new("/home/me/other"));
+    assert!(
+        elsewhere.contains("the run works in: /home/me/project"),
+        "{elsewhere}"
+    );
+}
+
 /// The same page in a browser is one command from the whole of it, and from nowhere the
 /// run's own close is drawn nor from the browser's page itself.
 #[test]

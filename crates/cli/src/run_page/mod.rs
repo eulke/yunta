@@ -214,16 +214,17 @@ impl RunPage<'_> {
 
     /// The decision the run waits on, as the section the page ends on, and
     /// above it where the run works — said whole, it is copied into another
-    /// terminal — on a page whose facts do not say it. A person who has just
-    /// watched their terminal stop is the one who needs telling that nothing
-    /// holds the answer open.
+    /// terminal — on a page whose facts do not say it, to a reader who does
+    /// not stand there already. A person who has just watched their terminal
+    /// stop is the one who needs telling that nothing holds the answer open.
     fn decided(&self) -> Vec<Block> {
         let Some(decided) = self.decision.as_ref() else {
             return Vec::new();
         };
         let mut blocks: Vec<Block> = Vec::new();
         // The closing's branch row says where the run works.
-        if self.scope != Scope::Closing && !self.depth.reaches(Depth::Full) {
+        let shown = surco::paths::shown(self.paths.worktree, self.paths.cwd, self.paths.home);
+        if self.scope != Scope::Closing && !self.depth.reaches(Depth::Full) && shown != "." {
             let tree = decision::run_tree_line(self.paths.worktree);
             blocks.push(Prose(tree).into());
         }
