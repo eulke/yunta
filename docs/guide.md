@@ -133,7 +133,8 @@ an edit outside `scope` fails the node — not a warning, not something the agen
 talk its way past. That diff is the guarantee: the fence judges the CLI's file tools,
 while a session's commands are confined by directory, so a command of an `edit`
 session can still write outside `scope` inside its checkout, and the node fails
-afterward for it.
+afterward for it. A moved file counts at both of its paths, so moving one needs the
+path it leaves in `scope` as well as the path it reaches.
 
 `scope: run` declares a node's reach without naming a path: it may change what the
 run has changed since its base, as that stands when the node starts. It is the scope

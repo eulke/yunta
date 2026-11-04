@@ -4,7 +4,7 @@
 use yunta_core::events::{EventPayload, Failure, NodeEvent, StoredEvent};
 use yunta_core::ScopeGlob;
 use yunta_engine::{RunReport, RunTerminal};
-use yunta_testkit::{write, Bench};
+use yunta_testkit::{git, write, Bench};
 
 mod common;
 use common::{answer_parked, parked};
@@ -58,6 +58,30 @@ async fn a_scope_run_node_may_write_what_the_run_changed() {
         run_scopes(&bench.events(), "fix"),
         vec![globs(&["made.txt"])]
     );
+}
+
+/// A move is what the run changed at both of its paths, so a node that
+/// corrects the run's work may also put something back where the file was.
+#[tokio::test]
+async fn a_scope_run_node_may_write_the_path_a_move_left() {
+    let bench = Bench::new();
+    write(&bench.worktree.join("old.txt"), "seed\n");
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-q", "-m", "seed"]);
+    let workflow = "name: fixes\nnodes:\n  - { id: make, kind: bash, run: \"mv old.txt new.txt\" }\n  - { id: fix, kind: bash, scope: run, depends_on: [make], run: \"echo back > old.txt\" }\n";
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let scopes = run_scopes(&bench.events(), "fix");
+    let [Some(scope)] = scopes.as_slice() else {
+        panic!("one start, with a scope: {scopes:?}");
+    };
+    assert_eq!(scope.len(), 2, "{scope:?}");
+    for path in ["new.txt", "old.txt"] {
+        assert!(scope.contains(&ScopeGlob::from(path)), "{scope:?}");
+    }
 }
 
 /// Writing a file the run never touched is outside the node's reach; a
