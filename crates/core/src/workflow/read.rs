@@ -34,8 +34,8 @@ use crate::{ModeInclude, Node, NodeId, NodeKind, Workflow};
 pub const RULES: &[crate::diagnostic::Rule] = &[
     crate::diagnostic::Rule {
         code: RuleCode::UnknownKey,
-        demand: "every key the workflow writes is one it reads: at its top, in every node, and \
-                 in the kind each node is",
+        demand: "every key the workflow writes is one it reads: at its top, in every node, in \
+                 the kind each node is, and in the entries of its context, mounts and on_finish",
     },
     crate::diagnostic::Rule {
         code: RuleCode::UnknownKind,

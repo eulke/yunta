@@ -135,19 +135,8 @@ pub(crate) fn check_gate(
         });
     }
     if let Some(external) = external {
-        match external.kind {
-            yunta_core::ForgeKind::PullRequest => {
-                let configured = config
-                    .forge
-                    .as_ref()
-                    .is_some_and(|forge| forge.github.is_some());
-                if !configured {
-                    errors.push(CheckError::ExternalGateWithoutForge {
-                        node: node.id.clone(),
-                    });
-                }
-            }
-        }
+        check_external_forge(node, external, config, errors);
+        check_published_files(node, external, errors);
     }
     for option in on.keys() {
         let route = if !options.iter().any(|declared| declared == option) {
@@ -163,6 +152,51 @@ pub(crate) fn check_gate(
             node: node.id.clone(),
             route,
         });
+    }
+}
+
+/// Refuses an external gate whose forge is not configured: its pull request is opened on it.
+fn check_external_forge(
+    node: &Node,
+    external: &yunta_core::ExternalGate,
+    config: &yunta_core::ConfigLayer,
+    errors: &mut Vec<CheckError>,
+) {
+    match external.kind {
+        yunta_core::ForgeKind::PullRequest => {
+            let configured = config
+                .forge
+                .as_ref()
+                .is_some_and(|forge| forge.github.is_some());
+            if !configured {
+                errors.push(CheckError::ExternalGateWithoutForge {
+                    node: node.id.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// Refuses a gate two of whose files come to one name in the folder they share.
+fn check_published_files(
+    node: &Node,
+    external: &yunta_core::ExternalGate,
+    errors: &mut Vec<CheckError>,
+) {
+    let mut seen: Vec<(String, String)> = Vec::new();
+    for spec in &external.artifacts {
+        let artifact = yunta_core::events::ArtifactId::from(spec);
+        for name in artifact.published_names() {
+            match seen.iter().find(|(taken, _)| *taken == name) {
+                Some((_, first)) => errors.push(CheckError::GateFilesCollide {
+                    node: node.id.clone(),
+                    name,
+                    first: first.clone(),
+                    second: spec.to_string(),
+                }),
+                None => seen.push((name, spec.to_string())),
+            }
+        }
     }
 }
 
@@ -234,4 +268,48 @@ pub(crate) fn check_no_gate_in_parallel(
             check_no_gate_in_parallel(children, Some(node), errors);
         }
     }
+}
+
+/// Refuses two external gates that come to one branch. Each branch is compared as a run
+/// renders it, as far as the workflow alone can tell: `{{node.id}}` is the gate's own id, and
+/// every other variable stands for itself, the same on any one run. A template that does not
+/// parse is the template check's to refuse.
+pub(crate) fn check_gates_share_no_branch(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    let mut seen: Vec<(String, &NodeId)> = Vec::new();
+    for node in &workflow.nodes {
+        let NodeKind::Gate {
+            external: Some(external),
+            ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        let Some(branch) = rendered_branch(&external.branch, &node.id) else {
+            continue;
+        };
+        match seen.iter().find(|(taken, _)| *taken == branch) {
+            Some((_, first)) => errors.push(CheckError::ExternalGatesShareBranch {
+                first: (*first).clone(),
+                second: node.id.clone(),
+                branch,
+            }),
+            None => seen.push((branch, &node.id)),
+        }
+    }
+}
+
+/// `template` as a run of the gate `node` renders it, as far as the workflow alone can tell.
+fn rendered_branch(template: &str, node: &NodeId) -> Option<String> {
+    let vars = template_variables(template)
+        .ok()?
+        .into_iter()
+        .map(|variable| {
+            let value = match &variable {
+                TemplateVar::NodeId => node.to_string(),
+                other => other.braced(),
+            };
+            (variable, value)
+        })
+        .collect();
+    yunta_core::template::render_template(template, &vars).ok()
 }

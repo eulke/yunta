@@ -98,8 +98,8 @@ pub(super) fn composition_words(error: &Composition) -> String {
             "node `{node}`: `use: {name}` reaches outside pack `{from_pack}`, and composition across \
              packs isn't supported; copy what you need into your own pack instead"
         ),
-        Composition::Unparseable { path, detail } => format!(
-            "workflow `{}` (referenced through composition) does not parse: {detail}",
+        Composition::Unparseable { path, report } => format!(
+            "workflow `{}` (referenced through composition) does not parse: {report}",
             path.display()
         ),
         Composition::Cycle { chain } => format!("workflow composition cycle: {chain}"),

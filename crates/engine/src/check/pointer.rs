@@ -44,6 +44,11 @@ impl CheckError {
             CheckError::OverlappingFanOutScope { a, .. } => node(a).key("scope"),
             CheckError::CommandDenied { node: id, .. } => node(id).key("run"),
             CheckError::ExternalGateWithoutForge { node: id } => node(id).key("external"),
+            CheckError::ExternalGatesShareBranch { second: id, .. }
+            | CheckError::GateFilesCollide { node: id, .. } => node(id).key("external"),
+            CheckError::ChildDeclaresWhatNothingReads {
+                node: id, field, ..
+            } => node(id).key(*field),
             CheckError::ShowsOnExternalGate { node: id } => node(id).key("shows"),
             CheckError::WorkflowNodeRunnerBinding { node: id, field } => node(id).key(*field),
             CheckError::MountOnSelf { node: id }

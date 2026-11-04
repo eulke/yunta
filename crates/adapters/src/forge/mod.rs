@@ -18,6 +18,7 @@ use surco::glyphs::Glyphs;
 use surco::surface::{Description, Surface};
 use yunta_core::port::{ForgeError, PublishRequest, PullRequestRequest};
 use yunta_core::step::NextStep;
+use yunta_core::RunId;
 use yunta_render::published::{self, Publication};
 
 /// What a reviewer answers a gate on.
@@ -51,9 +52,10 @@ pub(crate) fn marked(body: &str, run_id: &str) -> bool {
     body.contains(&run_marker(run_id)) || body.contains(&earlier_run_marker(run_id))
 }
 
-/// The body a run's pull request opens with: the body its author wrote,
-/// then the run's receipt drawn as a description, then the marker. `spell`
-/// writes the next steps the receipt names.
+/// The body a run's pull request opens with: the body its author wrote, then the run's
+/// receipt drawn as a description, then the marker, within what the forge keeps. A receipt
+/// that does not fit is left out, and an author's words that do not fit even alone are cut:
+/// a note says so, and the marker is never what gives. `spell` writes the commands they name.
 pub(crate) fn pull_request_body(
     req: &PullRequestRequest,
     spell: &dyn Fn(&NextStep) -> String,
@@ -68,18 +70,84 @@ pub(crate) fn pull_request_body(
             Glyphs::Unicode,
         ))
     });
-    let parts: Vec<String> = [Some(req.body.trim().to_string()), receipt]
-        .into_iter()
-        .flatten()
-        .filter(|part| !part.trim().is_empty())
-        .map(|part| part.trim_end().to_string())
-        .collect();
-    let mut body = parts.join("\n\n---\n\n");
-    if !body.is_empty() {
-        body.push_str("\n\n");
+    let author = req.body.trim();
+    let marker = run_marker(&req.run_id);
+    let whole = body_of(&[author, receipt.as_deref().unwrap_or_default()], &marker);
+    if whole.len() <= BODY_LIMIT {
+        return whole;
     }
-    body.push_str(&run_marker(&req.run_id));
-    body
+    let command = receipt
+        .as_ref()
+        .and_then(|_| receipt_command(&req.run_id, spell));
+    if receipt.is_some() {
+        let note = left_out("the run's receipt", command.as_deref());
+        let kept = body_of(&[author, note.as_str()], &marker);
+        if kept.len() <= BODY_LIMIT {
+            return kept;
+        }
+    }
+    let left = match receipt.is_some() {
+        true => "the run's receipt and the end of what this node says",
+        false => "the end of what this node says",
+    };
+    let note = left_out(left, command.as_deref());
+    let tail = body_of(&["", note.as_str()], &marker);
+    let room = BODY_LIMIT.saturating_sub(tail.len() + SEPARATOR.len());
+    let cut = cut_to(author, room);
+    body_of(&[cut.as_str(), note.as_str()], &marker)
+}
+
+/// What sets the parts of a body apart: a rule, which a forge's Markdown draws as a break
+/// between two sections.
+const SEPARATOR: &str = "\n\n---\n\n";
+
+/// `parts` that say anything, set apart by a rule, then `marker`.
+fn body_of(parts: &[&str], marker: &str) -> String {
+    let said: Vec<&str> = parts
+        .iter()
+        .map(|part| part.trim_end())
+        .filter(|part| !part.trim().is_empty())
+        .collect();
+    match said.is_empty() {
+        true => marker.to_string(),
+        false => format!("{}\n\n{marker}", said.join(SEPARATOR)),
+    }
+}
+
+/// The command that prints the run's receipt, as `spell` writes it; `None` when `run_id`
+/// does not parse as a run id, and the note then names the receipt without a command.
+fn receipt_command(run_id: &str, spell: &dyn Fn(&NextStep) -> String) -> Option<String> {
+    let run = run_id.parse::<RunId>().ok()?;
+    Some(spell(&NextStep::Receipt { run }))
+}
+
+/// What a body leaves out and where it is whole, said where a reviewer reads it. `receipt`
+/// is the command that prints the run's receipt, when a receipt was drawn.
+fn left_out(left: &str, receipt: Option<&str>) -> String {
+    let whole = match receipt {
+        Some(command) => format!("; `{command}` prints the run's receipt"),
+        None => String::new(),
+    };
+    format!(
+        "This description leaves out {left}, {}{whole}.",
+        published::why_it_leaves_out(FORGE, BODY_LIMIT)
+    )
+}
+
+/// `author` cut to fit `room` bytes: the characters that fit with an ellipsis after them,
+/// trimmed at their end. The author is never empty where this is reached, since a body
+/// whose receipt is left out and whose words are empty already fits.
+fn cut_to(author: &str, room: usize) -> String {
+    let ellipsis = Glyphs::Unicode.ellipsis();
+    let keep = room.saturating_sub(ellipsis.len());
+    let mut kept = String::new();
+    for ch in author.chars() {
+        if kept.len() + ch.len_utf8() > keep {
+            break;
+        }
+        kept.push(ch);
+    }
+    format!("{}{ellipsis}", kept.trim_end())
 }
 
 /// The forge a gate's pull request is drawn for, and the limit its description keeps.

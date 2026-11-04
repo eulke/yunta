@@ -64,7 +64,7 @@ fn publication(spell: &dyn Fn(&NextStep) -> String, body_limit: usize) -> Public
 /// The request a gate of `review` publishes: the plan as the document the gate
 /// shows, the two files the run holds beside it, and the decision that asks to
 /// approve the change the plan names.
-fn publishing(review: &PlanReview) -> PublishRequest {
+pub(super) fn publishing(review: &PlanReview) -> PublishRequest {
     let run_id = RunId::from_static(PULL_REQUEST_RUN);
     let node = NodeId::from("approve-plan");
     let folder = GateFolder::of(&run_id, &node);
@@ -102,7 +102,7 @@ pub(super) fn description(request: &PublishRequest) -> String {
 
 /// The description `request` is published with when the forge keeps `limit`
 /// of it.
-fn described(request: &PublishRequest, limit: usize) -> String {
+pub(super) fn described(request: &PublishRequest, limit: usize) -> String {
     let spelling = spell();
     published::body(request, &publication(&*spelling, limit), TAIL)
 }
@@ -115,7 +115,7 @@ fn titled(request: &PublishRequest) -> String {
 /// The least limit under which the description holds `holds`. A description
 /// leaves out more as its limit shrinks, so halving the range finds the limit
 /// where what `holds` looks for first fits.
-fn least_limit(request: &PublishRequest, holds: impl Fn(&str) -> bool) -> usize {
+pub(super) fn least_limit(request: &PublishRequest, holds: impl Fn(&str) -> bool) -> usize {
     least_where(|limit| holds(&described(request, limit)))
 }
 
@@ -145,7 +145,7 @@ fn least_body(request: &PublishRequest) -> usize {
 }
 
 /// Asserts that `page`, a description, is within the `limit` bytes the forge keeps.
-fn assert_within(page: &str, limit: usize) {
+pub(super) fn assert_within(page: &str, limit: usize) {
     assert!(
         page.len() <= limit,
         "{} bytes at a limit of {limit}",

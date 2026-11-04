@@ -12,10 +12,11 @@ use surco::glyphs::Mark;
 use surco::look::Look;
 use surco::text::counted;
 use yunta_core::caution::Caution;
+use yunta_core::diagnostic::Report;
 use yunta_core::step::NextStep;
 use yunta_core::yaml::SourceMap;
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::CheckError;
+use yunta_engine::{CheckError, Composition};
 use yunta_render::blocks::diagnostic::located;
 
 use super::advice;
@@ -235,14 +236,24 @@ impl Verdict {
             .in_file
             .iter()
             .map(|diagnostic| page::found(diagnostic, &shown, text.as_deref()))
-            .chain(self.errors.iter().map(|error| {
-                let at = error.pointer().and_then(|pointer| map.place(&pointer));
-                page::refused(error, at, &shown, text.as_deref()).into()
-            }))
             .collect();
+        let mut composed = Vec::new();
+        for error in &self.errors {
+            match error {
+                CheckError::Composition(Composition::Unparseable { report, .. }) => {
+                    composed.extend(composed_problems(ctx, report).await);
+                }
+                error => {
+                    let at = error.pointer().and_then(|pointer| map.place(&pointer));
+                    pointed.push(page::refused(error, at, &shown, text.as_deref()).into());
+                }
+            }
+        }
         // In the order the file has them; what has no place in it, a
         // config layer's conflict among them, after.
         pointed.sort_by_key(page::Pointed::order);
+        // A file this one composes is another file: its problems follow, in its own order.
+        pointed.extend(composed);
         let mut problems = page::hinted(pointed);
         problems.extend(
             self.conflicts
@@ -261,6 +272,19 @@ impl Verdict {
         };
         Ok(Unrunnable { problems, declare })
     }
+}
+
+/// Every problem of a workflow this one composes that does not read, each quoted from its
+/// own file.
+async fn composed_problems(ctx: &Context, report: &Report) -> Vec<page::Pointed> {
+    let path = Path::new(&report.document.path);
+    let text = tokio::fs::read_to_string(path).await.ok();
+    let shown = shown(ctx, path);
+    report
+        .diagnostics
+        .iter()
+        .map(|diagnostic| page::found(diagnostic, &shown, text.as_deref()))
+        .collect()
 }
 
 /// Why a workflow cannot run here: every problem, each pointed at in its

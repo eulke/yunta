@@ -257,6 +257,25 @@ fn group_words(error: &CheckError) -> Option<String> {
         CheckError::GateInsideParallel { node, group } => {
             format!("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")
         }
+        CheckError::ExternalGatesShareBranch { first, second, branch } => format!(
+            "nodes `{first}` and `{second}`: both external gates publish on `{branch}`, and a \
+             forge opens one pull request per branch, so an approval would resolve both; give \
+             each its own `external.branch`"
+        ),
+        CheckError::GateFilesCollide { node, name, first, second } => format!(
+            "node `{node}`: `external.artifacts` publishes `{first}` and `{second}` both as \
+             `{name}`, in one folder, and the second would overwrite the first; rename one"
+        ),
+        CheckError::ChildDeclaresWhatNothingReads { node, group, field } => {
+            let because = match *field {
+                "depends_on" => "a child starts with its group",
+                _ => "a child's failure fails its group",
+            };
+            format!(
+                "node `{node}`: `{field}` on a child of the `parallel` group `{group}` is read by \
+                 nothing, since {because}; declare it on the group"
+            )
+        }
         CheckError::ParallelInsideParallel { node, group } => {
             format!("node `{node}`: `kind: parallel` can't be a `parallel` child (group `{group}`)")
         }

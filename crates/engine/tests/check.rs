@@ -26,6 +26,9 @@ mod confinement;
 #[path = "check/denied_command.rs"]
 mod denied_command;
 
+#[path = "check/unkept.rs"]
+mod unkept;
+
 /// The rules under test here are about the workflow, not about which
 /// adapter would run it: these check against a binary that builds none,
 /// so a capability nothing declares is a capability nothing can refuse.
@@ -144,7 +147,7 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
             external: Some(yunta_core::ExternalGate {
                 kind: yunta_core::ForgeKind::PullRequest,
                 artifacts: Vec::new(),
-                branch: "{{run.branch}}".to_string(),
+                branch: format!("review/{id}"),
             }),
         },
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),

@@ -54,9 +54,11 @@ pub fn document(
                 ),
                 None => (Line::new().push(Tone::Strong, named), text.as_str()),
             };
-            Doc::new()
-                .with(Block::Title(surco::components::Title::named(title)))
-                .with(Block::Markdown(body.to_string()))
+            let doc = Doc::new().with(Block::Title(surco::components::Title::named(title)));
+            match body.trim().is_empty() {
+                true => doc,
+                false => doc.with(Block::Markdown(body.to_string())),
+            }
         }
     }
 }
@@ -98,6 +100,19 @@ fn headed(text: &str) -> Option<(&str, &str)> {
     let marks = first.len() - heading.len();
     let heading = heading.strip_prefix(' ')?.trim();
     ((1..=6).contains(&marks) && !heading.is_empty()).then_some((heading, rest))
+}
+
+/// The line a text document's heading is written on; empty when it opens on none.
+pub(crate) fn heading_line(text: &str) -> String {
+    match headed(text) {
+        Some(_) => text
+            .trim_start()
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_string(),
+        None => String::new(),
+    }
 }
 
 /// What weighs on a decision, said beside its menu: on a terminal the

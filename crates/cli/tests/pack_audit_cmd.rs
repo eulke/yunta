@@ -125,3 +125,25 @@ fn audit_on_an_uninstalled_pack_is_refused() {
     assert!(!out.status.success());
     assert!(stderr(&out).contains("isn't installed"), "{}", stderr(&out));
 }
+
+/// A workflow of a pack that does not read is told problem by problem, each at its place,
+/// as `yunta check` tells it: a person auditing a pack reads what is wrong and where.
+#[test]
+fn a_workflow_that_does_not_read_is_told_problem_by_problem() {
+    let (root, upstream, home) = setup();
+    std::fs::write(
+        upstream.join("workflows/review.yaml"),
+        "name: review\nnodes:\n  - id: one\n    kind: bash\n    run: \"true\"\n    \
+         depend_on: []\n",
+    )
+    .unwrap();
+    git(&upstream, &["add", "."]);
+    git(&upstream, &["commit", "-q", "-m", "a slip"]);
+    let repo = root.path().join("repo");
+
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    let page = format!("{}{}", stdout(&out), stderr(&out));
+    assert!(page.contains("unknown key `depend_on`"), "{page}");
+    assert!(page.contains("workflows/review.yaml:6:"), "{page}");
+    assert!(page.contains("did you mean `depends_on`?"), "{page}");
+}

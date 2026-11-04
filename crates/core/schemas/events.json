@@ -13111,6 +13111,37 @@
           ]
         },
         {
+          "description": "A key nothing reads in an entry of a list: `what` says which kind of entry, and\n`nearest` is the key it is a slip from.",
+          "type": "object",
+          "properties": {
+            "unknown-entry-key": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "nearest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "what": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "what"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-entry-key"
+          ]
+        },
+        {
           "description": "A `kind` no node can be, a slip from `nearest`, the kind it meant.",
           "type": "object",
           "properties": {

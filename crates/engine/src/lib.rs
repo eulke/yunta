@@ -116,7 +116,7 @@ pub use manifest::{build_manifest, FrozenRun, ManifestError};
 pub use modes::{dependencies_in_mode, included_nodes, mode_included_nodes, reached_nodes};
 pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
-    audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,
+    audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit, WorkflowUnread,
 };
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
 pub use permissions::command_violation;

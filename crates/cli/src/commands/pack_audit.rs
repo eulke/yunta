@@ -19,10 +19,10 @@ use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::text::counted;
 use yunta_core::PackRef;
-use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit};
+use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit, WorkflowUnread};
 
 use super::test::{case_found, discover_case_paths, run_case};
-use crate::error::{CliError, Outcome};
+use crate::error::{page, CliError, Outcome};
 use crate::interrupt::Interrupt;
 use crate::output::document;
 use crate::pack::{packs_root, read_manifest, vendor_dir};
@@ -89,11 +89,21 @@ pub fn inventory(report: &PackAudit, headline: Headline) -> Doc {
 
 fn workflow_section(workflow: &WorkflowAudit) -> Section {
     let blocks = match &workflow.error {
-        Some(error) => vec![Marked {
+        Some(WorkflowUnread::Missing(error)) => vec![Marked {
             mark: Mark::Failed,
             items: vec![format!("does not read: {error}")],
         }
         .into()],
+        Some(WorkflowUnread::Refused { report, text }) => page::hinted(
+            report
+                .diagnostics
+                .iter()
+                .map(|diagnostic| page::found(diagnostic, &workflow.declared_path, Some(text)))
+                .collect(),
+        )
+        .into_iter()
+        .map(Block::from)
+        .collect(),
         None => workflow
             .nodes
             .iter()

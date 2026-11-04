@@ -91,3 +91,29 @@ pub(crate) fn check_mounts(workflow: &Workflow, errors: &mut Vec<CheckError>) {
         }
     }
 }
+
+/// Refuses what a child of a `parallel` group declares about its group: it starts when the
+/// group does, and its failure fails the group. The group is where both are declared.
+pub(crate) fn check_child_declarations(nodes: &[Node], errors: &mut Vec<CheckError>) {
+    for node in nodes {
+        let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        for child in children {
+            let declared = [
+                (!child.depends_on.is_empty(), "depends_on"),
+                (child.on_failure.is_some(), "on_failure"),
+            ];
+            for (_, field) in declared.iter().filter(|(present, _)| *present) {
+                errors.push(CheckError::ChildDeclaresWhatNothingReads {
+                    node: child.id.clone(),
+                    group: node.id.clone(),
+                    field,
+                });
+            }
+        }
+    }
+}

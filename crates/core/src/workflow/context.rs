@@ -45,7 +45,7 @@ pub enum ContextSpec {
 }
 
 impl ContextSpec {
-    const KEYS: &'static [&'static str] = &[
+    pub(super) const KEYS: &'static [&'static str] = &[
         "files",
         "command",
         "artifact",
@@ -58,7 +58,7 @@ impl ContextSpec {
 
     /// Spellings an earlier workflow may carry, each read as the key
     /// it stands for and never listed as one an author writes today.
-    const ALIASES: &'static [(&'static str, &'static str)] = &[("ledger", "tasks")];
+    pub(super) const ALIASES: &'static [(&'static str, &'static str)] = &[("ledger", "tasks")];
 }
 
 impl<'de> Deserialize<'de> for ContextSpec {
@@ -106,6 +106,9 @@ pub struct ContextFile {
 }
 
 impl ContextFile {
+    /// The keys a `files:` entry written as a mapping accepts.
+    pub(super) const KEYS: &'static [&'static str] = &["path", "optional"];
+
     /// A path the node requires — what a bare string declares.
     pub fn required(path: impl Into<String>) -> Self {
         ContextFile {
@@ -136,7 +139,6 @@ impl<'de> Deserialize<'de> for ContextFile {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
 
-        const KEYS: &[&str] = &["path", "optional"];
         let mut mapping = match Value::deserialize(deserializer)? {
             Value::String(path) => return Ok(ContextFile::required(path)),
             Value::Mapping(mapping) => mapping,
@@ -154,8 +156,8 @@ impl<'de> Deserialize<'de> for ContextFile {
             return Err(D::Error::custom(format!(
                 "{}; one of {}{}",
                 super::parse::unknown_key(key, "a `files:` entry"),
-                super::parse::list(KEYS),
-                surco::text::did_you_mean(key, KEYS.iter().copied())
+                super::parse::list(Self::KEYS),
+                surco::text::did_you_mean(key, Self::KEYS.iter().copied())
             )));
         }
         let path = path.ok_or_else(|| {

@@ -75,7 +75,7 @@ are valid there. A mistyped key never silently becomes a default.
 - **`parallel`** — a named group of child nodes run at once, with `join: all` (any
   child failing fails the group) or `join: any` (first success wins, the rest are
   interrupted). Children needing to compare notes mid-flight (not just after `join`)
-  set `coordination: blackboard` on the group — see [MCP per-run tools](#mcp) below.
+  set `coordination: blackboard` on the group — see [MCP per-run tools](#mcp) below. A child starts with its group and its failure is the group's, so `depends_on` and `on_failure` go on the group: `yunta check` refuses them on a child.
 - **`executor`** — the extension point for anything `bash`'s bare exit code and
   `check`'s closed builtin list don't cover: `executor: <name>` (declared in
   `skills.executors:`) gets `with:` as JSON on stdin and returns a verdict as JSON on

@@ -7,7 +7,6 @@ use surco::doc::Block;
 use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::surface::{Description, Leaves, Markdown, Surface};
-use yunta_core::events::ArtifactId;
 use yunta_core::port::{GateDecision, PublishRequest};
 use yunta_core::shown::{ShownContent, ShownDocument};
 use yunta_core::step::NextStep;
@@ -88,6 +87,9 @@ const BLANK_LINE: &str = "\n\n";
 enum Level {
     /// The documents, with what `Leaves` names left out of each.
     Documents(Leaves),
+    /// The documents with what `Leaves::Folds` leaves out, and each text document down to
+    /// its title: it has no lines of code or folds to give up.
+    TextTitled,
     /// None of the documents: the headline, where the decision waits, the note,
     /// what the run changed and the decision the page ends on.
     NoDocuments,
@@ -100,10 +102,11 @@ enum Level {
 /// The levels a description is drawn at, from the whole page to the decision
 /// alone. Each leaves out more than the one before it, and the decision is in
 /// every one. The first that fits is drawn.
-const LEVELS: [Level; 5] = [
+const LEVELS: [Level; 6] = [
     Level::Documents(Leaves::Nothing),
     Level::Documents(Leaves::CodeLines),
     Level::Documents(Leaves::Folds),
+    Level::TextTitled,
     Level::NoDocuments,
     Level::Decision,
 ];
@@ -152,8 +155,13 @@ fn draw(
     level: Level,
     question: &str,
 ) -> String {
+    let titled: Vec<ShownDocument>;
     let (documents, leaves): (&[ShownDocument], Leaves) = match level {
         Level::Documents(leaves) => (request.shown.as_slice(), leaves),
+        Level::TextTitled => {
+            titled = request.shown.iter().map(down_to_its_title).collect();
+            (titled.as_slice(), Leaves::Folds)
+        }
         Level::NoDocuments | Level::Decision => (&[], Leaves::Nothing),
     };
     let page = crate::gate::page(
@@ -176,6 +184,16 @@ fn draw(
     Description { leaves }.draw(&page).trim_end().to_string()
 }
 
+/// `document` with a text document's words down to the heading it opens on: its title on the
+/// page says what it is, and the file the pull request carries holds it whole.
+fn down_to_its_title(document: &ShownDocument) -> ShownDocument {
+    let mut document = document.clone();
+    if let ShownContent::Text(text) = &mut document.content {
+        *text = crate::shown::heading_line(text);
+    }
+    document
+}
+
 /// What `level` leaves out, and where it is whole, as the note the page says
 /// under its gist. `None` where the level leaves nothing out.
 fn note(publication: &Publication<'_>, level: Level) -> Option<String> {
@@ -185,14 +203,23 @@ fn note(publication: &Publication<'_>, level: Level) -> Option<String> {
         Level::Documents(Leaves::Folds) => {
             "the lines of each code block and what each folded section holds"
         }
+        Level::TextTitled => {
+            "the lines of each code block, what each folded section holds and what each text \
+             document says"
+        }
         Level::NoDocuments => "the documents the gate shows",
         Level::Decision => "the documents the gate shows and what weighs on the decision",
     };
     Some(format!(
-        "This description leaves out {left}, since {} keeps a pull request's \
-         description to {} characters; the files it carries hold every document whole.",
-        publication.forge, publication.body_limit
+        "This description leaves out {left}, {}; the files it carries hold every document \
+         whole.",
+        why_it_leaves_out(publication.forge, publication.body_limit)
     ))
+}
+
+/// Why a description leaves something out: what `forge` keeps of one.
+pub fn why_it_leaves_out(forge: &str, limit: usize) -> String {
+    format!("since {forge} keeps a pull request's description to {limit} characters")
 }
 
 /// The section the page ends on, titled by `question`: the files it is read
@@ -207,7 +234,7 @@ fn decision(
     let mut blocks = vec![Block::Lines(listed(request))];
     let weighing = match level {
         Level::Decision => None,
-        Level::Documents(_) | Level::NoDocuments => {
+        Level::Documents(_) | Level::TextTitled | Level::NoDocuments => {
             crate::shown::before_you_decide(&[], &request.shown)
         }
     };
@@ -299,10 +326,9 @@ fn answers(decision: &GateDecision) -> Vec<DecisionOption> {
 /// The name `document` is published by drawn, when it is drawn: a
 /// document the run reads into its parts is; text is its own bytes.
 fn drawn_name(document: &ShownDocument) -> Option<String> {
-    match (&document.shown.artifact, &document.content) {
-        (_, ShownContent::Text(_)) => None,
-        (ArtifactId::Interpreted { kind }, _) => Some(format!("{kind}.md")),
-        (ArtifactId::Opaque { .. }, _) => None,
+    match &document.content {
+        ShownContent::Text(_) => None,
+        _ => document.shown.artifact.drawn_name(),
     }
 }
 

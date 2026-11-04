@@ -3,8 +3,9 @@
 //! The parser stops at the first key it does not know, and a person who
 //! typed three wrong hears about one of them, fixes it, and hears about
 //! the next. The audit reads the document's keys before the parser
-//! does — at the top, in each node, in each child of a `parallel` group
-//! — and reports every unknown one where it is written, with the key it
+//! does — at the top, in each node, in each child of a `parallel` group,
+//! and in the entries of its context, mounts and closing steps — and
+//! reports every unknown one where it is written, with the key it
 //! most likely meant. What it hands on is the document with those keys
 //! taken out, or renamed to the key meant when that key is missing, so
 //! that what the document says next is judged as the person meant it.
@@ -16,6 +17,8 @@ use super::WorkflowFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Subject};
 use crate::yaml::{Mapping, Pointer, ReadAs, SourceMap, Value};
 use crate::NodeKind;
+
+mod entries;
 
 /// What the audit found, and the document it hands on.
 pub(super) struct Audit {
@@ -70,6 +73,9 @@ impl Auditor<'_> {
                 let value = match (name.as_str(), value) {
                     ("nodes", Value::Sequence(nodes)) => {
                         Value::Sequence(self.nodes(nodes, Pointer::root().key("nodes")))
+                    }
+                    ("on_finish", Value::Sequence(steps)) => {
+                        Value::Sequence(self.closing_steps(steps, Pointer::root().key("on_finish")))
                     }
                     (_, value) => value,
                 };
@@ -133,12 +139,7 @@ impl Auditor<'_> {
                 continue;
             };
             if valid.contains(&name.as_str()) {
-                let value = match (kind.as_str(), name.as_str(), value) {
-                    ("parallel", "nodes", Value::Sequence(children)) => {
-                        Value::Sequence(self.nodes(children, at.clone().key("nodes")))
-                    }
-                    (_, _, value) => value,
-                };
+                let value = self.listed(&kind, &name, value, &at, &subject);
                 kept.insert(key, value);
                 continue;
             }

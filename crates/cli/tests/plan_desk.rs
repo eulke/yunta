@@ -164,9 +164,12 @@ fn j_walks_the_tasks_p_turns_a_card_over_and_d_shows_what_was_decided() {
     terminal.wait_on_screen("proof · T002", "p never turned the card over");
     assert!(terminal.screen().holds("test -f said.txt"));
     terminal.keys("d");
-    terminal.wait_on_screen("decided for you", "d never showed what was decided");
+    // The rail says `decided for you` already: what only the view holds is what to wait on.
+    terminal.wait_on_screen(
+        "▸ 1 What are they called?",
+        "d never showed what was decided",
+    );
     let screen = terminal.screen();
-    assert!(screen.holds("▸ 1 What are they called?"), "{screen:#?}");
     assert!(screen.holds("made and said"), "{screen:#?}");
     assert!(screen.holds("Two files can drift apart."), "{screen:#?}");
     terminal.keys("d");

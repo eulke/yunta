@@ -34,8 +34,20 @@ pub struct WorkflowAudit {
     /// The `contents.workflows` entry this came from, relative to the
     /// pack root.
     pub declared_path: String,
-    pub error: Option<String>,
+    pub error: Option<WorkflowUnread>,
     pub nodes: Vec<NodeAudit>,
+}
+
+/// Why a pack's workflow has no nodes to show.
+#[derive(Debug)]
+pub enum WorkflowUnread {
+    /// The file could not be read.
+    Missing(String),
+    /// The language refuses what the file says: every problem, and the text they are in.
+    Refused {
+        report: Box<yunta_core::diagnostic::Report>,
+        text: String,
+    },
 }
 
 /// A `{file: ...}` prompt naming something the pack does not ship.
@@ -105,7 +117,10 @@ fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
         Err(e) => {
             return WorkflowAudit {
                 declared_path: declared.to_string(),
-                error: Some(format!("cannot read `{}`: {e}", path.display())),
+                error: Some(WorkflowUnread::Missing(format!(
+                    "cannot read `{}`: {e}",
+                    path.display()
+                ))),
                 nodes: Vec::new(),
             }
         }
@@ -115,7 +130,10 @@ fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
         Err(report) => {
             return WorkflowAudit {
                 declared_path: declared.to_string(),
-                error: Some(report.to_string()),
+                error: Some(WorkflowUnread::Refused {
+                    report: Box::new(report),
+                    text,
+                }),
                 nodes: Vec::new(),
             }
         }

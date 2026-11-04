@@ -20,6 +20,8 @@ use nix::sys::signal::{kill, Signal};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, LocalFlags, SetArg};
 use nix::unistd::Pid;
 
+use surco::paint::{SYNC_BEGIN, SYNC_END};
+
 use crate::wait::{wait_for, wait_until, WAIT_DEADLINE};
 
 /// What a terminal is told to do, as the bytes a run writes to say it:
@@ -140,14 +142,19 @@ impl Terminal {
     }
 
     /// What a person sees on this terminal now: every row as the screen holds
-    /// it, whatever was drawn over what on the way there.
+    /// it, whatever was drawn over what on the way there. A drawing still on its
+    /// way is out of sight, as a terminal that takes one whole keeps it, so what a
+    /// test reads after waiting for one row of a drawing holds all of its rows.
     pub fn screen(&self) -> Screen {
         let mut parser = vt100::Parser::new(self.rows, self.columns, 0);
         parser.process(
-            self.drawn
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_bytes(),
+            drawn_whole(
+                &self
+                    .drawn
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            )
+            .as_bytes(),
         );
         let screen = parser.screen();
         Screen {
@@ -365,6 +372,16 @@ fn collect(mut screen: std::fs::File, into: Arc<Mutex<String>>) -> std::thread::
             }
         }
     })
+}
+
+/// `drawn` without a drawing that has opened and not ended: what a terminal that takes
+/// each drawing whole has shown so far.
+fn drawn_whole(drawn: &str) -> &str {
+    match (drawn.rfind(SYNC_BEGIN), drawn.rfind(SYNC_END)) {
+        (Some(begin), Some(end)) if end > begin => drawn,
+        (Some(begin), _) => &drawn[..begin],
+        _ => drawn,
+    }
 }
 
 /// `text` without the sequences that paint it (`ESC [ … m`).

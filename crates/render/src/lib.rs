@@ -61,6 +61,7 @@ mod tests {
     mod inputs;
     mod offers;
     mod publication;
+    mod publication_text;
     mod retry;
     mod routes;
 }

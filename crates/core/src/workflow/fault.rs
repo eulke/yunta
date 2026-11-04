@@ -70,6 +70,14 @@ pub enum WorkflowFault {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nearest: Option<String>,
     },
+    /// A key nothing reads in an entry of a list: `what` says which kind of entry, and
+    /// `nearest` is the key it is a slip from.
+    UnknownEntryKey {
+        key: String,
+        what: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nearest: Option<String>,
+    },
     /// A `kind` no node can be, a slip from `nearest`, the kind it meant.
     UnknownKind {
         kind: String,
@@ -93,7 +101,7 @@ impl WorkflowFault {
             Self::OptionalInParallel { .. }
             | Self::ReroutesToOptional { .. }
             | Self::ReadsWhatMayGo { .. } => RuleCode::IncoherentOptional,
-            Self::UnknownKey { .. } => RuleCode::UnknownKey,
+            Self::UnknownKey { .. } | Self::UnknownEntryKey { .. } => RuleCode::UnknownKey,
             Self::UnknownKind { .. } => RuleCode::UnknownKind,
         }
     }
@@ -116,6 +124,10 @@ impl WorkflowFault {
             Self::UnknownReference { nearest, .. } => nearest
                 .iter()
                 .map(|nearest| surco::text::suggested(nearest.as_str()))
+                .collect(),
+            Self::UnknownEntryKey { nearest, .. } => nearest
+                .iter()
+                .map(|nearest| surco::text::suggested(nearest))
                 .collect(),
             Self::UnknownKind { nearest, .. } => vec![surco::text::suggested(nearest)],
             _ => Vec::new(),
@@ -162,6 +174,7 @@ impl WorkflowFault {
                 kind: Some(kind),
                 ..
             } => super::parse::unknown_key(key, &format!("a `{kind}` node")),
+            Self::UnknownEntryKey { key, what, .. } => super::parse::unknown_key(key, what),
             Self::UnknownKind { kind, .. } => format!("unknown kind `{kind}`"),
         }
     }

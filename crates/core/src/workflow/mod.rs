@@ -261,7 +261,7 @@ impl std::fmt::Display for DistillArtifact {
 }
 
 impl OnFinishStep {
-    const KEYS: &'static [&'static str] = &["cleanup", "distill"];
+    pub(super) const KEYS: &'static [&'static str] = &["cleanup", "distill"];
 }
 
 impl<'de> Deserialize<'de> for OnFinishStep {

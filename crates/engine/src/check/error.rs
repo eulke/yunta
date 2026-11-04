@@ -228,6 +228,36 @@ pub enum CheckError {
     #[error("gate_inside_parallel")]
     GateInsideParallel { node: NodeId, group: NodeId },
 
+    /// A forge opens one pull request per branch and base, and a run finds it by its own
+    /// marker: two gates of a run on one branch would share it, and one approval would
+    /// resolve them both.
+    #[error("external_gates_share_branch")]
+    ExternalGatesShareBranch {
+        first: NodeId,
+        second: NodeId,
+        /// The branch as the gates come to it, with what a run fills in still named.
+        branch: String,
+    },
+
+    /// A gate publishes each file into one folder, and two of them come to one name: the
+    /// second overwrites the first on the branch.
+    #[error("gate_files_collide")]
+    GateFilesCollide {
+        node: NodeId,
+        name: String,
+        first: String,
+        second: String,
+    },
+
+    /// A child of a `parallel` group starts with its group and fails with it, so what it
+    /// declares about either is read by nothing.
+    #[error("child_declares_what_nothing_reads")]
+    ChildDeclaresWhatNothingReads {
+        node: NodeId,
+        group: NodeId,
+        field: &'static str,
+    },
+
     /// A group inside a group. Every surface draws a group's children
     /// one step under it, and the scheduler pairs each node with the
     /// group that holds it — both are exact at one level and false at
