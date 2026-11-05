@@ -38,6 +38,9 @@ mod checkouts;
 #[path = "run_flow/resuming.rs"]
 mod resuming;
 
+#[path = "run_flow/guarding.rs"]
+mod guarding;
+
 #[path = "run_flow/reading.rs"]
 mod reading;
 

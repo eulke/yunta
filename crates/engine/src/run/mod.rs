@@ -389,7 +389,9 @@ impl RunReport {
 pub struct RunEnv<'a> {
     pub run_id: &'a RunId,
     pub manifest: &'a Manifest,
-    pub run_dir: &'a Path,
+    /// Proof that this process drives the run, and where the run lives: a hold
+    /// names its run's directory, so a run is never driven under another's claim.
+    pub hold: &'a crate::run_hold::RunHold,
     pub worktree: &'a Path,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a AsyncStorage,

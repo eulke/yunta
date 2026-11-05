@@ -1,4 +1,6 @@
-use super::{check, close, inputs, project_view, refused_answer, resolve_gate};
+use super::{
+    check, close, hold_unclear, inputs, moving, project_view, refused_answer, resolve_gate,
+};
 use yunta_core::events::{Claim, ObjectProblem, Refusal, WhyWithheld, Withheld};
 use yunta_core::shown::Flaw;
 use yunta_core::{sha256_hex, ArtifactSpec, ConfigKey, NonEmpty, OptionId, TaskId};
@@ -347,5 +349,35 @@ fn a_run_that_cannot_be_closed_says_what_state_it_is_in() {
     assert_eq!(
         close(&CloseRunError::Export("disk full".to_string())),
         "could not write the run's events.jsonl: disk full"
+    );
+}
+
+/// The engine's pid in the sentences below.
+fn holder() -> yunta_core::Pid {
+    yunta_core::Pid::try_from(91930_u32).unwrap()
+}
+
+#[test]
+fn a_moving_run_is_said_with_who_drives_it() {
+    assert_eq!(
+        moving("Q78GRR", holder()),
+        "run Q78GRR is already moving: pid 91930 drives it"
+    );
+}
+
+#[test]
+fn a_hold_nobody_can_check_is_said_with_its_file_and_what_a_person_does() {
+    let lock = std::path::Path::new("/runs/Q78GRR/scratch/engine.lock");
+    assert_eq!(
+        hold_unclear("Q78GRR", lock, Some(holder())),
+        "run Q78GRR is held by pid 91930, a process this user cannot signal \
+         (`/runs/Q78GRR/scratch/engine.lock`): if nothing drives this run, delete that file by \
+         hand and resume it again"
+    );
+    assert_eq!(
+        hold_unclear("Q78GRR", lock, None),
+        "run Q78GRR has an engine lock with no readable owner \
+         (`/runs/Q78GRR/scratch/engine.lock`): if nothing drives this run, delete that file by \
+         hand and resume it again"
     );
 }

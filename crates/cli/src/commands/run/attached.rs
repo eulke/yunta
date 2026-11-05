@@ -11,7 +11,7 @@ use yunta_core::{AdapterId, ModeName};
 use yunta_storage::AsyncStorage;
 
 use super::{create_run_from, preflight, runnable};
-use crate::commands::drive::{drive, Driving};
+use crate::commands::drive::{drive, Driving, Prepared};
 use crate::commands::registry::{adapters_for, ScriptedPaths};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -70,23 +70,37 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
     let manifest = frozen.manifest;
     super::super::started(&prepared.run_id, Standing::Created.word(), output, look);
 
+    let (adapters, hold) = ready(ctx, &manifest, &prepared).await?;
+    drive(
+        Driving {
+            ctx,
+            storage,
+            manifest: &manifest,
+            prepared: &prepared,
+            adapters,
+            prior: preflight.prior,
+            warnings: preflight.warnings,
+            output,
+            look,
+        },
+        hold,
+    )
+    .await
+}
+
+/// What driving a created run here takes: the adapters it froze, and its claim.
+async fn ready(
+    ctx: &Context,
+    manifest: &yunta_core::Manifest,
+    prepared: &Prepared,
+) -> Result<(crate::commands::Adapters, yunta_engine::RunHold), CliError> {
     let adapters = adapters_for(
-        &manifest,
+        manifest,
         &ScriptedPaths {
             run_dir: &prepared.run_dir,
             worktree: &prepared.worktree,
         },
     )?;
-    drive(Driving {
-        ctx,
-        storage,
-        manifest: &manifest,
-        prepared: &prepared,
-        adapters,
-        prior: preflight.prior,
-        warnings: preflight.warnings,
-        output,
-        look,
-    })
-    .await
+    let hold = crate::commands::registry::claim(ctx, &prepared.run_dir).await?;
+    Ok((adapters, hold))
 }

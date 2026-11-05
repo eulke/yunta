@@ -48,3 +48,13 @@ Not a tool, a channel or a context source by which one session addresses another
 passes through the engine and stays on the log: an artifact, the output a later node mounts, a finding, or the
 blackboard of a `coordination: blackboard` group, where a member reads only its own posts until the group joins. A
 message between live sessions would make a run's outcome depend on which session got there first.
+
+### No sequence check when the log appends
+Not a compare-and-set on a run's sequence in `append`. A run has one engine because `RunEnv` borrows a `RunHold`, so
+two writers do not reach the log on the path a check would guard, and a check would turn the race it finds into a
+failed run instead of a refused resume.
+
+### No flag that takes a run from its engine
+Not a `--force` on `resume`. It would put two engines on one run again, and each case has its way: `yunta cancel`
+stops an engine that lives, an engine that is gone is replaced with nothing to pass, and a lock nothing here can
+check names its file for a person to delete.

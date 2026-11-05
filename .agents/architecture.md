@@ -55,6 +55,8 @@ every state from it, and what a person reads is drawn from that data in Surco.
 - The spec decides what proves a task: a plan or spec that cannot prove the work is refused at handover, never
   in `check()`, and its gate withholds going on. [test engine/spec_governs_gate]
 - Modes belong to workflows: the engine's code never names one. [smell mode_name_in_prod]
+- A run has one engine: `RunEnv` borrows a hold only `hold_run` makes; a second resume is refused and a dead
+  holder replaced. [test engine/run_guard]
 - A safety mechanism adds no wall-clock time to a run. [review]
   Paths: `crates/core/src/rail/**`, `crates/engine/src/task_cycle/**`, `crates/engine/src/worktree/**`,
   `crates/adapters/src/**`

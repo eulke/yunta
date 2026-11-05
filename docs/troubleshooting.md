@@ -340,6 +340,33 @@ Security › Developer Tools, open it again, and run `yunta doctor` once more:
 processes it starts are no longer assessed, and the first run costs what the
 next one does.
 
+## `yunta resume` says a run is already moving
+
+```text
+run Q78GRR is already moving: pid 91930 drives it
+```
+
+Another engine is driving that run. A run has one engine, because a second would
+write the same log and work in the same checkout, so the refusal changes nothing.
+`yunta status <run>` follows the run and `yunta cancel <run>` stops it; under
+`--json` those commands are in `next`, and an agent calling `resume_run` reads the
+same sentence. When that engine is asking at its terminal, the refusal says so
+instead: answer it there.
+
+An engine that is gone never holds a run: the next `yunta resume` replaces it,
+also when another process got its pid.
+
+Two other refusals name a file, because who holds the run cannot be told from here:
+
+- `is held by pid N, a process this user cannot signal`: that pid runs as another
+  user. It may be an engine that user started or, on macOS, where this user cannot
+  read when another user's process started, a process that got the pid after the
+  engine died.
+- `has an engine lock with no readable owner`: the file is corrupted.
+
+In both, if nothing drives the run, delete the file the sentence names and resume
+it again.
+
 ## A run says it `needs you`
 
 Not stuck — paused on a `gate`, waiting for a human decision, and it

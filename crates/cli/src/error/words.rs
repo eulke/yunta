@@ -11,10 +11,31 @@ mod tests;
 
 pub(crate) use refusals::{check, check_said, lacking};
 
+use std::path::Path;
+
 use yunta_core::events::{Claim, FailureMenu, Refusal};
 use yunta_core::inputs::InputsProblem;
-use yunta_core::ARTIFACTS_DIR;
+use yunta_core::{Pid, ARTIFACTS_DIR};
 use yunta_engine::{CloseRunError, ResolveGateError, RunError, StoreError};
+
+/// What a run another engine drives says: whose it is.
+pub(crate) fn moving(run: &str, pid: Pid) -> String {
+    format!("run {run} is already moving: pid {pid} drives it")
+}
+
+/// What a claim says when nothing here can tell a live holder from a leftover:
+/// who the lock names, if anyone, and its file, because only a person can tell.
+pub(crate) fn hold_unclear(run: &str, lock_path: &Path, pid: Option<Pid>) -> String {
+    let held = match pid {
+        Some(pid) => format!("is held by pid {pid}, a process this user cannot signal"),
+        None => "has an engine lock with no readable owner".to_string(),
+    };
+    format!(
+        "run {run} {held} (`{}`): if nothing drives this run, delete that file by hand and \
+         resume it again",
+        lock_path.display()
+    )
+}
 
 /// What the inputs a command was handed do not satisfy, in the words a
 /// reader sees. An input the command was not given is also named by the flag

@@ -1219,6 +1219,126 @@ async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
     client.cancel().await.ok();
 }
 
+/// A run started detached and holding its only node until `go` exists, or until the
+/// marker is gone with the test, so no engine outlives the test that started it.
+struct HoldingRun {
+    root: tempfile::TempDir,
+    repo: std::path::PathBuf,
+    home: std::path::PathBuf,
+    run_id: String,
+}
+
+impl HoldingRun {
+    fn started() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        let home = root.path().join("state");
+        let (started, go) = (root.path().join("started"), root.path().join("go"));
+        write(
+            &repo.join(".yunta/config.yaml"),
+            "defaults:\n  isolation: none\n",
+        );
+        write(
+            &repo.join("wf.yaml"),
+            &format!(
+                "name: hold\nnodes:\n  - id: hold\n    kind: bash\n    run: \"echo in >> {0}; until [ -f {1} ] || [ ! -e {0} ]; do sleep 0.05; done\"\n",
+                started.display(),
+                go.display(),
+            ),
+        );
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+        let detached = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach"]);
+        assert!(detached.status.success(), "{}", stderr(&detached));
+        let run_id = yunta_testkit::full_run_id(&home, &run_id_from(&detached));
+        yunta_testkit::wait_until(
+            || started.exists(),
+            || "the detached engine never reached the node".into(),
+        );
+        HoldingRun {
+            root,
+            repo,
+            home,
+            run_id,
+        }
+    }
+
+    fn run_dir(&self) -> std::path::PathBuf {
+        yunta_testkit::runs_root(&self.home).join(&self.run_id)
+    }
+
+    fn engine_pid(&self) -> Value {
+        let registry = self.run_dir().join("scratch/engine.json");
+        let engine: Value = serde_json::from_slice(&std::fs::read(registry).unwrap()).unwrap();
+        engine["engine_pid"].clone()
+    }
+
+    fn starts(&self) -> usize {
+        std::fs::read_to_string(self.root.path().join("started"))
+            .unwrap()
+            .lines()
+            .count()
+    }
+
+    /// Lets the node end, and says the run's log once its last event is written.
+    fn finished_log(&self) -> String {
+        std::fs::write(self.root.path().join("go"), "go").unwrap();
+        let path = self.run_dir().join("events.jsonl");
+        yunta_testkit::wait_for(
+            || {
+                std::fs::read_to_string(&path)
+                    .ok()
+                    .filter(|log| log.contains("\"run_finished\""))
+            },
+            || "the run never finished".into(),
+        )
+    }
+
+    /// Calls `resume_run` on this run from a real client.
+    async fn resume_run(&self) -> rmcp::model::CallToolResult {
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+        yunta_testkit::hermetic(&mut command, &self.repo, &self.home);
+        command.arg("mcp");
+        let transport = TokioChildProcess::new(command).unwrap();
+        let client = ().serve(transport).await.unwrap();
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new("resume_run")
+                    .with_arguments(json!({"run_id": self.run_id}).as_object().unwrap().clone()),
+            )
+            .await
+            .unwrap();
+        client.cancel().await.ok();
+        result
+    }
+}
+
+/// A process the tool handed the run to would find it taken, and say so in a log no
+/// caller reads, so the tool refuses first: the sentence a person reads, naming the
+/// run whole.
+///
+/// Reached by: `crates/cli/src/commands/mcp/tools.rs`
+#[tokio::test]
+async fn resume_run_on_a_moving_run_is_refused_and_starts_nothing() {
+    let run = HoldingRun::started();
+    let pid = run.engine_pid();
+
+    let refused = run.resume_run().await;
+    assert_eq!(refused.is_error, Some(true), "{refused:#?}");
+    assert_eq!(
+        tool_text(&refused),
+        format!("run {} is already moving: pid {pid} drives it", run.run_id)
+    );
+
+    let log = run.finished_log();
+    assert_eq!(log.matches("\"run_resumed\"").count(), 0, "{log}");
+    assert_eq!(log.matches("\"node_started\"").count(), 1, "{log}");
+    assert_eq!(run.starts(), 1, "the node did not start again");
+}
+
 /// A node whose session hands questions over and ends: with nothing to
 /// answer them the run parks, and the round stands for whichever
 /// surface reaches it next.

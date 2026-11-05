@@ -7,12 +7,14 @@
 //! belongs on top of it.
 
 use std::fmt::Display;
+use std::path::PathBuf;
 
 use surco::words::RUNS_THAT_NEED_YOU_FIRST;
-use yunta_core::RunId;
+use yunta_core::{Pid, RunId};
 
 pub use crate::output::{note, warn};
 
+mod hold;
 pub(crate) mod page;
 pub(crate) mod words;
 
@@ -161,6 +163,26 @@ pub enum CliError {
     CloseRefused {
         run_id: RunId,
         refusal: yunta_engine::CloseRunError,
+    },
+
+    /// A run another engine drives. The sentence says whose it is;
+    /// [`CliError::advice`] the commands that follow it and stop it.
+    #[error("{}", words::moving(.run_id.handle(), *.pid))]
+    RunMoving { run_id: RunId, pid: Pid },
+
+    /// A run whose engine is asking a person at its terminal, the one place
+    /// that moves it.
+    #[error("{}", crate::commands::advice::asking(.prompt, None))]
+    RunAsking { prompt: yunta_engine::Prompt },
+
+    /// A claim whose holder cannot be told from a leftover: a pid this user
+    /// cannot signal, or a file that names nobody. Taking it could put two engines
+    /// on one run, so the sentence names the file for a person to decide.
+    #[error("{}", words::hold_unclear(.run_id.handle(), .lock_path, *.pid))]
+    RunHoldUnclear {
+        run_id: RunId,
+        lock_path: PathBuf,
+        pid: Option<Pid>,
     },
 
     /// A run named by something more than one run answers to. Every
@@ -380,6 +402,12 @@ impl CliError {
                 words::close(refusal),
                 close_advice(&id(run_id), refusal)
             ),
+            CliError::RunMoving { run_id, pid } => words::moving(&id(run_id), *pid),
+            CliError::RunHoldUnclear {
+                run_id,
+                lock_path,
+                pid,
+            } => words::hold_unclear(&id(run_id), lock_path, *pid),
             CliError::Manifest(yunta_engine::ManifestError::Inputs(inputs)) => {
                 words::inputs(inputs)
             }
@@ -398,11 +426,21 @@ impl CliError {
         yunta_core::with_causes(said, self)
     }
 
-    /// What a person is told beside the refusal: where it looked, and the
+    /// What `reader` is told beside the refusal: where it looked, and the
     /// commands that go on from here. Empty for a refusal that says it
     /// all in its sentence.
-    pub fn advice(&self) -> (Option<String>, Vec<(String, &'static str)>) {
+    pub fn advice(&self, reader: Reader) -> (Option<String>, Vec<(String, &'static str)>) {
         match self {
+            CliError::RunMoving { run_id, .. } => {
+                let run = crate::commands::advice::named(run_id, reader);
+                (
+                    None,
+                    vec![
+                        (crate::commands::advice::status(run), "follows it"),
+                        (crate::commands::advice::cancel(run), "stops it"),
+                    ],
+                )
+            }
             CliError::RunNotFound { roots, .. } => (
                 Some(format!("looked in {}", roots.join(" and "))),
                 vec![

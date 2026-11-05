@@ -86,8 +86,11 @@ impl Presentation {
 
 /// Executes the run under a live surface, chases any promotion to its
 /// end, and closes the invocation out — the one path `yunta run` and
-/// `yunta resume` both take once the run they drive is open.
-pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
+/// `yunta resume` both take once the run they drive is open and claimed.
+pub(crate) async fn drive(
+    env: Driving<'_>,
+    hold: yunta_engine::RunHold,
+) -> Result<Outcome, CliError> {
     let shown = Presentation::of(env.output);
     let forge = super::forge::forge_for(&env.manifest.config, &yunta_core::ProcessSecrets);
     let watching = watch(&env, &shown).await?;
@@ -95,7 +98,7 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
     let report = match execute(Executing {
         run_id: &env.prepared.run_id,
         manifest: env.manifest,
-        run_dir: &env.prepared.run_dir,
+        hold,
         worktree: &env.prepared.worktree,
         adapters: &env.adapters,
         storage: env.storage,

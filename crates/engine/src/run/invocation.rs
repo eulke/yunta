@@ -28,14 +28,14 @@ pub(super) fn build_ctx(
     // every append this invocation makes takes the same values back out,
     // and a run that declares no secret builds an empty one and pays nothing.
     let redactor = yunta_core::Redactor::of(&env.manifest.config.secret_names(), &*env.secrets)?;
-    let (registry, registry_error) = open_registry(env.run_dir, &*env.clock);
+    let (registry, registry_error) = open_registry(env.hold.run_dir(), &*env.clock);
     // One cache of criterion results per invocation, read by every task
     // cycle and by every check a task session asks for through the host.
     let memo = Arc::new(Memo::new(env.manifest.config_hash.clone()));
     let pool = crate::worktree::CheckoutPool::of_run(
-        &crate::run_dir::worktrees_root(env.manifest, env.run_dir),
+        &crate::run_dir::worktrees_root(env.manifest, env.hold.run_dir()),
         env.worktree,
-        env.run_dir,
+        env.hold.run_dir(),
         env.manifest,
         env.clock.clone(),
     );
@@ -44,7 +44,7 @@ pub(super) fn build_ctx(
     let RunEnv {
         run_id,
         manifest,
-        run_dir,
+        hold,
         worktree,
         adapters,
         storage,
@@ -58,6 +58,7 @@ pub(super) fn build_ctx(
         observer,
         rail_command,
     } = env;
+    let run_dir = hold.run_dir();
     let awake = Arc::new(crate::wakefulness::Wakefulness::new(clock.clone()));
     let ctx = RunCtx {
         rail_command,
@@ -134,7 +135,7 @@ fn mcp_host(
             run_id: env.run_id.clone(),
             clock: env.clock.clone(),
             observer: env.observer.clone(),
-            run_dir: env.run_dir.to_path_buf(),
+            run_dir: env.hold.run_dir().to_path_buf(),
             max_artifact_bytes: env
                 .manifest
                 .config

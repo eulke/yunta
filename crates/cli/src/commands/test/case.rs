@@ -268,7 +268,7 @@ async fn drive_case_run(
     let report = execute(Executing {
         run_id: &prepared.run_id,
         manifest,
-        run_dir: &prepared.run_dir,
+        hold: crate::commands::registry::claim(ctx, &prepared.run_dir).await?,
         worktree: &prepared.worktree,
         adapters: &adapters,
         storage,
@@ -386,7 +386,7 @@ async fn answered(
         report = execute(Executing {
             run_id: &prepared.run_id,
             manifest,
-            run_dir: &prepared.run_dir,
+            hold: crate::commands::registry::claim(ctx, &prepared.run_dir).await?,
             worktree: &prepared.worktree,
             adapters,
             storage,

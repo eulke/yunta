@@ -227,6 +227,14 @@ async fn run_member(
     cancel: &CancellationToken,
     member: &Member,
 ) -> Result<super::super::RunReport, RunError> {
+    // A person can resume a child by its id, so its parent claims it like any run.
+    let hold = crate::run_hold::hold_run(
+        &member.run_dir,
+        crate::lock::Contention::Refuse,
+        &*ctx.clock,
+        cancel,
+    )
+    .await?;
     // Boxed for the indirect recursion `execute_run_at_depth` →
     // `execute_node` → here → `execute_run_at_depth`.
     let future: std::pin::Pin<
@@ -235,7 +243,7 @@ async fn run_member(
         super::super::RunEnv {
             run_id: &member.id,
             manifest: &member.manifest,
-            run_dir: &member.run_dir,
+            hold: &hold,
             worktree: &member.tree,
             adapters: ctx.adapters,
             storage: ctx.storage,

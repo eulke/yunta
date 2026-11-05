@@ -445,10 +445,17 @@ impl Bench {
         if let Some(driven) = self.driven.lock().expect("the bench's own lock").as_mut() {
             driven.tree = tree.clone();
         }
+        let hold = yunta_engine::hold_run(
+            &run_dir,
+            yunta_engine::lock::Contention::Refuse,
+            &*self.clock,
+            &self.cancel,
+        )
+        .await?;
         let report = execute_run(RunEnv {
             run_id: &self.run_id,
             manifest: &manifest,
-            run_dir: &run_dir,
+            hold: &hold,
             worktree: &tree,
             adapters: &adapters,
             storage: &self.storage.async_handle(),

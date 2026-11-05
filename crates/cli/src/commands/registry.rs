@@ -373,7 +373,7 @@ fn parse_script(text: &str, paths: &ScriptedPaths<'_>) -> Result<MockFixture, Fi
 pub(crate) struct Executing<'a> {
     pub(crate) run_id: &'a RunId,
     pub(crate) manifest: &'a Manifest,
-    pub(crate) run_dir: &'a Path,
+    pub(crate) hold: yunta_engine::RunHold,
     pub(crate) worktree: &'a Path,
     pub(crate) adapters: &'a Adapters,
     pub(crate) storage: &'a AsyncStorage,
@@ -387,13 +387,31 @@ pub(crate) struct Executing<'a> {
     pub(crate) ambient: &'a yunta_core::Env,
 }
 
+/// Claims a run nothing is leaving, one this invocation created or is taking on
+/// again by itself: anyone else holding it is refused at once.
+pub(crate) async fn claim(
+    ctx: &Context,
+    run_dir: &Path,
+) -> Result<yunta_engine::RunHold, RunError> {
+    let hold = yunta_engine::hold_run(
+        run_dir,
+        yunta_engine::lock::Contention::Refuse,
+        &ctx.clock,
+        ctx.cancellation(),
+    )
+    .await?;
+    Ok(hold)
+}
+
 /// Runs one run to its stop — the one `execute_run` call this binary
-/// makes.
+/// makes. The claim ends as this returns, before anything hands the run on: a
+/// detached resume that waits for a reset would otherwise find its own parent
+/// holding the run.
 pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, RunError> {
     yunta_engine::execute_run(RunEnv {
         run_id: on.run_id,
         manifest: on.manifest,
-        run_dir: on.run_dir,
+        hold: &on.hold,
         worktree: on.worktree,
         adapters: on.adapters,
         storage: on.storage,
@@ -448,44 +466,4 @@ pub(crate) async fn create_frozen_run(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A fixture that is not YAML at all is refused at birth, and the refusal
-    /// names the file, so the person knows which fixture to fix.
-    #[test]
-    fn a_fixture_that_does_not_parse_is_refused_naming_its_file() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("broken.yaml");
-        std::fs::write(&path, "sessions: [unclosed\n").unwrap();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let error = runtime
-            .block_on(read_fixture(&path))
-            .expect_err("a fixture that is not YAML is refused");
-        assert!(error.to_string().contains("broken.yaml"), "{error}");
-    }
-
-    /// The refusal offers the adapters `runners:` names that this binary
-    /// builds, and says so in words of its own when there are none.
-    #[test]
-    fn an_unbuilt_pin_names_what_this_binary_can_run() {
-        let refused = |runnable: Vec<AdapterId>| {
-            ServableError::UnbuiltPin {
-                pin: AdapterId::from("codex"),
-                runnable,
-            }
-            .to_string()
-        };
-        assert_eq!(
-            refused(vec![AdapterId::from("claude-code")]),
-            "unknown adapter `codex`; this binary can run: claude-code"
-        );
-        assert_eq!(
-            refused(Vec::new()),
-            "unknown adapter `codex`; this binary can run: (none configured: `runners:` names no adapter this build supports)"
-        );
-    }
-}
+mod tests;
