@@ -105,7 +105,7 @@ pub(crate) fn resolve_gate(error: &ResolveGateError) -> String {
         }
         ResolveGateError::NothingToResolve => "this run isn't currently waiting on a decision \
              `resolve_gate` can answer: it's paused for a reason with no menu of options (a failed \
-             gate node, a budget cap, an external gate with no forge)"
+             gate node, an external gate with no forge)"
             .to_string(),
         ResolveGateError::UnknownOption { chosen, declared } => {
             format!("option `{chosen}` isn't valid here; declared options: {declared}")

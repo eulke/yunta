@@ -172,8 +172,8 @@ fn answer(frame: &RunFrame) -> (Tone, String) {
 
 /// The command that moves a parked run: an option off its own menu when
 /// the run stopped on one, and handing the run back when what stopped it
-/// is settled somewhere else — a budget, a scope, an answers file, a
-/// review on a forge.
+/// is settled somewhere else — a scope, an answers file, a review on a
+/// forge, a child.
 pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
     match answerable {
         true => advice::decide(run_id.handle()),

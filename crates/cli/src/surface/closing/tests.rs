@@ -15,7 +15,7 @@ fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/closing")
 }
 
-fn closing(frame: RunFrame, decision: Option<(NodeId, GateWaitingPayload)>) -> Closing {
+fn closing(frame: RunFrame, decision: Option<(DecisionOn, GateWaitingPayload)>) -> Closing {
     Closing::framed(
         &RUN,
         frame,
@@ -79,7 +79,10 @@ fn cases() -> Vec<(&'static str, Closing)> {
     let failed = RunPhase::Failed {
         failure: Some(lint_failure()),
     };
-    let decision = (NodeId::from("lint"), exhausted_escalation().into_payload());
+    let decision = (
+        DecisionOn::Node("lint".into()),
+        exhausted_escalation().into_payload(),
+    );
     vec![
         (
             "finished",

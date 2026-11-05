@@ -8,7 +8,10 @@ use std::time::Duration;
 use chrono::{DateTime, TimeZone, Utc};
 use tokio::sync::Barrier;
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{EventPayload, PauseReason, RunEvent, RunPausedPayload};
+use yunta_core::events::{
+    EventPayload, GateEvent, GateResolvedPayload, HumanChoice, PauseReason, RunEvent,
+    RunPausedPayload, RunResumedPayload,
+};
 use yunta_core::persisted::{Persisted, PersistedDoc};
 use yunta_core::process::signal::Liveness;
 use yunta_core::Pid;
@@ -48,15 +51,16 @@ fn after_any_process_started() -> DateTime<Utc> {
 
 /// What replay derives from a log whose last event is a pause.
 fn parked() -> RunState {
-    derive(
-        &Log::for_run("run-1")
-            .event(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-                &PauseReason::Recorded {
-                    sentence: "parked".into(),
-                },
-            ))))
-            .build(),
-    )
+    derive(&parking().build())
+}
+
+/// The log of a run that just parked.
+fn parking() -> Log {
+    Log::for_run("run-1").event(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+        &PauseReason::Recorded {
+            sentence: "parked".into(),
+        },
+    ))))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -287,4 +291,35 @@ async fn what_a_hold_would_be_refused_with_is_read_without_taking_anything() {
 fn a_parked_run_is_waited_for_and_any_other_is_refused_at_once() {
     assert!(matches!(contention_for(&parked()), Contention::Wait { .. }));
     assert!(matches!(contention_for(&derive(&[])), Contention::Refuse));
+}
+
+/// An answer can reach the log while the engine that parked the run is still leaving,
+/// and the resume it starts meets that engine: the run is still parked.
+#[test]
+fn a_parked_run_with_an_answer_on_its_log_is_waited_for() {
+    let answered = derive(
+        &parking()
+            .event(EventPayload::Gates(GateEvent::Resolved(
+                GateResolvedPayload::Chosen(HumanChoice {
+                    option: "approve".into(),
+                    by: "mcp".into(),
+                    free_text: None,
+                }),
+            )))
+            .build(),
+    );
+    assert!(matches!(contention_for(&answered), Contention::Wait { .. }));
+}
+
+/// What a resume wrote ends the pause, so a run that woke is moving again.
+#[test]
+fn a_run_that_woke_after_its_pause_is_refused_at_once() {
+    let woken = derive(
+        &parking()
+            .event(EventPayload::Run(RunEvent::Resumed(
+                RunResumedPayload::new(Vec::new(), None),
+            )))
+            .build(),
+    );
+    assert!(matches!(contention_for(&woken), Contention::Refuse));
 }

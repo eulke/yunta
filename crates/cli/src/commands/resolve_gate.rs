@@ -19,7 +19,8 @@ use surco::look::Look;
 use surco::words::Standing;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
 use yunta_core::step::NextStep;
-use yunta_core::{NodeId, OptionId, Responder, RunId};
+use yunta_core::{OptionId, Responder, RunId};
+use yunta_engine::DecisionOn;
 use yunta_engine::RunState;
 use yunta_engine::ShownDocument;
 use yunta_render::gate::Route;
@@ -62,6 +63,10 @@ async fn record(
     free_text: Option<&str>,
 ) -> Result<(), CliError> {
     let open = ctx.open_run(run_id).await?;
+    // Said here because the resume below would say it only to `detached.log`, with
+    // the answer already on the log and the run reading as moving.
+    let state = yunta_engine::derive(&open.events);
+    super::resume::refuse_if_driven(run_id, &open.run_dir, &state).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
     let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
@@ -209,7 +214,7 @@ pub(super) enum Chosen {
 
 /// A decision a run waits on, with what it shows.
 pub(super) struct Waiting {
-    pub(super) node: NodeId,
+    pub(super) on: DecisionOn,
     pub(super) escalation: GateWaitingPayload,
     pub(super) shown: Vec<ShownDocument>,
     routes: BTreeMap<OptionId, Route>,
@@ -225,7 +230,7 @@ pub(super) async fn asked_of(ctx: &Context, run_id: &RunId) -> Result<Asked, Cli
     let handle = run_id.handle();
     let decision =
         yunta_engine::current_escalation(&open.manifest.doc, &open.run_dir, &state).await?;
-    let Some((node, escalation)) = decision else {
+    let Some((on, escalation)) = decision else {
         return Err(CliError::msg(format!(
             "run {handle} waits on no decision; `{}` says where it stands",
             advice::status(handle)
@@ -234,7 +239,7 @@ pub(super) async fn asked_of(ctx: &Context, run_id: &RunId) -> Result<Asked, Cli
     Ok(Asked {
         open,
         state,
-        node,
+        on,
         escalation: escalation.into_payload(),
     })
 }
@@ -243,7 +248,7 @@ pub(super) async fn asked_of(ctx: &Context, run_id: &RunId) -> Result<Asked, Cli
 pub(super) struct Asked {
     open: Opened,
     state: RunState,
-    node: NodeId,
+    on: DecisionOn,
     pub(super) escalation: GateWaitingPayload,
 }
 
@@ -253,7 +258,7 @@ impl Asked {
         let Asked {
             open,
             state,
-            node,
+            on,
             escalation,
         } = self;
         let asked = open.manifest.doc.request();
@@ -263,10 +268,10 @@ impl Asked {
             &escalation,
             &open.manifest.doc.workflow,
             state.run.left_out(),
-            Some(&node),
+            on.node(),
         );
         Ok(Waiting {
-            node,
+            on,
             escalation,
             shown,
             routes,
@@ -364,7 +369,7 @@ pub(super) fn chosen_on(
         shown: Some((run_id, &waiting.shown)),
         changed: waiting.changed.as_ref(),
         routes: waiting.routes.clone(),
-        node: Some(&waiting.node),
+        node: waiting.on.node(),
         called: Some(waiting.called.clone()),
         opens,
     };

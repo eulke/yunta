@@ -4,7 +4,7 @@
 //! reset is over.
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::{GateResolvedPayload, HumanChoice, PauseReason};
+use yunta_core::events::{GateResolvedPayload, HumanChoice, NodeState, PauseReason};
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{NodeId, Seq};
 
@@ -26,11 +26,28 @@ impl RunState {
     /// acts on it: the instant a recorded decision takes to reach another process. Nobody
     /// is needed in that instant, and what was answered is on offer to nobody.
     pub fn answer_awaits_its_resume(&self) -> bool {
-        self.run.paused().is_some()
-            && self
+        match self.run.paused() {
+            None => false,
+            Some((PauseReason::BudgetExhausted { .. }, _)) => self.cap_answer().is_some(),
+            Some(_) => self
                 .gates
                 .nodes()
-                .any(|node| self.pre_seeded(node).is_some())
+                .any(|node| self.pre_seeded(node).is_some()),
+        }
+    }
+
+    /// The answer to the token cap the next engine takes. It counts only while it
+    /// stands after the cap's pause with no resume since, because every engine spends
+    /// new money: not [`Self::pre_seeded`], whose answer outlives a crash, which is
+    /// harmless for a retry and not for a spend.
+    pub fn cap_answer(&self) -> Option<&HumanChoice> {
+        let (PauseReason::BudgetExhausted { .. }, paused_at) = self.run.paused()? else {
+            return None;
+        };
+        match self.gates.run_answer()? {
+            (GateResolvedPayload::Chosen(choice), at) if at > paused_at => Some(choice),
+            _ => None,
+        }
     }
 
     /// The option a person chose to run `node` again after its latest
@@ -47,6 +64,16 @@ impl RunState {
         };
         let option = ReservedOption::of(&choice.option)?;
         (option.runs_again() && self.unconsumed(node, *at)).then_some(option)
+    }
+
+    /// Whether a person chose to run a node a session was cut on past the token cap,
+    /// and the attempt that choice starts has not started: once it has, the node is not
+    /// failed, so an engine that replaces the one that took the answer pays its own way.
+    pub fn past_the_cap_chosen(&self) -> bool {
+        self.gates.nodes().any(|node| {
+            matches!(self.nodes.state(node), Some(NodeState::Failed { .. }))
+                && self.run_again_chosen(node) == Some(ReservedOption::Continue)
+        })
     }
 
     /// The choice a person made about `node` after its latest failure,
@@ -92,7 +119,7 @@ impl RunState {
                 node.last_reroute.as_ref().map(|r| r.seq),
             ]
         });
-        let blocker = consumed.flatten().chain(self.run.last_paused_at()).max();
+        let blocker = consumed.flatten().chain(self.run.answers_closed_at()).max();
         Some(at) > blocker && Some(at) > standing
     }
 

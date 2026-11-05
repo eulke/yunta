@@ -376,6 +376,50 @@ waiting on and the command that chooses each option; `yunta resolve-gate
 on a terminal puts the menu to you. See [gates from the
 outside](guide.md#gates-from-the-outside).
 
+## A run stopped on its token cap
+
+A run meets `limits.max_tokens_per_run` in two ways. Both say `needs you`, and both
+are answered the same way, from anywhere.
+
+``node `grill` failed: exceeded max_tokens 200000 (285734 used)`` is a session cut at
+its share. A session may spend the cap over the nodes still owed, cached tokens
+included, so this comes long before the run has spent the cap. Its next attempt would
+get the same share and fail the same way, so the menu offers `continue`, which runs
+the node again past the cap, and no `retry`.
+
+``its token budget is spent (2000431 tokens with `limits.max_tokens_per_run: 2000000`)``
+is the run itself on the cap, with nodes still to run. The menu offers `continue`,
+which goes on past it. A node whose `retry` you already chose keeps that answer: after
+`continue`, that attempt runs.
+
+`yunta status <run>` shows the decision and the command for each option. `yunta
+resolve-gate <run> continue` answers it from any process, and `resolve_gate` over
+`yunta mcp` does the same. The run goes on in a resume of its own, with nothing
+attached to it. `abort` runs nothing and leaves the decision open.
+
+One answer pays for one engine. `continue` lifts the cap for the engine that takes it,
+with no new cap, so `yunta cancel <run>` is what stops that engine. The next engine
+stands under the cap again: one that starts after a stop or a kill asks again when it
+meets the cap. An engine that died before it started the attempt spent nothing, so the
+answer still stands. A resume with no answer waiting asks at its terminal, and off a
+terminal it stops again.
+
+A parent whose child stopped on the cap has no option of its own to answer. `yunta
+status <parent>` names the command that reaches the child. Answer there with `yunta
+resolve-gate <child> continue`, and once the child has finished, `yunta resume
+<parent>` takes it from there. That answer lifts the child's cap and not the parent's,
+so the parent can stop on its own cap once the child's spend reaches it, and asks for
+itself.
+
+## A loop stopped on its iteration cap
+
+``node `implement` failed: loop `implement` exceeded `limits.max_loop_iterations` (2)``
+offers `retry`. `yunta resolve-gate <run> retry` starts the loop's count over, and it
+goes on from the tasks already done. It stops at the cap again if tasks remain, so a
+long plan takes one `retry` per round. A person at a terminal is asked before the loop
+stops, and `continue` there keeps it iterating for that engine. The limit itself
+stays what the run froze when it started: changing it takes a new run.
+
 ## A run says it `waiting`
 
 A run says `waiting` when a limit's reset holds it, under the default

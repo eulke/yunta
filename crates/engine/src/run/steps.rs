@@ -152,9 +152,11 @@ pub(super) async fn failure_escalation(
 ) -> Result<Option<RunReport>, RunError> {
     let escalation = escalation::build_failure_escalation(&node, &failure, next_attempt, &outlook);
     let answer = escalation::decided(ctx, state, &node, None, &escalation).await?;
-    if answer.is_some_and(|(choice, _)| {
-        ReservedOption::of(&choice.option).is_some_and(ReservedOption::runs_again)
-    }) {
+    let chosen = answer.and_then(|(choice, _)| ReservedOption::of(&choice.option));
+    if chosen == Some(ReservedOption::Continue) {
+        budget::lift_the_cap(ctx);
+    }
+    if chosen.is_some_and(ReservedOption::runs_again) {
         return Ok(None);
     }
     Ok(Some(
@@ -333,7 +335,7 @@ pub(super) async fn execute_batch(
         {
             let spent = state.spend().so_far().total();
             if spent >= cap {
-                let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap);
+                let (escalation, reason) = budget::over_budget_escalation(ctx.run_id, spent, cap);
                 match budget::escalate(ctx, None, escalation, reason).await? {
                     budget::BudgetDecision::Continue => ctx
                         .budget_lifted

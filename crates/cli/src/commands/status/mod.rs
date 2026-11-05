@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use yunta_core::events::{Escalation, StoredEvent};
 use yunta_core::{Clock, Manifest, NodeId, RunId};
-use yunta_engine::{NodeStanding, NodeState, RunFrame, RunState, ShownDocument};
+use yunta_engine::{DecisionOn, NodeStanding, NodeState, RunFrame, RunState, ShownDocument};
 
 use crate::commands::{advice, stats};
 use crate::context::Context;
@@ -76,7 +76,7 @@ struct Reading {
     manifest: Manifest,
     state: RunState,
     frame: RunFrame,
-    decision: Option<(NodeId, Escalation)>,
+    decision: Option<(DecisionOn, Escalation)>,
     tree: PathBuf,
     engine: Engine,
     now: DateTime<Utc>,
@@ -235,7 +235,7 @@ async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
     if advice::parked(&reading.frame.phase).is_none() {
         return Ok(None);
     }
-    let Some((node, escalation)) = &reading.decision else {
+    let Some((on, escalation)) = &reading.decision else {
         return Ok(None);
     };
     let shown = crate::json::shown_of(
@@ -248,13 +248,15 @@ async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
     // A failed node's evidence is quoted above the decision, so the
     // decision does not repeat it.
     let beside = decision::Beside {
-        evidence: matches!(
-            reading.state.nodes.state(node),
-            Some(NodeState::Failed { .. })
-        ),
+        evidence: on.node().is_some_and(|node| {
+            matches!(
+                reading.state.nodes.state(node),
+                Some(NodeState::Failed { .. })
+            )
+        }),
     };
     Ok(Some(Decided {
-        node: node.clone(),
+        on: on.clone(),
         escalation: escalation.clone().into_payload(),
         shown,
         beside,
@@ -310,7 +312,7 @@ struct DocumentInputs<'a> {
     manifest: &'a Manifest,
     frame: &'a RunFrame,
     engine: Engine,
-    decision: Option<(NodeId, Escalation)>,
+    decision: Option<(DecisionOn, Escalation)>,
 }
 
 impl<'a> DocumentInputs<'a> {

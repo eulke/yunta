@@ -57,6 +57,8 @@ every state from it, and what a person reads is drawn from that data in Surco.
 - Modes belong to workflows: the engine's code never names one. [smell mode_name_in_prod]
 - A run has one engine: `RunEnv` borrows a hold only `hold_run` makes; a second resume is refused and a dead
   holder replaced. [test engine/run_guard]
+- One answer pays for one engine: `continue` lifts the token cap only in the engine that took it, and the next
+  one stands under the cap again. [test engine/parked_answers]
 - A safety mechanism adds no wall-clock time to a run. [review]
   Paths: `crates/core/src/rail/**`, `crates/engine/src/task_cycle/**`, `crates/engine/src/worktree/**`,
   `crates/adapters/src/**`

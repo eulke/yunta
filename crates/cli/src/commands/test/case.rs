@@ -361,7 +361,10 @@ async fn answered(
     mut report: yunta_engine::RunReport,
 ) -> Result<yunta_engine::RunReport, CliError> {
     while !decisions.is_empty() {
-        let Some(node) = yunta_engine::awaits_decision(manifest, &report.state) else {
+        // A case names its answers by node, so a decision the run owns ends its answers.
+        let Some(yunta_engine::DecisionOn::Node(node)) =
+            yunta_engine::awaits_decision(manifest, &report.state)
+        else {
             break;
         };
         let Some(option) = decisions.remove(&node) else {

@@ -2,6 +2,9 @@
 //! leaves and the document a program reads give the same word, the same counts and the same
 //! next steps.
 
+use rmcp::model::CallToolRequestParams;
+use rmcp::transport::TokioChildProcess;
+use rmcp::ServiceExt;
 use serde_json::Value;
 use yunta_testkit::{git, run_id_from, stderr, stdout, yunta_in, Checkout};
 
@@ -105,7 +108,12 @@ fn next_steps_stand_on_the_page(document: &Value, page: &str, run: &str, handle:
 
 /// What every surface of a run has to agree on.
 fn says_one_thing(checkout: &Checkout) -> Value {
-    let (run, quiet, code) = ran(checkout);
+    says_one_thing_of(checkout, ran(checkout))
+}
+
+/// [`says_one_thing`], of a run already started.
+fn says_one_thing_of(checkout: &Checkout, started: (String, String, Option<i32>)) -> Value {
+    let (run, quiet, code) = started;
     let handle = yunta_testkit::handle(&run).to_string();
     let document = status_json(checkout, &run);
     let page = status_page(checkout, &run);
@@ -275,6 +283,109 @@ sessions:
       - { type: usage, input_tokens: 300, output_tokens: 0 }
     outcome: { type: completed, summary: spent }
 "#;
+
+/// What a decision offers, each thing where the page says it: the facts beside it, and each
+/// option with what it does and the command that chooses it. Its claim is not here: a page
+/// says the pause's sentence, which `said` holds, in its place.
+fn decision_stands_on_the_page(decision: &Value, page: &str, run: &str, handle: &str) {
+    // The rail an option's lines wrap beside is no part of what they say.
+    let page = page.replace("▎ ", "");
+    for fact in decision["evidence"].as_array().expect("its facts") {
+        let value = fact["value"].as_str().expect("what a fact says");
+        assert!(page.contains(&folded(value)), "`{value}`: {page}");
+    }
+    let options = decision["options"].as_array().expect("its options");
+    assert!(!options.is_empty(), "{decision:#}");
+    for option in options {
+        let id = option["id"].as_str().expect("an option's id");
+        let label = option["label"].as_str().expect("what it does");
+        let offered = folded(&format!("{id}: {label}"));
+        assert!(page.contains(&offered), "`{offered}`: {page}");
+        if let Some(tradeoff) = option["tradeoff"].as_str() {
+            assert!(page.contains(&folded(tradeoff)), "`{tradeoff}`: {page}");
+        }
+        let command = decision["commands"][id].as_str().expect("what chooses it");
+        assert!(
+            command.contains(run),
+            "the whole id, for a program: {command}"
+        );
+        let spoken = folded(&command.replace(run, handle));
+        assert!(page.contains(&spoken), "`{spoken}`: {page}");
+    }
+}
+
+/// The document of `run`, from a real client of the control plane.
+async fn over_mcp(checkout: &Checkout, run: &str) -> Value {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &checkout.repo, &checkout.home);
+    command.arg("mcp");
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    let arguments = serde_json::json!({ "run_id": run });
+    let read = client
+        .call_tool(
+            CallToolRequestParams::new("workflow_status")
+                .with_arguments(arguments.as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    client.cancel().await.ok();
+    let text = read
+        .content
+        .iter()
+        .filter_map(|block| block.as_text())
+        .map(|text| text.text.as_str())
+        .collect::<String>();
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}\n{text}"))
+}
+
+/// The sessions of [`SPENDING`] when the first goes past its share of a cap of 100, as a
+/// real session does, and is cut.
+const CUT: &str = r#"
+dialect: claude-code
+sessions:
+  - steps:
+      - { type: usage, input_tokens: 60, output_tokens: 0 }
+    outcome: { type: completed, summary: spent }
+"#;
+
+/// Both ways a run meets the cap, read from the page, the listing, the document and over
+/// MCP: the options, the evidence and the commands are one set of words.
+#[tokio::test]
+async fn a_run_stopped_by_the_cap_says_one_thing_on_every_interface() {
+    for (stop, fixture, word) in [
+        ("on the cap", SPENDS, "limits.max_tokens_per_run"),
+        ("cut at its share", CUT, "exceeded max_tokens"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = Checkout::under(root.path())
+            .config(&format!("{CONFIG}limits:\n  max_tokens_per_run: 100\n"))
+            .workflow("wf", SPENDING)
+            .file("fixture.yaml", fixture)
+            .committed();
+        let args = [
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+            "--quiet",
+        ];
+        let run = yunta_in!(&checkout.repo, &checkout.home, &args);
+        let (id, quiet, code) = (run_id_from(&run), stderr(&run), run.status.code());
+
+        let document = says_one_thing_of(&checkout, (id.clone(), quiet, code));
+        let page = status_page(&checkout, &id);
+        assert!(page.contains(word), "{stop}: {page}");
+        let handle = yunta_testkit::handle(&id);
+        decision_stands_on_the_page(&document["decision"], &page, &id, handle);
+
+        let read = over_mcp(&checkout, &id).await;
+        assert_eq!(read["decision"], document["decision"], "{stop}");
+        assert_eq!(read["next"], document["next"], "{stop}");
+        assert_eq!(read["waiting_on"], document["waiting_on"], "{stop}");
+    }
+}
 
 /// A run parked on its budget says what the cap means against its history, whichever
 /// invocation is asked: one run, one document.

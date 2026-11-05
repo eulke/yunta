@@ -33,7 +33,9 @@ use yunta_core::Location;
 /// Both sides boxed: a run starts once, so the allocation is nothing
 /// beside carrying either side's weight in every move of the other.
 enum Startup<'a> {
-    Finished(Box<RunReport>),
+    /// The invocation has nothing to drive: the run's log already ended, or an answer
+    /// waiting on it stopped the run where it stood.
+    Over(Box<RunReport>),
     Ready(Box<Ready<'a>>),
 }
 
@@ -65,7 +67,7 @@ pub(crate) async fn execute_run_at_depth(
     depth: u32,
 ) -> Result<RunReport, RunError> {
     let ready = match start(env, depth).await? {
-        Startup::Finished(report) => return Ok(*report),
+        Startup::Over(report) => return Ok(*report),
         Startup::Ready(ready) => *ready,
     };
     // The run's clock is read every second for as long as the loop
@@ -361,7 +363,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     if view.state.run.finished().is_some() {
         // Re-executing a finished run is a no-op, not an error — the log
         // already has its ending.
-        return Ok(Startup::Finished(Box::new(RunReport {
+        return Ok(Startup::Over(Box::new(RunReport {
             terminal: RunTerminal::Finished,
             state: *view.state,
         })));
@@ -373,6 +375,9 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
         // holding, so what separates the two is what the log says
         // happened, never how much of it there is.
         super::wake::resume(&ctx, &view).await?;
+        if let Some(stopped) = super::budget::take_cap_answer(&ctx, &view.state).await? {
+            return Ok(Startup::Over(Box::new(stopped)));
+        }
         // What earlier invocations answered stays answered for the trees
         // they named, as long as the commands still run as they did.
         let woken = ctx.run_view().await?;

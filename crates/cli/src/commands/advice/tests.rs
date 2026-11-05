@@ -87,6 +87,39 @@ fn a_failure_stuck_on_an_unchanged_tree_lists_the_resume_that_retries_once_it_ch
     );
 }
 
+/// What a parent parked on its child waits on stands on the child's log, so what a reader
+/// needs first is the way there, named as that reader copies it.
+#[test]
+fn the_parent_of_a_stopped_child_offers_the_command_that_reaches_it() {
+    let whole = "01AAAAAAAAAAAAAAAAAAAAAAAA";
+    let parent = frame(
+        Standing::NeedsYou,
+        RunPhase::Waiting {
+            on: WaitingOn::Run {
+                reason: PauseReason::ChildPaused {
+                    node: NodeId::from_static("compose"),
+                    run: RunId::from_static(whole),
+                    child: Box::new(PauseReason::BudgetExhausted { spent: 5, cap: 4 }),
+                },
+            },
+        },
+    );
+    let why = "shows what it is waiting on";
+    assert_eq!(
+        after(&parent, None)[0],
+        ("yunta status AAAAAA".to_string(), why)
+    );
+    assert_eq!(
+        after_for(&parent, None, Reader::Agent)[0],
+        (format!("yunta status {whole}"), why)
+    );
+    assert_eq!(
+        after(&parent, None)[1..],
+        after(&parked(), None),
+        "and the parent is still handed back and closed as before"
+    );
+}
+
 #[test]
 fn a_run_that_needs_a_person_without_a_decision_is_handed_back_once_settled() {
     assert_eq!(

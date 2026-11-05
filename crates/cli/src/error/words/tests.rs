@@ -312,6 +312,17 @@ fn an_input_the_command_was_not_given_or_gave_out_of_range_is_named_with_its_bou
     );
 }
 
+/// The token cap is a decision with a menu, so this refusal is no longer about it.
+#[test]
+fn a_pause_with_no_menu_is_refused_without_naming_the_cap() {
+    assert_eq!(
+        resolve_gate(&ResolveGateError::NothingToResolve),
+        "this run isn't currently waiting on a decision `resolve_gate` can answer: it's paused \
+         for a reason with no menu of options (a failed gate node, an external gate with no \
+         forge)"
+    );
+}
+
 #[test]
 fn a_decision_the_run_cannot_take_says_why_and_what_to_choose_instead() {
     assert_eq!(

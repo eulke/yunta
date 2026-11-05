@@ -10,7 +10,9 @@ pub async fn rebuilt_menu(
     run_dir: &Path,
     events: &[yunta_core::events::StoredEvent],
 ) -> Option<(yunta_core::NodeId, yunta_core::events::Escalation)> {
-    yunta_engine::current_escalation(manifest, run_dir, &yunta_engine::derive(events))
-        .await
-        .unwrap()
+    let (on, escalation) =
+        yunta_engine::current_escalation(manifest, run_dir, &yunta_engine::derive(events))
+            .await
+            .unwrap()?;
+    Some((on.node()?.clone(), escalation))
 }

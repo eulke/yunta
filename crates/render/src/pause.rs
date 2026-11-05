@@ -22,16 +22,11 @@ pub(crate) const RESET_FORMAT: &str = "%Y-%m-%d %H:%M UTC";
 /// whoever reads it, a teammate or an agent among them.
 pub const INTERRUPTED: &str = "interrupted by a person";
 
-/// The half every cap's sentence ends with: a reader who hit a declared
-/// limit has the same two ways past it whichever limit it was.
-pub const PAST_THE_CAP: &str =
-    "resume with an interactive surface to continue past the cap or abort";
-
-/// What a loop's iteration cap says once the loop has passed it: the limit,
-/// its value, and the two ways past it. The loop's pause and its failure
-/// both read it, so a parked run names the limit to whichever surface reads it.
+/// What a loop's iteration cap says once the loop has passed it: the limit and
+/// its value. The loop's pause and its failure both read it, so a parked run names
+/// the limit to whichever surface reads it, and the way on is the decision under it.
 pub(crate) fn exceeded_loop_cap(cap: u32) -> String {
-    format!("exceeded `limits.max_loop_iterations` ({cap}); {PAST_THE_CAP}")
+    format!("exceeded `limits.max_loop_iterations` ({cap})")
 }
 
 /// The one sentence for questions awaiting an answer: `asked 2
@@ -114,10 +109,11 @@ pub fn sentence(pause: &PauseReason) -> String {
     }
 }
 
-/// Why a run stops once it has spent the tokens its limit allows.
+/// Why a run stops once it has spent the tokens its limit allows. The way on is the
+/// decision under it.
 fn budget(spent: u64, cap: u64) -> String {
     format!(
-        "its token budget is spent ({} with `limits.max_tokens_per_run: {cap}`); {PAST_THE_CAP}",
+        "its token budget is spent ({} with `limits.max_tokens_per_run: {cap}`)",
         Tokens(spent).exact()
     )
 }
@@ -269,15 +265,27 @@ mod tests {
     }
 
     #[test]
-    fn a_loop_that_overran_names_its_limit_and_the_way_past_it() {
+    fn a_loop_that_overran_names_its_limit() {
         let overrun = PauseReason::LoopOverrun {
             node: NodeId::from("fix-lint"),
             cap: 3,
         };
         assert_eq!(
             sentence(&overrun),
-            "loop `fix-lint` exceeded `limits.max_loop_iterations` (3); resume with an \
-             interactive surface to continue past the cap or abort"
+            "loop `fix-lint` exceeded `limits.max_loop_iterations` (3)"
+        );
+    }
+
+    /// What goes on from here is the decision under it, on every interface, so the sentence
+    /// says what happened and nothing about who can answer.
+    #[test]
+    fn a_run_on_its_token_cap_says_what_it_spent_and_its_limit() {
+        assert_eq!(
+            sentence(&PauseReason::BudgetExhausted {
+                spent: 100,
+                cap: 100
+            }),
+            "its token budget is spent (100 tokens with `limits.max_tokens_per_run: 100`)"
         );
     }
 

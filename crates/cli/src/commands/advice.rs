@@ -153,8 +153,8 @@ pub(crate) fn review(run: &str) -> String {
 }
 
 /// Hands a run back to the engine, once whatever stopped it is settled
-/// somewhere else — a budget, a scope, an answers file, a review on a
-/// forge.
+/// somewhere else — a scope, an answers file, a review on a forge, a
+/// child's own decision.
 pub(crate) fn resume(run: &str) -> String {
     format!("yunta resume {run}")
 }
@@ -296,7 +296,8 @@ pub(crate) fn verify(run: &str) -> String {
 /// with what it does. `decision` is the decision a run that needs the
 /// person stopped on, when the log rebuilds one: its options carry their
 /// own commands, and a failure that no retry can change until the tree
-/// moves says so beside the command that hands the run back.
+/// moves says so beside the command that hands the run back. A run parked on
+/// a child is offered the way to that child first.
 pub(crate) fn after(
     frame: &RunFrame,
     decision: Option<&GateWaitingPayload>,
@@ -327,7 +328,14 @@ pub(crate) fn after_for(
         Standing::NeedsYou if matches!(frame.phase, RunPhase::Created | RunPhase::Running) => {
             vec![(cancel(run), "stops it and everything under it")]
         }
-        Standing::NeedsYou => after_needs_you(run, decision),
+        Standing::NeedsYou => {
+            let reaches = child_parked_on(frame)
+                .map(|child| (status(named(child, reader)), "shows what it is waiting on"));
+            reaches
+                .into_iter()
+                .chain(after_needs_you(run, decision))
+                .collect()
+        }
         Standing::Finished | Standing::Reported => vec![(receipt(run), "certifies what it did")],
         Standing::Broken => vec![(verify(run), "says where its log stops reading")],
         Standing::Created | Standing::Running => {
@@ -343,6 +351,15 @@ pub(crate) fn after_for(
         | Standing::Rerouted
         | Standing::Skipped
         | Standing::NeverRan => Vec::new(),
+    }
+}
+
+/// The child a parked run waits on. What it waits on stands on the child's log, so no
+/// answer given to the parent can reach it, and the way there is what a reader needs first.
+fn child_parked_on(frame: &RunFrame) -> Option<&RunId> {
+    match parked(&frame.phase)?.reason()? {
+        PauseReason::ChildPaused { run, .. } => Some(run),
+        _ => None,
     }
 }
 

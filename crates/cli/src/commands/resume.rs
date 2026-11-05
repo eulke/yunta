@@ -121,7 +121,7 @@ pub(crate) async fn refuse_if_driven(
         Some(LockError::Held {
             liveness: Liveness::Alive,
             ..
-        }) if state.tail_paused() => Ok(()),
+        }) if state.run.paused().is_some() => Ok(()),
         Some(refusal) => Err(CliError::refused_hold(run_id, run_dir, refusal)),
     }
 }

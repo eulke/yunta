@@ -198,6 +198,10 @@ pub(super) async fn tool_answer_questions(
 
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
     let open = ctx.open_run(&run_id).await?;
+    // Said here because the resume below would say it only to `detached.log`, with
+    // the answers already on the log.
+    let state = yunta_engine::derive(&open.events);
+    super::super::resume::refuse_if_driven(&run_id, &open.run_dir, &state).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
     let storage = ctx.async_storage().await?;

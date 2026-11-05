@@ -81,12 +81,13 @@ impl ReservedOption {
 
     /// Whether choosing this runs the failed node again — from scratch,
     /// from the work it left, with its scope widened first, with a request
-    /// it owed refused, so the tasks that asked go on in their scope, or
-    /// with a departure it owed answered.
+    /// it owed refused, so the tasks that asked go on in their scope, with a
+    /// departure it owed answered, or past the token cap that cut its session.
     pub fn runs_again(self) -> bool {
         matches!(
             self,
             ReservedOption::Retry
+                | ReservedOption::Continue
                 | ReservedOption::ContinueWork
                 | ReservedOption::Grant
                 | ReservedOption::Deny

@@ -126,8 +126,8 @@ pub enum CliError {
     },
 
     /// A decision was put to a run whose pause reconstructs no menu.
-    /// Those pauses are settled where they were raised — a budget, a
-    /// scope, an answers file, a review on a forge — and the run handed
+    /// Those pauses are settled where they were raised — a scope, an
+    /// answers file, a review on a forge, a child — and the run handed
     /// back, which is what the advice names.
     #[error("{}; settle it where it was raised, then `{}`", words::resolve_gate(.refusal), crate::commands::advice::resume(.run_id.handle()))]
     NoMenu {

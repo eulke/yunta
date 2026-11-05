@@ -40,7 +40,7 @@ use yunta_core::events::{
     GrantLedger, NodeLedger, RunEvent, RunLedger, RunMetrics, Spend, StoredEvent, TaskLedger,
     TokenUsage,
 };
-use yunta_core::{NodeId, Seq};
+use yunta_core::{NodeId, RunId, Seq};
 
 /// The node states replay derives: defined beside the node ledger in
 /// `yunta_core::events`, and named here by the engine's callers.
@@ -97,6 +97,9 @@ pub struct RunState {
     activity: Box<Activity>,
     /// Whether the last event applied was a pause.
     tail_paused: bool,
+    /// The run this log is of, read off its events. Left out of the comparison: two
+    /// runs that derive the same facts are the same state.
+    run_id: Option<RunId>,
 }
 
 /// Two states are the same when they derive the same facts. The clock and
@@ -215,6 +218,11 @@ impl RunState {
             .map(|(_, failure)| failure.clone())
     }
 
+    /// The run this log is of, once it holds an event.
+    pub fn run_id(&self) -> Option<&RunId> {
+        self.run_id.as_ref()
+    }
+
     /// Whether the last event applied was a pause.
     pub fn tail_paused(&self) -> bool {
         self.tail_paused
@@ -295,6 +303,9 @@ impl RunState {
     /// is the failure this shape exists to make impossible.
     pub fn apply(&mut self, event: &StoredEvent) -> Result<(), ReplayError> {
         self.refuse(event)?;
+        if self.run_id.is_none() {
+            self.run_id = Some(event.run_id.clone());
+        }
         let meta = EventMeta::of(event);
         if let Some(EventPayload::Run(e @ RunEvent::HostSuspended(_))) = event.payload() {
             self.run.apply(e, &meta);

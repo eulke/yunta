@@ -38,3 +38,18 @@ Four commands append to a run's log without its `engine.lock`: `resolve_gate`, `
 closing step of `cancel`. Each first reads that the run stopped, and a `resume` that starts right after that read
 can write beside them. The window is narrow and SQLite serializes the rows, so nothing has come of it yet. Closing
 it means each of them takes a `RunHold` for its write.
+
+### A parent stays parked after its child ends
+Paths: `crates/engine/src/run/workflow_exec/**`, `crates/engine/src/run/escalation.rs`
+A child answered on its own log ends in an engine of its own, and its parent stays parked on the child's pause
+until someone runs `yunta resume <parent>`. The parent's page offers the way to the child and that resume, and
+nothing hands the parent back. Going on by itself changes how any pause of a child is taken up, which is why it
+waits: who resumes the parent, and what an answer does when the parent has been closed.
+
+### How the token cap is shared among sessions
+Paths: `crates/engine/src/run/budget.rs`, `docs/reference.md`
+A session may spend the cap over the nodes still owed, and cached tokens count against it. No real fragua node
+fits a share of the `2000000` that `docs/reference.md` gives as its example: `grill` was cut at 285734 of 200000
+after 28 s, so such a run stops on a cut session long before it has spent the cap, and goes on only past the cap.
+Three questions stand: whether a share should be equal across nodes, whether cached tokens should count, and what
+that example should be.

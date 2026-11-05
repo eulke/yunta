@@ -78,13 +78,15 @@ pub async fn hold_refused(run_dir: &Path) -> Option<LockError> {
 }
 
 /// How to contend for a run the log reads as `state`: the engine that parked it
-/// is on its way out, and one still moving is not coming back soon.
+/// is on its way out, and one still moving is not coming back soon. Parked is the
+/// run's pause, which only a resume ends, and not the log's last event: an answer
+/// recorded after the pause can reach the log while that engine is still leaving.
 pub fn contention_for(state: &RunState) -> Contention {
-    match state.tail_paused() {
-        true => Contention::Wait {
+    match state.run.paused() {
+        Some(_) => Contention::Wait {
             patience: LEAVING,
             poll: LEAVING_POLL,
         },
-        false => Contention::Refuse,
+        None => Contention::Refuse,
     }
 }

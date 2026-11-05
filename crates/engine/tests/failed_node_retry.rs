@@ -63,7 +63,7 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     .await
     .unwrap()
     .expect("a failed node is a pause with a menu");
-    assert_eq!(node.as_str(), "broken");
+    assert_eq!(node, yunta_engine::DecisionOn::Node("broken".into()));
     assert_eq!(escalation.summary(), &node_failed("broken"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
@@ -92,7 +92,7 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
     .await
     .unwrap()
     .expect("a failed node is a pause with a menu");
-    assert_eq!(node.as_str(), "gate");
+    assert_eq!(node, yunta_engine::DecisionOn::Node("gate".into()));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["abort"]);
     let menu = escalation

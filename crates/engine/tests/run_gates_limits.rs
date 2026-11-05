@@ -561,8 +561,8 @@ limits:
 #[tokio::test]
 async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
     // The first invocation pauses headless; the resume gets its own
-    // "continue" — proving the ask happens per invocation and nothing in
-    // the log pre-authorizes new spend.
+    // "continue" — proving the ask happens per invocation, and that nothing
+    // but an answer to this stop authorizes new spend.
     let bench = Bench::new();
     let first = bench
         .run_with_config(BUDGET_WORKFLOW, BUDGET_FIXTURE, BUDGET_CONFIG)

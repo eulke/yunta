@@ -95,7 +95,7 @@ What moves:
 
 - At the base commit nothing answers from another process: `run/budget.rs` asks directly, and `current_decision` (`run/escalation.rs:249`) offers only three kinds of decision. The page admits it: "no option answers this pause here".
 - Authorization per invocation is deliberate (`run/budget.rs:8`, test `budget_authorization_is_per_invocation_a_resume_asks_again`): each invocation spends new money. It is kept: **a recorded answer authorizes only the next invocation**. With no answer waiting, a resume asks again.
-- The loop cap is milder: with no surface, the node fails with `LoopCapped`, whose remedy is `retry(Precondition::CapLifted)`. It can be answered from another process by raising the cap. What does not exist outside a terminal is "continue for this invocation". The spec decides whether that is needed.
+- The loop cap is milder: with no surface, the node fails with `LoopCapped`, and `retry` from another process starts its count over, so it goes on from the tasks done: five chained tasks under a cap of 2 went 2 of 5, 4 of 5, finished. Nothing raises the cap, which the run froze. `continue` for one invocation stays a terminal's, and is not needed elsewhere.
 - Scope and departures are already answered from another process (`engine/tests/deviation/surfaces.rs:41`).
 
 ## Assumptions
