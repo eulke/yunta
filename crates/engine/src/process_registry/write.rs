@@ -15,6 +15,9 @@ use super::{read_registry, registry_path, running_groups, Asked, EngineProcessFi
 pub struct ProcessRegistry {
     path: PathBuf,
     state: Mutex<EngineProcessFile>,
+    /// The socket the run's words are served on while this engine serves
+    /// it: it opens with the file and goes away with it.
+    socket: Mutex<Option<crate::said::Socket>>,
 }
 
 impl ProcessRegistry {
@@ -42,10 +45,12 @@ impl ProcessRegistry {
             started_at: crate::lock::taken_at(engine_pid, probe, clock),
             process_groups,
             asking: None,
+            words: None,
         };
         let registry = ProcessRegistry {
             path: registry_path(run_dir),
             state: Mutex::new(state),
+            socket: Mutex::new(None),
         };
         registry.commit(|_| {})?;
         Ok(registry)
@@ -87,6 +92,20 @@ impl ProcessRegistry {
     /// processes — the registry itself, and the MCP config a session's
     /// adapter was pointed at, which carries that session's bearer.
     ///
+    /// Serves the run's words on `socket` for as long as this registry does,
+    /// and names it in the file so a reader elsewhere can find it. A failed
+    /// write warns: the run goes on, and nobody elsewhere hears its words.
+    pub fn serve_words(&self, socket: crate::said::Socket) {
+        let path = socket.path().to_path_buf();
+        *self
+            .socket
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(socket);
+        if let Err(e) = self.commit(|state| state.words = Some(path)) {
+            tracing::warn!(error = %e, "failed to name the run's socket in engine.json");
+        }
+    }
+
     /// The run reached a terminal: there is nothing left for an outside
     /// process to signal, and a credential nobody can use is a
     /// credential nobody should still be able to read. The exception is a
@@ -96,9 +115,17 @@ impl ProcessRegistry {
     pub fn clear(&self) {
         // blocking: the terminal's last act, on the thread that reached
         // it, after the log is closed and nothing is left to schedule.
+        // The socket goes first, so no reader is served past the terminal.
+        drop(
+            self.socket
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
         let kept = {
             let mut state = lock(&self.state);
             state.asking = None;
+            state.words = None;
             state.process_groups = running_groups(&state.process_groups);
             !state.process_groups.is_empty()
         };
@@ -352,5 +379,44 @@ mod tests {
         drop(later);
         leader.kill().expect("the sleep is killed");
         leader.wait().expect("the sleep is reaped");
+    }
+
+    /// The registry names the socket while it serves, and a registry that
+    /// stays at a terminal to name a group the engine could not stop names
+    /// no socket: the socket is gone with the engine.
+    #[tokio::test]
+    async fn a_registry_kept_for_a_group_names_no_socket() {
+        let run = tempfile::tempdir().unwrap();
+        let short = tempfile::Builder::new()
+            .prefix("w")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let registry = registry_in(run.path());
+        let path = short.path().join("live.sock");
+        let voices = std::sync::Arc::new(crate::said::Voices::new());
+        let socket = crate::said::Socket::bind(&path, voices, yunta_core::process::user::uid())
+            .expect("the socket binds");
+        registry.serve_words(socket);
+        assert_eq!(words_on_disk(run.path()), Some(path.clone()));
+
+        let mut leader = running_group();
+        let group = Pid::try_from(leader.id()).expect("a pid");
+        register(Some(&registry), Some(group))
+            .expect("a registration")
+            .keep();
+        drop(registry);
+        assert_eq!(groups_on_disk(run.path()), vec![group]);
+        assert_eq!(words_on_disk(run.path()), None);
+        assert!(!path.exists(), "the socket outlived its engine");
+        leader.kill().expect("the sleep is killed");
+        leader.wait().expect("the sleep is reaped");
+    }
+
+    /// The socket the registry file names, as a reader of the file sees it.
+    fn words_on_disk(run_dir: &Path) -> Option<std::path::PathBuf> {
+        let Registry::Read(registry) = read_registry(run_dir) else {
+            panic!("the registry file does not read")
+        };
+        registry.doc.words.clone()
     }
 }

@@ -61,6 +61,9 @@ every state from it, and what a person reads is drawn from that data in Surco.
   one stands under the cap again. [test engine/parked_answers]
 - A follower only reads: it takes no lock, writes no event and never signals the engine it follows.
   [test cli/status_follow]
+- What a session says while it works reaches another process only through its run's socket, redacted: the
+  log keeps each note's digest, nothing writes the words to disk, and only a terminal draws them. The summary
+  a session ends with is its node's outcome, logged as ever. [test engine/run_words] [test cli/run_words]
 - A safety mechanism adds no wall-clock time to a run. [review]
   Paths: `crates/core/src/rail/**`, `crates/engine/src/task_cycle/**`, `crates/engine/src/worktree/**`,
   `crates/adapters/src/**`

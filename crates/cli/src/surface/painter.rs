@@ -345,6 +345,12 @@ impl Painter {
                     self.absorb(std::mem::take(&mut events)).await;
                     self.note(line);
                 }
+                // Only a region draws what a session said; lines never do.
+                Beat::Said(said) => {
+                    if let Draw::Live(region) = &mut self.draw {
+                        region.hear(*said);
+                    }
+                }
                 Beat::Close => closing = true,
             }
         }

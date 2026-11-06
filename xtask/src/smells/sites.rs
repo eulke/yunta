@@ -78,9 +78,10 @@ pub const COUNTERS: &[Counter] = &[
 pub(super) enum Mark {
     /// The line carries this text anywhere on it.
     Text(&'static str),
-    /// The line carries this text anywhere on it, except in the char literal
-    /// `except`. A check such as `contains('\x1b')` names the byte that way,
-    /// and the counter does not read it.
+    /// The line carries this text anywhere on it, outside the text `except`.
+    /// A check such as `contains('\x1b')` names the byte as a char literal,
+    /// and an `impl` block names its type before the brace; the counter reads
+    /// neither.
     TextExcept(&'static str, &'static str),
     /// The line carries this text followed by a lowercase letter, the way a
     /// message spells a command or a flag: `--input` and `yunta gc` match,
@@ -370,7 +371,8 @@ fn count_bench_struct_outside_testkit(root: &Path) -> usize {
 fn count_session_request_literal_outside_plan(root: &Path) -> usize {
     outside(
         root,
-        &[Text("SessionRequest {")],
+        // A method of the type, wherever it is written, builds no request.
+        &[TextExcept("SessionRequest {", "impl SessionRequest {")],
         &[
             "crates/engine/src/run/session_plan.rs",
             // The type's own declaration, and the request the adapters'

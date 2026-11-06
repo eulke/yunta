@@ -26,6 +26,11 @@ pub(crate) fn render(step: &MockStep, _naming: ToolNaming) -> Vec<String> {
         MockStep::Note { text, .. } | MockStep::BeforeOpen { text, .. } => {
             vec![assistant(json!([{ "type": "text", "text": text }]), None)]
         }
+        // The CLI signs what it reasons; the signature says nothing a reader reads.
+        MockStep::Reasoning { text, .. } => vec![assistant(
+            json!([{ "type": "thinking", "thinking": text, "signature": "" }]),
+            None,
+        )],
         // Kinds the stream carries that the reader does not read, as the CLI writes them.
         MockStep::UnknownLine { .. } => vec![
             json!({ "type": "compact_boundary", "reason": "context" }).to_string(),

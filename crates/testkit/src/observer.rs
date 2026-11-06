@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use yunta_core::events::EventPayload;
 use yunta_core::{NodeId, RunId, Seq};
+use yunta_engine::said::Said;
 use yunta_engine::{Observed, RunObserver};
 
 /// One frame as it arrived, owned: the engine lends an
@@ -38,6 +39,7 @@ pub struct Frame {
 #[derive(Default)]
 pub struct RecordingObserver {
     frames: Mutex<Vec<Frame>>,
+    said: Mutex<Vec<Said>>,
 }
 
 impl RecordingObserver {
@@ -68,6 +70,11 @@ impl RecordingObserver {
             .collect()
     }
 
+    /// Everything the run's sessions said, in the order it was handed over.
+    pub fn said(&self) -> Vec<Said> {
+        self.said.lock().expect("recorded words").clone()
+    }
+
     fn locked(&self) -> std::sync::MutexGuard<'_, Vec<Frame>> {
         self.frames.lock().expect("recorded frames")
     }
@@ -82,5 +89,9 @@ impl RunObserver for RecordingObserver {
             kind: event.payload.kind_name(),
             payload: event.payload.clone(),
         });
+    }
+
+    fn said(&self, said: &Said) {
+        self.said.lock().expect("recorded words").push(said.clone());
     }
 }

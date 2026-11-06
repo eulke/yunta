@@ -17,6 +17,8 @@
 //! ([`Surface::deliver`]), with the engine read from the run's registry
 //! ([`EngineReading`]). The log stays the truth: what the surface holds is the
 //! cache of one invocation, and every hole in it is closed by reading the log.
+//! What a session says is on no log: the driving process gets it from the
+//! observer, a follower off the run's socket, and only the region draws it.
 
 mod chronicle;
 mod closing;

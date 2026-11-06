@@ -32,6 +32,13 @@
 //! `crates/engine/tests/observer.rs` holds that list to the log itself:
 //! it compares what an observer recorded against the run's own events,
 //! so a new append site that skips this boundary fails there.
+//!
+//! **What a session says is not an event.** The log keeps a note's digest
+//! and never its words, so the words reach an observer by another door,
+//! [`RunObserver::said`], from the run's voices ([`crate::said`]): redacted,
+//! right after the digest is appended, and the same frame a reader of the
+//! run's socket gets in another process. The list above does not count
+//! them, and nothing an observer derives from the log moves on them.
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::EventPayload;
@@ -73,6 +80,13 @@ pub trait RunObserver: Send + Sync {
     /// and `status` read, so its storage cause travels back and fails
     /// the node.
     fn observe(&self, event: Observed<'_>);
+
+    /// Takes one thing a session said, which no log holds. It reaches here
+    /// through the run's voices and never through the log's mirror, and it
+    /// is never evidence: it moves nothing a surface derives from the log.
+    /// Synchronous and silent for the reasons [`observe`](RunObserver::observe)
+    /// is. Default: an observer that draws no words ignores it.
+    fn said(&self, _said: &crate::said::Said) {}
 }
 
 /// One appended event, borrowed for the duration of the call.

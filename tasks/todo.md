@@ -1,334 +1,369 @@
-# Tasks: `log-follow`
+# Tasks: `run-words`
 
-Spec: `SPEC-log-follow.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-05, in implementation**.
+Spec: `SPEC-run-words.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-05, in implementation**.
 
-**How these run:** one at a time, with `incremental-implementation` and `test-driven-development`. Each task names the test that fails first and why; it is seen failing for that cause before the code that makes it pass. A test that may pass at once says so and says what it guards. Every task leaves the tree compiling and its tests green. `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`. Before editing a file, `cargo xtask docs --about <files>` runs and what it prints is kept true. No commit until the user approves at Checkpoint E.
+**How these run:** one at a time, with `incremental-implementation` and `test-driven-development`. Each task names the test that fails first and why. That test is seen failing for that cause before the code that makes it pass. A test that may pass at once says so, and says what it guards. Every task leaves the tree compiling and its tests green. `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`. Before a file is edited, `cargo xtask docs --about <files>` runs, and what it prints is kept true. No commit until the user approves at Checkpoint E.
 
-## Phase 1: the store
+## Phase 1: the words of a run, in the engine
 
-### Task 1: `events_after` on both stores, one row reader
+### Task 1: `Said` and the store
 
-**Description:** The store reads a run from a position. One function turns a row into a `StoredEvent`, and `events_for_run` and `events_after` both use it, so an unknown kind and a corrupt row are handled the same way by both. `store.rs` is at 474 lines, so the reads move to a file of their own.
+**Description:** The frame and the in-memory store of what a run's sessions said, in a new engine module whose name is settled here. The name must not be confused with `run_tools::words`, which names what the engine says to an agent, and the module's `//!` says so. The store keeps the recent past under one `std::sync::Mutex` and hands each new frame to its readers through a `tokio::sync::broadcast`. A reader that falls behind is told how many frames it missed. A frame is one JSON line, with its version first.
 
-**Fails first:** `events_after_returns_what_events_for_run_returns_past_the_seq`, in `crates/storage/tests/store/events.rs`, because `events_after` does not exist.
+**Fails first:** `a_reader_gets_the_recent_past_then_what_comes_and_nothing_twice`, in the module's own tests, because the module does not exist.
 
 **Acceptance criteria:**
-- [x] For every seq of a run of several events, `events_after(run, seq)` equals `events_for_run(run)` with the events at or below `seq` taken out, in order; at the run's last seq, and for a run with no events, it is empty.
-- [x] An unknown kind past the seq comes back verbatim, and a corrupt payload past the seq fails the read as `events_for_run` fails it, while one at or below the seq is not read.
-- [x] `AsyncStorage::events_after` answers what `Storage::events_after` answers.
+- [x] A reader that subscribes after N frames gets the last of them, at most 64 within 256 KiB and in order, then each new frame exactly once. Two readers get the same frames.
+- [x] A text over 16 KiB is cut at a character boundary, so a multi-byte character at the cut stays whole, and its frame says `cut`. A shorter text is left as it is.
+- [x] A reader whose queue overflows is told, on its next frame, how many frames it lost. Handing a frame over returns at once with no reader, and with a reader that never reads.
+- [x] A frame survives its JSON line both ways. A line with a version the reader does not know reads as skipped, and does not end the reading.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-storage`
-- [x] `cargo xtask smells --check` passes.
+- [x] Tests pass: `cargo test -p yunta-engine --lib <module>`
+- [x] `cargo xtask smells --check` passes. Each numeric const has its `///` reason.
 
 **Dependencies:** None
 
 **Files likely touched:**
-- `crates/storage/src/store.rs`, `crates/storage/src/store/reading.rs` (new, where the reads move)
-- `crates/storage/src/async_storage.rs`
-- `crates/storage/tests/store/events.rs`
+- `crates/engine/src/<module>/mod.rs` (new)
+- `crates/engine/src/<module>/tests.rs` (new)
+- `crates/engine/src/lib.rs`
 
-**Estimated scope:** M
+**Estimated scope:** S
 
-### Task 2: each run's head, and what its fallback costs
+### Task 2: the socket and its reader
 
-**Description:** One read names every run with an event and its last seq. The first reading, `run_heads` and the events of a run with no head row, which an older binary wrote, took 28 to 39 ms on 1,000 runs of 200 events, since that fallback scans every event. At Checkpoint A the user chose a walk of the events' key, one run to the next, which reads the same heads with no fallback and no cache.
+**Description:** Where a run's socket lives, binding it, serving it and taking it away, and the reader that turns a socket into frames. The path is `scratch/live.sock` when it fits the platform's limit, and the user's short directory under `/tmp` otherwise. Binding replaces a stale socket and nothing else, and sets mode 0600. Only the engine's own uid is admitted. Each reader gets a task that writes the recent past and then each frame. Dropping the handle cancels every task and removes the file. The uid is read in `yunta-core`. Each `std::fs` call carries its `// blocking:` reason.
 
-**Fails first:** `each_run_s_head_is_its_last_seq_with_or_without_a_head_row`, in `crates/storage/tests/store/heads.rs`, because the read does not exist. The test deletes one run's `run_heads` row through its own connection, as `chain.rs` does, to stand for a run an older binary wrote.
+**Fails first:** `a_reader_of_the_socket_gets_what_the_store_holds_then_what_comes`, in the module's tests, because nothing binds a socket. The choice of path has its own unit test, `the_scratch_path_is_kept_up_to_the_limit_and_the_short_one_past_it`, which fails because the choice does not exist.
 
 **Acceptance criteria:**
-- [x] Every run with an event appears once, with the seq of its last event, whether or not it has a head row; a purged run does not appear.
-- [x] The async store answers the same.
-- [x] `heads_cost.py`, on a synthetic store of 1,000 runs of 200 events each, gives the same heads from every reading and times the store's read under 10 ms, with every head row there and with half of them gone. The numbers go to `heads-cost.txt`.
+- [x] The path is `scratch/live.sock` at or under the limit, 103 bytes on macOS and 107 on Linux, and `/tmp/yunta-<uid>/<run id>.sock` past it. A short directory that is a link, belongs to another uid, or is open to group or others gives no path.
+- [x] Binding over a stale socket replaces it, and binding where a regular file stands refuses and leaves the file alone. The socket's mode is 0600. Dropping the handle removes the file and ends every reader's stream.
+- [x] A reader that never reads keeps neither another reader from getting every frame nor a handover from returning at once. A peer whose uid is not the engine's is refused, which the admission function's test holds, since a test cannot be another user.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-storage`
-- [x] Manual check: `python3 .plans/yunta-tui/proof/log-follow/heads_cost.py`, running the SQL the store runs.
+- [x] Tests pass: `cargo test -p yunta-engine --lib <module>`, `cargo test -p yunta-core --lib process`
+- [x] `cargo xtask smells --check` passes, with `engine_fs_outside_runtime` no higher.
 
 **Dependencies:** Task 1
 
 **Files likely touched:**
-- `crates/storage/src/store/reading.rs`, `crates/storage/src/async_storage.rs`, `crates/storage/src/lib.rs` (`RunHead`)
-- `crates/storage/tests/store.rs`, `crates/storage/tests/store/heads.rs` (new)
+- `crates/engine/src/<module>/socket.rs` (new)
+- `crates/engine/src/<module>/listen.rs` (new)
+- `crates/engine/Cargo.toml` (tokio's `net` feature, named)
+- `crates/core/src/process/user.rs` (new), `crates/core/src/process/mod.rs`
 
 **Estimated scope:** M
 
-### Checkpoint A: after Tasks 1-2
-- [x] `cargo test -p yunta-storage` and `cargo xtask smells --check` pass.
-- [x] The user sees the fallback's cost and whether it is cached.
+### Task 3: the tap: a note hands its words over, redacted
 
-## Phase 2: following a run that moves
+**Description:** Where a note's digest is recorded, the note's words go to the run's store and the observer. `SessionRequest` gains the function that builds the session's redactor: the declared secrets bound in its environment, the rail's token and the run tools' token. It goes in a file of its own beside `port/session.rs`, which is at 497 lines. `stream_session` builds the redactor before the request is moved, and `AgentEventCtx` carries it. `note()` records the digest as today, then hands the redacted text and the digest's seq through a new `SessionObserver::said`, whose default ignores it. `RunCtx` stamps the run and the time from the run's clock, hands the frame to its store and then to a new `RunObserver::said`, whose default also ignores it. The testkit's recording observer learns to keep what it is handed.
 
-### Task 3: `--follow`, its conflicts, and a run that is not moving
-
-**Description:** `yunta status` takes `--follow`. On a run whose phase is neither created nor running, it prints the page `yunta status` prints and exits with the code `render::exit` gives its standing. The parser refuses it beside `--json`, `--full`, `--dig` and `--node`.
-
-**Fails first:** `following_a_run_that_is_not_moving_prints_its_page_and_exits_with_its_code`, in `crates/cli/tests/status_follow.rs`, because the parser refuses `--follow` with exit 2.
+**Fails first:** `what_a_session_says_reaches_the_observer_redacted_while_the_log_keeps_only_its_digest`, in `crates/engine/tests/run_words.rs`, because no observer is handed any words.
 
 **Acceptance criteria:**
-- [x] On a run parked on a gate, `status <run> --follow` prints what `status <run>` prints and exits 3; on a finished run, it exits 0.
-- [x] Each of `--json`, `--full`, `--dig` and `--node` beside `--follow` exits 2, and `status` without `--follow` still exits 0 on the parked run.
+- [x] A mock session says a declared secret. The observer gets one frame per thing said, in order, with `[redacted]` in its place, naming the node, the session, the task and the seq of the note's digest.
+- [x] The session's redactor takes out each declared secret its environment binds, the rail's token and the run tools' token. A unit test on a request holding all three holds this, since a scripted session cannot say a token minted for it.
+- [x] The run's log holds the same kinds and payloads as the same run with no observer, and its `agent_message` notes carry only a digest.
+- [x] A dispatch with no observer, as in the task cycle's own tests, hands nothing over and behaves as today.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta --test status_follow`
+- [x] Tests pass: `cargo test -p yunta-engine --test run_words`, `--test observer`, `--test log_words`; `cargo test -p yunta-core`
+- [x] `cargo xtask smells --check` passes; `task_cycle/stream.rs` stays under 500 lines.
+
+**Dependencies:** Task 1
+
+**Files likely touched:**
+- `crates/core/src/port/session_secrets.rs` (new), `crates/core/src/port/mod.rs`
+- `crates/engine/src/task_cycle/stream.rs`, `crates/engine/src/task_cycle/session.rs`
+- `crates/engine/src/observer.rs`, `crates/engine/src/run/ctx.rs`, `crates/engine/src/run/ctx/observers.rs`
+- `crates/testkit/src/observer.rs`, `crates/engine/tests/run_words.rs` (new)
+
+**Estimated scope:** M (small edits across these files)
+
+### Task 4: the socket opens with the run, and the registry names it
+
+**Description:** `build_ctx` binds the run's socket right after `open_registry` and keeps the handle in `RunCtx`. `EngineProcessFile` gains `words`, which `ProcessRegistry::clear` empties. `Engine`, the reading taken from the registry, gains `words` while the engine reads alive, and `Engine::this` names none. The testkit gains a reader that waits until the registry names a socket and gathers what it serves. That is the reader every later test uses.
+
+**Fails first:** `a_reader_of_a_runs_socket_gets_what_its_session_says`, in `crates/engine/tests/run_words.rs`, because the registry names no socket.
+
+**Acceptance criteria:**
+- [x] While a mock session holds, `engine.json` names the socket, and a reader that connects then gets what was already said followed by what comes. Under a test home on macOS the socket is in the short directory, and on Linux it is in `scratch/`.
+- [x] After the run finishes, pauses and is cancelled, the socket file is gone. A registry that stays at a terminal for a kept group names no socket. A resume replaces the socket a killed engine left.
+- [x] A registry without the field reads as no socket, and the field is kept through `Persisted` for a reader that does not know it. No file under the home holds what was said, the manifest that freezes a mock fixture aside.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-engine --test run_words`, `--lib process_registry`, `--test cancel`
+- [x] `cargo xtask smells --check` passes; `process_registry.rs` stays under 500 lines.
+
+**Dependencies:** Tasks 2 and 3
+
+**Files likely touched:**
+- `crates/engine/src/run/invocation.rs`, `crates/engine/src/run/ctx.rs`
+- `crates/engine/src/process_registry.rs`, `crates/engine/src/process_registry/write.rs`
+- `crates/testkit/src/said.rs` (new), `crates/testkit/src/lib.rs`
+- `crates/engine/tests/run_words.rs`
+
+**Estimated scope:** M
+
+### Checkpoint A: after Tasks 1-4
+- [x] `cargo test -p yunta-engine` and `cargo xtask smells --check` pass.
+- [x] On a release build, mock runs that say a lot take turns with and without three readers on their socket. The time between nodes is the same within noise, and a frame reaches a reader within the plan's bound. Kept in `.plans/yunta-tui/proof/run-words/`.
+- [x] The user sees a mock run's words read off its socket, redacted, and the measurement.
+
+## Phase 2: every adapter
+
+### Task 5: the mock can say reasoning
+
+**Description:** The mock's fixture gains a `reasoning` step, which it renders as its dialect writes reasoning: a `thinking` block for `claude-code` and a `reasoning` item for `codex`. The dialect's own parser drops it. `mock/fixture.rs` is at 498 lines, so the outcomes move to a file of their own first, with no change in behavior. The step's `///` says what it stands for.
+
+**Fails first:** `a_mock_sessions_reasoning_never_reaches_its_stream`, in `crates/adapters/tests/mock.rs`, because a fixture with `type: reasoning` is refused as an unknown step.
+
+**Acceptance criteria:**
+- [x] Under each dialect, a fixture that says something, reasons, then says something else streams the two things said, in order, and nothing of the reasoning.
+- [x] Every existing mock test passes unchanged after the outcomes move.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-adapters --test mock`, `--lib`
+- [x] `cargo xtask smells --check` passes.
 
 **Dependencies:** None
 
 **Files likely touched:**
-- `crates/cli/src/cli/mod.rs` (490 lines: the flag only), `crates/cli/src/cli/dispatch.rs`
-- `crates/cli/src/commands/status/mod.rs`, `crates/cli/src/commands/status/follow.rs` (new)
-- `crates/cli/tests/status_follow.rs` (new)
+- `crates/adapters/src/mock/fixture.rs`, `crates/adapters/src/mock/fixture/outcome.rs` (new)
+- `crates/adapters/src/claude_code/wire.rs`, `crates/adapters/src/codex/wire.rs`
+- `crates/adapters/tests/mock.rs`
 
 **Estimated scope:** M
 
-### Task 4: a surface fed from the log, and the engine read from the registry
+### Task 6: the contract: what a session says arrives whole and in order, and never its reasoning
 
-**Description:** `Surface` takes its seed from its caller and can be handed events from the log, each waiting for room in the queue. `SurfaceEnv` says where the engine comes from, this process or the run's registry, and the painter's frame reads it. `yunta run` passes this process and its observer, and shows what it shows today. `painter.rs` is at 477 lines, so its tests move to a file of their own.
+**Description:** A contract case run on every subject. The contract's `Step` gains reasoning, which the contract's wire writes as each CLI does. The case lives in a file of its own, since `cases.rs` is at 492 lines.
 
-**Fails first:** `a_painter_reading_the_registry_calls_a_run_with_a_dead_engine_stalled`, in the painter's tests, because the painter always reads the engine as this process. Beside it, `events_handed_to_a_surface_are_never_dropped` hands twice the queue's depth while the painter is stood down and finds every one folded once it comes back.
-
-**Acceptance criteria:**
-- [x] A painter whose engine is read from a registry naming a dead process draws the run as stalled, and one asking at its terminal as asking; a painter on this process draws what it draws today.
-- [x] Every event handed to a surface reaches the painter, in order, however full the queue is.
-- [x] `run_surface`, `run_flow` and the surface's own tests pass unchanged.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta --bin yunta surface`
-- [x] Tests pass: `cargo test -p yunta --test run_surface --test run_flow`
-
-**Dependencies:** None
-
-**Files likely touched:**
-- `crates/cli/src/surface/mod.rs`, `crates/cli/src/surface/feed.rs`
-- `crates/cli/src/surface/painter.rs`, `crates/cli/src/surface/painter/tests.rs` (moved)
-- `crates/cli/src/commands/drive/watch.rs`
-
-**Estimated scope:** M
-
-### Task 5: the follow loop, at a terminal and off one
-
-**Description:** The follower reads the log once, opens the surface with it, and at the pace of `Pace` hands what came after its last seq to the surface and to its own `RunState`. It reads the registry once a second. When the phase is no longer created or running it takes the surface down, prints the closing block the way `drive.rs` does, and exits with its outcome. The interval is a const with its reason, 100 ms until Task 11 measures it.
-
-**Fails first:** `a_follower_leaves_the_block_and_the_code_the_attached_run_leaves`, in `crates/cli/tests/status_follow.rs`: a run that stops on a gate is driven attached in one pty and followed in another, and the follower's closing block and exit code are compared with the attached run's. It fails because `--follow` on a moving run prints its page and returns at once.
+**Fails first:** `what_a_session_says_arrives_whole_and_in_order_and_never_its_reasoning`, which does not compile because `Step::Reasoning` does not exist. Once it does, the case may pass at once on every subject, since both parsers already drop reasoning and Task 5 gave the mock its step. It then guards that every adapter keeps doing so.
 
 **Acceptance criteria:**
-- [x] At a terminal the follower draws the region while the run moves, and its closing block and exit code equal those of the attached run of the same log.
-- [x] Off a terminal it prints a line per moment after the one it started on, the first saying why, then the same block and code.
-- [x] Each read is one statement, the interval const says why it has its value, and `Pace` spaces the reads.
+- [x] On `claude-code`, `codex` and `mock`, a session says a multi-line text with Markdown, reasons, then says a second text. Its stream carries both texts whole, in that order, and nothing of the reasoning.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta --test status_follow`
-- [x] Manual check: a held run followed at a terminal, read by eye.
-
-**Dependencies:** Tasks 1, 3, 4
-
-**Files likely touched:**
-- `crates/cli/src/commands/status/follow.rs`
-- `crates/cli/src/commands/drive.rs` (what prints the closing block, used from the follower)
-- `crates/cli/tests/status_follow.rs`
-
-**Estimated scope:** M
-
-### Checkpoint B: after Tasks 3-5
-- [x] `cargo test -p yunta --test status_follow --test run_surface --test run_flow` and `cargo xtask smells --check` pass.
-- [ ] The user sees a run followed at a terminal and off one, and the two closing blocks side by side.
-
-## Phase 3: the edges
-
-### Task 6: Ctrl-C
-
-**Description:** The follower watches the invocation's stop token. When it trips, the surface comes down, a note says that following stopped, that the run goes on and which command follows it again, and the exit is `RunExit::Interrupted`. Nothing is sent to the engine.
-
-**Fails first:** `ctrl_c_stops_following_and_the_run_goes_on`, in `crates/cli/tests/status_follow.rs`: a follower in a pty on a held run is interrupted, exits 130 and says so, and the run, once released, finishes. It fails because the loop ignores the token and goes on following.
-
-**Acceptance criteria:**
-- [x] Exit 130, and the note says the run goes on and offers `yunta status <handle> --follow`.
-- [x] The run's log gains no pause and ends `run_finished` once released, driven by the same engine throughout.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta --test status_follow`
+- [x] Tests pass: `cargo test -p yunta-adapters --test contract`
+- [x] `cargo xtask smells --check` passes.
 
 **Dependencies:** Task 5
 
 **Files likely touched:**
-- `crates/cli/src/commands/status/follow.rs`, `crates/cli/src/commands/advice.rs` (`advice::follow`, which Task 9 also uses)
-- `crates/cli/tests/status_follow.rs`
+- `crates/adapters/tests/contract/said.rs` (new), `crates/adapters/tests/contract/main.rs`
+- `crates/adapters/tests/contract/subject.rs`, `crates/adapters/tests/contract/wire.rs`
 
 **Estimated scope:** S
 
-### Task 7: an engine killed under the follower, and a run asking at its terminal
+### Task 7: every adapter in whole runs
 
-**Description:** A run whose log says it moves and whose registry names a dead engine is a stall: the follower takes the surface down, prints what `yunta status` prints of the run, and exits 1. An absent registry is not a stall. A run asking at its terminal is running, and the follower shows it asking and goes on.
+**Description:** `yunta run` with `claude-code` on its stub, `codex` on its stub, and `mock`. Each session says something, including a secret the test declares, and then holds until the test lets it go. The testkit's reader gets what each one said off the run's socket.
 
-**Fails first:** `an_engine_killed_under_a_follower_ends_it_as_a_stall`: the engine of a held run is killed with `kill -9`, and the follower should end within 2 s. It fails because the follower waits for a phase that never comes. Beside it, `an_absent_registry_is_not_a_stall`, in the follower's unit tests, and `a_run_asking_at_its_terminal_is_shown_asking_and_followed_on`, which may pass at once since Task 4 reads the engine from the registry; it guards that.
-
-**Acceptance criteria:**
-- [x] A killed engine ends the follower within 2 s, with the words `status` uses for a stalled run, exit 1.
-- [x] A run handed over with no registry yet does not end the follower.
-- [x] A run attached in one pty and asking at its gate is shown asking in the follower's pty; once answered there, the follower goes on to the run's end.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta --test status_follow`
-- [x] Tests pass: `cargo test -p yunta --bin yunta follow`
-
-**Dependencies:** Task 5
-
-**Files likely touched:**
-- `crates/cli/src/commands/status/follow.rs`
-- `crates/cli/tests/status_follow.rs`
-- `crates/cli/src/surface/region.rs`, `crates/cli/src/surface/view/mod.rs`, `crates/cli/src/surface/painter.rs`, and the region's callers in `region/tests.rs` and `scrollback.rs`: the attention row says whom the engine asks, which the region drew only for a parked run, so the guard test was red
-
-**Estimated scope:** M
-
-### Task 8: a promotion, a parent, and two followers that change nothing
-
-**Description:** When the log closes the run as promoted, the follower reads its successor's log from then on, as the painter does. A parent's children are drawn under the nodes that bore them. Any number of followers leave the run as it is with none.
-
-**Fails first:** `a_promotion_is_followed_onto_its_successor`, with the promoting workflow `run_flow/yunta_test.rs` already runs, because the follower ends at the predecessor's close. `a_parent_is_followed_with_its_children_under_their_nodes` and `two_followers_change_nothing` may pass at once; they guard what Task 4 and the rule that a follower only reads already give.
+**Fails first:** `each_adapter_speaks_through_the_runs_socket`, in `crates/cli/tests/run_words/adapters.rs`. It may pass at once, since Task 4 already serves every adapter's notes. It guards that each real adapter's words reach the socket through a whole run, which the engine's tests reach only with the mock. If it fails, the cause is named before any code changes.
 
 **Acceptance criteria:**
-- [x] A promoted run is followed to its successor's end, and the follower ends with the successor's block and code.
-- [x] A parent's region shows its open child under the node that bore it.
-- [x] With two followers on a held run, `engine.json` and `engine.lock` are byte for byte what they are with none, and the run's log holds the kinds a run with no follower holds.
+- [x] For each adapter, the reader gets the session's words whole, in order, naming its node and session.
+- [x] The declared secret never reaches the reader: `[redacted]` stands in its place.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta --test status_follow`
-
-**Dependencies:** Tasks 5, 7
-
-**Files likely touched:**
-- `crates/cli/src/commands/status/follow.rs`: the successor found by each run's head and its `promoted_from`, the first reader of the heads in the binary
-- `crates/cli/src/surface/mod.rs`, `crates/cli/src/surface/painter.rs`: the painter reads the successor's registry once it moves onto it
-- `crates/cli/tests/status_follow.rs`, `crates/cli/tests/status_follow/edges.rs`
-
-**Estimated scope:** M
-
-### Checkpoint C: after Tasks 6-8
+- [x] Tests pass: `cargo test -p yunta --test run_words`
 - [x] `cargo xtask smells --check` passes.
-- [x] Manual check: Ctrl-C, a killed engine and a run asking at its terminal, read at a terminal.
-- [ ] The user sees the result.
 
-## Phase 4: what it says
-
-### Task 9: `--follow` where a run "follows it"
-
-**Description:** `advice::follow(run)` spells `yunta status <run> --follow`, and the three places that offer `yunta status <run>` as what "follows it" use it: the line `run --detach` starts with, the next step of `resolve-gate`'s answer, and the advice of the refusal of a moving run. Goldens are blessed here only, and their diff is read before it is kept.
-
-**Fails first:** `every_place_that_says_follows_it_offers_follow`, in `crates/cli/tests/status_follow/said.rs`, because each still offers `yunta status <run>`.
-
-**Acceptance criteria:**
-- [x] Each of the three offers `yunta status <handle> --follow` to a person, and the refusal's document under `--json` offers it with the whole id.
-- [x] The goldens' diff holds only that change. No golden holds it, so none moved and nothing was blessed.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta --test status_follow`
-- [x] Tests pass: `cargo test -p yunta --bin yunta advice`
-- [x] Tests pass: `cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`
-
-**Dependencies:** Task 5
+**Dependencies:** Tasks 4 and 6
 
 **Files likely touched:**
-- `crates/cli/src/commands/advice.rs`, `crates/cli/src/commands/mod.rs`
-- `crates/cli/src/commands/resolve_gate.rs`, `crates/cli/src/error.rs`
-- `crates/cli/tests/status_follow/said.rs` (new)
-- `crates/cli/tests/run_flow/guarding/said.rs`: `a_program_reads_the_refusal_as_one_document_with_the_next_commands` held the refusal's next step as `yunta status <id>`, which this task changes
+- `crates/cli/tests/run_words.rs` (new), `crates/cli/tests/run_words/adapters.rs` (new)
+
+**Estimated scope:** S
+
+### Checkpoint B: after Tasks 5-7
+- [x] `cargo test -p yunta-adapters`, `cargo test -p yunta --test run_words` and `cargo xtask smells --check` pass.
+
+## Phase 3: the row
+
+### Task 8: the row, in the view
+
+**Description:** `view::node_rows` takes the last frame said by a node and draws one row after `tasks running:` and before the calls. The label is `says:`, or `T001 says:` for a task's session, in `Tone::Muted`, and the sentence is `surco::prose::first_sentence` of the text, in `Tone::Plain`, cut to fit. The view's tests are at 405 lines, so the row's tests go in a file of their own.
+
+**Fails first:** `a_working_node_shows_the_first_sentence_of_what_its_session_said`, because `node_rows` takes no frame.
+
+**Acceptance criteria:**
+- [x] A working node with a frame shows the row in its place, with its task when it has one. A node with no frame shows no row, and every existing row is as it was.
+- [x] A text that opens with a heading, spans several lines, or carries an escape or another control character draws one plain sentence, with no control character reaching the terminal.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta --bin yunta surface::view`
+- [x] `cargo xtask smells --check` passes.
+
+**Dependencies:** Task 1
+
+**Files likely touched:**
+- `crates/cli/src/surface/view/mod.rs`, `crates/cli/src/surface/view/said_tests.rs` (new)
+- `crates/cli/src/surface/region.rs`
+
+**Estimated scope:** S
+
+### Task 9: the attached region
+
+**Description:** `Feed` implements `RunObserver::said` with `try_send(Beat::Said)`. The painter keeps the last frame per node of the run it draws: it ignores another run's frames, starts empty on a successor, and drops a node's entry once the node stops working. It hands the frames to `Region::show`. `Draw::Lines` never sees them.
+
+**Fails first:** `attached_run_shows_what_its_session_says_under_its_node`, a pty test in `crates/cli/tests/run_words/row.rs`, because the region draws no row.
+
+**Acceptance criteria:**
+- [x] At a terminal, `yunta run` with a mock session that says something and holds shows the row under its node. When the session says something else, the row changes to it.
+- [x] A rerouted node does not show its last attempt's sentence. A child run's frames do not show in its parent's region.
+- [x] The goldens that change are only those of a region whose sessions say something, and their diff is read before it is kept.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta --test run_words`, `--bin yunta surface::painter`
+- [x] `cargo xtask smells --check` passes; `painter.rs` stays under 500 lines.
+
+**Dependencies:** Tasks 4 and 8
+
+**Files likely touched:**
+- `crates/cli/src/surface/feed.rs`, `crates/cli/src/surface/painter.rs`, `crates/cli/src/surface/painter/tests.rs`
+- `crates/cli/tests/run_words/row.rs` (new)
 
 **Estimated scope:** M
 
-### Task 10: docs, agent docs, and the `//!` this module makes false
+### Task 10: the follower listens
 
-**Description:** What a person and a script rely on, and what a contributor needs, each in its one home.
+**Description:** The surface's observer, the door the engine of `yunta run` hands a frame through, hands one to the painter here too, so no new door is added (decided while implementing, in place of a `Surface::hear`). The follow loop compares the `words` of each registry reading with the socket it listens to. When they differ, it stops the old reader and starts `listen(path)`, in a file of its own beside `follow.rs`, which is at 391 lines. A failed connection is tried again at the next reading.
+
+**Fails first:** `a_follower_shows_the_row_the_attached_run_shows`, a pty test in `crates/cli/tests/run_words/row.rs`, because the follower never connects.
 
 **Acceptance criteria:**
-- [x] `docs/compatibility.md` gives the exit codes of `status --follow` and keeps that `status` alone exits 0. `README.md`'s rows of `status` and `run`, and `docs/guide.md` where it speaks of a detached run and of gates from the outside, say how to follow a run.
-- [x] `.agents/architecture.md` holds that a follower only reads, citing `[test cli/status_follow]`, the target that holds `two_followers_change_nothing`: the docs checker reads a target's own file, not its modules.
-- [x] The `//!` of `surface/mod.rs`, which says the events come from the engine and not the log, and of `commands/status/mod.rs`, say what is true; the spec's file list matches what the module touched.
+- [x] `yunta status <run> --follow` at a terminal, started before and after the session speaks, shows the same row the attached run shows for the same session.
+- [x] A follower of a run with no socket, such as a registry without the field, follows as today. A follower started on a resumed run listens to the socket its new engine opened, and one started before an engine binds its socket starts listening once the registry names it.
+- [x] Every test in `status_follow` passes unchanged.
 
 **Verification:**
-- [x] Tests pass: `cargo xtask docs --check`
-- [x] Tests pass: `cargo test -p yunta --test docs_sync`
-- [x] Manual check: `cargo xtask docs --about` over each file the module touched.
+- [x] Tests pass: `cargo test -p yunta --test run_words`, `--test status_follow`
+- [x] `cargo xtask smells --check` passes.
 
 **Dependencies:** Task 9
 
 **Files likely touched:**
-- `docs/compatibility.md`, `docs/guide.md`, `README.md`
-- `.agents/architecture.md`
-- `crates/cli/src/surface/mod.rs`, `crates/cli/src/commands/status/mod.rs`, `SPEC-log-follow.md`
+- `crates/cli/src/surface/mod.rs`
+- `crates/cli/src/commands/status/follow.rs`, `crates/cli/src/commands/status/follow/listen.rs` (new)
+- `crates/cli/tests/run_words/row.rs`
 
 **Estimated scope:** M
 
-### Checkpoint D: after Tasks 9-10
-- [x] `cargo test --workspace --locked --no-fail-fast` passes, with no binary aborted, and its count is explained against 264 binaries and 4,394 tests on macOS.
-- [x] The user sees the result, and keeps `--follow` in the line attached `yunta run` starts with.
+### Task 11: nothing said off a terminal
+
+**Description:** Black-box tests for every output that is not a terminal: a pipe, `TERM=dumb`, the `detached.log` of a `--detach` engine, and `--json` documents.
+
+**Fails first:** `nothing_said_reaches_an_output_that_is_not_a_terminal`, in `crates/cli/tests/run_words/off_terminal.rs`. It may pass at once, since `Draw::Lines` never sees a frame. It guards the spec's rule that words go only to a person at a terminal.
+
+**Acceptance criteria:**
+- [x] A run whose session says a known sentence shows that sentence in none of: `yunta run` through a pipe, `TERM=dumb`, `status --follow` through a pipe, `detached.log`, `status --json` and the receipt.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta --test run_words`
+
+**Dependencies:** Task 10
+
+**Files likely touched:**
+- `crates/cli/tests/run_words/off_terminal.rs` (new), `crates/cli/tests/run_words.rs`
+
+**Estimated scope:** S
+
+### Checkpoint C: after Tasks 8-11
+- [x] `cargo xtask smells --check` passes.
+- [x] The user sees the row at a terminal, attached and followed, with mock sessions.
+
+## Phase 4: what it says
+
+### Task 12: docs, agent docs, and the `//!` this module makes false
+
+**Description:** `docs/guide.md` describes the row and where it never appears. `docs/compatibility.md` describes the socket for a program: `engine.json` names it, a frame is one versioned JSON line, a newer version is skipped, and a frame is never evidence. `README.md` changes only if its rows describe what a run shows. `.agents/architecture.md` gains the rule, cited as `[test engine/run_words]` with its test in that target's own file: what an agent says reaches other processes only through its run's socket, redacted, never on disk or in the log. The `//!` of `observer.rs`, `task_cycle/stream.rs`, `process_registry.rs`, `surface/feed.rs` and the region's view say what is true now. Each test that holds a rule other code can break ends with its `Reached by:` line.
+
+**Fails first:** `cargo xtask docs --check`, once the architecture rule cites its test, until that test exists in the target's own file with its name.
+
+**Acceptance criteria:**
+- [x] `cargo xtask docs --check` passes, and `cargo xtask docs --about` on the module's diff prints nothing left false.
+- [x] No document, code comment or test cites a document, the spec or the plan.
+
+**Verification:**
+- [x] `cargo xtask docs --check`, `cargo xtask smells --check`
+
+**Dependencies:** Tasks 1-11
+
+**Files likely touched:**
+- `docs/guide.md`, `docs/compatibility.md`, `.agents/architecture.md`
+- the `//!` of the files named above
+
+**Estimated scope:** S
+
+### Checkpoint D: after Task 12
+- [x] `cargo test --workspace --locked --no-fail-fast` passes. Its count is explained against 265 binaries and 4,414 tests on macOS, and no binary aborted.
 
 ## Phase 5: proof and close
 
-### Task 11: measured on a release build
+### Task 13: measured on release builds
 
-**Description:** With mock sessions, how long an event takes to reach the follower, and whether a follower adds time to a run. The interval of Task 5 is kept or changed by what this finds, and `repro.sh` runs again.
+**Description:** On release builds of the base and of the module, with mock sessions that say a lot, runs take turns with and without three readers on the socket. Each reader records when each frame arrives against the frame's `at`. Then `repro.sh` runs again on the module's build.
 
 **Acceptance criteria:**
-- [x] `follow_latency.py`: over the events of a mock run followed off a terminal, each line reaches the follower within 250 ms of its event's timestamp.
-- [x] `follow_cost.py`: 15 runs each, taking turns with and without a follower, and the median `between_secs` with one is no higher than the highest without.
-- [x] `repro.sh` on `bin/yunta-after` follows the held run to its end, beside `before.txt`.
+- [x] The median time between nodes with and without readers is the same within noise, over at least 15 runs each.
+- [x] The median delay before a frame reaches a reader is under 10 ms, and every frame arrives within 100 ms.
+- [x] `repro.sh` on the module's build shows the socket, the words a reader gets with the secret redacted, the log unchanged, and the row the attached region draws.
 
 **Verification:**
-- [x] Build succeeds: `cargo build --release --locked -p yunta`, installed with `install -m 755` as `.plans/yunta-tui/proof/log-follow/bin/yunta-after`.
-- [x] Manual check: `latency-after.txt`, `cost-after.txt` and `after.txt` read against the criteria.
+- [x] Results in `.plans/yunta-tui/proof/run-words/`, outside git, with the scripts that produced them.
 
 **Dependencies:** Checkpoint D
 
-**Files likely touched:** only `.plans/yunta-tui/proof/log-follow/`
+**Files likely touched:** none in git.
 
 **Estimated scope:** S
 
-### Task 12: the real run
+### Task 14: the real run
 
-**Description:** fragua, as `run-guard` ran it, with no token cap, started with `--detach` and followed in a pty up to `ship`, about 3.1M tokens. Then `abort` and `close`. Nothing is published.
+**Description:** A fragua run started with `--detach`, with its `reviewer` runners on the real `codex` and the model its configuration names, read before the run starts. It is followed at a terminal up to `ship`, while a reader keeps what the socket serves; then `abort` and `close`. Nothing is published. If a Codex retry notice ends a session, it is kept as evidence for `session-ends` and the cause is named before anything is resumed. The configured `gpt-6.1-sol` was refused by Codex for a ChatGPT account (run `X3GNEP`, `model_not_found`, no retry notice), so the user chose `gpt-6-luna` for the run that counts (corrected while implementing).
 
 **Acceptance criteria:**
-- [x] The follower's terminal shows the region move node by node, and the follower ends at `ship` with its decision and exit 3.
-- [x] `between_secs` stays under 1 s, beside the 0.668 s of the `run-guard` run.
+- [x] The follower showed rows of both CLIs, and the reader kept frames of both, with no secret in them.
+- [x] Its time between nodes, read with `yunta stats`, is in line with the 0.741 s that `log-follow` measured, and its tokens are reported.
 
 **Verification:**
-- [x] Manual check: `real-follow-after.txt`, with what the follower drew and `yunta stats` of the run.
+- [x] The run's id, its stats and the frames kept, in `.plans/yunta-tui/proof/run-words/`.
 
-**Dependencies:** Task 11
+**Dependencies:** Task 13
 
-**Files likely touched:** only `.plans/yunta-tui/proof/log-follow/`
+**Files likely touched:** none in git.
 
 **Estimated scope:** S
 
-### Task 13: every step of the `ci` job
+### Task 15: every step of the `ci` job
 
-**Description:** The whole job on the final tree, one build at a time and with `CARGO_INCREMENTAL=0`.
+**Description:** Every step of the `ci` job in `.github/workflows/ci.yml`, one build at a time, with `CARGO_INCREMENTAL=0`, through `sh .plans/yunta-tui/tools/gate.sh /Users/eulke/development/yunta-tui .plans/yunta-tui/out/gate-run-words`.
 
 **Acceptance criteria:**
-- [x] Every step passes.
-- [x] No binary aborted: an exit of 101 with "0 failed" is an abort.
-- [x] The smells baseline does not rise.
+- [x] Every step passes: fmt, clippy, build, schema, smells, docs, deny, doc, test, core-release, workflows, crates. The test step's summary shows no aborted binary.
 
 **Verification:**
-- [x] Tests pass: `sh .plans/yunta-tui/tools/gate.sh /Users/eulke/development/yunta-tui .plans/yunta-tui/out/gate-log-follow`
+- [x] The gate's logs, in `.plans/yunta-tui/out/gate-run-words/`.
 
-**Dependencies:** Task 12
+**Dependencies:** Task 14
 
-**Files likely touched:** none, unless the job asks for a fix
+**Files likely touched:** whatever a failing step points at.
 
-**Estimated scope:** XS
+**Estimated scope:** S
 
-### Checkpoint E: after Tasks 11-13
-- [x] All of the spec's success criteria are met.
-- [x] The user reviews the whole diff and the before and after. **No commit until the user approves.**
+### Checkpoint E: after Tasks 13-15
+- [x] The user reviews the whole diff, the before and after, and the real run. No commit until approved.
 
-### Task 14: commit the module
+### Task 16: commit the module
 
-**Description:** One commit on `feature/yunta-tui`, with its code, tests, spec, plan and task list, pushed to the open draft, whose list and test plan are brought up to date.
+**Description:** One commit for the module on `feature/yunta-tui`, staging paths by name, with a message that cites no document. Then the push, the pull request's list and test plan, and CI on Linux and macOS. Then `cargo clean`.
 
 **Acceptance criteria:**
-- [x] `feat(cli): follow a run from another process`, with paths staged by name and no document cited in the message.
-- [x] `.plans/` stays out of it, the main checkout is untouched, and `cargo clean` ran.
+- [x] The commit holds the module's files and nothing else, including `SPEC-run-words.md`, `tasks/plan.md`, `tasks/todo.md` and the map's row for `session-ends`.
 - [ ] CI on the pull request passes on Linux and macOS, with the new tests seen in the log.
 
 **Verification:**
@@ -336,7 +371,7 @@ Spec: `SPEC-log-follow.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11
 
 **Dependencies:** Checkpoint E
 
-**Files likely touched:** none new
+**Files likely touched:** none beyond the module's.
 
 **Estimated scope:** XS
 
@@ -344,21 +379,17 @@ Spec: `SPEC-log-follow.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11
 
 | Criterion | Tasks |
 |---|---|
-| 1. `events_after` | 1 |
-| 2. Each run's head | 2 |
-| 3. At a terminal, the region, the block and the code | 4, 5 |
-| 4. Off a terminal, the lines | 5 |
-| 5. A run that is not moving | 3 |
-| 6. Ctrl-C | 6 |
-| 7. Following writes nothing | 8 |
-| 8. A killed engine ends it as a stall | 7 |
-| 9. Asking, promotion, children | 7, 8 |
-| 10. `--follow` where a run "follows it" | 9 |
-| 11. Latency and cost | 11 |
-| 12. The real run | 12 |
-| 13. The docs | 10 |
-| 14. Every step of the `ci` job | 13 |
+| 1. Every adapter's words reach a reader whole and in order, never its reasoning | 3, 4, 5, 6, 7 |
+| 2. A secret or a session token never reaches a reader | 3, 7 |
+| 3. The log is unchanged, and no file holds the words | 3, 4 |
+| 4. `engine.json` names the socket, where it lives, gone at every terminal | 2, 4 |
+| 5. Late readers, other users, slow readers | 1, 2 |
+| 6. The same row, attached and followed | 8, 9, 10 |
+| 7. Nothing said off a terminal | 11 |
+| 8. A run with no socket is followed as today | 10 |
+| 9. Measured on release builds, and the real run | Checkpoint A, 13, 14 |
+| 10. Every step of the `ci` job | 15, 16 |
 
 ## Not in this list
 
-The other modules of `CAPABILITY-MAP.md` have no spec, plan or tasks yet. Each goes through the same flow when this one closes.
+`session-ends` and the other modules of `CAPABILITY-MAP.md` have no spec, plan or tasks yet. Each goes through the same flow when this one closes.

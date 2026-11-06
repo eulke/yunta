@@ -211,6 +211,11 @@ pub trait SessionObserver: KeepsOutput {
     fn shell_service(&self) -> Option<&std::collections::BTreeMap<String, String>> {
         None
     }
+    /// Hands over what a session of `node_id` said, already redacted, once
+    /// its note's digest is on the log. Never waits and never fails: words
+    /// are not evidence. Default: an observer that keeps no run's voices
+    /// ignores them.
+    fn said(&self, _node_id: &yunta_core::NodeId, _spoken: crate::said::Spoken) {}
 }
 
 /// Where a run keeps what its commands printed: every object it holds,
@@ -272,6 +277,7 @@ pub(super) async fn stream_session(
         budget: request.budget,
         confinement: yunta_core::events::ConfinementRecord::of(&request.confinement),
         counts_cap_mid_session: counts_tokens_mid_session(adapter),
+        redactor: request.redactor(),
     };
     record_cap_at_session_end(&terms).await?;
     let (mut session, continues) = spawn_or_resume(adapter, request, audit, opening.resume).await?;

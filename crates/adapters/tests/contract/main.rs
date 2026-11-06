@@ -8,6 +8,7 @@
 mod actions;
 mod cases;
 mod process;
+mod said;
 mod subject;
 mod wire;
 
@@ -138,6 +139,14 @@ macro_rules! adapter_contract {
             #[tokio::test]
             async fn the_prompt_never_reaches_argv() {
                 cases::the_prompt_never_reaches_argv(&$subject).await
+            }
+
+            #[tokio::test]
+            async fn what_a_session_says_arrives_whole_and_in_order_and_never_its_reasoning() {
+                said::what_a_session_says_arrives_whole_and_in_order_and_never_its_reasoning(
+                    &$subject,
+                )
+                .await
             }
 
             $( $process!($subject); )?

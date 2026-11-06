@@ -168,6 +168,7 @@ fn registered(dir: &Path, pid: Pid, asking: Option<&str>) {
             node: Some(NodeId::from(node)),
             since: chrono::DateTime::UNIX_EPOCH,
         }),
+        words: None,
     };
     let path = yunta_engine::registry_path(dir);
     std::fs::create_dir_all(path.parent().expect("the registry's directory")).unwrap();

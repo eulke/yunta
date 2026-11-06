@@ -1,6 +1,6 @@
 //! How a [`RunFrame`] reads as the rows a person watches: the line that
-//! says whether the run needs them, the line each working node gets, and
-//! the counters under it all.
+//! says whether the run needs them, the line each working node gets with
+//! what its session last said under it, and the counters under it all.
 //!
 //! Every surface here draws the same frame, so this is where the words
 //! for it are chosen once. What the words are *drawn with* — the glyphs,
@@ -16,6 +16,7 @@ use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 use yunta_render::spend::Breakdown;
 
 mod children;
+mod said;
 
 use children::children_of;
 pub(crate) use children::{child_row, children_by_node};
@@ -200,13 +201,15 @@ pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
 }
 
 /// The rows one working node takes: what it is, what its tasks are doing,
-/// and what its last calls reached for.
+/// what one of its sessions said last, and what its last calls reached for.
 ///
 /// A running node's spin turns a frame per event it says, and past
-/// [`QUIET_AFTER`] without one its row says how long.
+/// [`QUIET_AFTER`] without one its row says how long. What a session said
+/// moves neither: words are not evidence.
 pub(super) fn node_rows(
     frame: &RunFrame,
     node: &NodeFrame,
+    said: Option<&yunta_engine::said::Said>,
     look: &Look,
     motion: Motion,
 ) -> Vec<Line> {
@@ -231,6 +234,7 @@ pub(super) fn node_rows(
             ),
         ));
     }
+    rows.extend(said.map(|said| said::row(said, &detail)));
     let calls = calls_row(node, look, cell_width(&detail));
     if !calls.is_empty() {
         // The envelope names a node and never a session, so at loop

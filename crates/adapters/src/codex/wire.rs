@@ -21,6 +21,9 @@ pub(crate) fn render(step: &MockStep, naming: ToolNaming) -> Vec<String> {
         MockStep::Note { text, .. } | MockStep::BeforeOpen { text, .. } => {
             vec![item(json!({ "type": "agent_message", "text": text }))]
         }
+        MockStep::Reasoning { text, .. } => {
+            vec![item(json!({ "type": "reasoning", "text": text }))]
+        }
         // Kinds the stream carries that the reader does not read, as the CLI writes them.
         MockStep::UnknownLine { .. } => vec![
             json!({ "type": "thread.renamed", "name": "something new" }).to_string(),

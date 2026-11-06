@@ -15,6 +15,7 @@ fn asking(node: &str) -> Engine {
             since: at(5),
             pid: Pid::try_from(4242).expect("a pid"),
         }),
+        words: None,
         at: at(10),
     }
 }
@@ -150,6 +151,7 @@ fn a_moving_run_whose_engine_is_gone_is_stalled() {
     let gone = Engine {
         liveness: EngineLiveness::Dead,
         prompt: None,
+        words: None,
         at: at(10),
     };
     let frame = run_frame(&RUN.into(), &chain(), &events, None, &gone, at(10));

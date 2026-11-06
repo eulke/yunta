@@ -271,3 +271,79 @@ fn the_footer_stays_the_last_row_as_nodes_come_and_go() {
         );
     }
 }
+
+/// What a session of `node` in `run` said.
+fn said(run: &RunId, node: &'static str, text: &str) -> yunta_engine::said::Said {
+    yunta_engine::said::Said {
+        run_id: run.clone(),
+        node_id: NodeId::from_static(node),
+        session_id: yunta_core::SessionId::from_static("session-1"),
+        task_id: None,
+        seq: yunta_core::Seq::from(3),
+        at: chrono::DateTime::UNIX_EPOCH,
+        text: text.to_string(),
+        cut: false,
+    }
+}
+
+/// A node shows what its session said while it works. Once it stops, what
+/// it said is let go, so working again it shows nothing until it says
+/// something new.
+#[test]
+fn a_node_that_works_again_does_not_show_what_its_last_attempt_said() {
+    let term = Watched::sized(16, 80);
+    let scrollback = Captured::default();
+    let mut region = region(&term, &scrollback);
+    region.hear(said(&RUN, "build", "Compiling the parser."));
+
+    region.show(
+        &frame(RunPhase::Running, vec![running("build")]),
+        &RUN,
+        (false, None),
+    );
+    assert!(
+        rows(&term)
+            .iter()
+            .any(|row| row.contains("says: Compiling the parser.")),
+        "{:?}",
+        rows(&term)
+    );
+
+    region.show(
+        &frame(RunPhase::Running, vec![running("test")]),
+        &RUN,
+        (false, None),
+    );
+    region.show(
+        &frame(RunPhase::Running, vec![running("build")]),
+        &RUN,
+        (false, None),
+    );
+    assert!(
+        !rows(&term).iter().any(|row| row.contains("says:")),
+        "{:?}",
+        rows(&term)
+    );
+}
+
+/// What a session of another run said, such as a child's, is not shown in
+/// this run's region, even under a node of the same name.
+#[test]
+fn what_another_run_said_is_not_shown() {
+    let term = Watched::sized(16, 80);
+    let scrollback = Captured::default();
+    let mut region = region(&term, &scrollback);
+    region.hear(said(&CHILD, "build", "Said in the child."));
+
+    region.show(
+        &frame(RunPhase::Running, vec![running("build")]),
+        &RUN,
+        (false, None),
+    );
+
+    assert!(
+        !rows(&term).iter().any(|row| row.contains("says:")),
+        "{:?}",
+        rows(&term)
+    );
+}

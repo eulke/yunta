@@ -427,6 +427,42 @@ runs newest first; a glance says how long ago the newest closed. A run in the la
 has no derived state
 to have been in, so that group is ordered by run id alone.
 
+## What a session says
+
+While an engine drives a run, a program can hear what the run's sessions say as
+they say it. The run's registry, `scratch/engine.json`, names a Unix socket in
+`words` for as long as that engine lives: `scratch/live.sock` when that path fits
+in a socket's address, and otherwise `<run id>.sock` in `/tmp/yunta-<uid>/`, a
+directory only that user may open. The socket admits only processes of the user
+the engine runs as. A registry with no `words` has nothing to hear: no engine
+drives the run, an older binary does, or neither path fits. The socket goes away
+when its engine stops; one a killed engine left refuses connections, and the
+engine that resumes the run replaces it, so a reader that reads the registry
+again finds the live one.
+
+A reader that connects gets up to the last 64 things the run's sessions said,
+within 256 KiB, and then each new one as it is said. Each is one JSON object on
+its own line, `v` first:
+
+```json
+{"v":1,"run_id":"01M6QC8ZZ2XTH59J16A90RFK3T","node_id":"build","session_id":"01M6QCA3B7N2K8F0R4W9YQ5D1E","task_id":"T001","seq":118,"at":"2026-11-05T14:02:31.412Z","text":"First I read the parser."}
+```
+
+`text` is the whole of what was said, up to 16 KiB; a longer one is cut at a
+character boundary and carries `"cut": true`. A declared secret, and every token
+minted for the session, reads `[redacted]` in it. A session's reasoning is never
+sent. `task_id` is there when the session works a task, and `seq` is the seq of
+the note's digest on the log, which places the words among the run's events. A
+reader that falls behind loses lines rather than slowing the run: the next line
+it gets carries `missed`, how many it lost. A line whose `v` the reader does not
+know is skipped, and the next one read; a change to what a line means takes a
+new `v`.
+
+A line is never evidence. Nothing a run decides reads it, the log keeps only
+each note's size and digest, and nothing writes the words to a file. The summary a
+session ends with is the one thing said that the log also keeps: it is its node's
+outcome, as it always was.
+
 ## Exit codes
 
 `yunta run` and `yunta resume` — with or without `--json` and `--quiet` — exit

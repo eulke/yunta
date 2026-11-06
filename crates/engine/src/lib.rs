@@ -19,6 +19,8 @@
 //!   `receipt` and `events_export` read that state.
 //! - Sessions' tools: `run_tools` serves a node session's MCP server, shaped by
 //!   `mcp`.
+//! - What sessions say: `said` holds it for whoever watches the run, in this
+//!   process and through the run's socket, and never on the log.
 //! - Checkouts: `worktree` isolates and pools them; `wakefulness` notices a
 //!   host that slept.
 //! - Boundaries: `git`, `process`, `process_registry`, `lock`, `run_hold` and `pace`.
@@ -85,6 +87,7 @@ mod run_hold;
 mod run_log;
 mod run_tools;
 mod runner;
+pub mod said;
 mod scope;
 pub mod scope_expansion;
 mod session_dir;

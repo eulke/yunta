@@ -74,6 +74,7 @@ What moves:
 | `parked-answers` | A run stopped by the token cap can be continued from another process | nothing |
 | `log-follow` | `events_after`, the head of each run, and following a run from another process | nothing |
 | `run-words` | The per-run socket, in every adapter at once | nothing |
+| `session-ends` | A Codex retry notice no longer ends its session, and no command an agent started outlives its session | nothing |
 | `surco-screen` | Public reading of styles and the new components, with their goldens | nothing |
 | `run-state` | The `yunta-state` crate, cutting the cycle between `replay` and `stats` | nothing |
 | `run-pages` | The pages in `yunta-render`, with the CLI printing exactly the same | `run-state` |
@@ -83,7 +84,7 @@ What moves:
 | `third-party-notices` | Third-party license notices, included when the binary is distributed | nothing |
 | `desktop` | Reserved only: no spec and no code yet | `app-core` |
 
-**Order:** `run-guard`, `parked-answers`, `log-follow`, `run-words`, `surco-screen`, `run-state` and `third-party-notices`, which do not depend on each other → `run-pages` and `control` → `app-core` → `tui`.
+**Order:** `run-guard`, `parked-answers`, `log-follow`, `run-words`, `session-ends`, `surco-screen`, `run-state` and `third-party-notices`, which do not depend on each other → `run-pages` and `control` → `app-core` → `tui`.
 
 **How each module is built:** spec, plan, tasks, implementation, in that order and each with its own approval. The next module starts when this one is closed.
 
@@ -116,3 +117,4 @@ The from-scratch reorganization does not enter: `core` with no IO, `yunta-policy
 - `yunta review` at a terminal opens the application at that decision, and the duplicated full-screen loop is deleted. Outside a terminal it prints as before.
 - `third-party-notices` is its own module.
 - The names `yunta-state`, `yunta-control`, `yunta-app` and `yunta-tui` are fixed, as are the module ids.
+- `session-ends` was added on 2026-11-05, after `run-words`: the two bugs the agent audit of 2026-11-03 confirmed, still present at `3456baea`.

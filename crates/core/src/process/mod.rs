@@ -8,7 +8,8 @@
 //! [`process_start`] is how a later, separate process tells the same pid
 //! from a recycled one; [`subprocess`] is the spawn, [`lines`] the
 //! line-by-line read of its output, and [`stream`] the guard that keeps
-//! the events read from it in protocol order.
+//! the events read from it in protocol order. [`user`] is who this process
+//! runs as, which is who may reach what it serves.
 //!
 //! It lives here rather than beside any one caller because an adapter
 //! running a CLI, the engine running `git`, and the harness running the
@@ -21,3 +22,4 @@ pub mod process_start;
 pub mod signal;
 pub mod stream;
 pub mod subprocess;
+pub mod user;

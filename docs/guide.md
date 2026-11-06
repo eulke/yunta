@@ -852,6 +852,18 @@ succeeds it, and ends where `yunta run` would, with the same closing block and e
 code. A follower only reads, so any number of them change nothing, and Ctrl-C stops
 the follower alone.
 
+While a node works, its row in the live view carries the first sentence of what its
+session said last, `says: First I read the parser.`, or `T001 says:` when the
+session works a task; it changes each time the session says something new and goes
+when the node stops working. `yunta status <run> --follow` draws the same row, heard
+off the run's socket, which the run's registry names while an engine drives it. A
+secret the run declares, and every token minted for the session, read `[redacted]`.
+The row is for a person at a terminal and nowhere else: nothing a session says
+while it works reaches a pipe, CI, `TERM=dumb`, a detached run's `detached.log`,
+`--json` or a file. The log keeps what it always did: the size and digest of each
+note, and the summary a session ends with as its node's outcome, which `yunta status
+--full` shows. What a session says while it works is never evidence of anything.
+
 ## The Verified Work Receipt
 
 `yunta receipt <run>` closes a finished run out as a certificate: markdown for a

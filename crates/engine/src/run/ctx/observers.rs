@@ -1,5 +1,6 @@
 //! What a run's context answers the rest of the engine with: how a command's
-//! output is kept, and how a task cycle's events are appended to the log.
+//! output is kept, how a task cycle's events are appended to the log, and
+//! where what its sessions say goes, which is never the log.
 
 use yunta_core::events::EventPayload;
 use yunta_core::NodeId;
@@ -74,5 +75,15 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
 
     fn shell_service(&self) -> Option<&std::collections::BTreeMap<String, String>> {
         self.ambient.map(|ambient| &ambient.service)
+    }
+
+    /// Names the run and the time by the run's own clock, then hands what
+    /// was said to the invocation's surface and to the run's voices.
+    fn said(&self, node_id: &NodeId, spoken: crate::said::Spoken) {
+        let said = spoken.said(self.run_id.clone(), node_id.clone(), self.clock.now());
+        if let Some(observer) = &self.observer {
+            observer.said(&said);
+        }
+        self.voices.hand(said);
     }
 }

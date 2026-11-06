@@ -5,9 +5,10 @@
 //! with what it read, and then reads only what came past the last seq it holds,
 //! at the pace of [`Pace`], handing each event to the surface and to its own
 //! state. Where the engine stands comes from the run's registry, read once a
-//! second, the way `yunta status` reads it. When the run stops it takes the
-//! surface down and prints the block `yunta run` leaves, read from the log the
-//! same way, and exits with the code that block gives.
+//! second, the way `yunta status` reads it, and what the run's sessions say
+//! from the socket that registry names, through `listen`. When the run stops
+//! it takes the surface down and prints the block `yunta run` leaves, read
+//! from the log the same way, and exits with the code that block gives.
 //!
 //! A run that closes promoted is followed onto its successor, as `yunta run`
 //! carries on with one. The predecessor's log does not name it: the successor's
@@ -40,6 +41,8 @@ use crate::commands::drive::{report_closing, Closed};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::surface::{Delivery, EngineReading, Surface, SurfaceEnv, TerminalEnv};
+
+mod listen;
 
 /// How often the follower asks the log what came past the last seq it holds. A
 /// tenth of a second puts an event on the follower's terminal well inside the
@@ -82,6 +85,7 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
         engine,
         engine_read_at: now,
         seen: HashSet::new(),
+        listening: listen::Listening::default(),
     };
     let storage = ctx.async_storage().await?;
     followed.seen = storage
@@ -174,6 +178,8 @@ struct Followed {
     /// Every run whose head the follower has looked at, which no successor of
     /// this run can be.
     seen: HashSet<RunId>,
+    /// The socket of the run, heard while its registry names it.
+    listening: listen::Listening,
 }
 
 impl Followed {
@@ -217,6 +223,8 @@ impl Followed {
                 surface.deliver(event).await;
             }
             let frame = self.frame(ctx.clock.now());
+            self.listening
+                .to(self.engine.words.as_deref(), surface.observer());
             match ending(frame.standing, &frame.phase) {
                 None => {}
                 Some(Ended::Stopped) if matches!(frame.phase, RunPhase::Promoted { .. }) => {
@@ -365,6 +373,7 @@ mod tests {
         let engine = Engine {
             liveness,
             prompt: None,
+            words: None,
             at: chrono::DateTime::UNIX_EPOCH,
         };
         let nodes = vec![yunta_testkit::node_frame(

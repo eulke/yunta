@@ -62,6 +62,8 @@ pub enum Outcome {
 #[derive(Debug, Clone)]
 pub enum Step {
     Note(String),
+    /// What the session reasons, which its CLI prints and no reader passes on.
+    Reasoning(String),
     ToolUse {
         name: String,
         target: String,

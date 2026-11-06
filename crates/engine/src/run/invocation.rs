@@ -29,6 +29,10 @@ pub(super) fn build_ctx(
     // and a run that declares no secret builds an empty one and pays nothing.
     let redactor = yunta_core::Redactor::of(&env.manifest.config.secret_names(), &*env.secrets)?;
     let (registry, registry_error) = open_registry(env.hold.run_dir(), &*env.clock);
+    let voices = Arc::new(crate::said::Voices::new());
+    if let Some(registry) = &registry {
+        serve_words(registry, env.hold.run_dir(), env.run_id, &voices);
+    }
     // One cache of criterion results per invocation, read by every task
     // cycle and by every check a task session asks for through the host.
     let memo = Arc::new(Memo::new(env.manifest.config_hash.clone()));
@@ -83,6 +87,7 @@ pub(super) fn build_ctx(
         secrets,
         redactor,
         observer,
+        voices,
         unit: None,
         landing: Arc::new(tokio::sync::Mutex::new(())),
         awake,
@@ -110,6 +115,29 @@ fn open_registry(
     ) {
         Ok(registry) => (Some(Arc::new(registry)), None),
         Err(e) => (None, Some(e)),
+    }
+}
+
+/// Opens the run's socket and has the registry serve it. A run whose socket
+/// has nowhere to go, or does not bind, goes on, and nobody elsewhere hears
+/// what its sessions say.
+fn serve_words(
+    registry: &crate::process_registry::ProcessRegistry,
+    run_dir: &Path,
+    run_id: &yunta_core::RunId,
+    voices: &Arc<crate::said::Voices>,
+) {
+    let Some(path) = crate::said::socket_path(&crate::run_dir::words_socket(run_dir), run_id)
+    else {
+        tracing::warn!("the run's socket has no private place to go on this host");
+        return;
+    };
+    let uid = yunta_core::process::user::uid();
+    match crate::said::Socket::bind(&path, Arc::clone(voices), uid) {
+        Ok(socket) => registry.serve_words(socket),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "the run's socket did not bind")
+        }
     }
 }
 
