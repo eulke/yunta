@@ -121,7 +121,7 @@ fn resolved(run_id: &RunId, option: &OptionId) -> Doc {
         ))
         .with(Gist::new(APPLIED))
         .with(Next {
-            steps: vec![(advice::status(handle), "follows it")],
+            steps: vec![(advice::follow(handle), "follows it")],
         })
 }
 

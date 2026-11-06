@@ -27,7 +27,10 @@ fn a_program_reads_the_refusal_as_one_document_with_the_next_commands() {
         .collect();
     assert_eq!(
         next,
-        [format!("yunta status {id}"), format!("yunta cancel {id}")],
+        [
+            format!("yunta status {id} --follow"),
+            format!("yunta cancel {id}")
+        ],
         "{document:#}"
     );
 

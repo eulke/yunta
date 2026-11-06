@@ -8,10 +8,12 @@
 //! A run parked on a person is answerable from here: the decision it
 //! stopped on is rebuilt from its own log ([`decision`]) and printed
 //! with the command that answers it, so nobody has to read the exported
-//! JSONL to learn what the options are.
+//! JSONL to learn what the options are. A run that moves is followed with
+//! `--follow` ([`follow`]): what `yunta run` draws, from another process.
 
 pub(crate) mod decision;
 pub(crate) mod decision_json;
+pub(crate) mod follow;
 mod node;
 pub(crate) mod progress;
 
@@ -65,6 +67,25 @@ pub async fn status(
         document: DocumentInputs::of(run_id, &reading),
     };
     emit(output, &answer, look)
+}
+
+/// Prints the page `yunta status <run>` prints a person, and hands back the
+/// word the run is called by on it: what a caller that exits with the run's
+/// code reads.
+pub(crate) async fn print_page(
+    ctx: &Context,
+    run_id: &RunId,
+    look: &Look,
+) -> Result<surco::words::Standing, CliError> {
+    let reading = Reading::of(ctx, run_id).await?;
+    let page = (Mode::Human, None, Depth::Glance);
+    let body = page_body(ctx, run_id, &reading, &[], page).await?;
+    let answer = StatusAnswer {
+        body,
+        document: DocumentInputs::of(run_id, &reading),
+    };
+    emit(Mode::Human, &answer, look)?;
+    Ok(reading.frame.standing)
 }
 
 /// What `yunta status` reads about one run, gathered once: its log, the

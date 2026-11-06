@@ -11,7 +11,7 @@ use yunta_core::events::{EventDraft, StoredEvent};
 use yunta_core::{RunId, Seq};
 
 use crate::error::{Result, StorageError};
-use crate::store::{ChainVerification, Purge, RunListing, Storage};
+use crate::store::{ChainVerification, Purge, RunHead, RunListing, Storage};
 
 /// A handle to the event log for async callers: the log's path, and
 /// nothing open. Cloning is cheap; each call opens and closes its own
@@ -74,11 +74,25 @@ impl AsyncStorage {
         .await
     }
 
+    /// [`Storage::events_after`], from async code.
+    pub async fn events_after(&self, run_id: RunId, seq: Seq) -> Result<Vec<StoredEvent>> {
+        self.blocking("read a run's events past a seq", move |storage| {
+            storage.events_after(&run_id, seq)
+        })
+        .await
+    }
+
     pub async fn verify_chain(&self, run_id: RunId) -> Result<ChainVerification> {
         self.blocking("verify a run's chain", move |storage| {
             storage.verify_chain(&run_id)
         })
         .await
+    }
+
+    /// [`Storage::heads`], from async code.
+    pub async fn heads(&self) -> Result<Vec<RunHead>> {
+        self.blocking("read each run's head", |storage| storage.heads())
+            .await
     }
 
     pub async fn list_runs(&self) -> Result<Vec<RunListing>> {

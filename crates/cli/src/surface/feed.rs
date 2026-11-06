@@ -66,6 +66,13 @@ impl Feed {
         self.beats.send(beat).await.is_ok()
     }
 
+    /// Hands the painter an event read off the log, waiting for room as
+    /// [`Feed::tell`] does: the observer's copy can be dropped because the
+    /// log holds it, and this one came from the log.
+    pub(super) async fn deliver(&self, event: StoredEvent) -> bool {
+        self.tell(Beat::Event(Box::new(event))).await
+    }
+
     /// Whether the painter has taken every beat sent so far off the
     /// queue — where a test that asserts on what the painter did with a
     /// beat waits for it to have done it.

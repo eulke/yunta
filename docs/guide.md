@@ -845,6 +845,13 @@ never part of it. A gate waits on the event log, so one raised by a run whose vi
 gone — piped, detached, or in a terminal that closed — is answered exactly the
 same way, from anywhere.
 
+`yunta status <run> --follow` draws that view in any other terminal, read from the
+run's log: a run started with `--detach`, or one another terminal drives. It shows
+the run asking at its terminal when it does, follows a promotion onto the run that
+succeeds it, and ends where `yunta run` would, with the same closing block and exit
+code. A follower only reads, so any number of them change nothing, and Ctrl-C stops
+the follower alone.
+
 ## The Verified Work Receipt
 
 `yunta receipt <run>` closes a finished run out as a certificate: markdown for a

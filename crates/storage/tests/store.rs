@@ -23,6 +23,8 @@ use yunta_testkit_core::FixedClock;
 mod chain;
 #[path = "store/events.rs"]
 mod events;
+#[path = "store/heads.rs"]
+mod heads;
 
 fn open_temp() -> (tempfile::TempDir, Storage) {
     let dir = tempfile::tempdir().unwrap();

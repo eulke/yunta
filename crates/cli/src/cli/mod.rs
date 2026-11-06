@@ -94,6 +94,10 @@ enum Command {
         node: Option<yunta_core::NodeId>,
         #[command(flatten)]
         depth: DepthArg,
+        /// Follows the run while it moves, from any process, and exits with the
+        /// code its stop gives, as `yunta run` would.
+        #[arg(long, conflicts_with_all = ["json", "node", "full", "dig"])]
+        follow: bool,
     },
     /// Resume a run from its event log.
     ///

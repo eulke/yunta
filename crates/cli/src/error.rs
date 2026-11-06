@@ -436,7 +436,7 @@ impl CliError {
                 (
                     None,
                     vec![
-                        (crate::commands::advice::status(run), "follows it"),
+                        (crate::commands::advice::follow(run), "follows it"),
                         (crate::commands::advice::cancel(run), "stops it"),
                     ],
                 )

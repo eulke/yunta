@@ -268,6 +268,12 @@ pub(crate) fn status(run: &str) -> String {
     format!("yunta status {run}")
 }
 
+/// Follows a run while it moves, from any process: what `yunta run` draws,
+/// read from the run's log.
+pub(crate) fn follow(run: &str) -> String {
+    format!("{} --follow", status(run))
+}
+
 /// Shows one node of a run whole: its failure, the end of what it
 /// printed and where all of it is.
 pub(crate) fn status_node(run: &str, node: &str) -> String {

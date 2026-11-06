@@ -119,10 +119,20 @@ impl Region {
     ///
     /// `answerable` says whether the run stopped on a menu of its own —
     /// which decides the command the attention row offers, and which
-    /// only the run's frozen manifest can answer.
-    pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
-        let attention =
-            view::attention(frame, run_id, answerable, self.glyphs).map(|line| self.fit(&line));
+    /// only the run's frozen manifest can answer. `asking` is whom the
+    /// engine asks at its own terminal, as a process that follows the run
+    /// reads it off the registry; the row says so instead.
+    pub(super) fn show(
+        &mut self,
+        frame: &RunFrame,
+        run_id: &RunId,
+        (answerable, asking): (bool, Option<&yunta_engine::Prompt>),
+    ) {
+        let attention = match asking {
+            Some(prompt) => Some(view::asked(prompt, self.glyphs)),
+            None => view::attention(frame, run_id, answerable, self.glyphs),
+        }
+        .map(|line| self.fit(&line));
         self.attend(attention);
         let rows: Vec<String> = view::working(frame)
             .into_iter()

@@ -444,11 +444,16 @@ parsing what it printed:
 | 130 | was interrupted by a person in this invocation (Ctrl-C) |
 
 `yunta run --detach` exits 0 once the run is handed off, since the command returns
-before the run finishes: the outcome is what `yunta status` reads later. A refusal
-exits 1 with or without `--json`; under `--json` its document is on stdout.
+before the run finishes: the outcome is what `yunta status --follow` waits for, or
+what `yunta status` reads later. A refusal exits 1 with or without `--json`; under
+`--json` its document is on stdout.
 
 `yunta status` and `yunta close` exit 0 whatever the run says: they report a
-run, they do not drive it. `yunta test` reads a case's `final_state` in the same
+run, they do not drive it. `yunta status <run> --follow` exits with what the run's
+stop gives, in the codes above, as `yunta run` would: at once on a run that is not
+moving, and once it stops on one that moves. A run whose engine is gone while its
+log says it moves is stalled, which exits 1. Ctrl-C stops the follower alone and
+exits 130; the run goes on in the process that drives it. `yunta test` reads a case's `final_state` in the same
 words: `finished`, `needs you`, `waiting`, `stopped`, `reported`, `failed`,
 `promoted`; a case written with `paused` or `cancelled` is refused, naming the word
 that replaced it. A case's `expect.nodes` is written in the words a node's row

@@ -59,6 +59,8 @@ every state from it, and what a person reads is drawn from that data in Surco.
   holder replaced. [test engine/run_guard]
 - One answer pays for one engine: `continue` lifts the token cap only in the engine that took it, and the next
   one stands under the cap again. [test engine/parked_answers]
+- A follower only reads: it takes no lock, writes no event and never signals the engine it follows.
+  [test cli/status_follow]
 - A safety mechanism adds no wall-clock time to a run. [review]
   Paths: `crates/core/src/rail/**`, `crates/engine/src/task_cycle/**`, `crates/engine/src/worktree/**`,
   `crates/adapters/src/**`

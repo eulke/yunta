@@ -34,6 +34,24 @@ use surco::width::{cell_width, indent, CHILD_DEPTH};
 /// up with the blocks a run's other surfaces nest.
 const DETAIL_DEPTH: usize = 2;
 
+/// The attention row of a run whose engine asks a person at its own terminal,
+/// read from its registry by a process that follows it: whom it asks, and that
+/// the answer is given there. The engine that asks draws no such row, since its
+/// prompt has the terminal.
+pub(super) fn asked(prompt: &yunta_engine::Prompt, glyphs: Glyphs) -> Line {
+    Line::new()
+        .push(
+            Tone::NeedsYou,
+            format!(
+                "{} {}",
+                glyphs.mark(Mark::NeedsYou),
+                Standing::NeedsYou.word()
+            ),
+        )
+        .plain(": ")
+        .push(Tone::Strong, advice::asking_on(prompt))
+}
+
 /// The row that opens the region while the frame stands as
 /// `Standing::NeedsYou`: the command that answers it, and what it is about.
 /// Any other standing draws none, since the footer says that nothing needs
