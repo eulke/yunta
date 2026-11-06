@@ -214,6 +214,16 @@ impl PgidRegistration<'_> {
     pub fn keep(mut self) {
         self.kept = true;
     }
+
+    /// Leaves the group registered, as [`keep`](Self::keep) does, with each
+    /// of `others` beside it: the groups a refused kill named, which may
+    /// still run once the engine is gone.
+    pub fn keep_with(self, others: &[Pid]) {
+        for group in others {
+            self.registry.add(*group);
+        }
+        self.keep();
+    }
 }
 
 impl Drop for PgidRegistration<'_> {
@@ -324,6 +334,20 @@ mod tests {
             .expect("a registration")
             .keep();
         assert_eq!(groups_on_disk(run.path()), vec![group]);
+    }
+
+    /// The groups a refused kill named stay registered beside the CLI's own,
+    /// so a later `yunta cancel` or `yunta close` still finds each of them.
+    #[test]
+    fn a_kept_registration_keeps_the_groups_a_refused_kill_named() {
+        let run = tempfile::tempdir().unwrap();
+        let registry = registry_in(run.path());
+        let group = Pid::try_from(77u32).expect("a pid");
+        let named = [Pid::try_from(78u32).unwrap(), Pid::try_from(79u32).unwrap()];
+        register(Some(&registry), Some(group))
+            .expect("a registration")
+            .keep_with(&named);
+        assert_eq!(groups_on_disk(run.path()), vec![group, named[0], named[1]]);
     }
 
     #[test]

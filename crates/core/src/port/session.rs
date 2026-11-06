@@ -12,10 +12,10 @@
 //! What the engine has to remember of a session travels in that stream's
 //! events, so it never asks an adapter what an earlier session did.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+pub use super::session_env::{RunToolsEndpoint, SessionEnv};
 use crate::confinement::{Confinement, EditSandbox};
 use crate::events::SessionExit;
 use crate::fence::{Coverage, Fence};
@@ -23,9 +23,7 @@ use crate::rail::{
     answer::{FormatAnswer, StopAnswer, WriteAnswer},
     RailCall, RailCommand, RailEndpoint, RailEvent,
 };
-use crate::{
-    AdapterError, AdapterId, Capabilities, Capability, ModelName, Pid, Result, Secret, SessionId,
-};
+use crate::{AdapterError, AdapterId, Capabilities, Capability, ModelName, Pid, Result, SessionId};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -140,60 +138,11 @@ pub struct SessionRequest {
     /// session; an adapter creates the directory when it has something
     /// to put there.
     pub scratch_dir: PathBuf,
-}
-
-/// A session's environment, in two maps by what a log may carry: `plain`
-/// for shared directories and engine settings, `secret` for declared
-/// secrets and session tokens, which are never logged.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionEnv {
-    /// Shared directories and engine settings: not secrets.
-    pub plain: BTreeMap<String, String>,
-    /// Declared secrets and session tokens: never logged.
-    pub secret: BTreeMap<String, Secret<String>>,
-}
-
-/// Where a session's per-run MCP server listens: a loopback URL plus
-/// the per-session bearer token that scopes every call to `(run_id,
-/// node_id, attempt)` by construction — no tool ever takes a run id as
-/// a caller argument. The token is secret material: it must never
-/// reach the event log — the engine's own audit events carry the URL
-/// at most, never this pair.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunToolsEndpoint {
-    pub url: String,
-    pub token: Secret<String>,
-}
-
-impl RunToolsEndpoint {
-    /// The file a session's adapter writes its tool endpoint to; it carries
-    /// the session's bearer.
-    pub const CONFIG_FILE: &'static str = "mcp.json";
-
-    /// The name a CLI's own configuration gives this server. Every
-    /// adapter uses the one name: a CLI prefixes the tools it mounts
-    /// with it, so this is also what an allow-rule names to admit all
-    /// of them without any adapter knowing which tools the engine
-    /// mounted.
-    ///
-    /// It is not `yunta`, which is what a person registering the
-    /// control plane in their CLI's own configuration calls it. A CLI
-    /// merges both entries into one table by key, so two servers under
-    /// one name is one server configured twice — and the second write
-    /// contradicts the first, because the control plane is a command
-    /// and this is a URL.
-    pub const SERVER_NAME: &'static str = "yunta-run";
-
-    /// How long one call to these tools may take before the CLI gives up
-    /// on it: as long as the session itself may run, or an hour for a
-    /// session with no timeout. A call can run a task's criteria,
-    /// which take as long as the build behind them, and a CLI's own
-    /// default would cut the answer off before it arrives.
-    pub fn call_timeout(budget: &Budget) -> Duration {
-        budget
-            .timeout
-            .unwrap_or(Duration::from_secs(crate::rail::window::UNSET_WINDOW_SECS))
-    }
+    /// What every process of this session carries in its environment, so
+    /// the session's end finds what its CLI started even once that process
+    /// left the CLI's tree. Unique to the session, it names the session's
+    /// run; a session with no process of its own carries it to nothing.
+    pub mark: crate::process::mark::SessionMark,
 }
 
 /// What [`Adapter::probe`] found: whether the adapter can open sessions, as
@@ -418,12 +367,18 @@ pub trait AgentSession: Send {
     fn events(&mut self) -> BoxStream<'_, AgentEvent>;
 
     /// Ordered termination (Esc/SIGINT-equivalent) — the agent may still
-    /// close cleanly.
+    /// close cleanly. It begins the session's end, so what the CLI started
+    /// outside its own group is closed first, while the CLI still lives to
+    /// lead to it.
     async fn interrupt(&mut self) -> Result<()>;
 
-    /// Forceful termination of the whole session process tree — never
-    /// leaves anything running. An error means the engine cannot tell the
-    /// session stopped, and its process group may still run.
+    /// Forceful termination of everything the session runs: every process
+    /// group under its CLI's, found while the CLI lives, the CLI's own
+    /// group, and every process carrying the session's mark, wherever its
+    /// parent is. What clears its environment and has left the CLI's tree,
+    /// and on macOS a platform binary whose parent left, carries nothing this
+    /// reaches. An error means the engine cannot tell the session stopped;
+    /// [`AdapterError::NotClosed`] names each group that may still run.
     async fn kill(&mut self) -> Result<()>;
 
     /// Gives the session's process up to `grace` to exit on its own after

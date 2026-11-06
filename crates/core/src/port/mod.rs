@@ -11,12 +11,14 @@
 //! never links the crate the implementations are built in.
 //!
 //! A port is a trait the engine calls, never a network port: the loopback
-//! port a session's run tools listen on is named by a [`RunToolsEndpoint`].
+//! port a session's run tools listen on is named by a [`RunToolsEndpoint`],
+//! which `session_env` holds beside the environment a session's CLI runs in.
 
 pub mod forge;
 pub mod policy;
 mod secrets;
 pub mod session;
+mod session_env;
 
 pub use forge::{
     Forge, ForgeError, ForgeProbe, GateDecision, PolledGate, PublishRequest, PullRequestRef,

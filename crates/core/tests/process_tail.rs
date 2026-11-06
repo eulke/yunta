@@ -28,6 +28,9 @@ async fn a_launch_value_that_is_not_declared_stays_out_of_the_stderr_tail() {
         args: vec!["-c".into(), "echo 'retry in 10 seconds' >&2".into()],
         cwd: dir.path(),
         env: &env,
+        mark: &yunta_core::process::mark::SessionMark::new(&yunta_core::RunId::from(
+            "01HZYXW8M6D4V2T0R9Q7P5N3K4",
+        )),
         prompt: "",
         parser: Box::new(Quiet),
         held: None,

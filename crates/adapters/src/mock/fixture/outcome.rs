@@ -116,10 +116,15 @@ pub enum OnInterrupt {
     Ignore,
 }
 
-/// Scripted answer to `kill` while the script still plays: `Refuse` fails it
-/// and leaves the session running.
+/// Scripted answer to `kill`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KillBehavior {
+    /// Fails the kill while the script still plays, and leaves the session
+    /// running.
     Refuse,
+    /// Ends the session, but a command it started runs on in a group of its
+    /// own, and the kill fails naming that group: a finished session whose
+    /// end is refused.
+    LeaveBehind,
 }

@@ -77,3 +77,6 @@ every state from it, and what a person reads is drawn from that data in Surco.
 - A log an earlier binary wrote still replays. [test engine/logs_from_runs] [test engine/older_words]
 - No session writes what an agent CLI loads as configuration, at its own path or through a link the base commit
   holds; a person may grant the instruction files. [test engine/paths_deny] [test adapters/own_config]
+- Nothing a session's CLI started outlives its session, linked to it or carrying its mark, nor a dead engine's
+  `yunta cancel` or `yunta close`; on macOS an orphan running a platform binary may hide its mark.
+  [test core/process_tree] [test core/process_mark] [test adapters/contract] [test cli/session_ends]

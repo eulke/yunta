@@ -294,6 +294,13 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
+    /// The notice a CLI prints when a request to its service failed and it
+    /// tries again on its own, as that CLI writes it: the session goes on,
+    /// and the notice ends nothing.
+    RetryNotice {
+        #[serde(default)]
+        after_ms: u64,
+    },
     /// The lines of every kind the CLI prints that its reader does not read,
     /// as the CLI writes them, which the reader tolerates.
     UnknownLine {
@@ -354,6 +361,7 @@ impl MockStep {
             | MockStep::Usage { after_ms, .. }
             | MockStep::Note { after_ms, .. }
             | MockStep::Reasoning { after_ms, .. }
+            | MockStep::RetryNotice { after_ms }
             | MockStep::UnknownLine { after_ms }
             | MockStep::BeforeOpen { after_ms, .. }
             | MockStep::RunTool { after_ms, .. }

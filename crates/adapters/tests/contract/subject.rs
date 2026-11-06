@@ -64,6 +64,9 @@ pub enum Step {
     Note(String),
     /// What the session reasons, which its CLI prints and no reader passes on.
     Reasoning(String),
+    /// The notice a CLI prints when a request to its service failed and it
+    /// tries again on its own; the session goes on.
+    RetryNotice,
     ToolUse {
         name: String,
         target: String,

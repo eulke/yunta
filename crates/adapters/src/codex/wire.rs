@@ -24,6 +24,13 @@ pub(crate) fn render(step: &MockStep, naming: ToolNaming) -> Vec<String> {
         MockStep::Reasoning { text, .. } => {
             vec![item(json!({ "type": "reasoning", "text": text }))]
         }
+        // `exec --json` prints a retry as a top-level `error` line, with no
+        // flag that tells it from the error of a turn that fails.
+        MockStep::RetryNotice { .. } => vec![json!({
+            "type": "error",
+            "message": "Reconnecting... 2/5 (unexpected status 503 Service Unavailable)",
+        })
+        .to_string()],
         // Kinds the stream carries that the reader does not read, as the CLI writes them.
         MockStep::UnknownLine { .. } => vec![
             json!({ "type": "thread.renamed", "name": "something new" }).to_string(),

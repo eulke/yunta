@@ -931,6 +931,17 @@ binary that would leave processes behind on cancellation. Windows becomes a
 target when a process layer with the same guarantees exists and its
 cancellation tests pass on a Windows runner.
 
+At every end of a session, nothing its CLI started is left running if it
+still hangs from the CLI, in any process group, or if it carries the
+session's mark, `YUNTA_SESSION_MARK`, wherever its parent is. The same holds
+when `yunta cancel` or `yunta close` settles a run whose engine died. Linux
+shows the mark of every process of the user. macOS can hide the environment
+of its own platform binaries (`/bin/sleep`, `sh`, `zsh`, `perl`, `ruby`) from
+every other process, and where it does, a process running one of them is
+found only while it hangs from the CLI. Out of reach on both: a process that cleared its
+environment and left the CLI's tree, and one the system starts at an agent's
+request, such as a service. Nothing ties either to the session.
+
 A lock's holder is asked about by signal on every platform, and a holder
 that cannot be asked about — a process of another user — keeps its lock.
 On Linux the holder's start time, read from `/proc`, also tells a reused

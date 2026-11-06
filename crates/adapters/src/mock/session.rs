@@ -38,6 +38,10 @@ pub(super) struct MockSession {
     /// The process a refused kill leaves running. It is ended once the script
     /// has ended, so a session that finished leaves no process behind.
     stand_in: Option<StandIn>,
+    /// The command a `leave_behind` kill names as one that would not die.
+    /// Nothing here ends it: it runs on past the session, for the run's
+    /// registry to name.
+    left: Option<StandIn>,
     /// Whether the player still plays its script. The player clears it before
     /// its stream closes, so a reader that has seen the stream end sees it too.
     playing: Arc<AtomicBool>,
@@ -65,7 +69,11 @@ pub(super) fn start(
     let playing = Arc::new(AtomicBool::new(true));
     let stops = Stops::of(&script.outcome, Arc::clone(&interrupt), Arc::clone(&kill));
     let refuses_kill = script.kill == Some(KillBehavior::Refuse);
-    let stand_in = refuses_kill.then(StandIn::start).flatten();
+    let leaves_behind = script.kill == Some(KillBehavior::LeaveBehind);
+    let stand_in = (refuses_kill || leaves_behind)
+        .then(StandIn::start)
+        .flatten();
+    let left = leaves_behind.then(StandIn::start).flatten();
     let player = tokio::spawn(play(script, events, stops, Arc::clone(&playing)));
     Box::new(MockSession {
         receiver: Some(receiver),
@@ -73,6 +81,7 @@ pub(super) fn start(
         kill,
         refuses_kill,
         stand_in,
+        left,
         playing,
         player,
         interrogated,
@@ -120,7 +129,8 @@ impl AgentSession for MockSession {
 
     /// A kill the script refuses leaves its player running, and says so, for as
     /// long as the player still plays. Once the script has ended there is
-    /// nothing left to refuse, so the kill answers as it does for any session.
+    /// nothing left to refuse, so the kill answers as it does for any session,
+    /// unless the script leaves a command behind: that kill names its group.
     async fn kill(&mut self) -> yunta_core::Result<()> {
         if self.refuses_kill && self.playing.load(Ordering::SeqCst) {
             return Err(AdapterError::Adapter {
@@ -130,7 +140,14 @@ impl AgentSession for MockSession {
         }
         self.kill.notify_one();
         self.end_stand_in_when_done();
-        Ok(())
+        match &self.left {
+            Some(left) => Err(AdapterError::NotClosed {
+                adapter: ID.clone(),
+                groups: vec![left.group()],
+                detail: "a command the session started would not die".to_string(),
+            }),
+            None => Ok(()),
+        }
     }
 
     /// The group of the process a refused kill left running, which the

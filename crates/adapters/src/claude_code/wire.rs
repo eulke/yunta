@@ -31,6 +31,17 @@ pub(crate) fn render(step: &MockStep, _naming: ToolNaming) -> Vec<String> {
             json!([{ "type": "thinking", "thinking": text, "signature": "" }]),
             None,
         )],
+        // The fields Claude Code's headless documentation lists for a retry.
+        MockStep::RetryNotice { .. } => vec![json!({
+            "type": "system",
+            "subtype": "api_retry",
+            "attempt": 2,
+            "max_retries": 10,
+            "retry_delay_ms": 500,
+            "error_status": 503,
+            "error": "server_error",
+        })
+        .to_string()],
         // Kinds the stream carries that the reader does not read, as the CLI writes them.
         MockStep::UnknownLine { .. } => vec![
             json!({ "type": "compact_boundary", "reason": "context" }).to_string(),

@@ -10,9 +10,12 @@
 //!    with `PauseReason::Cancelled`. This command waits
 //!    for that terminal in the log, escalating to SIGKILL on the
 //!    registered process groups if it doesn't arrive in time.
-//! 2. **Engine dead, pgids registered** (a crash) — kill the orphaned
-//!    groups directly, record `run_paused` with
-//!    `PauseReason::CancelledAfterCrash`, delete the leftover registry.
+//! 2. **Engine dead, pgids registered** (a crash) — close what the dead
+//!    engine left, in a session's own order: the groups under each
+//!    registered group while its CLI still lives, the registered groups,
+//!    then whatever carries a mark of the run's sessions, such as a command
+//!    whose parent left. Then record `run_paused` with
+//!    `PauseReason::CancelledAfterCrash` and delete the leftover registry.
 //! 3. **No registry yet** — a run its creator has just handed to an engine
 //!    moves before that engine registers: wait for the registration, then
 //!    case 1. With no engine registering, report what the log says.
@@ -22,7 +25,9 @@ use std::time::Duration;
 use surco::look::Look;
 use yunta_core::events::RunPhaseRaw;
 use yunta_core::process::group::force_kill_group;
+use yunta_core::process::mark::{close_marked, SessionMark};
 use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
+use yunta_core::process::tree::close_groups_under;
 use yunta_core::{describe, Clock, Pid, RunId};
 use yunta_engine::pace::Pace;
 
@@ -178,7 +183,7 @@ async fn await_engine(
                  on its process groups",
                 surco::figures::duration(ENGINE_SHUTDOWN_TIMEOUT)
             ));
-            kill_groups(&registry.process_groups);
+            kill_groups(run_id, &registry.process_groups).await;
             if let Err(e) = signal_process(engine_pid, Signal::SIGKILL) {
                 if !e.is_gone() {
                     warn(describe(&e));
@@ -196,7 +201,7 @@ async fn await_engine(
 /// back to the pool, as `close` gives them back; the run's own state is left
 /// as it is. Answers how many of the named groups are alive as it looks.
 async fn settle_stopped(ctx: &Context, open: &Opened, run_id: &RunId) -> usize {
-    let killed = kill_unstopped_groups(&open.run_dir).await;
+    let killed = kill_unstopped_groups(&open.run_dir, run_id).await;
     if killed > 0 {
         give_back(ctx, open, run_id).await;
     }
@@ -217,7 +222,7 @@ pub(crate) async fn settle_crash(
     registry: &yunta_engine::EngineProcessFile,
     redactor: &yunta_core::Redactor,
 ) -> Result<(), CliError> {
-    kill_groups(&registry.process_groups);
+    kill_groups(run_id, &registry.process_groups).await;
     yunta_engine::record_pause_after_crash(
         storage,
         run_id,
@@ -234,18 +239,50 @@ pub(crate) async fn settle_crash(
     Ok(())
 }
 
-/// SIGKILL to every process group the engine registered. A group that is
-/// already gone is the end state wanted; any other refusal is printed,
-/// never hidden. A pgid that isn't a real run process group (see
-/// [`signalable_group`]) is skipped with a loud note rather than signalled.
-fn kill_groups(groups: &[Pid]) {
-    for pgid in groups {
-        if !may_signal(*pgid) {
-            continue;
-        }
+/// Closes what the engine of `run_id` left: the groups under each group it
+/// registered, while its CLI still lives; SIGKILL to the registered groups;
+/// then whatever still carries a mark of the run's sessions. A group that is
+/// already gone is the end state wanted; any other refusal is printed, never
+/// hidden. A pgid that isn't a real run process group (see
+/// [`signalable_group`]) is skipped with a loud note rather than walked or
+/// signalled.
+async fn kill_groups(run_id: &RunId, groups: &[Pid]) {
+    let groups = signalable(groups);
+    close_under(&groups).await;
+    for pgid in &groups {
         if let Err(e) = signal_group(*pgid, Signal::SIGKILL) {
             warn(describe(&e));
         }
+    }
+    close_marks(run_id).await;
+}
+
+/// The groups of `groups` that [`may_signal`] admits; each one it refuses is
+/// warned about once.
+fn signalable(groups: &[Pid]) -> Vec<Pid> {
+    groups
+        .iter()
+        .copied()
+        .filter(|pgid| may_signal(*pgid))
+        .collect()
+}
+
+/// Closes every group under each of `groups`, found by parent links while
+/// the CLI leading it still lives. What would not close is printed.
+async fn close_under(groups: &[Pid]) {
+    for group in groups {
+        if let Err(e) = close_groups_under(*group).await {
+            warn(e.to_string());
+        }
+    }
+}
+
+/// Closes whatever carries a mark of `run_id`'s sessions, wherever its parent
+/// is: what left the registered groups' trees. What would not close is
+/// printed.
+async fn close_marks(run_id: &RunId) {
+    if let Err(e) = close_marked(&SessionMark::of_run(run_id)).await {
+        warn(e.to_string());
     }
 }
 
@@ -262,23 +299,27 @@ fn may_signal(pgid: Pid) -> bool {
     false
 }
 
-/// SIGKILL to every process group a stopped run's registry names, as the crash
-/// path does: the groups its engine could not stop, which hold the run's
-/// checkout taken while they run. A group whose leader has exited is signalled
-/// too, since its members may still run. Each group is killed until none of its
-/// members can run. Answers how many of the named groups still answered when it
-/// looked.
-async fn kill_unstopped_groups(run_dir: &std::path::Path) -> usize {
+/// SIGKILL to every process group a stopped run's registry names, in the
+/// crash path's order: the groups its engine could not stop, which hold the
+/// run's checkout taken while they run. The groups under each are closed
+/// first, and what carries a mark of the run's sessions last. A group whose
+/// leader has exited is signalled too, since its members may still run. Each
+/// group is killed until none of its members can run. Answers how many of the
+/// named groups still answered when it looked.
+async fn kill_unstopped_groups(run_dir: &std::path::Path, run_id: &RunId) -> usize {
     let yunta_engine::Registry::Read(registry) = yunta_engine::read_registry(run_dir) else {
         return 0;
     };
     let groups = &registry.doc.process_groups;
     let running = answering(groups);
-    for pgid in groups.iter().copied().filter(|pgid| may_signal(*pgid)) {
+    let groups = signalable(groups);
+    close_under(&groups).await;
+    for pgid in groups {
         if let Err(e) = force_kill_group(pgid).await {
             warn(describe(&e));
         }
     }
+    close_marks(run_id).await;
     running
 }
 
@@ -300,8 +341,20 @@ fn signalable_group(pgid: Pid) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::signalable_group;
+    use super::{signalable, signalable_group};
     use yunta_core::Pid;
+
+    /// The groups a registry names are walked and signalled only once
+    /// `signalable` admits them, so init's group is neither walked nor
+    /// signalled, and the run's own groups are both.
+    #[test]
+    fn init_s_group_is_neither_walked_nor_signalled() {
+        let named = [
+            Pid::try_from(1u32).unwrap(),
+            Pid::try_from(4321u32).unwrap(),
+        ];
+        assert_eq!(signalable(&named), vec![named[1]]);
+    }
 
     #[test]
     fn a_run_never_signals_init_or_a_lower_group() {

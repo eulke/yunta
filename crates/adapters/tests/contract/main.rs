@@ -8,6 +8,7 @@
 mod actions;
 mod cases;
 mod process;
+mod retry;
 mod said;
 mod subject;
 mod wire;
@@ -149,6 +150,11 @@ macro_rules! adapter_contract {
                 .await
             }
 
+            #[tokio::test]
+            async fn a_retry_notice_ends_nothing() {
+                retry::a_retry_notice_ends_nothing(&$subject).await
+            }
+
             $( $process!($subject); )?
         }
     };
@@ -170,6 +176,32 @@ macro_rules! process_cases {
         #[tokio::test]
         async fn prompt_travels_by_stdin_never_argv() {
             process::prompt_travels_by_stdin_never_argv(&$subject).await
+        }
+
+        #[tokio::test]
+        async fn the_clis_environment_carries_the_sessions_mark() {
+            process::the_clis_environment_carries_the_sessions_mark(&$subject).await
+        }
+
+        #[tokio::test]
+        async fn a_command_in_a_group_of_its_own_is_gone_after_kill() {
+            process::a_command_in_a_group_of_its_own_is_gone_after_kill(&$subject).await
+        }
+
+        #[tokio::test]
+        async fn a_command_in_a_group_of_its_own_is_gone_after_interrupt_and_kill() {
+            process::a_command_in_a_group_of_its_own_is_gone_after_interrupt_and_kill(&$subject)
+                .await
+        }
+
+        #[tokio::test]
+        async fn an_orphaned_command_is_gone_after_kill() {
+            process::an_orphaned_command_is_gone_after_kill(&$subject).await
+        }
+
+        #[tokio::test]
+        async fn an_orphaned_command_is_gone_once_its_stream_ends() {
+            process::an_orphaned_command_is_gone_once_its_stream_ends(&$subject).await
         }
 
         #[tokio::test]

@@ -4,6 +4,7 @@
 use std::time::{Duration, Instant};
 
 use yunta_core::port::{AgentSession, SessionRequest};
+use yunta_core::process::mark::MARK_VAR;
 use yunta_core::{AdapterSettings, Pid, Secret};
 use yunta_testkit_core::adapter::{child_pid_fifo, drain, drain_for_exit};
 use yunta_testkit_core::adapter::{grandchild_pid, wait_until_gone, write_lines};
@@ -72,6 +73,98 @@ pub async fn prompt_travels_by_stdin_never_argv(subject: &dyn Subject) {
     assert!(!argv.contains("the whole brief"), "{argv}");
     let read = tokio::fs::read_to_string(&stdin).await.unwrap();
     assert_eq!(read, prompt);
+}
+
+/// The CLI starts with the session's mark in its environment, which every
+/// process it starts inherits.
+pub async fn the_clis_environment_carries_the_sessions_mark(subject: &dyn Subject) {
+    let (dir, mut req) = fresh();
+    let environment = dir.path().join("env.txt");
+    knob(subject, &mut req, "ENV_FILE", environment.display());
+    let mark = format!("{MARK_VAR}={}", req.mark.as_str());
+    drain(spawn_live(subject, req).await).await;
+    let read = tokio::fs::read_to_string(&environment).await.unwrap();
+    assert!(
+        read.lines().any(|line| line == mark),
+        "{mark} not in:\n{read}"
+    );
+}
+
+/// A process the test started, killed when the test ends, passed or not.
+struct Started(Pid);
+
+impl Drop for Started {
+    fn drop(&mut self) {
+        // best-effort: a process already gone is what the test wanted.
+        let _ = yunta_core::process::signal::signal_process(
+            self.0,
+            yunta_core::process::signal::Signal::SIGKILL,
+        );
+    }
+}
+
+/// The pid the command a scripted CLI started writes to `fifo` once it runs.
+async fn started(fifo: &std::path::Path) -> Started {
+    let pid: u32 = grandchild_pid(fifo).await.parse().unwrap();
+    Started(Pid::try_from(pid).unwrap())
+}
+
+/// A command the CLI started in a group of its own, still hanging from the
+/// CLI, is gone once the session is killed: a signal to the CLI's group never
+/// reached it.
+pub async fn a_command_in_a_group_of_its_own_is_gone_after_kill(subject: &dyn Subject) {
+    let (dir, mut req) = fresh();
+    let fifo = child_pid_fifo(dir.path());
+    knob(subject, &mut req, "GROUP_CHILD", fifo.display());
+    knob(subject, &mut req, "LINGER", 1);
+    let mut session = spawn_live(subject, req).await;
+    let command = started(&fifo).await;
+    session.kill().await.unwrap();
+    wait_until_gone(command.0).await;
+}
+
+/// A command the CLI started in a group of its own is gone once the session
+/// is ended as the engine ends one it stops: an interrupt the CLI leaves at,
+/// then a kill. Once the CLI has left, no parent link leads to the command,
+/// so the interrupt closes it first, while the CLI still lives.
+pub async fn a_command_in_a_group_of_its_own_is_gone_after_interrupt_and_kill(
+    subject: &dyn Subject,
+) {
+    let (dir, mut req) = fresh();
+    let fifo = child_pid_fifo(dir.path());
+    knob(subject, &mut req, "GROUP_CHILD", fifo.display());
+    knob(subject, &mut req, "LINGER", 1);
+    let mut session = spawn_live(subject, req).await;
+    let command = started(&fifo).await;
+    session.interrupt().await.unwrap();
+    session.allow_exit(GRACE).await;
+    session.kill().await.unwrap();
+    wait_until_gone(command.0).await;
+}
+
+/// A command whose parent left before the session ended, now a child of
+/// pid 1, is gone once the session is killed: it carries the session's mark.
+pub async fn an_orphaned_command_is_gone_after_kill(subject: &dyn Subject) {
+    let (dir, mut req) = fresh();
+    let fifo = child_pid_fifo(dir.path());
+    knob(subject, &mut req, "ORPHAN_CHILD", fifo.display());
+    knob(subject, &mut req, "LINGER", 1);
+    let mut session = spawn_live(subject, req).await;
+    let command = started(&fifo).await;
+    session.kill().await.unwrap();
+    wait_until_gone(command.0).await;
+}
+
+/// A command whose parent left is gone once the session's stream ends with
+/// no line that ends it, when the engine asks how the CLI went.
+pub async fn an_orphaned_command_is_gone_once_its_stream_ends(subject: &dyn Subject) {
+    let (dir, mut req) = fresh();
+    let fifo = child_pid_fifo(dir.path());
+    knob(subject, &mut req, "ORPHAN_CHILD", fifo.display());
+    let session = spawn_live(subject, req).await;
+    let command = started(&fifo).await;
+    drain_for_exit(session).await.unwrap();
+    wait_until_gone(command.0).await;
 }
 
 /// An interrupted session that leaves ends its grace at once, rather than sitting it out.

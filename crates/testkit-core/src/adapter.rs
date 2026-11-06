@@ -68,6 +68,9 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         run_tools_endpoint: None,
         artifact_dir: None,
         scratch_dir: cwd_scratch,
+        mark: yunta_core::process::mark::SessionMark::new(&yunta_core::RunId::from(
+            "01HZYXW8M6D4V2T0R9Q7P5N3K1",
+        )),
     }
 }
 
@@ -165,20 +168,37 @@ pub fn child_pid_fifo(dir: &Path) -> PathBuf {
     path
 }
 
+/// How long a stub has to record its child's pid: far longer than a stub
+/// takes to start its child, even on a loaded machine.
+const PID_DEADLINE: Duration = Duration::from_secs(30);
+
 /// The pid of the blocking child the stub spawned. The path is a fifo,
 /// so the read blocks until the stub opens it and writes: an explicit
 /// rendezvous, not a timed poll. The deadline turns a stub that never
 /// records the pid into a failed test rather than a hung one.
 pub async fn grandchild_pid(child_pid_fifo: &Path) -> String {
-    let fifo = child_pid_fifo.to_path_buf();
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        tokio::task::spawn_blocking(move || std::fs::read_to_string(fifo)),
-    )
-    .await
-    .expect("the stub records the child pid before the deadline")
-    .expect("the pid reader joins")
-    .expect("the child-pid fifo reads")
-    .trim()
-    .to_string()
+    grandchild_pid_within(child_pid_fifo, PID_DEADLINE).await
 }
+
+pub(crate) async fn grandchild_pid_within(child_pid_fifo: &Path, deadline: Duration) -> String {
+    let fifo = child_pid_fifo.to_path_buf();
+    let reading = fifo.clone();
+    let mut reader = tokio::task::spawn_blocking(move || std::fs::read_to_string(reading));
+    let Ok(read) = tokio::time::timeout(deadline, &mut reader).await else {
+        // The reader blocks in `open` until a writer comes, and a runtime
+        // waits for its blocking tasks before it ends: a writer of our own
+        // releases it.
+        // blocking: on a thread the runtime never waits for, in case the stub came first.
+        std::thread::spawn(move || drop(std::fs::OpenOptions::new().write(true).open(fifo)));
+        // best-effort: the reader only has to end; what it read is not looked at.
+        let _ = reader.await;
+        panic!("the stub records the child pid before the deadline");
+    };
+    read.expect("the pid reader joins")
+        .expect("the child-pid fifo reads")
+        .trim()
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests;

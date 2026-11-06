@@ -58,3 +58,9 @@ failed run instead of a refused resume.
 Not a `--force` on `resume`. It would put two engines on one run again, and each case has its way: `yunta cancel`
 stops an engine that lives, an engine that is gone is replaced with nothing to pass, and a lock nothing here can
 check names its file for a person to delete.
+
+### No hunt for a process nothing ties to its session
+Not a search by name, by working directory or by start time for what a session's CLI might have started. A
+session's end closes what still hangs from its CLI and what carries its mark; a process that cleared its
+environment and left the CLI's tree, or one the system starts at an agent's request, such as a service, keeps
+neither link. A guess could close one of the person's own processes, which a run must never touch.

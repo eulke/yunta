@@ -1,170 +1,187 @@
-# Implementation Plan: `run-words`
+# Implementation Plan: `session-ends`
 
-Spec: `SPEC-run-words.md`, approved on 2026-11-05. Status: **approved on 2026-11-05**. Task list: `tasks/todo.md`.
-Base: `feature/yunta-tui` at `3456baea`, on `main` at `34790ab8`, which had not moved when this was written.
+Spec: `SPEC-session-ends.md`, approved on 2026-11-06. Status: **approved on 2026-11-06**, with the dependency of decision 12. Task list: `tasks/todo.md`, written in the next phase.
+Base: `feature/yunta-tui` at `7d2752fe`, on `main` at `34790ab8`, which had not moved when this was written.
 
 ## Overview
 
-Where the engine records a note's digest, it also hands the note's words, redacted with the session's secrets, to the run's in-memory store of what was said. The store keeps the recent past and hands each new frame to every reader without waiting for any of them. One Unix socket per run serves the store to other processes of the same user; `engine.json` names where it is, and every terminal removes it. The observer hands the same frame to the attached region. The painter keeps the last thing said by each working node and draws it as one row at a terminal, whether the frame came from the observer or from the socket. No event, no field of the log, no file holding words and no dependency is added.
+The Codex parser stops reading a top-level `error` line as the end of a turn, so only `turn.completed` and `turn.failed` end one, and the adapter contract gains a retry notice in every dialect. Each session's CLI is started with a mark in its environment that names its run and is unique to the session. Every end of a session then does three things in `core/process`: it walks the CLI's tree by parent links and closes every group under it, it closes the CLI's own group, and it sweeps the user's processes for the mark and closes what carries it. The engine ends a finished session through that same verified close instead of the unverified signal its drop sends today. `yunta cancel` and `yunta close` do the same for a run whose engine died, from the run's id alone. One dependency is added, on macOS only, to read another process's environment.
 
 ## Architecture Decisions
 
-**1. One frame, `Said`, in a new engine module.**
-- It names the run, the node, the session, the task when there is one, the seq of the note's digest, when it was said, the text, whether the text was cut, and how many frames the reader missed before it. A version field comes first.
-- On the socket it is one JSON object per line, written by the engine and never read from the reader. A reader skips a line whose version it does not know and keeps reading, so an engine newer than its reader costs words, never the follow.
-- It lives in the engine because the engine produces it and the CLI already reads the engine's types (`Observed`, `Engine`). `run_tools::words` already names what the engine says to an agent, so the module is named after what a session said, and its `//!` says what it is not.
-- Not an event and not in `yunta-core`'s schemas: nothing persists it, and no person or workflow writes it.
+**1. Codex: an `error` line is no event.**
+- `codex/parse.rs` maps `ThreadEvent::Error` to no event; `turn.failed` keeps mapping to `Failed` with its message, so `failure_cause` classifies a refused model, a reached limit and a lost service as at the base.
+- The `//!` of `parse.rs` says why: the CLI prints the same line for a retry it goes on from and for the error a `turn.failed` then carries.
+- A stream that closes with no terminal line stays a session that died (`DispatchOutcome::Crashed`), as the port's contract already says. Nothing reads the last `error` line back.
 
-**2. The store: the recent past under one lock, and a broadcast for what comes.**
-- A `std::sync::Mutex` holds the last 64 frames within 256 KiB, and a `tokio::sync::broadcast` sender hands each new frame to the readers. Handing a frame over pushes it, drops the oldest past either bound, and sends it, all under the lock. A reader subscribes and copies the recent past under the same lock, so no frame reaches it twice or not at all.
-- `broadcast::send` never waits. Each reader's queue is bounded by the channel's capacity. A reader that falls behind gets `Lagged(n)`, and its next frame carries `missed: n`. That is exactly the policy the spec asks for, from a crate the engine already uses.
-- A text longer than 16 KiB is cut at a character boundary, and its frame says so. Each bound is a numeric const with its reason.
-- Why not one channel per reader: it would rebuild the lag count by hand, and each send would walk the readers on the run's own task.
+**2. The retry notice, in the contract and the mock.**
+- The contract's `Step` gains `RetryNotice`. Its wire writes it as each CLI does. Claude Code prints `{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"retry_delay_ms":500,"error_status":503,"error":"server_error"}`, the fields its documentation lists. Codex prints `{"type":"error","message":"Reconnecting... 2/5 (unexpected status 503 Service Unavailable)"}`.
+- The mock's `MockStep` gains the same step, rendered by `claude_code/wire.rs` and `codex/wire.rs` as above, so a mock fixture in the Codex dialect goes through the parser that changes.
+- The contract case runs on all three subjects: a session that prints a retry notice and then completes ends `Completed`. It fails at the base on `codex` and on the mock in the Codex dialect.
 
-**3. Where the socket lives.**
-- `scratch/live.sock` when its path fits the platform's limit: 103 bytes on macOS and 107 on Linux, the size of `sun_path` minus its closing NUL. One const per target, with that reason.
-- Otherwise `/tmp/yunta-<uid>/<run id>.sock`, which is 46 bytes. The directory is created with mode 0700. If it already exists, it must be a directory, not a link, owned by this uid, with no group or other bits. If it is anything else the run has no socket, and the engine says why in its tracing.
-- `/tmp` and not `$TMPDIR`: the path is the same whatever environment the engine was started from, and it is short on every host. A reader never computes the path: it reads it from `engine.json`.
-- The uid comes from `yunta-core`, through `rustix::process::getuid`, which the workspace already compiles with its `process` feature and which needs no `unsafe`.
-- This file work lives in the new module, and each `std::fs` call carries its `// blocking:` reason. The engine's filesystem smell exempts `process_registry.rs` itself, which is at 468 lines, and not the files beside it (corrected while writing the task list).
+**3. The mark.**
+- `SessionMark` lives in `core/process/mark.rs`: the run's id and a uuid v4 minted when the session is planned. Its value is `<run id>.<uuid>`, carried in `YUNTA_SESSION_MARK`.
+- The variable's name holds none of `KEY`, `SECRET` or `TOKEN`. Neither the value nor the name is secret.
+- `SessionMark::of_run(&RunId)` is what `yunta cancel` and `yunta close` match: every mark of that run.
+- `SessionRequest` gains `mark: SessionMark`, built only in `run/session_plan.rs`, the one place a request is composed. `port/session.rs` is at 497 lines, so `SessionEnv` and `RunToolsEndpoint` move to a sibling module of `port` first, with no other change.
+- The subprocess launch puts the mark in the CLI's environment itself, so no adapter can forget it. The mock ignores it, since it runs no process.
 
-**4. The socket opens with the registry and closes with it.**
-- `build_ctx` binds it right after `open_registry`, inside the runtime that `execute_run` runs on. A socket already at the path is removed first, only if it is a socket. The engine holds the run's lock, so nothing else can be using it.
-- The socket is set to 0600 after binding. Each connection is admitted only if `peer_cred().uid()` is the engine's own uid. Between `bind` and `chmod` the umask's mode already leaves other users without write permission, and the uid check closes that window regardless.
-- Each admitted reader gets its own task. The task writes the recent past, then each frame, serializing it there and never on the run's path. A reader that never reads blocks only its own task, until the broadcast drops frames for it.
-- The handle lives in `RunCtx`, beside the registry. Dropping it cancels the accept loop and every reader task, and removes the file. `RunCtx` drops with the invocation: at a finish, a pause, a cancel or an error. A crash leaves the file behind, and the next engine for the run replaces it.
-- A child run has its own `execute_run`, so it has its own registry and its own socket. A promotion's successor is another invocation, with another socket.
+**4. Codex keeps the mark in its commands' environment.**
+- `codex/config.rs` adds `-c shell_environment_policy.set.YUNTA_SESSION_MARK=<value>` through `ConfigOverride`, which already quotes every value.
+- Codex adds `set` after every filter but `include_only`. A person's own policy with an `include_only` that leaves the name out still drops the mark. Then only the walk reaches those commands, and `docs/adapters.md` says to name the variable there.
+- This corrects one sentence of the spec, which says a person's own policy cannot drop the mark; the spec is updated with this plan.
 
-**5. `engine.json` names it, and the engine reading carries it.**
-- `EngineProcessFile` gains `words: Option<PathBuf>`, with a serde default and skipped when empty. Its schema stays at version 1: the file does not deny unknown fields, so an older binary reading a newer file ignores the field. A test holds that.
-- `ProcessRegistry::clear` empties the field: when the file stays at a terminal to name a group the engine could not stop, it no longer names a socket.
-- `Engine`, the reading `status` and the follower take from the registry, gains `words`, named only while the engine reads alive. `Engine::this` names none, because the attached region never connects to its own socket.
+**5. The walk, in `core/process/tree.rs`.**
+- `groups_under(group: Pid) -> Vec<Pid>` starts from every member of `group`, not only its leader, so a leader that exited still has its members walked.
+- It follows children by parent pid to the bottom: `libproc`'s `ByParentProcess` filter on macOS, and `procfs` on Linux, both already dependencies. It collects every group it meets other than `group` itself.
+- It never returns the caller's own group (`getpgrp()`), nor a group id of 1 or less.
+- `close_groups_under(group)` closes each one with `force_kill_group`, killed until no member can execute, and names every group that would not close.
+- It is synchronous on its read, so a drop can use it too. `group.rs` is at 469 lines, so the walk gets its own module.
 
-**6. The tap is the note.**
-- `stream_session` builds the session's redactor from its request before the request is moved: the declared secrets bound in its environment, plus the rail's token and the run tools' token. That is what the session's stderr tail is redacted with, plus the token that the adapter adds to the environment later. It is one function, on `SessionRequest`, in `yunta-core`.
-- `note()` records the digest as it does today, takes the digest's seq, and hands the redacted text through a new `SessionObserver::said` method whose default ignores it. `RunCtx` implements it: it stamps the run and the time from the run's clock, hands the frame to the store and then to `RunObserver::said`.
-- Before the session has opened there is no session to name, so nothing is handed over. The stream guard already fails any line that comes before the opening.
-- Why not through `RunLog`: it is the one door to the log, and words never go through it. The observer's `//!` gains this second door: what was said reaches an observer through `said`, never through the log's mirror.
+**6. The sweep, in `core/process/mark.rs`.**
+- `marked(mark_or_run) -> Vec<(Pid, SystemTime)>` lists this user's processes whose environment holds the mark, each with the start time `process_start` reads.
+- On Linux it reads `/proc/<pid>/environ` through `procfs`. On macOS it reads `KERN_PROCARGS2` through the dependency of decision 12.
+- `close_marked(…)` signals a pid with SIGKILL only while `process_start` still answers the start time it was found with, and repeats until a pass finds nothing marked, within a bound. It never signals the caller, nor a pid of 1 or less.
+- A process that will not die within the bound is named in the error.
+- A session's sweep reads the environment only of the user's processes that started no earlier than a minute before its CLI: `Marks::Session` carries the CLI's start. On macOS the candidates are listed as the walk lists the table, through `libproc`'s BSD info (0.3 ms), and `sysinfo` reads only their environments: a listing through `sysinfo` costs about 6 ms by itself, measured. A run's sweep from `yunta cancel` or `yunta close` has no start and reads every process. Added after Task 14 measured 7 ms a sweep for about 570 processes (the user's choice).
+- macOS hides the environment of its own platform binaries (`/bin/sleep`, `sh`, `zsh`, `perl`, `ruby`) from every other process, measured at Checkpoint A. Such a process reads as carrying no mark, never as an error, so the sweep goes on with the rest. On macOS a process whose parent left is found only when it runs another binary, as `node`, `python3` or one built apart does; the docs say so (the user's choice at Checkpoint A, over the walk alone). GitHub's macOS runner shows those environments, so this holds only where macOS hides them, and the test compares the sweep with what `ps` shows (corrected after the module's commit).
 
-**7. The attached region gets the frame from the observer.**
-- `RunObserver::said(&self, &Said)` has a default that ignores it, so the testkit's observers and the engine's tests do not change.
-- `Feed` implements it with `try_send(Beat::Said)`. A full queue drops the frame, because words are not evidence and the next thing said replaces it.
+**7. Every end of a `SubprocessSession`.**
+- `kill` does three things, in this order: the walk and close of the groups under the CLI's group, the close of the CLI's own group as today, and the sweep of the session's mark.
+- `exit` does the same three, for a stream that ended with no terminal line. There the CLI has usually exited already, so the walk finds nothing and the sweep is what reaches its commands.
+- `interrupt` walks and closes the groups under the CLI's group before it sends SIGINT. The engine interrupts only to begin an end (cancel, timeout, budget), and a CLI that leaves at the SIGINT leaves its commands with no parent link to follow. On macOS, where the sweep cannot see `sleep` or a shell, such a command then outlived `yunta cancel` of a live engine (measured in Task 12). What that walk could not close is kept, and the `kill` that follows answers for it. Corrected while implementing.
+- `force_kill_group` looks again 1 ms after its first signal, then every 10 ms as before, within the same bound of about a second. Before, it waited 10 ms after the signal, which every end of a group that dies at once paid. Added after Task 14 measured it (the user's choice).
+- The drop does one pass of each synchronously, with SIGKILL and no wait: it is the last resort for a session nobody ended.
+- The error of `kill` and `exit` names every group and pid that would not close.
+- The port's kill contract says what is true: the whole tree, and what carries the session's mark, and nothing else.
 
-**8. The row: the painter keeps the last thing said, and the view draws it.**
-- The painter keeps the last frame per node of the run it draws. A frame of another run, such as a child's, is ignored. When the painter moves onto a successor it starts empty, and an entry is dropped when its node is no longer working, so a rerouted node never shows its last attempt's sentence.
-- `Region::show` hands those frames to `view::node_rows`. The row comes after `tasks running:` and before the calls. Its label, `says:`, or `T001 says:` for a task's session, is `Tone::Muted`. The sentence is `surco::prose::first_sentence` of the text in `Tone::Plain`, cut by the region's `fit`. `surco::paint` already turns a control character into a space, and a test sends an escape in what was said.
-- Only a `Draw::Live` region draws it. `Draw::Lines` never sees a frame, so nothing said goes off a terminal: not to a pipe, not under `TERM=dumb`, and not to the `detached.log` of a `--detach` engine. `--json` has no surface.
-- A frame moves no spin and resets no quiet clock: those are read from the log, which receives the digest's own event.
+**8. The engine ends a finished session through `kill`.**
+- Today a session that reached its terminal line is released and dropped, and its drop sends SIGKILL to the CLI's group, with nothing checking that it closed.
+- `read_and_release` now calls `session.kill()` once a terminal outcome is read, before `release`. The CLI said everything it had to say, so no interrupt and no grace come first; a cut-short session keeps `end_running`.
+- A `kill` that fails becomes `DispatchError::NotStopped`, as a cut-short session's does.
+- The registration keeps the CLI's group, and adds each group the error names, so the checkout stays held while anything of the session may still write it.
 
-**9. The follower listens to the socket the registry names.**
-- The follow loop already reads the registry once a second. When the `words` path it reads differs from the one it listens to, it stops the old reader and starts `listen(path)`, a task that hands each frame to the surface through a new `Surface::hear`. That covers a follower that starts before the engine binds, a resume, and a successor.
-- A refused or failed connection gives no words and is tried again at the next registry read. A run with no socket is followed as today.
-- The reader is a function in the engine module of decision 1, so `control` and `tui` read the socket the same way.
+**9. `yunta cancel` and `yunta close` after the engine.**
+- `kill_groups` (the escalation and the crash paths) and `kill_unstopped_groups` (the stopped path) first walk and close the groups under each registered group. Then they signal the registered groups as today, and sweep `SessionMark::of_run(run_id)` last.
+- The registered groups are the run's own, so walking all of them is what "the run's whole tree" means. `may_signal`'s refusal of a group of 1 or less stays.
 
-**10. Every adapter, held by the contract.**
-- A contract case: what a session says reaches the stream whole and in order, and its reasoning never does.
-- The contract's `Step` gains reasoning, rendered as each CLI writes it: Claude's `thinking` block and Codex's `reasoning` item. The mock gains a `reasoning` fixture step, which it renders as its dialect's line and which its parser drops, so the mock expresses the fact through the same parser and the case runs on every subject. The step's `///` says what it stands for: the closed set of steps lives in the type, and no document lists it (corrected while writing the task list).
-- In whole runs, each of `claude-code` through its stub, `codex` through its stub and `mock` says something that a test reader gets off the socket.
+**10. Stubs and tests.**
+- The two stubs gain `<NAME>_STUB_GROUP_CHILD`, which starts `sleep` in a group of its own, and `<NAME>_STUB_ORPHAN_CHILD`, which starts `python3` sleeping in a group of its own from a shell that exits at once. Both write the child's pid to a file the test waits on. The group child runs through `perl -e 'setpgrp(0, 0); exec …'`, and the orphan is `python3`, whose environment macOS lets another process read, so the orphan case holds on both platforms. Both are present on macOS and on the Linux runners.
+- The contract's process cases gain:
+  - a command in a group of its own is gone after `kill`, after an interrupt the CLI leaves at followed by `kill`, and after the stream ends by itself;
+  - an orphaned one is gone after both.
+- Corrected while implementing: each stub waits until each command it starts is in its own group and has written its pid before it prints, because a session that ends at its last line otherwise closes the stub's group while the command is still joining one of its own. A `<NAME>_STUB_SAID_FILE` says the stub's lines are all printed, so a test kills the engine only once the stub writes no more. An engine killed mid-write takes the stub with it by SIGPIPE.
+- Core tests start real processes and check the process table, and every test kills what it started at its end.
 
 **11. What a person and a program rely on is written down.**
-- `docs/guide.md` describes the row and where it never appears. `docs/compatibility.md` describes the socket for a program: where `engine.json` names it, that a frame is one versioned JSON line, that a frame is never evidence, and that a newer version is skipped. `README.md` changes only if its rows describe what a run shows.
-- `.agents/architecture.md` gains the rule: what an agent says reaches other processes only through its run's socket, redacted, never on disk or in the log, held by the engine's test target.
-- The `//!` this module makes false is rewritten: `observer.rs`, `task_cycle/stream.rs`, `process_registry.rs`, `surface/feed.rs`, and the region's view.
+- `docs/adapters.md`: the session's end, the mark, a person's `include_only`, and Codex's retry notices.
+- `docs/compatibility.md`: Platforms, what the process layer guarantees and what stays out.
+- `.agents/architecture.md` gains the rule "Nothing a session's CLI started outlives its session, linked to it or carrying its mark", held by the process tests and the contract.
+- `.agents/choices.md`: the absence, with its reason: a process that cleared its environment and left the tree, and one the system starts at an agent's request.
+- The `//!` this module makes false: `process/mod.rs`, `subprocess.rs`, `launch.rs` (its comment says a group signal reaches the CLI's tool subprocesses), `group.rs`, `cancel.rs`, `codex/parse.rs`.
+
+**12. The dependency: `sysinfo`, on macOS only.** For the user to approve with this plan.
+- `sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }`, under `[target.'cfg(target_os = "macos")'.dependencies]` of `yunta-core`. Linux reads `/proc` through `procfs`, as the rest of the module does.
+- **License:** `sysinfo` is MIT. On macOS it adds `objc2-core-foundation` and `objc2-io-kit`, both `Zlib OR Apache-2.0 OR MIT`. `libc`, `memchr` and `bitflags` are already in the workspace's lock.
+- **deny.toml:** checked against the repository's own `deny.toml` in a scratch project: `bans` and `licenses` pass with no change, because MIT is allowed and each new crate offers it.
+- **Weight:** a minimal release binary on macOS arm64 grows from 433,776 to 519,744 bytes (86 KB) with one sweep in it.
+- **Time:** one sweep that reads the environment of this user's 367 processes took a median of 13.95 ms and at most 72.40 ms over 20 passes.
+- **Toolchain:** its `rust-version` is 1.95, under the 1.98 that `rust-toolchain.toml` pins.
+- **Rejected alternatives:**
+  - writing the `sysctl` call with `unsafe`, which the workspace forbids;
+  - parsing `ps eww`, another tool's text, where a value may hold spaces;
+  - `libproc`, already a dependency, which reads no environment.
 
 ## Dependency Order
 
 ```
-1 the frame and the store
-        │
-        ├──────────────────────────────┐
-        ▼                              ▼
-2 the socket and its reader      3 the tap: a note hands its words over
-        └──────────────┬───────────────┘
-                       ▼
-4 the socket opens with the run, the registry names it
+1 the real CLIs at the base: groups, parents, environment (no code)
                        │
-        ┌──────────────┴──────────────────────┐
-        ▼                                     ▼
-5 the mock says reasoning               8 the row, in the view
-6 the contract                          9 the attached region
-7 every adapter in whole runs          10 the follower listens
-        └──────────────┬──────────────────────┘
-                       ▼
-11 nothing said off a terminal     12 docs and agent docs
-                       │
-                       ▼
-13 measurements   14 the real run   15 the ci job   16 commit
+        ┌──────────────┴───────────────────────────┐
+        ▼                                          ▼
+2 the retry notice in the contract and the mock   4 the walk
+3 Codex: an `error` line is no event              5 the mark and the sweep, the dependency
+                                                  6 the session carries its mark
+                                                   │
+                                                   ▼
+                                     7 every end of a SubprocessSession
+                                                   │
+                                     ┌─────────────┴─────────────┐
+                                     ▼                           ▼
+                        8 the engine ends a finished    9 `yunta cancel` and `yunta close`
+                          session through `kill`
+                                     └─────────────┬─────────────┘
+                                                   ▼
+                                     10 docs, agent docs, the `//!`
+                                                   │
+                                                   ▼
+                      11 measurements   12 the real runs   13 the ci job   14 commit
 ```
 
-Tasks 2 and 3 both need only Task 1. Tasks 5 to 7 touch other files than Tasks 8 to 10, so they could run beside them. The list keeps them in order so that one worktree stays green between tasks. Task 8 needs only the frame of Task 1.
-
-The task list splits three of the tasks this plan first named, because each touched more than five files: the tap and the socket's opening are Tasks 3 and 4, the mock's step and the contract are Tasks 5 and 6, and the row is Tasks 8 and 9.
+Tasks 2 and 3 touch other files than Tasks 4 to 6, so they could run beside them. The list keeps them in order so that one worktree stays green between tasks. Task 6 needs Task 5's `SessionMark`, and Task 7 needs Tasks 4 to 6.
 
 ## Phases
 
-### Phase 1: the words of a run, in the engine
-- Task 1: `Said` and the store: the recent past, cutting a long text, a reader's queue that skips and counts.
-- Task 2: the socket and its reader: where it lives, binding it and replacing a stale one, refusing another uid, serving each reader, removing it.
-- Task 3: the tap: the session's redactor, and `said` from the note to the store and the observer.
-- Task 4: the socket opens with the run: the registry names it, the engine reading carries it, every terminal takes it away.
+### Phase 1: the real CLIs, before any code
+- Task 1: with each real CLI on the base's release build, a one-node run asks the agent to start a long command, once through the shell tool's background mode and once as `cmd &`, and to end its turn. While the session runs, a script reads the command's group, its parent and its environment: a probe variable set on `yunta`'s own environment shows whether a CLI passes its environment on. Once the session ends, the script reads whether the command still runs. A few thousand tokens per CLI.
 
-**Checkpoint A:** a mock run's words read off its socket by a test reader, redacted, with the log unchanged; and a release build's mock runs taking turns with and without three readers, to show early that a reader adds no time. Shown to the user.
+**Checkpoint A:** the results shown to the user. If a CLI does not pass its environment on, or does not start its commands in groups of their own, the spec and this plan are updated and the user is told before any code.
 
-### Phase 2: every adapter
-- Task 5: the mock's `reasoning` step, rendered as each dialect writes it.
-- Task 6: the contract case, with the contract's wire writing reasoning as each CLI does. The stubs print whatever lines they are handed, so they do not change.
-- Task 7: `claude-code` and `codex` through their stubs, and `mock`, in whole runs, a declared secret redacted. The tokens minted for a session are held by a unit test on its redactor, since a scripted session cannot say them.
+### Phase 2: the Codex retry
+- Task 2: the retry notice in the contract's steps and wire, and in the mock's fixture and both wire renderers. The contract case fails on `codex` and on the mock in the Codex dialect.
+- Task 3: the Codex parser. The case passes. A refused model and a reached limit keep their cause and message, and a whole run through the Codex stub with a retry line finishes.
 
-**Checkpoint B:** the contract on every subject and the whole runs, through the wrapper.
+**Checkpoint B:** the adapter suite and the whole run, through the wrapper.
 
-### Phase 3: the row
-- Task 8: the row in the view.
-- Task 9: the attached region: `RunObserver::said`, `Beat::Said`, the painter's last frame per node. Goldens read before they are kept.
-- Task 10: the follower: `Engine.words`, `Surface::hear`, listening and listening again, the same row as the attached run.
-- Task 11: nothing said off a terminal: a pipe, `TERM=dumb`, `--detach`'s `detached.log`, `--json`.
+### Phase 3: the walk, the mark and the sweep
+- Task 4: `tree.rs`, the walk and the close of the groups under a group, with real processes in the core tests.
+- Task 5: `mark.rs`, the mark, a process's environment read on each platform, and the sweep. `sysinfo` enters here.
+- Task 6: the session carries its mark: `SessionRequest.mark` from the session plan (after moving `SessionEnv` and `RunToolsEndpoint` out of `port/session.rs`), the launch's environment, and Codex's `shell_environment_policy.set`.
 
-**Checkpoint C:** `smells --check`, and the row read at a terminal, attached and followed, with mock sessions.
+**Checkpoint C:** the core and adapter suites; `cargo deny check` with `sysinfo` in the tree.
 
-### Phase 4: what it says
-- Task 12: docs, agent docs, and the `//!` this module makes false.
+### Phase 4: every end
+- Task 7: every end of a `SubprocessSession`, the stubs' two knobs, and the contract's process cases.
+- Task 8: the engine ends a finished session through `kill`, the registry keeps what would not close, and a whole run through each stub leaves nothing after a session's own end.
+- Task 9: `yunta cancel` and `yunta close`: with the engine alive, after its crash, and on a stopped run.
 
-**Checkpoint D:** the whole suite, its count explained against 265 binaries and 4,414 tests on macOS, no binary aborted.
+**Checkpoint D:** `repro.py` on a debug build: every case closed. `smells --check`.
 
-### Phase 5: proof and close
-- Task 13: measured on release builds: how soon a frame reaches a reader, and the time readers add. `repro.sh` again.
-- Task 14: the real run: fragua with `--detach` and its `reviewer` runners on the real `codex`, followed at a terminal up to `ship`, the words of both CLIs kept, then `abort` and `close`.
-- Task 15: every step of the `ci` job.
+### Phase 5: what it says
+- Task 10: docs, agent docs, and the `//!` this module makes false.
 
-**Checkpoint E:** the user reviews the whole diff and the before and after. No commit until approved.
-- Task 16: the commit, the push, the pull request's list and test plan, and CI on Linux and macOS.
+**Checkpoint E:** the whole workspace suite, its count explained against 267 binaries and 4,455 tests on macOS, no binary aborted.
+
+### Phase 6: proof and close
+- Task 11: measured on release builds. Stub runs on the base and on the module take turns, 15 each, and their median time between nodes is compared; the time one session end spends walking and sweeping is measured too. `repro.py` runs again.
+- Task 12: the real runs. Task 1's script runs again on the module, and each command is gone once its session ends. Then a fragua run with `--detach` and `conform` on Codex `gpt-6-luna`, followed at a terminal up to `ship`, then `abort` and `close`, compared with 0.614 s.
+- Task 13: every step of the `ci` job, `cargo deny` among them.
+
+**Checkpoint F:** the user reviews the whole diff, the before and after, and the real runs. No commit until approved.
+- Task 14: the commit, the push, the pull request's list and test plan, CI on Linux and macOS, `cargo clean`.
 
 ## Verification
 
 - Each task names the test that fails first and why, and passes with `cargo test` on its targets through the wrapper.
-- Goldens move only where a session in them says something, and only in Task 9.
+- A test that starts a process waits on the process table, never for a fixed time, and kills what it started at its end, whether it passed or not.
 - `cargo xtask smells --check` at each checkpoint. The gate runs before the commit, with `CARGO_INCREMENTAL=0`.
-- Measurements on release builds are kept in `.plans/yunta-tui/proof/run-words/`, outside git. The bound for a frame reaching a reader: a median under 10 ms, and every frame under 100 ms, the bound a follower's events met in `log-follow`.
+- Results on release builds are kept in `.plans/yunta-tui/proof/session-ends/`, outside git, beside the scripts that produced them and `before.txt`.
 
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Handing a frame over slows the run | High | It costs one lock, one push and one send, and serialization happens in each reader's task. Checkpoint A measures it on a release build before anything draws, and Task 13 measures it again |
-| The path does not fit, or `/tmp/yunta-<uid>` belongs to someone else, and a run gets no words | Med | `engine.json` names no socket and the engine's tracing says why. Tests on macOS go through the short directory and Linux CI through `scratch/`. A unit test holds the choice at the limit |
-| A reader that never reads holds memory | Med | The broadcast's capacity bounds its queue and the kernel bounds its socket buffer. A test leaves a reader unread while the run goes on |
-| A word carries a secret nobody declared | Med | The same exposure the CLI has in its own terminal, and only the same uid reads it. The compatibility doc says so |
-| A crash leaves a socket file behind | Low | It holds nothing. The next engine for the run replaces it, and a reader treats the refused connection as no words |
-| What a session says carries a terminal escape | Med | `surco::paint` turns every control character into a space. Task 8 sends one through the row |
-| `task_cycle/stream.rs` is at 473 lines and passes 500 | Med | The note makes one call into the new module, and the redactor is one field of the context. A split is made if the count says so |
-| The row of the attached run and of the follower drift apart | Med | One painter and one view whoever feeds them. Task 10 compares the two rows on the same run |
-| A test that claims two processes overlap passes when they run in turn | Med | Sessions hold until the test lets them go (mock `hang`, the stubs' linger), and the test waits on what the run writes |
-| A Codex retry notice ends the reviewer's session during the real run | Med | That is the bug `session-ends` fixes. If it happens it is kept as that module's evidence, and the run is resumed only once the cause is known |
-| The real Codex model name is unknown | Low | Read from the user's Codex configuration in Task 14, before the run starts |
+| A finished session's end now waits for its group to be seen empty, plus a sweep of about 14 ms | Med | Task 11 measures the median time between nodes against the base, 15 runs each, and one end's own time. If it shows, the plan comes back to the user with the measurement before anything changes on the run path |
+| The sweep signals a process that is not the session's | High | Only a process whose environment holds the session's own value is signalled, and only while its start time is the one it was found with. The walk never returns the caller's group. Unit tests hold both with a process that carries another mark and one that carries none |
+| A real CLI does not pass its environment to its commands, or clears the mark | High | Task 1 measures it with each real CLI before any code; for Codex the adapter also sets the mark through `shell_environment_policy.set`. A gap goes back to the spec and to the user |
+| Killing a finished CLI at once cuts the write of what `resume` reads | Med | It is what the drop does today, a moment after the terminal line: the signal and its moment stay, and only the check that the group closed is new. The existing resume cases and a real run that resumes a session keep holding it |
+| `perl` is missing on a runner | Low | It is on macOS and on GitHub's Ubuntu images; a stub that cannot start its child fails the test that asked for it, never silently |
+| `sysinfo`'s process read on macOS changes with a new version | Low | The version is pinned by the lock, and the core tests read a real marked process on the macOS runner |
 
 ## Parallelization
 
-One person and one worktree: tasks run in order. Tasks 5 to 7 could run beside Tasks 8 to 10, and Task 12 beside Task 11, but nothing is gained by splitting them.
+None in practice: one worktree, and each phase's tests depend on the one before. Tasks 2 and 3 could run beside Tasks 4 to 6, which touch other files.
 
 ## Open Questions
 
-None. The plan settles the module's name, the readers' queue capacity and the reader's retry from what Tasks 1, 2 and 10 measure, within the bounds the spec sets.
+None. The user approved the dependency of decision 12 with this plan, and the sentence of the spec that decision 4 corrects is updated.
