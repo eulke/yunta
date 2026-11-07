@@ -70,7 +70,7 @@ pub(super) async fn tool_workflow_status(
     let open = ctx.open_run(&run_id).await?;
     let engine = crate::render::engine(&open.run_dir, ctx.clock.now());
     let (events, manifest) = (open.events, open.manifest.doc);
-    let state = yunta_engine::derive(&events);
+    let state = yunta_replay::RunState::replay(&events);
     let decision = crate::json::decision_of(&manifest, &open.run_dir, &state).await?;
     let mut frame = crate::commands::status::progress::frame_of(
         &run_id,
@@ -152,7 +152,7 @@ pub(super) async fn tool_resume_run(
     let open = ctx.open_run(&run_id).await?;
     // Said here because the process below would say it only to `detached.log`,
     // which no caller of this tool reads.
-    let state = yunta_engine::derive(&open.events);
+    let state = yunta_replay::RunState::replay(&open.events);
     super::super::resume::refuse_if_driven(&run_id, &open.run_dir, &state).await?;
     // A run paused on a limit's reset is handed to a resume that waits for
     // the reset first, so it does not spend the limit before it lifts.
@@ -200,7 +200,7 @@ pub(super) async fn tool_answer_questions(
     let open = ctx.open_run(&run_id).await?;
     // Said here because the resume below would say it only to `detached.log`, with
     // the answers already on the log.
-    let state = yunta_engine::derive(&open.events);
+    let state = yunta_replay::RunState::replay(&open.events);
     super::super::resume::refuse_if_driven(&run_id, &open.run_dir, &state).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;

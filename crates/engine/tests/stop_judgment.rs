@@ -6,10 +6,10 @@
 //! grants.
 
 use yunta_core::events::{
-    Decider, EventPayload, NodeEvent, Phase, ScopeEvent, SessionEvent, StopRefusal,
+    Decider, EventPayload, NodeEvent, NodeState, Phase, ScopeEvent, SessionEvent, StopRefusal,
     StopRefusedPayload, TaskStatus,
 };
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 mod common;

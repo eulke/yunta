@@ -13,13 +13,13 @@ use surco::words::Standing;
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
     artifacts, children, findings, gates, node, run, session, AgentMessageType,
-    GateResolvedPayload, LoggedWords, NoteDigest, TokenUsage,
+    GateResolvedPayload, LoggedWords, NodeState, NodeWait, NoteDigest, TokenUsage,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::NonEmpty;
-use yunta_engine::{Happening, NodeState, NodeWait};
 use yunta_render::spend::Breakdown;
 use yunta_render::state::NodeDisplay;
+use yunta_replay::frame::Happening;
 
 use super::super::view;
 
@@ -107,7 +107,7 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
             format!("{} on {}/{}", it.runner, it.chosen.adapter, it.chosen.model),
         ),
         H::Reached { state, elapsed, .. } => {
-            let display = NodeDisplay::of(yunta_engine::node_word(state), Some(state));
+            let display = NodeDisplay::of(yunta_replay::frame::node_word(state), Some(state));
             let worked = elapsed
                 .map(|elapsed| format!(" {sep} {}", duration(elapsed)))
                 .unwrap_or_default();

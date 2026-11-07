@@ -13,7 +13,8 @@ use watch::{watch, Watching};
 use std::path::{Path, PathBuf};
 
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{PriorEstimation, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_replay::history::PriorEstimation;
 use yunta_storage::AsyncStorage;
 
 use crate::commands::{reset_at, spawn_detached_resume, DetachedResumeError};
@@ -324,7 +325,7 @@ pub(crate) struct Closed<'a> {
 /// off the same source every other surface reads.
 async fn closing_of(closed: &Closed<'_>) -> Result<Closing, CliError> {
     let events = closed.storage.events_for_run(closed.run_id.clone()).await?;
-    let state = yunta_engine::derive(&events);
+    let state = yunta_replay::RunState::replay(&events);
     let decision = crate::json::decision_of(closed.manifest, closed.run_dir, &state)
         .await?
         .map(|(node, escalation)| (node, escalation.into_payload()));
@@ -387,9 +388,9 @@ async fn documented(
     warnings: PreRunWarnings,
 ) -> Result<crate::json::RunDocument, CliError> {
     let events = storage.events_for_run(run_id.clone()).await?;
-    let state = yunta_engine::derive(&events);
+    let state = yunta_replay::RunState::replay(&events);
     // This invocation is the engine that drove the run.
-    let engine = yunta_engine::Engine::this(ctx.clock.now());
+    let engine = yunta_replay::registry::Engine::this(ctx.clock.now());
     let decision = match ctx.project.run_dir(run_id.as_str()) {
         Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &state).await?,
         None => None,

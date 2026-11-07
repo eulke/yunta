@@ -259,7 +259,7 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
         "the registration is what caused the status the successor is born with"
     );
 
-    let state = yunta_engine::derive(&events);
+    let state = yunta_replay::RunState::replay(&events);
     assert_eq!(
         state.tasks.status("T001"),
         Some(yunta_core::events::TaskStatus::Done)
@@ -323,7 +323,8 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
         "the commit the work landed at is what the crossing is made of"
     );
 
-    let state = yunta_engine::derive(&bench.storage.events_for_run(&second.run_id).unwrap());
+    let state =
+        yunta_replay::RunState::replay(&bench.storage.events_for_run(&second.run_id).unwrap());
     assert_eq!(
         state.tasks.status("T001"),
         Some(yunta_core::events::TaskStatus::Done)
@@ -403,7 +404,7 @@ async fn successor_works_in_its_predecessors_checkout() {
     let on = yunta_testkit::git_output(&bench.worktree, &["branch", "--show-current"]);
     assert_eq!(on.trim(), format!("yunta/run/{}", successor.run_id));
     let born = bench.storage.events_for_run(&successor.run_id).unwrap();
-    let named = yunta_engine::derive(&born)
+    let named = yunta_replay::RunState::replay(&born)
         .run
         .checkout()
         .map(std::path::Path::to_path_buf);

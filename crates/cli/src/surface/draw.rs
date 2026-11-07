@@ -6,7 +6,7 @@
 //! those are the two answers here.
 
 use surco::glyphs::Glyphs;
-use yunta_engine::Moment;
+use yunta_replay::frame::Moment;
 
 use super::chronicle;
 use super::lines::Lines;
@@ -89,7 +89,7 @@ mod chronicle_tests {
             )
             .build();
 
-        let moments = yunta_engine::chronicle(&events);
+        let moments = yunta_replay::frame::chronicle(&events);
         let written: Vec<String> = moments
             .iter()
             .map(|moment| chronicle::say(moment, surco::glyphs::Glyphs::Ascii).text)

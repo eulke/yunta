@@ -15,7 +15,7 @@ use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
 use yunta_core::reserved::ReservedOption;
 use yunta_core::NonEmpty;
-use yunta_engine::chronicle as derive_chronicle;
+use yunta_replay::frame::chronicle as derive_chronicle;
 
 use super::*;
 

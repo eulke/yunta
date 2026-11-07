@@ -12,8 +12,8 @@ use std::time::Duration;
 use surco::motion::Motion;
 use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::RunId;
-use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 use yunta_render::spend::Breakdown;
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 
 mod children;
 mod said;
@@ -42,7 +42,7 @@ const DETAIL_DEPTH: usize = 2;
 /// the answer is given there, drawn at `look` as an [`Attention`] answered
 /// elsewhere. The engine that asks draws no such row, since its prompt has the
 /// terminal.
-pub(super) fn asked(prompt: &yunta_engine::Prompt, look: &Look) -> Option<Line> {
+pub(super) fn asked(prompt: &yunta_replay::registry::Prompt, look: &Look) -> Option<Line> {
     let row = Attention::elsewhere(advice::asking_on(prompt));
     Terminal::on(*look)
         .block(&Block::Attention(row))
@@ -339,8 +339,8 @@ pub(super) fn working(frame: &RunFrame) -> Vec<&NodeFrame> {
             matches!(
                 node.state,
                 NodeStanding::Reached(
-                    yunta_engine::NodeState::Running { .. }
-                        | yunta_engine::NodeState::Waiting { .. }
+                    yunta_core::events::NodeState::Running { .. }
+                        | yunta_core::events::NodeState::Waiting { .. }
                 )
             )
         })

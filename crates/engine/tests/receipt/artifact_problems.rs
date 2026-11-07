@@ -89,7 +89,7 @@ async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -
         },
     ];
 
-    build_receipt(
+    receipt::closed(
         &bench.run_id,
         &manifest,
         &events,
@@ -225,7 +225,7 @@ fn the_json_receipt_carries_the_counts_as_data() {
         code: DiagnosticCode::Parse(ParseCode::Parse),
         occurrences: 3,
     }];
-    let rendered = render_receipt_json(&receipt).expect("the receipt renders");
+    let rendered = serde_json::to_string_pretty(&receipt).expect("the receipt renders");
     let json: serde_json::Value = serde_json::from_str(&rendered).expect("the receipt is JSON");
     assert_eq!(json["diagnostics"][0]["kind"], "tasks");
     assert_eq!(json["diagnostics"][0]["code"], "parse");

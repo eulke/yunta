@@ -9,7 +9,7 @@ use surco::doc::Doc;
 use surco::look::Look;
 use surco::words::Standing;
 use yunta_core::{Redactor, Responder, RunId};
-use yunta_engine::EngineLiveness;
+use yunta_replay::registry::EngineLiveness;
 
 use super::cancel::settle_crash;
 use crate::context::Context;
@@ -109,7 +109,7 @@ async fn settled_liveness(
 /// checkout that cannot be given back stays the run's until `gc` collects it.
 pub(crate) async fn give_back(ctx: &Context, open: &crate::context::Opened, run_id: &RunId) {
     let manifest = &open.manifest.doc;
-    let bound = crate::project::bound_checkout(&yunta_engine::derive(&open.events));
+    let bound = crate::project::bound_checkout(&yunta_replay::RunState::replay(&open.events));
     let tree = ctx
         .project
         .run_tree(manifest, bound.as_deref(), run_id, &ctx.cwd);

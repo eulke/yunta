@@ -12,9 +12,10 @@ use surco::look::Look;
 use surco::paths;
 use yunta_core::events::NodeState;
 use yunta_core::{NodeId, RunId};
-use yunta_engine::{NodeFrame, NodeStanding, RunFrame, RunState};
 use yunta_render::blocks::FailureDetail;
 use yunta_render::spend::Breakdown;
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
+use yunta_replay::RunState;
 
 use crate::commands::advice;
 use crate::error::CliError;

@@ -171,7 +171,7 @@ async fn prepared<'a>(
         body,
         run_id: ctx.run_id.to_string(),
         receipt: match receipt {
-            true => Some(receipt_so_far(ctx).await?),
+            true => Some(standing_receipt(ctx).await?),
             false => None,
         },
     };
@@ -180,7 +180,7 @@ async fn prepared<'a>(
 
 /// The run's receipt as its log stands, its hash chain verified: what a
 /// pull request opened as the run's last step tells its reviewer.
-async fn receipt_so_far(ctx: &RunCtx<'_>) -> Result<yunta_core::receipt::Receipt, RunError> {
+async fn standing_receipt(ctx: &RunCtx<'_>) -> Result<yunta_core::receipt::Receipt, RunError> {
     let events = ctx.load_events().await?;
     let chain = match ctx.storage.verify_chain(ctx.run_id.clone()).await? {
         yunta_storage::ChainVerification::Intact { events } => {
@@ -190,7 +190,7 @@ async fn receipt_so_far(ctx: &RunCtx<'_>) -> Result<yunta_core::receipt::Receipt
             yunta_core::receipt::EventChainStatus::Broken { seq, detail }
         }
     };
-    Ok(crate::receipt::receipt_so_far(
+    Ok(yunta_replay::receipt::so_far(
         ctx.run_id,
         ctx.manifest,
         &events,

@@ -17,11 +17,11 @@ use yunta_core::events::{
     TokenUsage,
 };
 use yunta_core::{ArtifactKind, Node, NodeId, NodeKind, SpecFile, TaskId};
+use yunta_replay::RunState;
 
 use super::super::node_close::fail_with;
 use super::super::node_exec::NodeEnd;
 use super::super::{RunCtx, RunError};
-use crate::replay::RunState;
 
 /// The node that writes the run's spec again: the one the log accepted
 /// the spec it holds from, when that node opens a session of its own and
@@ -34,7 +34,7 @@ pub(super) fn writer(ctx: &RunCtx<'_>, state: &RunState) -> Option<NodeId> {
         .producer
         .clone()?;
     let workflow = &ctx.manifest.workflow;
-    let kept = crate::modes::included_nodes(workflow, state.run.mode(), state.run.left_out())
+    let kept = yunta_replay::modes::scheduled(workflow, state.run.mode(), state.run.left_out())
         .is_none_or(|ids| ids.contains(&producer));
     let writes = workflow
         .iter_nodes()

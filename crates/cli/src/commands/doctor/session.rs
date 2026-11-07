@@ -264,7 +264,7 @@ struct ProbeFacts {
 impl ProbeFacts {
     /// The facts a probe run's derived state carries: the failure the run's
     /// frame names, and what the probe node and its questions artifact show.
-    fn of(state: &yunta_engine::RunState) -> Self {
+    fn of(state: &yunta_replay::RunState) -> Self {
         let record = state.nodes.get(&PROBE_NODE);
         let questions = ArtifactId::Interpreted {
             kind: ArtifactKind::Questions,
@@ -283,7 +283,7 @@ impl ProbeFacts {
 
     #[cfg(test)]
     fn from_events(events: &[yunta_core::events::StoredEvent]) -> Self {
-        Self::of(&yunta_engine::derive(events))
+        Self::of(&yunta_replay::RunState::replay(events))
     }
 }
 

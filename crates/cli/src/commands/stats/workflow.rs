@@ -10,7 +10,7 @@ use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::width::{cell_width, truncate, INDENT, LABEL_WIDTH};
 use yunta_core::{ModeName, WorkflowName};
-use yunta_engine::{prior_estimation, RunSummary};
+use yunta_replay::history::{PriorEstimation, RunSummary};
 
 use super::format_estimation_line;
 
@@ -19,7 +19,7 @@ use super::format_estimation_line;
 pub(super) struct WorkflowPage<'a> {
     pub(super) name: &'a WorkflowName,
     pub(super) history: &'a [RunSummary],
-    pub(super) findings: Option<yunta_engine::VerificationFindings>,
+    pub(super) findings: Option<yunta_replay::verification_effectiveness::VerificationFindings>,
 }
 
 impl WorkflowPage<'_> {
@@ -73,11 +73,11 @@ fn history_lines(workflow_name: &WorkflowName, history: &[RunSummary], look: Loo
     }
 
     lines.push(Line::new());
-    lines.push(Line::new().plain(match prior_estimation(history) {
+    lines.push(Line::new().plain(match PriorEstimation::of(history) {
         Some(estimation) => format_estimation_line(&estimation, look.glyphs),
         None => format!(
             "estimation: not enough runs yet (need {}, have {})",
-            yunta_engine::MIN_SAMPLES_FOR_ESTIMATION,
+            yunta_replay::history::MIN_SAMPLES,
             history.len()
         ),
     }));
@@ -109,7 +109,9 @@ fn cptv_line(history: &[RunSummary], Look { glyphs, width, .. }: Look) -> String
 /// `stats` or `check` exits non-zero: these are suggestions for a person
 /// to weigh, not errors, each a caution row. `None` when there is
 /// nothing to say, so each caller says nothing at all.
-pub(crate) fn verification_findings(findings: &yunta_engine::VerificationFindings) -> Option<Doc> {
+pub(crate) fn verification_findings(
+    findings: &yunta_replay::verification_effectiveness::VerificationFindings,
+) -> Option<Doc> {
     if findings.is_empty() {
         return None;
     }
@@ -125,7 +127,7 @@ pub(crate) fn verification_findings(findings: &yunta_engine::VerificationFinding
 }
 
 /// One caution row per thing a workflow's history says about its checks.
-fn advice(findings: &yunta_engine::VerificationFindings) -> Checklist {
+fn advice(findings: &yunta_replay::verification_effectiveness::VerificationFindings) -> Checklist {
     let runs = |n| surco::text::counted(n, "run");
     let mut checks = Checklist::default();
     for c in &findings.never_red_criteria {
@@ -155,7 +157,10 @@ fn advice(findings: &yunta_engine::VerificationFindings) -> Checklist {
 }
 
 /// What the history says about a workflow's gates, tasks and modes.
-fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings) {
+fn habits(
+    checks: &mut Checklist,
+    findings: &yunta_replay::verification_effectiveness::VerificationFindings,
+) {
     for g in &findings.always_approved_gates {
         checks.push(
             Found::Caution,
@@ -190,8 +195,8 @@ fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings)
 
 /// Median CPTV/tokens per mode — a plain historical comparison, not a
 /// prediction, so it doesn't gate on
-/// [`yunta_engine::MIN_SAMPLES_FOR_ESTIMATION`] the way
-/// [`prior_estimation`] does: a mode with one run still gets a row, just
+/// [`yunta_replay::history::MIN_SAMPLES`] the way
+/// [`PriorEstimation::of`] does: a mode with one run still gets a row, just
 /// with that run's own numbers as its "median".
 fn mode_table(history: &[RunSummary]) -> Vec<(ModeName, usize, Option<f64>, Option<f64>)> {
     let mut modes: Vec<ModeName> = history.iter().map(|r| r.mode.clone()).collect();
@@ -209,8 +214,8 @@ fn mode_table(history: &[RunSummary]) -> Vec<(ModeName, usize, Option<f64>, Opti
             (
                 mode,
                 runs.len(),
-                yunta_engine::median(&cptv),
-                yunta_engine::median(&tokens),
+                yunta_replay::stats::median(&cptv),
+                yunta_replay::stats::median(&tokens),
             )
         })
         .collect()

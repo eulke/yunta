@@ -258,7 +258,7 @@ async fn reclaim(
         };
         let Some(last) = events.last() else { continue };
 
-        let state = yunta_engine::derive(&events);
+        let state = yunta_replay::RunState::replay(&events);
         let is_terminal = state.ended();
         if !is_terminal {
             if let Some(places) = old_layouts(ctx, pool, &run_id, &state, report).await {
@@ -334,14 +334,15 @@ async fn old_layouts(
     ctx: &Context,
     pool: &yunta_engine::CheckoutPool,
     run_id: &RunId,
-    state: &yunta_engine::RunState,
+    state: &yunta_replay::RunState,
     report: &mut Report,
 ) -> Option<Vec<PathBuf>> {
     let run_dir = ctx.project.run_dir(run_id.as_str())?;
     let liveness = yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe);
     if !matches!(
         liveness,
-        yunta_engine::EngineLiveness::Dead | yunta_engine::EngineLiveness::Unrecorded
+        yunta_replay::registry::EngineLiveness::Dead
+            | yunta_replay::registry::EngineLiveness::Unrecorded
     ) {
         return None;
     }
@@ -381,7 +382,7 @@ async fn pool_owns(
 async fn parked_checkout(
     ctx: &Context,
     pool: &yunta_engine::CheckoutPool,
-    state: &yunta_engine::RunState,
+    state: &yunta_replay::RunState,
     report: &mut Report,
 ) -> Option<PathBuf> {
     let tree = state.run.checkout()?;

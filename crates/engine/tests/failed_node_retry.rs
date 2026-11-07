@@ -58,7 +58,7 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     let (node, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -87,7 +87,7 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
     let (node, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -142,7 +142,7 @@ async fn a_plain_failure_retried_after_its_cause_is_fixed_finishes() {
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("broken"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
     assert_eq!(attempts(&bench, "broken"), 2);
 }
@@ -197,7 +197,7 @@ async fn a_retry_that_fails_again_asks_again_for_the_next_attempt() {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -247,7 +247,7 @@ async fn a_person_who_fixes_the_cause_while_asked_retries_in_the_same_invocation
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("broken"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
     assert_eq!(attempts(&bench, "broken"), 2);
     assert_eq!(
@@ -290,7 +290,7 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
     assert!(current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()

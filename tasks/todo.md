@@ -1,376 +1,452 @@
-# Tasks: `surco-screen`
+# Tasks: `run-state`
 
-Spec: `SPEC-surco-screen.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-06, in implementation**.
+Spec: `SPEC-run-state.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-07, in implementation**.
 
-**How these run:** one at a time, with `incremental-implementation` and `test-driven-development`.
-- Each task names the test that fails first and why. That test is seen failing for that cause before the code that makes it pass. A test that may pass at once says so, and says what it guards.
-- Every task leaves the tree compiling and its tests green.
+**How these run:**
+- One at a time, with `incremental-implementation` and `test-driven-development`, stopping at each checkpoint for the user.
 - `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`.
-- Before a file is edited, `cargo xtask docs --about <files>` runs, and what it prints is kept true.
-- A golden is blessed only with `YUNTA_BLESS=1`, and its diff is read before it is kept.
-- No commit until the user approves at Checkpoint F.
+- No commit until Checkpoint F. Paths are staged by name.
 
-**Three refinements of the plan:**
-1. **The targets are drawn by hand in the two plain environments, `ascii-80` and `unicode-60`.** A hand-written escape is a guess, and these two read as the text they are. The colored environments are blessed once the code draws the targets, and read in their diff (plan decision 6 named `unicode-color-100`).
-2. **The targets wait outside git** (`.plans/yunta-tui/proof/surco-screen/targets/`). Each moves into its golden in the task whose code draws it. Written straight into the catalog's goldens, they would turn its test red for three tasks.
-3. **A task that adds a kind of block touches more than five files.** Each surface's dispatch, the catalog's list of kinds and its goldens all gain one arm or one part. The task is still one thing: one block, drawn everywhere.
+**How a module changes:**
+- Its names change first, in place, with every caller. Then it moves, with every caller's path.
+- Neither step leaves an alias, a re-export or an old name, and the workspace compiles and passes after each.
+- A task that moves a file does it with `git mv` before it edits it.
+- Tasks that rename or move are larger than five files: one path to each item means a name and its callers change in one step. Each of them is mechanical, the compiler names every caller, and the moved bodies are read with `git diff -M` against their old files.
 
-## Phase 1: the one table
+**What fails first:**
+- A rename or a move has no new behavior, so no test can fail for it. Its guard is every test and golden it touches, passing unchanged.
+- The two new tests are seen red for their own cause before they pass.
 
-### Task 1: the style reading
+## Phase 0: the baseline
+
+### Task 1: the base's size and cost, against itself
 
 **Description:**
-- `crates/surco/src/paint/style.rs` holds `Style`, `Color`, `Ansi` (public now), `style`, `erase` and `page`, re-exported by `paint`.
-- `Paint::word`, `Paint::span` and `Paint::erase` write their SGR from `style` and `erase` alone.
-- The clap styles (`paint/help.rs`) and the page's style (`surface/html/style.rs`) read `style` and `page`.
-- `palette` stays private and unchanged.
+- Two release builds of `yunta` at `8c833576`, each kept apart, with the size of each binary.
+- `replay_cost.py`, written from `session-ends`' `ends_cost.py`: the same run of four prompt nodes on the Claude Code stub, taking turns on two binaries for 15 rounds. It prints the median, min and max of `between_secs`, `working_secs` and the wall time.
+- Run base against base.
 
-**Fails first:** `every_span_paints_as_its_style_reads`, in `paint/style/tests.rs`. It does not compile: there is no `style` yet. Once `style` exists, it guards the one table, with every tone, every own fill and line fill, and every layer drawn through `Paint` and through `style`. What holds the refactor is every existing color golden, unchanged.
+**Fails first:** none: a measurement.
 
 **Acceptance criteria:**
-- [x] `style`, `erase` and `page` answer every layer, and `Paint`, the clap styles and the page's style read nothing else from `palette`.
-- [x] `every_span_paints_as_its_style_reads` passes for the sixteen colors and both grounds of 24 bits.
-- [x] Every existing golden of the workspace and the palette's contrast tests pass unchanged.
+- [x] Both sizes, and their difference, are written down.
+- [x] Base against base: the three medians and the spread of each.
 
 **Verification:**
-- [x] `cargo test -p yunta-surco`, `cargo test -p yunta-render`, `cargo test -p yunta --bins`
-- [x] Manual check: no RGB value outside `palette.rs`, with `git grep -n "Rgb(" -- crates/surco/src`.
+- [x] Manual check: `.plans/yunta-tui/proof/run-state/baseline.txt` holds both, with the commands that made them.
 
 **Dependencies:** None
 
-**Files likely touched:** `crates/surco/src/paint.rs`, `crates/surco/src/paint/style.rs`, `crates/surco/src/paint/style/tests.rs`, `crates/surco/src/paint/help.rs`, `crates/surco/src/surface/html/style.rs`
+**Files likely touched:** `.plans/yunta-tui/proof/run-state/{replay_cost.py,baseline.txt}` (outside git)
 
-**Estimated scope:** M
+**Estimated scope:** S
 
 ### Checkpoint A: after Task 1
-- [x] Every existing golden is byte for byte the same, `cargo xtask smells --check` passes, and the user sees the reading's signature.
+- [x] The user sees the baseline and its spread.
 
-## Phase 2: the targets
+## Phase 1: the crate, its purity, and what nothing else depends on
 
-### Task 2: target goldens, drawn by hand
+### Task 2: the crate and the test that keeps it pure
 
 **Description:**
-- In `.plans/yunta-tui/proof/surco-screen/targets/`, write by hand what each new block and screen should draw, from the spike's frames (`.plans/yunta-tui/out/frames.json`, `spike/src/view.rs`) as Surco's rules allow:
-  - **Blocks**, as the catalog's appended part, in `ascii-80` and `unicode-60`: a ribbon of seven nodes, one running with its plow; a legend of five keys, the arrows among them; an attention answered by a command and one answered by a key.
-  - **Two screens laid out on a terminal**: a run's, and the same run with an overlay open over it, each at 80×24 in `ascii-80` and 60×14 in `unicode-60`. Since the redo below they are the `tui` module's reference, not this module's targets.
-  - **The run's screen** as Markdown and as HTML.
-- Beside them, a `NOTES.md` names each place where a rule of Surco's made the target differ from the spike, and the tone each span is meant to have.
+- `crates/replay/Cargo.toml` (plan decision 1).
+- `crates/replay/src/lib.rs` with the crate's `//!` and nothing else yet.
+- `crates/replay/tests/pure.rs`, `the_crate_reads_nothing_but_its_inputs`.
+- What names the crate:
+  - the workspace's `members` and `[workspace.dependencies]`;
+  - CI's "check each crate in isolation";
+  - `release.yml`: publish `yunta-replay` after `yunta-core`, then wait for its index before `yunta-engine`;
+  - `.agents/architecture.md`'s crate table.
 
-**Fails first:** nothing runs: this task writes the targets that Tasks 3 to 6 fail against.
-
-**Redone on 2026-11-06, after the layout moved** (each interface lays a screen out its own way):
-- The Markdown and HTML targets follow the screen's new parts: trail, tally, about, a side region and a main one.
-- The help overlay is open in both.
-- The two terminal screens move to `targets/tui-reference/` as the `tui` module's reference, with the notes about them.
+**Fails first:**
+- `cargo test -p yunta-replay --test pure`: no such package, until the crate exists.
+- Then, with `tokio` added to the manifest by hand, it fails with its message naming `tokio`. The probe is taken back out.
 
 **Acceptance criteria:**
-- [x] Every target exists, every line no wider than its columns, every frame exactly its rows.
-- [x] `NOTES.md` names each departure from the spike and the tone of each span.
+- [x] `yunta-replay` builds alone (`cargo check -p yunta-replay --locked`), and the purity test passes.
+- [x] The crate table names it with its dependencies, and `cargo xtask docs --check` passes.
+- [x] `release.yml` publishes it before `yunta-engine` and waits for its index.
 
 **Verification:**
-- [x] Manual check: a script measures each target's rows and widths. The user reads the targets at Checkpoint B.
+- [x] `cargo test -p yunta-replay`, `cargo xtask docs --check`, `cargo xtask smells --check`
 
 **Dependencies:** Checkpoint A
 
-**Files likely touched:** none in git.
-
-**Estimated scope:** S
-
-### Checkpoint B: after Task 2
-- [x] The user approves the targets. No code draws a new block before this.
-
-## Phase 3: the blocks
-
-### Task 3: the ribbon
-
-**Description:**
-- `components/ribbon.rs` holds `Ribbon` and `Stretch`, built as `Ribbon::new(stretches)` and `.plowed(events)`, and `Block::Ribbon` exists.
-- The terminal draws names over strokes, each stretch as wide as its name and at least four cells, a gap between two. The plow is the running node's cell at `events % cells`, strong, only when `events` is set. Where the names do not fit, it is the page's furrow.
-- A ribbon hangs from a headline, as the furrow does.
-- Markdown and the description draw each name with its word. HTML draws the names over the furrow's strokes, every word in its label.
-- The catalog gains its sample in a part appended after `closing()`, and the ribbon's targets move into the catalog's goldens.
-
-**Fails first:**
-- `every_kind_of_block_stands_in_the_catalog` fails once `ribbon` is a kind with no sample.
-- Then `every_block_matches_its_goldens_in_every_environment`, against the targets, until the terminal draws them.
-- Then `markdown_says_every_word_the_terminal_says_of_every_block`, until Markdown and HTML say the names.
-
-**Acceptance criteria:**
-- [x] The ribbon's catalog part matches its targets in `ascii-80` and `unicode-60`; the other environments, Markdown and HTML are blessed and read.
-- [x] With no `events`, no cell is strong; a ribbon with no stretch draws nothing; in `ascii-80` every name is there.
-- [x] Each catalog golden changes only by the part appended at its end.
-
-**Verification:**
-- [x] `cargo test -p yunta-surco`
-- [x] Manual check: the catalog goldens' diff shows only lines added at the end.
-
-**Dependencies:** Checkpoint B
-
-**Files likely touched:** `crates/surco/src/components/{ribbon,mod}.rs`, `crates/surco/src/doc.rs`, `crates/surco/src/surface/terminal/{mod,ribbon}.rs`, `crates/surco/src/surface/markdown/mod.rs`, `crates/surco/src/surface/html/blocks.rs`, `crates/surco/src/components/catalog{,/kinds}.rs`, `crates/surco/goldens/{components,markdown,html}/catalog.*`
-
-**Estimated scope:** M (one arm in each of the files above)
-
-**Found while implementing:**
-- The catalog's page grows in one more place than its end: its contents (`<nav class="toc">`) gain a link to the new heading `on a screen`, since the page lists every heading. It is an addition, and nothing that was there changes.
-- `markdown/mod.rs` passed 500 lines, so a screen's blocks are written in `markdown/screen.rs`.
-- In HTML two stretches are kept apart by a space, so their names read as words; a flex row draws none of it.
-
-### Task 4: the legend
-
-**Description:**
-- `components/legend.rs` holds `Legend`, `Binding` and `Keys`, built as `Legend::new().arrows("move").key("enter", "open")`, and `Block::Legend` exists.
-- The terminal draws keys in strong, what they do in muted and a faint separator, with `Keys::UpDown` in the glyph set's own arrows.
-- Markdown and the description draw a line of `` `keys` does `` pairs. HTML draws a `<button type="button" class="key" data-key="…">` for each binding.
-- The catalog's appended part gains its sample, and its targets move in.
-
-**Fails first:**
-- `every_kind_of_block_stands_in_the_catalog`, once `legend` is a kind with no sample.
-- Then the catalog's goldens against the targets.
-- Then `a_legend_draws_each_key_as_a_button_with_its_key`, in the HTML surface's tests, until the buttons carry `data-key`.
-
-**Acceptance criteria:**
-- [x] The legend's part matches its targets, and the rest is blessed and read.
-- [x] An empty legend draws nothing; `UpDown` reads `↑↓` in Unicode and `up/down` in ASCII.
-- [x] Each button carries its key and is `type="button"`.
-
-**Verification:**
-- [x] `cargo test -p yunta-surco`
-
-**Dependencies:** Task 3
-
-**Files likely touched:** `crates/surco/src/components/{legend,mod}.rs`, `crates/surco/src/doc.rs`, `crates/surco/src/surface/terminal/{mod,legend}.rs`, `crates/surco/src/surface/markdown/mod.rs`, `crates/surco/src/surface/html/blocks.rs`, `crates/surco/src/components/catalog{,/kinds}.rs`, the catalog's goldens
-
-**Estimated scope:** M (one arm in each)
-
-**Found while implementing:**
-- The screen's blocks are drawn as a page in `html/screen.rs`, the twin of `markdown/screen.rs`, and the ribbon moved there with the legend.
-- A key's button takes the page's monospaced face from the list on the stylesheet's first line, where every code-like part takes it, rather than from a variable of its own.
-
-### Task 5: the attention
-
-**Description:**
-- `components/attention.rs` holds `Attention` and `Answer`, built as `Attention::command(asks, command)`, `Attention::key(asks, keys, does)` and `.of(subject)`, and `Block::Attention` exists.
-- The terminal draws a command before what is asked, as the region's row reads today, so a row cut short keeps it. It draws a key after what is asked, which is cut to make room. The block carries no fill.
-- Markdown and the description draw its words in a line. HTML draws a tinted `<p role="status">`.
-- The catalog's appended part gains both samples, and their targets move in.
-
-**Fails first:**
-- `every_kind_of_block_stands_in_the_catalog`, once `attention` is a kind with no sample.
-- Then the catalog's goldens against the targets.
-- Then `an_attention_cut_short_keeps_its_answer`, until a narrow row keeps the command, and the key at its end.
-
-**Acceptance criteria:**
-- [x] Both samples match their targets, and the rest is blessed and read.
-- [x] A row cut to fit keeps its answer; in `ascii-80` every word is there.
-- [x] The line `Attention::command` draws is the region's line at the base, character for character, for the same command and question.
-
-**Verification:**
-- [x] `cargo test -p yunta-surco`
-
-**Dependencies:** Task 4
-
-**Files likely touched:** `crates/surco/src/components/{attention,mod}.rs`, `crates/surco/src/doc.rs`, `crates/surco/src/surface/terminal/{mod,attention}.rs`, `crates/surco/src/surface/markdown/mod.rs`, `crates/surco/src/surface/html/blocks.rs`, `crates/surco/src/components/catalog{,/kinds}.rs`, the catalog's goldens
-
-**Estimated scope:** M (one arm in each)
-
-**Found while implementing:**
-- The kind and its two samples came in one step, so `every_kind_of_block_stands_in_the_catalog` was never seen red for `attention`. The reds seen were the catalog's goldens against the targets and `an_attention_cut_short_keeps_its_answer`, while the block drew nothing.
-- At 60 cells the samples' questions are cut (`the plan wa…`, `baseli…`). Their whole words stand in `ascii-80`, whose 80 cells hold every word.
-
-### Checkpoint C: after Tasks 3-5
-- [x] The catalog's goldens grow only by the appended part, every other golden is unchanged, and no word is lost in `ascii-80`. `cargo xtask smells --check` passes.
-
-## Phase 4: the screen
-
-### Task 6: the screen as data, a pane's width, and the screen as a document and a page
-
-**Description:**
-- `components/screen.rs` holds `Screen`, `Region`, `Side` and `Overlay`, named by what they are and built as `Screen::new(main)` with `.trail`, `.tally`, `.about`, `.side`, `.focus_side`, `.attention`, `.legend` and `.overlay`. There are no widths, sizes or scroll positions.
-- `Width::exact(cells)` gives a pane exactly its cells, with no floor and no ceiling.
-- `Markdown::screen`, `Description::screen` and `Html::screen` draw a screen as plan decision 5 says. The two targets move into `goldens/markdown/screen.md` and `goldens/html/screen.html`.
-
-**Fails first:**
-- `every_block_draws_within_an_exact_width`, which draws every block of the catalog at every width from 20 to 59, because there is no `Width::exact`.
-- Then `every_surface_says_every_word_a_screen_holds`, because no surface draws a screen.
-- Then the two goldens against their targets.
-
-**Acceptance criteria:**
-- [x] No line of any catalog block is wider than an exact width from 20 to 59, and none panics.
-- [x] Markdown, the description and HTML each say every string the screen holds; the focused region carries `aria-current` in HTML.
-- [x] Both goldens match their targets.
-
-**Verification:**
-- [x] `cargo test -p yunta-surco screen`, `cargo test -p yunta-surco width`
-
-**Dependencies:** Checkpoint C
-
-**Files likely touched:** `crates/surco/src/components/{screen,mod}.rs`, `crates/surco/src/width.rs` (or where `Width` lives, `look.rs`), `crates/surco/src/surface/markdown/{mod,screen}.rs`, `crates/surco/src/surface/html/{mod,screen}.rs`, the screen's tests and goldens
+**Files likely touched:** `Cargo.toml`, `Cargo.lock`, `crates/replay/{Cargo.toml,src/lib.rs,tests/pure.rs}`, `.github/workflows/{ci,release}.yml`, `.agents/architecture.md`
 
 **Estimated scope:** M
 
-**Found while implementing:**
-- `Width::whole`, which the desk lays its columns at, already had the body `Width::exact` needed. It is renamed, with its three callers: the CLI's desk, its tests and the render crate's desk test.
-- The exact-width test was red for more than the missing constructor: twelve existing blocks passed an exact width below 60, none panicking. The widest was the decision at 53 cells, the main region's width at 80 columns.
-  - At the user's choice, a width now says whether its edge cuts (`Width::cuts`, true only for `Width::exact`). The terminal surface lays each line past a cutting edge out in rows with `Line::rows_within`.
-  - A stream keeps its lines as they are. No golden of `yunta-surco`, `yunta-render` or the CLI's units changed.
-- `tally` holds a `Count { standing, runs }` rather than a pair, so a count reads by name and says itself (`13 need you`, `1 needs you`). `Screen::main_focused` answers which region the keys act on.
-- The HTML target took the ribbon's markup as the catalog draws it, and ends where `Html::body` ends, with no newline. Both goldens equal their targets byte for byte.
-- `page.css` lays a screen out in a grid, the side region giving way first on a narrow page. No whole page draws a screen yet.
-
-### Checkpoint D: after Task 6
-- [x] The screen's targets match, every block draws within an exact width below the floor, and the user sees the screen's goldens.
-
-## Phase 5: the callers
-
-### Task 7: the card and the desk on a legend
+### Task 3: the modes, by what each returns
 
 **Description:**
-- `Card.keys` and `DeskFoot.keys` become `Legend`, and the terminal draws each inside them as it drew its strings: `<keys> <does>` in muted, joined by the separator, giving way where it gave way.
-- `crates/cli/src/ask/{card,desk,menu,form}.rs` build one with `Legend::new().arrows(…).key(…)` where they built strings.
+- `modes.rs` moves to `crates/replay/src/modes.rs`, a public module.
+- Its functions become `scheduled`, `included`, `reached` and `dependencies` (plan decision 7).
+- The engine's root stops re-exporting them, and every caller names `yunta_replay::modes::…`: the engine's `check/`, `run/budget.rs`, `run/schedule*`, `run/loop_exec/respecify.rs` and `tasks/mod.rs`, and any test or CLI file the compiler names.
+- The engine and every crate that names `modes` gain `yunta-replay`, and the crate table says so.
 
-**Fails first:** none can: a refactor, with no new behavior. What guards it is every test of the card and the desk in `yunta-surco`, every prompt test of `yunta`, and their goldens, all passing unchanged. Added: `a_cards_legend_reads_as_its_keys_read`, with the expected foot written out (`↑↓ move · enter chooses · …`). It passes once written, and pins the join the strings had.
-
-**Acceptance criteria:**
-- [x] No `keys: Vec<String>` is left in `Card` or `DeskFoot`.
-- [x] Every card, desk and prompt test, and every golden of `yunta-surco` and `yunta` outside the catalog, passes unchanged.
-
-**Verification:**
-- [x] `cargo test -p yunta-surco`, `cargo test -p yunta --bins`, `cargo test -p yunta --test <each prompt's target>`
-
-**Dependencies:** Checkpoint D
-
-**Files likely touched:** `crates/surco/src/components/{card,desk}.rs`, `crates/surco/src/surface/terminal/{card,desk}.rs` and their tests, `crates/cli/src/ask/{card,desk,menu,form}.rs`
-
-**Estimated scope:** M (mechanical in the prompts)
-
-**Found while implementing:**
-- The field is `legend`, named by what it holds: `Card.legend` and `DeskFoot.legend`.
-- `2 more options on the card` is no key. It stands in `FootRow::Options { named, more }`, and the desk says it after the keys, where the strings had it.
-- `type to filter` is `Keys::Typing`, built with `Legend::typing("to filter")`: whatever the person types, spelled `type`, rather than a key named `type`.
-- `Legend::spelled(glyphs)` is the one-tone run a card's, a desk's and a list's foot say.
-- `Escape::does` says what Escape does beside `esc`, and `Escape::said` is built from it. A prompt no longer needs a look to say its keys.
-- `a_cards_legend_reads_as_its_keys_read` passed against the strings before the change, and after it.
-
-### Task 8: the region's row as an attention
-
-**Description:** `crates/cli/src/surface/view/mod.rs` builds its row as `Attention::command(…)` and draws it through the terminal surface. Its comment about the command coming first moves to the block, where the rule now lives.
-
-**Fails first:** none can: the same line, drawn by Surco. What guards it is the region's and the view's tests and the CLI's goldens, unchanged.
+**Fails first:** none: a move and a rename. Its guards are the 3 inline tests that move with it, and the engine's scheduling and mode tests.
 
 **Acceptance criteria:**
-- [x] `view::attention` builds an `Attention` and writes no span of its own.
-- [x] Every test and golden of `yunta` passes unchanged.
+- [x] `crates/engine/src/modes.rs` is gone, and the old names find nothing in `crates/`.
+- [x] Every test of the engine and the CLI passes unchanged but for its paths.
 
 **Verification:**
-- [x] `cargo test -p yunta --bins`, `cargo test -p yunta --test run_flow`, `cargo test -p yunta --test status_follow`
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`
+
+**Dependencies:** Task 2
+
+**Files likely touched:** `crates/{engine/src/modes.rs → replay/src/modes.rs}`, `crates/engine/src/lib.rs`, the 7 engine modules named above, `crates/engine/Cargo.toml`, `.agents/architecture.md`
+
+**Estimated scope:** L (mechanical)
+
+### Task 4: the registry's values, and the read that stays
+
+**Description:**
+- `crates/replay/src/registry.rs` holds `Engine`, `EngineLiveness` and `Prompt`, with `Engine::this` and `Engine::asks_about` (plan decision 8).
+- `crates/engine/src/process_registry.rs` keeps every read, returning those values. `Engine::read` becomes `read_engine(run_dir, probe, at)`.
+- Every caller names `yunta_replay::registry::…`: the engine's `view/` (still in the engine), its tests, the CLI and the testkit.
+
+**Fails first:** none: a move. Its guards are `process_registry/tests.rs`, the engine's frame and standing tests, and the CLI's region, status and follow tests.
+
+**Acceptance criteria:**
+- [x] `Engine::read` finds nothing. `read_engine` has the 4 callers `Engine::read` had.
+- [x] Every test of the engine and the CLI passes unchanged but for its paths.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_follow`
+
+**Dependencies:** Task 3
+
+**Files likely touched:** `crates/replay/src/registry.rs`, `crates/engine/src/{process_registry.rs,lib.rs,view/*.rs}`, `crates/cli/src/render/words.rs` and the CLI files that name `Engine`, `crates/testkit/src/…`, their manifests
+
+**Estimated scope:** L (mechanical)
+
+### Checkpoint B: after Tasks 2-4
+- [x] The workspace builds and its tests for the three crates pass; `cargo xtask docs --check` and `cargo xtask smells --check` pass.
+
+## Phase 2: replay, and the cycle cut
+
+### Task 5: replay's names, in place
+
+**Description:**
+- In the engine, before anything moves:
+  - `derive(events)` becomes `RunState::replay(&events)`;
+  - `unknown_kind_counts(state)` becomes `state.unknown_kinds()`;
+  - `replay` stops re-exporting `NodeState`, `NodeWait` and `UnknownKindCount`, which every caller names from `yunta_core::events`;
+  - the field the count reads, `RunState::unknown_kinds`, is `unknown_events`.
+- `tests/schedule.rs`, at 499 lines, splits by behaviour (`schedule/failures.rs`), since the longer name takes it over 500.
+- About 200 calls change, in the engine's modules and tests, the CLI and the testkit.
+
+**Fails first:** none: a rename. Its guards are the engine's replay, log and older-words tests, and every golden.
+
+**Acceptance criteria:**
+- [x] No call of `derive(` on events, no `unknown_kind_counts` and no path to those three types through the engine is left.
+- [x] The workspace's tests pass unchanged but for their calls and paths.
+
+**Verification:**
+- [x] `cargo test -p yunta-engine`, `cargo test -p yunta --bins`, `cargo test -p yunta-testkit`
+
+**Dependencies:** Checkpoint B
+
+**Files likely touched:** `crates/engine/src/{replay.rs,lib.rs}` and every module that calls `derive`; the engine's tests; the CLI; the testkit
+
+**Estimated scope:** L (mechanical)
+
+### Task 6: replay moves to the crate's root, and the cycle is cut under a test
+
+**Description:**
+- `crates/replay/tests/layers.rs`, `each_module_names_only_the_modules_beneath_it` (plan decision 2), is written first.
+- `replay.rs`'s code moves into `crates/replay/src/lib.rs`, and `replay/{activity,clock,decisions,refuse,tree}.rs` into `src/` as private files. `TimeSpent`, `Timeline` and `ReplayError` are named at the root.
+- `Submissions` and `FindingActivity` first move to `crates/replay/src/stats.rs`, the start of `stats`, then into `activity.rs`.
+- Every `crate::replay` of the engine and every `yunta_engine::` path to replay becomes `yunta_replay::`, including the engine's `stats`, `history`, `live`, `view`, `receipt` and `verification_effectiveness`, still in the engine.
+- What follows the move:
+  - `RunView` stays the engine's, in `run_log.rs`;
+  - `RunState::activity` and `Activity` are public while the engine's stats read them;
+  - `logs_from_runs` splits (plan decision 11): its closed pull request asserts the `PauseReason` the log replays to, and `yunta-render`'s `pause.rs` tests assert that value's sentence. Then it moves to `crates/replay/tests/` with `tests/fixtures/logs/`, and the rule tag `[test engine/logs_from_runs]` becomes `[test replay/logs_from_runs]`;
+  - the `replay` target, with `replay/`, moves to `crates/replay/tests/`;
+  - `older_words`, which reads only `yunta-core` and `yunta-render`, moves to `yunta-render`, and its tag becomes `[test render/older_words]`;
+  - `tests/suite_guard.rs` splits by behaviour (`suite_guard/held.rs`), since the import takes it over 500 lines;
+  - `AGENTS.md`'s row says `crates/replay/src/lib.rs`, and so does the smell counter's path;
+
+**Fails first:**
+- `layers.rs`, while `activity.rs` names `crate::stats`: it names the root naming `stats`, a layer above it.
+- It passes once the two types stand in `activity.rs` and `stats.rs` is gone again.
+
+**Acceptance criteria:**
+- [x] `layers.rs` was seen red for the cycle, and passes.
+- [x] `crates/engine/src/replay.rs` and `replay/` are gone; no `crate::replay` is left in the engine, and the engine's root re-exports nothing of replay.
+- [x] `logs_from_runs` and `replay` pass in the new crate, and `older_words` in `yunta-render`, with their assertions as they were but for the one split; `cargo xtask docs --check` and `smells --check` pass.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`, `cargo xtask docs --check`, `cargo xtask smells --check`
+
+**Dependencies:** Task 5
+
+**Files likely touched:** `crates/replay/{src/*.rs,tests/layers.rs}`, `crates/engine/src/run_log.rs`, `crates/engine/src/**` (58 modules), `crates/engine/tests/**`, `crates/cli/src/**`, `crates/testkit/src/**`, `AGENTS.md`, `.agents/architecture.md`, `xtask/src/smells.rs`
+
+**Estimated scope:** L (mechanical, beside one new test)
+
+### Checkpoint C: after Tasks 5-6
+- [x] The workspace's tests pass, `layers.rs` was seen red then green, and no golden changed.
+
+## Phase 3: the stats and the history
+
+### Task 7: the stats' and the history's names, in place
+
+**Description:**
+- In the engine:
+  - `RunStats::at` and `RunStats::as_logged` take the place of `compute_run_stats`, `compute_run_stats_of` and `compute_run_stats_at`;
+  - `stats_observed_at` becomes the private `observed`;
+  - `RunSummary::of` and `PriorEstimation::of` take the place of `run_summary` and `prior_estimation`;
+  - one `history::MIN_SAMPLES` takes the place of `MIN_SAMPLES_FOR_ESTIMATION` and `verification_effectiveness::MIN_SAMPLES`, with its reason.
+- Every caller replays once and calls the constructor whose case it has.
+
+**Fails first:** none: a rename. Its guards are `time_spent`, the stats and history tests, the verification tests that read the floor, and the CLI's `stats` goldens.
+
+**Acceptance criteria:**
+- [x] None of the seven old names finds anything in `crates/`.
+- [x] Every test passes unchanged but for its calls and paths; `yunta stats`' goldens are byte for byte.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`
+
+**Dependencies:** Checkpoint C
+
+**Files likely touched:** `crates/engine/src/{stats.rs,history.rs,verification_effectiveness.rs,view/mod.rs,lib.rs}`, `crates/replay/tests/time_spent.rs` once moved or `crates/engine/tests/time_spent.rs`, the CLI's `commands/stats/` and `check.rs`, the engine's tests that call them
+
+**Estimated scope:** L (mechanical)
+
+### Task 8: the stats and the history move
+
+**Description:**
+- `stats.rs` and `history.rs` move to public modules of the crate.
+- Every path follows them.
+- `time_spent` and `stats` move to `crates/replay/tests/`.
+- `RunState::activity` and `Activity` return to `pub(crate)`: the stats read them from inside the crate.
+
+**Fails first:** none: a move. Its guard is `layers.rs`, which now reads `stats` and `history` and must still pass, with every test and golden.
+
+**Acceptance criteria:**
+- [x] Both files are gone from the engine, and its root re-exports nothing of them.
+- [x] `layers.rs`, `time_spent` and `stats` pass in the crate.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`
 
 **Dependencies:** Task 7
 
-**Files likely touched:** `crates/cli/src/surface/view/mod.rs`, its tests
+**Files likely touched:** `crates/{engine/src → replay/src}/{stats,history}.rs`, `crates/replay/tests/time_spent.rs`, the engine's and the CLI's files that name them
 
-**Estimated scope:** S
+**Estimated scope:** L (mechanical)
 
-**Found while implementing:**
-- `view::attention` takes the region's look, so Surco cuts the row at the width the region's `fit` cut it at before. The test calls pass an ASCII look 120 cells wide where they passed the glyph set.
-- `view::asked`, the row of a run whose engine asks at its own terminal, stays a line of its own. It has no answer a person types or presses here (the answer is given at that terminal), and it says whom it asks in strong, where an attention's question is plain. As an `Attention`, it needs an answer given elsewhere and changes a tone the region paints. Left for the user to place.
+## Phase 4: the receipt and the verification findings
 
-### Checkpoint E: after Tasks 7-8
-- [x] Every golden outside the catalog is byte for byte the same, across the workspace. `cargo xtask smells --check` passes.
-
-### Task 8b: the row of a run asked at its own terminal, as an attention
-
-Added at Checkpoint E, at the user's choice.
+### Task 9: the receipt's and the verification findings' names, in place
 
 **Description:**
-- `Answer` gains `Elsewhere`, built with `Attention::elsewhere(asks)`: an attention answered at another terminal, so only what is asked is said.
-- The terminal draws the mark, `needs you`, the subject when there is one, and what is asked, plain, cut at the row's end. Markdown, the description and HTML say the same words.
-- `view::asked` builds one and draws it at the region's look, as `view::attention` does.
-- The catalog's appended part gains a third attention, `node `implement` asks at its terminal`, its targets written first.
+- In the engine:
+  - `receipt::closed` and `receipt::so_far` take the place of `build_receipt` and `receipt_so_far`;
+  - `render_json` is gone, and its 4 callers write `serde_json::to_string_pretty(&receipt)`;
+  - `receipt` stops re-exporting `yunta_core::receipt`'s ten types;
+  - `VerificationFindings::of` takes the place of `analyze`.
 
-**Fails first:**
-- The catalog's goldens against the new targets, while `Elsewhere` draws nothing.
-- Then `an_attention_answered_elsewhere_says_what_is_asked`, until the row is the mark, `needs you` and what is asked, cut at its end.
+**Fails first:** none: a rename. Its guards are the engine's receipt tests and goldens (`crates/engine/goldens/receipt`), the CLI's `receipt` and `stats --workflow`, and `check`'s tests.
 
 **Acceptance criteria:**
-- [x] The third sample matches its targets in `ascii-80` and `unicode-60`, and the rest is blessed and read.
-- [x] `view::asked` builds an `Attention` and writes no span of its own; the region's words are the same.
+- [x] `build_receipt`, `receipt_so_far`, `render_receipt_json` and `analyze_verification_effectiveness` find nothing.
+- [x] The receipt's goldens are byte for byte, and every test passes unchanged but for its calls and paths.
 
 **Verification:**
-- [x] `cargo test -p yunta-surco`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_follow`
+- [x] `cargo test -p yunta-engine --test receipt`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`, `cargo test -p yunta --test receipt_cmd`
 
-**Dependencies:** Checkpoint E
+**Dependencies:** Task 8
 
-**Files likely touched:** `crates/surco/src/components/attention.rs`, `crates/surco/src/surface/{terminal/attention,markdown/screen,html/screen}.rs` and their tests, `crates/surco/src/components/catalog/on_screen.rs`, the catalog's goldens, `crates/cli/src/surface/{view/mod,region}.rs`
+**Files likely touched:** `crates/engine/src/{receipt/mod.rs,verification_effectiveness.rs,run/pull_request_exec.rs,lib.rs}`, `crates/engine/tests/receipt*`, the CLI's `commands/{receipt,check}.rs` and `commands/stats/`
 
-**Estimated scope:** S
+**Estimated scope:** M
 
-**Found while implementing:**
-- The page set an attention's question with `esc`, so backticks stood as they were written. It reads it with `words`, as Markdown does, so `` `implement` `` is code on both. No earlier sample had a backtick, and no other golden moved.
-- No test drew `view::asked`. `the_row_of_a_run_asked_at_its_terminal_says_whom_it_asks` pins its words. It passes on the strong row as on the plain one, since only the tone changed.
+### Task 10: the receipt and the verification findings move
+
+**Description:**
+- `receipt/mod.rs` moves to `crates/replay/src/receipt.rs`, and `verification_effectiveness.rs` to its public module.
+- Every path follows them.
+- The `verification_effectiveness` target moves to `crates/replay/tests/`.
+
+**Fails first:** none: a move. Its guards are `layers.rs`, the receipt's goldens and every test.
+
+**Acceptance criteria:**
+- [x] Both are gone from the engine, and its root re-exports nothing of them; `layers.rs` passes.
+- [x] The receipt's goldens are byte for byte.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`
+
+**Dependencies:** Task 9
+
+**Files likely touched:** `crates/{engine/src/receipt/mod.rs → replay/src/receipt.rs}`, `crates/{engine → replay}/src/verification_effectiveness.rs`, their callers
+
+**Estimated scope:** M
+
+### Checkpoint D: after Tasks 7-10
+- [x] The workspace's tests pass, and every golden of the engine and the CLI is byte for byte.
+
+## Phase 5: what a node is doing now, and the frame
+
+### Task 11: what a node is doing now, as the run state's reads
+
+**Description:**
+- `live.rs` becomes `crates/replay/src/attempt.rs`, a private file of the root, as methods of `RunState`: `running_since`, `last_event_age`, `open_sessions` and `recent_tool_calls`.
+- `OpenSession` and `ToolCall` are named from `yunta_core::events`.
+- The engine's `view/node.rs` and the CLI call the methods.
+- The `live_derivation` target, with `live_derivation/`, moves to `crates/replay/tests/`: the stats and what `live` held are both in the crate now.
+
+**Fails first:** none: a move into the type's crate (an inherent method can only stand there). Its guards are the frame's tests and the CLI's region and follow tests.
+
+**Acceptance criteria:**
+- [x] `crates/engine/src/live.rs` is gone, and the four free functions find nothing.
+- [x] Every test passes unchanged but for its calls and paths.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_follow`
+
+**Dependencies:** Checkpoint D
+
+**Files likely touched:** `crates/{engine/src/live.rs → replay/src/attempt.rs}`, `crates/replay/src/lib.rs`, `crates/engine/src/{view/node.rs,lib.rs}`, the CLI files that call them
+
+**Estimated scope:** M
+
+### Task 12: the frame's names, in place
+
+**Description:**
+- In the engine:
+  - `view/` becomes `frame/`;
+  - `RunFrame::of` takes the place of `run_frame` and `run_frame_of`;
+  - `frame` stops re-exporting `ChildLink`, `Degradation` and `Reroute`, which their callers name from `yunta_core::events`.
+
+**Fails first:** none: a rename. Its guards are the engine's `view` target, the CLI's every page and region test, and their goldens.
+
+**Acceptance criteria:**
+- [x] `run_frame(` and `run_frame_of` find nothing, and no module is called `view` among what moves.
+- [x] Every test and golden passes unchanged but for calls and paths.
+
+**Verification:**
+- [x] `cargo test -p yunta-engine`, `cargo test -p yunta --bins`, `cargo test -p yunta --test run_flow`, `cargo test -p yunta --test status_follow`
+
+**Dependencies:** Task 11
+
+**Files likely touched:** `crates/engine/src/{view → frame}/*.rs`, `crates/engine/src/lib.rs`, the engine's `view` target, the CLI's 37 calls of `run_frame` and `run_frame_of`
+
+**Estimated scope:** L (mechanical)
+
+### Task 13: the frame moves, and nothing of the eight is left in the engine
+
+**Description:**
+- `frame/` moves to `crates/replay/src/frame/`.
+- The frame's samples stand beside the frame (plan decision 11): `yunta-testkit/src/frames.rs` becomes `RunFrame::sample`, `NodeFrame::sample` and their kin in `frame`, behind `yunta-replay`'s `testkit` feature, and `frames.rs` goes. The CLI's tests and the engine's name them from the types.
+- The engine's `view` target moves to `crates/replay/tests/frame.rs`, with `frame/{declared,standing,stops}.rs`, and `chronicle` moves beside it.
+- `properties` splits: the properties of the fold, the chronicle and the frame move to `crates/replay/tests/properties.rs`, with the log generator; those that drive an engine stay.
+- Every path follows. The engine's root re-exports nothing that moved.
+
+**Fails first:** none: a move. Its guards are `layers.rs`, which now reads `frame`, and every test and golden.
+
+**Acceptance criteria:**
+- [x] `crates/engine/src` holds none of the eight modules, and `layers.rs` passes.
+- [x] Every name of the spec's criterion 4 finds nothing in `crates/`.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta-engine`, `cargo test -p yunta --bins`, `cargo check --workspace --all-targets`
+
+**Dependencies:** Task 12
+
+**Files likely touched:** `crates/{engine → replay}/src/frame/`, `crates/{engine/tests/view* → replay/tests/frame*}`, the engine's and the CLI's files that name them
+
+**Estimated scope:** L (mechanical)
+
+### Checkpoint E: after Tasks 11-13
+- [x] Every golden of the workspace is byte for byte, and the workspace's tests pass. The search for each old name finds nothing.
 
 ## Phase 6: what it says, proof and close
 
-### Task 9: the `//!` and `///` this module makes true, and the map's `tui` row
+### Task 14: the `//!` and `///` this module makes true
 
 **Description:**
-- Each new module's `//!` says how it works and what it rejects.
-- These say what is true:
-  - `components/mod.rs`;
-  - `doc.rs`'s `Block`;
-  - `surface/mod.rs`: every surface draws every block, and Markdown and HTML every screen, which each interface lays out its own way;
-  - `paint.rs` and the crate root's map: the style reading, the screen, a pane's width.
-- `paint/style.rs`'s `//!` says that a color has one table, and names the test that holds it.
-- `CAPABILITY-MAP.md`'s `tui` row says what it now owns: a screen laid out with Ratatui's `Layout`, and the overlay's box in Surco's glyphs.
+- The crate's `//!` (its map and layers, plan decision 1) and each moved module's.
+- The engine's `//!`, whose map loses what left, and its line on the crate graph.
+- `cargo xtask docs --about` on the module's diff, each rule and trap it prints kept true.
 
-**Fails first:** `cargo xtask docs --check`, should a moved term leave a link that names nothing. If it passes at once, it guards what the next change breaks.
+**Fails first:** `cargo xtask docs --check`, should a moved item leave a link that names nothing; `cargo doc` with `-D warnings`, should a `crate::` link point at the engine.
 
 **Acceptance criteria:**
-- [x] `cargo xtask docs --check` passes, and `cargo xtask docs --about` on the module's diff prints nothing left false.
-- [x] No document, code comment or test cites a document, the spec or the plan.
+- [x] `docs --check` and `cargo doc --workspace --no-deps --document-private-items` with `-D warnings` pass.
+- [x] No document, comment or test cites a document, the spec or the plan.
 
 **Verification:**
-- [x] `cargo xtask docs --check`, `cargo xtask smells --check`
+- [x] `cargo xtask docs --check`, `cargo xtask smells --check`, `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items`
 
-**Dependencies:** Tasks 1-8
+**Dependencies:** Checkpoint E
 
-**Files likely touched:** the `//!` of the files above, `CAPABILITY-MAP.md`
+**Files likely touched:** `crates/replay/src/{lib.rs,*.rs,frame/mod.rs}`, `crates/engine/src/lib.rs`
 
 **Estimated scope:** S
 
-### Task 10: every step of the `ci` job
+### Task 15: every step of the `ci` job
 
-**Description:** Every step of the `ci` job in `.github/workflows/ci.yml`, one build at a time, with `CARGO_INCREMENTAL=0`, through `sh .plans/yunta-tui/tools/gate.sh /Users/eulke/development/yunta-tui .plans/yunta-tui/out/gate-surco-screen`.
+**Description:** Every step of the `ci` job, one build at a time, with `CARGO_INCREMENTAL=0`, after a `cargo clean`. It runs through `gate.sh` into `.plans/yunta-tui/out/gate-run-state/`, in the foreground or step by step if the machine is short of memory.
 
 **Acceptance criteria:**
-- [x] Every step passes: fmt, clippy, build, schema, smells, docs, deny, doc, test, core-release, workflows, crates.
-- [x] The test step shows no aborted binary, and its count is explained against 270 binaries and 4,504 tests.
+- [x] Every step passes: fmt, clippy, build, schema, smells, docs, deny, doc, test, core-release, workflows, crates (which now checks `yunta-replay` alone).
+- [x] The test step shows no aborted binary, and its count is explained against 270 binaries and 4,528 tests.
+  - The new crate's library binary holds the 13 inline tests, which leave the engine's.
+  - `pure` and `layers` are new.
+  - `logs_from_runs`, `replay`, `time_spent`, `stats`, `verification_effectiveness`, `live_derivation`, `frame` and `chronicle` moved, `properties` split in two, and `older_words` moved to `yunta-render`.
 
 **Verification:**
-- [x] The gate's logs, in `.plans/yunta-tui/out/gate-surco-screen/`.
+- [x] The gate's logs.
 
-**Dependencies:** Task 9
+**Dependencies:** Task 14
 
 **Files likely touched:** whatever a failing step points at.
 
 **Estimated scope:** S
 
-**Found while implementing:**
-- The whole gate stopped in its eleventh step, `workflows`: the session's shell was reaped while the machine ran short of memory. Its first ten steps had passed. `workflows` (66 s) and `crates` (72 s) then passed on their own, in the foreground.
-- The test step ran 270 binaries and 4,528 tests, none failed and none aborted: the 4,504 of the base and the 24 this module adds, each inside a binary that existed.
+### Task 16: the module's size and cost, against the base
 
-### Checkpoint F: after Tasks 9-10
-- [ ] The user reviews the whole diff and the goldens. No commit until approved.
+**Description:**
+- A release build of the module's tree, and its binary's size against the base's two.
+- `replay_cost.py`, base against module, 15 rounds.
 
-### Task 11: commit the module
-
-**Description:** One commit for the module on `feature/yunta-tui`, staging paths by name, with a message that cites no document. Then the push, the pull request's list and test plan, and CI on Linux and macOS. Then `cargo clean`.
+**Fails first:** none: a measurement.
 
 **Acceptance criteria:**
-- [ ] The commit holds the module's files and nothing else, including `SPEC-surco-screen.md`, `tasks/plan.md` and `tasks/todo.md`.
+- [x] The module's size differs from the base by no more than the base's two builds differ from each other, or the difference is explained.
+- [x] Each module median stands within the base's own spread from Task 1.
+
+**Verification:**
+- [x] Manual check: `.plans/yunta-tui/proof/run-state/after.txt`.
+
+**Dependencies:** Task 15
+
+**Files likely touched:** `.plans/yunta-tui/proof/run-state/` (outside git)
+
+**Estimated scope:** S
+
+### Checkpoint F: after Tasks 14-16
+- [x] The user reviews the whole diff, read with `git diff -M`, and the measurements. No commit until approved.
+
+### Task 17: commit the module
+
+**Description:**
+- One commit for the module on `feature/yunta-tui`, staging paths by name, with a message that cites no document.
+- The push, the pull request's list and test plan, and CI on Linux and macOS.
+- Then `cargo clean`.
+
+**Acceptance criteria:**
+- [ ] The commit holds the module's files and nothing else, including `SPEC-run-state.md`, `CAPABILITY-MAP.md`, `tasks/plan.md` and `tasks/todo.md`.
+- [ ] `git show -M --stat HEAD` shows the moved files as renames.
 - [ ] CI on the pull request passes on Linux and macOS.
 
 **Verification:**
-- [ ] Manual check: `git show --stat HEAD`, `git status` and `gh pr checks 30`.
+- [ ] Manual check: `git show -M --stat HEAD`, `git status` and `gh pr checks 30`.
 
 **Dependencies:** Checkpoint F
 
@@ -380,17 +456,18 @@ Added at Checkpoint E, at the user's choice.
 
 ## The spec's success criteria
 
-| Criterion | Tasks |
+| Criterion | Held by |
 |---|---|
-| 1. A public style reading, one table with `Paint` | 1 |
-| 2. The three blocks and the two compositions | 3, 4, 5, 6 |
-| 3. Every surface draws each block, Markdown and HTML each screen; no word lost | 3, 4, 5, 6 |
-| 4. A screen with no cell, pixel or color; a pane's exact width | 6 |
-| 5. Goldens for each, reviewed before kept | 2, 3, 4, 5, 6 |
-| 6. `Card` and `DeskFoot` on `Legend`, the region on `Attention` | 7, 8 |
-| 7. No golden changes but the catalog's appended part; the suite passes | Checkpoints A, C, E; 10 |
-| 8. No new dependency, `cargo deny` as before | 10 |
+| 1. The crate, pure | Task 2 |
+| 2. No cycle | Task 6, then Tasks 8, 10 and 13 keep `layers.rs` green |
+| 3. One path | Tasks 3-13, each removing its re-exports |
+| 4. Names | Tasks 3, 5, 7, 9, 11 and 12; Task 13's search |
+| 5. The engine reads only the registry | Task 13 |
+| 6. Goldens, suite | Every task, then Task 15 |
+| 7. CI, release, docs | Tasks 2, 6, 14 and 15 |
+| 8. No dependency | Task 2, then Task 15's `deny` step |
+| 9. Cost | Tasks 1 and 16 |
 
 ## Not in this list
 
-The other modules of `CAPABILITY-MAP.md` (`run-state`, `third-party-notices`, then `run-pages`, `control`, `app-core`, `tui`) have no spec, plan or tasks yet. Each goes through the same flow when this one closes.
+`after_for`, the pages and `yunta-render`'s dependency on the crate are `run-pages`'. `yunta-control` is `control`'s.

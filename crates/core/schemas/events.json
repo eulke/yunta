@@ -594,7 +594,7 @@
       "type": "object",
       "properties": {
         "artifact_kind": {
-          "description": "The artifact's declared `kind:` when it has one — what\nlets `derive()` recognize a `questions` artifact without reading\nany file (state comes from events alone). `None` for opaque\nartifacts and for logs written before the field existed (tolerant\nreader). Named `artifact_kind`, not `kind`: the event\nenvelope's own internally-tagged discriminant already claims\n`kind` in the serialized JSON, and a colliding field name\nsilently corrupts the payload.",
+          "description": "The artifact's declared `kind:` when it has one — what\nlets replay recognize a `questions` artifact without reading\nany file (state comes from events alone). `None` for opaque\nartifacts and for logs written before the field existed (tolerant\nreader). Named `artifact_kind`, not `kind`: the event\nenvelope's own internally-tagged discriminant already claims\n`kind` in the serialized JSON, and a colliding field name\nsilently corrupts the payload.",
           "anyOf": [
             {
               "$ref": "#/$defs/ArtifactKind"

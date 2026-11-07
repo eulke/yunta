@@ -997,13 +997,6 @@ pub fn written(text: &str) -> yunta_core::events::Claim {
     yunta_core::events::Claim::Written(text.to_string())
 }
 
-/// The failure a node ends with when its lint command fails.
-pub fn lint_failure() -> Failure {
-    Failure::Message {
-        outcome: "lint failed".into(),
-    }
-}
-
 /// The node an exhausted reroute of a failed node goes to, when its menu names one.
 pub fn reroute_goto(escalation: &yunta_core::events::Escalation) -> Option<String> {
     let menu = escalation.failure()?;

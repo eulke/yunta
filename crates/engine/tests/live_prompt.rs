@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
-use yunta_engine::{Prompt, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_replay::registry::Prompt;
 use yunta_testkit::Bench;
 
 mod common;

@@ -3,7 +3,7 @@
 //! reroute edges visually differentiated (dashed) from them, each
 //! `parallel` group drawn with its children inside it, and, given
 //! `--run`, every node annotated with the state that run's event log
-//! derives for it (`yunta_engine::derive`). No agent involved in
+//! derives for it (`RunState::replay`). No agent involved in
 //! producing the graph itself, same shape as `status`.
 //!
 //! Exactly one source: a path or a catalog name reads the
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_core::{Clock, NodeId, RunId, Workflow};
-use yunta_engine::RunFrame;
+use yunta_replay::frame::RunFrame;
 
 use crate::commands::{resolve_workflow_ref, verdict};
 use crate::context::Context;
@@ -103,7 +103,7 @@ pub async fn graph(
 }
 
 /// One label per node of the graph, derived from the event log
-/// (`yunta_engine::derive`) and worded by `crate::render`, which is where
+/// (`RunState::replay`) and worded by `crate::render`, which is where
 /// `status` and every other surface take the same words from.
 ///
 /// Every node gets one, not only the ones the log mentions: a diagram

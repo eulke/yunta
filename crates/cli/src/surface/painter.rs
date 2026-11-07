@@ -10,7 +10,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
 use yunta_core::events::{StoredEvent, TerminalState};
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{derive, run_frame_of, PriorEstimation, RunFrame, RunState};
+use yunta_replay::frame::RunFrame;
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::RunState;
 use yunta_storage::AsyncStorage;
 
 pub(super) use super::draw::Draw;
@@ -143,7 +145,7 @@ impl Painter {
             glyphs,
             ..
         } = self;
-        let moments = yunta_engine::chronicle(folded.settled());
+        let moments = yunta_replay::frame::chronicle(folded.settled());
         for moment in moments.iter().skip(*written) {
             draw.record(moment, run_id.handle(), *glyphs);
         }
@@ -198,7 +200,7 @@ impl Painter {
             return;
         }
         let successor = {
-            let state = derive(self.folded.settled());
+            let state = RunState::replay(self.folded.settled());
             foreign.into_iter().find(|id| succeeds(&state, id))
         };
         if let Some(successor) = successor {
@@ -208,11 +210,11 @@ impl Painter {
 
     /// The run's state, its frame and the engine driving it, as they stand
     /// at this instant.
-    fn reading(&self) -> (RunState, RunFrame, yunta_engine::Engine) {
-        let state = derive(self.folded.settled());
+    fn reading(&self) -> (RunState, RunFrame, yunta_replay::registry::Engine) {
+        let state = RunState::replay(self.folded.settled());
         let now = self.clock.now();
         let engine = self.engine.read(now);
-        let frame = run_frame_of(
+        let frame = RunFrame::of(
             &self.run_id,
             &self.manifest.workflow,
             &state,
@@ -233,7 +235,7 @@ impl Painter {
         // Only a parked run has a menu to rebuild, and rebuilding one is
         // a walk of the run's state — asked exactly when the answer changes
         // what the attention row says.
-        let answerable = matches!(frame.phase, yunta_engine::RunPhase::Waiting { .. })
+        let answerable = matches!(frame.phase, yunta_replay::frame::RunPhase::Waiting { .. })
             && yunta_engine::awaits_decision(&self.manifest, &state).is_some();
         if let Draw::Live(region) = &mut self.draw {
             region.show(&frame, &self.run_id, (answerable, engine.prompt.as_ref()));

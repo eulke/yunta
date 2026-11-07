@@ -10,7 +10,7 @@ use yunta_core::events::{
     AskingOpenedPayload, ChangesCountedPayload, EngineFact, EventPayload, FileChange, GateEvent,
     NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RunEvent, TokenUsage,
 };
-use yunta_engine::TimeSpent;
+use yunta_replay::TimeSpent;
 use yunta_testkit_core::{fixed_now, Log};
 
 use super::super::facts::time_row;

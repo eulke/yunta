@@ -7,7 +7,7 @@ use yunta_core::events::{
     EventPayload, NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, Spend,
     TokenUsage,
 };
-use yunta_engine::{Declares, GateAsks, NodeFrame};
+use yunta_replay::frame::{Declares, GateAsks, NodeFrame};
 
 use super::*;
 use crate::render::surface_lines;
@@ -53,12 +53,12 @@ fn stats(nodes: Vec<NodeStat>) -> RunStats {
         rails: BTreeMap::new(),
         nodes,
         unknown_kinds: Vec::new(),
-        artifact_submissions: yunta_engine::Submissions {
+        artifact_submissions: yunta_replay::Submissions {
             accepted: 3,
             refused: 1,
         },
         submissions_by_node: Default::default(),
-        findings: yunta_engine::FindingActivity {
+        findings: yunta_replay::FindingActivity {
             posted: 5,
             updated: 1,
             withdrawn: 1,
@@ -83,7 +83,7 @@ fn render_run_stats(
     let frame = RunFrame {
         nodes: nodes.to_vec(),
         elapsed: stats.wall_clock,
-        ..yunta_testkit::run_frame(&RUN)
+        ..yunta_replay::frame::RunFrame::sample(&RUN)
     };
     let page = RunStatsPage {
         frame: &frame,
@@ -106,7 +106,7 @@ fn stats_renders_to_a_string_a_test_can_read() {
     // findings come to are in it, each said as itself.
     let look = Look::plain();
     let run_stats = stats(Vec::new());
-    let frame = yunta_testkit::run_frame(&RUN);
+    let frame = yunta_replay::frame::RunFrame::sample(&RUN);
     let page = RunStatsPage {
         frame: &frame,
         stats: &run_stats,
@@ -230,14 +230,14 @@ fn finished_frames(run: &RunStats) -> Vec<NodeFrame> {
                 ))),
             );
     }
-    let state = yunta_engine::derive(&log.build());
+    let state = yunta_replay::RunState::replay(&log.build());
     // Each node as a frame stands it: finished, the word its row opens with.
     run.nodes
         .iter()
         .map(|stat| {
-            yunta_testkit::node_frame(
+            yunta_replay::frame::NodeFrame::sample(
                 &stat.node_id,
-                yunta_engine::NodeStanding::Reached(
+                yunta_replay::frame::NodeStanding::Reached(
                     state
                         .nodes
                         .state(&stat.node_id)
@@ -289,9 +289,9 @@ fn frame(id: &str, people: Duration, rounds: usize) -> NodeFrame {
             gate,
             on_failure: None,
         },
-        ..yunta_testkit::node_frame(
+        ..yunta_replay::frame::NodeFrame::sample(
             &yunta_core::NodeId::from(id),
-            yunta_engine::NodeStanding::ToGo,
+            yunta_replay::frame::NodeStanding::ToGo,
         )
     }
 }
@@ -301,7 +301,7 @@ fn lines_at(run: &RunStats, nodes: &[NodeFrame], depth: Depth, look: &Look) -> V
     let view = RunFrame {
         nodes: nodes.to_vec(),
         elapsed: run.wall_clock,
-        ..yunta_testkit::run_frame(&RUN)
+        ..yunta_replay::frame::RunFrame::sample(&RUN)
     };
     let page = RunStatsPage {
         frame: &view,

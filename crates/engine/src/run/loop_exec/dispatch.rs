@@ -7,8 +7,8 @@ use yunta_core::events::{
     EventPayload, StoredEvent, TaskEvent, TaskStatus, TaskStatusChangedPayload,
 };
 use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task};
+use yunta_replay::RunState;
 
-use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
 use crate::scope_expansion::GrantWindow;
 use crate::task_cycle::{

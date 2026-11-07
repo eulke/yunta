@@ -12,11 +12,11 @@ use yunta_core::events::{
 use yunta_core::reserved::ReservedOption;
 use yunta_core::shown::{Flaw, ShownDocument};
 use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Seq, Workflow};
+use yunta_replay::RunState;
 
 use super::gate_exec::{emit_started, GateStep};
 use super::node_close::{fail, finish_node};
 use super::{RunCtx, RunError};
-use crate::replay::RunState;
 
 /// A gate a person answers here, read once out of its node.
 pub(crate) struct InternalGate<'a> {

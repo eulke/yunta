@@ -19,7 +19,9 @@ use surco::text::{counted, counted_as};
 use surco::words::{AT_WORK, WAITING_ON_YOU};
 use yunta_core::events::{EngineFact, NodeOutcome, NodeState};
 use yunta_core::Isolation;
-use yunta_engine::{NodeFrame, NodeStanding, PriorEstimation, RunFrame, TimeSpent};
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::TimeSpent;
 
 use super::{caution_row, RunPage, Scope};
 use crate::render::counter;

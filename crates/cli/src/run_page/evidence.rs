@@ -5,8 +5,8 @@ use surco::doc::{Block, Depth};
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use yunta_core::events::Failure;
-use yunta_engine::NodeFrame;
 use yunta_render::blocks::FailureDetail;
+use yunta_replay::frame::NodeFrame;
 
 use super::{failed, RunPage};
 use crate::commands::advice;

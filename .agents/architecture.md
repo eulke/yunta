@@ -17,10 +17,11 @@ every state from it, and what a person reads is drawn from that data in Surco.
 | `yunta-surco` | Surco, the language: its words, marks and figures, a `Doc` that a `Surface` draws, one lexer for code | nothing in the workspace |
 | `yunta-core` | domain types, the port, shapes, protection | surco |
 | `yunta-storage` | the append-only log; SQLite stays behind its interface | core |
+| `yunta-replay` | replay and every reading of a run, with no IO | core, surco |
 | `yunta-render` | Yunta's own facts and documents, said in Surco | core, surco |
 | `yunta-adapters` | `claude-code`, `codex` and `mock` behind the port | core, render, surco |
-| `yunta-engine` | scheduling, the task cycle, replay | core, storage, surco |
-| `yunta` | the commands | core, storage, engine, adapters, render, surco |
+| `yunta-engine` | scheduling, the task cycle | core, storage, replay, surco |
+| `yunta` | the commands | core, storage, replay, engine, adapters, render, surco |
 | `yunta-testkit-core` | test scaffolding for the crates below the engine | core |
 | `yunta-testkit` | the whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
 | `xtask` | smells, the docs checker, schemas | core, surco |
@@ -73,8 +74,8 @@ every state from it, and what a person reads is drawn from that data in Surco.
 - Engine decisions are deterministic and each effect has one owner: the clock, the environment, the filesystem
   and git are reached through their boundary modules. [smell system_clock_outside_boundary]
   [smell env_read_outside_boundary] [smell engine_fs_outside_runtime] [smell git_command_outside_git_rs]
-- Replay is a pure fold of the log: two logs with the same facts derive the same state. [test engine/properties]
-- A log an earlier binary wrote still replays. [test engine/logs_from_runs] [test engine/older_words]
+- Replay is a pure fold of the log: two logs with the same facts derive the same state. [test replay/properties]
+- A log an earlier binary wrote still replays. [test replay/logs_from_runs] [test render/older_words]
 - No session writes what an agent CLI loads as configuration, at its own path or through a link the base commit
   holds; a person may grant the instruction files. [test engine/paths_deny] [test adapters/own_config]
 - Nothing a session's CLI started outlives its session, linked to it or carrying its mark, nor a dead engine's

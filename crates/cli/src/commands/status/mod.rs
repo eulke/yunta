@@ -20,9 +20,11 @@ pub(crate) mod progress;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::{Escalation, StoredEvent};
+use yunta_core::events::{Escalation, NodeState, StoredEvent};
 use yunta_core::{Clock, Manifest, NodeId, RunId};
-use yunta_engine::{DecisionOn, NodeStanding, NodeState, RunFrame, RunState, ShownDocument};
+use yunta_engine::{DecisionOn, ShownDocument};
+use yunta_replay::frame::{NodeStanding, RunFrame};
+use yunta_replay::RunState;
 
 use crate::commands::{advice, stats};
 use crate::context::Context;
@@ -36,7 +38,7 @@ use node::NodePage;
 use surco::components::Note;
 use surco::doc::{Depth, Doc};
 use surco::look::Look;
-use yunta_engine::Engine;
+use yunta_replay::registry::Engine;
 
 /// Prints where `run_id` stands, as deep as `depth` asks — or, with
 /// `node`, that one node whole. A program reads the run's document under
@@ -122,7 +124,7 @@ impl Reading {
         }
         let manifest = open.manifest.doc;
         let now = ctx.clock.now();
-        let state = yunta_engine::derive(&events);
+        let state = yunta_replay::RunState::replay(&events);
         let decision = crate::json::decision_of(&manifest, &run_dir, &state).await?;
         let engine = crate::render::engine(&run_dir, now);
         let mut frame = progress::frame_of(run_id, &manifest, &state, &engine, now);

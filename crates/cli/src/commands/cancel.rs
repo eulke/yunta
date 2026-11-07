@@ -57,7 +57,7 @@ pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
     let storage = ctx.async_storage().await?;
     let open = ctx.open_run(run_id).await?;
 
-    let state = yunta_engine::derive(&open.events);
+    let state = yunta_replay::RunState::replay(&open.events);
     // Where the log leaves the run now: a pause a later wake resumed
     // stopped nothing that is still stopped.
     let parked = matches!(state.run.phase(), RunPhaseRaw::Paused);
@@ -89,7 +89,7 @@ async fn stop_engine(
     storage: &yunta_storage::AsyncStorage,
     open: &Opened,
     run_id: &RunId,
-    state: &yunta_engine::RunState,
+    state: &yunta_replay::RunState,
     output: Mode,
     look: &Look,
 ) -> Result<CancelState, CliError> {
@@ -172,7 +172,7 @@ async fn await_engine(
         let events = storage.events_for_run(run_id.clone()).await?;
         // The pause this signal asks for, not one a wake has
         // already resumed.
-        let state = yunta_engine::derive(&events);
+        let state = yunta_replay::RunState::replay(&events);
         if !matches!(state.run.phase(), RunPhaseRaw::Open) {
             let closed = matches!(state.run.phase(), RunPhaseRaw::Closed);
             return Ok(CancelState::Cancelled { engine_pid, closed });

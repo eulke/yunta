@@ -185,8 +185,8 @@ async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> 
 async fn read_state(
     ctx: &RunCtx<'_>,
     scheduling: &mut Scheduling,
-) -> Result<Box<crate::replay::RunState>, RunError> {
-    let crate::replay::RunView { events, state } = ctx.run_view().await?;
+) -> Result<Box<yunta_replay::RunState>, RunError> {
+    let crate::run_log::RunView { events, state } = ctx.run_view().await?;
     let accepted = protected::accepted_spec(&state.artifacts).map(|held| held.content_hash.clone());
     if accepted != scheduling.spec {
         ctx.renew_protected(protected::of(ctx, &events).await?);
@@ -202,7 +202,7 @@ async fn read_state(
 /// the log. Answers where the run works now; `None` when it stays.
 async fn moves_before(
     ctx: &RunCtx<'_>,
-    state: &crate::replay::RunState,
+    state: &yunta_replay::RunState,
     policy: &schedule::Policy,
     aside: &super::aside::Aside<'_>,
     decision: &Decision,
@@ -232,7 +232,7 @@ async fn moves_before(
 /// the run, saying how to make some.
 async fn take_step(
     ctx: &RunCtx<'_>,
-    state: &crate::replay::RunState,
+    state: &yunta_replay::RunState,
     mode_name: &ModeName,
     decision: Decision,
 ) -> Result<Option<RunReport>, RunError> {
@@ -253,7 +253,7 @@ type Stepped<'s> = Pin<Box<dyn Future<Output = Result<Option<RunReport>, RunErro
 /// composition.
 fn step<'s>(
     ctx: &'s RunCtx<'_>,
-    state: &'s crate::replay::RunState,
+    state: &'s yunta_replay::RunState,
     mode: &'s ModeName,
     decision: Decision,
 ) -> Stepped<'s> {
@@ -417,7 +417,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
 /// accepted spec the set was read from.
 async fn scheduling_of(
     ctx: &RunCtx<'_>,
-    view: &crate::replay::RunView,
+    view: &crate::run_log::RunView,
     mode_name: &ModeName,
 ) -> Result<Scheduling, RunError> {
     ctx.renew_protected(protected::of(ctx, &view.events).await?);

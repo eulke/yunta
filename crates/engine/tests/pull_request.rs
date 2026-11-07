@@ -11,7 +11,8 @@ use yunta_core::events::{
     EngineError, EngineStep, EventPayload, Failure, NodeEvent, PauseReason, StoredEvent,
 };
 use yunta_core::{ConfigKey, ConfigLayer, Workflow};
-use yunta_engine::{derive, CheckError, RunReport, RunTerminal};
+use yunta_engine::{CheckError, RunReport, RunTerminal};
+use yunta_replay::RunState;
 use yunta_testkit::{bare_origin, git_output, Bench, INITIAL_BRANCH, MOCK_CONFIG};
 
 const FORGE: &str = "forge:\n  github: { repo: acme/web, token_env: ACME_TOKEN }\n";
@@ -170,7 +171,7 @@ async fn optional_it_is_left_out_without_a_forge() {
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    let left: Vec<String> = derive(&bench.events())
+    let left: Vec<String> = RunState::replay(&bench.events())
         .run
         .left_out()
         .iter()

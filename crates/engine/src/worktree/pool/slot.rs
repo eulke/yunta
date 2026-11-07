@@ -18,7 +18,8 @@ use super::super::WorktreeError;
 use super::Lease;
 use crate::lock::{self, Acquired, Contention, LockError, LockOwner, SystemProbe};
 use crate::process::Supervision;
-use crate::process_registry::{self, EngineLiveness};
+use crate::process_registry;
+use yunta_replay::registry::EngineLiveness;
 
 /// What every checkout of the pool is called, followed by its number.
 pub(super) const SLOT: &str = "slot-";

@@ -38,7 +38,9 @@ sessions:
 ";
 
 fn status_of(bench: &Bench, task: &str) -> Option<yunta_core::events::TaskStatus> {
-    yunta_engine::derive(&bench.events()).tasks.status(task)
+    yunta_replay::RunState::replay(&bench.events())
+        .tasks
+        .status(task)
 }
 
 #[tokio::test]
@@ -52,7 +54,7 @@ async fn a_blocked_task_says_what_its_attempt_left_red() {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -159,7 +161,7 @@ async fn options(bench: &Bench) -> Vec<String> {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()

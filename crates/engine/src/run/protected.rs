@@ -15,10 +15,10 @@ use yunta_core::events::artifacts::{ArtifactLedger, ArtifactRef};
 use yunta_core::events::StoredEvent;
 use yunta_core::protected::Protected;
 use yunta_core::{ArtifactKind, Manifest, ScopeGlob, SpecFile};
+use yunta_replay::RunState;
 
 use super::{RunCtx, RunError};
 use crate::artifacts::store::ObjectStore;
-use crate::replay::RunState;
 
 /// What no session of the run may write, as its log stands: the project's
 /// deny, and the tests of the spec the log accepted last.

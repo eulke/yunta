@@ -4,8 +4,10 @@
 //! died — the shape a program acts on instead of parsing a sentence.
 
 use surco::words::Standing;
-use yunta_core::events::{CommandExit, Failure, SessionDeath, SessionEnd, TaskStop};
-use yunta_engine::{NodeFrame, NodeStanding, NodeState, NodeWait};
+use yunta_core::events::{
+    CommandExit, Failure, NodeState, NodeWait, SessionDeath, SessionEnd, TaskStop,
+};
+use yunta_replay::frame::{NodeFrame, NodeStanding};
 
 /// What one waiting node waits on — the same vocabulary the run-level
 /// `waiting_on` uses, so the document says "waiting" one way.

@@ -10,13 +10,14 @@ use yunta_core::events::{
     EngineStep, EventPayload, Failure, NodeOutcome, PauseReason, TerminalState, TokenUsage,
 };
 use yunta_core::{Isolation, Manifest, ModeName, Node, RunId};
+use yunta_replay::RunState;
 
 use super::super::node_close::{close_node, fail, fail_with, ChildRun, Close};
 use super::super::node_exec::{cancelled_end, NodeEnd};
 use super::super::promote::PromotionSuccessor;
 use super::super::{RunCtx, RunError, RunTerminal};
 use super::{ended, runs_root, worktrees_root, Step};
-use crate::replay::{RunState, RunView};
+use crate::run_log::RunView;
 
 /// Re-enters an existing, unfinished child run — everything it needs is
 /// its own frozen truth (manifest + paths + log), never re-resolved.

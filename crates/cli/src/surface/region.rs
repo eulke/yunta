@@ -33,7 +33,7 @@ use surco::motion::Motion;
 use surco::paint::Paint;
 use yunta_core::{NodeId, RunId};
 use yunta_engine::said::Said;
-use yunta_engine::RunFrame;
+use yunta_replay::frame::RunFrame;
 
 use super::scrollback::Scrollback;
 use super::{view, Screen};
@@ -145,7 +145,7 @@ impl Region {
         &mut self,
         frame: &RunFrame,
         run_id: &RunId,
-        (answerable, asking): (bool, Option<&yunta_engine::Prompt>),
+        (answerable, asking): (bool, Option<&yunta_replay::registry::Prompt>),
     ) {
         let attention = match asking {
             Some(prompt) => view::asked(prompt, &self.look()),

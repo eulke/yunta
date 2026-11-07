@@ -1,6 +1,8 @@
+use yunta_core::events::ChildLink;
+use yunta_core::events::NodeState;
 use yunta_core::NodeId;
-use yunta_engine::{Counter, NodeStanding, NodeState, RunPhase, WaitingOn};
-use yunta_testkit::{child_link, node_frame, run_frame};
+use yunta_replay::frame::{Counter, NodeStanding, RunPhase, WaitingOn};
+use yunta_replay::frame::{NodeFrame, RunFrame};
 use yunta_testkit_core::Captured;
 
 use crate::surface::Watched;
@@ -22,17 +24,17 @@ fn region(term: &Watched, scrollback: &Captured) -> Region {
     .expect("the region's row template parses")
 }
 
-fn running(id: &'static str) -> yunta_engine::NodeFrame {
-    node_frame(
+fn running(id: &'static str) -> yunta_replay::frame::NodeFrame {
+    NodeFrame::sample(
         &NodeId::from_static(id),
         NodeStanding::Reached(NodeState::Running { attempt: 1 }),
     )
 }
 
 /// A run of `nodes` in `phase`, counted as the region counts them.
-fn frame(phase: RunPhase, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
-    let engine = yunta_engine::Engine::this(chrono::DateTime::UNIX_EPOCH);
-    let standing = yunta_engine::run_standing(&phase, &nodes, 0, &engine);
+fn frame(phase: RunPhase, nodes: Vec<yunta_replay::frame::NodeFrame>) -> RunFrame {
+    let engine = yunta_replay::registry::Engine::this(chrono::DateTime::UNIX_EPOCH);
+    let standing = yunta_replay::frame::run_standing(&phase, &nodes, 0, &engine);
     RunFrame {
         standing,
         phase,
@@ -41,14 +43,18 @@ fn frame(phase: RunPhase, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
             ..Counter::default()
         },
         nodes,
-        ..run_frame(&RUN)
+        ..RunFrame::sample(&RUN)
     }
 }
 
 /// The run of `nodes`, with a child run still open under `bore`.
-fn composing(bore: &'static str, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
+fn composing(bore: &'static str, nodes: Vec<yunta_replay::frame::NodeFrame>) -> RunFrame {
     RunFrame {
-        children: vec![child_link(&CHILD, Some(&NodeId::from_static(bore)), None)],
+        children: vec![ChildLink::sample(
+            &CHILD,
+            Some(&NodeId::from_static(bore)),
+            None,
+        )],
         ..frame(RunPhase::Running, nodes)
     }
 }
@@ -63,7 +69,7 @@ fn parked_on_plan() -> RunFrame {
         RunPhase::Waiting {
             on: WaitingOn::Node {
                 node: NodeId::from_static("plan"),
-                on: yunta_engine::NodeWait::Gate { external_ref: None },
+                on: yunta_core::events::NodeWait::Gate { external_ref: None },
                 reason: None,
             },
         },
@@ -157,7 +163,7 @@ fn a_row_is_cut_to_the_terminal_and_never_past_the_width_it_is_written_for() {
                 RunPhase::Waiting {
                     on: WaitingOn::Node {
                         node: NodeId::from_static(PARKED),
-                        on: yunta_engine::NodeWait::Gate { external_ref: None },
+                        on: yunta_core::events::NodeWait::Gate { external_ref: None },
                         reason: None,
                     },
                 },

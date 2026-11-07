@@ -10,9 +10,9 @@ use std::path::PathBuf;
 
 use yunta_core::events::{EventPayload, GateResolvedPayload};
 use yunta_core::{Node, NodeId, NodeKind, Seq, Workflow};
+use yunta_replay::RunState;
 
 use super::{RunCtx, RunError};
-use crate::replay::RunState;
 use crate::task_cycle::{Answer, Continuing, RespecifiedTask, Respecify, Review};
 use yunta_core::reserved::ReservedOption;
 

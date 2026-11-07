@@ -2,8 +2,8 @@
 //!
 //! Three surfaces over two derivations and one vocabulary. The engine
 //! derives from the log where each thing stands
-//! ([`RunFrame`](yunta_engine::RunFrame)) and what happened, in order
-//! ([`yunta_engine::chronicle`]); this module's own `chronicle` chooses
+//! ([`RunFrame`](yunta_replay::frame::RunFrame)) and what happened, in order
+//! ([`yunta_replay::frame::chronicle`]); this module's own `chronicle` chooses
 //! a moment's words once; each surface only lays them out. The region
 //! draws what is open, the history above it keeps what closed or asked,
 //! and the append-only surface writes every moment. A reader moving
@@ -44,7 +44,9 @@ use tokio::task::JoinHandle;
 
 use yunta_core::events::StoredEvent;
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{Engine, PriorEstimation, RunObserver};
+use yunta_engine::RunObserver;
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::registry::Engine;
 use yunta_storage::AsyncStorage;
 
 use surco::glyphs::Glyphs;

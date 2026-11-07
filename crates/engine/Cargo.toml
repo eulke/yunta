@@ -21,6 +21,8 @@ yunta-core.workspace = true
 # Surco's text and figures, never a document or a surface.
 yunta-surco.workspace = true
 yunta-storage.workspace = true
+# What a run is, as its log says: the engine schedules and resumes from it.
+yunta-replay.workspace = true
 thiserror.workspace = true
 futures.workspace = true
 globset.workspace = true
@@ -81,11 +83,9 @@ async-trait.workspace = true
 # workspace graph); named here because internal_gate's own signature takes
 # it.
 indexmap.workspace = true
-# `stats::compute_run_stats` derives wall-clock and blocked-time per
-# node from `Event.timestamp` — already this exact `chrono` version via
-# `yunta-core`'s own dependency, promoted here from dev-only now that
-# production code (not just tests) needs to subtract and format
-# timestamps.
+# The instants the engine stamps and compares: a lock's holder, a
+# registry's reading, a wait's deadline — already this exact `chrono`
+# version via `yunta-core`'s own dependency.
 chrono.workspace = true
 # A canonical artifact is written through the run's own `scratch/` and
 # renamed into place, so a reader never meets half a document.
@@ -103,7 +103,7 @@ yunta-adapters.workspace = true
 # The shared test harness: git-repo fixture, fixed clock, run bench.
 yunta-testkit.workspace = true
 yunta-testkit-core.workspace = true
-# Property tests for the replay guarantees (derive, JSONL wire form, resume).
+# Property tests for the replay guarantees (the fold, JSONL wire form, resume).
 proptest.workspace = true
 # Tests write their workflows and fixtures as YAML literals.
 tempfile.workspace = true

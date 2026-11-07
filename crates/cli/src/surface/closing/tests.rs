@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use surco::golden::{assert_golden, ENVIRONMENTS};
 use surco::look::Look;
 use yunta_core::events::TokenUsage;
-use yunta_engine::{RunPhase, RunState};
+use yunta_replay::frame::RunPhase;
+use yunta_replay::RunState;
 use yunta_testkit_core::fixed_now;
 
 use super::*;

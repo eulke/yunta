@@ -225,7 +225,7 @@ fn the_engine_reading_names_the_socket_only_while_its_engine_lives() {
         &AtClock(started),
     )
     .unwrap();
-    assert_eq!(Engine::read(run.path(), &alive, started).words, None);
+    assert_eq!(read_engine(run.path(), &alive, started).words, None);
 
     // The field as an engine that serves its socket writes it.
     let path = registry_path(run.path());
@@ -234,14 +234,14 @@ fn the_engine_reading_names_the_socket_only_while_its_engine_lives() {
     file["words"] = "/tmp/yunta-501/run.sock".into();
     std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
     assert_eq!(
-        Engine::read(run.path(), &alive, started).words,
+        read_engine(run.path(), &alive, started).words,
         Some(PathBuf::from("/tmp/yunta-501/run.sock"))
     );
     let gone = Host {
         alive: Liveness::Dead,
         started: None,
     };
-    assert_eq!(Engine::read(run.path(), &gone, started).words, None);
+    assert_eq!(read_engine(run.path(), &gone, started).words, None);
     assert_eq!(Engine::this(started).words, None);
     drop(registry);
 }

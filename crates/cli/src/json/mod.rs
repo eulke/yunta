@@ -19,8 +19,9 @@ use yunta_core::caution::Caution;
 use yunta_core::events::StoredEvent;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload};
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{RunFrame, RunPhase, RunState, WaitingOn};
 use yunta_render::spend::SpendJson;
+use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
+use yunta_replay::RunState;
 
 mod diagnostics;
 mod facts;
@@ -219,7 +220,7 @@ impl RunDocument {
         state: &RunState,
         manifest: &Manifest,
         frame: &RunFrame,
-        engine: &yunta_engine::Engine,
+        engine: &yunta_replay::registry::Engine,
         decision: Option<(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
     ) -> Self {
         let escalation = parked_escalation(frame, decision.as_ref());
@@ -454,7 +455,7 @@ impl WaitingOnJson {
     /// The frame's own answer, in the document's shape — or, for a run
     /// that is moving, the question its engine is asking at its terminal.
     /// `None` for a run that is not waiting on anything.
-    fn of(phase: &RunPhase, engine: &yunta_engine::Engine) -> Option<Self> {
+    fn of(phase: &RunPhase, engine: &yunta_replay::registry::Engine) -> Option<Self> {
         let RunPhase::Waiting { on } = phase else {
             let moving = matches!(phase, RunPhase::Created | RunPhase::Running);
             return engine

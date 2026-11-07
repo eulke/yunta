@@ -19,7 +19,7 @@ use surco::figures::duration;
 use surco::glyphs::Glyphs;
 use surco::look::Look;
 use surco::paint::Paint;
-use yunta_engine::Moment;
+use yunta_replay::frame::Moment;
 
 use super::{chronicle, write_line};
 
@@ -93,7 +93,7 @@ mod pause_reason_tests {
         Claim, Escalation, Failure, PauseReason, PublishedGate, RunEvent, RunPausedPayload,
     };
     use yunta_core::{NodeId, QuestionId, RunId};
-    use yunta_engine::WaitingOn;
+    use yunta_replay::frame::WaitingOn;
 
     use crate::commands::advice;
 
@@ -249,7 +249,7 @@ mod pause_reason_tests {
                 NodeFailedPayload::new(failure, TokenUsage::default()),
             ))),
         };
-        let moments = yunta_engine::chronicle(&[event]);
+        let moments = yunta_replay::frame::chronicle(&[event]);
         let moment = moments.first().expect("one moment per event");
         let written = yunta_testkit_core::Captured::default();
         let mut lines = Lines {
@@ -293,9 +293,11 @@ mod pause_reason_tests {
             assert_eq!(payload.pause, reason);
 
             let said = chronicle::say(
-                &yunta_testkit::moment(
+                &yunta_replay::frame::Moment::sample(
                     None,
-                    yunta_engine::Happening::Run((&RunEvent::Paused(payload.clone())).into()),
+                    yunta_replay::frame::Happening::Run(
+                        (&RunEvent::Paused(payload.clone())).into(),
+                    ),
                 ),
                 surco::glyphs::Glyphs::Unicode,
             );
@@ -336,14 +338,15 @@ mod promotion_tests {
 
     #[test]
     fn a_promotion_with_no_cause_recorded_reads_as_the_mode_alone() {
-        let promoted = yunta_engine::Happening::Run(run::happening::Happening::PromotionSignaled {
-            to: "ship".into(),
-            cause: None,
-            legacy_reason: None,
-            evidence: Evidence::none(),
-        });
+        let promoted =
+            yunta_replay::frame::Happening::Run(run::happening::Happening::PromotionSignaled {
+                to: "ship".into(),
+                cause: None,
+                legacy_reason: None,
+                evidence: Evidence::none(),
+            });
         let said = chronicle::say(
-            &yunta_testkit::moment(None, promoted),
+            &yunta_replay::frame::Moment::sample(None, promoted),
             surco::glyphs::Glyphs::Unicode,
         );
         assert_eq!(said.text, "run promoted to `ship`");
@@ -360,14 +363,15 @@ mod promotion_tests {
                 outcome: "exit 1".into(),
             }),
         };
-        let promoted = yunta_engine::Happening::Run(run::happening::Happening::PromotionSignaled {
-            to: "ship".into(),
-            cause: Some(cause),
-            legacy_reason: None,
-            evidence: Evidence::none(),
-        });
+        let promoted =
+            yunta_replay::frame::Happening::Run(run::happening::Happening::PromotionSignaled {
+                to: "ship".into(),
+                cause: Some(cause),
+                legacy_reason: None,
+                evidence: Evidence::none(),
+            });
         let said = chronicle::say(
-            &yunta_testkit::moment(None, promoted),
+            &yunta_replay::frame::Moment::sample(None, promoted),
             surco::glyphs::Glyphs::Unicode,
         );
         assert_eq!(

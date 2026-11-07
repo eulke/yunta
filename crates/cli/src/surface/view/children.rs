@@ -4,9 +4,10 @@
 
 use surco::glyphs::{Glyphs, Mark};
 use surco::words::Standing;
+use yunta_core::events::ChildLink;
 use yunta_core::events::TerminalState;
 use yunta_core::NodeId;
-use yunta_engine::{ChildLink, RunFrame};
+use yunta_replay::frame::RunFrame;
 
 /// What a child run whose link the log recorded under no node is filed
 /// under: what the log does not say, rather than a node it might not
@@ -98,7 +99,6 @@ pub(in crate::surface) fn closed_as(state: TerminalState) -> Standing {
 #[cfg(test)]
 mod tests {
     use yunta_core::RunId;
-    use yunta_testkit::{child_link, run_frame};
 
     use super::*;
 
@@ -113,7 +113,7 @@ mod tests {
         node: Option<&'static str>,
         terminal: Option<TerminalState>,
     ) -> ChildLink {
-        child_link(run_id, node.map(NodeId::from_static).as_ref(), terminal)
+        ChildLink::sample(run_id, node.map(NodeId::from_static).as_ref(), terminal)
     }
 
     /// A run that bore `children` and declares no nodes: what these
@@ -122,7 +122,7 @@ mod tests {
     fn composed(children: Vec<ChildLink>) -> RunFrame {
         RunFrame {
             children,
-            ..run_frame(&RUN)
+            ..RunFrame::sample(&RUN)
         }
     }
 

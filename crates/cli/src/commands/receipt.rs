@@ -1,6 +1,6 @@
 //! `yunta receipt <run_id>`: gathers the run's manifest, event log and
 //! hash-chain verification off disk — the only
-//! IO this command does — and hands them to `yunta_engine::build_receipt`
+//! IO this command does — and hands them to `yunta_replay::receipt::closed`
 //! for the actual derivation. Writes both formats to the run's own
 //! `run.dir` (`receipt.md`, `receipt.json`) so a later node (e.g. a `pr`
 //! bash step doing `gh pr create --body-file receipt.md`) can pick them
@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 
 use surco::doc::Doc;
 use surco::look::Look;
+use yunta_core::receipt::{EventChainStatus, Receipt};
 use yunta_core::RunId;
-use yunta_engine::{build_receipt, render_receipt_json, EventChainStatus, Receipt};
+use yunta_replay::receipt;
 use yunta_storage::ChainVerification;
 
 use super::advice;
@@ -32,7 +33,7 @@ pub async fn receipt(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcom
             look.glyphs,
         ))
     };
-    let json_text = render_receipt_json(&receipt)
+    let json_text = serde_json::to_string_pretty(&receipt)
         .map_err(|e| CliError::msg(format!("could not render receipt JSON: {e}")))?;
 
     // Both formats land beside the run whichever one is asked for, so a
@@ -75,7 +76,7 @@ async fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), C
         ChainVerification::Broken { seq, detail } => EventChainStatus::Broken { seq, detail },
     };
 
-    let receipt = build_receipt(run_id, &manifest, &events, chain).map_err(|e| {
+    let receipt = receipt::closed(run_id, &manifest, &events, chain).map_err(|e| {
         // The engine says which state the run is in; which command shows
         // a reader where that run stands is this border's vocabulary.
         CliError::msg(format!(

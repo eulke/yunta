@@ -181,7 +181,7 @@ fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
             })),
         )
         .build();
-    yunta_engine::derive(&events).tasks
+    yunta_replay::RunState::replay(&events).tasks
 }
 
 /// The governance a cycle test runs under when governance is not what

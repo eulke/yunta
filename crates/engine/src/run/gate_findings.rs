@@ -11,9 +11,9 @@ use yunta_core::durable::{self, Durability};
 use yunta_core::events::findings::RunFindings;
 use yunta_core::events::{ArtifactId, EventPayload, FindingEvent, FindingSettledPayload, Shown};
 use yunta_core::{ArtifactContextRef, ArtifactKind, ContentHash, Node, Seq};
+use yunta_replay::RunState;
 
 use super::{RunCtx, RunError};
-use crate::replay::RunState;
 
 /// The identity the view is shown under.
 fn findings() -> ArtifactId {

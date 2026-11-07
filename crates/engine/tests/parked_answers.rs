@@ -5,7 +5,8 @@ use yunta_core::events::{
     EventDraft, EventPayload, GateEvent, GateResolvedPayload, HumanChoice, NodeEvent, PauseReason,
     RunEvent, RunPausedPayload, RunResumedPayload,
 };
-use yunta_engine::{awaits_decision, current_escalation, derive, DecisionOn, RunTerminal};
+use yunta_engine::{awaits_decision, current_escalation, DecisionOn, RunTerminal};
+use yunta_replay::RunState;
 use yunta_testkit::Bench;
 use yunta_testkit_core::{FixedClock, Log};
 
@@ -65,13 +66,13 @@ fn waits(events: Vec<EventPayload>) -> bool {
     let log = events
         .into_iter()
         .fold(Log::for_run("run-1"), |log, event| log.event(event));
-    derive(&log.build()).answer_awaits_its_resume()
+    RunState::replay(&log.build()).answer_awaits_its_resume()
 }
 
 #[tokio::test]
 async fn a_run_on_the_cap_offers_its_own_decision() {
     let bench = parked_on_the_cap().await;
-    let state = derive(&bench.events());
+    let state = RunState::replay(&bench.events());
     let (on, _) = current_escalation(&bench.manifest(), &bench.run_dir(), &state)
         .await
         .unwrap()
@@ -93,7 +94,7 @@ async fn an_answer_waits_for_the_engine_that_takes_it() {
         .await
         .expect("the cap's menu offers continue");
 
-    let state = derive(&bench.events());
+    let state = RunState::replay(&bench.events());
     assert!(state.answer_awaits_its_resume());
     assert!(
         current_escalation(&bench.manifest(), &bench.run_dir(), &state)
@@ -193,7 +194,7 @@ async fn an_abort_waiting_stops_the_run_where_it_stood() {
         current_escalation(
             &bench.manifest(),
             &bench.run_dir(),
-            &derive(&bench.events())
+            &RunState::replay(&bench.events())
         )
         .await
         .unwrap()
@@ -312,7 +313,7 @@ async fn a_recorded_continue_runs_a_cut_session_past_its_share() {
     );
 
     answer_parked(&bench, "continue").await.unwrap();
-    assert!(derive(&bench.events()).answer_awaits_its_resume());
+    assert!(RunState::replay(&bench.events()).answer_awaits_its_resume());
 
     let woken = bench.wake().await;
     assert_eq!(woken.terminal, RunTerminal::Finished);
@@ -393,7 +394,7 @@ async fn a_retry_that_reached_the_cap_runs_after_continue() {
         "{:?}",
         on_the_cap.terminal
     );
-    let state = derive(&bench.events());
+    let state = RunState::replay(&bench.events());
     assert!(
         !state.answer_awaits_its_resume(),
         "the run stands on the cap, and that is what is asked"

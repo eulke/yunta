@@ -7,12 +7,11 @@
 //! back as its attempt ends, is kept instead while a session the engine could
 //! not stop still runs in it.
 
-use yunta_core::events::{Cleaned, Failure, FindingCause, FindingSeverity};
+use yunta_core::events::{Cleaned, Failure, FindingCause, FindingSeverity, NodeState};
 use yunta_core::{Location, Node, NodeKind, RelativePath};
 
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
-use crate::replay::NodeState;
 
 /// Gives the checkouts the run's units hold back to the project's pool.
 /// One that cannot be given back stays its unit's until `gc` collects the

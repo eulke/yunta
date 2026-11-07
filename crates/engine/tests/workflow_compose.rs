@@ -13,11 +13,11 @@ use tokio_util::sync::CancellationToken;
 
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
-    ArtifactId, BaselineOrigin, EventPayload, NodeEvent, StoredEvent, TerminalState,
+    ArtifactId, BaselineOrigin, EventPayload, NodeEvent, NodeState, StoredEvent, TerminalState,
 };
 use yunta_core::events::{ChildEvent, FindingEvent, PauseReason, RunEvent, TaskEvent};
 use yunta_core::{AdapterId, ContentHash, Manifest, NodeId, RunAdapter, RunId, Workflow};
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{
     baselines, git, on_a_deep_stack, write, ApproveEverything, Bench, ScriptedInteraction,
 };
@@ -1308,7 +1308,8 @@ nodes:
         vec![(None, "T001".to_string())],
         "a mounted document's tasks are the child's from birth, with no node behind them"
     );
-    let child_state = yunta_engine::derive(&bench.storage.events_for_run(&child).unwrap());
+    let child_state =
+        yunta_replay::RunState::replay(&bench.storage.events_for_run(&child).unwrap());
     assert_eq!(
         child_state.tasks.status("T001"),
         Some(yunta_core::events::TaskStatus::Done)
@@ -1477,7 +1478,7 @@ nodes:
         vec![],
         "and none of them crosses: the sibling's tree has no commit the document's done names"
     );
-    let state = yunta_engine::derive(&sibling_events);
+    let state = yunta_replay::RunState::replay(&sibling_events);
     assert_eq!(
         state.tasks.status("T001"),
         Some(yunta_core::events::TaskStatus::Pending),

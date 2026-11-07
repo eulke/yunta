@@ -120,7 +120,7 @@ async fn a_loop_node_whose_session_died_fails_naming_the_adapter_and_the_exit() 
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()

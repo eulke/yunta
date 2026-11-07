@@ -44,7 +44,7 @@ use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, CLAUDE_CODE_ID, CODEX_ID};
 use yunta_core::events::PauseReason;
 use yunta_core::port::{Adapter, ProbeReport};
 use yunta_core::{AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Workflow};
-use yunta_engine::RunState;
+use yunta_replay::RunState;
 
 use crate::error::CliError;
 use crate::output::Mode;

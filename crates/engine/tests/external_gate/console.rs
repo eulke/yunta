@@ -3,11 +3,11 @@
 //! withheld and the reason it cannot be.
 
 use yunta_core::events::{
-    Approval, Claim, EventPayload, Failure, GateEvent, GateWaitingPayload, HumanChoice,
+    Approval, Claim, EventPayload, Failure, GateEvent, GateWaitingPayload, HumanChoice, NodeState,
     PauseReason, WhyWithheld,
 };
 use yunta_core::NodeId;
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, ScriptedInteraction};
 
 use super::{bench_on_a_forge, GATE_ONLY_WORKFLOW, NO_SESSIONS};

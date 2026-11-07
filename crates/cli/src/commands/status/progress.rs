@@ -16,7 +16,9 @@ use surco::glyphs::Glyphs;
 use surco::words::Standing;
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{Engine, RunFrame, RunPhase, RunState};
+use yunta_replay::frame::{RunFrame, RunPhase};
+use yunta_replay::registry::Engine;
+use yunta_replay::RunState;
 
 use crate::commands::advice;
 
@@ -31,7 +33,7 @@ use crate::commands::advice;
 /// once per row. `yunta status` sets one for a run parked on its budget,
 /// the only pause whose caution compares the cap with that history.
 ///
-/// Framing a run costs what [`yunta_engine::run_frame`] says it costs.
+/// Framing a run costs what [`yunta_replay::frame::RunFrame::of`] says it costs.
 /// `yunta status` pays that once, for the run it opens; `yunta list
 /// --runs` pays it again for every run it prints.
 pub(crate) fn frame(
@@ -41,7 +43,13 @@ pub(crate) fn frame(
     engine: &Engine,
     now: DateTime<Utc>,
 ) -> RunFrame {
-    frame_of(run_id, manifest, &yunta_engine::derive(events), engine, now)
+    frame_of(
+        run_id,
+        manifest,
+        &yunta_replay::RunState::replay(events),
+        engine,
+        now,
+    )
 }
 
 /// The frame of a run whose state the caller already derived from its
@@ -54,7 +62,7 @@ pub(crate) fn frame_of(
     engine: &Engine,
     now: DateTime<Utc>,
 ) -> RunFrame {
-    yunta_engine::run_frame_of(run_id, &manifest.workflow, state, None, engine, now)
+    yunta_replay::frame::RunFrame::of(run_id, &manifest.workflow, state, None, engine, now)
 }
 
 /// The counters and the phase on one line: the counters every surface
@@ -64,7 +72,11 @@ pub(crate) fn frame_of(
 /// `engine` is what the run's registry says about the process driving
 /// it, which is what tells a run that is moving from one whose engine is
 /// gone.
-pub(crate) fn summary(frame: &RunFrame, engine: &yunta_engine::Engine, glyphs: Glyphs) -> String {
+pub(crate) fn summary(
+    frame: &RunFrame,
+    engine: &yunta_replay::registry::Engine,
+    glyphs: Glyphs,
+) -> String {
     let sep = glyphs.sep();
     let mut summary = format!(
         "{} {sep} {}",
@@ -79,7 +91,7 @@ pub(crate) fn summary(frame: &RunFrame, engine: &yunta_engine::Engine, glyphs: G
 
 /// The phase on one line, for the end of a summary: the word every
 /// surface calls it by, and what qualifies it when something does.
-fn phase_label(frame: &RunFrame, engine: &yunta_engine::Engine) -> String {
+fn phase_label(frame: &RunFrame, engine: &yunta_replay::registry::Engine) -> String {
     let word = frame.standing;
     if word == Standing::Stalled {
         return format!("{word}: no process is driving it");

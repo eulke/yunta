@@ -151,7 +151,7 @@ async fn a_regression_offers_abort_alone_on_the_tree_it_failed_on() {
 
 /// A person who writes the tree back and a wake that finds the change
 /// offer the retry again, and choosing it runs the suite once more.
-/// Reached by: `crates/engine/src/run/escalation.rs`, `crates/engine/src/replay/tree.rs`,
+/// Reached by: `crates/engine/src/run/escalation.rs`, `crates/replay/src/tree.rs`,
 /// `crates/engine/src/run/steps.rs`, `crates/engine/src/run/wake.rs`,
 /// `crates/engine/src/run/schedule/failure.rs`, `crates/core/src/events/failure/remedy.rs`
 #[tokio::test]

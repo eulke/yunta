@@ -10,8 +10,7 @@ use yunta_core::events::{
 };
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{ModeName, NodeId};
-
-use crate::replay::RunState;
+use yunta_replay::RunState;
 
 use super::{
     budget, escalation, find_node, gate_exec, node_close, node_exec, pause, questions_exec,

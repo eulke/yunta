@@ -10,8 +10,8 @@ use yunta_core::events::{
     EventPayload, Failure, TaskCause, TaskEvent, TaskRecord, TaskStatus, TaskStatusChangedPayload,
 };
 use yunta_core::{Node, NodeId, Seq, TaskId, TasksFile};
+use yunta_replay::RunState;
 
-use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
 use yunta_core::reserved::ReservedOption;
 

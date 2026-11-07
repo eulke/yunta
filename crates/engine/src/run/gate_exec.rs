@@ -332,7 +332,8 @@ pub(super) async fn recheck_approved_gates(
         if !matches!(node.kind, yunta_core::NodeKind::Gate { .. }) {
             continue;
         }
-        let Some(crate::replay::NodeState::Finished { .. }) = state.nodes.state(&node.id) else {
+        let Some(yunta_core::events::NodeState::Finished { .. }) = state.nodes.state(&node.id)
+        else {
             continue;
         };
         let Some(approved_sha) = state.gates.approved_sha(&node.id).cloned() else {

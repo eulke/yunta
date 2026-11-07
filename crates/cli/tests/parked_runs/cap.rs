@@ -184,7 +184,7 @@ fn chain_up_to_a_hold(started: &Path, go: &Path) -> String {
 /// Every engine spends new money, so an answer pays for the one that took it: one killed
 /// mid-node, which never got to say anything, leaves the next one stopped on the cap.
 ///
-/// Reached by: `crates/engine/src/replay/decisions.rs`, `crates/engine/src/run/budget.rs`
+/// Reached by: `crates/replay/src/decisions.rs`, `crates/engine/src/run/budget.rs`
 #[test]
 fn an_engine_killed_after_it_took_the_answer_leaves_the_next_on_the_cap() {
     let root = tempfile::tempdir().unwrap();
@@ -318,7 +318,7 @@ sessions:
 /// The lift lives in the engine that took the answer: one killed mid-attempt leaves the
 /// next under its share, and it asks again when it is cut.
 ///
-/// Reached by: `crates/engine/src/replay/decisions.rs`
+/// Reached by: `crates/replay/src/decisions.rs`
 #[test]
 fn an_engine_killed_mid_attempt_leaves_the_next_under_its_share() {
     let root = tempfile::tempdir().unwrap();

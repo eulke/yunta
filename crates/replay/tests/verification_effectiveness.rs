@@ -1,0 +1,496 @@
+//! `VerificationFindings::of` — golden
+//! tests over hand-built historical logs, same style `tests/stats.rs`
+//! uses for its own pure derivation.
+
+use yunta_core::events::{
+    CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, Failure,
+    GateResolvedPayload, NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
+};
+use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
+use yunta_core::{Node, NodeKind, OnFailure, Workflow};
+use yunta_replay::history::MIN_SAMPLES;
+use yunta_replay::verification_effectiveness::VerificationFindings;
+use yunta_testkit_core::Log;
+
+/// The failure a node ends with when its lint command fails.
+fn lint_failure() -> Failure {
+    Failure::Message {
+        outcome: "lint failed".into(),
+    }
+}
+
+fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
+    Node {
+        id: id.into(),
+        kind: NodeKind::Bash { run: "true".into() },
+        depends_on: Vec::new(),
+        scope: yunta_core::NodeScope::Unscoped,
+        runner: None,
+        artifacts: None,
+        hooks: None,
+        on_failure,
+        on_interrupt: None,
+        description: None,
+        permissions: None,
+        network: None,
+        context: Vec::new(),
+        invariant: false,
+        skills: Vec::new(),
+        runners: Vec::new(),
+        agent: None,
+        effort: None,
+        optional: false,
+        ask: None,
+        cli_config: None,
+    }
+}
+
+fn gate_node(id: &str) -> Node {
+    Node {
+        effort: None,
+        id: id.into(),
+        kind: NodeKind::Gate {
+            assignee: "reviewer".to_string(),
+            message: None,
+            options: Vec::new(),
+            on: Default::default(),
+            shows: Vec::new(),
+            external: Some(yunta_core::ExternalGate {
+                kind: yunta_core::ForgeKind::PullRequest,
+                artifacts: Vec::new(),
+                branch: "{{run.branch}}".to_string(),
+            }),
+        },
+        depends_on: Vec::new(),
+        scope: yunta_core::NodeScope::Unscoped,
+        runner: None,
+        artifacts: None,
+        hooks: None,
+        on_failure: None,
+        on_interrupt: None,
+        description: None,
+        permissions: None,
+        network: None,
+        context: Vec::new(),
+        invariant: false,
+        skills: Vec::new(),
+        runners: Vec::new(),
+        agent: None,
+        optional: false,
+        ask: None,
+        cli_config: None,
+    }
+}
+
+fn workflow(nodes: Vec<Node>) -> Workflow {
+    Workflow {
+        name: "fixture".into(),
+        modes: None,
+        description: None,
+        inputs: Default::default(),
+        node_defaults: None,
+        nodes,
+        yunta_schema: None,
+        on_finish: Vec::new(),
+    }
+}
+
+fn criterion(cmd: &str, exit_code: i32) -> CriterionResult {
+    CriterionResult {
+        cmd: cmd.to_string(),
+        exit_code,
+        r#type: None,
+        reused: false,
+        duration_ms: None,
+        output: None,
+        tail: Vec::new(),
+        tree: None,
+        head: None,
+        conclusion: None,
+    }
+}
+
+fn pre_check_run(cmd: &str, exit_code: i32) -> Vec<StoredEvent> {
+    Log::for_run("run-1")
+        .event(EventPayload::Node(NodeEvent::CriteriaChecked(
+            CriteriaCheckedPayload {
+                task_id: "T001".into(),
+                phase: Phase::Pre,
+                results: vec![criterion(cmd, exit_code)],
+                waiting: Vec::new(),
+            },
+        )))
+        .build()
+}
+
+#[test]
+fn a_criterion_never_red_across_enough_samples_is_flagged() {
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| pre_check_run("cargo test", 0))
+        .collect();
+    let findings = VerificationFindings::of(&workflow(vec![]), &history);
+    assert_eq!(findings.never_red_criteria.len(), 1);
+    assert_eq!(findings.never_red_criteria[0].cmd, "cargo test");
+    assert_eq!(findings.never_red_criteria[0].sample_count, MIN_SAMPLES);
+}
+
+/// A guard is there to stay green, before the work and after it, so a
+/// guard that was never red has done exactly its job.
+#[test]
+fn a_guard_green_before_every_task_is_never_flagged() {
+    let guarded = || {
+        Log::for_run("run-1")
+            .event(EventPayload::Node(NodeEvent::CriteriaChecked(
+                CriteriaCheckedPayload {
+                    task_id: "T001".into(),
+                    phase: Phase::Pre,
+                    results: vec![CriterionResult {
+                        r#type: Some(CriterionType::Guard),
+                        ..criterion("cargo test --workspace", 0)
+                    }],
+                    waiting: Vec::new(),
+                },
+            )))
+            .build()
+    };
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES).map(|_| guarded()).collect();
+    let findings = VerificationFindings::of(&workflow(vec![]), &history);
+    assert!(findings.never_red_criteria.is_empty(), "{findings:#?}");
+}
+
+#[test]
+fn fewer_than_min_samples_flags_nothing() {
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES - 1)
+        .map(|_| pre_check_run("cargo test", 0))
+        .collect();
+    let findings = VerificationFindings::of(&workflow(vec![]), &history);
+    assert!(findings.never_red_criteria.is_empty());
+}
+
+#[test]
+fn a_criterion_red_before_green_after_is_never_flagged() {
+    // The relevant distinction is "never red before" vs.
+    // "never failed" — this criterion *did* go red at least once, in
+    // pre-check, which is the metric that matters; that it later passed
+    // (post-check) is irrelevant to this signal.
+    let mut history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| pre_check_run("cargo test", 0))
+        .collect();
+    history.push(pre_check_run("cargo test", 1)); // one red pre-check
+    let findings = VerificationFindings::of(&workflow(vec![]), &history);
+    assert!(
+        findings.never_red_criteria.is_empty(),
+        "a criterion that was red at least once in pre-check must never appear here"
+    );
+}
+
+#[test]
+fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
+    let on_failure = OnFailure {
+        goto: "fix".into(),
+        max_reroutes: 2,
+    };
+    let wf = workflow(vec![node("lint", Some(on_failure))]);
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "lint",
+                    EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                        lint_failure(),
+                        Default::default(),
+                    ))),
+                )
+                .build()
+            // no node_rerouted in any of these — the reroute this node
+            // declares was never observed firing.
+        })
+        .collect();
+    let findings = VerificationFindings::of(&wf, &history);
+    assert_eq!(findings.never_triggered_reroutes.len(), 1);
+    assert_eq!(findings.never_triggered_reroutes[0].node, "lint");
+}
+
+#[test]
+fn a_reroute_that_fires_at_least_once_is_never_flagged() {
+    let on_failure = OnFailure {
+        goto: "fix".into(),
+        max_reroutes: 2,
+    };
+    let wf = workflow(vec![node("lint", Some(on_failure))]);
+    let mut history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "lint",
+                    EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                        lint_failure(),
+                        Default::default(),
+                    ))),
+                )
+                .build()
+        })
+        .collect();
+    // The last sample's failure actually rerouted.
+    history.push(
+        Log::for_run("run-1")
+            .node(
+                "lint",
+                EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                    lint_failure(),
+                    Default::default(),
+                ))),
+            )
+            .node(
+                "lint",
+                EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+                    "fix".into(),
+                    lint_failure(),
+                    yunta_core::events::RerouteOrigin::OnFailure,
+                    Some(1),
+                    Some(2),
+                ))),
+            )
+            .build(),
+    );
+    let findings = VerificationFindings::of(&wf, &history);
+    assert!(findings.never_triggered_reroutes.is_empty());
+}
+
+#[test]
+fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
+    // The strongest version of "this reroute never fired": the node
+    // ran every time and never even needed it.
+    use yunta_core::events::{NodeFinishedPayload, NodeOutcome};
+    let on_failure = OnFailure {
+        goto: "fix".into(),
+        max_reroutes: 2,
+    };
+    let wf = workflow(vec![node("lint", Some(on_failure))]);
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "lint",
+                    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                        NodeOutcome::Summary("clean".to_string()),
+                        Default::default(),
+                    ))),
+                )
+                .build()
+        })
+        .collect();
+    let findings = VerificationFindings::of(&wf, &history);
+    assert_eq!(findings.never_triggered_reroutes.len(), 1);
+    assert_eq!(
+        findings.never_triggered_reroutes[0].sample_count,
+        MIN_SAMPLES
+    );
+}
+
+#[test]
+fn a_gate_always_approved_without_adjustment_is_flagged() {
+    let wf = workflow(vec![gate_node("approve")]);
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "approve",
+                    EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
+                        by: "reviewer".into(),
+                        sha: "deadbeef".into(),
+                    })),
+                )
+                .build()
+        })
+        .collect();
+    let findings = VerificationFindings::of(&wf, &history);
+    assert_eq!(findings.always_approved_gates.len(), 1);
+    assert_eq!(findings.always_approved_gates[0].node, "approve");
+}
+
+#[test]
+fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
+    let wf = workflow(vec![gate_node("approve")]);
+    let mut history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "approve",
+                    EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
+                        by: "reviewer".into(),
+                        sha: "deadbeef".into(),
+                    })),
+                )
+                .build()
+        })
+        .collect();
+    history.push(
+        Log::for_run("run-1")
+            .node(
+                "approve",
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
+                    by: "reviewer".into(),
+                })),
+            )
+            .build(),
+    );
+    let findings = VerificationFindings::of(&wf, &history);
+    assert!(findings.always_approved_gates.is_empty());
+}
+
+/// One run's post-check log: task `i` checked once per attempt in
+/// `task_attempts[i]`, every attempt green.
+fn post_check_run(task_attempts: &[u32]) -> Vec<StoredEvent> {
+    let mut log = Log::for_run("run-1");
+    for (i, &attempts) in task_attempts.iter().enumerate() {
+        for _ in 0..attempts {
+            log = log.event(EventPayload::Node(NodeEvent::CriteriaChecked(
+                CriteriaCheckedPayload {
+                    task_id: format!("T{i:03}").parse().unwrap(),
+                    phase: Phase::Post,
+                    results: vec![criterion("test -f done", 0)],
+                    waiting: Vec::new(),
+                },
+            )));
+        }
+    }
+    log.build()
+}
+
+#[test]
+fn tasks_always_passing_on_the_first_try_is_flagged() {
+    let history: Vec<Vec<StoredEvent>> =
+        (0..MIN_SAMPLES).map(|_| post_check_run(&[1, 1])).collect();
+    let findings = VerificationFindings::of(&workflow(vec![]), &history);
+    assert!(findings.always_first_try_tasks.is_some());
+}
+
+#[test]
+fn a_task_that_ever_needed_a_retry_is_never_flagged() {
+    let mut history: Vec<Vec<StoredEvent>> =
+        (0..MIN_SAMPLES).map(|_| post_check_run(&[1, 1])).collect();
+    history.push(post_check_run(&[2]));
+    let findings = VerificationFindings::of(&workflow(vec![]), &history);
+    assert!(findings.always_first_try_tasks.is_none());
+}
+
+#[test]
+fn no_history_flags_nothing_at_all() {
+    let findings = VerificationFindings::of(&workflow(vec![node("x", None)]), &[]);
+    assert!(findings.is_empty());
+}
+
+// --- signals tied to modes -----------
+
+fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
+    Log::for_run("run-1")
+        .event(EventPayload::Run(RunEvent::Created(
+            yunta_core::events::RunCreatedPayload {
+                checkout: None,
+                manifest_hash: yunta_core::sha256_hex(b"h"),
+                inputs: std::collections::BTreeMap::new(),
+                mode: mode.into(),
+                promoted_from: None,
+                yunta_schema: None,
+                base_branch: "main".to_string(),
+                base_commit: "deadbeef".into(),
+                environment: None,
+                left_out: Vec::new(),
+                opens_on_base: false,
+            },
+        )))
+        .build()
+}
+
+fn moded_workflow(nodes: Vec<Node>, mode_names: &[&str]) -> Workflow {
+    let mut wf = workflow(nodes);
+    wf.modes = Some(
+        mode_names
+            .iter()
+            .map(|name| {
+                (
+                    yunta_core::ModeName::from(*name),
+                    yunta_core::ModeSpec {
+                        include: yunta_core::ModeInclude::All,
+                        ask: None,
+                    },
+                )
+            })
+            .collect(),
+    );
+    wf
+}
+
+#[test]
+fn a_declared_mode_never_used_across_enough_runs_is_flagged() {
+    let wf = moded_workflow(vec![], &["alpha", "beta", "gamma"]);
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| run_created_in_mode("alpha"))
+        .collect();
+    let findings = VerificationFindings::of(&wf, &history);
+    let unused: Vec<&str> = findings
+        .unused_modes
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    assert_eq!(unused, vec!["beta", "gamma"]);
+    assert_eq!(findings.unused_modes[0].runs_observed, MIN_SAMPLES);
+}
+
+#[test]
+fn with_fewer_runs_than_the_floor_no_mode_is_flagged() {
+    let wf = moded_workflow(vec![], &["alpha", "beta"]);
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES - 1)
+        .map(|_| run_created_in_mode("alpha"))
+        .collect();
+    let findings = VerificationFindings::of(&wf, &history);
+    assert!(findings.unused_modes.is_empty());
+}
+
+#[test]
+fn a_mode_used_even_once_is_never_flagged() {
+    let wf = moded_workflow(vec![], &["alpha", "beta"]);
+    let mut history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| run_created_in_mode("alpha"))
+        .collect();
+    history.push(run_created_in_mode("beta"));
+    let findings = VerificationFindings::of(&wf, &history);
+    assert!(findings.unused_modes.is_empty());
+}
+
+#[test]
+fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
+    // Structural guarantee: never suggests removing `invariant:
+    // true` nodes — a verification node that never fails is doing its job;
+    // its never-fired reroute and its always-approved gate are
+    // excluded from the findings by construction.
+    use yunta_core::events::{NodeFinishedPayload, NodeOutcome};
+    let mut lint = node(
+        "lint",
+        Some(OnFailure {
+            goto: "fix".into(),
+            max_reroutes: 2,
+        }),
+    );
+    lint.invariant = true;
+    let wf = workflow(vec![lint]);
+    let history: Vec<Vec<StoredEvent>> = (0..MIN_SAMPLES)
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "lint",
+                    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                        NodeOutcome::Summary("clean".to_string()),
+                        Default::default(),
+                    ))),
+                )
+                .build()
+        })
+        .collect();
+    let findings = VerificationFindings::of(&wf, &history);
+    assert!(
+        findings.never_triggered_reroutes.is_empty(),
+        "an invariant node's never-fired reroute must never be flagged: {findings:?}"
+    );
+}

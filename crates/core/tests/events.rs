@@ -24,6 +24,9 @@ mod failure_samples;
 #[path = "events/claims.rs"]
 mod claims;
 
+#[path = "events/wire.rs"]
+mod wire;
+
 #[test]
 fn every_wire_kind_is_sampled() {
     let sampled: BTreeSet<&str> = all_kinds().iter().map(EventPayload::kind_name).collect();

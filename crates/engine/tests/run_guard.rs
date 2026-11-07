@@ -17,7 +17,8 @@ use yunta_core::process::signal::Liveness;
 use yunta_core::Pid;
 use yunta_engine::lock::{Contention, LockError, LockOwner};
 use yunta_engine::run_dir::engine_lock;
-use yunta_engine::{contention_for, derive, hold_refused, hold_run, RunHold, RunState};
+use yunta_engine::{contention_for, hold_refused, hold_run, RunHold};
+use yunta_replay::RunState;
 use yunta_testkit_core::{FixedClock, Log};
 
 async fn hold(run_dir: &Path, contention: Contention) -> Result<RunHold, LockError> {
@@ -51,7 +52,7 @@ fn after_any_process_started() -> DateTime<Utc> {
 
 /// What replay derives from a log whose last event is a pause.
 fn parked() -> RunState {
-    derive(&parking().build())
+    RunState::replay(&parking().build())
 }
 
 /// The log of a run that just parked.
@@ -290,14 +291,17 @@ async fn what_a_hold_would_be_refused_with_is_read_without_taking_anything() {
 #[test]
 fn a_parked_run_is_waited_for_and_any_other_is_refused_at_once() {
     assert!(matches!(contention_for(&parked()), Contention::Wait { .. }));
-    assert!(matches!(contention_for(&derive(&[])), Contention::Refuse));
+    assert!(matches!(
+        contention_for(&RunState::replay(&[])),
+        Contention::Refuse
+    ));
 }
 
 /// An answer can reach the log while the engine that parked the run is still leaving,
 /// and the resume it starts meets that engine: the run is still parked.
 #[test]
 fn a_parked_run_with_an_answer_on_its_log_is_waited_for() {
-    let answered = derive(
+    let answered = RunState::replay(
         &parking()
             .event(EventPayload::Gates(GateEvent::Resolved(
                 GateResolvedPayload::Chosen(HumanChoice {
@@ -314,7 +318,7 @@ fn a_parked_run_with_an_answer_on_its_log_is_waited_for() {
 /// What a resume wrote ends the pause, so a run that woke is moving again.
 #[test]
 fn a_run_that_woke_after_its_pause_is_refused_at_once() {
-    let woken = derive(
+    let woken = RunState::replay(
         &parking()
             .event(EventPayload::Run(RunEvent::Resumed(
                 RunResumedPayload::new(Vec::new(), None),

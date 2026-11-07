@@ -2,7 +2,7 @@
 //! definition — Mermaid by default, DOT on request — with `depends_on`
 //! edges, `on_failure.goto` edges visually differentiated from them,
 //! and, given a `--run <id>`, each node's derived state (via
-//! `yunta_engine::derive`) annotated: no new events, no agent involved
+//! `RunState::replay`) annotated: no new events, no agent involved
 //! in producing the graph itself, same as `status`.
 
 use yunta_testkit::{init_repo, run_id_from, stdout, write, yunta_in};

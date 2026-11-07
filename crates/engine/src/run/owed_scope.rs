@@ -9,13 +9,14 @@
 //! tasks go on within what they declared, however the answer runs the loop
 //! again.
 
-use yunta_core::events::{Decider, EventPayload, Failure, OwedScope, ScopeEvent, StoredEvent};
+use yunta_core::events::{
+    Decider, EventPayload, Failure, NodeState, OwedScope, ScopeEvent, StoredEvent,
+};
 use yunta_core::expansion::Decision;
 use yunta_core::{Node, Seq};
 
 use super::scope_record::{self, AskedFor, Recording, Subject};
 use super::{RunCtx, RunError};
-use crate::replay::NodeState;
 use crate::reserved::decision_of_choice;
 
 /// Answers the scope requests `node`'s loop ended owing, when a person

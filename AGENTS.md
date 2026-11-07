@@ -14,7 +14,7 @@ root's `//!` maps its crate. When you know a change by its subject and not yet b
 | You are changing | Open |
 |---|---|
 | event kinds, payload fields | `crates/core/src/events/mod.rs` |
-| replay, the log store | `crates/engine/src/replay.rs`, `crates/storage/src/lib.rs` |
+| replay, the log store | `crates/replay/src/lib.rs`, `crates/storage/src/lib.rs` |
 | workflow keys, node kinds, config keys | `crates/core/src/workflow/mod.rs`, `crates/core/src/config/mod.rs` |
 | document shapes | `crates/core/src/shape/mod.rs` |
 | the run loop, gates, child workflows | `crates/engine/src/run/mod.rs` |

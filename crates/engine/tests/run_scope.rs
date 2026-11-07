@@ -756,7 +756,7 @@ nodes:
     assert!(
         matches!(
             state.nodes.state("second"),
-            Some(yunta_engine::NodeState::Finished { .. })
+            Some(yunta_core::events::NodeState::Finished { .. })
         ),
         "got {:?}",
         state.nodes.state("second")
@@ -794,7 +794,7 @@ nodes:
     assert!(
         matches!(
             state.nodes.state("second"),
-            Some(yunta_engine::NodeState::Failed { .. })
+            Some(yunta_core::events::NodeState::Failed { .. })
         ),
         "got {:?}",
         state.nodes.state("second")
@@ -841,7 +841,7 @@ nodes:
     );
     assert!(matches!(
         state.nodes.state("flaky"),
-        Some(yunta_engine::NodeState::Failed { .. })
+        Some(yunta_core::events::NodeState::Failed { .. })
     ));
 }
 

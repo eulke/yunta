@@ -4,8 +4,8 @@
 
 use surco::figures::{Ratio, Tokens};
 use surco::glyphs::Glyphs;
-use yunta_engine::RunStats;
 use yunta_render::spend::Breakdown;
+use yunta_replay::stats::RunStats;
 
 /// What a verified task cost — the rate a run is read by first, and the
 /// one its acronym names.
@@ -63,7 +63,7 @@ pub(super) fn spent(stats: &RunStats) -> String {
 /// What the run handed over, by what the engine answered — the other
 /// half of what a run cost, beside the tokens it spent. A count of zero is
 /// no part of it.
-pub(super) fn submissions(submissions: &yunta_engine::Submissions) -> String {
+pub(super) fn submissions(submissions: &yunta_replay::Submissions) -> String {
     nonzero(&[
         (submissions.accepted, "accepted"),
         (submissions.refused, "refused"),
@@ -78,7 +78,7 @@ pub(super) fn submissions(submissions: &yunta_engine::Submissions) -> String {
 /// withdrawal stands at four, and a reader shown only one of those
 /// numbers draws the wrong conclusion from either. A count of zero is no
 /// part of it.
-pub(super) fn findings(activity: &yunta_engine::FindingActivity, effective: u64) -> String {
+pub(super) fn findings(activity: &yunta_replay::FindingActivity, effective: u64) -> String {
     let calls = nonzero(&[
         (activity.posted, "posted"),
         (activity.updated, "updated"),
@@ -90,7 +90,7 @@ pub(super) fn findings(activity: &yunta_engine::FindingActivity, effective: u64)
 
 /// The answers given to the run's findings, and how many settled one. A
 /// count of zero is no part of it.
-pub(super) fn answers(activity: &yunta_engine::FindingActivity, settled: u64) -> String {
+pub(super) fn answers(activity: &yunta_replay::FindingActivity, settled: u64) -> String {
     let given = nonzero(&[(activity.answered, "given"), (activity.proved, "proved")]);
     joined(given, nonzero(&[(settled, "settled")]))
 }
@@ -124,18 +124,18 @@ mod tests {
     /// nothing.
     #[test]
     fn a_count_of_zero_is_no_part_of_its_fact() {
-        let submissions = yunta_engine::Submissions {
+        let submissions = yunta_replay::Submissions {
             accepted: 3,
             refused: 0,
         };
         assert_eq!(super::submissions(&submissions), "3 accepted");
-        let activity = yunta_engine::FindingActivity {
+        let activity = yunta_replay::FindingActivity {
             posted: 5,
             ..Default::default()
         };
         assert_eq!(findings(&activity, 4), "5 posted; 4 standing");
         assert_eq!(answers(&activity, 0), "");
-        let answered = yunta_engine::FindingActivity {
+        let answered = yunta_replay::FindingActivity {
             answered: 2,
             ..Default::default()
         };

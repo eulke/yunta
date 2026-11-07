@@ -2,8 +2,8 @@
 
 use yunta_core::events::TaskStatus;
 use yunta_core::{ScopeGlob, Task, TasksFile};
+use yunta_replay::RunState;
 
-use crate::replay::RunState;
 use crate::task_cycle::scope_in_force;
 
 /// Up to `concurrency` tasks this iteration may work on, in
@@ -93,8 +93,9 @@ mod tests {
             common: Vec::new(),
             at: "a".repeat(40).parse().unwrap(),
         }));
-        let apart = crate::replay::derive(&registered(Log::for_run("r"), &document).build());
-        let meeting = crate::replay::derive(
+        let apart =
+            yunta_replay::RunState::replay(&registered(Log::for_run("r"), &document).build());
+        let meeting = yunta_replay::RunState::replay(
             &registered(Log::for_run("r"), &document)
                 .node("plan", derived)
                 .build(),

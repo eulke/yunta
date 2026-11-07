@@ -3,8 +3,9 @@
 
 use serde::Serialize;
 use yunta_core::{ContentHash, RunId, WorkflowName};
-use yunta_engine::{prior_estimation, NodeStat, RunStats, RunSummary};
 use yunta_render::spend::SpendJson;
+use yunta_replay::history::{PriorEstimation, RunSummary};
+use yunta_replay::stats::{NodeStat, RunStats};
 
 use super::currency_line;
 
@@ -27,10 +28,10 @@ struct NodeStatJson {
     /// What this node handed over, by what the engine answered. A node
     /// that submitted nothing carries zeroes rather than nothing: it
     /// was asked and did not deliver, which is a number, not an absence.
-    submissions: yunta_engine::Submissions,
+    submissions: yunta_replay::Submissions,
     /// What this node found, by what the engine answered — zeroes for a
     /// node the log carries no finding call from, for the same reason.
-    findings: yunta_engine::FindingActivity,
+    findings: yunta_replay::FindingActivity,
 }
 
 impl NodeStatJson {
@@ -87,11 +88,11 @@ pub(super) struct RunStatsJson {
     time: TimeJson,
     currency_estimate: Option<String>,
     nodes: Vec<NodeStatJson>,
-    unknown_kinds: Vec<yunta_engine::UnknownKindCount>,
+    unknown_kinds: Vec<yunta_core::events::UnknownKindCount>,
     /// Every document the run handed over, by what the engine answered.
-    submissions: yunta_engine::Submissions,
+    submissions: yunta_replay::Submissions,
     /// Every finding call the log carries, by what the engine answered.
-    findings: yunta_engine::FindingActivity,
+    findings: yunta_replay::FindingActivity,
     /// How many findings stand now — the fold over the whole log, where
     /// an update replaces and a withdrawal removes. Never the count of
     /// posts: a reader given only `findings.posted` reads a withdrawn
@@ -117,7 +118,7 @@ pub(crate) struct TimeJson {
 
 impl TimeJson {
     /// A run's time by share, read off the time the engine measured for it.
-    pub(crate) fn of(time: &yunta_engine::TimeSpent) -> Self {
+    pub(crate) fn of(time: &yunta_replay::TimeSpent) -> Self {
         TimeJson {
             working_secs: time.working.as_secs_f64(),
             rails_secs: time.rails.as_secs_f64(),
@@ -205,8 +206,8 @@ struct EstimationJson {
     tasks_p90: f64,
 }
 
-impl From<&yunta_engine::PriorEstimation> for EstimationJson {
-    fn from(e: &yunta_engine::PriorEstimation) -> Self {
+impl From<&yunta_replay::history::PriorEstimation> for EstimationJson {
+    fn from(e: &yunta_replay::history::PriorEstimation) -> Self {
         Self {
             sample_count: e.sample_count,
             tokens_median: e.tokens.median,
@@ -232,13 +233,15 @@ impl WorkflowHistoryJson {
     pub(super) fn from(
         workflow: &WorkflowName,
         history: &[RunSummary],
-        findings: Option<&yunta_engine::VerificationFindings>,
+        findings: Option<&yunta_replay::verification_effectiveness::VerificationFindings>,
     ) -> Self {
         Self {
             schema_version: crate::json::SCHEMA_VERSION,
             workflow: workflow.clone(),
             runs: history.iter().map(RunSummaryJson::from).collect(),
-            estimation: prior_estimation(history).as_ref().map(EstimationJson::from),
+            estimation: PriorEstimation::of(history)
+                .as_ref()
+                .map(EstimationJson::from),
             verification_findings: findings.map(VerificationFindingsJson::from),
         }
     }
@@ -279,7 +282,9 @@ struct AlwaysApprovedGateJson {
 }
 
 impl VerificationFindingsJson {
-    pub(super) fn from(findings: &yunta_engine::VerificationFindings) -> Self {
+    pub(super) fn from(
+        findings: &yunta_replay::verification_effectiveness::VerificationFindings,
+    ) -> Self {
         Self {
             never_red_criteria: findings
                 .never_red_criteria
@@ -331,7 +336,7 @@ mod tests {
     use yunta_core::events::{Spend, TokenUsage};
     use yunta_core::NodeId;
     use yunta_core::Workflow;
-    use yunta_engine::compute_run_stats;
+    use yunta_replay::RunState;
 
     use super::*;
 
@@ -344,7 +349,7 @@ mod tests {
         RunStats {
             spend,
             total_tokens: spend.so_far(),
-            ..compute_run_stats(&workflow, &[])
+            ..RunStats::as_logged(&RunState::replay(&[]), &workflow)
         }
     }
 

@@ -77,7 +77,7 @@ pub async fn escalate(
 /// step would spend.
 pub(super) async fn take_cap_answer(
     ctx: &RunCtx<'_>,
-    state: &crate::replay::RunState,
+    state: &yunta_replay::RunState,
 ) -> Result<Option<super::RunReport>, RunError> {
     if state.past_the_cap_chosen() {
         lift_the_cap(ctx);
@@ -216,8 +216,8 @@ impl RunCtx<'_> {
 
     /// How many of the nodes this run reaches are short of a terminal —
     /// what the remaining cap is shared among.
-    fn nodes_still_owed(&self, state: &crate::replay::RunState) -> usize {
-        crate::modes::reached_nodes(
+    fn nodes_still_owed(&self, state: &yunta_replay::RunState) -> usize {
+        yunta_replay::modes::reached(
             &self.manifest.workflow,
             state.run.mode(),
             state.run.left_out(),
@@ -226,7 +226,7 @@ impl RunCtx<'_> {
         .filter(|node| {
             !matches!(
                 state.nodes.state(&node.id),
-                Some(crate::replay::NodeState::Finished { .. })
+                Some(yunta_core::events::NodeState::Finished { .. })
             )
         })
         .count()

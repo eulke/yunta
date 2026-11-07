@@ -33,7 +33,10 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, RunEvent, StoredEvent};
 use yunta_core::{Clock, Manifest, RunId, Seq};
 use yunta_engine::pace::Pace;
-use yunta_engine::{derive, Engine, PriorEstimation, RunFrame, RunPhase, RunState};
+use yunta_replay::frame::{RunFrame, RunPhase};
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::registry::Engine;
+use yunta_replay::RunState;
 use yunta_storage::AsyncStorage;
 
 use crate::commands::advice;
@@ -65,7 +68,7 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
     let ctx = Context::load()?;
     let open = ctx.open_run(run_id).await?;
     let now = ctx.clock.now();
-    let state = derive(&open.events);
+    let state = RunState::replay(&open.events);
     let engine = crate::render::engine(&open.run_dir, now);
     let manifest = open.manifest.doc;
     let frame = super::progress::frame_of(run_id, &manifest, &state, &engine, now);
@@ -79,7 +82,7 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
         run_id: run_id.clone(),
         run_dir: open.run_dir,
         manifest,
-        prior: yunta_engine::prior_estimation(&sample),
+        prior: yunta_replay::history::PriorEstimation::of(&sample),
         events: open.events,
         state,
         engine,
@@ -297,7 +300,7 @@ impl Followed {
         self.run_id = successor;
         self.run_dir = open.run_dir;
         self.manifest = open.manifest.doc;
-        self.state = derive(&open.events);
+        self.state = RunState::replay(&open.events);
         self.events = open.events;
         self.engine = crate::render::engine(&self.run_dir, now);
         self.engine_read_at = now;
@@ -315,7 +318,7 @@ impl Followed {
     fn take(&mut self, event: &StoredEvent) {
         self.events.push(event.clone());
         if self.state.apply(event).is_err() {
-            self.state = derive(&self.events);
+            self.state = RunState::replay(&self.events);
         }
     }
 
@@ -362,8 +365,10 @@ impl Followed {
 
 #[cfg(test)]
 mod tests {
+    use yunta_core::events::NodeState;
     use yunta_core::NodeId;
-    use yunta_engine::{EngineLiveness, NodeStanding, NodeState, RunPhase};
+    use yunta_replay::frame::{NodeStanding, RunPhase};
+    use yunta_replay::registry::EngineLiveness;
 
     use super::*;
 
@@ -376,13 +381,13 @@ mod tests {
             words: None,
             at: chrono::DateTime::UNIX_EPOCH,
         };
-        let nodes = vec![yunta_testkit::node_frame(
+        let nodes = vec![yunta_replay::frame::NodeFrame::sample(
             &NodeId::from_static("build"),
             NodeStanding::Reached(NodeState::Running { attempt: 1 }),
         )];
         let phase = RunPhase::Running;
         (
-            yunta_engine::run_standing(&phase, &nodes, 0, &engine),
+            yunta_replay::frame::run_standing(&phase, &nodes, 0, &engine),
             phase,
         )
     }

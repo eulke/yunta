@@ -18,8 +18,8 @@ mod page;
 use std::sync::Arc;
 
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::{Failure, FindingCause, FindingSays, GateEvent, NodeEvent};
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_core::events::{Failure, FindingCause, FindingSays, GateEvent, NodeEvent, NodeState};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 /// A claude-code fixture that scripts no session, so a run reaches only its gates.
@@ -89,7 +89,7 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
         matches!(
             state.nodes.state("approve"),
             Some(NodeState::Waiting {
-                on: yunta_engine::NodeWait::Gate {
+                on: yunta_core::events::NodeWait::Gate {
                     external_ref: Some(_)
                 }
             })

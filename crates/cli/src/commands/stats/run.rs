@@ -15,8 +15,9 @@ use surco::text::counted;
 use surco::width::{cell_width, id_column, middle_cut, truncate, INDENT, INDENT_WIDTH};
 use surco::words::{Standing, WAITING_ON_YOU};
 use yunta_core::NodeId;
-use yunta_engine::{NodeFrame, NodeStat, RunFrame, RunPhase, RunStats};
 use yunta_render::state::NodeDisplay;
+use yunta_replay::frame::{NodeFrame, RunFrame, RunPhase};
+use yunta_replay::stats::{NodeStat, RunStats};
 
 use crate::render::node_display;
 

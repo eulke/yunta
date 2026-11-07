@@ -5,7 +5,7 @@ use yunta_core::events::{
     RunEvent, RunFinishedPayload, RunMetrics, SessionEvent, StoredEvent, TerminalState, TokenUsage,
 };
 use yunta_core::{RunId, Workflow};
-use yunta_engine::RunPhase;
+use yunta_replay::frame::RunPhase;
 use yunta_testkit_core::{fixed_now, Log};
 
 fn node_started(attempt: u32) -> EventPayload {
@@ -43,7 +43,7 @@ fn run_failed() -> EventPayload {
 fn finished_report(events: &[StoredEvent]) -> yunta_engine::RunReport {
     yunta_engine::RunReport {
         terminal: yunta_engine::RunTerminal::Finished,
-        state: yunta_engine::derive(events),
+        state: yunta_replay::RunState::replay(events),
     }
 }
 
@@ -113,12 +113,12 @@ fn doctor_and_the_phase_page_name_the_same_last_failure() {
         "name: doctor-test\nnodes:\n  - { id: build, kind: bash, run: \"true\" }\n  - { id: probe, kind: bash, run: \"true\" }\n",
     )
     .unwrap();
-    let frame = yunta_engine::run_frame(
+    let frame = yunta_replay::frame::RunFrame::of(
         &RunId::from("doctor-test"),
         &workflow,
-        &events,
+        &yunta_replay::RunState::replay(&events),
         None,
-        &yunta_engine::Engine::this(fixed_now()),
+        &yunta_replay::registry::Engine::this(fixed_now()),
         fixed_now(),
     );
     let RunPhase::Failed { failure: page } = frame.phase else {

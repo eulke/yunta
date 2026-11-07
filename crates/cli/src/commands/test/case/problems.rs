@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use surco::words::Standing;
-use yunta_engine::RunFrame;
+use yunta_replay::frame::RunFrame;
 
 use super::{terminal_label, Played, TestCase};
 
@@ -43,12 +43,12 @@ pub(super) fn standing_problems(case: &TestCase, played: &Played) -> Vec<String>
     let state = &played.report.state;
     let read_at = state.clock().last_at().unwrap_or_default();
     // The case's run ended in this process, which drove it.
-    let frame = yunta_engine::run_frame_of(
+    let frame = yunta_replay::frame::RunFrame::of(
         &played.prepared.run_id,
         &played.manifest.workflow,
         state,
         None,
-        &yunta_engine::Engine::this(read_at),
+        &yunta_replay::registry::Engine::this(read_at),
         read_at,
     );
     let mut problems = Vec::new();

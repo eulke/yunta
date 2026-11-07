@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::Clock;
+use yunta_replay::RunState;
 
 use crate::lock::{self, Acquired, Contention, LockError, LockOwner, SystemProbe};
-use crate::replay::RunState;
 
 /// How long a parked run's next engine waits for the engine that parked it: that
 /// engine leaves moments after it writes the pause, and a longer wait would only

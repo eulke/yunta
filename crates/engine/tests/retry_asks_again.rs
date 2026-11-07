@@ -65,7 +65,7 @@ async fn parked_menu(bench: &Bench) -> Escalation {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -157,8 +157,8 @@ const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 const ASKS_ONCE: &str = "name: asked\nnodes:\n  - id: approve\n    kind: gate\n    assignee: lead\n    message: \"Go?\"\n    options: [go, stop]\n";
 
 /// What a run parked on `approve` has recorded, as every later process reads it.
-fn state_of(bench: &Bench) -> yunta_engine::RunState {
-    yunta_engine::derive(&bench.storage.events_for_run(&bench.run_id).unwrap())
+fn state_of(bench: &Bench) -> yunta_replay::RunState {
+    yunta_replay::RunState::replay(&bench.storage.events_for_run(&bench.run_id).unwrap())
 }
 
 /// A decision answered while its run is parked is on offer to nobody until the resume it

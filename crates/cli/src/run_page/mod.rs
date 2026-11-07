@@ -36,10 +36,10 @@ use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::caution::Caution;
 use yunta_core::events::{Failure, GateWaitingPayload, NodeState, PauseReason};
 use yunta_core::{NodeId, RunId};
-use yunta_engine::{
-    DecisionOn, NodeFrame, NodeStanding, RunFrame, RunPhase, RunState, ShownDocument, WaitingOn,
-};
+use yunta_engine::{DecisionOn, ShownDocument};
 use yunta_render::spend::Breakdown;
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, WaitingOn};
+use yunta_replay::RunState;
 
 use crate::commands::advice;
 use crate::commands::status::decision::{self, Beside};
@@ -80,7 +80,7 @@ pub(crate) struct RunPage<'a> {
     pub(crate) depth: Depth,
     pub(crate) run_id: &'a RunId,
     /// What the run's registry says about the process driving it.
-    pub(crate) engine: yunta_engine::Engine,
+    pub(crate) engine: yunta_replay::registry::Engine,
     pub(crate) frame: &'a RunFrame,
     /// The run as its log derives it; the frame is read from the same log.
     pub(crate) state: &'a RunState,
@@ -288,7 +288,7 @@ impl RunPage<'_> {
 
 /// The sentence under a page's headline: what the run comes to, as a person reads it. `None`
 /// for a run whose word says it all.
-pub(crate) fn gist(frame: &RunFrame, engine: &yunta_engine::Engine) -> Option<String> {
+pub(crate) fn gist(frame: &RunFrame, engine: &yunta_replay::registry::Engine) -> Option<String> {
     let blocking = frame.blocking_findings;
     Some(match (frame.standing, &frame.phase) {
         (Standing::Stalled, _) => advice::STALLED.to_string(),
@@ -357,7 +357,7 @@ pub(crate) fn cautions(frame: &RunFrame) -> Vec<Caution> {
                 WaitingOn::Run {
                     reason: PauseReason::BudgetExhausted { cap, .. },
                 },
-        } => yunta_engine::budget_caution(Some(*cap), frame.prior.as_ref())
+        } => yunta_replay::history::budget_caution(Some(*cap), frame.prior.as_ref())
             .into_iter()
             .collect(),
         _ => Vec::new(),

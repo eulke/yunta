@@ -7,8 +7,7 @@
 
 use yunta_core::events::{ChangesCountedPayload, EventPayload, RunEvent};
 use yunta_core::NodeId;
-
-use crate::replay::RunState;
+use yunta_replay::RunState;
 
 use super::{RunCtx, RunError};
 

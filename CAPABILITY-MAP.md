@@ -18,8 +18,8 @@ crates/
   surco     yunta-surco     the language; adds Ribbon, Legend, Overlay, Attention, Screen
   core      yunta-core      no change of responsibility
   storage   yunta-storage   adds reading from a sequence, and the head of each run
-  state     yunta-state     NEW: what happened. Replay and the read model, pure, no IO
-  render    yunta-render    adds every page, since it can read yunta-state
+  replay    yunta-replay    NEW: what happened. Replay and the read model, pure, no IO
+  render    yunta-render    adds every page, since it can read yunta-replay
   adapters  yunta-adapters  no change
   engine    yunta-engine    adds the resume guard, parked answers, the words socket
   control   yunta-control   NEW: what can be asked of Yunta, with no terminal
@@ -33,11 +33,11 @@ New or changed dependencies:
 
 | Crate | Depends on |
 |---|---|
-| `yunta-state` | core, surco |
-| `yunta-render` | core, state, surco |
-| `yunta-engine` | core, storage, state, surco |
-| `yunta-control` | core, storage, state, engine, adapters, render, surco |
-| `yunta-app` | core, state, render, control, surco |
+| `yunta-replay` | core, surco |
+| `yunta-render` | core, replay, surco |
+| `yunta-engine` | core, storage, replay, surco |
+| `yunta-control` | core, storage, replay, engine, adapters, render, surco |
+| `yunta-app` | core, replay, render, control, surco |
 | `yunta-tui` | app, surco, ratatui, crossterm |
 | `yunta` | all of the above |
 | desktop | app, surco |
@@ -46,9 +46,9 @@ What moves:
 
 | What | To | Note |
 |---|---|---|
-| `replay`, `view`, `live`, `stats`, `history`, `receipt`, `verification_effectiveness`, `modes`, the value types `Engine`, `EngineLiveness`, `Prompt` | `yunta-state` | About 2,650 lines. They import only core, surco and each other. Reading `engine.json` stays in the engine |
+| `replay`, `view`, `live`, `stats`, `history`, `receipt`, `verification_effectiveness`, `modes`, the value types `Engine`, `EngineLiveness`, `Prompt` | `yunta-replay` | About 2,650 lines at the base, 4,143 at `8c833576`. They import only core, surco and each other. Reading `engine.json` stays in the engine |
 | `run_page`, inbox pages, status, stats, doctor | `yunta-render` | They take data; `exit` and disk paths stay outside |
-| The `after_for` table and the spelling of commands | `after_for` to `yunta-state`, spelling to `yunta-render` | One table: the CLI spells it, the TUI binds keys, the desktop shows buttons |
+| The `after_for` table and the spelling of commands | `after_for` to `yunta-replay`, spelling to `yunta-render`, both in `run-pages` | One table: the CLI spells it, the TUI binds keys, the desktop shows buttons |
 | Gathering the inbox, run admission, resolve, cancel, close, gc, packs, doctor's checks, detection, the test runner | `yunta-control` | They return data and never print |
 | The models of `card`, `menu`, `form`, `field`, `desk`, `Stroke`, `Press` | `yunta-app` | `hold`, `Console`, `keyboard` and the live region stay in `yunta` |
 | `json/` | stays in `yunta` | Only the CLI and MCP use it; the desktop links the library |
@@ -59,7 +59,7 @@ What moves:
 |---|---|
 | No interface calls the engine, only `yunta-control` | A test over the dependencies, like `no_adapter_crate_in_engine` |
 | `yunta-app` does not know a terminal | The same kind of test |
-| `yunta-state` is pure | Its manifest lists neither tokio nor rusqlite, and a test holds that |
+| `yunta-replay` is pure | Its manifest lists neither tokio nor rusqlite, and a test holds that |
 | `update` is pure and effects are data | A test walks every reachable state |
 | The desktop stays possible without building it | That walk also draws each screen with `Html` |
 | Nothing below the interface reads the process | `yunta-control` takes a `Workspace`: path, environment, clock and engine binary |
@@ -76,7 +76,7 @@ What moves:
 | `run-words` | The per-run socket, in every adapter at once | nothing |
 | `session-ends` | A Codex retry notice no longer ends its session, and no command an agent started outlives its session | nothing |
 | `surco-screen` | Public reading of styles; the ribbon, legend and attention blocks; a screen as data, drawn as Markdown and HTML; a pane's exact width; with their goldens | nothing |
-| `run-state` | The `yunta-state` crate, cutting the cycle between `replay` and `stats` | nothing |
+| `run-state` | The `yunta-replay` crate, cutting the cycle between `replay` and `stats`, each item with one path and a name that says what it is | nothing |
 | `run-pages` | The pages in `yunta-render`, with the CLI printing exactly the same | `run-state` |
 | `control` | `yunta-control`, with the CLI and MCP mounted on it | `log-follow`, `run-state` |
 | `app-core` | `yunta-app`: stages, screens, effects and moved prompts | `control`, `run-pages`, `surco-screen` |
@@ -109,12 +109,12 @@ What moves:
 
 ## Out of this map, on purpose
 
-The from-scratch reorganization does not enter: `core` with no IO, `yunta-policy`, the log's own types, one crate per adapter. It can be done gradually, and nothing in this map prevents it. `yunta-state` is the only part brought forward, because it avoids moving the pages twice.
+The from-scratch reorganization does not enter: `core` with no IO, `yunta-policy`, the log's own types, one crate per adapter. It can be done gradually, and nothing in this map prevents it. `yunta-replay` is the only part brought forward, because it avoids moving the pages twice.
 
 ## Approved with the map
 
 - `yunta-control` and `yunta-app` are separate crates.
 - `yunta review` at a terminal opens the application at that decision, and the duplicated full-screen loop is deleted. Outside a terminal it prints as before.
 - `third-party-notices` is its own module.
-- The names `yunta-state`, `yunta-control`, `yunta-app` and `yunta-tui` are fixed, as are the module ids.
+- The names `yunta-control`, `yunta-app` and `yunta-tui` are fixed, as are the module ids. `yunta-state` became `yunta-replay` on 2026-11-07, at the user's choice, when its spec was approved: "state" is `RunState` and `yunta-app`'s own state, and replay is what every module of the crate does.
 - `session-ends` was added on 2026-11-05, after `run-words`: the two bugs the agent audit of 2026-11-03 confirmed, still present at `3456baea`.

@@ -1,6 +1,6 @@
 //! Human-interaction gates, the generic internal gate, and run limits: token budget, loop-iteration cap, and inline-context threshold.
 
-use yunta_engine::{NoInteraction, NodeState, RunError, RunReport, RunTerminal};
+use yunta_engine::{NoInteraction, RunError, RunReport, RunTerminal};
 use yunta_render::offers::option_words;
 use yunta_testkit::{Bench, ScriptedInteraction};
 use yunta_testkit_core::FixedClock;
@@ -8,7 +8,7 @@ use yunta_testkit_core::FixedClock;
 mod common;
 use common::*;
 use yunta_core::events::{
-    EngineFact, Failure, GateEvent, NodeEvent, NodeOutcome, PauseReason, Refusal,
+    EngineFact, Failure, GateEvent, NodeEvent, NodeOutcome, NodeState, PauseReason, Refusal,
 };
 
 #[path = "run_gates_limits/claims.rs"]
@@ -44,7 +44,7 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("lint"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
 
     let events = bench.events();
@@ -264,7 +264,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         "the crashed gate is re-asked and resolved, not left stuck"
     );
     match report.state.nodes.state("approve") {
-        Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
+        Some(yunta_core::events::NodeState::Finished { outcome, .. }) => {
             assert_eq!(
                 outcome,
                 &NodeOutcome::Fact(EngineFact::OptionChosen {
@@ -277,7 +277,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
     assert!(
         matches!(
             report.state.nodes.state("ship"),
-            Some(yunta_engine::NodeState::Finished { .. })
+            Some(yunta_core::events::NodeState::Finished { .. })
         ),
         "the node behind the gate runs once the gate resolves"
     );
@@ -301,7 +301,7 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("approve"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
     assert_eq!(
         plan_run_count(&bench.worktree),

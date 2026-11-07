@@ -1,6 +1,6 @@
 //! Concurrent execution: parallel nodes, join:all / join:any groups, per-loop concurrency, and orphan resume across a crash.
 
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, Bench};
 use yunta_testkit_core::FixedClock;
 
@@ -9,7 +9,7 @@ mod common;
 mod join_any_failure;
 use common::*;
 use yunta_core::events::{
-    ArtifactEvent, Failure, Interruption, NodeEvent, PauseReason, RunEvent, TaskEvent,
+    ArtifactEvent, Failure, Interruption, NodeEvent, NodeState, PauseReason, RunEvent, TaskEvent,
 };
 use yunta_core::{Capabilities, JoinPolicy};
 

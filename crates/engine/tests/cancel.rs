@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{AgentMessageType, EventPayload, SessionEvent};
 use yunta_core::events::{NodeEvent, PauseReason, RunEvent};
 use yunta_core::Redactor;
-use yunta_engine::{EngineLiveness, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_replay::registry::EngineLiveness;
 use yunta_testkit::{wait_until_async, Bench, MOCK_CONFIG};
 use yunta_testkit_core::FixedClock;
 

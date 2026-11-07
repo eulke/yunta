@@ -22,7 +22,7 @@ fn held(measurements: Vec<RunEvent>) -> Vec<String> {
             |log, event| log.event(EventPayload::Run(event)),
         )
         .build();
-    yunta_engine::held_of(&yunta_engine::derive(&log).run)
+    yunta_engine::held_of(&yunta_replay::RunState::replay(&log).run)
 }
 
 /// The suite, measured green.

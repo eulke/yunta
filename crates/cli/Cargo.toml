@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 yunta-core.workspace = true
 yunta-engine.workspace = true
+yunta-replay.workspace = true
 yunta-render.workspace = true
 yunta-surco = { workspace = true, features = ["clap"] }
 yunta-adapters.workspace = true
@@ -73,6 +74,8 @@ rmcp = { workspace = true, features = ["server", "transport-io"] }
 # terminal to stand up.
 indicatif = { workspace = true, features = ["in_memory"] }
 yunta-core = { workspace = true, features = ["testkit"] }
+# A surface test builds the frame it draws from the frame's samples.
+yunta-replay = { workspace = true, features = ["testkit"] }
 # `verify`'s broken-chain test corrupts a stored event behind the store's
 # back through the same fault injector storage's own tests use.
 yunta-storage = { workspace = true, features = ["testkit"] }

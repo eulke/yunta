@@ -173,7 +173,9 @@ pub enum CliError {
     /// A run whose engine is asking a person at its terminal, the one place
     /// that moves it.
     #[error("{}", crate::commands::advice::asking(.prompt, None))]
-    RunAsking { prompt: yunta_engine::Prompt },
+    RunAsking {
+        prompt: yunta_replay::registry::Prompt,
+    },
 
     /// A claim whose holder cannot be told from a leftover: a pid this user
     /// cannot signal, or a file that names nobody. Taking it could put two engines

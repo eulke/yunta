@@ -13,7 +13,7 @@ use surco::words::{AT_WORK, WAITING_ON_YOU};
 use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
 use yunta_core::NodeId;
-use yunta_engine::TimeSpent;
+use yunta_replay::TimeSpent;
 
 /// The block `yunta stats <run>` shows of `time`: a bar of its parts, side
 /// by side in the one order two runs are read in, each part as many cells

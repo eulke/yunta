@@ -2,7 +2,7 @@
 //! binary, same style `stats_cmd.rs`/`run_flow.rs` use — this is what
 //! proves the CLI wiring (writing `receipt.md`/`receipt.json` to
 //! `run.dir`, the `--json` flag, refusing a non-terminal run) on top of
-//! `yunta_engine::receipt`'s own unit-tested derivation.
+//! `yunta_replay::receipt`'s own unit-tested derivation.
 
 use yunta_testkit::{handle, init_repo, run_id_from, stderr, stdout, unwrapped, write, yunta_in};
 

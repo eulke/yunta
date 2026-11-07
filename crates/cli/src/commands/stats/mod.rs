@@ -21,10 +21,10 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use yunta_core::events::{PauseReason, StoredEvent};
 use yunta_core::{Clock, Manifest, ModeName, RunId, Workflow, WorkflowName};
-use yunta_engine::{
-    compute_run_stats_of, prior_estimation, run_summary, PriorEstimation, RunFrame, RunPhase,
-    RunSummary, VerificationFindings, WaitingOn,
-};
+use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
+use yunta_replay::history::{PriorEstimation, RunSummary};
+use yunta_replay::stats::RunStats;
+use yunta_replay::verification_effectiveness::VerificationFindings;
 
 use crate::commands::advice;
 use crate::context::{Context, Opened};
@@ -118,14 +118,14 @@ async fn stats_run(
     let events = open.events;
     let manifest = open.manifest.doc;
 
-    let state = yunta_engine::derive(&events);
+    let state = yunta_replay::RunState::replay(&events);
     // The page reads the run at one instant, its headline's: a run still
     // going counts the wait or the work open now.
     let now = ctx.clock.now();
-    let run_stats = compute_run_stats_of(&manifest.workflow, &state, Some(now));
+    let run_stats = RunStats::at(&state, &manifest.workflow, now);
     let mode = state.run.mode().as_str();
     let pricing = ctx.project.config.pricing.clone();
-    let frame = yunta_engine::run_frame_of(
+    let frame = yunta_replay::frame::RunFrame::of(
         run_id,
         &manifest.workflow,
         &state,
@@ -200,7 +200,9 @@ fn findings_of(opened: &[Opened]) -> Option<VerificationFindings> {
     // workflow shape those runs actually exercised to match
     // criteria/reroutes/gates against.
     let (raw_history, workflow) = raw_history(opened);
-    workflow.map(|wf| yunta_engine::analyze_verification_effectiveness(&wf, &raw_history))
+    workflow.map(|wf| {
+        yunta_replay::verification_effectiveness::VerificationFindings::of(&wf, &raw_history)
+    })
 }
 
 /// Every past run of `workflow_name` this project knows about, oldest
@@ -290,7 +292,7 @@ pub(crate) async fn budget_prior(
     }
     let started = events.first()?.timestamp;
     let sample = budget_sample(ctx, manifest, &frame.mode, Some(started)).await;
-    prior_estimation(&sample)
+    PriorEstimation::of(&sample)
 }
 
 /// What `--workflow`'s sparkline, mode table and prior estimation fold
@@ -299,7 +301,7 @@ pub(crate) fn summaries(history: &[Opened]) -> Vec<RunSummary> {
     history
         .iter()
         .map(|open| {
-            run_summary(
+            RunSummary::of(
                 open.run_id.clone(),
                 open.manifest.doc.workflow_hash.clone(),
                 &open.manifest.doc.workflow,
@@ -310,7 +312,7 @@ pub(crate) fn summaries(history: &[Opened]) -> Vec<RunSummary> {
 }
 
 /// The whole log of every past run, plus the most recent one's own
-/// frozen workflow — what `analyze_verification_effectiveness` needs
+/// frozen workflow — what `VerificationFindings::of` needs
 /// and a `RunSummary` throws away. The workflow is not necessarily
 /// byte-identical to what is on disk now: it is the shape those runs
 /// actually exercised, which is what the analysis matches against.
@@ -327,7 +329,7 @@ pub(crate) fn raw_history(history: &[Opened]) -> (Vec<Vec<StoredEvent>>, Option<
 /// Shared by `yunta stats --workflow` and `yunta run`/`list_workflows`
 /// so the three surfaces never phrase the same numbers differently.
 pub(crate) fn format_estimation_line(
-    estimation: &yunta_engine::PriorEstimation,
+    estimation: &yunta_replay::history::PriorEstimation,
     glyphs: surco::glyphs::Glyphs,
 ) -> String {
     let sep = glyphs.sep();

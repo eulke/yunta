@@ -3,11 +3,10 @@
 //! menu it offers is [`Failure::remedies`].
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::{Facts, Failure, Outlook, PauseReason, Stuck};
+use yunta_core::events::{Facts, Failure, NodeState, Outlook, PauseReason, Stuck};
 use yunta_core::{DefaultOnFailure, Node, NodeId};
 
 use super::{is_gate, Board, Decision};
-use crate::replay::NodeState;
 
 impl Board<'_> {
     /// What the log holds beside `failure` of `node`: the clock it failed

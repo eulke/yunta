@@ -6,7 +6,8 @@
 //! nothing that needs a run. `yunta-testkit` builds on it with everything a
 //! whole run takes — a git repository, a bench, a pty, a binary runner.
 //!
-//! Its map: `adapter` is what a test of an adapter needs first; `clock` and
+//! Its map: `adapter` is what a test of an adapter needs first; `arbitrary`
+//! draws the logs a property holds over; `clock` and
 //! `ids` are deterministic clocks and ids; `capture` is a writer a test reads
 //! back; `log` writes a log by hand; `persisted` states what every persisted
 //! document promises; `repo` asks git directly; `spell` is the spelling a
@@ -16,6 +17,7 @@
 //! It is a dev-dependency only: nothing here ships in a published crate.
 
 pub mod adapter;
+pub mod arbitrary;
 mod capture;
 mod clock;
 mod ids;

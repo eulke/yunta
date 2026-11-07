@@ -42,7 +42,7 @@ fn bore(child: &RunId) -> EventPayload {
 #[test]
 fn a_run_still_moving_has_no_successor() {
     let log = Log::for_run(DRAWN).node("build", started()).build();
-    assert!(!succeeds(&derive(&log), &OTHER));
+    assert!(!succeeds(&RunState::replay(&log), &OTHER));
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn a_run_that_closed_any_other_way_has_no_successor() {
             .node("build", started())
             .event(closed(terminal))
             .build();
-        assert!(!succeeds(&derive(&log), &OTHER), "{terminal:?}");
+        assert!(!succeeds(&RunState::replay(&log), &OTHER), "{terminal:?}");
     }
 }
 
@@ -66,7 +66,7 @@ fn the_run_appending_after_a_promoted_close_is_the_successor() {
         .node("build", started())
         .event(closed(TerminalState::Promoted))
         .build();
-    assert!(succeeds(&derive(&log), &OTHER));
+    assert!(succeeds(&RunState::replay(&log), &OTHER));
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn a_child_this_run_bore_is_never_mistaken_for_its_successor() {
         .event(bore(&OTHER))
         .event(closed(TerminalState::Promoted))
         .build();
-    assert!(!succeeds(&derive(&log), &OTHER));
+    assert!(!succeeds(&RunState::replay(&log), &OTHER));
 }
 
 /// A run frozen with one node, `build`, which the frames below are about.

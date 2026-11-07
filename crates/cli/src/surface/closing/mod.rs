@@ -20,7 +20,10 @@ use chrono::{DateTime, Utc};
 use surco::doc::Depth;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::{Isolation, RunId, Workflow};
-use yunta_engine::{run_frame_of, DecisionOn, PriorEstimation, RunFrame, RunState, ShownDocument};
+use yunta_engine::{DecisionOn, ShownDocument};
+use yunta_replay::frame::RunFrame;
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::RunState;
 
 use crate::commands::status::decision::Beside;
 use crate::error::Outcome;
@@ -73,7 +76,7 @@ pub(crate) struct Closing {
     cwd: PathBuf,
     home: Option<PathBuf>,
     /// The process that drove the run is this one, which asks no one.
-    engine: yunta_engine::Engine,
+    engine: yunta_replay::registry::Engine,
 }
 
 impl Closing {
@@ -82,12 +85,12 @@ impl Closing {
     /// from whatever the surface managed to see.
     pub(crate) fn of(env: ClosingEnv<'_>) -> Self {
         // The block is drawn by the process that drove the run.
-        let frame = run_frame_of(
+        let frame = RunFrame::of(
             env.run_id,
             env.workflow,
             env.state,
             env.prior,
-            &yunta_engine::Engine::this(env.now),
+            &yunta_replay::registry::Engine::this(env.now),
             env.now,
         );
         Self::framed(
@@ -121,7 +124,7 @@ impl Closing {
             isolation: outline.isolation,
             cwd: outline.cwd.to_path_buf(),
             home: outline.home.map(Path::to_path_buf),
-            engine: yunta_engine::Engine::this(now),
+            engine: yunta_replay::registry::Engine::this(now),
         }
     }
 

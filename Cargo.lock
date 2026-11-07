@@ -3090,6 +3090,7 @@ dependencies = [
  "yunta-core",
  "yunta-engine",
  "yunta-render",
+ "yunta-replay",
  "yunta-storage",
  "yunta-surco",
  "yunta-testkit",
@@ -3182,6 +3183,7 @@ dependencies = [
  "yunta-adapters",
  "yunta-core",
  "yunta-render",
+ "yunta-replay",
  "yunta-storage",
  "yunta-surco",
  "yunta-testkit",
@@ -3195,6 +3197,21 @@ dependencies = [
  "serde",
  "serde_json",
  "yunta-core",
+ "yunta-surco",
+ "yunta-testkit-core",
+]
+
+[[package]]
+name = "yunta-replay"
+version = "0.0.5"
+dependencies = [
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "yunta-core",
+ "yunta-replay",
  "yunta-surco",
  "yunta-testkit-core",
 ]
@@ -3252,6 +3269,7 @@ version = "0.0.5"
 dependencies = [
  "chrono",
  "futures",
+ "proptest",
  "serde_json",
  "tokio",
  "yunta-core",

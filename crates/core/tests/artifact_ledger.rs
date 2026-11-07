@@ -11,6 +11,7 @@ use yunta_core::events::{
     ArtifactWrittenPayload, EventPayload, RecordedOrigin, StoredEvent, SubmissionOutcome,
 };
 use yunta_core::{sha256_hex, ArtifactKind, ContentHash, NodeId};
+use yunta_testkit_core::arbitrary::log;
 use yunta_testkit_core::Log;
 
 fn hash(content: &str) -> ContentHash {
@@ -270,4 +271,36 @@ fn a_fresh_acceptance_cannot_be_legacy() {
     );
 
     assert_eq!(accepted.origin, RecordedOrigin::Derived);
+}
+
+proptest! {
+    /// The artifact fold is a pure function of the log, and it holds every
+    /// identity the log accepted: `every` returns one
+    /// ref per `(producer, identity)` the log named, never fewer.
+    #[test]
+    fn the_artifact_fold_is_deterministic_and_holds_every_identity(log in log()) {
+        let ledger = ArtifactLedger::of(&log);
+        prop_assert_eq!(&ledger, &ArtifactLedger::of(&log));
+
+        let held: std::collections::BTreeSet<_> = ledger
+            .every()
+            .map(|artifact| (artifact.producer.clone(), artifact.artifact.clone()))
+            .collect();
+        let named: std::collections::BTreeSet<_> = log
+            .iter()
+            .filter_map(|event| match event.payload() {
+                Some(EventPayload::Artifacts(ArtifactEvent::Accepted(p))) => {
+                    Some((event.node_id.clone(), p.artifact.clone()))
+                }
+                // A log written before an acceptance stated the identity
+                // names it through what it wrote.
+                Some(EventPayload::Artifacts(ArtifactEvent::Written(p))) => Some((
+                    event.node_id.clone(),
+                    yunta_core::events::artifacts::legacy_identity(p),
+                )),
+                _ => None,
+            })
+            .collect();
+        prop_assert_eq!(held, named);
+    }
 }

@@ -36,7 +36,7 @@ state_phrase_outside_words 0
 sync_fs_in_async 0
 system_clock_outside_boundary 0
 tense_markers 0
-test_files_over_500_lines 29
+test_files_over_500_lines 28
 test_fns_over_50_lines 117
 token_count_formatted_outside_units 0
 wildcard_in_ledger_apply 0

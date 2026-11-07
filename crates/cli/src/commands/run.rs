@@ -17,7 +17,8 @@ use std::path::Path;
 use yunta_adapters::MOCK_ID;
 use yunta_core::caution::Caution;
 use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, RunAdapter, Workflow};
-use yunta_engine::{CheckError, FrozenRun, PriorEstimation};
+use yunta_engine::{CheckError, FrozenRun};
+use yunta_replay::history::PriorEstimation;
 use yunta_storage::AsyncStorage;
 
 mod attached;
@@ -68,7 +69,7 @@ async fn count_non_terminal_runs(
     let mut active = 0;
     for run_id in storage.list_runs().await?.into_iter().map(|run| run.run_id) {
         let events = storage.events_for_run(run_id).await?;
-        if !events.is_empty() && !yunta_engine::derive(&events).ended() {
+        if !events.is_empty() && !yunta_replay::RunState::replay(&events).ended() {
             active += 1;
         }
     }
@@ -264,7 +265,7 @@ async fn context_files(
 ) -> Result<Vec<Caution>, CliError> {
     let mode = resolve_mode(manifest, mode);
     let left_out = yunta_core::left_out(&manifest.workflow, &manifest.config);
-    let included = yunta_engine::included_nodes(&manifest.workflow, &mode, &left_out);
+    let included = yunta_replay::modes::scheduled(&manifest.workflow, &mode, &left_out);
     let found = super::context_files(
         ctx,
         &manifest.workflow,
@@ -304,7 +305,7 @@ async fn estimate(
     look: &Look,
 ) -> (Option<PriorEstimation>, Option<Caution>) {
     let history = super::stats::budget_sample(ctx, manifest, mode, None).await;
-    let estimation = yunta_engine::prior_estimation(&history);
+    let estimation = yunta_replay::history::PriorEstimation::of(&history);
     if let Some(estimation) = &estimation {
         crate::output::progress(
             output,
@@ -312,7 +313,7 @@ async fn estimate(
             super::stats::format_estimation_line(estimation, look.glyphs),
         );
     }
-    let budget = yunta_engine::budget_caution(
+    let budget = yunta_replay::history::budget_caution(
         manifest
             .config
             .limits

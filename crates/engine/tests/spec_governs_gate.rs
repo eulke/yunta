@@ -197,7 +197,7 @@ async fn rebuilt(bench: &Bench) -> GateWaitingPayload {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -303,7 +303,7 @@ async fn an_approval_seeded_before_the_plan_was_found_unprovable_is_asked_again(
     assert!(
         !matches!(
             state.nodes.state("approve-plan"),
-            Some(yunta_engine::NodeState::Finished { .. })
+            Some(yunta_core::events::NodeState::Finished { .. })
         ),
         "the plan is not approved: {:?}",
         state.nodes.state("approve-plan")

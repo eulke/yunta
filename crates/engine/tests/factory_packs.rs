@@ -9,8 +9,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::{EventPayload, NodeEvent};
-use yunta_engine::{derive, NodeState, RunReport, RunTerminal};
+use yunta_core::events::{EventPayload, NodeEvent, NodeState};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_replay::RunState;
 use yunta_testkit::{
     bare_origin, git, write, ApproveEverything, Bench, INITIAL_BRANCH, MOCK_CONFIG,
 };
@@ -147,7 +148,7 @@ fn started_in_order(bench: &Bench) -> Vec<String> {
     started
 }
 
-fn finished(state: &yunta_engine::RunState, node: &str) -> bool {
+fn finished(state: &yunta_replay::RunState, node: &str) -> bool {
     matches!(state.nodes.state(node), Some(NodeState::Finished { .. }))
 }
 
@@ -204,7 +205,7 @@ async fn yunta_fragua_leaves_lint_out_where_the_project_declares_none() {
     let (bench, forge, RunReport { terminal, state }) = quick_run("").await;
 
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
-    let left: Vec<String> = derive(&bench.events())
+    let left: Vec<String> = RunState::replay(&bench.events())
         .run
         .left_out()
         .iter()
@@ -226,14 +227,13 @@ fn fragua_s_checks_follow_the_last_node_that_changes_the_work() {
     let text = std::fs::read_to_string(Path::new(WORKFLOWS).join("fragua.yaml")).unwrap();
     let workflow: yunta_core::Workflow = yunta_core::yaml::parse(&text).unwrap();
     let waits = |mode: &str, node: &str| -> Vec<String> {
-        let included = yunta_engine::mode_included_nodes(&workflow, &mode.into());
-        let mut deps: Vec<String> =
-            yunta_engine::dependencies_in_mode(&workflow, included.as_ref())
-                .remove(&yunta_core::NodeId::from(node))
-                .unwrap_or_default()
-                .iter()
-                .map(ToString::to_string)
-                .collect();
+        let included = yunta_replay::modes::included(&workflow, &mode.into());
+        let mut deps: Vec<String> = yunta_replay::modes::dependencies(&workflow, included.as_ref())
+            .remove(&yunta_core::NodeId::from(node))
+            .unwrap_or_default()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         deps.sort();
         deps
     };

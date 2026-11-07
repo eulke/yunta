@@ -243,6 +243,6 @@ pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
 }
 
 /// The checkout of its own a run's state names, when it names one.
-pub fn bound_checkout(state: &yunta_engine::RunState) -> Option<PathBuf> {
+pub fn bound_checkout(state: &yunta_replay::RunState) -> Option<PathBuf> {
     state.run.checkout().map(Path::to_path_buf)
 }

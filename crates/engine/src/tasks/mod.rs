@@ -27,10 +27,11 @@ use yunta_core::events::{
 };
 use yunta_core::ScopeGlob;
 use yunta_core::{CommitSha, NodeId, Task, TaskId, TasksFile};
+use yunta_replay::RunState;
 
-use crate::replay::{RunState, RunView};
 use crate::run::RunError;
 use crate::run_log::RunLog;
+use crate::run_log::RunView;
 use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
@@ -51,7 +52,7 @@ pub(crate) fn plan_reviewed(
     state: &RunState,
     producer: &NodeId,
 ) -> bool {
-    let reached = crate::modes::reached_nodes(workflow, state.run.mode(), state.run.left_out());
+    let reached = yunta_replay::modes::reached(workflow, state.run.mode(), state.run.left_out());
     yunta_core::workflow::reads::shown_by_a_gate(reached, producer)
 }
 
@@ -59,7 +60,7 @@ pub(crate) fn plan_reviewed(
 /// the run reaches produces one. Where it does, the spec writes each
 /// task's tests, and a plan that writes its own is refused.
 pub(crate) fn plan_specified(workflow: &yunta_core::Workflow, state: &RunState) -> bool {
-    crate::modes::reached_nodes(workflow, state.run.mode(), state.run.left_out())
+    yunta_replay::modes::reached(workflow, state.run.mode(), state.run.left_out())
         .into_iter()
         .filter_map(|node| node.artifacts.as_ref())
         .any(|artifacts| {

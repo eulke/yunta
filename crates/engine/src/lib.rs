@@ -3,20 +3,22 @@
 //! CLI-specific knowledge — the crate graph enforces both, not convention. It
 //! reaches an adapter only through the port `yunta-core` declares, and the CLI
 //! is the only shipped crate above it; the test harness `yunta-testkit` builds
-//! on it too. Its map:
+//! on it too. What a run is, as its log says, is `yunta-replay`'s: the engine
+//! drives a run and writes its log, and reads back what replay derives from
+//! it. Its map:
 //!
 //! - Birth and resume: `run` creates a run and drives its loop, from what
-//!   `manifest` freezes and `frozen` keeps; `inputs`, `modes`, `catalog`,
+//!   `manifest` freezes and `frozen` keeps; `inputs`, `catalog`,
 //!   `agents`, `skills` and `runner` resolve what a workflow names, and
 //!   `run_dir` and `session_dir` lay out what a run keeps on disk.
 //! - A node's work: `task_cycle` runs a task through its checks, over what
 //!   `tasks` means to the run; `scope`, `scope_expansion` and `permissions`
 //!   judge what it wrote; `answers`, `human_interaction` and `reserved` carry a
-//!   person's decisions; `findings`, `verification_effectiveness` and
-//!   `artifacts` keep what nodes report and hand over; `check` is `yunta check`.
-//! - The log and what reads it: `run_log` is the one way an event reaches it;
-//!   `replay` derives state, and `view`, `live`, `observer`, `stats`, `history`,
-//!   `receipt` and `events_export` read that state.
+//!   person's decisions; `findings` and `artifacts` keep what nodes report
+//!   and hand over; `check` is `yunta check`.
+//! - The log and what reads it: `run_log` is the one way an event reaches it,
+//!   and a read of it, replayed, is its `RunView`; `observer` and
+//!   `events_export` read what the log says.
 //! - Sessions' tools: `run_tools` serves a node session's MCP server, shaped by
 //!   `mcp`.
 //! - What sessions say: `said` holds it for whoever watches the run, in this
@@ -63,14 +65,11 @@ mod events_export;
 mod findings;
 mod frozen;
 pub mod git;
-mod history;
 mod human_interaction;
 mod inputs;
-mod live;
 pub mod lock;
 mod manifest;
 pub mod mcp;
-mod modes;
 mod observer;
 pub mod pace;
 mod pack_audit;
@@ -78,8 +77,6 @@ mod pack_requires;
 mod permissions;
 pub mod process;
 mod process_registry;
-mod receipt;
-mod replay;
 mod reserved;
 mod run;
 pub mod run_dir;
@@ -92,11 +89,8 @@ mod scope;
 pub mod scope_expansion;
 mod session_dir;
 mod skills;
-mod stats;
 mod task_cycle;
 mod tasks;
-mod verification_effectiveness;
-mod view;
 mod wakefulness;
 mod worktree;
 
@@ -122,19 +116,11 @@ pub use check::{
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
-pub use history::{
-    budget_caution, prior_estimation, run_summary, Percentiles, PriorEstimation, RunSummary,
-    MIN_SAMPLES_FOR_ESTIMATION,
-};
 pub use human_interaction::{
     Asking, HumanInteraction, NoInteraction, QuestionsReply, ShownContent, ShownDocument,
 };
 pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
-pub use live::{
-    last_event_age, open_sessions, recent_tool_calls, running_since, OpenSession, ToolCall,
-};
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
-pub use modes::{dependencies_in_mode, included_nodes, mode_included_nodes, reached_nodes};
 pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
     audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit, WorkflowUnread,
@@ -142,17 +128,8 @@ pub use pack_audit::{
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
 pub use permissions::command_violation;
 pub use process_registry::{
-    engine_liveness, engine_prompt, read_registry, registry_path, running_groups, Asked, Engine,
-    EngineLiveness, EngineProcessFile, ProcessRegistry, Prompt, Registry,
-};
-pub use receipt::{
-    build_receipt, render_json as render_receipt_json, BaselineSummary, CostSummary,
-    CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, FailedNode, Receipt,
-    ReceiptError, RunnerUsage, ScopeSummary,
-};
-pub use replay::TimeSpent;
-pub use replay::{
-    dedup_findings, derive, unknown_kind_counts, NodeState, NodeWait, RunState, UnknownKindCount,
+    engine_liveness, engine_prompt, read_engine, read_registry, registry_path, running_groups,
+    Asked, EngineProcessFile, ProcessRegistry, Registry,
 };
 pub use run::schedule::{decide, follows_build, Decision, Policy as SchedulingPolicy};
 pub use run::{
@@ -172,26 +149,12 @@ pub use scope::{
     audit, audits, changed_between, changed_since, fence_breach, node_scope_in_force, violations,
     Breach, Ceiling, ScopeCheckError, ScopeCheckResult,
 };
-pub use stats::{
-    compute_run_stats, compute_run_stats_at, compute_run_stats_of, median, FindingActivity,
-    NodeStat, RunStats, Submissions,
-};
 pub use task_cycle::{
     post_check, pre_check, run_task, surprises, AttemptEnv, AttemptRecord, CriterionRun,
     DispatchOutcome, KeepsOutput, Memo, PostCheck, ScopeGovernance, SessionObserver, SessionSetup,
     Surprise, TaskCause, TaskCycleError, TaskCycleReport, TaskOutcome,
 };
 pub use tasks::{held_of, judged_task, measured};
-pub use verification_effectiveness::{
-    analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
-    NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
-    MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
-};
-pub use view::{
-    chronicle, node_word, run_frame, run_frame_of, run_standing, ChildLink, Counter, Declares,
-    Degradation, GateAsks, Happening, Moment, NodeFrame, NodeStanding, Reroute, RunFrame, RunPhase,
-    RunningTask, TaskCounter, WaitingOn,
-};
 pub use wakefulness::SETTLE_AFTER_SUSPENSION;
 pub use worktree::{
     adopt_unit_branches, adoptable_unit_branches, capture_tree, carry_work, cleanup_worktree,

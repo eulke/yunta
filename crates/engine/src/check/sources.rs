@@ -116,7 +116,7 @@ fn variants(workflow: &Workflow) -> Vec<Variant<'_>> {
     let mut earlier: Vec<&Node> = Vec::new();
     let mut found = Vec::new();
     for mode in modes.keys() {
-        let nodes = keeps(crate::modes::mode_included_nodes(workflow, mode).as_ref());
+        let nodes = keeps(yunta_replay::modes::included(workflow, mode).as_ref());
         found.push(Variant {
             mode: Some(mode),
             nodes: nodes.clone(),

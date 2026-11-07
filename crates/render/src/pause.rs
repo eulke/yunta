@@ -208,6 +208,22 @@ mod tests {
         assert_eq!(sentence(&failed), "node `lint` failed: exit 1");
     }
 
+    /// The pause an older log recorded when a gate's pull request closed reads
+    /// as the headline of that failure, the pull request it names left out.
+    #[test]
+    fn a_closed_pull_request_pauses_on_its_headline() {
+        let closed = PauseReason::NodeFailed {
+            node: NodeId::from("approve"),
+            failure: Failure::PullRequestClosed {
+                closed_pull_request: Some("https://mock.forge/pr/1".to_string()),
+            },
+        };
+        assert_eq!(
+            sentence(&closed),
+            "node `approve` failed: the pull request was closed without approval"
+        );
+    }
+
     #[test]
     fn a_pause_a_person_chose_reads_as_the_choice() {
         assert_eq!(sentence(&PauseReason::Cancelled), "interrupted by a person");

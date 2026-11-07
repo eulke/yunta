@@ -12,7 +12,7 @@ use yunta_core::{Clock, Redactor, Responder, RunId};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::run_log::RunLog;
-use crate::EngineLiveness;
+use yunta_replay::registry::EngineLiveness;
 
 /// Why a run cannot be closed. Each variant's display is its code; the
 /// words a reader sees are the caller's to write.
@@ -54,7 +54,7 @@ pub async fn close_run(
     by: Responder,
     redactor: &Redactor,
 ) -> Result<(), CloseRunError> {
-    let state = crate::replay::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
+    let state = crate::run_log::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
     if state.run.finished().is_some() {
         return Err(CloseRunError::AlreadyClosed);
     }

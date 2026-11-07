@@ -18,10 +18,10 @@ use yunta_core::reserved::ReservedOption;
 use yunta_core::{
     Manifest, ModeName, NodeId, NonEmpty, OptionId, Redactor, RunId, Seq, TaskId, Workflow,
 };
+use yunta_replay::RunState;
 
 use super::schedule::{self, Decision};
 use super::{RunCtx, RunError};
-use crate::replay::RunState;
 use crate::run_log::RunLog;
 use yunta_core::events::{GateEvent, PauseReason};
 
@@ -331,7 +331,7 @@ pub async fn resolve_gate(
     choice: HumanChoice,
     redactor: &Redactor,
 ) -> Result<(), ResolveGateError> {
-    let state = crate::replay::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
+    let state = crate::run_log::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
     if !state.tail_paused() {
         return Err(ResolveGateError::NotPaused);
     }

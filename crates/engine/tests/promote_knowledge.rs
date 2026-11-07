@@ -6,8 +6,9 @@
 
 use std::path::Path;
 
+use yunta_core::events::NodeState;
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::{check, NodeState, RunReport, RunTerminal};
+use yunta_engine::{check, RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, write, ApproveEverything, Bench};
 
 /// The reference workflow as the repo ships it, checked and run from the

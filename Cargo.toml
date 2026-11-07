@@ -4,6 +4,7 @@ members = [
     "crates/surco",
     "crates/core",
     "crates/storage",
+    "crates/replay",
     "crates/adapters",
     "crates/engine",
     "crates/render",
@@ -28,6 +29,7 @@ repository = "https://github.com/eulke/yunta"
 yunta-surco = { path = "crates/surco", version = "0.0.5" }
 yunta-core = { path = "crates/core", version = "0.0.5" }
 yunta-storage = { path = "crates/storage", version = "0.0.5" }
+yunta-replay = { path = "crates/replay", version = "0.0.5" }
 yunta-adapters = { path = "crates/adapters", version = "0.0.5" }
 yunta-engine = { path = "crates/engine", version = "0.0.5" }
 yunta-render = { path = "crates/render", version = "0.0.5" }

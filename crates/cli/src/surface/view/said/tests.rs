@@ -2,7 +2,7 @@
 
 use yunta_core::{NodeId, SessionId, TaskId};
 use yunta_engine::said::Said;
-use yunta_testkit::run_frame;
+use yunta_replay::frame::RunFrame;
 
 use crate::surface::view::{node_rows, NodeFrame, NodeStanding, RunId, Standing};
 use surco::glyphs::Glyphs;
@@ -36,9 +36,10 @@ fn said(task: Option<&str>, text: &str) -> Said {
 
 /// `implement` at work on T001 in a session.
 fn working() -> NodeFrame {
-    let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
+    let mut node =
+        yunta_replay::frame::NodeFrame::sample(&NodeId::from("implement"), NodeStanding::ToGo);
     node.standing = Standing::Running;
-    node.running_tasks = vec![yunta_engine::RunningTask {
+    node.running_tasks = vec![yunta_replay::frame::RunningTask {
         id: "T001".into(),
         in_session: true,
     }];
@@ -46,7 +47,7 @@ fn working() -> NodeFrame {
 }
 
 fn rows(node: &NodeFrame, said: Option<&Said>) -> Vec<String> {
-    let frame = run_frame(&RUN);
+    let frame = RunFrame::sample(&RUN);
     node_rows(&frame, node, said, &look(), Motion::Still)
         .iter()
         .map(|row| Paint::Plain.line(row))

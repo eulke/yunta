@@ -5,7 +5,8 @@
 //! process that paused the run) know what it's answering.
 
 use yunta_core::events::{EngineFact, GateEvent, NodeEvent, NodeOutcome, PauseReason, RunEvent};
-use yunta_engine::{ResolveGateError, RunReport, RunState, RunTerminal};
+use yunta_engine::{ResolveGateError, RunReport, RunTerminal};
+use yunta_replay::RunState;
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
 
@@ -150,7 +151,7 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("lint"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
     // The consuming engine never re-emits the recorded pair.
     assert_eq!(
@@ -253,7 +254,7 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
 
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("approve") {
-        Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
+        Some(yunta_core::events::NodeState::Finished { outcome, .. }) => {
             assert_eq!(
                 outcome,
                 &NodeOutcome::Fact(EngineFact::OptionChosen {

@@ -11,11 +11,13 @@
 //! whole session. The tools move it inside: a refusal comes back as an
 //! answer, and the session fixes it in the same breath.
 
-use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RecordedOrigin, SessionEvent};
+use yunta_core::events::{
+    ArtifactEvent, FindingEvent, NodeEvent, NodeState, RecordedOrigin, SessionEvent,
+};
 use yunta_core::events::{ArtifactId, EventPayload, Failure, SubmissionOutcome};
 use yunta_core::port::{Policy, PolicyApplied};
 use yunta_core::{ArtifactKind, Capabilities};
-use yunta_engine::{current_escalation, NodeState, RunReport, RunTerminal};
+use yunta_engine::{current_escalation, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 #[path = "submit/undelivered.rs"]

@@ -17,10 +17,10 @@
 //! is ever one that run's own menu does not offer.
 
 use surco::words::Standing;
-use yunta_core::events::{ArtifactId, GateWaitingPayload, PauseReason, Stuck};
+use yunta_core::events::{ArtifactId, GateWaitingPayload, NodeWait, PauseReason, Stuck};
 use yunta_core::step::NextStep;
 use yunta_core::{ArtifactKind, RunId};
-use yunta_engine::{NodeWait, RunFrame, RunPhase, WaitingOn};
+use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
 
 use crate::error::Reader;
 
@@ -33,7 +33,7 @@ pub(crate) const STALLED: &str = "no process is driving it: the engine that ran 
 /// how long it has been asking; a page whose headline says it leaves it
 /// out.
 pub(crate) fn asking(
-    prompt: &yunta_engine::Prompt,
+    prompt: &yunta_replay::registry::Prompt,
     at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> String {
     let who = prompt
@@ -53,7 +53,7 @@ pub(crate) fn asking(
 
 /// Whom a live engine is asking, on the one line a row has room for: the
 /// node, and that the answer is given at its terminal.
-pub(crate) fn asking_on(prompt: &yunta_engine::Prompt) -> String {
+pub(crate) fn asking_on(prompt: &yunta_replay::registry::Prompt) -> String {
     match &prompt.node {
         Some(node) => format!("node `{node}` asks at its terminal"),
         None => "the run asks at its terminal".to_string(),

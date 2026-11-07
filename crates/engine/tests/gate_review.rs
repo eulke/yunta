@@ -94,7 +94,7 @@ fn held_plan(bench: &Bench) -> Shown {
     let tasks = ArtifactId::Interpreted {
         kind: ArtifactKind::Tasks,
     };
-    let state = yunta_engine::derive(&bench.events());
+    let state = yunta_replay::RunState::replay(&bench.events());
     let held = state
         .artifacts
         .latest(&tasks, Some(&"plan".into()))
@@ -185,7 +185,7 @@ async fn an_option_that_sends_the_plan_back_asks_what_should_change() {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()

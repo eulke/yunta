@@ -21,9 +21,9 @@ use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice}
 use yunta_core::step::NextStep;
 use yunta_core::{OptionId, Responder, RunId};
 use yunta_engine::DecisionOn;
-use yunta_engine::RunState;
 use yunta_engine::ShownDocument;
 use yunta_render::gate::Route;
+use yunta_replay::RunState;
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
 use crate::commands::advice;
@@ -65,7 +65,7 @@ async fn record(
     let open = ctx.open_run(run_id).await?;
     // Said here because the resume below would say it only to `detached.log`, with
     // the answer already on the log and the run reading as moving.
-    let state = yunta_engine::derive(&open.events);
+    let state = yunta_replay::RunState::replay(&open.events);
     super::resume::refuse_if_driven(run_id, &open.run_dir, &state).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
@@ -226,7 +226,7 @@ pub(super) struct Waiting {
 /// what serves when it waits on none.
 pub(super) async fn asked_of(ctx: &Context, run_id: &RunId) -> Result<Asked, CliError> {
     let open = ctx.open_run(run_id).await?;
-    let state = yunta_engine::derive(&open.events);
+    let state = yunta_replay::RunState::replay(&open.events);
     let handle = run_id.handle();
     let decision =
         yunta_engine::current_escalation(&open.manifest.doc, &open.run_dir, &state).await?;

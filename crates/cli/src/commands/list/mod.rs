@@ -202,7 +202,7 @@ async fn estimation_field(
     glyphs: surco::glyphs::Glyphs,
 ) -> Fields {
     let history = super::stats::summaries(&super::stats::history(ctx, &workflow.name).await);
-    if let Some(estimation) = yunta_engine::prior_estimation(&history) {
+    if let Some(estimation) = yunta_replay::history::PriorEstimation::of(&history) {
         fields = fields.push_if(
             "usually",
             super::stats::format_estimation_line(&estimation, glyphs),

@@ -7,15 +7,12 @@ use surco::look::{Look, Width};
 use surco::words::Standing;
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, ChangesCountedPayload, EventPayload, Failure, NodeEvent,
-    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RunEvent, SessionEvent, StoredEvent,
-    TokenUsage,
+    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, NodeState, RunEvent, SessionEvent,
+    StoredEvent, TokenUsage,
 };
 use yunta_core::{NodeId, OnFailure, RunId, Workflow};
-use yunta_engine::{
-    derive, run_frame_of, Declares, GateAsks, NodeFrame, NodeStanding, NodeState, RunFrame,
-    RunState,
-};
-use yunta_testkit::{node_frame, run_frame};
+use yunta_replay::frame::{Declares, GateAsks, NodeFrame, NodeStanding, RunFrame};
+use yunta_replay::RunState;
 use yunta_testkit_core::{fixed_now, Log};
 
 use super::fixtures::{blocked_log, cases, outline, Case, RUN};
@@ -210,13 +207,13 @@ fn a_blocked_task_says_where_its_work_is() {
 
 /// The page of the run `events` write, in `scope`.
 fn page_of(events: Vec<StoredEvent>, scope: Scope) -> RunPage<'static> {
-    let state: &'static RunState = Box::leak(Box::new(derive(&events)));
-    let frame: &'static RunFrame = Box::leak(Box::new(run_frame_of(
+    let state: &'static RunState = Box::leak(Box::new(RunState::replay(&events)));
+    let frame: &'static RunFrame = Box::leak(Box::new(RunFrame::of(
         &RUN,
         &workflow(),
         state,
         None,
-        &yunta_engine::Engine::this(fixed_now()),
+        &yunta_replay::registry::Engine::this(fixed_now()),
         fixed_now(),
     )));
     let run_id: &'static RunId = Box::leak(Box::new(RUN));
@@ -224,7 +221,7 @@ fn page_of(events: Vec<StoredEvent>, scope: Scope) -> RunPage<'static> {
         scope,
         depth: Depth::Glance,
         run_id,
-        engine: yunta_engine::Engine::this(fixed_now()),
+        engine: yunta_replay::registry::Engine::this(fixed_now()),
         frame,
         state,
         paths: outline(),
@@ -337,19 +334,19 @@ fn trace_nodes() -> Vec<NodeFrame> {
         NodeFrame {
             reroutes: 2,
             attempt: Some(3),
-            ..node_frame(&NodeId::from_static("build"), finished())
+            ..NodeFrame::sample(&NodeId::from_static("build"), finished())
         },
         NodeFrame {
             people: Duration::from_secs(724),
             question_rounds: 2,
-            ..node_frame(&NodeId::from_static("ask"), paused())
+            ..NodeFrame::sample(&NodeId::from_static("ask"), paused())
         },
         NodeFrame {
             standing: Standing::NeedsYou,
             people: Duration::from_secs(60),
             decisions: 1,
             declares: gate(),
-            ..node_frame(&NodeId::from_static("approve"), paused())
+            ..NodeFrame::sample(&NodeId::from_static("approve"), paused())
         },
         NodeFrame {
             declares: Declares {
@@ -359,11 +356,11 @@ fn trace_nodes() -> Vec<NodeFrame> {
                 }),
                 ..Declares::default()
             },
-            ..node_frame(&NodeId::from_static("lint"), NodeStanding::ToGo)
+            ..NodeFrame::sample(&NodeId::from_static("lint"), NodeStanding::ToGo)
         },
         NodeFrame {
             declares: gate(),
-            ..node_frame(&NodeId::from_static("check"), NodeStanding::ToGo)
+            ..NodeFrame::sample(&NodeId::from_static("check"), NodeStanding::ToGo)
         },
     ]
 }
@@ -389,18 +386,18 @@ fn corrected_nodes() -> Vec<NodeFrame> {
                 }),
                 ..Declares::default()
             },
-            ..node_frame(&NodeId::from_static("tidy"), failed)
+            ..NodeFrame::sample(&NodeId::from_static("tidy"), failed)
         },
         NodeFrame {
             attempt: Some(2),
-            ..node_frame(
+            ..NodeFrame::sample(
                 &NodeId::from_static("retry"),
                 NodeStanding::Paused { attempt: 2 },
             )
         },
         NodeFrame {
             attempt: Some(2),
-            ..node_frame(
+            ..NodeFrame::sample(
                 &NodeId::from_static("scan"),
                 NodeStanding::Reached(NodeState::Running { attempt: 2 }),
             )
@@ -415,7 +412,7 @@ fn trace_page(nodes: Vec<NodeFrame>) -> RunPage<'static> {
     page.depth = Depth::Full;
     page.frame = Box::leak(Box::new(RunFrame {
         nodes,
-        ..run_frame(&RUN)
+        ..RunFrame::sample(&RUN)
     }));
     page
 }
@@ -435,7 +432,7 @@ fn row_of(drawn: &str, id: &str) -> String {
 fn a_wait_under_a_second_is_not_said() {
     let nodes = vec![NodeFrame {
         people: Duration::from_millis(400),
-        ..node_frame(&NodeId::from_static("ask"), finished())
+        ..NodeFrame::sample(&NodeId::from_static("ask"), finished())
     }];
     let drawn = draw(&trace_page(nodes), &Look::plain());
     let ask = row_of(&drawn, "ask");

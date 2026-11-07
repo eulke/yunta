@@ -5,10 +5,11 @@
 
 use std::time::Duration;
 
-use yunta_core::events::RunPhaseRaw;
+use yunta_core::events::{NodeState, RunPhaseRaw};
 use yunta_core::{describe, RunId};
 use yunta_engine::pace::Pace;
-use yunta_engine::{EngineProcessFile, NodeState, Registry, RunState};
+use yunta_engine::{EngineProcessFile, Registry};
+use yunta_replay::RunState;
 
 use super::ENGINE_SHUTDOWN_POLL;
 use crate::commands::advice;
@@ -41,7 +42,7 @@ pub(super) async fn engine_registry(
             () = Pace::every(ENGINE_SHUTDOWN_POLL).beat() => {}
             () = ctx.cancellation().cancelled() => return Ok(None),
         }
-        let state = yunta_engine::derive(&storage.events_for_run(run_id.clone()).await?);
+        let state = yunta_replay::RunState::replay(&storage.events_for_run(run_id.clone()).await?);
         if !matches!(state.run.phase(), RunPhaseRaw::Open) {
             return Ok(None);
         }

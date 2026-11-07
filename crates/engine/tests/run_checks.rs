@@ -2,10 +2,10 @@
 
 use yunta_core::events::{
     BaselineOrigin, CommandOrigin, EngineFact, EventPayload, Failure, FindingSeverity, NodeEvent,
-    NodeOutcome, PauseReason, RedCheck, RunEvent, Timed,
+    NodeOutcome, NodeState, PauseReason, RedCheck, RunEvent, Timed,
 };
 use yunta_core::{ConfigKey, NodeId};
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{baselines, ApproveEverything, Bench, MOCK_CONFIG};
 
 mod common;
@@ -548,7 +548,7 @@ nodes:
         assert!(
             matches!(
                 state.nodes.state(node),
-                Some(yunta_engine::NodeState::Finished { outcome, .. })
+                Some(yunta_core::events::NodeState::Finished { outcome, .. })
                     if *outcome == NodeOutcome::Fact(EngineFact::ExitStatus { code: 0 })
             ),
             "{node}: {:?}",
@@ -638,7 +638,8 @@ nodes:
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
-    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("probe") else {
+    let Some(yunta_core::events::NodeState::Failed { failure, .. }) = state.nodes.state("probe")
+    else {
         panic!("`probe` failed: {state:?}");
     };
     assert_eq!(
@@ -966,7 +967,7 @@ nodes:
     // The export carries the run's own close, which the report the run
     // hands back was taken just before: what has to round-trip is every
     // node's state, and then the close on top of it.
-    let exported = yunta_engine::derive(&round_tripped);
+    let exported = yunta_replay::RunState::replay(&round_tripped);
     let states = |ledger: &yunta_core::events::NodeLedger| {
         ledger
             .iter()

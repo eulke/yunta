@@ -1,308 +1,370 @@
-# Implementation Plan: `surco-screen`
+# Implementation Plan: `run-state`
 
-Spec: `SPEC-surco-screen.md`, approved on 2026-11-06, its four open questions answered with the recommended choice. Status: **approved on 2026-11-06**, with the catalog's goldens growing at their end (decision 6). The layout was revised the same day: each interface lays a screen out its own way, at the user's choice (decisions 3 and 4). Task list: `tasks/todo.md`.
-Base: `feature/yunta-tui` at `717148cf`, on `main` at `34790ab8`, which had not moved when this was written.
+Spec: `SPEC-run-state.md`, approved on 2026-11-07. Status: **approved on 2026-11-07**. Task list: `tasks/todo.md`. Base: `feature/yunta-tui` at `8c833576`. `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`.
 
 ## Overview
 
-`yunta-surco` gains three things:
-- **A public style reading** that `Paint`, the clap styles and the HTML page all read.
-- **What an open interface needs, as data:** `Ribbon`, `Legend` and `Attention` as blocks, and `Screen` and `Overlay` as compositions of documents.
-  - Every surface draws each block, and Markdown and HTML draw each screen.
-  - A screen holds no cell, pixel or color. The terminal (`tui` module), a GPUI desktop and a page each lay it out their own way, and Surco's tokens give them one look.
-- **A width of exactly the cells a pane is given,** so another engine's panes can draw Surco's documents.
+What derives a run's state from its log leaves `yunta-engine` for a crate of its own, `yunta-replay`, at `crates/replay`. The move goes module by module, bottom up, so the workspace compiles and its suite passes after each phase.
 
-Then `Card`, `DeskFoot` and the attached region are rebuilt on `Legend` and `Attention`, and print what they printed. The look is the spike's, as Surco's rules allow. Target goldens are written and reviewed before the code that draws them.
+Every caller's import changes in it, so each item takes its one path and its name in the same step: there is no alias, no re-export and no old name at any point. The phases are:
+1. what nothing else depends on: `modes` and the registry's values;
+2. replay, with the cycle cut under a test that sees it;
+3. the stats and the history;
+4. the receipt and the verification findings;
+5. what a node is doing now, and the frame;
+6. the docs, the proof and the close.
 
 ## Architecture Decisions
 
-**1. The style reading, in `paint/style.rs`.**
-- `paint.rs` holds 459 lines, so the reading goes in a file of its own, re-exported by `paint`.
-- One function answers every layer. `Paint::Plain` has no style. The sixteen colors keep their bold, dim and color of `ansi`, and fill nothing, as today. The 24 bits keep the tone, fill and pill rules of `truecolor_parameters`.
+**1. The crate.** `crates/replay/Cargo.toml`:
 
-```rust
-/// How a span is drawn: what an escape, a cell of another engine or a page's
-/// style sets. Not a `Tone`, which is the span's role; this is what that role
-/// looks like in one layer.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Style {
-    pub bold: bool,
-    pub dim: bool,
-    pub fg: Option<Color>,
-    pub bg: Option<Color>,
-}
+```toml
+[package]
+name = "yunta-replay"
+description = "What a run is, as its log says: replay and every reading derived from it"
+# version, edition, rust-version, license and repository from the workspace
 
-/// A color as a layer has it: one of the terminal's sixteen, or 24 bits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Color {
-    Ansi(Ansi),
-    Rgb(u8, u8, u8),
-}
-
-/// The style of a span in `tone` on its own fill or else its line's, in `layer`.
-pub fn style(layer: Layer, tone: Tone, own: Option<Fill>, line: Option<Fill>) -> Style;
-
-/// The background a filled line is erased with to its edge, in `layer`.
-pub fn erase(layer: Layer, line: Option<Fill>) -> Option<Color>;
-
-/// The colors only a page has on `ground`, each with the name a page's style reads it by.
-pub fn page(ground: Ground) -> [(&'static str, Color); 5];
+[dependencies]
+yunta-core.workspace = true
+# The words a frame calls a run and a node by, and their marks.
+yunta-surco.workspace = true
+chrono.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
 ```
 
-- `Ansi` becomes public: today's private enum and its codes.
-- `Paint::word`, `Paint::span` and `Paint::erase` write their SGR from `style` and `erase`.
-- `paint/help.rs`, the clap styles, reads `style`.
-- `surface/html/style.rs` reads `style` and `page`.
-- `palette` stays private, and its values and contrast tests stay as they are. No color value exists outside it.
-
-**2. The blocks, as data in `components/`.** One file each, with the crate's rule: what is said and its role, never a width, an escape or a glyph. Each is built the way a caller reads it.
+- The root is replay. `lib.rs` holds what `replay.rs` holds today: `RunState`, its fold and its reads, and `dedup_findings`.
+- Replay's parts stay private files of the root: `activity`, `clock`, `decisions`, `refuse`, `tree`, and `attempt` for what `live` held.
+- What lives in a private part and is part of the root's API is named once, at the root: `TimeSpent`, `Timeline`, `ReplayError`, `Submissions`, `FindingActivity`. That is its only path.
+- `RunView`, the events read and the state they replay to, is the engine's alone (`pub(crate)`, 48 uses): it stays in the engine, in `run_log.rs`, beside the log it reads.
+- The readings are public modules, each the only path to its items: `modes`, `registry`, `stats`, `history`, `receipt`, `verification_effectiveness` and `frame`. The root re-exports nothing from them.
+- Its `//!`:
 
 ```rust
-/// The furrow with the names of the run's nodes over it: the signature at
-/// the top of a run. Not a `Furrow`, which hangs under a page's headline and
-/// names no node.
-pub struct Ribbon {
-    pub stretches: Vec<Stretch>,
-    /// How many events the running node has had: the plow stands a cell
-    /// further for each. `None` where the view stands still: no plow.
-    pub events: Option<u64>,
-}
-/// One node's stretch of the furrow: its name and the word it stands at.
-pub struct Stretch {
-    pub name: String,
-    pub standing: Standing,
-}
-
-/// The keys a person can press where they are, each with what it does, in
-/// the order they are read. Not a `Next`, which says what to type at a shell.
-pub struct Legend(pub Vec<Binding>);
-/// What is pressed and what it does: `enter` and `open`.
-pub struct Binding {
-    pub keys: Keys,
-    pub does: String,
-}
-/// What is pressed, as the person reads it: the arrows, which each glyph set
-/// draws its own way, or keys spelled as they are typed (`enter`, `esc`, `n`).
-pub enum Keys {
-    UpDown,
-    Typed(String),
-}
-
-/// What needs a person, and how they answer it, on any screen. Not a
-/// `Concern`, which warns: this asks.
-pub struct Attention {
-    /// What needs them, when a screen shows more than one: a run's handle.
-    pub subject: Option<String>,
-    /// What is asked of them.
-    pub asks: String,
-    pub answer: Answer,
-}
-/// How a person answers what needs them.
-pub enum Answer {
-    /// Typed at a shell: said before what is asked, so a row cut short keeps it.
-    Command(String),
-    /// Pressed here: said after what is asked, which gives way to it.
-    Key(Binding),
-    /// Given where it was asked, at another terminal: nothing here answers
-    /// it, so only what is asked is said.
-    Elsewhere,
-}
+//! What a run is, as its log says: the events folded into a [`RunState`],
+//! and every reading of a run derived from that state and its inputs: the
+//! frame a surface draws ([`frame`]), the stats, a workflow's history, the
+//! receipt, the verification findings, and the nodes a mode schedules.
+//!
+//! Pure: nothing here opens a file, reads a clock or spawns a task. An
+//! instant, the registry's word on the engine, a past run's log: each comes
+//! in as an argument its caller read. So a crate that reads a run needs none
+//! of the engine that drives one, and a reading at a chosen instant is the
+//! same in a test as in production.
+//!
+//! Its modules stand in layers, each naming only the ones beneath:
+//! `modes` and `registry`; replay, at the root; `stats`; `history`; then
+//! `receipt`, `verification_effectiveness` and `frame`.
 ```
 
-- **Built as they read:**
-  - `Legend::new().arrows("move").key("enter", "chooses")`;
-  - `Attention::command(asks, command)`, `Attention::key(asks, keys, does)` and `.of(subject)`;
-  - `Ribbon::new(stretches)` and `.plowed(events)`.
-- **`Block` gains `Ribbon`, `Legend` and `Attention`,** each with `From`. A ribbon hangs from a headline, as the furrow does.
-- **One with nothing to say draws nothing:** a legend with no binding, a ribbon with no stretch, an attention that asks nothing.
-
-**3. The screen, as data in `components/screen.rs`.** Its parts are named by what they are, never by where they stand, and its types admit only valid states: the main region has the focus unless the side one says it has.
+**2. The two rules, held by tests.**
 
 ```rust
-/// What a whole interface shows, with no cell, no pixel and no color: each
-/// interface lays it out its own way. Not a `Doc`: a screen holds documents.
-pub struct Screen {
-    /// Where the person is, from the outermost: `yunta`, a run, a node.
-    pub trail: Vec<String>,
-    /// How many runs stand at each word that asks for a look.
-    pub tally: Vec<Count>,
-    /// What the screen is about, across it: a run's headline, ribbon and gist.
-    pub about: Option<Doc>,
-    pub main: Region,
-    /// A list beside the main region to move through, the first to give way.
-    pub side: Option<Side>,
-    pub attention: Option<Attention>,
-    pub legend: Legend,
-    /// Open over the regions; its legend stands for the screen's while open.
-    pub overlay: Option<Overlay>,
+// crates/replay/tests/pure.rs
+/// What replay derives depends on its inputs alone, so its manifest names no
+/// runtime, no store and no engine: the day one is added, this says where
+/// the work belongs instead.
+#[test]
+fn the_crate_reads_nothing_but_its_inputs() {
+    let manifest = include_str!("../Cargo.toml");
+    for named in ["tokio", "rusqlite", "sqlx", "yunta-storage", "yunta-engine"] {
+        assert!(
+            !manifest.contains(named),
+            "yunta-replay names {named}; what reads a disk, a clock or a process belongs to the engine"
+        );
+    }
 }
-/// How many runs stand at one word: `13 need you`.
-pub struct Count {
-    pub standing: Standing,
-    pub runs: usize,
-}
-pub struct Region {
-    pub title: Option<String>,
-    pub doc: Doc,
-}
-pub struct Side {
-    pub region: Region,
-    /// Whether the keys act on it rather than on the main region.
-    pub focused: bool,
-}
-/// What opens over a screen and closes with `esc`: the palette, help, a confirmation.
-pub struct Overlay {
-    pub title: String,
-    pub doc: Doc,
-    pub legend: Legend,
+
+// crates/replay/tests/layers.rs
+/// The crate's modules from the bottom. A file belongs to the public module
+/// its path starts with, and every other file to replay, at the root.
+const LAYERS: [&[&str]; 5] = [
+    &["modes", "registry"],
+    &["replay"],
+    &["stats"],
+    &["history"],
+    &["receipt", "verification_effectiveness", "frame"],
+];
+
+/// What replay folds never depends on what is read off it: each module names,
+/// through `crate::`, only modules in a layer beneath its own.
+#[test]
+fn each_module_names_only_the_modules_beneath_it() { /* walks src/ */ }
+```
+
+- `layers.rs` reads `src/` at test time (a test may read files; the crate may not).
+- `crate::RunState` names the root, and `crate::stats::RunStats` names `stats`. A file in a layer that names its own layer's sibling, or a layer above, fails with both names.
+
+**3. Replay's names.**
+
+```rust
+impl RunState {
+    /// The state `events` leave a run in, folded in order.
+    pub fn replay(events: &[StoredEvent]) -> RunState;
+    /// How many events of each kind this binary does not know, which a
+    /// newer engine wrote.
+    pub fn unknown_kinds(&self) -> Vec<UnknownKindCount>;
+    // The field it counts, `unknown_kinds: Vec<(Seq, String)>`, is `unknown_events`:
+    // the method and the field are two things, with two names.
+
+    // attempt.rs, what `live` held: what a node is doing now
+    pub fn running_since(&self, node: &NodeId) -> Option<DateTime<Utc>>;
+    pub fn last_event_age(&self, node: &NodeId, now: DateTime<Utc>) -> Option<Duration>;
+    pub fn open_sessions(&self, node: &NodeId) -> Vec<OpenSession>;
+    pub fn recent_tool_calls(&self, node: &NodeId, limit: usize) -> Vec<ToolCall>;
 }
 ```
 
-- **Built as it reads:** `Screen::new(main)`, `.trail(...)`, `.tally(Standing::NeedsYou, 13)`, `.about(doc)`, `.side(region)`, `.focus_side()`, `.attention(...)`, `.legend(...)` and `.overlay(...)`. Also `Region::new(doc).titled("plan")`.
-- **What a screen carries:** no scroll position, no width and no size. Each interface keeps where a person scrolled to and how wide a pane stands.
+- `UnknownKindCount`, `NodeState`, `NodeWait`, `OpenSession` and `ToolCall` are imported from `yunta_core::events` by whoever names them.
+- `Submissions` and `FindingActivity` move from `stats.rs` into `activity.rs`, and are public at the root: what replay counts, which the stats read.
 
-**4. Each interface lays a screen out; Surco gives a pane its exact width.**
-- **Surco lays no screen out on a terminal.**
-- **The `tui` module does:**
-  - Ratatui's `Layout`;
-  - each region's document drawn by `Terminal::lines` at the region's width;
-  - the overlay's box in Surco's `corners(Shape::Box)` and joints;
-  - the attention row on the tint the style reading gives.
-- **The targets drawn for the terminal at 80×24 and 60×14** stay as that module's reference.
-- **A GPUI desktop** lays it out with flexbox, and a page with CSS grid.
-- **What a pane needs from Surco: `Width::exact(cells)`.** `Width::of` holds a stream between 60 and 120 cells, which a pane of 22 cannot use.
-  - `Width::whole`, the desk's, already had no floor and no ceiling. It becomes `Width::exact`, since a pane's own edge bounds it as the desk's does.
-  - **A pane's edge cuts what passes it,** where a stream's terminal wraps it. Measured while implementing: twelve existing blocks passed an exact width below 60. The widest was the decision at 53 cells, which is the main region's width at 80 columns.
-  - At the user's choice, the terminal surface lays each line past a pane's edge out in rows (`Line::rows_within`, read from `Width::cuts`). A row breaks at its last space, or else at the edge, and each further row hangs under where the line's text starts.
-  - A stream keeps its lines as they are, so a word its terminal wraps is still copied whole.
-  - A test draws every block of the catalog at exact widths from 20 to 59, and finds no line wider than its width and no panic.
+**4. The stats.**
 
-**5. Markdown, the description and HTML.**
-- **Markdown and the description:**
-  - a ribbon is a line of each name with its word, in order;
-  - a legend is a line of `` `keys` does `` pairs;
-  - an attention is a line with its words.
-  - A screen is its trail and tally, what it is about, the side region and then the main one, each as a section under its title, then its attention and legend. An overlay is a section after them, under its title.
-- **HTML:**
-  - a ribbon is a row of names over the furrow's strokes, with every word in its label;
-  - a legend is a row of `<button type="button" class="key" data-key="…">`, inert on a static page;
-  - an attention is a tinted `<p role="status">`.
-  - A screen is a `<header>` with the trail and the tally, a `<div class="about">`, a `<main>` with a `<section class="region side">` and a `<section class="region main">`, the focused one with `aria-current`, a `<footer>` with the attention and the legend, and an overlay as a `<dialog open>`.
-- **`every_surface_says_every_word_a_screen_holds`** holds both: each surface's words include every string the screen holds, read from its data.
+```rust
+impl RunStats {
+    /// The run's stats as they stand at `now`: an open attempt reports how
+    /// long it has been working, and a run still going measures its clock to
+    /// `now`. A run that finished or broke stops at its last event.
+    pub fn at(state: &RunState, workflow: &Workflow, now: DateTime<Utc>) -> RunStats;
+    /// The run's stats as its log stands, with no instant after it: an
+    /// attempt still open has no elapsed time, which is unknown, not zero.
+    pub fn as_logged(state: &RunState, workflow: &Workflow) -> RunStats;
+}
+```
 
-**6. Goldens, and the catalog.**
-- **A deviation from the spec.** `every_kind_of_block_stands_in_the_catalog` asks the catalog for a sample of every kind of block. So the three new blocks enter the catalog, and its goldens (`components/catalog.*.txt`, `markdown/catalog.md`, `html/catalog.html`) grow.
-  - The new samples go in a part appended after `closing()`. Each of those files then changes only by what is added at its end, or before the page's closing tags.
-  - Every other existing golden stays byte for byte. That is the one place where the spec's "no existing golden changes" is narrowed (approved).
-  - Rejected: a second catalog for the new blocks. It would split the one reference Surco keeps and make a reader look in two places.
-- **A screen's goldens:** `markdown/screen.md` and `html/screen.html`, the run's screen with the help overlay open.
-- **Targets first.** The blocks' targets are drawn by hand in `ascii-80` and `unicode-60`, and the screen's as Markdown and HTML. They follow the spike's frames as Surco's rules allow, and the user reviews them before any code draws them. The other environments are blessed once the code draws the targets, and read in their diff.
+- `stats_observed_at` becomes the private `observed(state, workflow, until: Option<DateTime<Utc>>)` behind the two.
+- `compute_run_stats`, `compute_run_stats_of` and `compute_run_stats_at` are gone. Their 31 callers replay once and call one of the two.
+- `median` stays in `stats`.
 
-**7. The callers move without a change to what they print.**
-- `Card.keys` and `DeskFoot.keys` become `Legend`.
-- `crates/cli/src/ask/{card,desk,menu,form}.rs` build one with `Legend::new().arrows("move").key("enter", "chooses")…` where they built strings.
-- `crates/cli/src/surface/view/mod.rs` builds its row as `Attention::command(…)` and draws it through the terminal surface.
-- Its row for a run whose engine asks at its own terminal is `Attention::elsewhere(…)`, at the user's choice: the words stay, and what it asks goes from strong to plain.
-- Their tests and the goldens of `yunta-surco` (card, desk), `yunta` (`crates/cli/goldens`), `yunta-render` and `yunta-engine` stay byte for byte.
+**5. The history.**
 
-**8. What is said, and where.**
-- Each new module gets a `//!`. `components/mod.rs`, `doc.rs`, `surface/mod.rs`, `paint.rs` and the crate root say what is true.
-- The rule "a color has one table" is held by the test of decision 1. The `//!` of `paint/style.rs` says so.
-- `.agents/architecture.md` stands at 6,045 of its 6,144 bytes, so the rule goes in no line of it: a test holds it.
-- No user document changes, because nothing a person runs looks different.
-- `CAPABILITY-MAP.md`'s `tui` row says what it now owns: a screen laid out with Ratatui's `Layout`, and the overlay's box in Surco's glyphs.
+```rust
+impl RunSummary {
+    pub fn of(run_id: RunId, workflow_hash: ContentHash, workflow: &Workflow, events: &[StoredEvent]) -> RunSummary;
+}
+impl PriorEstimation {
+    /// What the past runs say a new one costs; `None` below [`MIN_SAMPLES`].
+    pub fn of(history: &[RunSummary]) -> Option<PriorEstimation>;
+}
+/// Fewer independent samples than this say nothing: a number without a
+/// distribution behind it reads like knowledge it is not. Every signal
+/// read across past runs, an estimate or a verification finding, keeps it.
+pub const MIN_SAMPLES: usize = 3;
+```
+
+- `budget_caution` and `Percentiles` stay as they are.
+
+**6. The receipt and the verification findings.**
+
+```rust
+// receipt.rs: Receipt and its parts are yunta_core::receipt's, named from there
+pub fn closed(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], event_chain: EventChainStatus) -> Result<Receipt, ReceiptError>;
+pub fn so_far(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], event_chain: EventChainStatus) -> Receipt;
+
+// verification_effectiveness.rs
+impl VerificationFindings {
+    pub fn of(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> VerificationFindings;
+}
+```
+
+- `render_json` is gone: its callers write `serde_json::to_string_pretty(&receipt)`.
+- `verification_effectiveness::MIN_SAMPLES` is gone: it reads `history::MIN_SAMPLES`.
+
+**7. The modes.**
+
+```rust
+pub fn scheduled(workflow: &Workflow, mode: &ModeName, left_out: &[LeftOut]) -> Option<HashSet<NodeId>>;
+pub fn included(workflow: &Workflow, mode: &ModeName) -> Option<HashSet<NodeId>>;
+pub fn reached<'a>(workflow: &'a Workflow, mode: &ModeName, left_out: &[LeftOut]) -> Vec<&'a Node>;
+pub fn dependencies(workflow: &Workflow, included: Option<&HashSet<NodeId>>) -> HashMap<NodeId, Vec<NodeId>>;
+```
+
+They were `included_nodes`, `mode_included_nodes`, `reached_nodes` and `dependencies_in_mode`; each body stays as it is.
+
+**8. The registry's values, and the read that stays.**
+
+```rust
+// crates/replay/src/registry.rs: what a run's registry says, as values
+pub struct Engine { pub liveness: EngineLiveness, pub prompt: Option<Prompt>, pub words: Option<PathBuf>, pub at: DateTime<Utc> }
+pub enum EngineLiveness { Alive, Dead, Unrecorded, Unknown }
+pub struct Prompt { pub node: Option<NodeId>, pub since: DateTime<Utc>, pub pid: Pid }
+impl Engine {
+    pub fn this(at: DateTime<Utc>) -> Engine;
+    pub fn asks_about(&self, node: &NodeId) -> bool;
+}
+
+// crates/engine/src/process_registry.rs
+/// What the registry under `run_dir` says about the engine driving it, at `at`.
+pub fn read_engine(run_dir: &Path, probe: &dyn OwnerProbe, at: DateTime<Utc>) -> Engine;
+```
+
+`engine_liveness`, `engine_prompt`, `engine_words`, `read_registry` and `child_pid` stay, returning the crate's values.
+
+**9. The frame.**
+
+```rust
+impl RunFrame {
+    /// One run's frame: from its replayed state, the workflow its manifest
+    /// froze, the history the caller read, what its registry says about the
+    /// engine driving it, and the instant it is looked at.
+    pub fn of(run_id: &RunId, workflow: &Workflow, state: &RunState, prior: Option<&PriorEstimation>, engine: &Engine, now: DateTime<Utc>) -> RunFrame;
+}
+```
+
+- `run_frame` and `run_frame_of` are gone.
+- `chronicle`, `run_standing`, `node_word`, `Counter`, `TaskCounter` and every frame type keep their names in `frame`.
+- `ChildLink`, `Degradation` and `Reroute` are named from `yunta_core::events`.
+
+**10. Callers change in the step that changes what they call.**
+- A module's names change first, in place in the engine, with every caller. Then the module moves, with every caller's path.
+- The move does all of this:
+  - the file moves with `git mv`, so its history follows;
+  - the engine's root stops re-exporting it;
+  - each caller is changed: the engine's modules (from `crate::`), its tests, the CLI and the testkit;
+  - the crate's dependencies are added to each manifest where its first use arrives, along with the crate table.
+- Neither step leaves an alias, a re-export or an old name, and the workspace compiles and passes after each. Where a name can only stand in the new crate (a method of `RunState`), its rename and its move are one step.
+
+A step that leaves an old name or a second path is not done.
+
+**11. Tests beside their code.** A test stands with the code it proves, in the step that moves that code:
+- A target that proves only the new crate's code moves into `crates/replay/tests/`, with its fixtures and its assertions as they are.
+- A target that proves two crates' code splits, each assertion with the crate that owns what it checks. Together they prove what the one did.
+- A type's test samples stand beside the type, behind the crate's `testkit` feature, as `yunta-core`'s literal ids and `sample_payloads` do; the crate's own tests enable it through a dev-dependency on the crate.
+
+The survey of the engine's targets, by what each reads:
+
+| Target | Reads | Where it goes | Task |
+|---|---|---|---|
+| `logs_from_runs`, with `tests/fixtures/logs/` | replay; one assertion reads a pause's sentence through `yunta-render` | splits: replay asserts the `PauseReason` the old log replays to, and `yunta-render`'s `pause.rs` tests assert that value's sentence; the target and its fixtures move, and its tag becomes `[test replay/logs_from_runs]` | 6 |
+| `replay`, with `replay/` | replay and `yunta-testkit-core` | moves | 6 |
+| `older_words` | `yunta-core` and `yunta-render`, nothing of the engine | moves to `yunta-render`, and its tag becomes `[test render/older_words]` | 6 |
+| `time_spent`, `stats` | the stats and the history | move | 8 |
+| `verification_effectiveness` | the verification findings | moves | 10 |
+| `live_derivation`, with `live_derivation/` | the stats and what `live` held | moves | 11 |
+| `view`, with `view/{declared,standing,stops}.rs` | the frame, and the testkit's `node_frame` | moves as `frame`, once the frame's samples stand beside the frame | 13 |
+| `chronicle` | the frame's chronicle | moves | 13 |
+| `properties` | replay's fold, the frame and the chronicle; and runs on a `Bench` | splits: the properties of the fold, the chronicle and the frame move as `properties`, with the log generator; those that drive an engine stay | 13 |
+
+A target that drives an engine (a `Bench`, a run) stays in the engine.
+
+The frame's samples: `yunta-testkit/src/frames.rs` builds frame values only because the frame stood in the engine. They become associated functions of their types in `frame`, behind `#[cfg(feature = "testkit")]`, and `frames.rs` goes:
+
+```rust
+RunFrame { phase, nodes, ..RunFrame::sample(&RUN) }
+NodeFrame { attempt: Some(2), ..NodeFrame::sample(&id, standing) }
+```
+
+**12. What names a path, in the step that moves it.**
+- From Phase 1:
+  - the workspace's `members` and `[workspace.dependencies]`;
+  - CI's "check each crate in isolation";
+  - `release.yml`: publish `yunta-replay` after `yunta-core`, wait for its index, and only then `yunta-engine`;
+  - the crate table of `.agents/architecture.md`.
+- From Phase 2: `AGENTS.md`'s "replay, the log store" row (`crates/replay/src/lib.rs`), and `xtask/src/smells.rs`'s `wildcards_in_folds` path.
+- Phase 6 writes:
+  - the engine's `//!`, its map losing what left;
+  - the crate's `//!`, and each moved module's;
+  - `CAPABILITY-MAP.md`, already done.
 
 ## Dependency Order
 
 ```
-1 the style reading ── Paint, clap, HTML read it
-        │
-2 target goldens, reviewed
-        │
-3 Ribbon ─ 4 Legend ─ 5 Attention          (blocks, each on every surface, in the catalog)
-        │         │          │
-        │   7 Card, DeskFoot, prompts
-        │                    8 the region
-        └── 6 Screen, Overlay, Width::exact, as Markdown and HTML
-                     │
-                9 docs and the map ─ 10 gate ─ 11 commit
+0 baseline: release size, stub runs
+1 crate + pure test + modes + registry ── engine, CLI, testkit import them
+    └── 2 replay at the root, the cycle cut under layers.rs
+            └── 3 stats, history (RunStats::at, PriorEstimation::of, MIN_SAMPLES)
+                    ├── 4 receipt, verification_effectiveness
+                    └── 5 attempt (RunState's methods), frame (RunFrame::of)
+                            └── 6 docs, gate, measure, review, commit
 ```
 
-The style reading depends on nothing. The blocks need the targets, and the screen needs the three blocks. The migrations need only their block. The docs come last, once what they describe is true.
+Phases 4 and 5 both stand on 3 and on nothing of each other; they run in that order to keep one change in review at a time.
 
 ## Phases
 
-### Phase 1: the one table
-- Task: the style reading, and `Paint`, the clap styles and the HTML style read it.
+### Phase 0: the baseline
+- A release build at `8c833576`, twice: the size of each, and how much the two differ.
+- `replay_cost.py`, from `session-ends`' `ends_cost.py`: 15 runs on the Claude Code stub, base against base, with medians of `between_secs`, `working_secs` and the wall time. The engine replays its log at every step, so `between_secs` is where a slower replay would show.
+- Kept in `.plans/yunta-tui/proof/run-state/`.
 
 ### Checkpoint A
-- Every existing golden of the workspace is byte for byte the same. The new test holds one table across every tone, fill and layer.
+- The baseline's numbers, and the spread of the base against itself.
 
-### Phase 2: the targets
-- Task: target goldens for the three blocks in `ascii-80` and `unicode-60`, and the screen as Markdown and HTML. Drawn by hand from the spike's frames. The terminal's screens stay as the `tui` module's reference.
+### Phase 1: the crate, its purity, and what nothing else depends on
+- The crate's manifest, `lib.rs` and `tests/pure.rs`. `pure.rs` fails first because the crate does not exist.
+- `modes` moves with its new names, and `registry` with the three values. `Engine::read` becomes `yunta_engine::read_engine`.
+- The workspace, CI, the release order and the crate table follow (decision 12).
 
 ### Checkpoint B
-- The user reviews the targets. No drawing code until they are approved.
+- `cargo test -p yunta-replay`, `-p yunta-engine`, `-p yunta --bins` green. `docs --check` and `smells --check` pass.
 
-### Phase 3: the blocks
-- Task: `Ribbon` on every surface and in the catalog.
-- Task: `Legend` on every surface and in the catalog.
-- Task: `Attention` on every surface and in the catalog.
+### Phase 2: replay, and the cycle cut
+- `replay.rs` and `replay/` move into the root, with `RunState::replay` and `unknown_kinds`.
+- `tests/layers.rs` is written first, and is seen red: `Submissions` and `FindingActivity` first move into `crates/replay/src/stats.rs`, the start of `stats`, so replay names a module above it. Then they move into `activity.rs`, and the test passes.
+- About 200 calls of `derive` and the 58 engine modules that reach `crate::replay` change.
+- `logs_from_runs` splits and moves, `replay` moves, and `older_words` moves to `yunta-render` (decision 11). `AGENTS.md` and the smell counter's path follow.
 
 ### Checkpoint C
-- The catalog's goldens grow only by the appended part, and every other golden is unchanged.
-- In `ascii-80` no word is lost.
+- The same suites green, and `layers.rs` seen red, then green. No `derive(` call and no `crate::replay` is left.
 
-### Phase 4: the screen
-- Task: `Screen`, `Region`, `Side` and `Overlay` as data; `Width::exact`; a screen in Markdown, the description and HTML.
+### Phase 3: the stats and the history
+- `stats.rs` and `history.rs` move, with `RunStats::at` and `as_logged`, `RunSummary::of`, `PriorEstimation::of` and one `MIN_SAMPLES`.
+- `time_spent` moves.
+
+### Phase 4: the receipt and the verification findings
+- `receipt/` becomes `receipt.rs`, with `closed` and `so_far`; `render_json` is gone. `verification_effectiveness.rs` moves, with `VerificationFindings::of`.
 
 ### Checkpoint D
-- The screen's targets match, and every block draws within an exact width below the floor.
+- After Phases 3 and 4: the same suites green, and the engine's receipt goldens byte for byte.
 
-### Phase 5: the callers
-- Task: `Card` and `DeskFoot` on `Legend`, and the CLI's prompts building it.
-- Task: the region's row as an `Attention`.
+### Phase 5: what a node is doing now, and the frame
+- `live.rs` becomes `attempt.rs`, as methods of `RunState`. `view/` becomes `frame/`, with `RunFrame::of`.
+- The `view` target moves as `frame`.
+- No file of the eight is left in `crates/engine/src`.
 
 ### Checkpoint E
-- The CLI's prompt and region tests pass unchanged, and every golden outside the catalog is byte for byte the same.
+- The same suites green, and every golden of the CLI and the engine byte for byte. A search for each old name in the spec's criterion 4 finds nothing.
 
 ### Phase 6: what it says, proof and close
-- Task: the `//!` and `///` this module makes false, the map's `tui` row, and the docs checker.
-- Task: every step of the `ci` job, with the suite's count explained against 270 binaries and 4,504 tests.
-- Task: commit the module.
+- The `//!`s (decision 12), and `cargo xtask docs --about` on the module's diff.
+- Every step of the `ci` job, one build at a time, with `CARGO_INCREMENTAL=0`.
+- The release size and `replay_cost.py`, base against module.
 
 ### Checkpoint F
-- The user reviews the whole diff. No commit until approved.
+- The user reviews the whole diff and the measurements. No commit until approved.
+- Then: one commit, the push, the pull request's list and test plan, CI on Linux and macOS, and `cargo clean`.
 
 ## Verification
 
-- **Each task:**
-  - `cargo test -p yunta-surco`, and the target of each caller it touches;
-  - `cargo xtask docs --about` on its files;
-  - `cargo xtask smells --check`.
-- **After each bless:** `git status crates/*/goldens` shows new files only, and the catalog files change only at their end.
-- **Before the commit:**
-  - every step of the `ci` job, one build at a time, with `CARGO_INCREMENTAL=0`, through `sh .plans/yunta-tui/tools/gate.sh`;
-  - then `cargo clean` after the commit.
-- **No real run.** The run path does not change (the spec's assumption 3).
+| Spec criterion | How |
+|---|---|
+| 1. The crate, pure | `tests/pure.rs`; `cargo tree -p yunta-replay -e normal` lists no store. It lists `tokio`, which reaches it only through `yunta-core`, whose port and process modules declare it: `core` with no IO is out of the map on purpose |
+| 2. No cycle | `tests/layers.rs`, seen red in Phase 2 before the cut |
+| 3. One path | A search for `pub use` in `crates/replay/src/lib.rs` finds only its private parts' items; the engine's `lib.rs` names nothing that moved; `yunta_core` types are named from `yunta_core` |
+| 4. Names | A search for each old name finds nothing in `crates/` |
+| 5. The engine reads only the registry | `crates/engine/src` holds none of the eight files |
+| 6. Goldens, suite | `git status` shows no golden changed; the suite's count is explained against 270 binaries and 4,528 tests. The new crate adds its library's binary and `pure` and `layers`, and the moved targets keep their tests |
+| 7. CI, release, docs | The gate's `crates` step checks `yunta-replay` alone; `release.yml` reviewed; `docs --check` and `smells --check` |
+| 8. No dependency | `cargo deny check`, and `Cargo.lock`'s diff adds only the workspace's own crate |
+| 9. Cost | The release size and `replay_cost.py`, base against module, within the base's own spread |
 
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| A refactor of `Paint` changes an escape | High | Checkpoint A: every existing color golden (the catalog in `truecolor-dark-100` and `truecolor-light-100`, and each crate's) compares byte for byte before any new code |
-| A card's or a desk's keys print differently once they are a `Legend` | High | Their existing tests and goldens, unchanged, before and after; a legend drawn inside them keeps today's muted join |
-| A block drawn below the floor of 60 cells breaks a line or panics | Medium | `Width::exact`'s test draws every block of the catalog at every width from 20 to 59 |
-| A screen's data leans on one interface | Medium | It holds no width, size or scroll, and HTML draws every screen: the shape is held by a page as well as by a terminal |
-| The spike's look against a Surco rule, such as a glyph outside `glyphs` | Low | The rule wins and the target golden says so; the user sees it at Checkpoint B |
-| The catalog's goldens grow | Low | The change is only an appended part, and the spec is updated to say so (decision 6) |
+| A diff of about 190 files hides a change of behavior | High | No assertion changes, no golden changes; each phase compiles and passes before the next; the bodies of moved functions are compared with `git diff -M` against their old files |
+| A rename leaves a caller on an old name | Medium | The compiler finds every one: no old name survives as an alias. Criterion 4's search confirms |
+| Git loses a file's history | Low | `git mv` before any edit, and each moved file's diff read with `-M` |
+| The crate table outgrows `.agents/architecture.md`'s 6,144 bytes | Medium | The row and the dependency lists take about 85 of the 99 bytes left; the engine's row loses "replay". If it does not fit, cut what the code already says, never the table |
+| A doc link names `crate::` in the engine | Low | `cargo doc` with `-D warnings`, which the gate runs |
+| A call across the crates costs time | Low | `lto = "fat"`, `codegen-units = 1`; Phase 0 and Phase 6 measure it |
+| The suite's memory on this Mac | Medium | The gate runs in the foreground or with its steps apart, as the last module's had to |
 
 ## Parallelization
 
-None: one person, and the blocks share the catalog and the surfaces' dispatch.
+None. Each phase changes the imports the next one reads. A worker per caller crate within one phase would edit the same moved files' callers, so the lead moves each module and its callers in one pass, and the compiler checks it.
 
 ## Open Questions
 
-Answered on approval: the catalog's goldens grow by a part appended at their end.
-
-1. **The catalog's goldens grow** (decision 6). The new blocks join the catalog, so its three golden files gain an appended part. Every other golden stays byte for byte. The other choice, a second catalog, keeps those files as they are and splits the reference. The recommendation is to append.
+None. The spec's three were answered when it was approved.

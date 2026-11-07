@@ -11,7 +11,7 @@ fn frame(standing: Standing, phase: RunPhase) -> RunFrame {
     RunFrame {
         standing,
         phase,
-        ..yunta_testkit::run_frame(&RunId::from_static("run-1"))
+        ..yunta_replay::frame::RunFrame::sample(&RunId::from_static("run-1"))
     }
 }
 

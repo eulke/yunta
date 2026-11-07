@@ -22,8 +22,8 @@ use yunta_storage::AsyncStorage;
 
 use crate::human_interaction::HumanInteraction;
 use crate::observer::RunObserver;
-use crate::replay::RunView;
 use crate::run_log::RunLog;
+use crate::run_log::RunView;
 use crate::task_cycle::Memo;
 
 use super::RunError;
@@ -303,7 +303,7 @@ impl<'a> RunCtx<'a> {
 
     /// The run's log read and its state derived, together — the pairing
     /// every site that needs the current state goes through, so the load
-    /// and the `derive` live in one place rather than at each call.
+    /// and the replay live in one place rather than at each call.
     pub(crate) async fn run_view(&self) -> Result<RunView, RunError> {
         Ok(RunView::of(self.load_events().await?))
     }

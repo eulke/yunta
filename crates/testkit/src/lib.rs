@@ -2,7 +2,7 @@
 //!
 //! One canonical copy of every piece of scaffolding a whole run takes —
 //! a git-repo fixture, a binary runner, a pty a run is driven on, a run
-//! bench, the frames a surface draws, gate doubles, a recording run
+//! bench, gate doubles, a recording run
 //! observer — so a change to the shape of a test run happens in one
 //! place, and so the fixtures are hermetic by construction (git isolated
 //! from the developer's global config, a fixed clock, an injected home
@@ -16,7 +16,7 @@
 //! binary, and `checkout` and `child` hold a test that drives it; `terminal`
 //! drives a run on a real terminal; `repo` is a hermetic git fixture and
 //! `stubs` stand in for programs on `PATH`; `events` reads and writes a run's
-//! log and `frames` holds what a surface test draws; `interaction` and
+//! log; `interaction` and
 //! `observer` are doubles for a gate and the display boundary; `tools` hosts
 //! the per-run MCP listener; `said` reads what a run's sessions said off its
 //! socket; `tasks` writes a tasks document; `corpus` reads
@@ -32,7 +32,6 @@ mod checkout;
 mod child;
 mod corpus;
 mod events;
-mod frames;
 mod interaction;
 mod observer;
 mod owner;
@@ -58,7 +57,6 @@ pub use corpus::{
 pub use events::{
     accepted, baselines, status_changed_carrying, task_registered, task_status_changed, SourceLog,
 };
-pub use frames::{child_link, moment, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use owner::Owner;

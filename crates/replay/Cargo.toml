@@ -1,0 +1,42 @@
+[package]
+name = "yunta-replay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "What a run is, as its log says: replay and every reading derived from it."
+
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+# The frames and moments a surface test builds, every field it is not
+# about filled in once.
+testkit = ["yunta-core/testkit"]
+
+[dependencies]
+yunta-core.workspace = true
+# The words a frame calls a run and a node by, and their marks.
+yunta-surco.workspace = true
+# The instant a registry was read, and since when its engine asks.
+chrono.workspace = true
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+# A test of the frame builds its frames from the samples.
+yunta-replay = { path = ".", features = ["testkit"] }
+# A test writes an identifier as a literal.
+yunta-core = { workspace = true, features = ["testkit"] }
+# A test writes the log it replays with the shared log builder.
+yunta-testkit-core.workspace = true
+# A log checked in as a recording is read line by line, as JSON.
+serde_json.workspace = true
+# What a node is doing now holds for every log a generator writes.
+proptest.workspace = true

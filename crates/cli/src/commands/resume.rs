@@ -24,7 +24,8 @@ use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
 use yunta_core::process::signal::Liveness;
 use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::lock::LockError;
-use yunta_engine::{PriorEstimation, RunState};
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::RunState;
 
 use super::registry::{adapters_for, servable, ScriptedPaths, ServableError};
 use crate::commands::drive::{drive, Driving, Prepared};
@@ -65,7 +66,7 @@ async fn parked(
     look: &Look,
 ) -> Result<Option<Parked>, CliError> {
     let open = ctx.open_run(run_id).await?;
-    let state = yunta_engine::derive(&open.events);
+    let state = yunta_replay::RunState::replay(&open.events);
     let bound = crate::project::bound_checkout(&state);
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     // Resolved before any checkout is taken, so a refused resume takes no

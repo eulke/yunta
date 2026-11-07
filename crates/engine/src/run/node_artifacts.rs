@@ -19,7 +19,7 @@ use crate::artifacts::{
     accept, answerer, canonical, interpreted, Answerer, ArtifactContent, RunArtifacts, StoreError,
     VerifiedArtifact,
 };
-use crate::replay::RunView;
+use crate::run_log::RunView;
 use crate::tasks::{Provenance, Standing};
 
 use super::node_close::{fail_with_tokens_staged, ChildRun};

@@ -23,7 +23,7 @@ pub struct ArtifactWrittenPayload {
     pub path: PathBuf,
     pub content_hash: ContentHash,
     /// The artifact's declared `kind:` when it has one — what
-    /// lets `derive()` recognize a `questions` artifact without reading
+    /// lets replay recognize a `questions` artifact without reading
     /// any file (state comes from events alone). `None` for opaque
     /// artifacts and for logs written before the field existed (tolerant
     /// reader). Named `artifact_kind`, not `kind`: the event

@@ -12,7 +12,8 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use surco::words::Standing;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
-use yunta_engine::{RunFrame, RunPhase, RunState};
+use yunta_replay::frame::{RunFrame, RunPhase};
+use yunta_replay::RunState;
 use yunta_storage::Storage;
 
 use crate::commands::advice;
@@ -257,7 +258,12 @@ impl RunRow {
     /// One row from the run's own frame: which group it belongs in, what
     /// the run is, what holds it and what moves it. `menu` says whether
     /// the run stopped on a decision whose options `yunta status` lists.
-    fn of(frame: &RunFrame, engine: &yunta_engine::Engine, age: Duration, menu: bool) -> Self {
+    fn of(
+        frame: &RunFrame,
+        engine: &yunta_replay::registry::Engine,
+        age: Duration,
+        menu: bool,
+    ) -> Self {
         let word = frame.standing;
         let (reason, command) = held(frame, engine, word, menu);
         let asking = word == Standing::NeedsYou
@@ -291,7 +297,7 @@ impl RunRow {
 /// options of.
 fn held(
     frame: &RunFrame,
-    engine: &yunta_engine::Engine,
+    engine: &yunta_replay::registry::Engine,
     word: Standing,
     menu: bool,
 ) -> (Option<String>, Option<String>) {
@@ -376,7 +382,7 @@ fn run_row(
                 ),
             )
         })?;
-    let state = yunta_engine::derive(&events);
+    let state = yunta_replay::RunState::replay(&events);
     let engine = crate::render::engine(&run_dir, now);
     let frame = progress::frame_of(&run_id, &manifest, &state, &engine, now);
     // Only a parked run has a menu to rebuild, and rebuilding one is a
@@ -414,7 +420,7 @@ fn time_in_state(state: &RunState, now: DateTime<Utc>) -> Duration {
 /// a live engine asks about, the claim a parked run stopped on, the stall,
 /// how far a moving run has come, what failed a closed one. Nothing for a
 /// run that finished.
-fn said(frame: &RunFrame, engine: &yunta_engine::Engine) -> String {
+fn said(frame: &RunFrame, engine: &yunta_replay::registry::Engine) -> String {
     match (frame.standing, &frame.phase) {
         (Standing::Stalled, _) => advice::STALLED.to_string(),
         (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => engine

@@ -205,7 +205,7 @@ fn reach<'a>(
 
 /// The nodes `workflow` reaches in `mode`, less what `config` leaves out.
 fn in_mode<'a>(workflow: &'a Workflow, mode: &ModeName, config: &ConfigLayer) -> Vec<&'a Node> {
-    yunta_engine::reached_nodes(workflow, mode, &yunta_core::left_out(workflow, config))
+    yunta_replay::modes::reached(workflow, mode, &yunta_core::left_out(workflow, config))
 }
 
 /// Whether one of `nodes` runs the frozen child its `use:` calls `name`.

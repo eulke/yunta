@@ -23,7 +23,7 @@ use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::json;
-use crate::replay::RunView;
+use crate::run_log::RunView;
 use crate::task_cycle::{could_not_run, CriterionRun, Judgement, Settle};
 
 impl SessionTools {

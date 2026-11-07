@@ -123,7 +123,7 @@ nodes:
 
     let RunReport { terminal, state } = bench.run(workflow, fixture).await;
     match &state.nodes.state("plan") {
-        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+        Some(yunta_core::events::NodeState::Failed { failure, .. }) => {
             assert_eq!(yunta_render::failure::sentence(failure), "context `artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by node `grill`) was never produced; this run's log holds no such artifact");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
@@ -184,7 +184,8 @@ async fn a_missing_file_fails_the_node_saying_where_the_next_attempt_looks() {
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
-    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("ask") else {
+    let Some(yunta_core::events::NodeState::Failed { failure, .. }) = state.nodes.state("ask")
+    else {
         panic!("expected `ask` to fail on the missing file");
     };
     assert_eq!(
@@ -222,7 +223,7 @@ async fn a_missing_file_retried_after_it_is_put_in_place_finishes() {
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("ask"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert_eq!(context_sources(&events, "ask")[0].kind, "files");
@@ -729,7 +730,7 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
 
     let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     match &state.nodes.state("ask") {
-        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+        Some(yunta_core::events::NodeState::Failed { failure, .. }) => {
             assert_eq!(yunta_render::failure::sentence(failure), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs (`acme/pack-a` and `globex/pack-b`), and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
         }
         other => panic!("expected `ask` to fail naming both packs, got {other:?}"),
@@ -1033,7 +1034,7 @@ sessions:
 
     let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
     match state.nodes.state("plan") {
-        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+        Some(yunta_core::events::NodeState::Failed { failure, .. }) => {
             let text = yunta_render::failure::sentence(failure);
             assert!(
                 text.contains("report.md") && text.contains("bare"),

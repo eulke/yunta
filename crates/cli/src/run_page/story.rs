@@ -12,11 +12,12 @@ use surco::line::Tone;
 use surco::prose;
 use surco::text::{counted, ordinal};
 use surco::words::{Standing, WAITED_ON_YOU};
-use yunta_core::events::TaskStatus;
+use yunta_core::events::{NodeState, TaskStatus};
 use yunta_core::shown::ShownContent;
 use yunta_core::NodeId;
-use yunta_engine::{NodeFrame, NodeStanding, NodeState, RunState};
 use yunta_render::state::NodeDisplay;
+use yunta_replay::frame::{NodeFrame, NodeStanding};
+use yunta_replay::RunState;
 
 use super::RunPage;
 

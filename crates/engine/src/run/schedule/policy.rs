@@ -80,7 +80,11 @@ impl Policy {
             max_parallel_nodes: manifest.max_parallel_nodes,
             on_interrupt: manifest.config.resolved_on_interrupt(),
             on_failure: manifest.config.resolved_on_failure(),
-            mode_nodes: crate::modes::included_nodes(&manifest.workflow, mode_name, run.left_out()),
+            mode_nodes: yunta_replay::modes::scheduled(
+                &manifest.workflow,
+                mode_name,
+                run.left_out(),
+            ),
             baseline_suite: crate::run::baseline::suite(manifest).map(str::to_string),
             baseline_held: crate::run::baseline::held(manifest),
             measures_aside: run.opens_on_base(),

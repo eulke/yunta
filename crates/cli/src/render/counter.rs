@@ -13,7 +13,7 @@ use surco::glyphs::{Glyphs, Mark};
 use surco::text::counted;
 use surco::words::Standing;
 use yunta_core::events::{TaskLedger, TaskStatus};
-use yunta_engine::{Counter, RunFrame, TaskCounter};
+use yunta_replay::frame::{Counter, RunFrame, TaskCounter};
 
 /// How many names a row of a page says before it counts the rest: enough
 /// to recognise a place by, few enough that the row stays one row. Every
@@ -208,10 +208,9 @@ fn tasks(counter: &TaskCounter, sep: char) -> String {
 mod tests {
     use super::*;
     use yunta_core::RunId;
-    use yunta_testkit::run_frame;
 
     fn frame(flow: Counter, reroutes: usize) -> RunFrame {
-        let mut frame = run_frame(&RunId::from("01J"));
+        let mut frame = RunFrame::sample(&RunId::from("01J"));
         frame.flow = flow;
         frame.reroutes = reroutes;
         frame

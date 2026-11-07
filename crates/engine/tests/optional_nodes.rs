@@ -4,7 +4,9 @@
 
 use yunta_core::events::{EventPayload, NodeEvent, StoredEvent};
 use yunta_core::{Because, CommandName, ConfigKey, ConfigLayer, Workflow};
-use yunta_engine::{derive, CheckError, NodeStanding, RunReport, RunTerminal};
+use yunta_engine::{CheckError, RunReport, RunTerminal};
+use yunta_replay::frame::NodeStanding;
+use yunta_replay::RunState;
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
 /// A lint the project may not have, the fix only a failing lint leads
@@ -54,7 +56,7 @@ async fn an_optional_node_the_project_cannot_run_is_left_out_and_its_dependents_
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.events();
     assert_eq!(started(&events), ["build", "ship"]);
-    let left: Vec<String> = derive(&events)
+    let left: Vec<String> = RunState::replay(&events)
         .run
         .left_out()
         .iter()
@@ -74,7 +76,7 @@ async fn an_optional_node_runs_where_the_project_declares_it() {
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.events();
     assert_eq!(started(&events), ["build", "lint", "ship"]);
-    assert!(derive(&events).run.left_out().is_empty());
+    assert!(RunState::replay(&events).run.left_out().is_empty());
 }
 
 /// A mode may never drop an invariant; a project may lack what it needs.
@@ -114,12 +116,12 @@ async fn a_left_out_node_stands_apart_from_a_mode_skipped_one() {
 
     let events = bench.events();
     let closed_at = events.last().expect("the run's log").timestamp;
-    let frame = yunta_engine::run_frame(
+    let frame = yunta_replay::frame::RunFrame::of(
         &bench.run_id,
         &workflow,
-        &events,
+        &yunta_replay::RunState::replay(&events),
         None,
-        &yunta_engine::Engine::this(closed_at),
+        &yunta_replay::registry::Engine::this(closed_at),
         closed_at,
     );
 

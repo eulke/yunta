@@ -18,10 +18,10 @@ use yunta_core::reserved::ReservedOption;
 use yunta_core::{
     AdapterId, CommitSha, ContentHash, Isolation, NodeId, NonEmpty, RunId, Seq, TaskId,
 };
-use yunta_engine::{
-    Counter, NodeFrame, NodeStanding, RunFrame, RunPhase, RunState, TaskCounter, WaitingOn,
+use yunta_replay::frame::{
+    Counter, NodeFrame, NodeStanding, RunFrame, RunPhase, TaskCounter, WaitingOn,
 };
-use yunta_testkit::{node_frame, run_frame};
+use yunta_replay::RunState;
 use yunta_testkit_core::{fixed_now, Log};
 
 use super::{Decided, RunPage, Scope};
@@ -47,7 +47,7 @@ pub(crate) fn outline() -> Outline<'static> {
 }
 
 pub(crate) fn reached(id: &str, state: NodeState) -> NodeFrame {
-    node_frame(&NodeId::from(id), NodeStanding::Reached(state))
+    NodeFrame::sample(&NodeId::from(id), NodeStanding::Reached(state))
 }
 
 pub(crate) fn finished(id: &str) -> NodeFrame {
@@ -66,7 +66,7 @@ pub(crate) fn ahead(id: &str) -> NodeFrame {
         attempt: None,
         elapsed: None,
         last_event_age: None,
-        ..node_frame(&NodeId::from(id), NodeStanding::ToGo)
+        ..NodeFrame::sample(&NodeId::from(id), NodeStanding::ToGo)
     }
 }
 
@@ -134,11 +134,11 @@ pub(crate) fn frame(phase: RunPhase, nodes: Vec<NodeFrame>, blocking_findings: u
     RunFrame {
         workflow: "fragua".into(),
         mode: "quick".into(),
-        standing: yunta_engine::run_standing(
+        standing: yunta_replay::frame::run_standing(
             &phase,
             &nodes,
             blocking_findings,
-            &yunta_engine::Engine::this(DateTime::UNIX_EPOCH),
+            &yunta_replay::registry::Engine::this(DateTime::UNIX_EPOCH),
         ),
         phase,
         blocking_findings,
@@ -154,7 +154,7 @@ pub(crate) fn frame(phase: RunPhase, nodes: Vec<NodeFrame>, blocking_findings: u
             cached: None,
         },
         nodes,
-        ..run_frame(&RUN)
+        ..RunFrame::sample(&RUN)
     }
 }
 
@@ -287,7 +287,7 @@ impl Case {
         Case {
             name,
             run_id: RUN,
-            state: yunta_engine::derive(&log),
+            state: yunta_replay::RunState::replay(&log),
             frame,
             decision: None,
         }
@@ -301,7 +301,7 @@ impl Case {
             scope,
             depth,
             run_id: &self.run_id,
-            engine: yunta_engine::Engine::this(at),
+            engine: yunta_replay::registry::Engine::this(at),
             frame: &self.frame,
             state: &self.state,
             paths: outline(),
@@ -385,7 +385,7 @@ fn needs_you() -> Case {
         total: 4,
         ..TaskCounter::default()
     });
-    case.state = yunta_engine::derive(&tasks_log());
+    case.state = yunta_replay::RunState::replay(&tasks_log());
     case.decision = Some(decided);
     case
 }
