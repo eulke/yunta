@@ -2,7 +2,7 @@
 //! can stand on and what the plan says of itself as a whole, what is being read, and what
 //! is being asked. Data: a surface lays it out for a size.
 
-use super::ChoiceRow;
+use super::{ChoiceRow, Legend};
 use crate::diagram::Diagram;
 use crate::line::Line;
 
@@ -70,13 +70,14 @@ pub struct DeskFoot {
     pub question: String,
     pub row: FootRow,
     /// The keys it answers to, each with what it does.
-    pub keys: Vec<String>,
+    pub legend: Legend,
 }
 
 /// How the question stands.
 pub enum FootRow {
-    /// Open, with its options in the order their numbers pick them.
-    Options(Vec<String>),
+    /// Open, with the options a number picks, in the order their numbers
+    /// pick them, and how many more stand on the card past the last number.
+    Options { named: Vec<String>, more: usize },
     /// One of them about to be chosen, with what it does and what it costs.
     Confirming(ChoiceRow),
 }

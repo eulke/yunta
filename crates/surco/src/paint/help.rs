@@ -4,9 +4,8 @@
 #[cfg(test)]
 mod tests;
 
-use super::{ansi, Ansi, Ground, Layer, Paint};
+use super::{style, Ansi, Color, Layer, Paint, Style};
 use crate::line::Tone;
-use crate::palette::{self, Rgb};
 
 /// The styles `clap` draws its own help and usage errors in, in `paint`'s
 /// colors and the tones every page takes: a heading and a value to fill in
@@ -17,14 +16,7 @@ use crate::palette::{self, Rgb};
 pub fn clap_styles(paint: Paint) -> clap::builder::Styles {
     match paint {
         Paint::Plain => clap::builder::Styles::plain(),
-        Paint::Color {
-            layer: Layer::Ansi16,
-            ..
-        } => clap_roles(ansi16_style),
-        Paint::Color {
-            layer: Layer::Truecolor(ground),
-            ..
-        } => clap_roles(|tone| truecolor_style(ground, tone)),
+        Paint::Color { layer, .. } => clap_roles(|tone| clap_style(layer, tone)),
     }
 }
 
@@ -41,37 +33,26 @@ fn clap_roles(style: impl Fn(Tone) -> clap::builder::styling::Style) -> clap::bu
         .invalid(style(Tone::Caution))
 }
 
-/// The style of `tone` in the sixteen colors: its ANSI color, bold and dim as
-/// [`ansi`] says, so every terminal draws it in its own palette.
-fn ansi16_style(tone: Tone) -> clap::builder::styling::Style {
-    use clap::builder::styling::{AnsiColor, Style};
-    let (bold, dim, color) = ansi(tone);
-    let color = color.map(|code| match code {
-        Ansi::Red => AnsiColor::Red,
-        Ansi::Green => AnsiColor::Green,
-        Ansi::Yellow => AnsiColor::Yellow,
-        Ansi::Magenta => AnsiColor::Magenta,
-        Ansi::Cyan => AnsiColor::Cyan,
-    });
-    let style = Style::new().fg_color(color.map(Into::into));
-    let style = if bold { style.bold() } else { style };
-    if dim {
-        style.dimmed()
-    } else {
-        style
-    }
-}
-
-/// The style of `tone` in 24 bits on `ground`: its color there, bold where the
+/// The style of `tone` in `layer`, as the style reading gives it with no fill:
+/// in the sixteen colors its ANSI color, bold and dim, so every terminal draws
+/// it in its own palette; in 24 bits its color on the ground, bold where the
 /// sixteen colors are bold, and never dimmed.
-fn truecolor_style(ground: Ground, tone: Tone) -> clap::builder::styling::Style {
-    use clap::builder::styling::{Color, RgbColor, Style};
-    let color = palette::tone(ground, tone)
-        .map(|Rgb(red, green, blue)| Color::Rgb(RgbColor(red, green, blue)));
-    let style = Style::new().fg_color(color);
-    if ansi(tone).0 {
-        style.bold()
+fn clap_style(layer: Layer, tone: Tone) -> clap::builder::styling::Style {
+    use clap::builder::styling::{AnsiColor, Color as ClapColor, RgbColor};
+    let Style { bold, dim, fg, .. } = style(layer, tone, None, None);
+    let color = fg.map(|color| match color {
+        Color::Ansi(Ansi::Red) => ClapColor::Ansi(AnsiColor::Red),
+        Color::Ansi(Ansi::Green) => ClapColor::Ansi(AnsiColor::Green),
+        Color::Ansi(Ansi::Yellow) => ClapColor::Ansi(AnsiColor::Yellow),
+        Color::Ansi(Ansi::Magenta) => ClapColor::Ansi(AnsiColor::Magenta),
+        Color::Ansi(Ansi::Cyan) => ClapColor::Ansi(AnsiColor::Cyan),
+        Color::Rgb(red, green, blue) => ClapColor::Rgb(RgbColor(red, green, blue)),
+    });
+    let clap = clap::builder::styling::Style::new().fg_color(color);
+    let clap = if bold { clap.bold() } else { clap };
+    if dim {
+        clap.dimmed()
     } else {
-        style
+        clap
     }
 }

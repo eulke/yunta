@@ -1,5 +1,6 @@
 //! A document on a terminal: each block laid out in columns at the
-//! stream's width, with its glyph set, painted by its paint.
+//! stream's width, with its glyph set, painted by its paint. In a pane, whose
+//! edge cuts what passes it, a line past the edge goes on in the rows under it.
 
 use crate::components::{Lead, Section};
 use crate::doc::{Block, Doc};
@@ -9,6 +10,7 @@ use crate::surface::Surface;
 use crate::width::{cell_width, INDENT};
 use crate::words::Standing;
 
+mod attention;
 mod card;
 pub use card::{narrowed, said_whole, Placed};
 pub use desk::LaidDesk;
@@ -23,11 +25,13 @@ mod document;
 mod evidence;
 mod fields;
 mod headline;
+mod legend;
 pub(in crate::surface) mod markdown;
 mod next;
 pub(in crate::surface) use next::{NEXT, OR};
 mod page;
 mod problem;
+mod ribbon;
 pub(in crate::surface) use problem::{HELP, REFUSED};
 mod runs;
 mod table;
@@ -54,8 +58,8 @@ impl Terminal {
     }
 
     /// `doc` laid out for this stream, unpainted, in the rhythm a page
-    /// keeps: a blank line between two blocks, except the furrow and the
-    /// gist, which hang from the headline, and a block under a heading,
+    /// keeps: a blank line between two blocks, except the furrow, the ribbon
+    /// and the gist, which hang from the headline, and a block under a heading,
     /// which hangs from it. It opens on what it says: there is nothing
     /// above the first line, and no blank line is doubled.
     pub fn lines(&self, doc: &Doc) -> Vec<Line> {
@@ -70,7 +74,8 @@ impl Terminal {
             let Some(first) = drawn.first() else {
                 continue;
             };
-            let hangs = headed || matches!(block, Block::Furrow(_) | Block::Gist(_));
+            let hangs =
+                headed || matches!(block, Block::Furrow(_) | Block::Ribbon(_) | Block::Gist(_));
             let spaced =
                 first.text().is_empty() || lines.last().is_none_or(|line| line.text().is_empty());
             if !hangs && !spaced {
@@ -92,12 +97,27 @@ impl Terminal {
         blocks.iter().flat_map(|block| self.block(block)).collect()
     }
 
-    /// One block laid out for this stream.
+    /// One block laid out for this stream; in a pane, each line that passes
+    /// its edge goes on in the rows under it.
     pub fn block(&self, block: &Block) -> Vec<Line> {
+        let drawn = self.laid(block);
+        let width = self.look.width;
+        match width.cuts() {
+            true => drawn
+                .into_iter()
+                .flat_map(|line| line.rows_within(width.cells()))
+                .collect(),
+            false => drawn,
+        }
+    }
+
+    /// One block as its own layout draws it, at the stream's width.
+    fn laid(&self, block: &Block) -> Vec<Line> {
         let look = &self.look;
         match block {
             Block::Headline(block) => block.lines(look),
             Block::Furrow(block) => block.lines(look),
+            Block::Ribbon(block) => block.lines(look),
             Block::Gist(block) => block.lines(look),
             Block::Fields(block) => block.lines(look),
             Block::Table(block) => block.lines(look),
@@ -112,6 +132,8 @@ impl Terminal {
             Block::Problem(block) => block.lines(look),
             Block::Refusal(block) => block.lines(look),
             Block::Next(block) => block.lines(look),
+            Block::Legend(block) => block.lines(look),
+            Block::Attention(block) => block.lines(look),
             Block::Heading(title) => std::iter::once(Line::new())
                 .chain(
                     crate::width::wrap_unbroken(title, look.width.cells())

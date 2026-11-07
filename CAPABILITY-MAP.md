@@ -75,12 +75,12 @@ What moves:
 | `log-follow` | `events_after`, the head of each run, and following a run from another process | nothing |
 | `run-words` | The per-run socket, in every adapter at once | nothing |
 | `session-ends` | A Codex retry notice no longer ends its session, and no command an agent started outlives its session | nothing |
-| `surco-screen` | Public reading of styles and the new components, with their goldens | nothing |
+| `surco-screen` | Public reading of styles; the ribbon, legend and attention blocks; a screen as data, drawn as Markdown and HTML; a pane's exact width; with their goldens | nothing |
 | `run-state` | The `yunta-state` crate, cutting the cycle between `replay` and `stats` | nothing |
 | `run-pages` | The pages in `yunta-render`, with the CLI printing exactly the same | `run-state` |
 | `control` | `yunta-control`, with the CLI and MCP mounted on it | `log-follow`, `run-state` |
 | `app-core` | `yunta-app`: stages, screens, effects and moved prompts | `control`, `run-pages`, `surco-screen` |
-| `tui` | `yunta-tui`, bare `yunta` and `deny.toml`, in slices: watch, decide, start | `app-core`, `parked-answers` |
+| `tui` | `yunta-tui`, bare `yunta` and `deny.toml`, in slices: watch, decide, start. It lays a screen out with Ratatui's `Layout`, draws each pane through Surco's terminal at `Width::exact`, and draws the overlay's box in Surco's glyphs; `surco-screen`'s `tui-reference` frames are its reference | `app-core`, `parked-answers` |
 | `third-party-notices` | Third-party license notices, included when the binary is distributed | nothing |
 | `desktop` | Reserved only: no spec and no code yet | `app-core` |
 

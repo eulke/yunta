@@ -160,3 +160,15 @@ _the run holds its own state on disk._
 **next**
 
 - `yunta status 7E5PH4`: where it stands
+
+## on a screen
+
+grill finished · brief finished · plan running · build never ran · review never ran · lint never ran · ship never ran
+
+`↑↓` move · `enter` open · `n` new run · `x` close · `q` quit
+
+◆ needs you: `yunta resolve-gate 7E5PH4 approve` (the plan waits for approval)
+
+◆ **Q78GRR** needs you: the suite passed at baseline and now exits 101 · `a` go there
+
+◆ needs you: node `implement` asks at its terminal

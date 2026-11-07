@@ -1,5 +1,7 @@
 //! A decision held in place at a terminal, and the list it is answered from.
 
+use super::Legend;
+
 /// A question a person answers here and now, with keys.
 pub struct Card {
     /// What is asked.
@@ -10,7 +12,7 @@ pub struct Card {
     pub about: Vec<String>,
     pub body: CardBody,
     /// The keys it answers to, each with what it does: `enter chooses`.
-    pub keys: Vec<String>,
+    pub legend: Legend,
 }
 
 /// What a card holds: its options, or the words one of them is said with.

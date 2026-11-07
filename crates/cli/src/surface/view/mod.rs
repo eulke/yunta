@@ -23,8 +23,10 @@ pub(crate) use children::{child_row, children_by_node};
 pub(super) use children::{child_standing, closed_as};
 
 use crate::commands::advice;
+use surco::components::Attention;
+use surco::doc::Block;
 use surco::figures::duration;
-use surco::glyphs::{Glyphs, Mark};
+use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::surface::Terminal;
@@ -37,57 +39,39 @@ const DETAIL_DEPTH: usize = 2;
 
 /// The attention row of a run whose engine asks a person at its own terminal,
 /// read from its registry by a process that follows it: whom it asks, and that
-/// the answer is given there. The engine that asks draws no such row, since its
-/// prompt has the terminal.
-pub(super) fn asked(prompt: &yunta_engine::Prompt, glyphs: Glyphs) -> Line {
-    Line::new()
-        .push(
-            Tone::NeedsYou,
-            format!(
-                "{} {}",
-                glyphs.mark(Mark::NeedsYou),
-                Standing::NeedsYou.word()
-            ),
-        )
-        .plain(": ")
-        .push(Tone::Strong, advice::asking_on(prompt))
+/// the answer is given there, drawn at `look` as an [`Attention`] answered
+/// elsewhere. The engine that asks draws no such row, since its prompt has the
+/// terminal.
+pub(super) fn asked(prompt: &yunta_engine::Prompt, look: &Look) -> Option<Line> {
+    let row = Attention::elsewhere(advice::asking_on(prompt));
+    Terminal::on(*look)
+        .block(&Block::Attention(row))
+        .into_iter()
+        .next()
 }
 
 /// The row that opens the region while the frame stands as
-/// `Standing::NeedsYou`: the command that answers it, and what it is about.
+/// `Standing::NeedsYou`: the command that answers it, and what it is about,
+/// drawn at `look` as an [`Attention`] keeps a command when its row is cut.
 /// Any other standing draws none, since the footer says that nothing needs
 /// the person, or that the run waits for a reset: a pause a person chose
 /// stands as `Standing::Stopped`, and a reset that resumes on its own as
 /// `Standing::Waiting`. A row saying nothing would cost the work a row.
-///
-/// The command comes before what it is about, so that a row cut to fit
-/// loses the subject and never the thing to run. A reader who lost the
-/// subject still has `yunta status`; a reader who lost the command has
-/// nothing.
 pub(super) fn attention(
     frame: &RunFrame,
     run_id: &RunId,
     answerable: bool,
-    glyphs: Glyphs,
+    look: &Look,
 ) -> Option<Line> {
     if !matches!(frame.standing, Standing::NeedsYou) {
         return None;
     }
     let on = advice::parked(&frame.phase)?;
-    Some(
-        Line::new()
-            .push(
-                Tone::NeedsYou,
-                format!(
-                    "{} {}",
-                    glyphs.mark(Mark::NeedsYou),
-                    Standing::NeedsYou.word()
-                ),
-            )
-            .plain(": ")
-            .push(Tone::Strong, answer_command(run_id, answerable))
-            .push(Tone::Muted, format!(" ({})", advice::parked_on(on))),
-    )
+    let row = Attention::command(advice::parked_on(on), answer_command(run_id, answerable));
+    Terminal::on(*look)
+        .block(&Block::Attention(row))
+        .into_iter()
+        .next()
 }
 
 /// The region's last row, which answers on every redraw: the run's furrow

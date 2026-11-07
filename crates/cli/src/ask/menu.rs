@@ -7,14 +7,14 @@
 //! digit narrows the list as any letter does, so a value with digits in it is typed
 //! as written. A decision is not this list: its letters are keys.
 
-use surco::components::{ChoiceRow, Choices};
+use surco::components::{ChoiceRow, Choices, Legend};
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::surface::{narrowed, Placed};
 
 use super::held::{hold, Held, Press};
 use super::keys::Stroke;
-use super::{Answered, Console, Escape};
+use super::{Answered, Console, Escape, ESC};
 
 /// The rows of a terminal a list leaves to what stands around it: its filter, its
 /// keys, the question a caller said above it, and the row a prompt never draws on.
@@ -121,16 +121,12 @@ impl<T> Picker<T> {
 
     /// The keys the list answers to, and what Escape does here, wrapped to `room`.
     fn keys(&self, look: &Look) -> Vec<Line> {
-        let separator = format!(" {} ", look.glyphs.sep());
-        let [move_keys, filter_keys] = list_keys(look);
-        let keys = [
-            move_keys,
-            filter_keys,
-            "enter chooses".to_string(),
-            self.escape.said().to_string(),
-        ]
-        .join(separator.as_str());
-        Line::new().push(Tone::Muted, keys).wrap(look.width.cells())
+        let legend = list_legend()
+            .key("enter", "chooses")
+            .key(ESC, self.escape.does());
+        Line::new()
+            .push(Tone::Muted, legend.spelled(look.glyphs))
+            .wrap(look.width.cells())
     }
 
     /// Moves the pointer by one row within what the filter leaves, around at its ends.
@@ -152,11 +148,8 @@ impl<T> Picker<T> {
 }
 
 /// The keys any list answers to, whatever holds it.
-pub(super) fn list_keys(look: &Look) -> [String; 2] {
-    [
-        format!("{} move", look.glyphs.up_down()),
-        "type to filter".to_string(),
-    ]
+pub(super) fn list_legend() -> Legend {
+    Legend::new().arrows("move").typing("to filter")
 }
 
 /// How well `name` answers what was typed, the lower the better: the whole of it, its

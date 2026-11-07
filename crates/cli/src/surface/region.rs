@@ -148,8 +148,8 @@ impl Region {
         (answerable, asking): (bool, Option<&yunta_engine::Prompt>),
     ) {
         let attention = match asking {
-            Some(prompt) => Some(view::asked(prompt, self.glyphs)),
-            None => view::attention(frame, run_id, answerable, self.glyphs),
+            Some(prompt) => view::asked(prompt, &self.look()),
+            None => view::attention(frame, run_id, answerable, &self.look()),
         }
         .map(|line| self.fit(&line));
         self.attend(attention);

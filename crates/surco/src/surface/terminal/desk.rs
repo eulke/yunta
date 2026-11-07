@@ -202,8 +202,7 @@ impl Desk {
         let mut lines = vec![Line::new(), question];
         // The keys stand at the far end of the answer's row when both fit, and under it when not.
         let left = self.answers();
-        let sep = format!(" {} ", glyphs.sep());
-        let keys = self.foot.keys.join(sep.as_str());
+        let keys = self.far(glyphs);
         let far = Line::new().push(Tone::Muted, keys.as_str());
         if keys.is_empty() {
             lines.push(left.cut(measure, glyphs));
@@ -216,12 +215,26 @@ impl Desk {
         lines
     }
 
+    /// What stands at the far end of the answer's row: the keys, then how many options
+    /// stand on the card past the last number, the separator between them.
+    fn far(&self, glyphs: Glyphs) -> String {
+        let more = match &self.foot.row {
+            FootRow::Options { more, .. } if *more > 0 => {
+                Some(format!("{} on the card", counted(*more, "more option")))
+            }
+            _ => None,
+        };
+        let keys = Some(self.foot.legend.spelled(glyphs)).filter(|keys| !keys.is_empty());
+        let sep = format!(" {} ", glyphs.sep());
+        keys.into_iter().chain(more).collect::<Vec<_>>().join(&sep)
+    }
+
     /// The answer as it stands: the options by their numbers, or the option about to be
     /// chosen with what it does.
     fn answers(&self) -> Line {
         match &self.foot.row {
-            FootRow::Options(names) => {
-                names
+            FootRow::Options { named, .. } => {
+                named
                     .iter()
                     .enumerate()
                     .fold(Line::new(), |line, (at, name)| {

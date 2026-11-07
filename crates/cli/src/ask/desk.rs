@@ -6,16 +6,15 @@
 
 use std::cell::Cell;
 
-use surco::components::{ChoiceRow, DeskFoot, FootRow};
+use surco::components::{ChoiceRow, DeskFoot, FootRow, Legend};
 use surco::look::{Look, Width};
 use surco::surface::Placed;
-use surco::text::counted;
 use surco::words::Standing;
 use yunta_render::plan::{Reading, Spot, View};
 
 use super::held::{Held, Press};
 use super::keys::Stroke;
-use super::Escape;
+use super::{Escape, ESC};
 
 /// The most options a number can name: one key each, since a second digit would have
 /// nothing to say the first has ended. The rest are on the card, and the keys say so.
@@ -118,11 +117,11 @@ impl<'a> PlanDesk<'a> {
 
     /// The foot the desk is drawn with: the question, the options or the one being
     /// confirmed, and the keys that do something here.
-    fn foot(&self, look: &Look) -> DeskFoot {
+    fn foot(&self) -> DeskFoot {
         DeskFoot {
             question: self.asked.question.clone(),
             row: self.foot_row(),
-            keys: self.foot_keys(look),
+            legend: self.foot_legend(),
         }
     }
 
@@ -130,56 +129,48 @@ impl<'a> PlanDesk<'a> {
     fn foot_row(&self) -> FootRow {
         match self.confirming.and_then(|option| self.offered.get(option)) {
             Some(option) => FootRow::Confirming(option.clone()),
-            None => FootRow::Options(
-                self.offered
+            None => FootRow::Options {
+                named: self
+                    .offered
                     .iter()
                     .take(NUMBERED)
                     .map(|row| row.name.clone())
                     .collect(),
-            ),
+                more: self.offered.len().saturating_sub(NUMBERED),
+            },
         }
     }
 
     /// The keys that do something from where the desk stands, each with what it does.
-    fn foot_keys(&self, look: &Look) -> Vec<String> {
+    fn foot_legend(&self) -> Legend {
         if self.confirming.is_some() {
-            return vec!["enter confirms".to_string(), "esc goes back".to_string()];
+            return Legend::new().key("enter", "confirms").key(ESC, "goes back");
         }
         let at = self.spot.at;
-        let mut keys = Vec::new();
-        if matches!(self.spot.view, View::Choices) {
-            if self.reading.choices() > 0 {
-                keys.push("j k choice".to_string());
-            }
-        } else {
-            keys.push("j k task".to_string());
+        let legend = match self.spot.view {
+            View::Choices if self.reading.choices() == 0 => Legend::new(),
+            View::Choices => Legend::new().key("j k", "choice"),
+            _ => Legend::new().key("j k", "task"),
         }
-        keys.push(format!("{} scroll", look.glyphs.up_down()));
-        if self.reading.has_proof(at) {
-            keys.push(match self.spot.view {
-                View::Proof => "p the card".to_string(),
-                _ => "p proof".to_string(),
-            });
-        }
-        if self.reading.says_what_it_decided() {
-            keys.push(match self.spot.view {
-                View::Choices => "d the tasks".to_string(),
-                _ => "d decided for you".to_string(),
-            });
-        }
-        keys.push(self.leaving_said());
-        let unnamed = self.offered.len().saturating_sub(NUMBERED);
-        if unnamed > 0 {
-            keys.push(format!("{} on the card", counted(unnamed, "more option")));
-        }
-        keys
+        .arrows("scroll");
+        let legend = match (self.reading.has_proof(at), self.spot.view) {
+            (false, _) => legend,
+            (true, View::Proof) => legend.key("p", "the card"),
+            (true, _) => legend.key("p", "proof"),
+        };
+        let legend = match (self.reading.says_what_it_decided(), self.spot.view) {
+            (false, _) => legend,
+            (true, View::Choices) => legend.key("d", "the tasks"),
+            (true, _) => legend.key("d", "decided for you"),
+        };
+        legend.key(ESC, self.leaving_does())
     }
 
     /// What Escape does from here, as the keys say it.
-    fn leaving_said(&self) -> String {
+    fn leaving_does(&self) -> &'static str {
         match self.leaving {
-            Leaving::ToTheCard => "esc back".to_string(),
-            Leaving::TheCommand(escape) => escape.said().to_string(),
+            Leaving::ToTheCard => "back",
+            Leaving::TheCommand(escape) => escape.does(),
         }
     }
 
@@ -331,7 +322,7 @@ impl Held for PlanDesk<'_> {
                 &self.spot,
                 &self.title(),
                 Some(self.edge()),
-                self.foot(look),
+                self.foot(),
                 look,
             )
             .drawn(look, rows);
@@ -360,7 +351,7 @@ impl Held for PlanDesk<'_> {
     /// It takes every cell the terminal has, past the width a line of text gets.
     fn look(&self, line: Look, columns: usize) -> Look {
         Look {
-            width: Width::whole(columns),
+            width: Width::exact(columns),
             ..line
         }
     }

@@ -15,6 +15,14 @@ fn look(cells: usize) -> Look {
     }
 }
 
+/// The look of an ASCII terminal wide enough for a whole command.
+fn ascii() -> Look {
+    Look {
+        glyphs: Glyphs::Ascii,
+        ..look(120)
+    }
+}
+
 fn drawn(rows: Vec<Line>) -> Vec<String> {
     rows.iter().map(|row| Paint::Plain.line(row)).collect()
 }
@@ -262,14 +270,8 @@ fn the_footer_names_what_the_run_spent_in_and_out() {
 
 #[test]
 fn the_attention_row_is_drawn_only_while_something_needs_you() {
-    assert!(attention(
-        &standing(RunPhase::Running, None),
-        &RUN,
-        false,
-        Glyphs::Ascii
-    )
-    .is_none());
-    let row = attention(&standing(parked(), None), &RUN, true, Glyphs::Ascii)
+    assert!(attention(&standing(RunPhase::Running, None), &RUN, false, &ascii()).is_none());
+    let row = attention(&standing(parked(), None), &RUN, true, &ascii())
         .map(|row| Paint::Plain.line(&row))
         .unwrap_or_default();
     assert!(
@@ -277,6 +279,24 @@ fn the_attention_row_is_drawn_only_while_something_needs_you() {
         "it carries the command that answers it, whole: {row}"
     );
     assert!(row.contains("node `plan`"), "and what it is about: {row}");
+}
+
+/// A run whose engine asks at its own terminal says whom it asks after the
+/// mark and `needs you`, and nothing to type here: the answer is given there.
+#[test]
+fn the_row_of_a_run_asked_at_its_terminal_says_whom_it_asks() {
+    let prompt = yunta_engine::Prompt {
+        node: Some(NodeId::from_static("implement")),
+        since: chrono::DateTime::UNIX_EPOCH,
+        pid: yunta_core::Pid::current(),
+    };
+
+    let row = asked(&prompt, &ascii()).map(|row| Paint::Plain.line(&row));
+
+    assert_eq!(
+        row.as_deref(),
+        Some("? needs you: node `implement` asks at its terminal")
+    );
 }
 
 /// A pause a person chose draws no row, and the footer says nothing needs them.
@@ -299,7 +319,7 @@ fn a_run_a_person_paused_draws_no_attention_row() {
         free_text: None,
     });
     for frame in [&closed, &aborted] {
-        assert!(attention(frame, &RUN, true, Glyphs::Ascii).is_none());
+        assert!(attention(frame, &RUN, true, &ascii()).is_none());
         let line = Paint::Plain.line(&footer(frame, &Look::plain()));
         assert!(line.ends_with(" nothing needs you"), "{line}");
     }
@@ -316,7 +336,7 @@ fn a_run_waiting_on_a_reset_draws_no_attention_row_and_says_it_waits() {
         },
     };
     let frame = standing(reset, None);
-    assert!(attention(&frame, &RUN, true, Glyphs::Ascii).is_none());
+    assert!(attention(&frame, &RUN, true, &ascii()).is_none());
     let line = Paint::Plain.line(&footer(&frame, &Look::plain()));
     assert!(line.ends_with(" waiting for a reset"), "{line}");
     assert!(!line.contains("needs you"), "{line}");

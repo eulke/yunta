@@ -230,7 +230,7 @@ fn project_answers(
             // What Escape does, said once above the prompts it applies
             // to — the same place every other surface says it.
             // best-effort: the notice informs only; a refused write falls back to the defaults.
-            let _ = console.say(console.escape().said());
+            let _ = console.say(&console.escape().said());
             Some((
                 asked(console, "project name", &default_name)?,
                 asked(console, "base branch", &default_branch)?,

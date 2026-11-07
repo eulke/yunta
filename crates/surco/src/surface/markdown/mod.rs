@@ -20,6 +20,7 @@ mod diffstat;
 mod fence;
 pub(in crate::surface) mod fold;
 mod headline;
+mod screen;
 mod text;
 
 pub use description::{Description, Leaves};
@@ -87,6 +88,7 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
     match block {
         Block::Headline(headline) => headline::headline(headline),
         Block::Furrow(_) => String::new(),
+        Block::Ribbon(ribbon) => screen::ribbon(ribbon),
         Block::Gist(gist) => plain_text(&gist.0),
         Block::Fields(fields) => self::fields(fields),
         Block::Table(table) => self::table(table),
@@ -106,6 +108,8 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         Block::Problem(problem) => self::problem(problem),
         Block::Refusal(refusal) => self::refusal(refusal),
         Block::Next(next) => self::next(next),
+        Block::Legend(legend) => screen::legend(legend),
+        Block::Attention(attention) => screen::attention(attention),
         Block::Heading(title) => format!("{} {}", "#".repeat(2 + depth), plain_text(title)),
         Block::Title(title) => headline::title(title, page),
         Block::Section(section) => self::section(section, depth, page),

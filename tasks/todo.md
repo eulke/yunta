@@ -1,338 +1,328 @@
-# Tasks: `session-ends`
+# Tasks: `surco-screen`
 
-Spec: `SPEC-session-ends.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-06, in implementation**.
+Spec: `SPEC-surco-screen.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-06, in implementation**.
 
-**How these run:** one at a time, with `incremental-implementation` and `test-driven-development`. Each task names the test that fails first and why. That test is seen failing for that cause before the code that makes it pass. A test that may pass at once says so, and says what it guards. Every task leaves the tree compiling and its tests green. A test that starts a process kills it at its end, whether it passed or not, and waits on the process table, never for a fixed time. `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`. Before a file is edited, `cargo xtask docs --about <files>` runs, and what it prints is kept true. No commit until the user approves at Checkpoint F.
+**How these run:** one at a time, with `incremental-implementation` and `test-driven-development`.
+- Each task names the test that fails first and why. That test is seen failing for that cause before the code that makes it pass. A test that may pass at once says so, and says what it guards.
+- Every task leaves the tree compiling and its tests green.
+- `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`.
+- Before a file is edited, `cargo xtask docs --about <files>` runs, and what it prints is kept true.
+- A golden is blessed only with `YUNTA_BLESS=1`, and its diff is read before it is kept.
+- No commit until the user approves at Checkpoint F.
 
-This list splits four of the plan's tasks, because each touched more than five files. The retry notice is Tasks 3 and 4. Moving the port's types out is Task 6. The session's mark is Tasks 8 and 9. The plan's Task 7 is Task 10 here.
+**Three refinements of the plan:**
+1. **The targets are drawn by hand in the two plain environments, `ascii-80` and `unicode-60`.** A hand-written escape is a guess, and these two read as the text they are. The colored environments are blessed once the code draws the targets, and read in their diff (plan decision 6 named `unicode-color-100`).
+2. **The targets wait outside git** (`.plans/yunta-tui/proof/surco-screen/targets/`). Each moves into its golden in the task whose code draws it. Written straight into the catalog's goldens, they would turn its test red for three tasks.
+3. **A task that adds a kind of block touches more than five files.** Each surface's dispatch, the catalog's list of kinds and its goldens all gain one arm or one part. The task is still one thing: one block, drawn everywhere.
 
-## Phase 1: the real CLIs, before any code
+## Phase 1: the one table
 
-### Task 1: the real CLIs at the base
+### Task 1: the style reading
 
-**Description:** On the base's release build (`.plans/yunta-tui/proof/session-ends/yunta-base`), a one-node run on each real CLI asks the agent to start `sleep <n>` and end its turn at once: Claude Code on `claude-haiku-4-5`, Codex on `gpt-6-luna`. Each CLI is asked twice:
-- once through its shell tool's own background mode: Claude's `run_in_background`, and a Codex command its tool returns from before it ends;
-- once as `sleep <n> &` from the shell.
+**Description:**
+- `crates/surco/src/paint/style.rs` holds `Style`, `Color`, `Ansi` (public now), `style`, `erase` and `page`, re-exported by `paint`.
+- `Paint::word`, `Paint::span` and `Paint::erase` write their SGR from `style` and `erase` alone.
+- The clap styles (`paint/help.rs`) and the page's style (`surface/html/style.rs`) read `style` and `page`.
+- `palette` stays private and unchanged.
 
-`yunta` runs with a probe variable in its environment, which the CLI inherits. While the session runs, a script reads the command's process group, its parent and whether its environment holds the probe. After the session ends, it reads whether the command still runs. The script kills every `sleep` it started.
-
-**Fails first:** nothing; no code changes. What it guards is assumption 1 of the spec.
+**Fails first:** `every_span_paints_as_its_style_reads`, in `paint/style/tests.rs`. It does not compile: there is no `style` yet. Once `style` exists, it guards the one table, with every tone, every own fill and line fill, and every layer drawn through `Paint` and through `style`. What holds the refactor is every existing color golden, unchanged.
 
 **Acceptance criteria:**
-- [x] For each CLI and each way, the record says the command's group against the CLI's, its parent, whether the probe reached it, and whether it outlived the session. The probe was read again with a `python3` command (`real_env.py`), because macOS hides the environment of `/bin/zsh` and `/bin/sleep`.
-- [x] Nothing the script started runs after it, and the tokens each run spent are recorded.
+- [x] `style`, `erase` and `page` answer every layer, and `Paint`, the clap styles and the page's style read nothing else from `palette`.
+- [x] `every_span_paints_as_its_style_reads` passes for the sixteen colors and both grounds of 24 bits.
+- [x] Every existing golden of the workspace and the palette's contrast tests pass unchanged.
 
 **Verification:**
-- [x] Manual check: the script and its result (`real-before.txt`) in `.plans/yunta-tui/proof/session-ends/`, outside git.
+- [x] `cargo test -p yunta-surco`, `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+- [x] Manual check: no RGB value outside `palette.rs`, with `git grep -n "Rgb(" -- crates/surco/src`.
 
 **Dependencies:** None
+
+**Files likely touched:** `crates/surco/src/paint.rs`, `crates/surco/src/paint/style.rs`, `crates/surco/src/paint/style/tests.rs`, `crates/surco/src/paint/help.rs`, `crates/surco/src/surface/html/style.rs`
+
+**Estimated scope:** M
+
+### Checkpoint A: after Task 1
+- [x] Every existing golden is byte for byte the same, `cargo xtask smells --check` passes, and the user sees the reading's signature.
+
+## Phase 2: the targets
+
+### Task 2: target goldens, drawn by hand
+
+**Description:**
+- In `.plans/yunta-tui/proof/surco-screen/targets/`, write by hand what each new block and screen should draw, from the spike's frames (`.plans/yunta-tui/out/frames.json`, `spike/src/view.rs`) as Surco's rules allow:
+  - **Blocks**, as the catalog's appended part, in `ascii-80` and `unicode-60`: a ribbon of seven nodes, one running with its plow; a legend of five keys, the arrows among them; an attention answered by a command and one answered by a key.
+  - **Two screens laid out on a terminal**: a run's, and the same run with an overlay open over it, each at 80×24 in `ascii-80` and 60×14 in `unicode-60`. Since the redo below they are the `tui` module's reference, not this module's targets.
+  - **The run's screen** as Markdown and as HTML.
+- Beside them, a `NOTES.md` names each place where a rule of Surco's made the target differ from the spike, and the tone each span is meant to have.
+
+**Fails first:** nothing runs: this task writes the targets that Tasks 3 to 6 fail against.
+
+**Redone on 2026-11-06, after the layout moved** (each interface lays a screen out its own way):
+- The Markdown and HTML targets follow the screen's new parts: trail, tally, about, a side region and a main one.
+- The help overlay is open in both.
+- The two terminal screens move to `targets/tui-reference/` as the `tui` module's reference, with the notes about them.
+
+**Acceptance criteria:**
+- [x] Every target exists, every line no wider than its columns, every frame exactly its rows.
+- [x] `NOTES.md` names each departure from the spike and the tone of each span.
+
+**Verification:**
+- [x] Manual check: a script measures each target's rows and widths. The user reads the targets at Checkpoint B.
+
+**Dependencies:** Checkpoint A
 
 **Files likely touched:** none in git.
 
 **Estimated scope:** S
 
-### Checkpoint A: after Task 1
-- [x] The user sees the results. If a CLI does not pass its environment to its commands, or does not start them in groups of their own, the spec and the plan are updated and the user is told before Task 2. (Both do. macOS hiding its platform binaries' environment was found here; the user chose to keep the sweep, and the spec, plan and list say so.)
+### Checkpoint B: after Task 2
+- [x] The user approves the targets. No code draws a new block before this.
 
-## Phase 2: the Codex retry
+## Phase 3: the blocks
 
-### Task 2: Codex, an `error` line is no event
+### Task 3: the ribbon
 
-**Description:** `codex/parse.rs` maps a top-level `error` line to no event, and its `//!` says why. `turn.failed` keeps mapping to `Failed` with its message, read by `failure_cause` as today. A whole run through the Codex stub, whose stream prints a retry notice and goes on, finishes.
+**Description:**
+- `components/ribbon.rs` holds `Ribbon` and `Stretch`, built as `Ribbon::new(stretches)` and `.plowed(events)`, and `Block::Ribbon` exists.
+- The terminal draws names over strokes, each stretch as wide as its name and at least four cells, a gap between two. The plow is the running node's cell at `events % cells`, strong, only when `events` is set. Where the names do not fit, it is the page's furrow.
+- A ribbon hangs from a headline, as the furrow does.
+- Markdown and the description draw each name with its word. HTML draws the names over the furrow's strokes, every word in its label.
+- The catalog gains its sample in a part appended after `closing()`, and the ribbon's targets move into the catalog's goldens.
 
-**Fails first:** `an_error_line_is_no_event`, in the parser's own tests, because the parser maps the line to `Failed`. Then `a_codex_session_that_retries_finishes`, in a new CLI target `session_ends`, because the run ends at `needs you` with exit 3.
-
-**Acceptance criteria:**
-- [x] An `error` line, whatever its message, yields no event.
-- [x] A refused model (`error` then `turn.failed` carrying `model_not_found`, as 0.157.0 prints it), a reached limit and a lost service each fail with the cause and message they have at the base.
-- [x] Through the Codex stub, a stream of `thread.started`, a retry notice, an agent message and `turn.completed` finishes the run with exit 0.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-adapters --lib codex`, `cargo test -p yunta --test session_ends`
-
-**Dependencies:** Checkpoint A
-
-**Files likely touched:**
-- `crates/adapters/src/codex/parse.rs`
-- `crates/cli/tests/session_ends.rs` (new)
-
-**Estimated scope:** S
-
-### Task 3: the mock can print a retry notice
-
-**Description:** `MockStep` gains `retry_notice`, the line a CLI prints when it retries a request it goes on with. `claude_code/wire.rs` renders it as Claude Code's `{"type":"system","subtype":"api_retry",...}` with the fields Claude Code's documentation lists, and `codex/wire.rs` as Codex's `{"type":"error","message":"Reconnecting... 2/5 (...)"}`. The step's `///` says what it stands for.
-
-**Fails first:** `a_mock_session_that_retries_completes_in_either_dialect`, in the mock suite, because the fixture refuses the step.
+**Fails first:**
+- `every_kind_of_block_stands_in_the_catalog` fails once `ribbon` is a kind with no sample.
+- Then `every_block_matches_its_goldens_in_every_environment`, against the targets, until the terminal draws them.
+- Then `markdown_says_every_word_the_terminal_says_of_every_block`, until Markdown and HTML say the names.
 
 **Acceptance criteria:**
-- [x] A mock fixture with a `retry_notice` step and a `completed` outcome completes in the Claude Code dialect and in the Codex dialect.
-- [x] The step takes `after_ms` as the other steps do.
+- [x] The ribbon's catalog part matches its targets in `ascii-80` and `unicode-60`; the other environments, Markdown and HTML are blessed and read.
+- [x] With no `events`, no cell is strong; a ribbon with no stretch draws nothing; in `ascii-80` every name is there.
+- [x] Each catalog golden changes only by the part appended at its end.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-adapters --test mock`
-
-**Dependencies:** Task 2
-
-**Files likely touched:**
-- `crates/adapters/src/mock/fixture.rs`
-- `crates/adapters/src/claude_code/wire.rs`, `crates/adapters/src/codex/wire.rs`
-- `crates/adapters/tests/mock/retry.rs` (new), `crates/adapters/tests/mock.rs`
-
-**Estimated scope:** M
-
-### Task 4: the contract, a retry notice ends nothing
-
-**Description:** The contract's `Step` gains `RetryNotice`, and its wire writes it as each CLI does. A case runs on every subject: a session that prints a retry notice and then completes ends `Completed`, with its summary.
-
-**Fails first:** `a_retry_notice_ends_nothing`, because the contract has no such step.
-
-**Acceptance criteria:**
-- [x] The case passes on `claude_code`, `codex` and `mock`.
-- [x] The contract's wire writes the notice in each CLI's own shape.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-adapters --test contract`
-
-**Dependencies:** Task 3
-
-**Files likely touched:**
-- `crates/adapters/tests/contract/subject.rs`, `crates/adapters/tests/contract/wire.rs`
-- `crates/adapters/tests/contract/main.rs`, `crates/adapters/tests/contract/retry.rs` (new)
-
-**Estimated scope:** S
-
-### Checkpoint B: after Tasks 2-4
-- [x] The adapter suite and `session_ends` pass through the wrapper. `cargo xtask smells --check` passes.
-
-## Phase 3: the walk, the mark and the sweep
-
-### Task 5: the walk
-
-**Description:** A new module `core/process/tree.rs`:
-- `groups_under(group)` starts from every member of `group`, follows children by parent pid to the bottom, and answers every group it meets other than `group`. It reads children with `libproc`'s `ByParentProcess` filter on macOS and `procfs` on Linux.
-- It never answers the caller's own group, nor a group id of 1 or less.
-- `close_groups_under(group)` closes each one with `force_kill_group`, and its error names every group that would not close.
-
-**Fails first:** `the_walk_finds_a_grandchild_in_a_group_of_its_own`, in a new core target `process_tree`, because the module does not exist.
-
-**Acceptance criteria:**
-- [x] A grandchild in a group of its own under a leader is found, and is found too when the leader exited and another member remains.
-- [x] A leader with no children answers nothing.
-- [x] A child that joined the caller's group is never answered.
-- [x] After `close_groups_under`, nothing found runs, and the leader's own group is untouched.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-core --test process_tree`, on macOS here and on Linux in CI
-- [x] `cargo xtask smells --check` passes.
+- [x] `cargo test -p yunta-surco`
+- [x] Manual check: the catalog goldens' diff shows only lines added at the end.
 
 **Dependencies:** Checkpoint B
 
-**Files likely touched:**
-- `crates/core/src/process/tree.rs` (new), `crates/core/src/process/mod.rs`
-- `crates/core/tests/process_tree.rs` (new)
+**Files likely touched:** `crates/surco/src/components/{ribbon,mod}.rs`, `crates/surco/src/doc.rs`, `crates/surco/src/surface/terminal/{mod,ribbon}.rs`, `crates/surco/src/surface/markdown/mod.rs`, `crates/surco/src/surface/html/blocks.rs`, `crates/surco/src/components/catalog{,/kinds}.rs`, `crates/surco/goldens/{components,markdown,html}/catalog.*`
 
-**Estimated scope:** S
+**Estimated scope:** M (one arm in each of the files above)
 
-### Task 6: the port's environment types move out of `session.rs`
+**Found while implementing:**
+- The catalog's page grows in one more place than its end: its contents (`<nav class="toc">`) gain a link to the new heading `on a screen`, since the page lists every heading. It is an addition, and nothing that was there changes.
+- `markdown/mod.rs` passed 500 lines, so a screen's blocks are written in `markdown/screen.rs`.
+- In HTML two stretches are kept apart by a space, so their names read as words; a flex row draws none of it.
 
-**Description:** `port/session.rs` is at 497 lines. `SessionEnv` and `RunToolsEndpoint` move, with their docs and impls, to a sibling module of `port`, re-exported where they are read today. Nothing else changes.
+### Task 4: the legend
 
-**Fails first:** nothing; a move. It may pass at once, and what guards it is every suite that names either type.
+**Description:**
+- `components/legend.rs` holds `Legend`, `Binding` and `Keys`, built as `Legend::new().arrows("move").key("enter", "open")`, and `Block::Legend` exists.
+- The terminal draws keys in strong, what they do in muted and a faint separator, with `Keys::UpDown` in the glyph set's own arrows.
+- Markdown and the description draw a line of `` `keys` does `` pairs. HTML draws a `<button type="button" class="key" data-key="…">` for each binding.
+- The catalog's appended part gains its sample, and its targets move in.
 
-**Acceptance criteria:**
-- [x] Every path that names either type compiles unchanged.
-- [x] `port/session.rs` has room for the field Task 8 adds, and the `//!` of `port/mod.rs` names the new module.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-core`, `cargo build --workspace --all-targets`
-
-**Dependencies:** Task 5
-
-**Files likely touched:**
-- `crates/core/src/port/session.rs`, `crates/core/src/port/mod.rs`
-- `crates/core/src/port/<the new module>.rs` (new)
-
-**Estimated scope:** S
-
-### Task 7: the mark and the sweep
-
-**Description:** A new module `core/process/mark.rs`:
-- `SessionMark` is `<run id>.<uuid v4>`, carried in `YUNTA_SESSION_MARK`, minted by `SessionMark::new(&RunId)`. `SessionMark::of_run(&RunId)` matches every mark of that run.
-- `marked(…)` lists this user's processes whose environment holds a mark, each with the start time `process_start` reads. On Linux it reads `/proc/<pid>/environ` through `procfs`; on macOS it reads through `sysinfo` 0.40.1, added under `[target.'cfg(target_os = "macos")'.dependencies]` with `default-features = false` and `features = ["system"]`.
-- `close_marked(…)` signals a pid only while its start time is the one it was found with. It repeats until a pass finds nothing, within a bound whose `///` says why, and never signals the caller or a pid of 1 or less. Its error names what would not die.
-
-**Fails first:** `the_sweep_finds_a_marked_process_whose_parent_left`, in a new core target `process_mark`, because the module does not exist.
+**Fails first:**
+- `every_kind_of_block_stands_in_the_catalog`, once `legend` is a kind with no sample.
+- Then the catalog's goldens against the targets.
+- Then `a_legend_draws_each_key_as_a_button_with_its_key`, in the HTML surface's tests, until the buttons carry `data-key`.
 
 **Acceptance criteria:**
-- [x] A `python3` carrying the mark whose parent left is found and closed. One carrying another session's mark, or none, is left running.
-- [x] A process whose environment the host hides, such as `/bin/sleep` on macOS, reads as unmarked and the sweep goes on with the rest.
-- [x] `of_run` finds the marks of every session of that run and of no other run.
-- [x] A pid whose start time changed since it was found is not signalled, and the caller never is: both are held by a unit test on the choice of what to signal.
-- [x] `cargo deny check` passes with `sysinfo` in the tree. The lock adds `sysinfo`, `objc2-core-foundation` and `objc2-io-kit`, and also `sysinfo`'s Windows-only `ntapi` and `winapi` crates, which the lock lists for every platform and macOS and Linux never build (corrected while implementing: the tree read before planning was macOS's alone).
+- [x] The legend's part matches its targets, and the rest is blessed and read.
+- [x] An empty legend draws nothing; `UpDown` reads `↑↓` in Unicode and `up/down` in ASCII.
+- [x] Each button carries its key and is `type="button"`.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-core --test process_mark`, `cargo test -p yunta-core --lib process::mark`
-- [x] `cargo deny check`
+- [x] `cargo test -p yunta-surco`
 
-**Dependencies:** Task 6
+**Dependencies:** Task 3
 
-**Files likely touched:**
-- `crates/core/src/process/mark.rs` (new), `crates/core/src/process/mark/tests.rs` (new), `crates/core/src/process/mod.rs`
-- `Cargo.toml`, `crates/core/Cargo.toml`, `Cargo.lock`
-- `crates/core/tests/process_mark.rs` (new)
+**Files likely touched:** `crates/surco/src/components/{legend,mod}.rs`, `crates/surco/src/doc.rs`, `crates/surco/src/surface/terminal/{mod,legend}.rs`, `crates/surco/src/surface/markdown/mod.rs`, `crates/surco/src/surface/html/blocks.rs`, `crates/surco/src/components/catalog{,/kinds}.rs`, the catalog's goldens
 
-**Estimated scope:** M
+**Estimated scope:** M (one arm in each)
 
-### Task 8: every session's request carries its mark
+**Found while implementing:**
+- The screen's blocks are drawn as a page in `html/screen.rs`, the twin of `markdown/screen.rs`, and the ribbon moved there with the legend.
+- A key's button takes the page's monospaced face from the list on the stylesheet's first line, where every code-like part takes it, rather than from a variable of its own.
 
-**Description:** `SessionRequest` gains `mark: SessionMark`. It is minted in `run/session_plan.rs`, the one place a request is composed, from the run's id. The test builder in `testkit-core` and the adapter suite's own requests mint one too.
+### Task 5: the attention
 
-**Fails first:** `each_session_carries_a_mark_of_its_run_and_its_own`, in the engine's session tests, because the request has no mark.
+**Description:**
+- `components/attention.rs` holds `Attention` and `Answer`, built as `Attention::command(asks, command)`, `Attention::key(asks, keys, does)` and `.of(subject)`, and `Block::Attention` exists.
+- The terminal draws a command before what is asked, as the region's row reads today, so a row cut short keeps it. It draws a key after what is asked, which is cut to make room. The block carries no fill.
+- Markdown and the description draw its words in a line. HTML draws a tinted `<p role="status">`.
+- The catalog's appended part gains both samples, and their targets move in.
+
+**Fails first:**
+- `every_kind_of_block_stands_in_the_catalog`, once `attention` is a kind with no sample.
+- Then the catalog's goldens against the targets.
+- Then `an_attention_cut_short_keeps_its_answer`, until a narrow row keeps the command, and the key at its end.
 
 **Acceptance criteria:**
-- [x] Two sessions of one run get marks that differ and that `of_run` of that run matches.
-- [x] A session of another run gets a mark `of_run` of the first does not match.
-- [x] `session_request_literal_outside_plan` does not rise.
+- [x] Both samples match their targets, and the rest is blessed and read.
+- [x] A row cut to fit keeps its answer; in `ascii-80` every word is there.
+- [x] The line `Attention::command` draws is the region's line at the base, character for character, for the same command and question.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-engine --test run_sessions`, `cargo test -p yunta-adapters`
-- [x] `cargo xtask smells --check` passes.
+- [x] `cargo test -p yunta-surco`
 
-**Dependencies:** Task 7
+**Dependencies:** Task 4
 
-**Files likely touched:**
-- `crates/core/src/port/session.rs`, `crates/engine/src/run/session_plan.rs`
-- `crates/testkit-core/src/adapter.rs`
-- `crates/adapters/tests/mock.rs`, `crates/adapters/tests/mock/rail.rs`
+**Files likely touched:** `crates/surco/src/components/{attention,mod}.rs`, `crates/surco/src/doc.rs`, `crates/surco/src/surface/terminal/{mod,attention}.rs`, `crates/surco/src/surface/markdown/mod.rs`, `crates/surco/src/surface/html/blocks.rs`, `crates/surco/src/components/catalog{,/kinds}.rs`, the catalog's goldens
 
-**Estimated scope:** M
+**Estimated scope:** M (one arm in each)
 
-### Task 9: a session's CLI starts with its mark
+**Found while implementing:**
+- The kind and its two samples came in one step, so `every_kind_of_block_stands_in_the_catalog` was never seen red for `attention`. The reds seen were the catalog's goldens against the targets and `an_attention_cut_short_keeps_its_answer`, while the block drew nothing.
+- At 60 cells the samples' questions are cut (`the plan wa…`, `baseli…`). Their whole words stand in `ascii-80`, whose 80 cells hold every word.
 
-**Description:** `Launch` takes the request's mark, and the launch puts it in the CLI's environment itself, so no adapter can leave it out. `codex` also passes `-c shell_environment_policy.set.YUNTA_SESSION_MARK=<value>` through `ConfigOverride`. The mock runs no process and ignores the mark.
+### Checkpoint C: after Tasks 3-5
+- [x] The catalog's goldens grow only by the appended part, every other golden is unchanged, and no word is lost in `ascii-80`. `cargo xtask smells --check` passes.
 
-**Fails first:** `the_clis_environment_carries_the_sessions_mark`, a new process case of the contract, because no CLI gets the mark.
+## Phase 4: the screen
+
+### Task 6: the screen as data, a pane's width, and the screen as a document and a page
+
+**Description:**
+- `components/screen.rs` holds `Screen`, `Region`, `Side` and `Overlay`, named by what they are and built as `Screen::new(main)` with `.trail`, `.tally`, `.about`, `.side`, `.focus_side`, `.attention`, `.legend` and `.overlay`. There are no widths, sizes or scroll positions.
+- `Width::exact(cells)` gives a pane exactly its cells, with no floor and no ceiling.
+- `Markdown::screen`, `Description::screen` and `Html::screen` draw a screen as plan decision 5 says. The two targets move into `goldens/markdown/screen.md` and `goldens/html/screen.html`.
+
+**Fails first:**
+- `every_block_draws_within_an_exact_width`, which draws every block of the catalog at every width from 20 to 59, because there is no `Width::exact`.
+- Then `every_surface_says_every_word_a_screen_holds`, because no surface draws a screen.
+- Then the two goldens against their targets.
 
 **Acceptance criteria:**
-- [x] Through each stub, the CLI's environment holds `YUNTA_SESSION_MARK` with the request's mark.
-- [x] Codex's arguments carry the `shell_environment_policy.set` override with the same value, quoted by `ConfigOverride`.
-- [x] The launch comment that says a group signal reaches the CLI's tool subprocesses says what is true.
+- [x] No line of any catalog block is wider than an exact width from 20 to 59, and none panics.
+- [x] Markdown, the description and HTML each say every string the screen holds; the focused region carries `aria-current` in HTML.
+- [x] Both goldens match their targets.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-adapters --test contract`, `cargo test -p yunta-adapters --lib codex`
-
-**Dependencies:** Task 8
-
-**Files likely touched:**
-- `crates/core/src/process/subprocess.rs`, `crates/core/src/process/subprocess/launch.rs`
-- `crates/adapters/src/claude_code/mod.rs`, `crates/adapters/src/codex/mod.rs`
-- `crates/adapters/tests/contract/process.rs`, `crates/adapters/tests/contract/main.rs`
-
-**Estimated scope:** M
-
-### Checkpoint C: after Tasks 5-9
-- [x] The core and adapter suites pass through the wrapper. `cargo deny check` and `cargo xtask smells --check` pass.
-
-## Phase 4: every end
-
-### Task 10: every end of a `SubprocessSession`
-
-**Description:** `kill` and `exit` each do three things, in order:
-1. `close_groups_under` the CLI's group;
-2. close the CLI's own group, as today;
-3. `close_marked` the session's mark.
-
-Their error names every group and pid that would not close. The drop does one pass of each with SIGKILL and no wait. The two stubs gain `<NAME>_STUB_GROUP_CHILD`, which starts `sleep` in a group of its own under the stub through `perl -e 'setpgrp(0, 0); exec …'`, and `<NAME>_STUB_ORPHAN_CHILD`, which starts `python3` sleeping in a group of its own from a shell that exits at once, because macOS lets another process read a `python3`'s environment and hides `/bin/sleep`'s. Each writes its child's pid to the file the knob names. The port's kill contract says what is true.
-
-**Fails first:** `a_command_in_a_group_of_its_own_is_gone_after_kill`, a new process case of the contract, because the command still runs.
-
-**Acceptance criteria:**
-- [x] Through each stub, a command in a group of its own, still hanging from the CLI, is gone after `kill`. (After `exit` the CLI has left, so such a command is reached by its mark alone, which `/bin/sleep` on macOS does not show; the orphan case below holds `exit`. Corrected while implementing.)
-- [x] Through each stub, a command whose parent left is gone after `kill` and after `exit`.
-- [x] A dropped session leaves neither behind, in the core suite.
-- [x] The existing process cases still pass.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-adapters --test contract`, `cargo test -p yunta-core --test process_kill`
+- [x] `cargo test -p yunta-surco screen`, `cargo test -p yunta-surco width`
 
 **Dependencies:** Checkpoint C
 
-**Files likely touched:**
-- `crates/core/src/process/subprocess.rs`, `crates/core/src/port/session.rs`
-- `crates/testkit-core/stubs/claude_code_stub.sh`, `crates/testkit-core/stubs/codex_stub.sh`, `crates/testkit-core/src/stubs.rs`
-- `crates/adapters/tests/contract/process.rs`, `crates/adapters/tests/contract/main.rs`
+**Files likely touched:** `crates/surco/src/components/{screen,mod}.rs`, `crates/surco/src/width.rs` (or where `Width` lives, `look.rs`), `crates/surco/src/surface/markdown/{mod,screen}.rs`, `crates/surco/src/surface/html/{mod,screen}.rs`, the screen's tests and goldens
 
 **Estimated scope:** M
 
-### Task 11: the engine ends a finished session through `kill`
+**Found while implementing:**
+- `Width::whole`, which the desk lays its columns at, already had the body `Width::exact` needed. It is renamed, with its three callers: the CLI's desk, its tests and the render crate's desk test.
+- The exact-width test was red for more than the missing constructor: twelve existing blocks passed an exact width below 60, none panicking. The widest was the decision at 53 cells, the main region's width at 80 columns.
+  - At the user's choice, a width now says whether its edge cuts (`Width::cuts`, true only for `Width::exact`). The terminal surface lays each line past a cutting edge out in rows with `Line::rows_within`.
+  - A stream keeps its lines as they are. No golden of `yunta-surco`, `yunta-render` or the CLI's units changed.
+- `tally` holds a `Count { standing, runs }` rather than a pair, so a count reads by name and says itself (`13 need you`, `1 needs you`). `Screen::main_focused` answers which region the keys act on.
+- The HTML target took the ribbon's markup as the catalog draws it, and ends where `Html::body` ends, with no newline. Both goldens equal their targets byte for byte.
+- `page.css` lays a screen out in a grid, the side region giving way first on a narrow page. No whole page draws a screen yet.
 
-**Description:** `read_and_release` calls `session.kill()` once it has read a terminal outcome, before `release`. There is no interrupt and no grace, because the CLI already said everything. A cut-short session keeps `end_running`. A `kill` that fails becomes `DispatchError::NotStopped`. The registration keeps the CLI's group, and adds each group the error names.
+### Checkpoint D: after Task 6
+- [x] The screen's targets match, every block draws within an exact width below the floor, and the user sees the screen's goldens.
 
-**Fails first:**
-- `a_finished_session_whose_kill_fails_ends_its_node_with_session_not_stopped`, in the engine's session tests, with a mock session whose kill is refused and whose outcome is `completed`, because the engine never kills a finished session today.
-- `a_kept_registration_keeps_the_groups_a_refused_kill_named`, in the registration's unit tests, because a registration keeps only the CLI's own group today.
-- `no_command_outlives_a_session_that_ends_by_itself`, in `session_ends`, through each stub, holds criterion 3 but is not red here. Measured: once the stub waits for its commands to be in their own groups before it prints, Task 10's drop pass closes both commands even without this task's kill. What the kill adds is a checked end: a refusal reported as `session_not_stopped`, with its groups kept for `yunta cancel` and `yunta close`.
+## Phase 5: the callers
 
-**Acceptance criteria:**
-- [x] A finished session whose kill is refused ends its node with `session_not_stopped`, keeping the tokens it spent.
-- [x] Each group a refused kill names stays in the run's registry beside the CLI's, held by a unit test on the registration.
-- [x] Through each stub, a session that ends by itself leaves no command, whether its command hung from it or was left by its parent.
+### Task 7: the card and the desk on a legend
 
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-engine --test run_sessions`, `cargo test -p yunta --test session_ends`
+**Description:**
+- `Card.keys` and `DeskFoot.keys` become `Legend`, and the terminal draws each inside them as it drew its strings: `<keys> <does>` in muted, joined by the separator, giving way where it gave way.
+- `crates/cli/src/ask/{card,desk,menu,form}.rs` build one with `Legend::new().arrows(…).key(…)` where they built strings.
 
-**Dependencies:** Task 10
-
-**Files likely touched:**
-- `crates/engine/src/task_cycle/session.rs`
-- `crates/engine/src/process_registry/write.rs`
-- `crates/engine/tests/run_sessions/frozen.rs`, `crates/cli/tests/session_ends.rs`
-- Found while implementing: `crates/engine/src/task_cycle/{dispatch,open}.rs` and `crates/engine/src/run/prompt_exec.rs` (the kill and `NotStopped.groups`). Also `crates/adapters/src/mock/{session.rs,fixture/outcome.rs}` with `crates/adapters/tests/mock/continuity.rs`: the mock refuses `kill` only while its script plays, so a finished session's refused end needs `kill: leave_behind`. Also both stubs: each now waits until its commands are in their own groups before it prints. And `crates/testkit-core/src/adapter.rs` with `adapter/tests.rs`: a pid never written to the fifo hung the test, because a runtime waits for its blocking tasks.
-
-**Estimated scope:** M
-
-### Task 12: `yunta cancel` and `yunta close` after the engine
-
-**Description:** On the escalation path, the crash path and the stopped path, `cancel.rs` first walks and closes the groups under each registered group. Then it signals the registered groups as today, and sweeps `SessionMark::of_run(run_id)` last. `close` reaches the crash path through `settle_crash`. `may_signal`'s refusal stays.
-
-**Fails first:** `cancel_after_its_engine_died_leaves_no_command`, in `session_ends`, through each stub, because only the registered groups are signalled.
-
-**Found while implementing:** `cancel_with_its_engine_alive_leaves_no_command` failed too, for a cause outside `cancel.rs`. The live engine ends its session with `end_running`, an interrupt first, and the stub leaves at the SIGINT. Its `sleep` then hangs from pid 1, out of the walk's reach, and macOS hides it from the sweep. The new contract case `a_command_in_a_group_of_its_own_is_gone_after_interrupt_and_kill` failed on both adapters for that cause. Now `SubprocessSession::interrupt` closes the groups under the CLI first, and the `kill` after it answers for what that walk could not close (plan decision 7). The crash tests also failed on a race at first: an engine killed while the stub still wrote took the stub with it by SIGPIPE. They now wait for `<NAME>_STUB_SAID_FILE`, and were seen red again for the right cause, with the base `cancel.rs`.
+**Fails first:** none can: a refactor, with no new behavior. What guards it is every test of the card and the desk in `yunta-surco`, every prompt test of `yunta`, and their goldens, all passing unchanged. Added: `a_cards_legend_reads_as_its_keys_read`, with the expected foot written out (`↑↓ move · enter chooses · …`). It passes once written, and pins the join the strings had.
 
 **Acceptance criteria:**
-- [x] Through each stub, no command is left after `yunta cancel` with the engine alive, after `yunta cancel` once the engine was killed, and after `yunta close` once the engine was killed.
-- [x] A run whose registry names a group of 1 or less is still refused, with nothing signalled.
+- [x] No `keys: Vec<String>` is left in `Card` or `DeskFoot`.
+- [x] Every card, desk and prompt test, and every golden of `yunta-surco` and `yunta` outside the catalog, passes unchanged.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta --test session_ends`, `cargo test -p yunta --test run_flow`
+- [x] `cargo test -p yunta-surco`, `cargo test -p yunta --bins`, `cargo test -p yunta --test <each prompt's target>`
 
-**Dependencies:** Task 11
+**Dependencies:** Checkpoint D
 
-**Files likely touched:**
-- `crates/cli/src/commands/cancel.rs`
-- `crates/cli/tests/session_ends.rs`
-- Found while implementing: `crates/core/src/process/subprocess.rs` and `subprocess/launch.rs`, `crates/core/src/port/session.rs` (the interrupt's contract), `crates/adapters/tests/contract/{process,main}.rs`, and both stubs (`<NAME>_STUB_SAID_FILE`).
+**Files likely touched:** `crates/surco/src/components/{card,desk}.rs`, `crates/surco/src/surface/terminal/{card,desk}.rs` and their tests, `crates/cli/src/ask/{card,desk,menu,form}.rs`
+
+**Estimated scope:** M (mechanical in the prompts)
+
+**Found while implementing:**
+- The field is `legend`, named by what it holds: `Card.legend` and `DeskFoot.legend`.
+- `2 more options on the card` is no key. It stands in `FootRow::Options { named, more }`, and the desk says it after the keys, where the strings had it.
+- `type to filter` is `Keys::Typing`, built with `Legend::typing("to filter")`: whatever the person types, spelled `type`, rather than a key named `type`.
+- `Legend::spelled(glyphs)` is the one-tone run a card's, a desk's and a list's foot say.
+- `Escape::does` says what Escape does beside `esc`, and `Escape::said` is built from it. A prompt no longer needs a look to say its keys.
+- `a_cards_legend_reads_as_its_keys_read` passed against the strings before the change, and after it.
+
+### Task 8: the region's row as an attention
+
+**Description:** `crates/cli/src/surface/view/mod.rs` builds its row as `Attention::command(…)` and draws it through the terminal surface. Its comment about the command coming first moves to the block, where the rule now lives.
+
+**Fails first:** none can: the same line, drawn by Surco. What guards it is the region's and the view's tests and the CLI's goldens, unchanged.
+
+**Acceptance criteria:**
+- [x] `view::attention` builds an `Attention` and writes no span of its own.
+- [x] Every test and golden of `yunta` passes unchanged.
+
+**Verification:**
+- [x] `cargo test -p yunta --bins`, `cargo test -p yunta --test run_flow`, `cargo test -p yunta --test status_follow`
+
+**Dependencies:** Task 7
+
+**Files likely touched:** `crates/cli/src/surface/view/mod.rs`, its tests
 
 **Estimated scope:** S
 
-### Checkpoint D: after Tasks 10-12
-- [x] `repro.py` on a debug build of the module closes every case it asks about. `cargo xtask smells --check` passes.
+**Found while implementing:**
+- `view::attention` takes the region's look, so Surco cuts the row at the width the region's `fit` cut it at before. The test calls pass an ASCII look 120 cells wide where they passed the glyph set.
+- `view::asked`, the row of a run whose engine asks at its own terminal, stays a line of its own. It has no answer a person types or presses here (the answer is given at that terminal), and it says whom it asks in strong, where an attention's question is plain. As an `Attention`, it needs an answer given elsewhere and changes a tone the region paints. Left for the user to place.
 
-## Phase 5: what it says
+### Checkpoint E: after Tasks 7-8
+- [x] Every golden outside the catalog is byte for byte the same, across the workspace. `cargo xtask smells --check` passes.
 
-### Task 13: docs, agent docs, and the `//!` this module makes false
+### Task 8b: the row of a run asked at its own terminal, as an attention
+
+Added at Checkpoint E, at the user's choice.
 
 **Description:**
-- `docs/adapters.md` says how a session ends now, what the mark is, that a person's `include_only` must name `YUNTA_SESSION_MARK`, and that a Codex retry notice ends nothing.
-- `docs/compatibility.md`'s Platforms says what the process layer guarantees and what stays out, macOS's hidden platform binaries among it.
-- `.agents/architecture.md` gains the rule "Nothing a session's CLI started outlives its session, linked to it or carrying its mark", tagged with the process tests and the contract.
-- `.agents/choices.md` records the absence and its reason: a process that cleared its environment and left the tree, and one the system starts at an agent's request.
-- The `//!` of `process/mod.rs`, `subprocess.rs`, `group.rs`, `cancel.rs` and `codex/parse.rs` say what is true.
-- Each test that holds a rule other code can break ends with its `Reached by:` line.
+- `Answer` gains `Elsewhere`, built with `Attention::elsewhere(asks)`: an attention answered at another terminal, so only what is asked is said.
+- The terminal draws the mark, `needs you`, the subject when there is one, and what is asked, plain, cut at the row's end. Markdown, the description and HTML say the same words.
+- `view::asked` builds one and draws it at the region's look, as `view::attention` does.
+- The catalog's appended part gains a third attention, `node `implement` asks at its terminal`, its targets written first.
 
-**Fails first:** `cargo xtask docs --check`, once the rule cites its tests, until the crate map of `yunta-core` names `tree` and `mark`.
+**Fails first:**
+- The catalog's goldens against the new targets, while `Elsewhere` draws nothing.
+- Then `an_attention_answered_elsewhere_says_what_is_asked`, until the row is the mark, `needs you` and what is asked, cut at its end.
 
-**Found while implementing:** that red did not come. The crate map names `process`, and `process/mod.rs`'s `//!` already named `tree` and `mark` (Task 5). What failed instead was `.agents/architecture.md`'s budget of 6144 bytes, so the rule says the guarantee and its macOS limit, and the order of the closings lives in `subprocess.rs`'s `//!`.
+**Acceptance criteria:**
+- [x] The third sample matches its targets in `ascii-80` and `unicode-60`, and the rest is blessed and read.
+- [x] `view::asked` builds an `Attention` and writes no span of its own; the region's words are the same.
+
+**Verification:**
+- [x] `cargo test -p yunta-surco`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_follow`
+
+**Dependencies:** Checkpoint E
+
+**Files likely touched:** `crates/surco/src/components/attention.rs`, `crates/surco/src/surface/{terminal/attention,markdown/screen,html/screen}.rs` and their tests, `crates/surco/src/components/catalog/on_screen.rs`, the catalog's goldens, `crates/cli/src/surface/{view/mod,region}.rs`
+
+**Estimated scope:** S
+
+**Found while implementing:**
+- The page set an attention's question with `esc`, so backticks stood as they were written. It reads it with `words`, as Markdown does, so `` `implement` `` is code on both. No earlier sample had a backtick, and no other golden moved.
+- No test drew `view::asked`. `the_row_of_a_run_asked_at_its_terminal_says_whom_it_asks` pins its words. It passes on the strong row as on the plain one, since only the tone changed.
+
+## Phase 6: what it says, proof and close
+
+### Task 9: the `//!` and `///` this module makes true, and the map's `tui` row
+
+**Description:**
+- Each new module's `//!` says how it works and what it rejects.
+- These say what is true:
+  - `components/mod.rs`;
+  - `doc.rs`'s `Block`;
+  - `surface/mod.rs`: every surface draws every block, and Markdown and HTML every screen, which each interface lays out its own way;
+  - `paint.rs` and the crate root's map: the style reading, the screen, a pane's width.
+- `paint/style.rs`'s `//!` says that a color has one table, and names the test that holds it.
+- `CAPABILITY-MAP.md`'s `tui` row says what it now owns: a screen laid out with Ratatui's `Layout`, and the overlay's box in Surco's glyphs.
+
+**Fails first:** `cargo xtask docs --check`, should a moved term leave a link that names nothing. If it passes at once, it guards what the next change breaks.
 
 **Acceptance criteria:**
 - [x] `cargo xtask docs --check` passes, and `cargo xtask docs --about` on the module's diff prints nothing left false.
@@ -341,162 +331,43 @@ Their error names every group and pid that would not close. The drop does one pa
 **Verification:**
 - [x] `cargo xtask docs --check`, `cargo xtask smells --check`
 
-**Dependencies:** Tasks 1-12
+**Dependencies:** Tasks 1-8
 
-**Files likely touched:**
-- `docs/adapters.md`, `docs/compatibility.md`, `.agents/architecture.md`, `.agents/choices.md`
-- the `//!` of the files named above
+**Files likely touched:** the `//!` of the files above, `CAPABILITY-MAP.md`
 
 **Estimated scope:** S
 
-### Checkpoint E: after Task 13
-- [x] `cargo test --workspace --locked --no-fail-fast` passes. Its count is explained against 267 binaries and 4,455 tests on macOS, and no binary aborted.
+### Task 10: every step of the `ci` job
 
-## Phase 6: proof and close
-
-### Task 14: measured on release builds
-
-**Description:**
-- On release builds of the base and of the module, runs whose sessions stand on the Claude Code stub take turns, 15 each.
-- Their median time between nodes is compared.
-- The time one session end spends walking and sweeping is measured on its own, from the module's tracing or from a probe around `kill`.
-- Then `repro.py` runs again on the module's build.
+**Description:** Every step of the `ci` job in `.github/workflows/ci.yml`, one build at a time, with `CARGO_INCREMENTAL=0`, through `sh .plans/yunta-tui/tools/gate.sh /Users/eulke/development/yunta-tui .plans/yunta-tui/out/gate-surco-screen`.
 
 **Acceptance criteria:**
-- [x] The median time between nodes on the base and on the module is the same within noise, over 15 runs each.
-- [x] The time one end spends walking and sweeping is recorded, with its median and its maximum.
-- [x] `repro.py` on the module's build shows the retry finishing, the refused model failing as at the base, and no command left in any case but the orphaned `/bin/sleep` on macOS, which the docs name.
+- [x] Every step passes: fmt, clippy, build, schema, smells, docs, deny, doc, test, core-release, workflows, crates.
+- [x] The test step shows no aborted binary, and its count is explained against 270 binaries and 4,504 tests.
 
 **Verification:**
-- [x] Results in `.plans/yunta-tui/proof/session-ends/`, outside git, with the scripts that produced them.
+- [x] The gate's logs, in `.plans/yunta-tui/out/gate-surco-screen/`.
 
-**Dependencies:** Checkpoint E
-
-**Files likely touched:** none in git.
-
-**Estimated scope:** S
-
-**Measured on 2026-11-06** (`cost-after.txt`, `end-probe.txt`, `after.txt`):
-- Between nodes the two match, 179.7 against 181.1 ms.
-- Working time does not: +45 ms over four sessions, about 11 ms for each finished session's end.
-- Through the probe, an end with a command hanging from the CLI takes 33.5 ms (45 at most): 13.5 for the walk's close, 12.6 for the CLI's group, 7.0 for the sweep. A close looks again only 10 ms after its signal, and the sweep reads all 574 processes.
-- The user chose to remove that cost before the real runs: Tasks 14a and 14b, then this task's three measures again.
-
-**Measured again after Tasks 14a and 14b** (`cost-after.txt`, `cost-base-vs-base.txt`, `end-probe.txt`, `after.txt`; the first measures are kept as `*-first.txt`):
-
-| Measure | Base | Module |
-|---|---|---|
-| between nodes | 187.1 ms | 185.1 ms |
-| working | 465.9 ms | 485.3 ms |
-| wall | 781.3 ms | 800.6 ms |
-
-- The base against itself, the same way, differs by 13 ms between nodes, 17 ms working and 23 ms wall, so the module's differences are within that noise.
-- Through the probe, an end with a command hanging from the CLI takes 9.7 ms (10.2 at most): 4.2 for the walk's close, 3.8 for the CLI's group, 1.7 for the sweep.
-- `repro.py` is unchanged: every case closes but the hidden `sleep`.
-
-### Task 14a: a close looks again soon after its signal
-
-**Description:** `force_kill_group` looks again 1 ms after its first SIGKILL, then every 10 ms, within the same bound of about a second.
-
-**Fails first:** `a_group_that_dies_at_its_signal_closes_within_one_interval`, in `group.rs`'s unit tests, because the close looks again only one full interval after its signal.
-
-**Found while implementing:**
-- The timing test failed as stated, at 11.3 ms.
-- Beside eight busy loops it then failed 2 times in 20 with one look at 1 ms, and once in 50 with looks at 1, 2, 4 and 8 ms: a saturated machine holds the test's own thread past 10 ms.
-- So the schedule became a pure `waits()`, held by `a_kill_looks_again_soon_after_its_signal_then_backs_off`: looks at 1, 2, 4 and 8 ms, then every 10 ms, about a second in all. What it saves an end is measured by the probe when Task 14 runs again.
-- The tests moved to `group/tests.rs`, since `group.rs` passed 500 lines.
-
-**Acceptance criteria:**
-- [x] A group whose one member dies at its SIGKILL is closed in less than one 10 ms interval.
-- [x] The group tests, the core's process suites and the contract pass.
-
-**Verification:**
-- [x] `cargo test -p yunta-core`, `cargo test -p yunta-adapters --test contract`
-
-**Dependencies:** Task 14
-
-**Files likely touched:** `crates/core/src/process/group.rs`
-
-**Estimated scope:** XS
-
-### Task 14b: a session's sweep reads only what may carry its mark
-
-**Description:**
-- `Marks::Session` carries the CLI's start, which `SubprocessSession` takes before it spawns the CLI.
-- A session's sweep finds no process that started more than a minute before that.
-- On macOS the processes are listed first without their environment, and only the candidates' environments are read.
-- `Marks::Run` has no start and reads every process.
-
-**Fails first:** `a_process_older_than_its_session_is_not_read_for_its_mark`, in `process_mark`, because the sweep reads every process whatever its start.
-
-**Found while implementing:**
-- The test failed as stated: an hour-later session's sweep found the older process.
-- With the filter on `sysinfo`'s own listing, the probe's sweep went only from 7.0 to 6.9 ms, so that listing was the cost: it reads far more of each process than its start.
-- The candidates are now listed through `libproc`'s BSD info, as the walk lists the table, and `sysinfo` reads only their environments. The sweep went to 1.7 ms.
-
-**Acceptance criteria:**
-- [x] A marked process that started well before a session's CLI is not found by that session's sweep, and one that started after it is.
-- [x] A run's sweep still finds every marked process of the run.
-- [x] The core's process suites, the contract and `session_ends` pass.
-
-**Verification:**
-- [x] `cargo test -p yunta-core`, `cargo test -p yunta-adapters --test contract`, `cargo test -p yunta --test session_ends`
-
-**Dependencies:** Task 14a
-
-**Files likely touched:** `crates/core/src/process/mark.rs`, `mark/tests.rs`, `subprocess.rs`, `subprocess/launch.rs`, `crates/core/tests/process_mark.rs`
-
-**Estimated scope:** S
-
-### Task 15: the real runs
-
-**Description:** Task 1's script runs again on the module's release build. Then a fragua run is started with `--detach`, with `conform` on Codex `gpt-6-luna` and the rest on Claude Code. It is followed at a terminal up to `ship`, then `abort` and `close`. Nothing is published.
-
-**Acceptance criteria:**
-- [x] For each CLI and each way of Task 1, the command is gone once the session ends.
-- [x] The fragua run reaches `ship` with no command left after any of its sessions. Its time between nodes, read with `yunta stats`, is in line with the 0.614 s of `run-words`, and its tokens are reported.
-
-**Verification:**
-- [x] The runs' ids, stats and results, in `.plans/yunta-tui/proof/session-ends/`.
-
-**Dependencies:** Task 14
-
-**Files likely touched:** none in git.
-
-**Estimated scope:** S
-
-**Measured on 2026-11-06** (`real-after.txt`, `real-env-after.txt`, `real-fragua.txt`, `real_ends.py`):
-- Task 1's scripts: at the base, the command outlived its session in 4 of 6 cases (background mode on both CLIs, and the environment probe on both). On the module it outlived none. Claude ran the `cmd &` this time, which it had refused at the base, and that command did not outlive its session either.
-- Fragua run `01M6S9F9BGMYZBP6DEDVJ8BCX3`, `conform` on Codex `gpt-6-luna`, reached `ship` with every node finished.
-- A sampler read the process table 524 times and kept 74 processes of its sessions: 15 by their mark, 59 under the engine, among them shells, `git`, `npm`, `node` and the MCP servers Claude Code starts. None ran while the run waited at `ship`.
-- Between nodes: 0.584 s at `ship`, 0.593 s after `close`, against 0.614 s for `run-words`. Tokens: 3.64M, more than the 2.3M estimated, 2.02M of them in `implement`. `abort` and `close` exited 0.
-
-### Task 16: every step of the `ci` job
-
-**Description:** Every step of the `ci` job in `.github/workflows/ci.yml`, one build at a time, with `CARGO_INCREMENTAL=0`, through `sh .plans/yunta-tui/tools/gate.sh /Users/eulke/development/yunta-tui .plans/yunta-tui/out/gate-session-ends`.
-
-**Acceptance criteria:**
-- [x] Every step passes: fmt, clippy, build, schema, smells, docs, deny, doc, test, core-release, workflows, crates. The test step's summary shows no aborted binary.
-
-**Verification:**
-- [x] The gate's logs, in `.plans/yunta-tui/out/gate-session-ends/`.
-
-**Dependencies:** Task 15
+**Dependencies:** Task 9
 
 **Files likely touched:** whatever a failing step points at.
 
 **Estimated scope:** S
 
-### Checkpoint F: after Tasks 14-16
-- [x] The user reviews the whole diff, the before and after, and the real runs. No commit until approved.
+**Found while implementing:**
+- The whole gate stopped in its eleventh step, `workflows`: the session's shell was reaped while the machine ran short of memory. Its first ten steps had passed. `workflows` (66 s) and `crates` (72 s) then passed on their own, in the foreground.
+- The test step ran 270 binaries and 4,528 tests, none failed and none aborted: the 4,504 of the base and the 24 this module adds, each inside a binary that existed.
 
-### Task 17: commit the module
+### Checkpoint F: after Tasks 9-10
+- [ ] The user reviews the whole diff and the goldens. No commit until approved.
+
+### Task 11: commit the module
 
 **Description:** One commit for the module on `feature/yunta-tui`, staging paths by name, with a message that cites no document. Then the push, the pull request's list and test plan, and CI on Linux and macOS. Then `cargo clean`.
 
 **Acceptance criteria:**
-- [x] The commit holds the module's files and nothing else, including `SPEC-session-ends.md`, `tasks/plan.md` and `tasks/todo.md`.
-- [ ] CI on the pull request passes on Linux and macOS, with the new tests seen in the log.
+- [ ] The commit holds the module's files and nothing else, including `SPEC-surco-screen.md`, `tasks/plan.md` and `tasks/todo.md`.
+- [ ] CI on the pull request passes on Linux and macOS.
 
 **Verification:**
 - [ ] Manual check: `git show --stat HEAD`, `git status` and `gh pr checks 30`.
@@ -505,27 +376,21 @@ Their error names every group and pid that would not close. The drop does one pa
 
 **Files likely touched:** none beyond the module's.
 
-**Found while implementing:**
-- On `b0cfd1cb`, CI passed on Linux and failed on macOS, in one test: `a_hidden_environment_reads_as_unmarked`. GitHub's macOS runner showed the marked `/bin/sleep`'s environment, which the test expected macOS to hide, as this Mac with System Integrity Protection on does.
-- The test now compares the sweep with what `ps -E` shows of that process. `ps -E` reads environments through the host, as the sweep does: here it shows a `python3`'s mark and not a `sleep`'s.
-- The docs, the `//!` and the rule say macOS can hide such an environment, not that it always does.
-
 **Estimated scope:** XS
 
 ## The spec's success criteria
 
 | Criterion | Tasks |
 |---|---|
-| 1. A Codex session that retries ends as its later lines say | 2, 4 |
-| 2. A refused model and a reached limit fail as at the base | 2 |
-| 3. Every adapter's retry notice ends nothing | 3, 4 |
-| 4. No command outlives a session, every way it ends | 10, 11, 12, Checkpoint D |
-| 5. Nothing signals what is not the session's | 5, 7 |
-| 6. The real CLIs, before and after | 1, 15 |
-| 7. Measured on release builds, and the real fragua run | 14, 15 |
-| 8. The contract and the docs say what is true | 10, 13 |
-| 9. Every step of the `ci` job | 16, 17 |
+| 1. A public style reading, one table with `Paint` | 1 |
+| 2. The three blocks and the two compositions | 3, 4, 5, 6 |
+| 3. Every surface draws each block, Markdown and HTML each screen; no word lost | 3, 4, 5, 6 |
+| 4. A screen with no cell, pixel or color; a pane's exact width | 6 |
+| 5. Goldens for each, reviewed before kept | 2, 3, 4, 5, 6 |
+| 6. `Card` and `DeskFoot` on `Legend`, the region on `Attention` | 7, 8 |
+| 7. No golden changes but the catalog's appended part; the suite passes | Checkpoints A, C, E; 10 |
+| 8. No new dependency, `cargo deny` as before | 10 |
 
 ## Not in this list
 
-The other modules of `CAPABILITY-MAP.md` have no spec, plan or tasks yet. Each goes through the same flow when this one closes.
+The other modules of `CAPABILITY-MAP.md` (`run-state`, `third-party-notices`, then `run-pages`, `control`, `app-core`, `tui`) have no spec, plan or tasks yet. Each goes through the same flow when this one closes.

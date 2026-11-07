@@ -122,3 +122,15 @@
 
 ␛[2mnext␛[0m
   ␛[1myunta status 7E5PH4␛[0m   ␛[2mwhere it stands␛[0m
+
+␛[2mon a screen␛[0m
+␛[2mgrill␛[0m ␛[2mbrief␛[0m ␛[36mplan␛[0m ␛[2mbuild␛[0m ␛[2mreview␛[0m ␛[2mlint␛[0m ␛[2mship␛[0m
+␛[32m━━━━━␛[0m ␛[32m━━━━━␛[0m ␛[36m━␛[0m␛[1m━␛[0m␛[36m━━␛[0m ␛[2m┄┄┄┄┄␛[0m ␛[2m┄┄┄┄┄┄␛[0m ␛[2m┄┄┄┄␛[0m ␛[2m┄┄┄┄␛[0m
+
+␛[1m↑↓␛[0m␛[2m move␛[0m␛[2m · ␛[0m␛[1menter␛[0m␛[2m open␛[0m␛[2m · ␛[0m␛[1mn␛[0m␛[2m new run␛[0m␛[2m · ␛[0m␛[1mx␛[0m␛[2m close␛[0m␛[2m · ␛[0m␛[1mq␛[0m␛[2m quit␛[0m
+
+␛[1;35m◆ needs you␛[0m: ␛[1myunta resolve-gate 7E5PH4 approve␛[0m␛[2m (the plan waits for approval)␛[0m
+
+␛[1;35m◆␛[0m ␛[1mQ78GRR␛[0m␛[1;35m needs you␛[0m: the suite passed at baseline and now exits 101␛[2m · ␛[0m␛[1ma␛[0m␛[2m go there␛[0m
+
+␛[1;35m◆ needs you␛[0m: node `implement` asks at its terminal

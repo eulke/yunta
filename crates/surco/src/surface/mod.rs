@@ -5,6 +5,12 @@
 //! a browser, a page. Every surface draws every block,
 //! and draws the words a block says whole — the word carries the meaning,
 //! so no medium may drop it.
+//!
+//! Markdown, the description and a page also draw a whole
+//! [`Screen`](crate::components::Screen), in the order a reader takes its
+//! parts. The terminal draws no screen: an engine of cells lays one out and
+//! draws each pane's document here at [`Width::exact`](crate::look::Width::exact),
+//! where a line past the pane's edge goes on in the rows under it.
 
 mod diff;
 mod html;

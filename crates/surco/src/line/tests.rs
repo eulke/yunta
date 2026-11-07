@@ -257,3 +257,44 @@ fn a_path_links_to_its_file_with_what_an_address_cannot_hold_escaped() {
         Some("file:///w/%C3%B1%20a%20b%23c%25d%07.rs")
     );
 }
+
+/// A line past a pane's edge goes on in the row under it, broken at its last
+/// space before the edge and hung under where its text starts, each part in
+/// its span's tone.
+#[test]
+fn a_line_past_a_panes_edge_goes_on_under_where_its_text_starts() {
+    let line = Line::new().push(Tone::Faint, "▎").plain("   ").push(
+        Tone::Strong,
+        r#"yunta resolve-gate 7E5PH4 adjust --text "<answer>""#,
+    );
+
+    let rows = line.rows_within(53);
+
+    let said: Vec<String> = rows.iter().map(Line::text).collect();
+    assert_eq!(
+        said,
+        [
+            "▎   yunta resolve-gate 7E5PH4 adjust --text",
+            r#"    "<answer>""#
+        ]
+    );
+    assert_eq!(rows[0].spans()[0].tone, Tone::Faint);
+    assert_eq!(
+        rows[1].spans().last().map(|span| span.tone),
+        Some(Tone::Strong)
+    );
+    assert_eq!(line.rows_within(54), vec![line.clone()]);
+}
+
+/// A word wider than what a row has left is broken at the edge, so no row
+/// passes it and no character is lost.
+#[test]
+fn a_word_wider_than_its_row_breaks_at_the_edge() {
+    let line = Line::new()
+        .plain("  ")
+        .push(Tone::Command, "limits.max_tokens_per_run");
+
+    let said: Vec<String> = line.rows_within(12).iter().map(Line::text).collect();
+
+    assert_eq!(said, ["  limits.max", "  _tokens_pe", "  r_run"]);
+}

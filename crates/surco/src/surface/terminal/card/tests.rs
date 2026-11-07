@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use crate::components::{Card, CardBody, ChoiceRow, Choices, TypedRow};
+use crate::components::{Card, CardBody, ChoiceRow, Choices, Legend, TypedRow};
 use crate::figures::files_moving;
 use crate::glyphs::Glyphs;
 use crate::golden::{assert_golden, ENVIRONMENTS, RICH};
@@ -47,12 +47,11 @@ fn card(body: CardBody, glyphs: Glyphs) -> Card {
         edge: Some(format!("approve-plan {} 3GQF5Q", glyphs.sep())),
         about: vec![files_moving("8 files".to_string(), 295, 73, glyphs)],
         body,
-        keys: vec![
-            format!("{} move", glyphs.up_down()),
-            "enter chooses".to_string(),
-            "n adds a note".to_string(),
-            "esc leaves it for later".to_string(),
-        ],
+        legend: Legend::new()
+            .arrows("move")
+            .key("enter", "chooses")
+            .key("n", "adds a note")
+            .key("esc", "leaves it for later"),
     }
 }
 
@@ -162,7 +161,9 @@ fn a_field_opens_under_the_option_it_answers_with_the_cursor_on_it() {
         refused: None,
     };
     let mut card = card(body, Glyphs::Unicode);
-    card.keys = vec!["enter sends it".to_string(), "esc goes back".to_string()];
+    card.legend = Legend::new()
+        .key("enter", "sends it")
+        .key("esc", "goes back");
     let placed = card.drawn(&look(Glyphs::Unicode, 80), usize::MAX);
     let rows: Vec<String> = placed.lines.iter().map(|line| line.text()).collect();
     assert_eq!(
@@ -451,5 +452,24 @@ fn a_card_matches_its_goldens_in_every_environment() {
             .map(|line| look.paint.line(line) + "\n")
             .collect();
         assert_golden(&environment.golden(&goldens, "choosing"), &drawn);
+    }
+}
+
+/// A card's keys read in one muted run, each key beside what it does and the
+/// glyph set's separator between two, in each glyph set.
+#[test]
+fn a_cards_legend_reads_as_its_keys_read() {
+    for (glyphs, foot) in [
+        (
+            Glyphs::Unicode,
+            "▎ ↑↓ move · enter chooses · n adds a note · esc leaves it for later",
+        ),
+        (
+            Glyphs::Ascii,
+            "| up/down move ; enter chooses ; n adds a note ; esc leaves it for later",
+        ),
+    ] {
+        let rows = drawn(&card(choosing(0, None), glyphs), &look(glyphs, 100));
+        assert_eq!(rows.last().map(String::as_str), Some(foot), "{rows:#?}");
     }
 }

@@ -10,8 +10,9 @@
 //! surface already builds, and changes none of them.
 
 use crate::components::{
-    Checklist, Code, Concern, Decision, Diffstat, Evidence, Fields, Furrow, Gist, Headline, Marked,
-    Next, NodeTable, Note, Paths, Problem, Prose, Refusal, Runs, Said, Section, Table,
+    Attention, Checklist, Code, Concern, Decision, Diffstat, Evidence, Fields, Furrow, Gist,
+    Headline, Legend, Marked, Next, NodeTable, Note, Paths, Problem, Prose, Refusal, Ribbon, Runs,
+    Said, Section, Table,
 };
 use crate::line::Line;
 
@@ -48,11 +49,14 @@ impl Depth {
     }
 }
 
-/// One part of a document.
+/// One part of a document. Not a [`Screen`](crate::components::Screen),
+/// which holds documents, each in its place.
 pub enum Block {
     Headline(Headline),
     /// Where each node of the run stands, under the headline.
     Furrow(Furrow),
+    /// Where each node of the run stands, under its name: a screen's signature.
+    Ribbon(Ribbon),
     /// The page's gist, under the headline.
     Gist(Gist),
     Fields(Fields),
@@ -77,6 +81,10 @@ pub enum Block {
     /// What a command would not do.
     Refusal(Refusal),
     Next(Next),
+    /// The keys of what is on screen, each with what it does.
+    Legend(Legend),
+    /// What needs a person, and how they answer it.
+    Attention(Attention),
     /// What a whole document is, before anything it says: its name and
     /// the facts beside it.
     Title(crate::components::Title),
@@ -115,6 +123,7 @@ macro_rules! block_from {
 block_from!(
     Headline(Headline),
     Furrow(Furrow),
+    Ribbon(Ribbon),
     Gist(Gist),
     Fields(Fields),
     Table(Table),
@@ -129,6 +138,8 @@ block_from!(
     Problem(Problem),
     Refusal(Refusal),
     Next(Next),
+    Legend(Legend),
+    Attention(Attention),
     Title(crate::components::Title),
     Section(Section),
     Fold(crate::components::Fold),

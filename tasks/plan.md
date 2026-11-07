@@ -1,187 +1,308 @@
-# Implementation Plan: `session-ends`
+# Implementation Plan: `surco-screen`
 
-Spec: `SPEC-session-ends.md`, approved on 2026-11-06. Status: **approved on 2026-11-06**, with the dependency of decision 12. Task list: `tasks/todo.md`, written in the next phase.
-Base: `feature/yunta-tui` at `7d2752fe`, on `main` at `34790ab8`, which had not moved when this was written.
+Spec: `SPEC-surco-screen.md`, approved on 2026-11-06, its four open questions answered with the recommended choice. Status: **approved on 2026-11-06**, with the catalog's goldens growing at their end (decision 6). The layout was revised the same day: each interface lays a screen out its own way, at the user's choice (decisions 3 and 4). Task list: `tasks/todo.md`.
+Base: `feature/yunta-tui` at `717148cf`, on `main` at `34790ab8`, which had not moved when this was written.
 
 ## Overview
 
-The Codex parser stops reading a top-level `error` line as the end of a turn, so only `turn.completed` and `turn.failed` end one, and the adapter contract gains a retry notice in every dialect. Each session's CLI is started with a mark in its environment that names its run and is unique to the session. Every end of a session then does three things in `core/process`: it walks the CLI's tree by parent links and closes every group under it, it closes the CLI's own group, and it sweeps the user's processes for the mark and closes what carries it. The engine ends a finished session through that same verified close instead of the unverified signal its drop sends today. `yunta cancel` and `yunta close` do the same for a run whose engine died, from the run's id alone. One dependency is added, on macOS only, to read another process's environment.
+`yunta-surco` gains three things:
+- **A public style reading** that `Paint`, the clap styles and the HTML page all read.
+- **What an open interface needs, as data:** `Ribbon`, `Legend` and `Attention` as blocks, and `Screen` and `Overlay` as compositions of documents.
+  - Every surface draws each block, and Markdown and HTML draw each screen.
+  - A screen holds no cell, pixel or color. The terminal (`tui` module), a GPUI desktop and a page each lay it out their own way, and Surco's tokens give them one look.
+- **A width of exactly the cells a pane is given,** so another engine's panes can draw Surco's documents.
+
+Then `Card`, `DeskFoot` and the attached region are rebuilt on `Legend` and `Attention`, and print what they printed. The look is the spike's, as Surco's rules allow. Target goldens are written and reviewed before the code that draws them.
 
 ## Architecture Decisions
 
-**1. Codex: an `error` line is no event.**
-- `codex/parse.rs` maps `ThreadEvent::Error` to no event; `turn.failed` keeps mapping to `Failed` with its message, so `failure_cause` classifies a refused model, a reached limit and a lost service as at the base.
-- The `//!` of `parse.rs` says why: the CLI prints the same line for a retry it goes on from and for the error a `turn.failed` then carries.
-- A stream that closes with no terminal line stays a session that died (`DispatchOutcome::Crashed`), as the port's contract already says. Nothing reads the last `error` line back.
+**1. The style reading, in `paint/style.rs`.**
+- `paint.rs` holds 459 lines, so the reading goes in a file of its own, re-exported by `paint`.
+- One function answers every layer. `Paint::Plain` has no style. The sixteen colors keep their bold, dim and color of `ansi`, and fill nothing, as today. The 24 bits keep the tone, fill and pill rules of `truecolor_parameters`.
 
-**2. The retry notice, in the contract and the mock.**
-- The contract's `Step` gains `RetryNotice`. Its wire writes it as each CLI does. Claude Code prints `{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"retry_delay_ms":500,"error_status":503,"error":"server_error"}`, the fields its documentation lists. Codex prints `{"type":"error","message":"Reconnecting... 2/5 (unexpected status 503 Service Unavailable)"}`.
-- The mock's `MockStep` gains the same step, rendered by `claude_code/wire.rs` and `codex/wire.rs` as above, so a mock fixture in the Codex dialect goes through the parser that changes.
-- The contract case runs on all three subjects: a session that prints a retry notice and then completes ends `Completed`. It fails at the base on `codex` and on the mock in the Codex dialect.
+```rust
+/// How a span is drawn: what an escape, a cell of another engine or a page's
+/// style sets. Not a `Tone`, which is the span's role; this is what that role
+/// looks like in one layer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Style {
+    pub bold: bool,
+    pub dim: bool,
+    pub fg: Option<Color>,
+    pub bg: Option<Color>,
+}
 
-**3. The mark.**
-- `SessionMark` lives in `core/process/mark.rs`: the run's id and a uuid v4 minted when the session is planned. Its value is `<run id>.<uuid>`, carried in `YUNTA_SESSION_MARK`.
-- The variable's name holds none of `KEY`, `SECRET` or `TOKEN`. Neither the value nor the name is secret.
-- `SessionMark::of_run(&RunId)` is what `yunta cancel` and `yunta close` match: every mark of that run.
-- `SessionRequest` gains `mark: SessionMark`, built only in `run/session_plan.rs`, the one place a request is composed. `port/session.rs` is at 497 lines, so `SessionEnv` and `RunToolsEndpoint` move to a sibling module of `port` first, with no other change.
-- The subprocess launch puts the mark in the CLI's environment itself, so no adapter can forget it. The mock ignores it, since it runs no process.
+/// A color as a layer has it: one of the terminal's sixteen, or 24 bits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Color {
+    Ansi(Ansi),
+    Rgb(u8, u8, u8),
+}
 
-**4. Codex keeps the mark in its commands' environment.**
-- `codex/config.rs` adds `-c shell_environment_policy.set.YUNTA_SESSION_MARK=<value>` through `ConfigOverride`, which already quotes every value.
-- Codex adds `set` after every filter but `include_only`. A person's own policy with an `include_only` that leaves the name out still drops the mark. Then only the walk reaches those commands, and `docs/adapters.md` says to name the variable there.
-- This corrects one sentence of the spec, which says a person's own policy cannot drop the mark; the spec is updated with this plan.
+/// The style of a span in `tone` on its own fill or else its line's, in `layer`.
+pub fn style(layer: Layer, tone: Tone, own: Option<Fill>, line: Option<Fill>) -> Style;
 
-**5. The walk, in `core/process/tree.rs`.**
-- `groups_under(group: Pid) -> Vec<Pid>` starts from every member of `group`, not only its leader, so a leader that exited still has its members walked.
-- It follows children by parent pid to the bottom: `libproc`'s `ByParentProcess` filter on macOS, and `procfs` on Linux, both already dependencies. It collects every group it meets other than `group` itself.
-- It never returns the caller's own group (`getpgrp()`), nor a group id of 1 or less.
-- `close_groups_under(group)` closes each one with `force_kill_group`, killed until no member can execute, and names every group that would not close.
-- It is synchronous on its read, so a drop can use it too. `group.rs` is at 469 lines, so the walk gets its own module.
+/// The background a filled line is erased with to its edge, in `layer`.
+pub fn erase(layer: Layer, line: Option<Fill>) -> Option<Color>;
 
-**6. The sweep, in `core/process/mark.rs`.**
-- `marked(mark_or_run) -> Vec<(Pid, SystemTime)>` lists this user's processes whose environment holds the mark, each with the start time `process_start` reads.
-- On Linux it reads `/proc/<pid>/environ` through `procfs`. On macOS it reads `KERN_PROCARGS2` through the dependency of decision 12.
-- `close_marked(…)` signals a pid with SIGKILL only while `process_start` still answers the start time it was found with, and repeats until a pass finds nothing marked, within a bound. It never signals the caller, nor a pid of 1 or less.
-- A process that will not die within the bound is named in the error.
-- A session's sweep reads the environment only of the user's processes that started no earlier than a minute before its CLI: `Marks::Session` carries the CLI's start. On macOS the candidates are listed as the walk lists the table, through `libproc`'s BSD info (0.3 ms), and `sysinfo` reads only their environments: a listing through `sysinfo` costs about 6 ms by itself, measured. A run's sweep from `yunta cancel` or `yunta close` has no start and reads every process. Added after Task 14 measured 7 ms a sweep for about 570 processes (the user's choice).
-- macOS hides the environment of its own platform binaries (`/bin/sleep`, `sh`, `zsh`, `perl`, `ruby`) from every other process, measured at Checkpoint A. Such a process reads as carrying no mark, never as an error, so the sweep goes on with the rest. On macOS a process whose parent left is found only when it runs another binary, as `node`, `python3` or one built apart does; the docs say so (the user's choice at Checkpoint A, over the walk alone). GitHub's macOS runner shows those environments, so this holds only where macOS hides them, and the test compares the sweep with what `ps` shows (corrected after the module's commit).
+/// The colors only a page has on `ground`, each with the name a page's style reads it by.
+pub fn page(ground: Ground) -> [(&'static str, Color); 5];
+```
 
-**7. Every end of a `SubprocessSession`.**
-- `kill` does three things, in this order: the walk and close of the groups under the CLI's group, the close of the CLI's own group as today, and the sweep of the session's mark.
-- `exit` does the same three, for a stream that ended with no terminal line. There the CLI has usually exited already, so the walk finds nothing and the sweep is what reaches its commands.
-- `interrupt` walks and closes the groups under the CLI's group before it sends SIGINT. The engine interrupts only to begin an end (cancel, timeout, budget), and a CLI that leaves at the SIGINT leaves its commands with no parent link to follow. On macOS, where the sweep cannot see `sleep` or a shell, such a command then outlived `yunta cancel` of a live engine (measured in Task 12). What that walk could not close is kept, and the `kill` that follows answers for it. Corrected while implementing.
-- `force_kill_group` looks again 1 ms after its first signal, then every 10 ms as before, within the same bound of about a second. Before, it waited 10 ms after the signal, which every end of a group that dies at once paid. Added after Task 14 measured it (the user's choice).
-- The drop does one pass of each synchronously, with SIGKILL and no wait: it is the last resort for a session nobody ended.
-- The error of `kill` and `exit` names every group and pid that would not close.
-- The port's kill contract says what is true: the whole tree, and what carries the session's mark, and nothing else.
+- `Ansi` becomes public: today's private enum and its codes.
+- `Paint::word`, `Paint::span` and `Paint::erase` write their SGR from `style` and `erase`.
+- `paint/help.rs`, the clap styles, reads `style`.
+- `surface/html/style.rs` reads `style` and `page`.
+- `palette` stays private, and its values and contrast tests stay as they are. No color value exists outside it.
 
-**8. The engine ends a finished session through `kill`.**
-- Today a session that reached its terminal line is released and dropped, and its drop sends SIGKILL to the CLI's group, with nothing checking that it closed.
-- `read_and_release` now calls `session.kill()` once a terminal outcome is read, before `release`. The CLI said everything it had to say, so no interrupt and no grace come first; a cut-short session keeps `end_running`.
-- A `kill` that fails becomes `DispatchError::NotStopped`, as a cut-short session's does.
-- The registration keeps the CLI's group, and adds each group the error names, so the checkout stays held while anything of the session may still write it.
+**2. The blocks, as data in `components/`.** One file each, with the crate's rule: what is said and its role, never a width, an escape or a glyph. Each is built the way a caller reads it.
 
-**9. `yunta cancel` and `yunta close` after the engine.**
-- `kill_groups` (the escalation and the crash paths) and `kill_unstopped_groups` (the stopped path) first walk and close the groups under each registered group. Then they signal the registered groups as today, and sweep `SessionMark::of_run(run_id)` last.
-- The registered groups are the run's own, so walking all of them is what "the run's whole tree" means. `may_signal`'s refusal of a group of 1 or less stays.
+```rust
+/// The furrow with the names of the run's nodes over it: the signature at
+/// the top of a run. Not a `Furrow`, which hangs under a page's headline and
+/// names no node.
+pub struct Ribbon {
+    pub stretches: Vec<Stretch>,
+    /// How many events the running node has had: the plow stands a cell
+    /// further for each. `None` where the view stands still: no plow.
+    pub events: Option<u64>,
+}
+/// One node's stretch of the furrow: its name and the word it stands at.
+pub struct Stretch {
+    pub name: String,
+    pub standing: Standing,
+}
 
-**10. Stubs and tests.**
-- The two stubs gain `<NAME>_STUB_GROUP_CHILD`, which starts `sleep` in a group of its own, and `<NAME>_STUB_ORPHAN_CHILD`, which starts `python3` sleeping in a group of its own from a shell that exits at once. Both write the child's pid to a file the test waits on. The group child runs through `perl -e 'setpgrp(0, 0); exec …'`, and the orphan is `python3`, whose environment macOS lets another process read, so the orphan case holds on both platforms. Both are present on macOS and on the Linux runners.
-- The contract's process cases gain:
-  - a command in a group of its own is gone after `kill`, after an interrupt the CLI leaves at followed by `kill`, and after the stream ends by itself;
-  - an orphaned one is gone after both.
-- Corrected while implementing: each stub waits until each command it starts is in its own group and has written its pid before it prints, because a session that ends at its last line otherwise closes the stub's group while the command is still joining one of its own. A `<NAME>_STUB_SAID_FILE` says the stub's lines are all printed, so a test kills the engine only once the stub writes no more. An engine killed mid-write takes the stub with it by SIGPIPE.
-- Core tests start real processes and check the process table, and every test kills what it started at its end.
+/// The keys a person can press where they are, each with what it does, in
+/// the order they are read. Not a `Next`, which says what to type at a shell.
+pub struct Legend(pub Vec<Binding>);
+/// What is pressed and what it does: `enter` and `open`.
+pub struct Binding {
+    pub keys: Keys,
+    pub does: String,
+}
+/// What is pressed, as the person reads it: the arrows, which each glyph set
+/// draws its own way, or keys spelled as they are typed (`enter`, `esc`, `n`).
+pub enum Keys {
+    UpDown,
+    Typed(String),
+}
 
-**11. What a person and a program rely on is written down.**
-- `docs/adapters.md`: the session's end, the mark, a person's `include_only`, and Codex's retry notices.
-- `docs/compatibility.md`: Platforms, what the process layer guarantees and what stays out.
-- `.agents/architecture.md` gains the rule "Nothing a session's CLI started outlives its session, linked to it or carrying its mark", held by the process tests and the contract.
-- `.agents/choices.md`: the absence, with its reason: a process that cleared its environment and left the tree, and one the system starts at an agent's request.
-- The `//!` this module makes false: `process/mod.rs`, `subprocess.rs`, `launch.rs` (its comment says a group signal reaches the CLI's tool subprocesses), `group.rs`, `cancel.rs`, `codex/parse.rs`.
+/// What needs a person, and how they answer it, on any screen. Not a
+/// `Concern`, which warns: this asks.
+pub struct Attention {
+    /// What needs them, when a screen shows more than one: a run's handle.
+    pub subject: Option<String>,
+    /// What is asked of them.
+    pub asks: String,
+    pub answer: Answer,
+}
+/// How a person answers what needs them.
+pub enum Answer {
+    /// Typed at a shell: said before what is asked, so a row cut short keeps it.
+    Command(String),
+    /// Pressed here: said after what is asked, which gives way to it.
+    Key(Binding),
+    /// Given where it was asked, at another terminal: nothing here answers
+    /// it, so only what is asked is said.
+    Elsewhere,
+}
+```
 
-**12. The dependency: `sysinfo`, on macOS only.** For the user to approve with this plan.
-- `sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }`, under `[target.'cfg(target_os = "macos")'.dependencies]` of `yunta-core`. Linux reads `/proc` through `procfs`, as the rest of the module does.
-- **License:** `sysinfo` is MIT. On macOS it adds `objc2-core-foundation` and `objc2-io-kit`, both `Zlib OR Apache-2.0 OR MIT`. `libc`, `memchr` and `bitflags` are already in the workspace's lock.
-- **deny.toml:** checked against the repository's own `deny.toml` in a scratch project: `bans` and `licenses` pass with no change, because MIT is allowed and each new crate offers it.
-- **Weight:** a minimal release binary on macOS arm64 grows from 433,776 to 519,744 bytes (86 KB) with one sweep in it.
-- **Time:** one sweep that reads the environment of this user's 367 processes took a median of 13.95 ms and at most 72.40 ms over 20 passes.
-- **Toolchain:** its `rust-version` is 1.95, under the 1.98 that `rust-toolchain.toml` pins.
-- **Rejected alternatives:**
-  - writing the `sysctl` call with `unsafe`, which the workspace forbids;
-  - parsing `ps eww`, another tool's text, where a value may hold spaces;
-  - `libproc`, already a dependency, which reads no environment.
+- **Built as they read:**
+  - `Legend::new().arrows("move").key("enter", "chooses")`;
+  - `Attention::command(asks, command)`, `Attention::key(asks, keys, does)` and `.of(subject)`;
+  - `Ribbon::new(stretches)` and `.plowed(events)`.
+- **`Block` gains `Ribbon`, `Legend` and `Attention`,** each with `From`. A ribbon hangs from a headline, as the furrow does.
+- **One with nothing to say draws nothing:** a legend with no binding, a ribbon with no stretch, an attention that asks nothing.
+
+**3. The screen, as data in `components/screen.rs`.** Its parts are named by what they are, never by where they stand, and its types admit only valid states: the main region has the focus unless the side one says it has.
+
+```rust
+/// What a whole interface shows, with no cell, no pixel and no color: each
+/// interface lays it out its own way. Not a `Doc`: a screen holds documents.
+pub struct Screen {
+    /// Where the person is, from the outermost: `yunta`, a run, a node.
+    pub trail: Vec<String>,
+    /// How many runs stand at each word that asks for a look.
+    pub tally: Vec<Count>,
+    /// What the screen is about, across it: a run's headline, ribbon and gist.
+    pub about: Option<Doc>,
+    pub main: Region,
+    /// A list beside the main region to move through, the first to give way.
+    pub side: Option<Side>,
+    pub attention: Option<Attention>,
+    pub legend: Legend,
+    /// Open over the regions; its legend stands for the screen's while open.
+    pub overlay: Option<Overlay>,
+}
+/// How many runs stand at one word: `13 need you`.
+pub struct Count {
+    pub standing: Standing,
+    pub runs: usize,
+}
+pub struct Region {
+    pub title: Option<String>,
+    pub doc: Doc,
+}
+pub struct Side {
+    pub region: Region,
+    /// Whether the keys act on it rather than on the main region.
+    pub focused: bool,
+}
+/// What opens over a screen and closes with `esc`: the palette, help, a confirmation.
+pub struct Overlay {
+    pub title: String,
+    pub doc: Doc,
+    pub legend: Legend,
+}
+```
+
+- **Built as it reads:** `Screen::new(main)`, `.trail(...)`, `.tally(Standing::NeedsYou, 13)`, `.about(doc)`, `.side(region)`, `.focus_side()`, `.attention(...)`, `.legend(...)` and `.overlay(...)`. Also `Region::new(doc).titled("plan")`.
+- **What a screen carries:** no scroll position, no width and no size. Each interface keeps where a person scrolled to and how wide a pane stands.
+
+**4. Each interface lays a screen out; Surco gives a pane its exact width.**
+- **Surco lays no screen out on a terminal.**
+- **The `tui` module does:**
+  - Ratatui's `Layout`;
+  - each region's document drawn by `Terminal::lines` at the region's width;
+  - the overlay's box in Surco's `corners(Shape::Box)` and joints;
+  - the attention row on the tint the style reading gives.
+- **The targets drawn for the terminal at 80×24 and 60×14** stay as that module's reference.
+- **A GPUI desktop** lays it out with flexbox, and a page with CSS grid.
+- **What a pane needs from Surco: `Width::exact(cells)`.** `Width::of` holds a stream between 60 and 120 cells, which a pane of 22 cannot use.
+  - `Width::whole`, the desk's, already had no floor and no ceiling. It becomes `Width::exact`, since a pane's own edge bounds it as the desk's does.
+  - **A pane's edge cuts what passes it,** where a stream's terminal wraps it. Measured while implementing: twelve existing blocks passed an exact width below 60. The widest was the decision at 53 cells, which is the main region's width at 80 columns.
+  - At the user's choice, the terminal surface lays each line past a pane's edge out in rows (`Line::rows_within`, read from `Width::cuts`). A row breaks at its last space, or else at the edge, and each further row hangs under where the line's text starts.
+  - A stream keeps its lines as they are, so a word its terminal wraps is still copied whole.
+  - A test draws every block of the catalog at exact widths from 20 to 59, and finds no line wider than its width and no panic.
+
+**5. Markdown, the description and HTML.**
+- **Markdown and the description:**
+  - a ribbon is a line of each name with its word, in order;
+  - a legend is a line of `` `keys` does `` pairs;
+  - an attention is a line with its words.
+  - A screen is its trail and tally, what it is about, the side region and then the main one, each as a section under its title, then its attention and legend. An overlay is a section after them, under its title.
+- **HTML:**
+  - a ribbon is a row of names over the furrow's strokes, with every word in its label;
+  - a legend is a row of `<button type="button" class="key" data-key="…">`, inert on a static page;
+  - an attention is a tinted `<p role="status">`.
+  - A screen is a `<header>` with the trail and the tally, a `<div class="about">`, a `<main>` with a `<section class="region side">` and a `<section class="region main">`, the focused one with `aria-current`, a `<footer>` with the attention and the legend, and an overlay as a `<dialog open>`.
+- **`every_surface_says_every_word_a_screen_holds`** holds both: each surface's words include every string the screen holds, read from its data.
+
+**6. Goldens, and the catalog.**
+- **A deviation from the spec.** `every_kind_of_block_stands_in_the_catalog` asks the catalog for a sample of every kind of block. So the three new blocks enter the catalog, and its goldens (`components/catalog.*.txt`, `markdown/catalog.md`, `html/catalog.html`) grow.
+  - The new samples go in a part appended after `closing()`. Each of those files then changes only by what is added at its end, or before the page's closing tags.
+  - Every other existing golden stays byte for byte. That is the one place where the spec's "no existing golden changes" is narrowed (approved).
+  - Rejected: a second catalog for the new blocks. It would split the one reference Surco keeps and make a reader look in two places.
+- **A screen's goldens:** `markdown/screen.md` and `html/screen.html`, the run's screen with the help overlay open.
+- **Targets first.** The blocks' targets are drawn by hand in `ascii-80` and `unicode-60`, and the screen's as Markdown and HTML. They follow the spike's frames as Surco's rules allow, and the user reviews them before any code draws them. The other environments are blessed once the code draws the targets, and read in their diff.
+
+**7. The callers move without a change to what they print.**
+- `Card.keys` and `DeskFoot.keys` become `Legend`.
+- `crates/cli/src/ask/{card,desk,menu,form}.rs` build one with `Legend::new().arrows("move").key("enter", "chooses")…` where they built strings.
+- `crates/cli/src/surface/view/mod.rs` builds its row as `Attention::command(…)` and draws it through the terminal surface.
+- Its row for a run whose engine asks at its own terminal is `Attention::elsewhere(…)`, at the user's choice: the words stay, and what it asks goes from strong to plain.
+- Their tests and the goldens of `yunta-surco` (card, desk), `yunta` (`crates/cli/goldens`), `yunta-render` and `yunta-engine` stay byte for byte.
+
+**8. What is said, and where.**
+- Each new module gets a `//!`. `components/mod.rs`, `doc.rs`, `surface/mod.rs`, `paint.rs` and the crate root say what is true.
+- The rule "a color has one table" is held by the test of decision 1. The `//!` of `paint/style.rs` says so.
+- `.agents/architecture.md` stands at 6,045 of its 6,144 bytes, so the rule goes in no line of it: a test holds it.
+- No user document changes, because nothing a person runs looks different.
+- `CAPABILITY-MAP.md`'s `tui` row says what it now owns: a screen laid out with Ratatui's `Layout`, and the overlay's box in Surco's glyphs.
 
 ## Dependency Order
 
 ```
-1 the real CLIs at the base: groups, parents, environment (no code)
-                       │
-        ┌──────────────┴───────────────────────────┐
-        ▼                                          ▼
-2 the retry notice in the contract and the mock   4 the walk
-3 Codex: an `error` line is no event              5 the mark and the sweep, the dependency
-                                                  6 the session carries its mark
-                                                   │
-                                                   ▼
-                                     7 every end of a SubprocessSession
-                                                   │
-                                     ┌─────────────┴─────────────┐
-                                     ▼                           ▼
-                        8 the engine ends a finished    9 `yunta cancel` and `yunta close`
-                          session through `kill`
-                                     └─────────────┬─────────────┘
-                                                   ▼
-                                     10 docs, agent docs, the `//!`
-                                                   │
-                                                   ▼
-                      11 measurements   12 the real runs   13 the ci job   14 commit
+1 the style reading ── Paint, clap, HTML read it
+        │
+2 target goldens, reviewed
+        │
+3 Ribbon ─ 4 Legend ─ 5 Attention          (blocks, each on every surface, in the catalog)
+        │         │          │
+        │   7 Card, DeskFoot, prompts
+        │                    8 the region
+        └── 6 Screen, Overlay, Width::exact, as Markdown and HTML
+                     │
+                9 docs and the map ─ 10 gate ─ 11 commit
 ```
 
-Tasks 2 and 3 touch other files than Tasks 4 to 6, so they could run beside them. The list keeps them in order so that one worktree stays green between tasks. Task 6 needs Task 5's `SessionMark`, and Task 7 needs Tasks 4 to 6.
+The style reading depends on nothing. The blocks need the targets, and the screen needs the three blocks. The migrations need only their block. The docs come last, once what they describe is true.
 
 ## Phases
 
-### Phase 1: the real CLIs, before any code
-- Task 1: with each real CLI on the base's release build, a one-node run asks the agent to start a long command, once through the shell tool's background mode and once as `cmd &`, and to end its turn. While the session runs, a script reads the command's group, its parent and its environment: a probe variable set on `yunta`'s own environment shows whether a CLI passes its environment on. Once the session ends, the script reads whether the command still runs. A few thousand tokens per CLI.
+### Phase 1: the one table
+- Task: the style reading, and `Paint`, the clap styles and the HTML style read it.
 
-**Checkpoint A:** the results shown to the user. If a CLI does not pass its environment on, or does not start its commands in groups of their own, the spec and this plan are updated and the user is told before any code.
+### Checkpoint A
+- Every existing golden of the workspace is byte for byte the same. The new test holds one table across every tone, fill and layer.
 
-### Phase 2: the Codex retry
-- Task 2: the retry notice in the contract's steps and wire, and in the mock's fixture and both wire renderers. The contract case fails on `codex` and on the mock in the Codex dialect.
-- Task 3: the Codex parser. The case passes. A refused model and a reached limit keep their cause and message, and a whole run through the Codex stub with a retry line finishes.
+### Phase 2: the targets
+- Task: target goldens for the three blocks in `ascii-80` and `unicode-60`, and the screen as Markdown and HTML. Drawn by hand from the spike's frames. The terminal's screens stay as the `tui` module's reference.
 
-**Checkpoint B:** the adapter suite and the whole run, through the wrapper.
+### Checkpoint B
+- The user reviews the targets. No drawing code until they are approved.
 
-### Phase 3: the walk, the mark and the sweep
-- Task 4: `tree.rs`, the walk and the close of the groups under a group, with real processes in the core tests.
-- Task 5: `mark.rs`, the mark, a process's environment read on each platform, and the sweep. `sysinfo` enters here.
-- Task 6: the session carries its mark: `SessionRequest.mark` from the session plan (after moving `SessionEnv` and `RunToolsEndpoint` out of `port/session.rs`), the launch's environment, and Codex's `shell_environment_policy.set`.
+### Phase 3: the blocks
+- Task: `Ribbon` on every surface and in the catalog.
+- Task: `Legend` on every surface and in the catalog.
+- Task: `Attention` on every surface and in the catalog.
 
-**Checkpoint C:** the core and adapter suites; `cargo deny check` with `sysinfo` in the tree.
+### Checkpoint C
+- The catalog's goldens grow only by the appended part, and every other golden is unchanged.
+- In `ascii-80` no word is lost.
 
-### Phase 4: every end
-- Task 7: every end of a `SubprocessSession`, the stubs' two knobs, and the contract's process cases.
-- Task 8: the engine ends a finished session through `kill`, the registry keeps what would not close, and a whole run through each stub leaves nothing after a session's own end.
-- Task 9: `yunta cancel` and `yunta close`: with the engine alive, after its crash, and on a stopped run.
+### Phase 4: the screen
+- Task: `Screen`, `Region`, `Side` and `Overlay` as data; `Width::exact`; a screen in Markdown, the description and HTML.
 
-**Checkpoint D:** `repro.py` on a debug build: every case closed. `smells --check`.
+### Checkpoint D
+- The screen's targets match, and every block draws within an exact width below the floor.
 
-### Phase 5: what it says
-- Task 10: docs, agent docs, and the `//!` this module makes false.
+### Phase 5: the callers
+- Task: `Card` and `DeskFoot` on `Legend`, and the CLI's prompts building it.
+- Task: the region's row as an `Attention`.
 
-**Checkpoint E:** the whole workspace suite, its count explained against 267 binaries and 4,455 tests on macOS, no binary aborted.
+### Checkpoint E
+- The CLI's prompt and region tests pass unchanged, and every golden outside the catalog is byte for byte the same.
 
-### Phase 6: proof and close
-- Task 11: measured on release builds. Stub runs on the base and on the module take turns, 15 each, and their median time between nodes is compared; the time one session end spends walking and sweeping is measured too. `repro.py` runs again.
-- Task 12: the real runs. Task 1's script runs again on the module, and each command is gone once its session ends. Then a fragua run with `--detach` and `conform` on Codex `gpt-6-luna`, followed at a terminal up to `ship`, then `abort` and `close`, compared with 0.614 s.
-- Task 13: every step of the `ci` job, `cargo deny` among them.
+### Phase 6: what it says, proof and close
+- Task: the `//!` and `///` this module makes false, the map's `tui` row, and the docs checker.
+- Task: every step of the `ci` job, with the suite's count explained against 270 binaries and 4,504 tests.
+- Task: commit the module.
 
-**Checkpoint F:** the user reviews the whole diff, the before and after, and the real runs. No commit until approved.
-- Task 14: the commit, the push, the pull request's list and test plan, CI on Linux and macOS, `cargo clean`.
+### Checkpoint F
+- The user reviews the whole diff. No commit until approved.
 
 ## Verification
 
-- Each task names the test that fails first and why, and passes with `cargo test` on its targets through the wrapper.
-- A test that starts a process waits on the process table, never for a fixed time, and kills what it started at its end, whether it passed or not.
-- `cargo xtask smells --check` at each checkpoint. The gate runs before the commit, with `CARGO_INCREMENTAL=0`.
-- Results on release builds are kept in `.plans/yunta-tui/proof/session-ends/`, outside git, beside the scripts that produced them and `before.txt`.
+- **Each task:**
+  - `cargo test -p yunta-surco`, and the target of each caller it touches;
+  - `cargo xtask docs --about` on its files;
+  - `cargo xtask smells --check`.
+- **After each bless:** `git status crates/*/goldens` shows new files only, and the catalog files change only at their end.
+- **Before the commit:**
+  - every step of the `ci` job, one build at a time, with `CARGO_INCREMENTAL=0`, through `sh .plans/yunta-tui/tools/gate.sh`;
+  - then `cargo clean` after the commit.
+- **No real run.** The run path does not change (the spec's assumption 3).
 
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| A finished session's end now waits for its group to be seen empty, plus a sweep of about 14 ms | Med | Task 11 measures the median time between nodes against the base, 15 runs each, and one end's own time. If it shows, the plan comes back to the user with the measurement before anything changes on the run path |
-| The sweep signals a process that is not the session's | High | Only a process whose environment holds the session's own value is signalled, and only while its start time is the one it was found with. The walk never returns the caller's group. Unit tests hold both with a process that carries another mark and one that carries none |
-| A real CLI does not pass its environment to its commands, or clears the mark | High | Task 1 measures it with each real CLI before any code; for Codex the adapter also sets the mark through `shell_environment_policy.set`. A gap goes back to the spec and to the user |
-| Killing a finished CLI at once cuts the write of what `resume` reads | Med | It is what the drop does today, a moment after the terminal line: the signal and its moment stay, and only the check that the group closed is new. The existing resume cases and a real run that resumes a session keep holding it |
-| `perl` is missing on a runner | Low | It is on macOS and on GitHub's Ubuntu images; a stub that cannot start its child fails the test that asked for it, never silently |
-| `sysinfo`'s process read on macOS changes with a new version | Low | The version is pinned by the lock, and the core tests read a real marked process on the macOS runner |
+| A refactor of `Paint` changes an escape | High | Checkpoint A: every existing color golden (the catalog in `truecolor-dark-100` and `truecolor-light-100`, and each crate's) compares byte for byte before any new code |
+| A card's or a desk's keys print differently once they are a `Legend` | High | Their existing tests and goldens, unchanged, before and after; a legend drawn inside them keeps today's muted join |
+| A block drawn below the floor of 60 cells breaks a line or panics | Medium | `Width::exact`'s test draws every block of the catalog at every width from 20 to 59 |
+| A screen's data leans on one interface | Medium | It holds no width, size or scroll, and HTML draws every screen: the shape is held by a page as well as by a terminal |
+| The spike's look against a Surco rule, such as a glyph outside `glyphs` | Low | The rule wins and the target golden says so; the user sees it at Checkpoint B |
+| The catalog's goldens grow | Low | The change is only an appended part, and the spec is updated to say so (decision 6) |
 
 ## Parallelization
 
-None in practice: one worktree, and each phase's tests depend on the one before. Tasks 2 and 3 could run beside Tasks 4 to 6, which touch other files.
+None: one person, and the blocks share the catalog and the surfaces' dispatch.
 
 ## Open Questions
 
-None. The user approved the dependency of decision 12 with this plan, and the sentence of the spec that decision 4 corrects is updated.
+Answered on approval: the catalog's goldens grow by a part appended at their end.
+
+1. **The catalog's goldens grow** (decision 6). The new blocks join the catalog, so its three golden files gain an appended part. Every other golden stays byte for byte. The other choice, a second catalog, keeps those files as they are and splits the reference. The recommendation is to append.

@@ -2,7 +2,9 @@
 //! written by hand.
 
 use super::said_whole;
-use crate::components::{Card, CardBody, ChoiceRow, Choices, RoundRow, RoundStanding, TypedRow};
+use crate::components::{
+    Card, CardBody, ChoiceRow, Choices, Legend, RoundRow, RoundStanding, TypedRow,
+};
 use crate::glyphs::Glyphs;
 use crate::look::{Look, Width};
 use crate::paint::Paint;
@@ -70,13 +72,13 @@ fn typing(asked: &str, before: &str, after: &str, refused: &[&str]) -> RoundRow 
     }
 }
 
-fn card(rows: Vec<RoundRow>, keys: &[&str]) -> Card {
+fn card(rows: Vec<RoundRow>, legend: Legend) -> Card {
     Card {
         question: "3 answers before `grill` goes on".to_string(),
         edge: None,
         about: vec!["nothing is recorded until every one is answered".to_string()],
         body: CardBody::Round(rows),
-        keys: keys.iter().map(|key| (*key).to_string()).collect(),
+        legend,
     }
 }
 
@@ -96,7 +98,7 @@ fn a_round_holds_what_was_answered_what_is_asked_and_what_is_to_come() {
             picking("Which tier?"),
             ahead("Anything to add?", Some("optional, assumes nothing")),
         ],
-        &["↑↓ move", "enter answers"],
+        Legend::new().arrows("move").key("enter", "answers"),
     );
     assert_eq!(
         drawn(&card, &look(Glyphs::Unicode, 80), usize::MAX),
@@ -123,7 +125,7 @@ fn ascii_draws_its_own_marks() {
             picking("Which tier?"),
             ahead("Anything to add?", None),
         ],
-        &["enter answers"],
+        Legend::new().key("enter", "answers"),
     );
     let rows = drawn(&card, &look(Glyphs::Ascii, 80), usize::MAX);
     assert_eq!(rows[3], "| + Which environment?  production");
@@ -148,7 +150,7 @@ fn a_typed_question_opens_its_field_under_it_and_says_what_was_refused() {
             ),
             ahead("Anything to add?", None),
         ],
-        &["enter answers"],
+        Legend::new().key("enter", "answers"),
     );
     let placed = card.drawn(&look(Glyphs::Unicode, 80), usize::MAX);
     let rows: Vec<String> = placed.lines.iter().map(|line| line.text()).collect();
@@ -184,14 +186,14 @@ fn a_filter_stands_over_its_list() {
             }),
             "pr",
         )],
-        &["enter answers"],
+        Legend::new().key("enter", "answers"),
     );
     let rows = drawn(&narrowed, &look(Glyphs::Unicode, 80), usize::MAX);
     assert_eq!(
         rows[3..=5],
         ["▎ ◆ Which tier?", "▎     filter pr", "▎     ▸ pro"]
     );
-    let none = card(vec![row(None, "zz")], &["enter answers"]);
+    let none = card(vec![row(None, "zz")], Legend::new().key("enter", "answers"));
     let rows = drawn(&none, &look(Glyphs::Unicode, 80), usize::MAX);
     assert_eq!(
         rows[3..=5],
@@ -216,7 +218,7 @@ fn a_long_answer_is_cut_and_a_long_question_wraps() {
                 None,
             ),
         ],
-        &["enter answers"],
+        Legend::new().key("enter", "answers"),
     );
     for cells in 30..=100 {
         for row in drawn(&card, &look(Glyphs::Unicode, cells), usize::MAX) {
@@ -280,7 +282,7 @@ fn a_long_question_gives_way_before_its_answer() {
             "Which environment should this change be deployed to first?",
             "staging",
         )],
-        &["enter answers"],
+        Legend::new().key("enter", "answers"),
     );
     let rows = drawn(&card, &look(Glyphs::Unicode, 60), usize::MAX);
     assert!(rows[3].ends_with("…  staging"), "{rows:#?}");
@@ -301,7 +303,7 @@ fn a_field_in_a_round_fills_what_its_margin_leaves() {
 /// come next. What is being answered is never folded.
 #[test]
 fn a_long_round_folds_what_was_answered_and_then_what_is_to_come() {
-    let card = card(long_round(), &["enter answers"]);
+    let card = card(long_round(), Legend::new().key("enter", "answers"));
     let tall = drawn(&card, &look(Glyphs::Unicode, 80), 13);
     assert_eq!(
         tall,
@@ -335,7 +337,7 @@ fn a_long_round_folds_what_was_answered_and_then_what_is_to_come() {
 /// The cursor stands on the field wherever folding leaves it.
 #[test]
 fn the_cursor_follows_the_field_through_a_fold() {
-    let card = card(long_round(), &["enter answers"]);
+    let card = card(long_round(), Legend::new().key("enter", "answers"));
     let placed = card.drawn(&look(Glyphs::Unicode, 80), 13);
     assert_eq!(placed.cursor, Some((5, 8)));
 }
