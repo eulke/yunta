@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::CliError;
 use crate::output::Mode;
-use crate::surface::{Curtain, Diagnostics, Surface, SurfaceEnv};
+use crate::surface::{Curtain, Diagnostics, EngineReading, Surface, SurfaceEnv};
 
 use super::{Driving, Presentation};
 
@@ -62,8 +62,14 @@ pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Wat
     let surface = if env.output == Mode::Json {
         None
     } else {
-        Some(
-            Surface::open(SurfaceEnv {
+        // The run's creation is written before any observer exists, so the
+        // first thing the surface knows is read once, here.
+        let seed = env
+            .storage
+            .events_for_run(env.prepared.run_id.clone())
+            .await?;
+        Some(Surface::open(
+            SurfaceEnv {
                 run_id: &env.prepared.run_id,
                 manifest: env.manifest,
                 prior: env.prior.as_ref(),
@@ -71,9 +77,10 @@ pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Wat
                 clock: std::sync::Arc::new(env.ctx.clock),
                 delivery: shown.delivery,
                 glyphs: shown.glyphs,
-            })
-            .await?,
-        )
+                engine: EngineReading::This,
+            },
+            seed,
+        ))
     };
     // The token is the invocation's, installed when its `Context`
     // loaded; what this arranges is the line the person reads when they

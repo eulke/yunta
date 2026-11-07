@@ -492,4 +492,5 @@ fn a_field_that_goes_on_stands_under_the_one_it_goes_on_from() {
     assert!(body.contains("<code>src/greet.rs</code>"), "{body}");
 }
 
+mod screen;
 mod written;

@@ -103,8 +103,7 @@ impl Card {
             }
         }
         head.push(Line::new());
-        let separator = format!(" {} ", look.glyphs.sep());
-        let keys = self.keys.join(separator.as_str());
+        let keys = self.legend.spelled(look.glyphs);
         let foot: Vec<Line> = match keys.is_empty() || keeping == Keeping::TheQuestion {
             true => Vec::new(),
             false => std::iter::once(Line::new())

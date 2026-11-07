@@ -179,6 +179,7 @@ pub fn register_group(run_dir: &Path, engine: u32, group: u32) {
         started_at: yunta_testkit_core::FixedClock.now(),
         process_groups: vec![Pid::try_from(group).unwrap()],
         asking: None,
+        words: None,
     };
     std::fs::create_dir_all(run_dir.join(yunta_engine::run_dir::SCRATCH_DIR)).unwrap();
     let bytes = yunta_core::persisted::PersistedDoc::of(file)

@@ -213,14 +213,13 @@ fn a_stalled_loop_and_a_loop_without_a_tasks_document_say_what_they_need() {
 }
 
 #[test]
-fn a_loop_at_its_iteration_cap_names_the_limit_and_the_two_ways_past_it() {
+fn a_loop_at_its_iteration_cap_names_the_limit() {
     assert_eq!(
         sentence(&Failure::LoopCapped {
             node: yunta_core::NodeId::from("loop"),
             loop_cap: 3
         }),
-        "loop `loop` exceeded `limits.max_loop_iterations` (3); resume with an interactive surface \
-         to continue past the cap or abort"
+        "loop `loop` exceeded `limits.max_loop_iterations` (3)"
     );
 }
 

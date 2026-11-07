@@ -1,7 +1,7 @@
 //! A plan's desk on a terminal of an exact size. Every expected row here is written by
 //! hand, and what a row ends in spaces is gone before it is compared.
 
-use crate::components::{ChoiceRow, Desk, DeskFoot, FootRow, Pane, RailGroup, RailRow};
+use crate::components::{ChoiceRow, Desk, DeskFoot, FootRow, Legend, Pane, RailGroup, RailRow};
 use crate::glyphs::Glyphs;
 use crate::line::{Fill, Line};
 use crate::look::{Look, Width};
@@ -12,7 +12,7 @@ fn look(glyphs: Glyphs, cells: usize) -> Look {
     Look {
         glyphs,
         paint: Paint::Plain,
-        width: Width::whole(cells),
+        width: Width::exact(cells),
     }
 }
 
@@ -90,12 +90,14 @@ fn desk(lines: Vec<Line>) -> Desk {
         },
         foot: DeskFoot {
             question: "Plan registered. Approve?".to_string(),
-            row: FootRow::Options(vec!["approve".to_string(), "adjust".to_string()]),
-            keys: vec![
-                "j k task".to_string(),
-                "p proof".to_string(),
-                "esc back".to_string(),
-            ],
+            row: FootRow::Options {
+                named: vec!["approve".to_string(), "adjust".to_string()],
+                more: 0,
+            },
+            legend: Legend::new()
+                .key("j k", "task")
+                .key("p", "proof")
+                .key("esc", "back"),
         },
     }
 }
@@ -321,7 +323,9 @@ fn a_choice_being_confirmed_says_what_it_does() {
         said: Some("On to `implement`".to_string()),
         cost: Some("resolves this gate".to_string()),
     });
-    confirming.foot.keys = vec!["enter confirms".to_string(), "esc goes back".to_string()];
+    confirming.foot.legend = Legend::new()
+        .key("enter", "confirms")
+        .key("esc", "goes back");
     let rows = drawn(&confirming, &look(Glyphs::Unicode, 100), 24);
     assert_eq!(
         rows.last().map(String::as_str),
@@ -343,7 +347,9 @@ fn a_choice_being_confirmed_says_what_it_does() {
 #[test]
 fn keys_that_do_not_fit_beside_the_options_go_under_them() {
     let mut crowded = desk(numbered(1));
-    crowded.foot.keys = vec!["a very long way to say what a key does".to_string(); 3];
+    crowded.foot.legend = (0..3).fold(Legend::new(), |legend, _| {
+        legend.key("a", "very long way to say what a key does")
+    });
     let rows = drawn(&crowded, &look(Glyphs::Unicode, 100), 24);
     let at = rows
         .iter()
@@ -358,7 +364,7 @@ fn keys_that_do_not_fit_beside_the_options_go_under_them() {
 fn ascii_draws_it_with_what_ascii_has() {
     let mut plain = desk(numbered(3));
     plain.title = vec!["plan".to_string(), "EKPBGE".to_string()];
-    plain.foot.keys = vec!["j k task".to_string(), "p proof".to_string()];
+    plain.foot.legend = Legend::new().key("j k", "task").key("p", "proof");
     let rows = drawn(&plain, &look(Glyphs::Ascii, 100), 24);
     assert!(rows.iter().all(|row| row.is_ascii()), "{rows:#?}");
     assert!(

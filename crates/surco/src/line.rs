@@ -291,6 +291,44 @@ impl Line {
         lines
     }
 
+    /// The line as rows inside `cells`, for a pane whose edge cuts what
+    /// passes it: whole when it fits; else broken at the last space before
+    /// the edge, or at the edge inside a word wider than what the row has
+    /// left, each further row hung under where the line's text starts, and
+    /// each part in the tone, fill and link of its span. Not [`Line::wrap`],
+    /// which keeps a word whole past a stream's edge, where the terminal
+    /// wraps it and a copy still takes it whole.
+    pub fn rows_within(&self, cells: usize) -> Vec<Line> {
+        let text = self.text();
+        if cells == 0 || cell_width(&text) <= cells {
+            return vec![self.clone()];
+        }
+        // The text starts past the marks, gutters and spaces that lead it.
+        let lead = text.find(char::is_alphanumeric).unwrap_or(text.len());
+        // A further row hangs under it while that leaves the row half the line.
+        let hang = Some(cell_width(&text[..lead]))
+            .filter(|width| *width <= cells / 2)
+            .unwrap_or(0);
+        let mut rows: Vec<Line> = Vec::new();
+        let mut start = 0;
+        while start < text.len() {
+            let (room, after) = match rows.is_empty() {
+                true => (cells, lead),
+                false => (cells - hang, start),
+            };
+            let (end, next) = row_end(&text, start, room, after);
+            if end > start {
+                let row = self.slice(start..end);
+                rows.push(match rows.is_empty() {
+                    true => row,
+                    false => row.under(&" ".repeat(hang)),
+                });
+            }
+            start = next;
+        }
+        rows
+    }
+
     /// The line's words, in order, each as the parts of the spans it is made
     /// of, and the fill of the first whitespace before it. A word runs on
     /// across spans until whitespace ends it.
@@ -357,6 +395,34 @@ impl Line {
     pub fn text(&self) -> String {
         self.spans.iter().map(|span| span.text.as_str()).collect()
     }
+}
+
+/// Where the row of `text` that starts at byte `start` ends inside `room`
+/// cells, its trailing spaces left out, and where the next row starts, past
+/// the spaces between them. It ends at its last space past byte `after`
+/// when it has one, and else at the edge, one character at least, so every
+/// row moves on.
+fn row_end(text: &str, start: usize, room: usize, after: usize) -> (usize, usize) {
+    let rest = &text[start..];
+    let mut end = text.len();
+    if cell_width(rest) > room {
+        let (mut used, mut edge, mut space) = (0, start, None);
+        for (at, c) in rest.char_indices() {
+            used += cell_width(c.encode_utf8(&mut [0; 4]));
+            if used > room {
+                break;
+            }
+            edge = start + at + c.len_utf8();
+            if c == ' ' && start + at > after {
+                space = Some(start + at);
+            }
+        }
+        let first = rest.chars().next().map_or(0, char::len_utf8);
+        end = space.unwrap_or(edge.max(start + first));
+    }
+    let kept = start + text[start..end].trim_end().len();
+    let next = text.len() - text[end..].trim_start().len();
+    (kept, next)
 }
 
 /// The link to the file at `target`: a `file://` address with every byte of

@@ -52,6 +52,16 @@ pub enum AdapterError {
     #[error("adapter `{adapter}`: {message}")]
     Adapter { adapter: AdapterId, message: String },
 
+    /// What a session's CLI started would not close: `groups` are the
+    /// process groups that may still run, the CLI's own among them when it
+    /// would not close either. The engine keeps each in the run's registry.
+    #[error("adapter `{adapter}`: {detail}")]
+    NotClosed {
+        adapter: AdapterId,
+        groups: Vec<crate::Pid>,
+        detail: String,
+    },
+
     /// `adapters.<id>.adapter_settings` names a key the adapter does not
     /// read — a typo, or a setting of another adapter.
     #[error(

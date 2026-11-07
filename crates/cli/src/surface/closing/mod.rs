@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use surco::doc::Depth;
 use yunta_core::events::GateWaitingPayload;
-use yunta_core::{Isolation, NodeId, RunId, Workflow};
-use yunta_engine::{run_frame_of, PriorEstimation, RunFrame, RunState, ShownDocument};
+use yunta_core::{Isolation, RunId, Workflow};
+use yunta_engine::{run_frame_of, DecisionOn, PriorEstimation, RunFrame, RunState, ShownDocument};
 
 use crate::commands::status::decision::Beside;
 use crate::error::Outcome;
@@ -52,7 +52,7 @@ pub(crate) struct ClosingEnv<'a> {
     /// The decision a parked run stopped on, rebuilt from the manifest and
     /// the log. `None` for a pause with no menu to rebuild, and for a run
     /// that is not parked at all.
-    pub(crate) decision: Option<(NodeId, GateWaitingPayload)>,
+    pub(crate) decision: Option<(DecisionOn, GateWaitingPayload)>,
     /// The documents that decision shows, as the run holds them.
     pub(crate) shown: Vec<ShownDocument>,
     pub(crate) outline: Outline<'a>,
@@ -64,7 +64,7 @@ pub(crate) struct Closing {
     run_id: RunId,
     state: RunState,
     frame: RunFrame,
-    decision: Option<(NodeId, GateWaitingPayload)>,
+    decision: Option<(DecisionOn, GateWaitingPayload)>,
     shown: Vec<ShownDocument>,
     run_dir: PathBuf,
     worktree: PathBuf,
@@ -106,7 +106,7 @@ impl Closing {
         frame: RunFrame,
         state: RunState,
         now: DateTime<Utc>,
-        (decision, shown): (Option<(NodeId, GateWaitingPayload)>, Vec<ShownDocument>),
+        (decision, shown): (Option<(DecisionOn, GateWaitingPayload)>, Vec<ShownDocument>),
         outline: &Outline<'_>,
     ) -> Self {
         Self {
@@ -157,13 +157,14 @@ impl Closing {
     /// The decision a parked run stopped on, with what the page says beside
     /// it already: the record a failed node's evidence quotes.
     fn decided(&self) -> Option<Decided> {
-        let (node, escalation) = self.decision.as_ref()?;
+        let (on, escalation) = self.decision.as_ref()?;
         Some(Decided {
-            node: node.clone(),
+            on: on.clone(),
             escalation: escalation.clone(),
             shown: self.shown.clone(),
             beside: Beside {
-                evidence: failed(&self.frame).any(|(failed_node, _)| failed_node.id == *node),
+                evidence: failed(&self.frame)
+                    .any(|(failed_node, _)| on.node() == Some(&failed_node.id)),
             },
         })
     }

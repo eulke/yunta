@@ -53,6 +53,9 @@ libc = "0.2"
 rustix = { version = "1.1", features = ["fs", "process"] }
 procfs = "0.18"
 libproc = "0.14.11"
+# Reads another process's environment on macOS, where `sysctl(KERN_PROCARGS2)`
+# would take `unsafe`; only its process reading is compiled.
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 proptest = "1"
 regex = "1"
 reqwest = { version = "0.13", default-features = false }

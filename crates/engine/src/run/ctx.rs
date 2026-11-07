@@ -103,6 +103,9 @@ pub(crate) struct RunCtx<'a> {
     /// borrowed: the run-tools host keeps a clone of it and outlives
     /// every borrow of ours.
     pub observer: Option<Arc<dyn RunObserver>>,
+    /// What this run's sessions said lately, held for whoever listens. One
+    /// for the invocation, shared by every context of the run.
+    pub(crate) voices: Arc<crate::said::Voices>,
     /// The checkout this node was given of its own, and the tree its
     /// work lands in once that work passes its audit. `None` for a node
     /// working in the run's own tree, whose work is committed there when
@@ -186,6 +189,7 @@ impl<'a> RunCtx<'a> {
             secrets: self.secrets.clone(),
             redactor: self.redactor.clone(),
             observer: self.observer.clone(),
+            voices: self.voices.clone(),
             landing: self.landing.clone(),
             awake: self.awake.clone(),
             protected: self.protected.clone(),
@@ -232,6 +236,7 @@ impl<'a> RunCtx<'a> {
             secrets: self.secrets.clone(),
             redactor: self.redactor.clone(),
             observer: self.observer.clone(),
+            voices: self.voices.clone(),
             landing: self.landing.clone(),
             awake: self.awake.clone(),
             protected: self.protected.clone(),

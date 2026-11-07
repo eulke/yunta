@@ -95,7 +95,9 @@ pub use budget::session_token_budget;
 pub use close::{close_run, CloseRunError};
 pub use create::{create_run, run_redactor, BirthArtifact, BirthOrigin, CreateRunParams};
 pub(crate) use ctx::RunCtx;
-pub use escalation::{awaits_decision, current_escalation, resolve_gate, ResolveGateError};
+pub use escalation::{
+    awaits_decision, current_escalation, resolve_gate, DecisionOn, ResolveGateError,
+};
 pub(crate) use exec::execute_run_at_depth;
 pub(in crate::run) use exec::find_node;
 pub(in crate::run) use pause::pause;
@@ -389,7 +391,9 @@ impl RunReport {
 pub struct RunEnv<'a> {
     pub run_id: &'a RunId,
     pub manifest: &'a Manifest,
-    pub run_dir: &'a Path,
+    /// Proof that this process drives the run, and where the run lives: a hold
+    /// names its run's directory, so a run is never driven under another's claim.
+    pub hold: &'a crate::run_hold::RunHold,
     pub worktree: &'a Path,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a AsyncStorage,

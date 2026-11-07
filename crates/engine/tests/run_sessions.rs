@@ -25,6 +25,9 @@ mod messages;
 #[path = "run_sessions/distill.rs"]
 mod distill;
 
+#[path = "run_sessions/marks.rs"]
+mod marks;
+
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
     matches!(

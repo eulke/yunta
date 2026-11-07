@@ -100,6 +100,39 @@ fn reports_usage(payload: &EventPayload) -> bool {
     )
 }
 
+/// A session that finished its turn is ended by a kill that checks nothing it
+/// started still runs. One whose kill leaves a command behind ends its node
+/// with the fact that it could not be stopped, keeping what it spent, and the
+/// command's group stays on the run's registry while it runs.
+#[tokio::test]
+async fn a_finished_session_whose_kill_fails_ends_its_node_with_session_not_stopped() {
+    let bench = Bench::new();
+    let workflow =
+        "name: done\nnodes:\n  - { id: talk, kind: prompt, runner: executor, prompt: \"x\" }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - kill: leave_behind\n    steps:\n      - { type: usage, input_tokens: 7, output_tokens: 3 }\n    outcome: { type: completed, summary: done }\n";
+    let config = "runners:\n  executor:\n    - { adapter: mock, model: m }\n";
+
+    bench.run_with_config(workflow, fixture, config).await;
+
+    let failed = failed_payloads(&bench.events(), "talk");
+    let spent = TokenUsage {
+        input: 7,
+        output: 3,
+        cached: None,
+    };
+    assert!(
+        matches!(failed.as_slice(), [payload] if matches!(payload.failure, Failure::SessionNotStopped { .. }) && payload.tokens_used == spent),
+        "{failed:?}"
+    );
+    let groups = registered_groups(&bench.run_dir());
+    assert!(
+        groups
+            .iter()
+            .any(|group| matches!(group_runs(*group), Ok(true))),
+        "the command left behind is registered while it runs: {groups:?}"
+    );
+}
+
 /// A session the engine must stop, whose kill is refused, ends its node with
 /// the fact that the session could not be stopped, not as a cancellation.
 #[tokio::test]

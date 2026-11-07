@@ -7,7 +7,10 @@
 //! it closes — a detached daemon calling `setsid` — is either killed
 //! before it leaves or runs on outside it. A stop that caught it leaving
 //! would leave it frozen outside the group, holding whatever it
-//! inherited, with nothing left that would continue or kill it.
+//! inherited, with nothing left that would continue or kill it. What runs
+//! on outside a session's group is the walk's and the sweep's to close:
+//! [`tree`](super::tree) while it hangs from the CLI,
+//! [`mark`](super::mark) wherever its parent is.
 
 use std::io;
 use std::time::Duration;
@@ -37,6 +40,11 @@ pub fn child_has_exited_unreaped(pid: Pid) -> io::Result<bool> {
 }
 
 const OBSERVATION_INTERVAL: Duration = Duration::from_millis(10);
+/// How soon a kill looks again after its first signal, each later look
+/// waiting twice as long until a whole interval: a member the kernel kills
+/// is gone within a few milliseconds even on a busy machine, so most closes
+/// end at those looks instead of a whole interval later.
+const FIRST_LOOK: Duration = Duration::from_millis(1);
 /// How many observations of a group's members a kill waits for, one tick apart.
 const MAX_OBSERVATIONS: usize = 100;
 
@@ -113,6 +121,7 @@ pub async fn force_kill_group(pgid: Pid) -> Result<(), GroupError> {
     let mut observation = tokio::time::interval(OBSERVATION_INTERVAL);
     let mut last_members = Vec::new();
     let mut refused = None;
+    let mut waits = waits();
     for _ in 0..MAX_OBSERVATIONS {
         observation.tick().await;
         let members = match inspect(pgid) {
@@ -131,6 +140,7 @@ pub async fn force_kill_group(pgid: Pid) -> Result<(), GroupError> {
         }
         refused = signal_group(pgid, Signal::SIGKILL).err();
         last_members = members;
+        observation.reset_after(waits.next().unwrap_or(OBSERVATION_INTERVAL));
     }
     Err(match refused {
         Some(source) => GroupError::Signal {
@@ -142,6 +152,15 @@ pub async fn force_kill_group(pgid: Pid) -> Result<(), GroupError> {
             pgid,
             members: listed(&last_members),
         },
+    })
+}
+
+/// The waits between a kill's looks at its group, one after each signal:
+/// [`FIRST_LOOK`], twice that, and so on up to one interval, then an
+/// interval each.
+fn waits() -> impl Iterator<Item = Duration> {
+    std::iter::successors(Some(FIRST_LOOK), |wait| {
+        Some((*wait * 2).min(OBSERVATION_INTERVAL))
     })
 }
 
@@ -291,179 +310,4 @@ fn inspect(_pgid: Pid) -> io::Result<Vec<Member>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
-
-    use super::*;
-    use crate::process::signal::{liveness, Liveness};
-
-    #[tokio::test]
-    async fn force_kill_group_kills_a_live_group() {
-        let mut child = Command::new("sh")
-            .args(["-c", "sleep 30 & wait"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let pgid = Pid::try_from(child.id()).unwrap();
-
-        force_kill_group(pgid).await.unwrap();
-        assert!(inspect(pgid)
-            .unwrap()
-            .iter()
-            .all(|member| member.state == State::Terminated));
-        child.wait().unwrap();
-    }
-
-    #[tokio::test]
-    async fn exit_observation_keeps_the_leader_waitable_until_group_cleanup() {
-        let mut child = Command::new("sh")
-            .args(["-c", "exit 0"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let pgid = Pid::try_from(child.id()).unwrap();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if child_has_exited_unreaped(pgid).unwrap() {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("the child exits");
-
-        assert!(child_has_exited_unreaped(pgid).unwrap());
-        assert_eq!(
-            liveness(pgid),
-            Liveness::Alive,
-            "WNOWAIT leaves the zombie waitable"
-        );
-        child.wait().unwrap();
-        assert_eq!(
-            liveness(pgid),
-            Liveness::Dead,
-            "the ordinary wait reaps the leader"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_leader_that_exited_leaving_a_child_still_has_its_child_killed() {
-        let mut child = Command::new("sh")
-            .args(["-c", "sleep 30 & exit 0"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let pgid = Pid::try_from(child.id()).unwrap();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while !child_has_exited_unreaped(pgid).unwrap() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("the leader exits");
-        assert!(
-            inspect(pgid)
-                .unwrap()
-                .iter()
-                .any(|member| member.state == State::Running),
-            "the sleep it left behind runs on in its group"
-        );
-
-        force_kill_group(pgid).await.unwrap();
-
-        assert!(inspect(pgid)
-            .unwrap()
-            .iter()
-            .all(|member| member.state == State::Terminated));
-        child.wait().unwrap();
-    }
-
-    /// A group whose members keep forking is emptied all the same: a
-    /// child born while one signal was delivered gets the next.
-    #[tokio::test]
-    async fn a_group_that_keeps_forking_is_emptied() {
-        let mut child = Command::new("sh")
-            .args(["-c", "while :; do sleep 30 & done"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let pgid = Pid::try_from(child.id()).unwrap();
-
-        force_kill_group(pgid).await.unwrap();
-
-        assert!(inspect(pgid)
-            .unwrap()
-            .iter()
-            .all(|member| member.state == State::Terminated));
-        child.wait().unwrap();
-    }
-
-    #[tokio::test]
-    async fn an_empty_group_needs_no_signal() {
-        let pgid = Pid::try_from(999_999_999_u32).unwrap();
-        force_kill_group(pgid).await.unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn an_empty_group_ignores_errno_left_by_an_unrelated_call() {
-        errno::set_errno(errno::Errno(316));
-        let pgid = Pid::try_from(999_999_999_u32).unwrap();
-        force_kill_group(pgid).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn zombies_are_not_running_group_members() {
-        let mut child = Command::new("sh")
-            .args(["-c", "exit 0"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let pgid = Pid::try_from(child.id()).unwrap();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while !child_has_exited_unreaped(pgid).unwrap() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("the child exits");
-
-        assert!(inspect(pgid)
-            .unwrap()
-            .iter()
-            .all(|member| member.state == State::Terminated));
-        assert_eq!(
-            liveness(pgid),
-            Liveness::Alive,
-            "the child remains waitable"
-        );
-        child.wait().unwrap();
-    }
-
-    /// A reaped pid reads as dead through errno. The macOS inspection takes the
-    /// same answer instead of matching libproc's error text.
-    #[test]
-    fn a_reaped_pid_reads_as_dead_by_errno() {
-        let mut child = Command::new("true").spawn().unwrap();
-        let pid = Pid::try_from(child.id()).unwrap();
-        child.wait().unwrap();
-        assert_eq!(liveness(pid), Liveness::Dead);
-    }
-}
+mod tests;

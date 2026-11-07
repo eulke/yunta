@@ -11,10 +11,12 @@ mod diagram;
 mod markdown;
 mod notices;
 mod page;
+mod screen;
 mod style;
 mod tables;
 mod text;
 
+use crate::components::Screen;
 use crate::doc::Doc;
 use crate::glyphs::Glyphs;
 use crate::look::{Look, Width};
@@ -37,6 +39,12 @@ impl Html {
     /// change to a color or a rule of the style does not move every page.
     pub fn body(&self, doc: &Doc) -> String {
         page::body(doc)
+    }
+
+    /// A screen as what a page's body holds, without what dresses it, as
+    /// [`Html::body`] is: a golden holds it, and a page lays it out in a grid.
+    pub fn screen(&self, screen: &Screen) -> String {
+        screen::screen(screen)
     }
 
     /// The look a document is built with for a page.

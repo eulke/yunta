@@ -10,6 +10,10 @@
 //! What a person watching sees is what `yunta run` shows, down to the
 //! flags: two commands that execute the same thing have no business
 //! reporting it differently.
+//!
+//! A run has one engine: a resume is refused while another engine drives the
+//! run, before it waits for anything, and it claims the run before it takes a
+//! checkout.
 
 use std::path::PathBuf;
 
@@ -17,7 +21,9 @@ use chrono::{DateTime, Utc};
 use surco::look::Look;
 use yunta_adapters::MOCK_SESSION_PREFIX;
 use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
+use yunta_core::process::signal::Liveness;
 use yunta_core::{Clock, Manifest, RunId};
+use yunta_engine::lock::LockError;
 use yunta_engine::{PriorEstimation, RunState};
 
 use super::registry::{adapters_for, servable, ScriptedPaths, ServableError};
@@ -35,6 +41,7 @@ struct Parked {
     manifest: Manifest,
     worktree: PathBuf,
     prior: Option<PriorEstimation>,
+    hold: yunta_engine::RunHold,
 }
 
 /// Opens the run `run_id` names, refusing one this project cannot reach
@@ -45,7 +52,8 @@ struct Parked {
 /// current config: a run never re-reads config after it is created, and
 /// the worktree it works in is the one its own frozen roots name. The
 /// refusals come before the reset wait, so a run that cannot resume here
-/// is refused at once rather than after a wait.
+/// is refused at once rather than after a wait. The run is claimed after
+/// that wait and before its checkout, so a resume refused there takes nothing.
 ///
 /// `None` when a person interrupted that wait: the run stays parked and
 /// nothing was taken. `output` decides whether the wait is said on the
@@ -67,9 +75,13 @@ async fn parked(
         return Err(ServableError::MockBeforeFrozenAdapter.into());
     }
     servable(&manifest, state.run.mode()).await?;
+    refuse_if_driven(run_id, &run_dir, &state).await?;
     if !waited_out_reset(ctx, &state, run_id, output, look).await {
         return Ok(None);
     }
+    let Some(hold) = claimed(ctx, run_id, &run_dir, &state).await? else {
+        return Ok(None);
+    };
     let worktree = ctx
         .project
         .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
@@ -88,7 +100,46 @@ async fn parked(
         manifest,
         worktree,
         prior,
+        hold,
     }))
+}
+
+/// Refuses a run another engine holds, before anything waits for a reset or starts
+/// a process to drive it: what holds it now does not clear by waiting, and that
+/// process's own refusal would reach nobody. A live holder of a parked run passes,
+/// because the engine that parks a run is on its way out; the claim waits for it.
+///
+/// Takes nothing, so it only says the run is free at this moment: the claim is what
+/// makes it so.
+pub(crate) async fn refuse_if_driven(
+    run_id: &RunId,
+    run_dir: &std::path::Path,
+    state: &RunState,
+) -> Result<(), CliError> {
+    match yunta_engine::hold_refused(run_dir).await {
+        None => Ok(()),
+        Some(LockError::Held {
+            liveness: Liveness::Alive,
+            ..
+        }) if state.run.paused().is_some() => Ok(()),
+        Some(refusal) => Err(CliError::refused_hold(run_id, run_dir, refusal)),
+    }
+}
+
+/// Claims the run for this process. `None` when a person interrupted the wait for
+/// the engine that parked it to leave.
+async fn claimed(
+    ctx: &Context,
+    run_id: &RunId,
+    run_dir: &std::path::Path,
+    state: &RunState,
+) -> Result<Option<yunta_engine::RunHold>, CliError> {
+    let contention = yunta_engine::contention_for(state);
+    match yunta_engine::hold_run(run_dir, contention, &ctx.clock, ctx.cancellation()).await {
+        Ok(hold) => Ok(Some(hold)),
+        Err(LockError::Cancelled { .. }) => Ok(None),
+        Err(refused) => Err(CliError::refused_hold(run_id, run_dir, refused)),
+    }
 }
 
 /// A manifest with no adapter whose log holds a session the mock opened
@@ -192,6 +243,7 @@ pub async fn resume(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
         manifest,
         worktree,
         prior,
+        hold,
     }) = parked(&ctx, run_id, output, look).await?
     else {
         return Ok(crate::render::RunExit::Interrupted.outcome());
@@ -210,22 +262,25 @@ pub async fn resume(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
         run_dir,
         worktree,
     };
-    drive(Driving {
-        ctx: &ctx,
-        storage: &storage,
-        manifest: &manifest,
-        prepared: &prepared,
-        adapters,
-        // A run parked on its token budget is read against the sample its
-        // creation read, as `status` reads it, so the closing says the same
-        // caution.
-        prior,
-        // The pre-run estimation is said to whoever creates a run; this
-        // picks one up.
-        warnings: Default::default(),
-        output,
-        look,
-    })
+    drive(
+        Driving {
+            ctx: &ctx,
+            storage: &storage,
+            manifest: &manifest,
+            prepared: &prepared,
+            adapters,
+            // A run parked on its token budget is read against the sample its
+            // creation read, as `status` reads it, so the closing says the same
+            // caution.
+            prior,
+            // The pre-run estimation is said to whoever creates a run; this
+            // picks one up.
+            warnings: Default::default(),
+            output,
+            look,
+        },
+        hold,
+    )
     .await
 }
 

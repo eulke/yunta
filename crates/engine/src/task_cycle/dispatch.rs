@@ -50,6 +50,9 @@ pub enum DispatchError {
         detail: String,
         release: Option<Box<AdapterError>>,
         tokens: TokenUsage,
+        /// The process groups the kill named that may still run, beside the
+        /// CLI's own: what the run's registry keeps.
+        groups: Vec<yunta_core::Pid>,
     },
 }
 
@@ -63,10 +66,12 @@ impl DispatchError {
                 detail,
                 release,
                 tokens,
+                groups,
             } => DispatchError::NotStopped {
                 detail,
                 release,
                 tokens: earlier + tokens,
+                groups,
             },
             other => other,
         }
@@ -194,9 +199,11 @@ fn resumed<'a>(
     }
 }
 
-/// Reads a session to its terminal outcome, and ends it when the read was cut
-/// short by a cancel or a budget. A session the engine cannot stop fails with
-/// what it reported, which `totals` holds.
+/// Reads a session to its terminal outcome and ends it: one cut short by a
+/// cancel or a budget is interrupted first, one that finished is killed at
+/// once, which closes what its CLI started while the CLI still lives. A
+/// session the engine cannot stop fails with what it reported, which
+/// `totals` holds.
 pub(super) async fn read_and_end(
     session: &mut dyn AgentSession,
     cancel: &CancellationToken,
@@ -210,13 +217,32 @@ pub(super) async fn read_and_end(
     if cancelled || matches!(terminal, Some(DispatchOutcome::BudgetExceeded { .. })) {
         end_running(session)
             .await
-            .map_err(|source| DispatchError::NotStopped {
-                detail: source.to_string(),
-                release: None,
-                tokens: totals.tokens,
-            })?;
+            .map_err(|source| not_stopped(source, totals.tokens))?;
+    } else if terminal.is_some() {
+        // The CLI said everything it had to say, so no interrupt and no
+        // grace: the kill closes what it started while it still lives, and
+        // checks that nothing of it runs on.
+        session
+            .kill()
+            .await
+            .map_err(|source| not_stopped(source, totals.tokens))?;
     }
     Ok((terminal, cancelled))
+}
+
+/// The failure a session that could not be stopped leaves: its kill's error,
+/// what it spent, and each group the kill named that may still run.
+fn not_stopped(source: AdapterError, tokens: TokenUsage) -> DispatchError {
+    let groups = match &source {
+        AdapterError::NotClosed { groups, .. } => groups.clone(),
+        _ => Vec::new(),
+    };
+    DispatchError::NotStopped {
+        detail: source.to_string(),
+        release: None,
+        tokens,
+        groups,
+    }
 }
 
 /// `request` with the budget a session that already spent `tokens` over

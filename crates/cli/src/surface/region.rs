@@ -4,6 +4,11 @@
 //! node at work, and a footer that always says whether the run needs
 //! them.
 //!
+//! It is the one place that keeps what a session said: the last frame
+//! for each working node, which it lets go when the node stops working.
+//! A frame from another run is never drawn, so a child's words stay with
+//! the child.
+//!
 //! It takes no alternate screen, no raw mode and no mouse capture, which
 //! is why the reader keeps their scrollback, their text selection, and a
 //! typed Ctrl-C that still reaches the one cancellation bridge. Nothing
@@ -17,6 +22,7 @@
 //! goes through the [`Scrollback`], which takes the region down, writes,
 //! and puts it back.
 
+use std::collections::HashMap;
 use std::io::Write;
 
 use indicatif::style::TemplateError;
@@ -25,7 +31,8 @@ use surco::glyphs::Glyphs;
 use surco::line::Line;
 use surco::motion::Motion;
 use surco::paint::Paint;
-use yunta_core::RunId;
+use yunta_core::{NodeId, RunId};
+use yunta_engine::said::Said;
 use yunta_engine::RunFrame;
 
 use super::scrollback::Scrollback;
@@ -67,6 +74,10 @@ pub(super) struct Region {
     bell: bool,
     /// Whether the window's title says a person is being asked.
     told: bool,
+    /// What a session of each working node said last, by run and node.
+    /// Only a region keeps it, so nothing said reaches a surface that is
+    /// not a terminal.
+    said: HashMap<(RunId, NodeId), Said>,
 }
 
 impl Region {
@@ -99,6 +110,7 @@ impl Region {
             motion: Motion::default(),
             bell: false,
             told: false,
+            said: HashMap::new(),
         })
     }
 
@@ -114,19 +126,45 @@ impl Region {
         self
     }
 
+    /// Keeps what a session said, for the row of its node while the node
+    /// works. The next redraw shows it.
+    pub(super) fn hear(&mut self, said: Said) {
+        self.said
+            .insert((said.run_id.clone(), said.node_id.clone()), said);
+    }
+
     /// Redraws the region from `frame`, sending up the nodes that stopped
     /// working since the last redraw.
     ///
     /// `answerable` says whether the run stopped on a menu of its own —
     /// which decides the command the attention row offers, and which
-    /// only the run's frozen manifest can answer.
-    pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
-        let attention =
-            view::attention(frame, run_id, answerable, self.glyphs).map(|line| self.fit(&line));
+    /// only the run's frozen manifest can answer. `asking` is whom the
+    /// engine asks at its own terminal, as a process that follows the run
+    /// reads it off the registry; the row says so instead.
+    pub(super) fn show(
+        &mut self,
+        frame: &RunFrame,
+        run_id: &RunId,
+        (answerable, asking): (bool, Option<&yunta_engine::Prompt>),
+    ) {
+        let attention = match asking {
+            Some(prompt) => view::asked(prompt, &self.look()),
+            None => view::attention(frame, run_id, answerable, &self.look()),
+        }
+        .map(|line| self.fit(&line));
         self.attend(attention);
-        let rows: Vec<String> = view::working(frame)
+        let working = view::working(frame);
+        // What a node that stopped working said, and what another run said,
+        // is let go: a node that works again says something new.
+        self.said.retain(|(run, node), _| {
+            run == run_id && working.iter().any(|working| &working.id == node)
+        });
+        let rows: Vec<String> = working
             .into_iter()
-            .flat_map(|node| view::node_rows(frame, node, &self.look(), self.motion))
+            .flat_map(|node| {
+                let said = self.said.get(&(run_id.clone(), node.id.clone()));
+                view::node_rows(frame, node, said, &self.look(), self.motion)
+            })
             .map(|row| self.fit(&row))
             .collect();
         self.resize(rows.len());

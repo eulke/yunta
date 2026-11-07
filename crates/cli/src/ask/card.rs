@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use surco::components::{Card, CardBody, ChoiceRow, Choices, TypedRow};
+use surco::components::{Card, CardBody, ChoiceRow, Choices, Legend, TypedRow};
 use surco::look::Look;
 use surco::surface::Placed;
 use yunta_core::events::GateWaitingPayload;
@@ -16,7 +16,7 @@ use yunta_render::gate::Route;
 use super::field::{Edit, Field};
 use super::held::{Held, Press};
 use super::keys::Stroke;
-use super::{Escape, ANSWER};
+use super::{Escape, ANSWER, ESC};
 
 /// What an option that needs words says when none were given.
 const NEEDS_WORDS: &str = "this option needs an answer";
@@ -187,26 +187,25 @@ impl DecisionCard {
     }
 
     /// The keys the card answers to, each with what it does, for the body it draws.
-    fn keys(&self, look: &Look) -> Vec<String> {
+    fn legend(&self) -> Legend {
         match &self.saying {
             None => {
-                let mut keys = vec![
-                    format!("{} move", look.glyphs.up_down()),
-                    "enter chooses".to_string(),
-                    "n adds a note".to_string(),
-                ];
-                if self.reads {
-                    keys.push("r reads the plan".to_string());
-                }
-                keys.push(self.escape.said().to_string());
-                keys
+                let legend = Legend::new()
+                    .arrows("move")
+                    .key("enter", "chooses")
+                    .key("n", "adds a note");
+                let legend = match self.reads {
+                    true => legend.key("r", "reads the plan"),
+                    false => legend,
+                };
+                legend.key(ESC, self.escape.does())
             }
             Some(_) => {
                 let send = match self.pointed().is_some_and(|pointed| pointed.asks.is_some()) {
-                    true => "enter sends it",
-                    false => "enter records it",
+                    true => "sends it",
+                    false => "records it",
                 };
-                vec![send.to_string(), "esc goes back".to_string()]
+                Legend::new().key("enter", send).key(ESC, "goes back")
             }
         }
     }
@@ -289,7 +288,7 @@ impl Held for DecisionCard {
             edge: self.edge.clone(),
             about: self.about.clone(),
             body,
-            keys: self.keys(look),
+            legend: self.legend(),
         }
         .drawn(look, rows)
     }

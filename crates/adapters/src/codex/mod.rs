@@ -101,6 +101,7 @@ impl CodexAdapter {
             args: plan.args,
             cwd: &req.cwd,
             env: &plan.env,
+            mark: &req.mark,
             prompt: &req.prompt,
             parser: Box::new(CodexParser::new(plan.coverage, plan.checkout)),
             held: Some(Box::new(mounts)),
@@ -229,6 +230,18 @@ fn config_overrides(req: &SessionRequest) -> Vec<String> {
     if let Some(endpoint) = &req.run_tools_endpoint {
         args.extend(run_tools_overrides(&endpoint.url, &req.budget));
     }
+    // The CLI builds its commands' environment from this policy; `set` is
+    // added after its own filters, so the session's mark reaches them.
+    args.extend(
+        ConfigOverride::string(
+            format!(
+                "shell_environment_policy.set.{}",
+                yunta_core::process::mark::MARK_VAR
+            ),
+            req.mark.as_str(),
+        )
+        .into_args(),
+    );
     args
 }
 

@@ -37,7 +37,7 @@ use yunta_core::caution::Caution;
 use yunta_core::events::{Failure, GateWaitingPayload, NodeState, PauseReason};
 use yunta_core::{NodeId, RunId};
 use yunta_engine::{
-    NodeFrame, NodeStanding, RunFrame, RunPhase, RunState, ShownDocument, WaitingOn,
+    DecisionOn, NodeFrame, NodeStanding, RunFrame, RunPhase, RunState, ShownDocument, WaitingOn,
 };
 use yunta_render::spend::Breakdown;
 
@@ -63,8 +63,8 @@ const IN_A_BROWSER: &str = "the whole page, in a browser";
 /// The decision a parked run waits on, as the run's log rebuilds it.
 #[derive(Debug, Clone)]
 pub(crate) struct Decided {
-    /// The node the decision is on.
-    pub(crate) node: NodeId,
+    /// Whom the decision belongs to.
+    pub(crate) on: DecisionOn,
     pub(crate) escalation: GateWaitingPayload,
     /// The documents the decision shows, as the run holds them.
     pub(crate) shown: Vec<ShownDocument>,
@@ -120,7 +120,7 @@ impl RunPage<'_> {
     }
 
     /// What a run parked on a person says when its pause rebuilds no menu
-    /// — a budget, a scope, an answers file, a review on a forge: that no
+    /// — a scope, an answers file, a review on a forge, a child: that no
     /// option answers it here, so a reader who knows the menus other stops
     /// show does not look for one.
     fn no_menu(&self) -> Option<Note> {

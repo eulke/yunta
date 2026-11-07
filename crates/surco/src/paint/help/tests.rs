@@ -1,6 +1,12 @@
 use super::*;
-use crate::paint::sgr;
+use crate::paint::Ground;
 use clap::builder::styling::Style;
+
+/// The escape a page writes before a word in `tone`, in the sixteen colors.
+fn page_escape(tone: Tone) -> String {
+    let painted = Paint::ANSI16.word(tone, "x");
+    painted.split('x').next().unwrap_or_default().to_string()
+}
 
 /// The seven roles clap draws in, each with the tone a page paints it in.
 fn roles_and_tones(styles: &clap::builder::Styles) -> [(&Style, Tone); 7] {
@@ -19,11 +25,7 @@ fn roles_and_tones(styles: &clap::builder::Styles) -> [(&Style, Tone); 7] {
 fn clap_draws_each_tone_in_the_escape_a_page_paints_it_in() {
     let styles = clap_styles(Paint::ANSI16);
     for (style, tone) in roles_and_tones(&styles) {
-        assert_eq!(
-            style.render().to_string(),
-            format!("\x1b[{}m", sgr(tone).unwrap_or_default()),
-            "{tone:?}"
-        );
+        assert_eq!(style.render().to_string(), page_escape(tone), "{tone:?}");
     }
 }
 

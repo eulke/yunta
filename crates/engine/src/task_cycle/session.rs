@@ -60,6 +60,8 @@ pub struct SessionSetup {
     /// adapter may drop scaffolding — outside the worktree, whose diff
     /// the scope check reads.
     pub run_dir: PathBuf,
+    /// The run its sessions belong to, which each session's mark names.
+    pub run: yunta_core::RunId,
     /// The loop node these task sessions belong to. It names each
     /// session's own scratch directory, so concurrent attempts of one
     /// node never write over each other's scaffolding.
@@ -116,6 +118,7 @@ impl SessionSetup {
     /// nowhere is one every such write resolves against the current
     /// directory instead.
     pub fn bare(
+        run: yunta_core::RunId,
         run_dir: PathBuf,
         node: yunta_core::NodeId,
         chosen: yunta_core::RunnerCandidate,
@@ -137,6 +140,7 @@ impl SessionSetup {
             cli_config: yunta_core::CliConfig::Inherit,
             network: yunta_core::network_asked(None, None),
             run_dir,
+            run,
             node,
             chosen,
             artifact_dir: None,
@@ -211,6 +215,11 @@ pub trait SessionObserver: KeepsOutput {
     fn shell_service(&self) -> Option<&std::collections::BTreeMap<String, String>> {
         None
     }
+    /// Hands over what a session of `node_id` said, already redacted, once
+    /// its note's digest is on the log. Never waits and never fails: words
+    /// are not evidence. Default: an observer that keeps no run's voices
+    /// ignores them.
+    fn said(&self, _node_id: &yunta_core::NodeId, _spoken: crate::said::Spoken) {}
 }
 
 /// Where a run keeps what its commands printed: every object it holds,
@@ -272,6 +281,7 @@ pub(super) async fn stream_session(
         budget: request.budget,
         confinement: yunta_core::events::ConfinementRecord::of(&request.confinement),
         counts_cap_mid_session: counts_tokens_mid_session(adapter),
+        redactor: request.redactor(),
     };
     record_cap_at_session_end(&terms).await?;
     let (mut session, continues) = spawn_or_resume(adapter, request, audit, opening.resume).await?;
@@ -282,8 +292,10 @@ pub(super) async fn stream_session(
     );
     let drained = drain(&mut *session, cancel, &terms, opening, continues).await;
     // A group the engine could not stop may still run, so it stays on the map.
-    if let (Some(registration), Err(DispatchError::NotStopped { .. })) = (registration, &drained) {
-        registration.keep();
+    if let (Some(registration), Err(DispatchError::NotStopped { groups, .. })) =
+        (registration, &drained)
+    {
+        registration.keep_with(groups);
     }
     drained
 }
@@ -303,9 +315,9 @@ async fn drain(
     drained
 }
 
-/// Reads an opened session to its terminal outcome, ends it when the read was
-/// cut short, and says what it spent and whether it ended on a lost service.
-/// The session is released whatever the read and the end did.
+/// Reads an opened session to its terminal outcome, ends it, and says what it
+/// spent and whether it ended on a lost service. The session is released
+/// whatever the read and the end did.
 async fn read_and_release(
     session: &mut dyn AgentSession,
     cancel: &CancellationToken,
@@ -321,11 +333,20 @@ async fn read_and_release(
     let (terminal, cancelled) = match (ended, released) {
         (Ok(read), Ok(())) => read,
         (Ok(_), Err(release)) => return Err(DispatchError::Release(release)),
-        (Err(DispatchError::NotStopped { detail, tokens, .. }), Err(release)) => {
+        (
+            Err(DispatchError::NotStopped {
+                detail,
+                tokens,
+                groups,
+                ..
+            }),
+            Err(release),
+        ) => {
             return Err(DispatchError::NotStopped {
                 detail,
                 release: Some(Box::new(release)),
                 tokens,
+                groups,
             })
         }
         (Err(error), Ok(())) => return Err(error),
@@ -340,8 +361,7 @@ async fn read_and_release(
         (true, _) => DispatchOutcome::Cancelled,
         (false, Some(outcome)) => outcome,
         // Only the one that fell silent is asked: a session that closed
-        // its turn said everything it had to say, and asking it would
-        // cost a kill and a wait for nothing.
+        // its turn said how it ended.
         (false, None) => DispatchOutcome::Crashed {
             exit: session.exit().await?,
         },

@@ -32,6 +32,9 @@ pub(super) async fn dispatch(
         Command::Completions { shell } => completions_command(shell),
         Command::Check { workflow, config } => check_command(workflow, config, look).await,
         Command::Run(args) => run_command(args, output, look).await,
+        Command::Status { run, follow, .. } if follow => {
+            commands::status::follow::follow(&run.named().await?, look).await
+        }
         Command::Status {
             run, node, depth, ..
         } => status_command(run, node, depth.depth(), output, look).await,

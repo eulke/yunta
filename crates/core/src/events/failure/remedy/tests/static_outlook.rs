@@ -160,12 +160,33 @@ fn a_failure_the_outside_settles_waits_for_the_outside_to_change() {
     );
 }
 
+/// The next attempt would get the same share and fail the same way, so what is on offer
+/// is going past the cap, and it waits for nothing.
 #[test]
-fn a_token_budget_waits_for_a_person_to_lift_the_budget_from_outside() {
+fn a_session_cut_at_its_share_offers_to_go_past_the_cap() {
     outlook_on(
         vec![Failure::TokenBudget {
             used: 150,
             max: 100,
+        }],
+        Outlook::Choose(vec![Remedy {
+            option: ReservedOption::Continue,
+            precondition: None,
+        }]),
+    );
+}
+
+/// A child's cap is its own, and lifting its parent's does not lift it, so that offer
+/// would not do what it says on the parent's menu.
+#[test]
+fn a_child_cut_at_its_share_waits_for_the_outside_to_change() {
+    outlook_on(
+        vec![Failure::ChildFailed {
+            child_run: RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA"),
+            child_failure: Some(Box::new(Failure::TokenBudget {
+                used: 150,
+                max: 100,
+            })),
         }],
         retry_waiting_for(Precondition::OutsideTreeChanged),
     );
@@ -225,14 +246,19 @@ fn a_gate_child_or_loop_stop_waits_for_the_outside_to_change() {
     );
 }
 
+/// Its next attempt starts its count over, so it waits for nothing: tasks done stay done,
+/// and the loop goes on from them.
 #[test]
-fn a_loop_past_its_cap_waits_for_a_person_to_lift_the_cap() {
+fn a_loop_past_its_cap_offers_a_retry_that_waits_for_nothing() {
     outlook_on(
         vec![Failure::LoopCapped {
             node: crate::NodeId::from("loop"),
             loop_cap: 4,
         }],
-        retry_waiting_for(Precondition::CapLifted),
+        Outlook::Choose(vec![Remedy {
+            option: ReservedOption::Retry,
+            precondition: None,
+        }]),
     );
 }
 

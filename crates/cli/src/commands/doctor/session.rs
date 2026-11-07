@@ -207,7 +207,7 @@ async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outco
     let report = crate::commands::drive::execute(crate::commands::drive::Executing {
         run_id: &prepared.run_id,
         manifest: &manifest,
-        run_dir: &prepared.run_dir,
+        hold: crate::commands::registry::claim(&ctx, &prepared.run_dir).await?,
         worktree: &prepared.worktree,
         adapters: &adapters,
         storage: &storage,

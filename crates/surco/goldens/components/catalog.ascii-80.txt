@@ -123,3 +123,15 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
 
 next
   yunta status 7E5PH4   where it stands
+
+on a screen
+grill brief plan build review lint ship
+===== ===== ==== ..... ...... .... ....
+
+up/down move ; enter open ; n new run ; x close ; q quit
+
+? needs you: yunta resolve-gate 7E5PH4 approve (the plan waits for approval)
+
+? Q78GRR needs you: the suite passed at baseline and now exits 101 ; a go there
+
+? needs you: node `implement` asks at its terminal

@@ -10,7 +10,7 @@
 //! submitted, and a surface that judged by its own rules would be telling a person
 //! something the engine might refuse.
 
-use surco::components::{Card, CardBody, RoundRow, RoundStanding, TypedRow};
+use surco::components::{Card, CardBody, Legend, RoundRow, RoundStanding, TypedRow};
 use surco::look::Look;
 use surco::surface::{said_whole, Placed};
 use surco::text::counted;
@@ -21,8 +21,8 @@ use yunta_engine::QuestionsReply;
 use super::field::{Edit, Field, Typed, FOLDED};
 use super::held::{hold, Held, Press};
 use super::keys::Stroke;
-use super::menu::{list_keys, Choice, Picker};
-use super::{attributed, Answered, Console, Escape, ANSWER};
+use super::menu::{list_legend, Choice, Picker};
+use super::{attributed, Answered, Console, Escape, ANSWER, ESC};
 
 /// The option that leaves a question no answer, offered only where the
 /// question allows one, and what stands for the answer that was not
@@ -227,7 +227,7 @@ impl Round {
                 Vec::new()
             },
             body: CardBody::Round(rows),
-            keys: self.keys(look),
+            legend: self.legend(),
         }
     }
 
@@ -276,17 +276,17 @@ impl Round {
 
     /// The keys the round answers to now: the list's own when a list is being answered,
     /// enter, going back once there is a question before, and what Escape does.
-    fn keys(&self, look: &Look) -> Vec<String> {
-        let mut keys = Vec::new();
-        if matches!(self.answering, Answering::Picking(_)) {
-            keys.extend(list_keys(look));
+    fn legend(&self) -> Legend {
+        let legend = match self.answering {
+            Answering::Picking(_) => list_legend(),
+            _ => Legend::new(),
         }
-        keys.push("enter answers".to_string());
-        if self.at > 0 {
-            keys.push("shift-tab goes back".to_string());
-        }
-        keys.push(self.escape.said().to_string());
-        keys
+        .key("enter", "answers");
+        let legend = match self.at > 0 {
+            true => legend.key("shift-tab", "goes back"),
+            false => legend,
+        };
+        legend.key(ESC, self.escape.does())
     }
 }
 

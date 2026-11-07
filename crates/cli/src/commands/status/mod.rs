@@ -8,10 +8,12 @@
 //! A run parked on a person is answerable from here: the decision it
 //! stopped on is rebuilt from its own log ([`decision`]) and printed
 //! with the command that answers it, so nobody has to read the exported
-//! JSONL to learn what the options are.
+//! JSONL to learn what the options are. A run that moves is followed with
+//! `--follow` ([`follow`]): what `yunta run` draws, from another process.
 
 pub(crate) mod decision;
 pub(crate) mod decision_json;
+pub(crate) mod follow;
 mod node;
 pub(crate) mod progress;
 
@@ -20,7 +22,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use yunta_core::events::{Escalation, StoredEvent};
 use yunta_core::{Clock, Manifest, NodeId, RunId};
-use yunta_engine::{NodeStanding, NodeState, RunFrame, RunState, ShownDocument};
+use yunta_engine::{DecisionOn, NodeStanding, NodeState, RunFrame, RunState, ShownDocument};
 
 use crate::commands::{advice, stats};
 use crate::context::Context;
@@ -67,6 +69,25 @@ pub async fn status(
     emit(output, &answer, look)
 }
 
+/// Prints the page `yunta status <run>` prints a person, and hands back the
+/// word the run is called by on it: what a caller that exits with the run's
+/// code reads.
+pub(crate) async fn print_page(
+    ctx: &Context,
+    run_id: &RunId,
+    look: &Look,
+) -> Result<surco::words::Standing, CliError> {
+    let reading = Reading::of(ctx, run_id).await?;
+    let page = (Mode::Human, None, Depth::Glance);
+    let body = page_body(ctx, run_id, &reading, &[], page).await?;
+    let answer = StatusAnswer {
+        body,
+        document: DocumentInputs::of(run_id, &reading),
+    };
+    emit(Mode::Human, &answer, look)?;
+    Ok(reading.frame.standing)
+}
+
 /// What `yunta status` reads about one run, gathered once: its log, the
 /// state and frame that log derives, the decision it stopped on, and the
 /// tree it works in.
@@ -76,7 +97,7 @@ struct Reading {
     manifest: Manifest,
     state: RunState,
     frame: RunFrame,
-    decision: Option<(NodeId, Escalation)>,
+    decision: Option<(DecisionOn, Escalation)>,
     tree: PathBuf,
     engine: Engine,
     now: DateTime<Utc>,
@@ -235,7 +256,7 @@ async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
     if advice::parked(&reading.frame.phase).is_none() {
         return Ok(None);
     }
-    let Some((node, escalation)) = &reading.decision else {
+    let Some((on, escalation)) = &reading.decision else {
         return Ok(None);
     };
     let shown = crate::json::shown_of(
@@ -248,13 +269,15 @@ async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
     // A failed node's evidence is quoted above the decision, so the
     // decision does not repeat it.
     let beside = decision::Beside {
-        evidence: matches!(
-            reading.state.nodes.state(node),
-            Some(NodeState::Failed { .. })
-        ),
+        evidence: on.node().is_some_and(|node| {
+            matches!(
+                reading.state.nodes.state(node),
+                Some(NodeState::Failed { .. })
+            )
+        }),
     };
     Ok(Some(Decided {
-        node: node.clone(),
+        on: on.clone(),
         escalation: escalation.clone().into_payload(),
         shown,
         beside,
@@ -310,7 +333,7 @@ struct DocumentInputs<'a> {
     manifest: &'a Manifest,
     frame: &'a RunFrame,
     engine: Engine,
-    decision: Option<(NodeId, Escalation)>,
+    decision: Option<(DecisionOn, Escalation)>,
 }
 
 impl<'a> DocumentInputs<'a> {

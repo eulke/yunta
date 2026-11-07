@@ -8648,7 +8648,7 @@
       ]
     },
     "Precondition": {
-      "description": "What must change before a retry can end differently: the tree, something outside it, or the named input.",
+      "description": "What must change before a retry can end differently: the tree, something outside it, or the named input.\nOlder logs hold `cap_lifted`, which no failure offers now: a capped loop's retry waits for nothing.",
       "oneOf": [
         {
           "description": "The run's tree has to change first.",
@@ -9289,7 +9289,7 @@
           "$ref": "#/$defs/ReservedOption"
         },
         "precondition": {
-          "description": "The input a `retry` waits for; always set on one. Other options may leave it `None`.",
+          "description": "The input a `retry` waits for. A capped loop's retry waits for none, since its next\nattempt starts its count over. Other options may leave it `None`.",
           "anyOf": [
             {
               "$ref": "#/$defs/Precondition"

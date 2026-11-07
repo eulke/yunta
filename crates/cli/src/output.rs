@@ -189,7 +189,7 @@ impl NextCommand {
 impl ErrorDocument {
     /// The refusal `error` is, as `reader` is told it.
     pub(crate) fn of(error: &CliError, reader: Reader) -> Self {
-        let (detail, next) = error.advice();
+        let (detail, next) = error.advice(reader);
         Self {
             schema_version: crate::json::SCHEMA_VERSION,
             error: ErrorBody {
@@ -218,7 +218,7 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
         }
         return;
     }
-    let (detail, steps) = error.advice();
+    let (detail, steps) = error.advice(Reader::Person);
     let page = Doc::new()
         .with(Refusal {
             said: error.said_to(Reader::Person),

@@ -99,7 +99,7 @@ mod tests {
         let above = Captured::default();
         let mut region = region(&term, &above);
 
-        region.show(&frame(vec![running("plan")]), &RUN, false);
+        region.show(&frame(vec![running("plan")]), &RUN, (false, None));
         assert!(term.shown().contains("plan"), "{}", term.shown());
         assert_eq!(above.text(), "", "nothing has stopped working yet");
 
@@ -107,7 +107,7 @@ mod tests {
         // comparing frames: the region shows what is open, and this is
         // what left it.
         region.record(&[surco::line::Line::new().plain("+ plan finished (exit 0)")]);
-        region.show(&frame(vec![running("build")]), &RUN, false);
+        region.show(&frame(vec![running("build")]), &RUN, (false, None));
         assert!(
             !term.shown().contains("plan"),
             "the finished node left the region: {}",

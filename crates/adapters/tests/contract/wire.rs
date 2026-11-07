@@ -69,6 +69,19 @@ fn claude_step(step: &Step, n: usize) -> Vec<Value> {
         Step::Note(text) | Step::BeforeOpen(text) => {
             vec![claude_message(json!({ "content": [text_block(text)] }))]
         }
+        Step::Reasoning(text) => vec![claude_message(json!({
+            "content": [{ "type": "thinking", "thinking": text, "signature": "c2lnbmVk" }]
+        }))],
+        Step::RetryNotice => vec![json!({
+            "type": "system",
+            "subtype": "api_retry",
+            "attempt": 1,
+            "max_retries": 10,
+            "retry_delay_ms": 600,
+            "error_status": 529,
+            "error": "overloaded",
+            "session_id": CLAUDE_SESSION,
+        })],
         Step::StopRefused { reason } => {
             vec![claude_message(
                 json!({ "content": [text_block(&format!("{STOP_TURN}{reason}"))] }),
@@ -179,6 +192,11 @@ pub fn codex_lines(script: &Script) -> Vec<String> {
 fn codex_step(step: &Step) -> Vec<Value> {
     match step {
         Step::Note(text) | Step::BeforeOpen(text) => vec![agent_message(text)],
+        Step::Reasoning(text) => vec![completed_item(json!({ "type": "reasoning", "text": text }))],
+        Step::RetryNotice => vec![json!({
+            "type": "error",
+            "message": "Reconnecting... 2/5 (stream disconnected before completion)",
+        })],
         Step::StopRefused { reason } => vec![agent_message(&format!("{STOP_TURN}{reason}"))],
         Step::UnknownLine => codex_unread(),
         Step::ToolUse { target, .. } => vec![completed_item(json!({
@@ -278,6 +296,8 @@ fn agent_message(text: &str) -> Value {
 pub(super) fn mock_step(step: &Step) -> Value {
     match step {
         Step::Note(text) => json!({ "type": "note", "text": text }),
+        Step::Reasoning(text) => json!({ "type": "reasoning", "text": text }),
+        Step::RetryNotice => json!({ "type": "retry_notice" }),
         Step::StopRefused { reason } => {
             json!({ "type": "note", "text": format!("{STOP_TURN}{reason}") })
         }

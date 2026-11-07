@@ -79,6 +79,8 @@ pub struct RunLedger {
     /// The last close the log records for this run.
     finished: Option<Finished>,
     paused: Option<(PauseReason, Seq)>,
+    /// Where the latest pause that closes a node's answer sits.
+    answers_closed_at: Option<Seq>,
     resumed_after: Option<Seq>,
     promotion: Option<Promotion>,
     /// The measurement this run holds: its own, or the one it was born
@@ -245,11 +247,13 @@ impl RunLedger {
         self.paused.as_ref().map(|(pause, at)| (pause, *at))
     }
 
-    /// Where the latest `run_paused` sits, whether or not a resume came
-    /// after it — the end of the window a decision could have been
-    /// seeded into, which a later resume does not reopen.
-    pub fn last_paused_at(&self) -> Option<Seq> {
-        self.paused.as_ref().map(|(_, at)| *at)
+    /// Where the latest `run_paused` that closes a node's answer sits, whether or
+    /// not a resume came after it: the end of the window a decision could have been
+    /// seeded into, which a later resume does not reopen. A stop on the token cap is
+    /// not one. It acts on no answer, and an answer it closed would be lost while the
+    /// run waits to go past the cap, with `retry` and `continue` alternating forever.
+    pub fn answers_closed_at(&self) -> Option<Seq> {
+        self.answers_closed_at
     }
 
     /// The promotion the run signalled, if it did.
@@ -278,6 +282,9 @@ impl RunLedger {
                 self.woken = true;
                 self.phase = RunPhaseRaw::Paused;
                 self.paused = Some((p.pause.clone(), meta.seq));
+                if !matches!(p.pause, PauseReason::BudgetExhausted { .. }) {
+                    self.answers_closed_at = Some(meta.seq);
+                }
             }
             RunEvent::Resumed(p) => self.resumed(p, meta),
             RunEvent::Moved(p) => {

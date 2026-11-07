@@ -427,6 +427,42 @@ runs newest first; a glance says how long ago the newest closed. A run in the la
 has no derived state
 to have been in, so that group is ordered by run id alone.
 
+## What a session says
+
+While an engine drives a run, a program can hear what the run's sessions say as
+they say it. The run's registry, `scratch/engine.json`, names a Unix socket in
+`words` for as long as that engine lives: `scratch/live.sock` when that path fits
+in a socket's address, and otherwise `<run id>.sock` in `/tmp/yunta-<uid>/`, a
+directory only that user may open. The socket admits only processes of the user
+the engine runs as. A registry with no `words` has nothing to hear: no engine
+drives the run, an older binary does, or neither path fits. The socket goes away
+when its engine stops; one a killed engine left refuses connections, and the
+engine that resumes the run replaces it, so a reader that reads the registry
+again finds the live one.
+
+A reader that connects gets up to the last 64 things the run's sessions said,
+within 256 KiB, and then each new one as it is said. Each is one JSON object on
+its own line, `v` first:
+
+```json
+{"v":1,"run_id":"01M6QC8ZZ2XTH59J16A90RFK3T","node_id":"build","session_id":"01M6QCA3B7N2K8F0R4W9YQ5D1E","task_id":"T001","seq":118,"at":"2026-11-05T14:02:31.412Z","text":"First I read the parser."}
+```
+
+`text` is the whole of what was said, up to 16 KiB; a longer one is cut at a
+character boundary and carries `"cut": true`. A declared secret, and every token
+minted for the session, reads `[redacted]` in it. A session's reasoning is never
+sent. `task_id` is there when the session works a task, and `seq` is the seq of
+the note's digest on the log, which places the words among the run's events. A
+reader that falls behind loses lines rather than slowing the run: the next line
+it gets carries `missed`, how many it lost. A line whose `v` the reader does not
+know is skipped, and the next one read; a change to what a line means takes a
+new `v`.
+
+A line is never evidence. Nothing a run decides reads it, the log keeps only
+each note's size and digest, and nothing writes the words to a file. The summary a
+session ends with is the one thing said that the log also keeps: it is its node's
+outcome, as it always was.
+
 ## Exit codes
 
 `yunta run` and `yunta resume` — with or without `--json` and `--quiet` — exit
@@ -444,11 +480,16 @@ parsing what it printed:
 | 130 | was interrupted by a person in this invocation (Ctrl-C) |
 
 `yunta run --detach` exits 0 once the run is handed off, since the command returns
-before the run finishes: the outcome is what `yunta status` reads later. A refusal
-exits 1 with or without `--json`; under `--json` its document is on stdout.
+before the run finishes: the outcome is what `yunta status --follow` waits for, or
+what `yunta status` reads later. A refusal exits 1 with or without `--json`; under
+`--json` its document is on stdout.
 
 `yunta status` and `yunta close` exit 0 whatever the run says: they report a
-run, they do not drive it. `yunta test` reads a case's `final_state` in the same
+run, they do not drive it. `yunta status <run> --follow` exits with what the run's
+stop gives, in the codes above, as `yunta run` would: at once on a run that is not
+moving, and once it stops on one that moves. A run whose engine is gone while its
+log says it moves is stalled, which exits 1. Ctrl-C stops the follower alone and
+exits 130; the run goes on in the process that drives it. `yunta test` reads a case's `final_state` in the same
 words: `finished`, `needs you`, `waiting`, `stopped`, `reported`, `failed`,
 `promoted`; a case written with `paused` or `cancelled` is refused, naming the word
 that replaced it. A case's `expect.nodes` is written in the words a node's row
@@ -498,7 +539,7 @@ place never passes the terminal's edge, whatever the floor says.
 
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 8`. The
+`stats --json`, `status --json` and `run --json` carry `schema_version: 9`. The
 three share one stamp, so all of them carry the new number even when a change
 touched only one of them: from 6 on, a run stopped on a person is `needs you` rather
 than `paused`, and a run that finished holding blocking findings is `reported` rather
@@ -509,7 +550,10 @@ rather than `needs you`, and its document carries `awaiting_reset`. From 8 on, a
 and a node are called by one vocabulary: a run a person stopped is `stopped` rather
 than `cancelled` or `needs you`, a node waiting on a person is `needs you` rather than
 `waiting`, a node whose attempt stopped with its run is `stopped` rather than
-`paused`, and a failed node a reroute is correcting is `rerouted`.
+`paused`, and a failed node a reroute is correcting is `rerouted`. From 9 on, a run
+stopped on its token cap carries a `decision` that belongs to the run, so `decision.node`
+is absent there, and a reader that took it to be always present has to read it again. A
+session cut at its share of the cap offers `continue` where it offered `retry`.
 
 Under `--json`, `list --runs`, `verify`, `close`, `cancel`, `resolve-gate` and `doctor`
 print one document each: the answer the command gives, with the fields its human view
@@ -521,7 +565,7 @@ says: `intact` or `broken` for `verify`, `ready` or `not ready` for `doctor`. `c
 carries `standing` when the run was stopped already, as the word it is called by.
 
 A refusal under `--json` is one document as well, on stdout, and the refusal writes
-nothing to stderr: `{"schema_version": 8, "error": {"said", "detail", "next"}}`. `said`
+nothing to stderr: `{"schema_version": 9, "error": {"said", "detail", "next"}}`. `said`
 is the refusal as an agent reads it, with the whole run id where it names a run;
 `detail` is `null` when there is nothing to add; `next` lists the commands that go on
 from here as `{"command", "why"}` objects, and is empty when there are none. A command
@@ -559,7 +603,8 @@ the shares `stats --json` names; `changed`, what it changed from its base to its
 tree, where that was counted; `branch`, `{name?, base}`, where `name` is absent for a run in
 a person's own checkout; `pull_requests`, `[{number, url}]`, absent when it opened none;
 `artifacts`, how many artifacts its nodes wrote; and `next`, `[{command, why}]`, the
-commands a program reads at the end of the page, each naming the run by its whole id. They
+commands a program reads at the end of the page, each naming the run it acts on by its
+whole id. They
 arrive with version 8. A failed or
 broken run carries `reason`; a parked one carries `waiting_on` and, when its
 pause reconstructs a menu, `decision`. `yunta run --detach --json` publishes that
@@ -746,19 +791,21 @@ withholds, and from the facts an older log attached. A fact that names itself, l
 failing command's `exit 1`, carries no `label`.
 
 In `status --json`, `decision` carries what a parked run is waiting on:
-`{node, summary, evidence, options: [{id, label, tradeoff?, asks?}], external_ref?,
-shows?, withheld?, <menu>, resolve_with, commands}`: the node it belongs to, the claim
+`{node?, summary, evidence, options: [{id, label, tradeoff?, asks?}], external_ref?,
+shows?, withheld?, <menu>, resolve_with, commands}`: the node it belongs to, absent for a
+decision the run owns, the claim
 and the options in the words a reader sees, the evidence and the withheld options as
 shown, the escalation's menu under the key its `gate_waiting` event writes it with, the
 command that answers it with the option left as `<option>`, and `commands`, the command
 that chooses each option keyed by its id. `withheld` lists each option the gate does
 not offer, as `{option, because}`, and is absent when it withholds none. An option a workflow declares on a gate is
 labelled with where it leads — ``Back to `fix` ``, ``On to `deploy` `` — rather
-than with its own id. Two pauses reconstruct one: a node whose
-reroutes are exhausted, and an unresolved internal gate. Every other pause — a
-budget cap, a scope expansion, an unanswered questions artifact, an external
-gate with no reachable forge — carries no `decision` at all, and `summary` says
-what the run is waiting on instead. The `decision` field itself is additive; the
+than with its own id. Three pauses reconstruct one: a failed node, whose
+reroutes are exhausted or that has none; an unresolved internal gate; and, from 9 on, a
+run stopped on its token cap, whose `decision` has no `node` and carries `budget: {spent,
+cap}`. Every other pause — a scope expansion, an unanswered questions artifact, an
+external gate with no reachable forge, a parent waiting on its child — carries no
+`decision` at all, and `summary` says what the run is waiting on instead. The `decision` field itself is additive; the
 stamp moved to `3` for the shape of `decision.evidence`, described above.
 
 A failed node's menu is `decision.failure`: `{attempt, failure, remedies, stuck?,
@@ -767,7 +814,8 @@ Each remedy is `{option, precondition}`: the option's id, and the input a
 `retry` waits for (`null` for an option that waits for none), as a snake_case
 word such as `tree_changed`,
 `outside_tree_changed` or `limit_lifted`, or as `{command_runnable: {cmd}}` for a
-command that has to run. The menu's `options` name each option once, so `retry` is
+command that has to run. A capped loop's `retry` waits for none, and `cap_lifted` is a
+word only older logs hold. The menu's `options` name each option once, so `retry` is
 listed there once even when `remedies` holds a `retry` for each input a stop waits
 for. `stuck` says why no remedy is offered, as a word such as
 `frozen_config`, `tree_unchanged` or `criteria_wrong`, and `reroute` is the
@@ -882,6 +930,17 @@ with its whole tree, lock liveness checked by signal — is POSIX, and
 binary that would leave processes behind on cancellation. Windows becomes a
 target when a process layer with the same guarantees exists and its
 cancellation tests pass on a Windows runner.
+
+At every end of a session, nothing its CLI started is left running if it
+still hangs from the CLI, in any process group, or if it carries the
+session's mark, `YUNTA_SESSION_MARK`, wherever its parent is. The same holds
+when `yunta cancel` or `yunta close` settles a run whose engine died. Linux
+shows the mark of every process of the user. macOS can hide the environment
+of its own platform binaries (`/bin/sleep`, `sh`, `zsh`, `perl`, `ruby`) from
+every other process, and where it does, a process running one of them is
+found only while it hangs from the CLI. Out of reach on both: a process that cleared its
+environment and left the CLI's tree, and one the system starts at an agent's
+request, such as a service. Nothing ties either to the session.
 
 A lock's holder is asked about by signal on every platform, and a holder
 that cannot be asked about — a process of another user — keeps its lock.

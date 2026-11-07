@@ -55,6 +55,15 @@ every state from it, and what a person reads is drawn from that data in Surco.
 - The spec decides what proves a task: a plan or spec that cannot prove the work is refused at handover, never
   in `check()`, and its gate withholds going on. [test engine/spec_governs_gate]
 - Modes belong to workflows: the engine's code never names one. [smell mode_name_in_prod]
+- A run has one engine: `RunEnv` borrows a hold only `hold_run` makes; a second resume is refused and a dead
+  holder replaced. [test engine/run_guard]
+- One answer pays for one engine: `continue` lifts the token cap only in the engine that took it, and the next
+  one stands under the cap again. [test engine/parked_answers]
+- A follower only reads: it takes no lock, writes no event and never signals the engine it follows.
+  [test cli/status_follow]
+- What a session says while it works reaches another process only through its run's socket, redacted: the
+  log keeps each note's digest, nothing writes the words to disk, and only a terminal draws them. The summary
+  a session ends with is its node's outcome, logged as ever. [test engine/run_words] [test cli/run_words]
 - A safety mechanism adds no wall-clock time to a run. [review]
   Paths: `crates/core/src/rail/**`, `crates/engine/src/task_cycle/**`, `crates/engine/src/worktree/**`,
   `crates/adapters/src/**`
@@ -68,3 +77,6 @@ every state from it, and what a person reads is drawn from that data in Surco.
 - A log an earlier binary wrote still replays. [test engine/logs_from_runs] [test engine/older_words]
 - No session writes what an agent CLI loads as configuration, at its own path or through a link the base commit
   holds; a person may grant the instruction files. [test engine/paths_deny] [test adapters/own_config]
+- Nothing a session's CLI started outlives its session, linked to it or carrying its mark, nor a dead engine's
+  `yunta cancel` or `yunta close`; on macOS an orphan running a platform binary may hide its mark.
+  [test core/process_tree] [test core/process_mark] [test adapters/contract] [test cli/session_ends]

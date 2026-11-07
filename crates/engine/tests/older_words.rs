@@ -1,6 +1,6 @@
 //! Lines an earlier binary wrote, one of each shape that stored words where
 //! the log now holds data. Each line reads, a surface shows its words as they
-//! were stored, and writing it back gives the same line. The first five are
+//! were stored, and writing it back gives the same line. The first seven are
 //! lines a run wrote, with the run's id replaced; the other four are built in
 //! the shape their fields had.
 
@@ -34,6 +34,14 @@ const RULE_CLAUSES: &str = r##"{"seq": 196, "timestamp": "2026-10-15T00:14:29.29
 /// A `node_failed` line whose owed scope stored the reason its session gave.
 const OWED_REASON: &str = r##"{"seq": 1179, "timestamp": "2026-10-15T03:11:09.092338+00:00", "run_id": "01R0000000000000000000000H", "node_id": "implement", "kind": "node_failed", "owed": [{"task_id": "resolve-global", "paths": ["crates/engine/src/catalog.rs"], "reason": "PackLayers in catalog.rs needs three additions for the resolve-global task: (1) remove #[expect(dead_code)] from pack_dir and scope_of since callers are being added in this task, (2) add pub(crate) fn repo_root(&self) -> &Path accessor needed by agents.rs and skills.rs, and (3) add pub(crate) fn lock_path(&self, scope: PackScope) -> PathBuf method needed by provenance.rs. Without these, the call chain from provenance/walk/agents/skills cannot compile."}], "tokens_used": {"input": 13020941, "output": 69775, "cached": 12047942}, "tree": "23faf1d2a13d0b817db76fc5b9ca9f22d3957060"}"##;
 
+/// A `gate_waiting` line of a loop stopped on its cap, whose retry waits for a person to
+/// lift the cap, which nothing asks of a person now.
+const CAPPED_LOOP_RETRY: &str = r##"{"seq": 38, "timestamp": "2026-11-05T13:26:33.509100+00:00", "run_id": "01R0000000000000000000000H", "node_id": "implement", "kind": "gate_waiting", "summary": {"claim": "node_failed", "node": "implement"}, "options": [{"id": "retry"}, {"id": "abort"}], "failure": {"attempt": 2, "failure": {"node": "implement", "loop_cap": 2}, "remedies": [{"option": "retry", "precondition": "cap_lifted"}]}}"##;
+
+/// A `gate_waiting` line of a session cut at its share of the token cap, which offered a
+/// retry where a menu now offers `continue`.
+const CUT_SESSION_RETRY: &str = r##"{"seq": 9, "timestamp": "2026-11-05T15:49:41.223325+00:00", "run_id": "01R0000000000000000000000H", "node_id": "first", "kind": "gate_waiting", "summary": {"claim": "node_failed", "node": "first"}, "options": [{"id": "retry"}, {"id": "abort"}], "failure": {"attempt": 2, "failure": {"used": 60, "max": 25}, "remedies": [{"option": "retry", "precondition": "outside_tree_changed"}]}}"##;
+
 /// Checks that the words of one older line come out of render as it stored them.
 type Shows = fn(&StoredEvent, &Value);
 
@@ -53,6 +61,16 @@ fn older_lines() -> Vec<(&'static str, Value, Shows)> {
         ("note text", copied(NOTE_TEXT), note_text as Shows),
         ("rule clause", copied(RULE_CLAUSES), rule_clause as Shows),
         ("owed reason", copied(OWED_REASON), owed_reason as Shows),
+        (
+            "capped loop's retry",
+            copied(CAPPED_LOOP_RETRY),
+            capped_loop_retry_words as Shows,
+        ),
+        (
+            "cut session's retry",
+            copied(CUT_SESSION_RETRY),
+            cut_session_retry_words as Shows,
+        ),
         (
             "engine error sentence",
             engine_error_sentence(),
@@ -142,6 +160,27 @@ fn gate_option_words(event: &StoredEvent, line: &Value) {
             "mode: ask",
             "0/3 grant(s) used",
         ]
+    );
+}
+
+/// The retry of a loop's older menu says what a retry does, since what it waited for was
+/// never so.
+fn capped_loop_retry_words(event: &StoredEvent, _line: &Value) {
+    let payload = waiting(event);
+    let (label, _) = offers::option_words(payload, &payload.options()[0]);
+    assert_eq!(
+        label,
+        "Run it again (attempt 2): its iteration count starts over"
+    );
+}
+
+/// The retry of a cut session's older menu reads as that menu offered it.
+fn cut_session_retry_words(event: &StoredEvent, _line: &Value) {
+    let payload = waiting(event);
+    let (label, _) = offers::option_words(payload, &payload.options()[0]);
+    assert_eq!(
+        label,
+        "Run it again (attempt 2) once something outside the tree changes"
     );
 }
 

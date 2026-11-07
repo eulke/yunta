@@ -125,7 +125,7 @@ async fn run_successor(
     super::registry::execute(super::registry::Executing {
         run_id: &successor.run_id,
         manifest: &successor.manifest,
-        run_dir: &successor.run_dir,
+        hold: super::registry::claim(env.ctx, &successor.run_dir).await?,
         worktree: &successor.worktree,
         adapters: env.adapters,
         storage: env.storage,

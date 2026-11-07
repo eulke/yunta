@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 
 use yunta_core::events::{Fact, GateWaitingPayload, Menu, Shown};
 use yunta_core::step::NextStep;
-use yunta_core::{NodeId, RunId};
+use yunta_core::RunId;
+use yunta_engine::DecisionOn;
 
 use super::decision::claim_words;
 use crate::commands::advice;
@@ -18,8 +19,10 @@ use crate::error::Reader;
 /// own data, and the commands that answer it.
 #[derive(serde::Serialize)]
 pub(crate) struct DecisionJson {
-    /// The node `resolve_gate` records the answer against.
-    node: String,
+    /// The node `resolve_gate` records the answer against. Absent for a decision
+    /// that belongs to the run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    node: Option<String>,
     /// The claim, in the words a person reads.
     summary: String,
     /// The facts a person reads beside the claim.
@@ -65,9 +68,9 @@ struct WithheldJson {
 }
 
 impl DecisionJson {
-    pub(crate) fn new(run_id: &RunId, node: &NodeId, escalation: GateWaitingPayload) -> Self {
+    pub(crate) fn new(run_id: &RunId, on: &DecisionOn, escalation: GateWaitingPayload) -> Self {
         DecisionJson {
-            node: node.to_string(),
+            node: on.node().map(ToString::to_string),
             summary: claim_words(&escalation),
             evidence: yunta_render::escalation::facts(&escalation),
             options: options_of(&escalation),
@@ -135,7 +138,7 @@ mod tests {
     };
     use yunta_core::reserved::ReservedOption;
     use yunta_core::shown::Flaw;
-    use yunta_core::{NonEmpty, OptionId, TaskId};
+    use yunta_core::{NodeId, NonEmpty, OptionId, TaskId};
 
     use super::*;
 
@@ -193,9 +196,22 @@ mod tests {
         .into_payload()
     }
 
+    /// A decision the run owns has no node to record its answer against, and a reader
+    /// tells that from the field being absent.
+    #[test]
+    fn a_decision_the_run_owns_names_no_node() {
+        let owned =
+            serde_json::to_value(DecisionJson::new(&RUN, &DecisionOn::Run, gate())).unwrap();
+        assert!(owned.get("node").is_none(), "{owned:#}");
+        let on_a_node =
+            serde_json::to_value(DecisionJson::new(&RUN, &DecisionOn::Node(NODE), gate())).unwrap();
+        assert_eq!(on_a_node["node"], "approve-plan", "{on_a_node:#}");
+    }
+
     #[test]
     fn a_decision_reads_its_words_where_a_program_reads_them() {
-        let json = serde_json::to_value(DecisionJson::new(&RUN, &NODE, gate())).unwrap();
+        let json =
+            serde_json::to_value(DecisionJson::new(&RUN, &DecisionOn::Node(NODE), gate())).unwrap();
         assert_eq!(json["options"][0]["label"], "On to `ship`", "{json:#}");
         assert_eq!(
             json["options"][1]["asks"], "what should change?",
@@ -228,7 +244,8 @@ mod tests {
 
     #[test]
     fn every_option_has_the_command_that_chooses_it() {
-        let json = serde_json::to_value(DecisionJson::new(&RUN, &NODE, gate())).unwrap();
+        let json =
+            serde_json::to_value(DecisionJson::new(&RUN, &DecisionOn::Node(NODE), gate())).unwrap();
         assert_eq!(
             json["commands"]["proceed"],
             "yunta resolve-gate 01JBZ5X8K3N7Q2W6E4R9T1Y0P5 proceed"
@@ -241,7 +258,8 @@ mod tests {
 
     #[test]
     fn an_engine_claim_is_said_in_the_words_a_person_reads() {
-        let json = serde_json::to_value(DecisionJson::new(&RUN, &NODE, gate())).unwrap();
+        let json =
+            serde_json::to_value(DecisionJson::new(&RUN, &DecisionOn::Node(NODE), gate())).unwrap();
         assert_eq!(json["summary"], "gate `approve-plan` needs a decision");
     }
 }

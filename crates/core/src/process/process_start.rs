@@ -1,6 +1,7 @@
-//! When a process started, from the host's process table. Linux
-//! publishes it in `/proc/<pid>/stat`; a host without `/proc` (macOS)
-//! cannot tell, and the answer is `None` — never a guess.
+//! When a process started, from the host's process table. Linux publishes it
+//! in `/proc/<pid>/stat` for any process; macOS answers through `proc_pidinfo`,
+//! and only about this user's processes. Where the host cannot tell, the answer
+//! is `None`, never a guess.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -9,10 +10,26 @@ use crate::Pid;
 /// Clock ticks per second in the times `/proc` reports since boot —
 /// fixed at 100 in the kernel's user-space ABI, whatever the
 /// scheduler's own frequency.
+#[cfg(not(target_os = "macos"))]
 const USER_HZ: u64 = 100;
+
+/// The moment the process with `pid` started.
+#[cfg(target_os = "macos")]
+pub fn process_start(pid: Pid) -> Option<SystemTime> {
+    use libproc::bsd_info::BSDInfo;
+    use libproc::proc_pid::pidinfo;
+
+    let info = pidinfo::<BSDInfo>(pid.as_i32(), 0).ok()?;
+    Some(
+        UNIX_EPOCH
+            + Duration::from_secs(info.pbi_start_tvsec)
+            + Duration::from_micros(info.pbi_start_tvusec),
+    )
+}
 
 /// The moment the process with `pid` started, rounded down to the
 /// boot time's whole second: never later than the real start.
+#[cfg(not(target_os = "macos"))]
 pub fn process_start(pid: Pid) -> Option<SystemTime> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let ticks = start_ticks(&stat)?;
@@ -24,12 +41,14 @@ pub fn process_start(pid: Pid) -> Option<SystemTime> {
 /// parentheses of its own, so fields are counted from its closing
 /// parenthesis: the next field is the state (3), and the start time is
 /// 19 fields further.
+#[cfg(not(target_os = "macos"))]
 fn start_ticks(stat: &str) -> Option<u64> {
     let after_comm = &stat[stat.rfind(')')? + 1..];
     after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
 /// `btime` from `/proc/stat`: the boot, in whole seconds since the epoch.
+#[cfg(not(target_os = "macos"))]
 fn boot_time() -> Option<SystemTime> {
     let stat = std::fs::read_to_string("/proc/stat").ok()?;
     let seconds: u64 = stat
@@ -41,7 +60,7 @@ fn boot_time() -> Option<SystemTime> {
     Some(UNIX_EPOCH + Duration::from_secs(seconds))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
 

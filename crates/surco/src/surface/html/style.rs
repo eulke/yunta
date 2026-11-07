@@ -2,8 +2,7 @@
 //! the style reads, and the few only a page has.
 
 use crate::line::{Fill, Syntax, Tone};
-use crate::paint::Ground;
-use crate::palette::{self, Rgb};
+use crate::paint::{page, style, Color, Ground, Layer};
 
 /// The palette's tones, by the name the style reads.
 const TONES: [(&str, Tone); 18] = [
@@ -46,28 +45,30 @@ pub(super) fn tokens() -> String {
 }
 
 /// Every token on `ground`, each written `--name:#rrggbb;`: the page's own
-/// colors, then each tone and fill the palette colors, then the ink of a pill.
+/// colors, then each tone and fill the style reading colors in 24 bits, then
+/// the ink of a pill, which is the text's color of any colored tone in one.
 fn set(ground: Ground) -> String {
-    let page = palette::page(ground)
+    let layer = Layer::Truecolor(ground);
+    let page = page(ground)
         .into_iter()
-        .map(|(name, color)| token(name, color));
+        .filter_map(|(name, color)| token(name, Some(color)));
     let tones = TONES
         .iter()
-        .filter_map(|(name, tone)| palette::tone(ground, *tone).map(|color| token(name, color)));
+        .filter_map(|(name, tone)| token(name, style(layer, *tone, None, None).fg));
     let fills = FILLS
         .iter()
-        .filter_map(|(name, fill)| palette::fill(ground, *fill).map(|color| token(name, color)));
-    let pill = std::iter::once(token("pill-ink", palette::pill_ink(ground)));
+        .filter_map(|(name, fill)| token(name, style(layer, Tone::Plain, Some(*fill), None).bg));
+    let pill = token(
+        "pill-ink",
+        style(layer, Tone::Strong, Some(Fill::Pill), None).fg,
+    );
     page.chain(tones).chain(fills).chain(pill).collect()
 }
 
-/// One token, `--name:#rrggbb;`, for `color`.
-fn token(name: &str, color: Rgb) -> String {
-    format!("--{name}:{};", hex(color))
-}
-
-/// `color` as a web color: `#` and its red, green and blue in two lowercase
-/// hex digits each.
-fn hex(Rgb(red, green, blue): Rgb) -> String {
-    format!("#{red:02x}{green:02x}{blue:02x}")
+/// One token, `--name:#rrggbb;`, for `color`, when it is one of 24 bits.
+fn token(name: &str, color: Option<Color>) -> Option<String> {
+    match color? {
+        Color::Rgb(red, green, blue) => Some(format!("--{name}:#{red:02x}{green:02x}{blue:02x};")),
+        Color::Ansi(_) => None,
+    }
 }

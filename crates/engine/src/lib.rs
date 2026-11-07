@@ -19,9 +19,11 @@
 //!   `receipt` and `events_export` read that state.
 //! - Sessions' tools: `run_tools` serves a node session's MCP server, shaped by
 //!   `mcp`.
+//! - What sessions say: `said` holds it for whoever watches the run, in this
+//!   process and through the run's socket, and never on the log.
 //! - Checkouts: `worktree` isolates and pools them; `wakefulness` notices a
 //!   host that slept.
-//! - Boundaries: `git`, `process`, `process_registry`, `lock` and `pace`.
+//! - Boundaries: `git`, `process`, `process_registry`, `lock`, `run_hold` and `pace`.
 //! - Packs: `pack_audit` and `pack_requires`.
 
 // A panic is a bug, never a fallible path: production returns a typed
@@ -81,9 +83,11 @@ mod replay;
 mod reserved;
 mod run;
 pub mod run_dir;
+mod run_hold;
 mod run_log;
 mod run_tools;
 mod runner;
+pub mod said;
 mod scope;
 pub mod scope_expansion;
 mod session_dir;
@@ -155,9 +159,10 @@ pub use run::{
     awaits_decision, close_run, create_promotion_successor, create_run, current_escalation,
     execute_run, read_manifest, record_pause_after_crash, resolve_gate, run_redactor,
     session_token_budget, BirthArtifact, BirthOrigin, CallerInfra, CloseRunError, CreateRunParams,
-    ManifestReadError, OwedMeasurement, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv,
-    RunError, RunReport, RunRoots, RunTerminal,
+    DecisionOn, ManifestReadError, OwedMeasurement, Predecessor, PromotionSuccessor,
+    ResolveGateError, RunEnv, RunError, RunReport, RunRoots, RunTerminal,
 };
+pub use run_hold::{contention_for, hold_refused, hold_run, RunHold};
 pub use run_tools::{
     consolidate_blackboard, open_session_listener, HostOf, NodeScopeAccess, RunTool,
     RunToolsAccess, RunToolsHost, RunToolsSession, TaskAccess, TaskExpansion,

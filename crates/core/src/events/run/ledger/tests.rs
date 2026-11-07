@@ -162,6 +162,37 @@ fn a_pause_is_the_fact_it_recorded_until_a_resume_follows() {
     assert_eq!(ledger.paused(), None);
 }
 
+/// A stop on the token cap is not a person's answer being acted on, so it does not close
+/// the window of one that waits: the cap comes first, and the answer after it.
+#[test]
+fn a_stop_on_the_cap_leaves_a_node_s_answer_open() {
+    let mut ledger = RunLedger::default();
+    at(&mut ledger, 1, RunEvent::Created(born_in(None)));
+    let on_the_cap = PauseReason::BudgetExhausted { spent: 5, cap: 4 };
+    at(
+        &mut ledger,
+        2,
+        RunEvent::Paused(RunPausedPayload::new(&on_the_cap)),
+    );
+    assert_eq!(ledger.answers_closed_at(), None);
+
+    let stopped = PauseReason::Cancelled;
+    at(
+        &mut ledger,
+        3,
+        RunEvent::Paused(RunPausedPayload::new(&stopped)),
+    );
+    assert_eq!(ledger.answers_closed_at(), Some(Seq::from(3_u64)));
+
+    at(
+        &mut ledger,
+        4,
+        RunEvent::Paused(RunPausedPayload::new(&on_the_cap)),
+    );
+    assert_eq!(ledger.answers_closed_at(), Some(Seq::from(3_u64)));
+    assert_eq!(ledger.paused(), Some((&on_the_cap, Seq::from(4_u64))));
+}
+
 /// A wake logged at `seq`, `seconds` after the epoch, that found the run at
 /// `tree` when it found one.
 fn woke(ledger: &mut RunLedger, seq: u64, seconds: i64, tree: Option<&str>) {

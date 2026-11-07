@@ -1,7 +1,7 @@
 //! A plan as its desk reads it: every place a person can stand on, what each shows, and
 //! what the rail says of the whole, from the plan the rest of these tests read.
 
-use surco::components::{DeskFoot, FootRow, RailGroup, RailRow};
+use surco::components::{DeskFoot, FootRow, Legend, RailGroup, RailRow};
 use surco::doc::Doc;
 use surco::glyphs::Glyphs;
 use surco::golden::assert_golden;
@@ -18,7 +18,7 @@ fn look(cells: usize) -> Look {
     Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
-        width: Width::whole(cells),
+        width: Width::exact(cells),
     }
 }
 
@@ -435,16 +435,23 @@ fn a_card_says_what_the_plan_is_about_and_how_big_it_is() {
 fn the_desk_matches_its_goldens() {
     let review: PlanReview = global_packs();
     let reading = Reading::of(&review, Vec::new());
-    let foot = |keys: [&str; 4]| DeskFoot {
+    let foot = |[moves, p, d]: [&str; 3]| DeskFoot {
         question: "Plan and its tests registered. Approve?".to_string(),
-        row: FootRow::Options(vec![
-            "approve".to_string(),
-            "adjust".to_string(),
-            "abort".to_string(),
-        ]),
-        keys: keys.map(str::to_string).to_vec(),
+        row: FootRow::Options {
+            named: vec![
+                "approve".to_string(),
+                "adjust".to_string(),
+                "abort".to_string(),
+            ],
+            more: 0,
+        },
+        legend: Legend::new()
+            .key("j k", moves)
+            .key("p", p)
+            .key("d", d)
+            .key("esc", "back"),
     };
-    let reading_keys = ["j k task", "p proof", "d decided for you", "esc back"];
+    let reading_keys = ["task", "proof", "decided for you"];
     for (name, at, view, choice, keys) in [
         ("desk-the-change", 0, View::Stop, 0, reading_keys),
         ("desk-task", 2, View::Stop, 0, reading_keys),
@@ -453,14 +460,14 @@ fn the_desk_matches_its_goldens() {
             1,
             View::Proof,
             0,
-            ["j k task", "p the card", "d decided for you", "esc back"],
+            ["task", "the card", "decided for you"],
         ),
         (
             "desk-choices",
             1,
             View::Choices,
             1,
-            ["j k choice", "p proof", "d the tasks", "esc back"],
+            ["choice", "proof", "the tasks"],
         ),
     ] {
         let look = look(118);

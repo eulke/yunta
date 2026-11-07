@@ -1,6 +1,6 @@
 //! How a [`RunFrame`] reads as the rows a person watches: the line that
-//! says whether the run needs them, the line each working node gets, and
-//! the counters under it all.
+//! says whether the run needs them, the line each working node gets with
+//! what its session last said under it, and the counters under it all.
 //!
 //! Every surface here draws the same frame, so this is where the words
 //! for it are chosen once. What the words are *drawn with* — the glyphs,
@@ -16,14 +16,17 @@ use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 use yunta_render::spend::Breakdown;
 
 mod children;
+mod said;
 
 use children::children_of;
 pub(crate) use children::{child_row, children_by_node};
 pub(super) use children::{child_standing, closed_as};
 
 use crate::commands::advice;
+use surco::components::Attention;
+use surco::doc::Block;
 use surco::figures::duration;
-use surco::glyphs::{Glyphs, Mark};
+use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::surface::Terminal;
@@ -34,41 +37,41 @@ use surco::width::{cell_width, indent, CHILD_DEPTH};
 /// up with the blocks a run's other surfaces nest.
 const DETAIL_DEPTH: usize = 2;
 
+/// The attention row of a run whose engine asks a person at its own terminal,
+/// read from its registry by a process that follows it: whom it asks, and that
+/// the answer is given there, drawn at `look` as an [`Attention`] answered
+/// elsewhere. The engine that asks draws no such row, since its prompt has the
+/// terminal.
+pub(super) fn asked(prompt: &yunta_engine::Prompt, look: &Look) -> Option<Line> {
+    let row = Attention::elsewhere(advice::asking_on(prompt));
+    Terminal::on(*look)
+        .block(&Block::Attention(row))
+        .into_iter()
+        .next()
+}
+
 /// The row that opens the region while the frame stands as
-/// `Standing::NeedsYou`: the command that answers it, and what it is about.
+/// `Standing::NeedsYou`: the command that answers it, and what it is about,
+/// drawn at `look` as an [`Attention`] keeps a command when its row is cut.
 /// Any other standing draws none, since the footer says that nothing needs
 /// the person, or that the run waits for a reset: a pause a person chose
 /// stands as `Standing::Stopped`, and a reset that resumes on its own as
 /// `Standing::Waiting`. A row saying nothing would cost the work a row.
-///
-/// The command comes before what it is about, so that a row cut to fit
-/// loses the subject and never the thing to run. A reader who lost the
-/// subject still has `yunta status`; a reader who lost the command has
-/// nothing.
 pub(super) fn attention(
     frame: &RunFrame,
     run_id: &RunId,
     answerable: bool,
-    glyphs: Glyphs,
+    look: &Look,
 ) -> Option<Line> {
     if !matches!(frame.standing, Standing::NeedsYou) {
         return None;
     }
     let on = advice::parked(&frame.phase)?;
-    Some(
-        Line::new()
-            .push(
-                Tone::NeedsYou,
-                format!(
-                    "{} {}",
-                    glyphs.mark(Mark::NeedsYou),
-                    Standing::NeedsYou.word()
-                ),
-            )
-            .plain(": ")
-            .push(Tone::Strong, answer_command(run_id, answerable))
-            .push(Tone::Muted, format!(" ({})", advice::parked_on(on))),
-    )
+    let row = Attention::command(advice::parked_on(on), answer_command(run_id, answerable));
+    Terminal::on(*look)
+        .block(&Block::Attention(row))
+        .into_iter()
+        .next()
 }
 
 /// The region's last row, which answers on every redraw: the run's furrow
@@ -172,8 +175,8 @@ fn answer(frame: &RunFrame) -> (Tone, String) {
 
 /// The command that moves a parked run: an option off its own menu when
 /// the run stopped on one, and handing the run back when what stopped it
-/// is settled somewhere else — a budget, a scope, an answers file, a
-/// review on a forge.
+/// is settled somewhere else — a scope, an answers file, a review on a
+/// forge, a child.
 pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
     match answerable {
         true => advice::decide(run_id.handle()),
@@ -182,13 +185,15 @@ pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
 }
 
 /// The rows one working node takes: what it is, what its tasks are doing,
-/// and what its last calls reached for.
+/// what one of its sessions said last, and what its last calls reached for.
 ///
 /// A running node's spin turns a frame per event it says, and past
-/// [`QUIET_AFTER`] without one its row says how long.
+/// [`QUIET_AFTER`] without one its row says how long. What a session said
+/// moves neither: words are not evidence.
 pub(super) fn node_rows(
     frame: &RunFrame,
     node: &NodeFrame,
+    said: Option<&yunta_engine::said::Said>,
     look: &Look,
     motion: Motion,
 ) -> Vec<Line> {
@@ -213,6 +218,7 @@ pub(super) fn node_rows(
             ),
         ));
     }
+    rows.extend(said.map(|said| said::row(said, &detail)));
     let calls = calls_row(node, look, cell_width(&detail));
     if !calls.is_empty() {
         // The envelope names a node and never a session, so at loop

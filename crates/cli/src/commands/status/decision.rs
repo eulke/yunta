@@ -15,11 +15,12 @@
 //! that chooses it. A failed node's evidence is said once: by the block,
 //! or by the page above it when the page quotes it.
 //!
-//! **Two pauses reconstruct a menu, and only two**: a node whose
-//! reroutes are exhausted, and an unresolved internal gate. A budget
-//! cap, a scope expansion in ask mode, an unanswered questions artifact
-//! and an external gate with no reachable forge park a run with no menu
-//! to rebuild — the forge one because whether a forge answers depends
+//! **Three pauses reconstruct a menu, and only three**: a failed node,
+//! whose reroutes are exhausted or that has none, an unresolved internal
+//! gate, and a run stopped on its token cap, whose decision is the run's and
+//! names no node. A scope expansion in ask mode, an unanswered questions
+//! artifact, a parent waiting on its child and an external gate with no
+//! reachable forge park a run with no menu to rebuild — the forge one because whether a forge answers depends
 //! on the machine asking, which no log can say. Those runs still report
 //! what they are waiting on, and what to do instead of choosing an
 //! option.
@@ -30,7 +31,7 @@ use surco::components::{Decision, Note, Prose, Section};
 use surco::doc::Block;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::RunId;
-use yunta_engine::ShownDocument;
+use yunta_engine::{DecisionOn, ShownDocument};
 
 use crate::commands::advice;
 use crate::run_page::Decided;
@@ -83,7 +84,11 @@ pub(crate) fn section(
     let mut menu = menu(run_id, escalation);
     menu.otherwise = otherwise;
     blocks.push(menu.into());
-    yunta_render::gate::decision(format!("decision on node `{}`", decided.node), blocks)
+    let heading = match &decided.on {
+        DecisionOn::Node(node) => format!("decision on node `{node}`"),
+        DecisionOn::Run => "decision on the run".to_string(),
+    };
+    yunta_render::gate::decision(heading, blocks)
 }
 
 /// The record the engine attached to a decision, to audit it against, less
@@ -183,11 +188,32 @@ mod tests {
     /// The lines of the section a page ends on for `escalation`, with nothing shown.
     fn drawn(escalation: &GateWaitingPayload, beside: Beside) -> Vec<String> {
         drawn_with(&Decided {
-            node: NODE,
+            on: DecisionOn::Node(NODE),
             escalation: escalation.clone(),
             shown: Vec::new(),
             beside,
         })
+    }
+
+    /// A decision no node owns says whose it is in its heading.
+    #[test]
+    fn a_decision_the_run_owns_says_so() {
+        let lines = drawn_with(&Decided {
+            on: DecisionOn::Run,
+            escalation: escalation(),
+            shown: Vec::new(),
+            beside: NOTHING_BESIDE,
+        });
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("decision on the run")),
+            "{lines:#?}"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("decision on node")),
+            "{lines:#?}"
+        );
     }
 
     /// The lines of the section a page ends on for `decided`, drawn plain.
@@ -341,7 +367,7 @@ mod tests {
         );
         // The section a page ends on says the reason once, under its title.
         let decided = Decided {
-            node: NODE,
+            on: DecisionOn::Node(NODE),
             escalation: withheld,
             shown: vec![flawed_plan()],
             beside: NOTHING_BESIDE,

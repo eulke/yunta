@@ -16,6 +16,7 @@ fn every_persisted_file_carries_its_version() {
             node: Some("approve".into()),
             since: DateTime::<Utc>::UNIX_EPOCH,
         }),
+        words: Some("/tmp/yunta-501/run.sock".into()),
     });
     holds_its_version(yunta_engine::lock::LockOwner {
         schema_version: 1,

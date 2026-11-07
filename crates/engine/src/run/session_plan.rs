@@ -81,6 +81,7 @@ pub(crate) async fn resolve_setup(
         cli_config: super::session_policy::cli_config(ctx, node),
         network: yunta_core::network_asked(node.network, ctx.manifest.config.network_permissions()),
         run_dir: ctx.run_dir.to_path_buf(),
+        run: ctx.run_id.clone(),
         node: node.id.clone(),
         chosen: chosen.clone(),
         artifact_dir: crate::run::node_exec::artifact_dir(ctx, node),
@@ -290,6 +291,7 @@ pub(crate) async fn open_session(
         // told where it belongs.
         artifact_dir: setup.artifact_dir.clone(),
         scratch_dir,
+        mark: yunta_core::process::mark::SessionMark::new(&setup.run),
     };
     record_staged(&held_to, adapter, &request)?;
     Ok(OpenedSession { request, run_tools })

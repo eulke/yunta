@@ -123,7 +123,7 @@ fn look() -> Look {
     Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
-        width: Width::whole(COLUMNS),
+        width: Width::exact(COLUMNS),
     }
 }
 
@@ -369,7 +369,7 @@ fn the_keys_say_where_esc_goes() {
     );
     let opened = desk(&review, Leaving::TheCommand(Escape::LeavesWaiting));
     assert!(
-        holds(&opened, Escape::LeavesWaiting.said()),
+        holds(&opened, &Escape::LeavesWaiting.said()),
         "{:#?}",
         rows(&opened)
     );

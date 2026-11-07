@@ -53,6 +53,12 @@ mod forge;
 #[path = "mock/proof.rs"]
 mod proof;
 
+#[path = "mock/said.rs"]
+mod said;
+
+#[path = "mock/retry.rs"]
+mod retry;
+
 use rail::judged;
 
 #[tokio::test]

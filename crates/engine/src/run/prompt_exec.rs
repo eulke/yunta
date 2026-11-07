@@ -305,6 +305,7 @@ async fn dispatch_failed(
             detail,
             release,
             tokens,
+            ..
         } => {
             let failure = not_stopped_failure(&detail, release.as_deref());
             fail_unstopped(ctx, node, failure, tokens).await

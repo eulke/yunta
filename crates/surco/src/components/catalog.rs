@@ -3,7 +3,9 @@
 //! surface has to draw, and what a change to one block is seen against.
 
 mod closing;
+mod exact;
 mod kinds;
+mod on_screen;
 
 use std::path::{Path, PathBuf};
 
@@ -20,6 +22,7 @@ use crate::surface::{visible, Description, Html, Markdown, Surface, Terminal};
 use crate::width::cell_width;
 use crate::words::Standing;
 use closing::closing;
+use on_screen::on_a_screen;
 
 fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens")
@@ -400,6 +403,7 @@ pub(super) fn catalog() -> Doc {
         .chain(planned())
         .chain(written())
         .chain(closing())
+        .chain(on_a_screen())
         .fold(Doc::new(), Doc::with)
 }
 

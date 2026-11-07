@@ -329,6 +329,7 @@ impl ClaudeCodeAdapter {
             args: planned.args,
             cwd: &req.cwd,
             env: &planned.env,
+            mark: &req.mark,
             prompt: &req.prompt,
             parser: Box::new(ClaudeParser::new(planned.coverage, planned.checkout)),
             held: Some(Box::new(mounts)),

@@ -74,16 +74,24 @@ pub(crate) enum Escape {
 }
 
 impl Escape {
-    /// The phrase, as every prompt says it.
-    pub(crate) fn said(self) -> &'static str {
+    /// The phrase, as every prompt says it: the key, then what it does.
+    pub(crate) fn said(self) -> String {
+        format!("{ESC} {}", self.does())
+    }
+
+    /// What Escape does, as a legend says it beside the key.
+    pub(crate) fn does(self) -> &'static str {
         match self {
-            Escape::Parks => "esc leaves it for later",
-            Escape::LeavesWaiting => "esc leaves the run waiting",
-            Escape::KeepsDefault => "esc keeps the detected default",
-            Escape::TakesTheFirst => "esc takes the first",
+            Escape::Parks => "leaves it for later",
+            Escape::LeavesWaiting => "leaves the run waiting",
+            Escape::KeepsDefault => "keeps the detected default",
+            Escape::TakesTheFirst => "takes the first",
         }
     }
 }
+
+/// The key a person leaves a prompt with, as a legend spells it.
+pub(super) const ESC: &str = "esc";
 
 /// What marks a line an answer is given on, typed or echoed back, so a
 /// person reads a round as answers under the things that asked for

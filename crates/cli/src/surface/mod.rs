@@ -9,12 +9,16 @@
 //! and the append-only surface writes every moment. A reader moving
 //! between them meets the same facts in the same words.
 //!
-//! **The events come from the engine, not from the log.** The engine
-//! hands every append to the observer in the moment it writes it
-//! ([`RunObserver`]), so the process drawing a run never asks storage for
-//! what it wrote an instant earlier. The log stays the truth: what
-//! the surface holds is the cache of one invocation, and every hole in it
-//! is closed by reading the log.
+//! **The events come from whoever has them first.** In the process that
+//! drives a run, the engine hands every append to the observer in the moment
+//! it writes it ([`RunObserver`]), so that process never asks storage for what
+//! it wrote an instant earlier. A process that follows a run another one drives
+//! reads the log past what it holds and hands each event over itself
+//! ([`Surface::deliver`]), with the engine read from the run's registry
+//! ([`EngineReading`]). The log stays the truth: what the surface holds is the
+//! cache of one invocation, and every hole in it is closed by reading the log.
+//! What a session says is on no log: the driving process gets it from the
+//! observer, a follower off the run's socket, and only the region draws it.
 
 mod chronicle;
 mod closing;
@@ -38,9 +42,10 @@ use console::Term;
 use indicatif::TermLike;
 use tokio::task::JoinHandle;
 
+use yunta_core::events::StoredEvent;
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{PriorEstimation, RunObserver};
-use yunta_storage::{AsyncStorage, StorageError};
+use yunta_engine::{Engine, PriorEstimation, RunObserver};
+use yunta_storage::AsyncStorage;
 
 use surco::glyphs::Glyphs;
 
@@ -118,6 +123,43 @@ impl Delivery {
     }
 }
 
+/// Where the frame a surface draws reads the engine driving its run from.
+///
+/// The process that drives a run is alive, and asks its own terminal, so it
+/// reads itself. A process that follows a run another one drives reads the
+/// run's registry, which is what says that engine is asking at its terminal or
+/// is gone.
+#[derive(Debug, Clone)]
+pub(crate) enum EngineReading {
+    /// This process drives the run.
+    This,
+    /// Another process drives it: the run's registry, under this run directory.
+    Registry(std::path::PathBuf),
+}
+
+impl EngineReading {
+    /// The same reading for `successor`, the run a promotion handed the work
+    /// to. This process drives a successor as it drove its predecessor; a
+    /// successor's registry sits beside its predecessor's, since the engine
+    /// that promotes creates it under the runs root it works in.
+    pub(crate) fn of_successor(&self, successor: &RunId) -> Self {
+        match self {
+            EngineReading::This => EngineReading::This,
+            EngineReading::Registry(run_dir) => {
+                EngineReading::Registry(run_dir.with_file_name(successor.as_str()))
+            }
+        }
+    }
+
+    /// The engine driving the run, as this reading says at `at`.
+    pub(crate) fn read(&self, at: chrono::DateTime<chrono::Utc>) -> Engine {
+        match self {
+            EngineReading::This => Engine::this(at),
+            EngineReading::Registry(run_dir) => crate::render::engine(run_dir, at),
+        }
+    }
+}
+
 /// Everything the surface needs of the run it draws.
 pub(crate) struct SurfaceEnv<'a> {
     pub(crate) run_id: &'a RunId,
@@ -135,6 +177,8 @@ pub(crate) struct SurfaceEnv<'a> {
     /// invocation so the region and the block that closes it cannot
     /// disagree — and so an unusable override is reported once.
     pub(crate) glyphs: Glyphs,
+    /// Where the frame reads the engine driving the run from.
+    pub(crate) engine: EngineReading,
 }
 
 /// The live surface of one invocation: the observer the engine feeds and
@@ -149,17 +193,18 @@ pub(crate) struct Surface {
 }
 
 impl Surface {
-    /// Opens the surface for `env.run_id`, seeded with the log as it
-    /// stands: the run's creation is written before any observer exists,
-    /// so the first thing a surface knows it reads once, here.
-    pub(crate) async fn open(env: SurfaceEnv<'_>) -> Result<Self, StorageError> {
+    /// Opens the surface for `env.run_id`, seeded with `seed`, the run's log
+    /// as the caller read it. The caller reads it because what comes next is
+    /// its to hand over: the engine's appends to the process that drives the
+    /// run, and the log past the seed's last seq to a process that follows it.
+    pub(crate) fn open(env: SurfaceEnv<'_>, seed: Vec<StoredEvent>) -> Self {
         let draw = match env.delivery {
             Delivery::Quiet => {
-                return Ok(Self {
+                return Self {
                     feed: None,
                     painter: None,
                     curtain: Curtain::none(),
-                })
+                }
             }
             Delivery::Lines { reason } => Draw::Lines(Lines::open(stderr(), reason)),
             Delivery::Live => {
@@ -174,15 +219,26 @@ impl Surface {
                 }
             }
         };
-        let seed = env.storage.events_for_run(env.run_id.clone()).await?;
         let (feed, beats) = Feed::open();
         let (curtain, standby) = Curtain::open();
         let painter = Painter::seeded(&env, draw, seed);
-        Ok(Self {
+        Self {
             feed: Some(feed),
             painter: Some(tokio::spawn(painter::paint(painter, beats, standby))),
             curtain,
-        })
+        }
+    }
+
+    /// Hands the surface an event read off the log, waiting for room in its
+    /// queue rather than dropping it: the log is where a dropped event is
+    /// recovered from, so one read from there has no other copy. Answers
+    /// whether the painter took it; nothing draws under `--quiet`, and that
+    /// is taking it too.
+    pub(crate) async fn deliver(&self, event: StoredEvent) -> bool {
+        match &self.feed {
+            Some(feed) => feed.deliver(event).await,
+            None => true,
+        }
     }
 
     /// Where a diagnostic raised while this run is drawn goes out.

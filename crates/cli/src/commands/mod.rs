@@ -389,7 +389,7 @@ pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, output: Mode, loo
             look,
             format!(
                 "run {run_id}: {doing} (`{}` follows it)",
-                advice::status(run_id.handle())
+                advice::follow(run_id.handle())
             ),
         ),
         Mode::Quiet => crate::output::say(look, run_id.to_string()),

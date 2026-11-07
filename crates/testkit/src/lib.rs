@@ -18,7 +18,8 @@
 //! `stubs` stand in for programs on `PATH`; `events` reads and writes a run's
 //! log and `frames` holds what a surface test draws; `interaction` and
 //! `observer` are doubles for a gate and the display boundary; `tools` hosts
-//! the per-run MCP listener; `tasks` writes a tasks document; `corpus` reads
+//! the per-run MCP listener; `said` reads what a run's sessions said off its
+//! socket; `tasks` writes a tasks document; `corpus` reads
 //! the repository's own documents; `owner` is what a test's subprocesses
 //! answer to; `stack` gives a deep run its thread; and `wait` bounds a wait on
 //! another process.
@@ -36,6 +37,7 @@ mod interaction;
 mod observer;
 mod owner;
 mod repo;
+pub mod said;
 mod stack;
 pub mod stubs;
 mod tasks;

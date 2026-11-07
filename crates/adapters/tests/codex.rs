@@ -345,6 +345,37 @@ async fn a_named_agent_s_instructions_reach_the_cli_as_developer_instructions() 
     );
 }
 
+/// The session's mark reaches every command Codex runs: its arguments set
+/// it in the shell environment policy, after Codex's own filters.
+#[tokio::test]
+async fn the_mark_reaches_codex_commands_through_its_shell_environment_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
+    let mut req = request(dir.path().to_path_buf());
+    let mark = req.mark.as_str().to_string();
+    req.env.plain.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string(),
+    );
+    req.env.plain.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    let _ = drain(adapter().spawn(req).await.unwrap()).await;
+
+    let args = tokio::fs::read_to_string(&args_file).await.unwrap();
+    let assignment = args
+        .lines()
+        .find(|arg| arg.starts_with("shell_environment_policy.set.YUNTA_SESSION_MARK="))
+        .unwrap_or_else(|| panic!("no mark override in:\n{args}"));
+    let table: toml::Table = toml::from_str(assignment).unwrap();
+    assert_eq!(
+        table["shell_environment_policy"]["set"]["YUNTA_SESSION_MARK"].as_str(),
+        Some(mark.as_str())
+    );
+}
+
 /// A skill source and a worktree, both created under `dir`.
 fn skill_and_cwd(dir: &Path) -> (PathBuf, PathBuf) {
     let (skill, cwd) = (dir.join("skills-src/grill"), dir.join("worktree"));

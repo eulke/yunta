@@ -68,7 +68,7 @@ impl PreRunWarnings {
 /// One number covers every `--json` document together, so a bump earned
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// Serializes a DTO as pretty JSON to a string — what the control plane
 /// hands back in a tool result instead of printing, so a `println!` never
@@ -156,14 +156,14 @@ pub(crate) struct RunDocument {
     /// Absent when no failing node named an artifact.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     diagnostics: BTreeMap<String, Vec<ArtifactProblems>>,
-    /// The decision this run is parked on: the node it belongs to, the
-    /// escalation under the field names the `gate_waiting` event writes,
-    /// and the command that answers it.
+    /// The decision this run is parked on: the node it belongs to, when one
+    /// owns it, the escalation under the field names the `gate_waiting` event
+    /// writes, and the command that answers it.
     ///
     /// Absent for a run that is not parked, and for a pause that
-    /// reconstructs no menu — a budget cap, a scope expansion, an
-    /// unanswered questions artifact, an external gate with no reachable
-    /// forge. Those pauses are answered where they were raised, and
+    /// reconstructs no menu — a scope expansion, an unanswered questions
+    /// artifact, an external gate with no reachable forge, a parent waiting
+    /// on its child. Those pauses are answered where they were raised, and
     /// `waiting_on` carries what the run is waiting on.
     #[serde(skip_serializing_if = "Option::is_none")]
     decision: Option<DecisionJson>,
@@ -220,7 +220,7 @@ impl RunDocument {
         manifest: &Manifest,
         frame: &RunFrame,
         engine: &yunta_engine::Engine,
-        decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
+        decision: Option<(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
     ) -> Self {
         let escalation = parked_escalation(frame, decision.as_ref());
         RunDocument {
@@ -317,7 +317,7 @@ fn tasks_of(state: &RunState) -> BTreeMap<String, &'static str> {
 /// that is not parked, whatever decision the log rebuilt.
 fn parked_escalation(
     frame: &RunFrame,
-    decision: Option<&(yunta_core::NodeId, yunta_core::events::Escalation)>,
+    decision: Option<&(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
 ) -> Option<GateWaitingPayload> {
     decision
         .filter(|_| advice::parked(&frame.phase).is_some())
@@ -378,14 +378,14 @@ fn reason(phase: &RunPhase) -> Option<String> {
 /// pause that reconstructs no menu.
 fn parked_decision(
     run_id: &RunId,
-    decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
+    decision: Option<(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
     phase: &RunPhase,
 ) -> Option<DecisionJson> {
     if !matches!(phase, RunPhase::Waiting { .. }) {
         return None;
     }
-    let (node, escalation) = decision?;
-    Some(DecisionJson::new(run_id, &node, escalation.into_payload()))
+    let (on, escalation) = decision?;
+    Some(DecisionJson::new(run_id, &on, escalation.into_payload()))
 }
 
 /// The decision a run waits on, rebuilt from the run's derived state and
@@ -394,7 +394,10 @@ pub(crate) async fn decision_of(
     manifest: &Manifest,
     run_dir: &std::path::Path,
     state: &RunState,
-) -> Result<Option<(yunta_core::NodeId, yunta_core::events::Escalation)>, crate::error::CliError> {
+) -> Result<
+    Option<(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
+    crate::error::CliError,
+> {
     Ok(yunta_engine::current_escalation(manifest, run_dir, state).await?)
 }
 

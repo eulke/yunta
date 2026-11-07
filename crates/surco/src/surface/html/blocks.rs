@@ -2,7 +2,7 @@
 //! it holds, gathered as it draws them.
 
 use super::text::{class_of, command, esc, line, mark, steps, title_words, words};
-use super::{code, decision, diagram, markdown, notices, tables, GLYPHS};
+use super::{code, decision, diagram, markdown, notices, screen, tables, GLYPHS};
 use crate::components::{Fields, Headline, Lead, Next, PathNote, Paths, Reads, Section, Title};
 use crate::doc::Block;
 use crate::glyphs::Mark;
@@ -40,6 +40,16 @@ impl Reader {
             toc: Vec::new(),
             named: 0,
             headlined: false,
+        }
+    }
+
+    /// A reader of a part of a page whose title stands elsewhere: a screen's,
+    /// whose place says where the person is, so its first headline is a
+    /// heading of the second level.
+    pub(super) fn headed() -> Self {
+        Reader {
+            headlined: true,
+            ..Reader::new()
         }
     }
 
@@ -81,6 +91,7 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
     match block {
         Block::Headline(head) => headline(reader, head),
         Block::Furrow(stands) => furrow(&stands.0),
+        Block::Ribbon(stretches) => screen::ribbon(stretches),
         Block::Gist(gist) => paragraph("gist", &gist.0),
         Block::Fields(rows) => fields(rows),
         Block::Table(table) => tables::table(table),
@@ -95,6 +106,8 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
         Block::Problem(problem) => notices::problem(problem),
         Block::Refusal(refusal) => notices::refusal(refusal),
         Block::Next(next) => next_steps(next, depth),
+        Block::Legend(legend) => screen::legend(legend),
+        Block::Attention(attention) => screen::attention(attention),
         Block::Title(doc_title) => title(reader, doc_title, depth),
         Block::Heading(text) => heading(reader, text, depth),
         Block::Section(part) => section(reader, part, depth),
@@ -162,7 +175,7 @@ pub(super) fn furrow(standings: &[Standing]) -> String {
 
 /// One stroke of a furrow: a node's mark in its tone's class. A stroke of a
 /// muted node is bare, since its class would paint it like what a reader skims.
-fn stroke(sign: Mark) -> String {
+pub(super) fn stroke(sign: Mark) -> String {
     let class = match Tone::of(sign) {
         Tone::Muted => None,
         tone => class_of(tone),
@@ -374,7 +387,7 @@ fn lines(rows: &[Line]) -> String {
 
 /// Each of `blocks`, `depth` deep, on a line of its own; a block that draws
 /// nothing leaves no line.
-fn draw_all(reader: &mut Reader, blocks: &[Block], depth: usize) -> String {
+pub(super) fn draw_all(reader: &mut Reader, blocks: &[Block], depth: usize) -> String {
     blocks
         .iter()
         .map(|inner| block(reader, inner, depth))

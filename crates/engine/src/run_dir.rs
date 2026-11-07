@@ -29,6 +29,17 @@ pub fn manifest_path(run_dir: &Path) -> PathBuf {
     run_dir.join("manifest.yaml")
 }
 
+/// The lock that names the process driving the run, under the scratch.
+pub fn engine_lock(run_dir: &Path) -> PathBuf {
+    run_dir.join(SCRATCH_DIR).join("engine.lock")
+}
+
+/// Where the run's socket goes under the scratch, when its path fits what a
+/// socket's address holds.
+pub fn words_socket(run_dir: &Path) -> PathBuf {
+    run_dir.join(SCRATCH_DIR).join("live.sock")
+}
+
 /// Where a session's own transcript directory goes, under the scratch.
 pub fn sessions_root(run_dir: &Path) -> PathBuf {
     run_dir.join(SCRATCH_DIR).join("sessions")

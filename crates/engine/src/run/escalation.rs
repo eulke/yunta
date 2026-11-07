@@ -23,7 +23,7 @@ use super::schedule::{self, Decision};
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
 use crate::run_log::RunLog;
-use yunta_core::events::GateEvent;
+use yunta_core::events::{GateEvent, PauseReason};
 
 /// The escalation object for a node whose reroutes are exhausted: retry once
 /// more, abort, or — when `modes:` has somewhere later to go — promote. The
@@ -119,6 +119,24 @@ fn named_options(remedies: &[Remedy]) -> Vec<ReservedOption> {
     named
 }
 
+/// Whom a parked run's decision belongs to: a node, or the run itself. Not an
+/// `Option<NodeId>`: beside a decision that may not exist, `None` would read as none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionOn {
+    Node(NodeId),
+    Run,
+}
+
+impl DecisionOn {
+    /// The node the decision is recorded against, when one owns it.
+    pub fn node(&self) -> Option<&NodeId> {
+        match self {
+            DecisionOn::Node(node) => Some(node),
+            DecisionOn::Run => None,
+        }
+    }
+}
+
 /// Reconstructs the escalation object a paused run is
 /// currently waiting on, purely from the manifest and its own log — no
 /// live process required. This is what lets `resolve_gate` (a `yunta
@@ -131,8 +149,11 @@ fn named_options(remedies: &[Remedy]) -> Vec<ReservedOption> {
 /// does the work of building the decision — that's a computation, not
 /// a persisted fact, until a human actually answers).
 ///
-/// `None` covers every pause this function's three cases don't: a failed
-/// gate node, a budget cap, a cancellation, an
+/// A run stopped on its token cap rebuilds its menu from that pause, and the decision is
+/// the run's.
+///
+/// `None` covers every pause these cases don't: a failed
+/// gate node, a cancellation, an
 /// external gate degraded to console for lack of a forge (deliberately
 /// out of scope here — whether a forge is reachable depends on the
 /// calling machine's own environment, not on the log, so it isn't a
@@ -141,16 +162,44 @@ fn named_options(remedies: &[Remedy]) -> Vec<ReservedOption> {
 /// It also covers a decision already answered, that the resume it was handed to has not
 /// acted on yet.
 ///
-/// The `NodeId` alongside the object is the node the decision belongs
+/// The [`DecisionOn`] alongside the object is what the decision belongs
 /// to — `resolve_gate` needs it to record `gate_waiting`/`gate_resolved`
-/// against the right node, the same one the live pause path would have
-/// used.
+/// against the right node, or none for the run's own, the same as the live
+/// pause path would have.
 ///
 /// A gate's menu is built from the documents it shows, read from
 /// `run_dir` as the run holds them — the same reading the live prompt
 /// makes, so the menu a later process rebuilds is the one a person was
 /// put.
 pub async fn current_escalation(
+    manifest: &Manifest,
+    run_dir: &std::path::Path,
+    state: &RunState,
+) -> Result<Option<(DecisionOn, Escalation)>, RunError> {
+    if let Some(escalation) = cap_escalation(state) {
+        return Ok(Some((DecisionOn::Run, escalation)));
+    }
+    Ok(node_escalation(manifest, run_dir, state)
+        .await?
+        .map(|(node, escalation)| (DecisionOn::Node(node), escalation)))
+}
+
+/// The decision a run standing on its token cap waits on, rebuilt from the pause,
+/// which holds what its menu says. It comes before any node's: nothing a node's answer
+/// starts can spend until the run is past the cap.
+fn cap_escalation(state: &RunState) -> Option<Escalation> {
+    if state.answer_awaits_its_resume() {
+        return None;
+    }
+    let (PauseReason::BudgetExhausted { spent, cap }, _) = state.run.paused()? else {
+        return None;
+    };
+    let (escalation, _) = super::budget::over_budget_escalation(state.run_id()?, *spent, *cap);
+    Some(escalation)
+}
+
+/// The escalation a node of a parked run waits on, if one does.
+async fn node_escalation(
     manifest: &Manifest,
     run_dir: &std::path::Path,
     state: &RunState,
@@ -182,14 +231,18 @@ pub async fn current_escalation(
 /// reading what its gate shows: whether a run needs someone, not what it
 /// asks them. It names a node exactly when [`current_escalation`] builds
 /// that node's menu, so no surface offers a choice the menu does not hold.
-pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<NodeId> {
+pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<DecisionOn> {
+    if cap_escalation(state).is_some() {
+        return Some(DecisionOn::Run);
+    }
     let mode_name = state.run.mode().clone();
     // Which node waits does not depend on what the set protects, and no
     // document is read here, so the empty set decides the same node.
-    match current_decision(manifest, state, &mode_name, Arc::default())? {
-        Decision::ResolveInternalGate { node } => Some(node),
-        decision => menu_of(manifest, &mode_name, decision).map(|(node, _)| node),
-    }
+    let node = match current_decision(manifest, state, &mode_name, Arc::default())? {
+        Decision::ResolveInternalGate { node } => node,
+        decision => menu_of(manifest, &mode_name, decision).map(|(node, _)| node)?,
+    };
+    Some(DecisionOn::Node(node))
 }
 
 /// The menu of a decision that reads no document: a node's reroutes
@@ -282,7 +335,7 @@ pub async fn resolve_gate(
     if !state.tail_paused() {
         return Err(ResolveGateError::NotPaused);
     }
-    let Some((node, escalation)) = current_escalation(manifest, run_dir, &state)
+    let Some((on, escalation)) = current_escalation(manifest, run_dir, &state)
         .await
         .map_err(Box::new)?
     else {
@@ -304,9 +357,9 @@ pub async fn resolve_gate(
     let resolution = GateResolvedPayload::Chosen(choice);
     let log = RunLog::new(storage, run_id, clock, redactor);
     let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())));
-    log.record(Some(&node), waiting).await?;
+    log.record(on.node(), waiting).await?;
     let resolved = EventPayload::Gates(GateEvent::Resolved(resolution));
-    log.record(Some(&node), resolved).await?;
+    log.record(on.node(), resolved).await?;
     Ok(())
 }
 

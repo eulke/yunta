@@ -60,6 +60,9 @@ pub struct GateLedger {
     /// The nodes waiting on a question a person answers elsewhere: a round
     /// of questions, or a gate published to a forge.
     awaiting: BTreeSet<NodeId>,
+    /// The latest answer with no node, which is the run's own decision, and where the
+    /// log holds it.
+    run_answer: Option<(GateResolvedPayload, Seq)>,
 }
 
 impl GateLedger {
@@ -82,6 +85,11 @@ impl GateLedger {
     /// The nodes waiting on an answer that a person gives elsewhere.
     pub fn awaiting(&self) -> &BTreeSet<NodeId> {
         &self.awaiting
+    }
+
+    /// The latest answer to a decision the run itself owns, and where the log holds it.
+    pub fn run_answer(&self) -> Option<(&GateResolvedPayload, Seq)> {
+        self.run_answer.as_ref().map(|(answer, at)| (answer, *at))
     }
 
     /// Forgets every ask in progress: a run that pauses, resumes or closes
@@ -134,6 +142,9 @@ impl GateLedger {
         let Some(node) = meta.node else {
             // A run-level escalation: it gates the whole invocation, so
             // no node record answers for it.
+            if let GateEvent::Resolved(answer) = event {
+                self.run_answer = Some((answer.clone(), meta.seq));
+            }
             return;
         };
         self.per_node

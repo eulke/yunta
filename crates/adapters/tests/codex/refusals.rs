@@ -1,7 +1,7 @@
 //! How a Codex session's failure is classified: the cause a failed turn ends
 //! on, a limit read from the stream, an authentication error refused for its
-//! credentials, a fatal stream error, and a thread id the CLI states that
-//! cannot be one.
+//! credentials, a lost service failed on its `turn.failed`, a retry notice
+//! that ends nothing, and a thread id the CLI states that cannot be one.
 
 use super::*;
 
@@ -79,11 +79,58 @@ async fn an_auth_error_is_refused_for_its_credentials() {
     }
 }
 
+/// A retry Codex goes on from ends nothing: the session ends on the turn's
+/// own completion, with the message the agent wrote after the retry.
 #[tokio::test]
-async fn a_fatal_error_event_ends_the_session_as_failed() {
+async fn a_retry_notice_does_not_end_the_session() {
+    let events = events_of(&[
+        THREAD_STARTED_LINE,
+        r#"{"type":"error","message":"Reconnecting... 2/5 (unexpected status 503 Service Unavailable)"}"#,
+        r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Done after the retry."}}"#,
+        r#"{"type":"turn.completed","usage":{"input_tokens":3,"cached_input_tokens":0,"output_tokens":2}}"#,
+    ])
+    .await;
+
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::Failed { .. })),
+        "{events:?}"
+    );
+    assert!(
+        matches!(events.last(), Some(AgentEvent::Completed { result }) if result.summary == "Done after the retry."),
+        "{events:?}"
+    );
+}
+
+/// A stream that stops after a retry notice, with no line that ends the
+/// turn, is a session that died: no terminal event is made up for it.
+#[tokio::test]
+async fn a_stream_that_stops_after_a_retry_notice_reports_no_end() {
+    let events = events_of(&[
+        THREAD_STARTED_LINE,
+        r#"{"type":"error","message":"Reconnecting... 2/5 (unexpected status 503 Service Unavailable)"}"#,
+    ])
+    .await;
+
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            AgentEvent::Failed { .. } | AgentEvent::Completed { .. }
+        )),
+        "{events:?}"
+    );
+}
+
+/// A lost service fails its session on the `turn.failed` that follows the
+/// `error` line Codex prints first, as Codex prints both for the last
+/// retry it gives up on.
+#[tokio::test]
+async fn a_lost_service_fails_on_the_turn_failed_after_its_error_line() {
     let events = events_of(&[
         THREAD_STARTED_LINE,
         r#"{"type":"error","message":"stream disconnected before completion"}"#,
+        r#"{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}"#,
     ])
     .await;
 

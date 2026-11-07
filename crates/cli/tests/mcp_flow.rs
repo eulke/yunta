@@ -18,6 +18,9 @@ use yunta_testkit::{
     write, yunta_in,
 };
 
+#[path = "mcp_flow/cap.rs"]
+mod cap;
+
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
     result
         .content
@@ -1217,6 +1220,269 @@ async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
         unwrapped(&sentence.replace(yunta_testkit::handle(&run_id), &run_id))
     );
     client.cancel().await.ok();
+}
+
+/// A run started detached and holding its only node until `go` exists, or until the
+/// marker is gone with the test, so no engine outlives the test that started it.
+struct HoldingRun {
+    root: tempfile::TempDir,
+    repo: std::path::PathBuf,
+    home: std::path::PathBuf,
+    run_id: String,
+}
+
+impl HoldingRun {
+    fn started() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        let home = root.path().join("state");
+        let (started, go) = (root.path().join("started"), root.path().join("go"));
+        write(
+            &repo.join(".yunta/config.yaml"),
+            "defaults:\n  isolation: none\n",
+        );
+        write(
+            &repo.join("wf.yaml"),
+            &format!(
+                "name: hold\nnodes:\n  - id: hold\n    kind: bash\n    run: \"echo in >> {0}; until [ -f {1} ] || [ ! -e {0} ]; do sleep 0.05; done\"\n",
+                started.display(),
+                go.display(),
+            ),
+        );
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+        let detached = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach"]);
+        assert!(detached.status.success(), "{}", stderr(&detached));
+        let run_id = yunta_testkit::full_run_id(&home, &run_id_from(&detached));
+        yunta_testkit::wait_until(
+            || started.exists(),
+            || "the detached engine never reached the node".into(),
+        );
+        HoldingRun {
+            root,
+            repo,
+            home,
+            run_id,
+        }
+    }
+
+    fn run_dir(&self) -> std::path::PathBuf {
+        yunta_testkit::runs_root(&self.home).join(&self.run_id)
+    }
+
+    fn engine_pid(&self) -> Value {
+        let registry = self.run_dir().join("scratch/engine.json");
+        let engine: Value = serde_json::from_slice(&std::fs::read(registry).unwrap()).unwrap();
+        engine["engine_pid"].clone()
+    }
+
+    fn starts(&self) -> usize {
+        std::fs::read_to_string(self.root.path().join("started"))
+            .unwrap()
+            .lines()
+            .count()
+    }
+
+    /// Lets the node end, and says the run's log once its last event is written.
+    fn finished_log(&self) -> String {
+        std::fs::write(self.root.path().join("go"), "go").unwrap();
+        let path = self.run_dir().join("events.jsonl");
+        yunta_testkit::wait_for(
+            || {
+                std::fs::read_to_string(&path)
+                    .ok()
+                    .filter(|log| log.contains("\"run_finished\""))
+            },
+            || "the run never finished".into(),
+        )
+    }
+
+    /// Calls `resume_run` on this run from a real client.
+    async fn resume_run(&self) -> rmcp::model::CallToolResult {
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+        yunta_testkit::hermetic(&mut command, &self.repo, &self.home);
+        command.arg("mcp");
+        let transport = TokioChildProcess::new(command).unwrap();
+        let client = ().serve(transport).await.unwrap();
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new("resume_run")
+                    .with_arguments(json!({"run_id": self.run_id}).as_object().unwrap().clone()),
+            )
+            .await
+            .unwrap();
+        client.cancel().await.ok();
+        result
+    }
+}
+
+/// A process the tool handed the run to would find it taken, and say so in a log no
+/// caller reads, so the tool refuses first: the sentence a person reads, naming the
+/// run whole.
+///
+/// Reached by: `crates/cli/src/commands/mcp/tools.rs`
+#[tokio::test]
+async fn resume_run_on_a_moving_run_is_refused_and_starts_nothing() {
+    let run = HoldingRun::started();
+    let pid = run.engine_pid();
+
+    let refused = run.resume_run().await;
+    assert_eq!(refused.is_error, Some(true), "{refused:#?}");
+    assert_eq!(
+        tool_text(&refused),
+        format!("run {} is already moving: pid {pid} drives it", run.run_id)
+    );
+
+    let log = run.finished_log();
+    assert_eq!(log.matches("\"run_resumed\"").count(), 0, "{log}");
+    assert_eq!(log.matches("\"node_started\"").count(), 1, "{log}");
+    assert_eq!(run.starts(), 1, "the node did not start again");
+}
+
+/// Calls `tool` once from a real client, as an agent does.
+async fn called(
+    repo: &Path,
+    home: &Path,
+    tool: &'static str,
+    args: Value,
+) -> rmcp::model::CallToolResult {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, repo, home);
+    command.arg("mcp");
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = ().serve(transport).await.unwrap();
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new(tool).with_arguments(args.as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    client.cancel().await.ok();
+    result
+}
+
+/// Spoils the lock of `run_id`, so nothing here can tell who holds the run.
+fn lock_nobody_can_read(home: &Path, run_id: &str) {
+    let scratch = yunta_testkit::runs_root(home).join(run_id).join("scratch");
+    std::fs::write(scratch.join("engine.lock"), "not a lock").unwrap();
+}
+
+/// A run of [`ASKING`] parked on its round of questions, by its whole id.
+fn parked_on_its_questions(repo: &Path, home: &Path) -> String {
+    std::fs::create_dir_all(repo).unwrap();
+    init_repo(repo);
+    write(&repo.join("asking.yaml"), ASKING);
+    write(&repo.join("fixture.yaml"), ASKING_FIXTURE);
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "runners:\n  executor:\n    - { adapter: claude-code, model: claude-model }\n",
+    );
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "fixtures"]);
+    let run = yunta_in!(
+        repo,
+        home,
+        &[
+            "run",
+            "asking.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ]
+    );
+    assert!(!run.status.success(), "the run parks: {}", stdout(&run));
+    yunta_testkit::full_run_id(home, &run_id_from(&run))
+}
+
+/// A resume started beside this lock would refuse in a log no caller reads, so the tool
+/// refuses before it records: the same sentence a person reads, naming the run whole.
+///
+/// Reached by: `crates/cli/src/commands/resolve_gate.rs`
+#[tokio::test]
+async fn resolve_gate_beside_an_unreadable_lock_records_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: gated\nnodes:\n  - { id: approve, kind: gate, assignee: lead }\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = yunta_testkit::full_run_id(&home, &run_id_from(&run));
+    lock_nobody_can_read(&home, &run_id);
+
+    let refused = called(
+        &repo,
+        &home,
+        "resolve_gate",
+        json!({"run_id": run_id, "option": "approve"}),
+    )
+    .await;
+    assert_eq!(refused.is_error, Some(true), "{refused:#?}");
+    let said = unwrapped(&tool_text(&refused));
+    assert!(
+        said.contains(&format!(
+            "run {run_id} has an engine lock with no readable owner"
+        )),
+        "{said}"
+    );
+
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    let document: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert!(
+        document.get("decision").is_some(),
+        "nothing was recorded, so the decision stands: {document:#}"
+    );
+}
+
+/// The same for the other answer that starts a resume.
+///
+/// Reached by: `crates/cli/src/commands/mcp/tools.rs`
+#[tokio::test]
+async fn answer_questions_beside_an_unreadable_lock_records_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    let home = root.path().join("state");
+    let run_id = parked_on_its_questions(&repo, &home);
+    lock_nobody_can_read(&home, &run_id);
+
+    let refused = called(
+        &repo,
+        &home,
+        "answer_questions",
+        json!({
+            "run_id": run_id,
+            "node": "ask",
+            "answers": [{"id": "summary", "value": "the resize handler"}],
+        }),
+    )
+    .await;
+    assert_eq!(refused.is_error, Some(true), "{refused:#?}");
+    let said = unwrapped(&tool_text(&refused));
+    assert!(
+        said.contains(&format!(
+            "run {run_id} has an engine lock with no readable owner"
+        )),
+        "{said}"
+    );
+
+    let log = yunta_testkit::runs_root(&home)
+        .join(&run_id)
+        .join("events.jsonl");
+    let log = std::fs::read_to_string(log).unwrap();
+    assert_eq!(log.matches("\"questions_answered\"").count(), 0, "{log}");
 }
 
 /// A node whose session hands questions over and ends: with nothing to
