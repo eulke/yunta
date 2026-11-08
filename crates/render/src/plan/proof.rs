@@ -11,23 +11,17 @@ use surco::glyphs::Mark;
 use surco::line::Line;
 use surco::text::counted;
 use yunta_core::shown::{JudgedCriterion, PlanReview};
-use yunta_core::step::NextStep;
 use yunta_core::{RunId, Task, TaskId};
 
 use super::{card, titled, Form};
 
-/// `doc` with what proves `review`, for the run `run`; each command it
-/// names is written by `spell`. What keeps a plan from being proven is
+/// `doc` with what proves `review`, for the run `run`, the one each command
+/// it names takes. What keeps a plan from being proven is
 /// said here in its whole form: where a decision is made on it, it is
 /// said beside the decision, once.
-pub(super) fn proof(
-    doc: Doc,
-    review: &PlanReview,
-    form: Form,
-    said: (&RunId, &dyn Fn(&NextStep) -> String),
-) -> Doc {
+pub(super) fn proof(doc: Doc, review: &PlanReview, form: Form, run: &RunId) -> Doc {
     let showing = match (form, &review.spec_node) {
-        (Form::Review, Some(node)) => Some(crate::spec::status_command(said.0, node, said.1)),
+        (Form::Review, Some(node)) => Some(crate::spec::status_command(run, node)),
         _ => None,
     };
     let mut blocks = held(review, showing);

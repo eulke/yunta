@@ -147,7 +147,7 @@ impl Painter {
         } = self;
         let moments = yunta_replay::frame::chronicle(folded.settled());
         for moment in moments.iter().skip(*written) {
-            draw.record(moment, run_id.handle(), *glyphs);
+            draw.record(moment, run_id, *glyphs);
         }
         *written = moments.len();
     }

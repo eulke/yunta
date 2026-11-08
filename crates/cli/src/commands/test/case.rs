@@ -20,7 +20,7 @@ use yunta_engine::RunTerminal;
 
 use super::{copy_dir_all, init_git, sandboxed_checkout};
 use crate::commands::registry::{adapters_and_script, execute, Executing, ScriptedPaths};
-use crate::commands::{advice, Adapters};
+use crate::commands::Adapters;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::load_yaml;
@@ -416,12 +416,7 @@ fn stand_in_forge(config: &yunta_core::ConfigLayer) -> Option<yunta_adapters::Mo
         .forge
         .as_ref()
         .and_then(|forge| forge.github.as_ref())
-        .map(|_| {
-            yunta_adapters::MockForge::new(
-                yunta_adapters::MockForgeState::new(),
-                Arc::new(advice::spell),
-            )
-        })
+        .map(|_| yunta_adapters::MockForge::new(yunta_adapters::MockForgeState::new()))
 }
 
 #[cfg(test)]

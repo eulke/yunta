@@ -29,12 +29,10 @@ use std::path::Path;
 
 use surco::components::{Decision, Note, Prose, Section};
 use surco::doc::Block;
-use yunta_core::events::DecisionOn;
-use yunta_core::events::GateWaitingPayload;
+use yunta_core::events::{DecisionOn, GateWaitingPayload};
 use yunta_core::shown::ShownDocument;
 use yunta_core::RunId;
 
-use crate::commands::advice;
 use crate::run_page::Decided;
 
 /// Where a run works, as the page says it above a decision: the path
@@ -117,7 +115,7 @@ pub(crate) fn claim_words(escalation: &GateWaitingPayload) -> String {
 /// chooses it.
 fn menu(run_id: &RunId, escalation: &GateWaitingPayload) -> Decision {
     let options = yunta_render::offers::decision_options(escalation);
-    yunta_render::blocks::decision::here(run_id, options, &advice::spell)
+    yunta_render::blocks::decision::here(run_id, options)
 }
 
 #[cfg(test)]
@@ -139,6 +137,7 @@ mod tests {
     use surco::line::Line;
     use surco::look::Look;
     use surco::width::cell_width;
+    use yunta_core::step::NextStep;
     use yunta_core::{ArtifactKind, ContentHash, NodeId, TaskId, TasksFile};
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
@@ -219,7 +218,10 @@ mod tests {
 
     /// The lines of the section a page ends on for `decided`, drawn plain.
     fn drawn_with(decided: &Decided) -> Vec<String> {
-        let close = (advice::close(RUN.handle()), "closes it for good");
+        let close = (
+            yunta_render::command::line(&NextStep::Close { run: RUN }),
+            "closes it for good",
+        );
         let doc = Doc::new().with(section(&RUN, decided, vec![close]));
         crate::render::surface_lines(doc, &Look::plain())
             .iter()

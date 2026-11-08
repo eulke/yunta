@@ -204,31 +204,37 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 
 ## Phase 2: every command, spelled once
 
-### Task 8: every kind of `NextStep`, and the one module that writes them
+### Task 8: the one module that writes a command
 
 **Description:**
-- `crates/core/src/step.rs` takes plan decision 1's kinds, `Arg`, `Answer`, `Reach` and `PackVerb`, and its `//!` says `yunta_render::command` writes them.
-- `crates/render/src/command.rs`:
+- `crates/render/src/command.rs`, with its `//!`:
   - `Reader`, moved from the CLI's `error.rs`, with `Reader::name_of`, the body of `advice::named`;
-  - `line`, and `line_for`, the body of `advice::spell_for`, extended to every kind.
-- `advice::spell`, `spell_for` and `named` are gone. Their callers call `command::line` or `line_for`, and where a crate below the CLI still takes a closure, the CLI passes `&yunta_render::command::line` until Task 9.
-- Tests:
-  - `crates/render/src/command/tests.rs`: one test per kind, taking over `spell_names_a_run_by_its_handle_in_the_command_that_takes_it`, `spell_writes_a_decision_with_its_option_and_the_answer_it_asks_for`, `an_agent_is_handed_the_whole_run_id_and_the_text_flag_for_an_option_that_asks` and `a_program_is_handed_the_whole_id_and_a_person_the_handle` from `advice/tests.rs`.
-  - `crates/cli/src/cli/tests.rs`, `every_command_line_parses`: an exhaustive match lists every kind, so a new kind cannot skip it. Each line, for both readers, with blanks filled by a sample value, is parsed by `Cli::try_parse_from`.
+  - `line`, and `line_for`, the body of `advice::spell_for`, for the nine kinds `NextStep` holds.
+- `advice::spell`, `spell_for` and `named` are gone.
+  - Their callers call `command::line` or `line_for`.
+  - Where a crate below the CLI still takes a spelling, the CLI hands it `&yunta_render::command::line` until Task 9 takes the parameter away.
+- `crates/render/src/command/tests.rs` takes over four tests from `advice/tests.rs`:
+  - `spell_names_a_run_by_its_handle_in_the_command_that_takes_it`;
+  - `spell_writes_a_decision_with_its_option_and_the_answer_it_asks_for`;
+  - `an_agent_is_handed_the_whole_run_id_and_the_text_flag_for_an_option_that_asks`;
+  - `a_program_is_handed_the_whole_id_and_a_person_the_handle`.
+  
+  Each is renamed for `line`.
+- `the_test_spelling_matches_the_cli_for_every_step` compares `command::line` with the testkit's copy until Task 9 deletes both.
+- `NextStep` keeps its nine kinds here. Growing them waits for Task 10: the two copies that Task 9 deletes match every kind with no wildcard, and growing first would mean extending copies about to go.
 
-**Fails first:** `every_command_line_parses` does not build until `command` exists. Then, with `Review` spelled `yunta reviews {run}` as a probe, it fails, naming that line. The probe is reverted.
+**Fails first:** the four moved tests do not build until `yunta_render::command` exists.
 
 **Acceptance criteria:**
-- [ ] Every kind is written by `line_for`, for both readers, and parsed by clap.
-- [ ] `Reader` has one path, `yunta_render::command::Reader`, and `crate::error::Reader` is gone.
-- [ ] `advice` defines no `spell`, `spell_for` or `named`.
+- [x] `Reader` has one path, `yunta_render::command::Reader`, and `crate::error::Reader` is gone.
+- [x] `advice` defines no `spell`, `spell_for` or `named`, and every printed line is the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render command`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_cmd --test run_flow`
+- [x] `cargo test -p yunta-render command`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_cmd --test run_flow`
 
 **Dependencies:** Checkpoint B
 
-**Files likely touched:** `crates/core/src/step.rs`, `crates/render/src/{lib.rs,command.rs,command/tests.rs}`, `crates/cli/src/{cli/tests.rs,cli/mod.rs,error.rs,error/hold.rs,output.rs,json/mod.rs,commands/{advice.rs,advice/tests.rs,mcp.rs,status/decision_json.rs}}`, and the 15 callers of `advice::spell`
+**Files likely touched:** `crates/render/src/{lib.rs,command.rs,command/tests.rs}`, `crates/cli/src/{error.rs,error/hold.rs,output.rs,json/mod.rs,commands/{advice.rs,advice/tests.rs,mcp.rs,status/decision_json.rs}}`, and the 15 callers of `advice::spell`
 
 **Estimated scope:** L
 
@@ -248,11 +254,11 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 **Fails first:** none: a signature. The guard is render's 21 goldens, `pull-request.md` among them, and the adapters' forge tests.
 
 **Acceptance criteria:**
-- [ ] A search for `Spell`, `spell:` and `spell(` in `crates/` finds nothing.
-- [ ] Render's goldens and the forge's published bodies are byte for byte the same.
+- [x] A search for `Spell`, `spell:` and `spell(` in `crates/` finds nothing.
+- [x] Render's goldens and the forge's published bodies are byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render -p yunta-adapters`, the engine's batches, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta-render -p yunta-adapters`, the engine targets it touches, `cargo test -p yunta --bins`
 
 **Dependencies:** Task 8
 
@@ -260,80 +266,119 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 
 **Estimated scope:** L (a signature)
 
-### Task 10: the commands that name a run, as kinds
+### Task 10: every kind of `NextStep`, and the commands that name a run
 
 **Description:**
+- `crates/core/src/step.rs` takes plan decision 1's kinds, `Arg`, `Choice` and `Reach`. Its `//!` says `yunta_render::command` writes them.
+  - `ResolveGate`'s `option` and `text` become `choice: Choice`, named apart from the CLI's `Answer` trait.
+  - Its three builders change with it: `resolve_gate.rs`, `decision_json.rs` and render's `blocks/decision.rs`.
+- `command::line_for` writes every kind, for both readers.
+- `crates/cli/src/cli/tests.rs`, `every_command_line_parses`:
+  - an exhaustive match lists every kind, so a new kind cannot skip it;
+  - each line, for both readers, is parsed by `Cli::try_parse_from`;
+  - `ShowCommit` is git's, so its line is held to `git show <commit>` instead.
 - `advice::{status, status_node, follow, resume, cancel, close, receipt, verify, review, open, decide, resolve_gate}` are gone.
-- Their callers write `command::line(&NextStep::…)`:
-  - `cancel`, `cancel/{page,registered}`, `close`, `receipt`, `resolve_gate`, `review`, `run_ref`, `status/{mod,node,follow,decision,decision_json}`, `list/{inbox,runs}` and `commands/mod.rs`;
-  - `error.rs`, `help.rs`, `run_page/{mod,evidence}.rs`, `surface/{chronicle/mod,view/mod}.rs`.
+  - Their callers write `command::line(&NextStep::…)`.
+  - These are `cancel`, `cancel/{page,registered}`, `close`, `receipt`, `resolve_gate`, `review`, `run_ref`, `status/{mod,node,follow,decision,decision_json}`, `list/{inbox,runs}`, `commands/mod.rs`, `error.rs`, `help.rs`, `run_page/{mod,evidence}.rs` and `surface/{chronicle/mod,view/mod}.rs`.
+  - Inside `advice`, `after_for`'s steps are written with `command::line_for` until Task 15 moves it.
 
-**Fails first:** none: the same lines, spelled in one place. The guard is the goldens, the captures and the CLI's integration tests.
+**Fails first:** `every_command_line_parses` does not build until the kinds exist. Then, with `Review` spelled `yunta reviews {run}` as a probe, it fails, naming that line. The probe is reverted.
 
 **Acceptance criteria:**
-- [ ] `advice` writes none of those commands, and every printed line is the same.
+- [x] Every kind is written by `line_for`, for both readers, and parsed by clap.
+- [x] `advice` writes none of the commands that name a run, and every printed line is the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`, `python3 .plans/yunta-tui/tools/suite.py cli-1` to `cli-5`
+- [x] `cargo test -p yunta-render command`, `cargo test -p yunta --bins`, `python3 .plans/yunta-tui/tools/suite.py cli-1` to `cli-5`
 
 **Dependencies:** Task 9
+
+**Found while doing it:**
+- Two commands were written by gluing a flag on: `yunta status X --full` and `yunta doctor --full`. So `Status` carries its `depth` (surco's `Depth`), and `Doctor` its `full`.
+- `NextStep::status(run)` builds the glance every surface points to most.
+- `yunta status needs` is a real line, and `needs` is no run id, so it has its kind, `Needs`.
+- The three `pack` texts the user chose to make whole lines need one kind per verb, with its own arguments: `PackAdd`, `PackUpdate`, `PackRemove`, `PackNew`. `Test` carries the `dir` a pack's README names.
+- A decision's answer is `Choice`, named apart from the CLI's `Answer` trait, which `resolve_gate.rs` holds beside it.
+- A line with a blank is not typed as written, and `<option>` is no valid option id. So the clap test fills each blank before it parses the line.
+- In a test build, an id's `From<&str>`, which exists only for tests, panics. Clap prefers it to `FromStr`, so a test that parses an invalid id panics where production is refused cleanly.
+- The live region (`painter`, `draw`, `lines`, the chronicle) hands down the run's id in place of its handle, so a quoted failure's step is data.
+
+**Files likely touched:** `crates/core/src/step.rs`, `crates/render/src/{command.rs,command/tests.rs,blocks/decision.rs}`, `crates/cli/src/cli/{mod,tests}.rs`, the callers above, `crates/cli/src/commands/advice.rs`
+
+**Estimated scope:** L
+
+### Task 11: every other command, as kinds
+
+**Description:**
+- `advice::{gc, schemas, schema_workflow, test, doctor, init, pack, list, list_runs, list_every_run, list_closed_runs, help, run, show_commit}` are gone.
+  - Their callers write `command::line(&NextStep::…)`.
+  - These are `init`, `init/skill`, `help`, `list/{mod,runs}`, `run_ref`, `error.rs`, `error/page.rs`, `new`, `schema`, `pack`, `pack/scaffold`, `test/mod`, `commands/mod.rs`, `run`, `doctor/mod`, `close`, `gc/page` and `run_page/story`.
+- `doctor/mod.rs`'s `format!("{doctor} --session")` becomes `NextStep::Doctor { sessions: true }`.
+- Four sites keep their `advice` call for Task 12, which changes what they say:
+  - `stats/mod.rs`'s two refusals (`advice::stats`);
+  - `error/page.rs`'s `unrunnable` (`advice::check`);
+  - `run.rs`'s `--detach` refusal (`advice::resume_any`);
+  - the skill's `yunta schema <kind>` (`advice::schema`).
+
+**Fails first:** none. The guard is the goldens, the captures, and `every_command_line_parses`.
+
+**Acceptance criteria:**
+- [x] `advice` holds no command but `stats`, `check`, `resume_any`, `schema` and `pack`, each with the callers Task 12 rewords: the three texts of `yunta pack` keep `advice::pack` until then.
+- [x] Every printed line is the same.
+
+**Verification:**
+- [x] `cargo test -p yunta --bins`, the CLI's batches
+
+**Dependencies:** Task 10
 
 **Files likely touched:** the callers above, `crates/cli/src/commands/advice.rs`
 
 **Estimated scope:** L (a rename)
 
-### Task 11: the four texts a better command replaces
+### Task 12: the seven texts a better command replaces
 
 **Description:**
-- `yunta stats` with neither a run nor `--workflow`, or with both, is refused by clap. The two arguments form an argument group in `crates/cli/src/cli/mod.rs`, and `stats/mod.rs`'s two hand-written refusals and its `(None, None)` and `(Some, Some)` arms are gone.
-- `error::page::unrunnable` takes the refused workflow and says `the workflow fails `yunta check <path>``, through `NextStep::Check`. Its callers in `commands/registry.rs` and `commands/run.rs` hand it the path they refused.
-- `--adapter mock` with `--detach` says it "hands the run to another process that resolves the adapters `runners:` names and reads no fixture".
-- `yunta schema <kind>` becomes `yunta schema <document>`, through `NextStep::Schema { document: Arg::Blank, .. }`:
+- **`yunta stats` with no argument.**
+  - Clap refuses it: the run is required unless `--workflow` is present, beside the `conflicts_with` clap already holds.
+  - `stats/mod.rs` loses its two hand-written refusals and its `(None, None)` and `(Some, Some)` arms. The second was unreachable, since clap already refused both arguments together.
+- **The refused workflow.** `error::page::unrunnable` takes the refused workflow and says `the workflow fails `yunta check <path>``, through `NextStep::Check`. Its callers in `commands/registry.rs` and `commands/run.rs` hand it the path they refused.
+- **The `--detach` refusal.** `--adapter mock` with `--detach` says it "hands the run to another process that resolves the adapters `runners:` names and reads no fixture".
+- **`yunta schema <kind>` becomes `yunta schema <document>`,** through `NextStep::Schema { document: Arg::Blank, .. }`:
   - in the skill `init` writes, where "to list the kinds" becomes "to list them";
   - in `docs/concepts.md`, `docs/guide.md`, `docs/reference.md`, `docs/troubleshooting.md` and `docs/compatibility.md`, where they name that command.
+- `advice::{stats, check, resume_any, schema}` are gone with their last callers.
 
 **Fails first:** each text's test is changed first and seen red, against the old text:
 - `stats_cmd`: `yunta stats` alone exits 2 with clap's usage error;
-- the refusal of a workflow that fails `check` names its path;
+- `context_files_cmd` or the verdict's test: the refusal of a workflow that fails `check` names its path;
 - the `--detach` refusal's words;
 - `init`'s test: the written skill names `yunta schema <document>`.
 
 **Acceptance criteria:**
-- [ ] Each of the four prints its new text, and its test passes.
-- [ ] No other capture of Task 2 changes.
-- [ ] `cargo test -p yunta --test docs_sync` passes, and no doc says `yunta schema <kind>`.
+- [x] Each of the seven prints its new text, and its test passes; no other capture of Task 2 changes.
+- [x] `advice` holds no command, and no doc says `yunta schema <kind>`.
+- [x] `cargo test -p yunta --test docs_sync` passes.
 
 **Verification:**
-- [ ] `cargo test -p yunta --test stats_cmd --test docs_sync`, the CLI's batches, `pages.sh` against the base, normalized
-
-**Dependencies:** Task 10
-
-**Files likely touched:** `crates/cli/src/{cli/mod.rs,commands/stats/mod.rs,error/page.rs,commands/registry.rs,commands/run.rs,commands/init/skill.rs}`, `crates/cli/tests/stats_cmd.rs`, the five docs
-
-**Estimated scope:** L
-
-### Task 12: every other command, as kinds
-
-**Description:**
-- `advice::{gc, schemas, schema, schema_workflow, test, doctor, check, stats, init, pack, list, list_runs, list_every_run, list_closed_runs, help, run, resume_any, show_commit}` are gone. After Task 11, `check`, `stats` and `resume_any` have no caller left.
-- Their callers write `command::line(&NextStep::…)`:
-  - `init`, `init/skill`, `help`, `list/{mod,runs}`, `run_ref`, `error.rs`, `error/page.rs`, `new`, `schema`, `pack`, `pack/scaffold`, `test/mod`, `commands/mod.rs`, `run`, `doctor/mod`, `close`, `gc/page`, `run_page/story`.
-- `doctor/mod.rs`'s `format!("{doctor} --session")` becomes `NextStep::Doctor { sessions: true }`.
-
-**Fails first:** none. The guard is the goldens, the captures, and `every_command_line_parses`, which now covers every kind.
-
-**Acceptance criteria:**
-- [ ] `advice` holds no command. What is left in it is its words and `after_for`.
-- [ ] Every printed line is the same.
-
-**Verification:**
-- [ ] `cargo test -p yunta --bins`, the CLI's batches
+- [x] `cargo test -p yunta --test stats_cmd --test docs_sync --test context_files_cmd`, the CLI's batches, `pages.sh` against the base, normalized
 
 **Dependencies:** Task 11
 
-**Files likely touched:** the callers above, `crates/cli/src/commands/advice.rs`
+**Found while doing it:**
+- A resume refuses a frozen run that has no file of its own. So `Check` carries `Arg<String>`: the refused file where the refusal knows one (the verdict's `Unrunnable`, a `run` of a file through `preflight` and `servable`), and `yunta check <workflow>` where it does not (`resume`).
+- `yunta stats` calls `stats::of_run` or `stats::of_workflow`, named by what the dispatch was handed. The pair clap refuses returns a typed error: the CLI denies `clippy::unreachable`, and a panic is a bug.
+- The smells caught what rustfmt's wrapping of each `NextStep` grew, and each was split along a seam:
+  - `line_for` writes status, resolve-gate, listings, schema and doctor through helpers;
+  - `after_for` shares `goes_on` (resume or close), and the way to a parked child moved into `after_needs_you`;
+  - a cancel's `closes` and `goes_on` are methods;
+  - `new`'s step that runs the workflow is `runs_it`;
+  - `CliError::sentence` is the match `said_to` held;
+  - the clap test's samples stand in four lists.
+- `list/inbox.rs` and `resolve_gate.rs` passed 500 lines, and their inline tests moved to `tests.rs`. `pack.rs`'s two refusals moved to `pack/page.rs`, which says what a pack command says.
 
-**Estimated scope:** L (a rename)
+**Files likely touched:** `crates/cli/src/{cli/mod.rs,commands/stats/mod.rs,error/page.rs,commands/registry.rs,commands/run.rs,commands/init/skill.rs,commands/advice.rs}`, `crates/cli/tests/{stats_cmd,context_files_cmd}.rs`, the five docs
+
+**Estimated scope:** L
 
 ### Task 13: the smell reaches every crate that can spell through render
 
@@ -350,11 +395,11 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 **Fails first:** with the counter widened, `cargo xtask smells --check` fails at 1, on `crates/render/src/pause.rs:131`. Then `make_room` changes, and it passes at 0.
 
 **Acceptance criteria:**
-- [ ] `cargo xtask smells --check` passes, and `xtask/smells.baseline`'s diff renames one key at 0 and changes no other value.
-- [ ] `cargo xtask docs --check` passes.
+- [x] `cargo xtask smells --check` passes, and `xtask/smells.baseline`'s diff renames one key at 0 and changes no other value.
+- [x] `cargo xtask docs --check` passes.
 
 **Verification:**
-- [ ] `cargo test -p xtask`, `cargo xtask smells --check`, `cargo xtask docs --check`, `cargo test -p yunta --test docs_sync`
+- [x] `cargo test -p xtask`, `cargo xtask smells --check`, `cargo xtask docs --check`, `cargo test -p yunta --test docs_sync`
 
 **Dependencies:** Task 12
 
@@ -363,9 +408,9 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 **Estimated scope:** M
 
 ### Checkpoint C: after Tasks 8–13
-- [ ] The suites, the adapters' forge tests, the CLI's integration tests, `smells --check` at 0, `docs --check`.
-- [ ] Every golden's digest equals the base's; the captures equal the base's but the four texts.
-- [ ] The user reviews the phase. Then every step of the `ci` job, commit 2, `cargo clean`.
+- [x] The suites, the adapters' forge tests, the CLI's integration tests, `smells --check` at 0, `docs --check`.
+- [x] Every golden's digest equals the base's; the captures equal the base's but the seven texts.
+- [x] The user reviews the phase. Then every step of the `ci` job, commit 2, `cargo clean`.
 
 ## Phase 3: what a run offers next
 
@@ -1010,7 +1055,7 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Estimated scope:** S
 
 ### Checkpoint I: after Tasks 37–42
-- [ ] The suites; every golden's digest; the captures but the four texts.
+- [ ] The suites; every golden's digest; the captures but the seven texts.
 - [ ] The user reviews the phase. Then every step of the `ci` job, commit 8, `cargo clean`.
 
 ## Phase 9: the review
@@ -1040,7 +1085,7 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Description:**
 - The suite's count against the base's 274 binaries and 4,531 tests, explained target by target with `suite_diff.py`.
 - A release build: its size against Task 2's.
-- `pages.sh` on it, normalized, against the base: equal but for the four texts.
+- `pages.sh` on it, normalized, against the base: equal but for the seven texts.
 - Every golden's digest against the base's.
 
 **Fails first:** none: a measurement.

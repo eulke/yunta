@@ -4,14 +4,13 @@
 
 use std::collections::BTreeMap;
 
-use yunta_core::events::DecisionOn;
-use yunta_core::events::{Fact, GateWaitingPayload, Menu, Shown};
-use yunta_core::step::NextStep;
+use yunta_core::events::{DecisionOn, Fact, GateWaitingPayload, Menu, Shown};
+use yunta_core::step::{Choice, NextStep};
 use yunta_core::RunId;
+use yunta_render::command;
 
 use super::decision::claim_words;
-use crate::commands::advice;
-use crate::error::Reader;
+use yunta_render::command::Reader;
 
 /// A parked run's decision as the versioned JSON carries it: the node it
 /// belongs to, the claim and the facts a person reads beside it, every option
@@ -78,7 +77,13 @@ impl DecisionJson {
             shows: escalation.shows().to_vec(),
             withheld: withheld_of(&escalation),
             menu: escalation.menu().cloned(),
-            resolve_with: advice::resolve_gate(run_id.as_str()),
+            resolve_with: command::line_for(
+                &NextStep::ResolveGate {
+                    run: run_id.clone(),
+                    choice: Choice::Blank,
+                },
+                Reader::Agent,
+            ),
             commands: commands_of(run_id, &escalation),
         }
     }
@@ -119,12 +124,14 @@ fn commands_of(run_id: &RunId, escalation: &GateWaitingPayload) -> BTreeMap<Stri
         .map(|option| {
             let step = NextStep::ResolveGate {
                 run: run_id.clone(),
-                option: Some(option.id.clone()),
-                text: option.asks().is_some(),
+                choice: Choice::Picked {
+                    option: option.id.clone(),
+                    words: option.asks().is_some(),
+                },
             };
             (
                 option.id.to_string(),
-                advice::spell_for(&step, Reader::Agent),
+                yunta_render::command::line_for(&step, Reader::Agent),
             )
         })
         .collect()

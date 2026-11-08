@@ -7,9 +7,10 @@ use surco::glyphs::Mark;
 use surco::look::Look;
 use surco::text::counted;
 use surco::words::Standing;
+use yunta_core::step::NextStep;
 use yunta_core::{Pid, RunId};
+use yunta_render::command;
 
-use crate::commands::advice;
 use crate::error::Outcome;
 use crate::json::SCHEMA_VERSION;
 use crate::output::Answer;
@@ -62,7 +63,7 @@ pub(super) fn answer(run_id: &RunId, state: CancelState) -> CancelAnswer {
 impl Answer for CancelAnswer {
     fn document(&self, _look: &Look) -> Doc {
         let called = self.run_id.handle();
-        let Some((mark, said, gist, steps)) = self.said(called) else {
+        let Some((mark, said, gist, steps)) = self.said() else {
             // A stop the engine answers to has no line of its own: its
             // notes went to stderr while it ran.
             return Doc::new();
@@ -86,16 +87,9 @@ impl Answer for CancelAnswer {
 type Said = (Mark, &'static str, String, Vec<(String, &'static str)>);
 
 impl CancelAnswer {
-    /// What the page says of the run `called`, or `None` for a stop the
+    /// What the page says of the run, or `None` for a stop the
     /// engine answers to itself.
-    fn said(&self, called: &str) -> Option<Said> {
-        let closes = || (advice::close(called), "closes it for good");
-        let goes_on = || {
-            vec![
-                (advice::resume(called), "continues it where it stopped"),
-                closes(),
-            ]
-        };
+    fn said(&self) -> Option<Said> {
         let stopped =
             |said, gist: String, steps| Some((Standing::Stopped.mark(), said, gist, steps));
         match &self.state {
@@ -103,7 +97,11 @@ impl CancelAnswer {
                 killed,
                 parked,
                 standing,
-            } => Some(already_stopped(*standing, *killed, parked.then(closes))),
+            } => Some(already_stopped(
+                *standing,
+                *killed,
+                parked.then(|| self.closes()),
+            )),
             CancelState::NothingRunning => Some((
                 Mark::Absent,
                 "nothing to cancel",
@@ -114,12 +112,15 @@ impl CancelAnswer {
                 Mark::Absent,
                 "nothing to cancel",
                 "it closed before the interrupt reached it".to_string(),
-                vec![(advice::status(called), "shows how it ended")],
+                vec![(
+                    command::line(&NextStep::status(&self.run_id)),
+                    "shows how it ended",
+                )],
             )),
             CancelState::Cancelled { .. } => stopped(
                 Standing::Stopped.word(),
                 "its engine stopped every session and recorded the pause".to_string(),
-                goes_on(),
+                self.goes_on(),
             ),
             CancelState::Crashed { engine_pid, killed } => stopped(
                 Standing::Stopped.word(),
@@ -128,10 +129,30 @@ impl CancelAnswer {
                      and recorded the pause",
                     counted(*killed, "orphaned process group")
                 ),
-                goes_on(),
+                self.goes_on(),
             ),
             CancelState::Escalated { .. } | CancelState::Interrupted { .. } => None,
         }
+    }
+
+    /// The step that closes the run for good.
+    fn closes(&self) -> (String, &'static str) {
+        let close = NextStep::Close {
+            run: self.run_id.clone(),
+        };
+        (command::line(&close), "closes it for good")
+    }
+
+    /// The steps that go on from a stop: the run continued where it stopped,
+    /// or closed for good.
+    fn goes_on(&self) -> Vec<(String, &'static str)> {
+        let resume = NextStep::Resume {
+            run: self.run_id.clone(),
+        };
+        vec![
+            (command::line(&resume), "continues it where it stopped"),
+            self.closes(),
+        ]
     }
 }
 

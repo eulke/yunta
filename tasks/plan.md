@@ -30,7 +30,8 @@ Each phase ends with the workspace compiling, its suite green and every golden b
 /// `yunta_render::command` writes each.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NextStep {
-    Status { run: RunId, node: Option<NodeId> },
+    Status { run: RunId, node: Option<NodeId>, depth: Depth },
+    Needs,
     Follow { run: RunId },
     Resume { run: RunId },
     Cancel { run: RunId },
@@ -39,17 +40,20 @@ pub enum NextStep {
     Open { run: RunId },
     Receipt { run: RunId },
     Verify { run: RunId },
-    ResolveGate { run: RunId, answer: Answer },
+    ResolveGate { run: RunId, choice: Choice },
     Run { workflow: Arg<String> },
     Check { workflow: String },
     List,
     ListRuns { reach: Reach },
     Schemas,
     Schema { document: Arg<String>, json: bool },
-    Doctor { sessions: bool },
-    Test,
+    Doctor { sessions: bool, full: bool },
+    Test { dir: Option<String> },
     Init,
-    Pack { verb: PackVerb },
+    PackAdd { source: Arg<String> },
+    PackUpdate { pack: PackRef, reference: Arg<String> },
+    PackRemove { pack: PackRef },
+    PackNew { pack: PackRef },
     Gc,
     Help,
     ShowCommit { commit: String },
@@ -63,12 +67,12 @@ pub enum Arg<T> {
     Blank,
 }
 
-/// How a `resolve-gate` line answers a decision: with no option, which puts
+/// How a `resolve-gate` line chooses on a decision: with no option, which puts
 /// the decision to the person at a terminal; with an option left blank for
 /// the reader to pick off the menu above it; or with `option`, its words left
 /// blank when it asks for some.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Answer {
+pub enum Choice {
     Asked,
     Blank,
     Picked { option: OptionId, words: bool },
@@ -78,8 +82,6 @@ pub enum Answer {
 /// ones too, or every run on this machine.
 pub enum Reach { Repository, WithClosed, Machine }
 
-/// What `yunta pack` does to a pack.
-pub enum PackVerb { Add, Update, Remove, New }
 ```
 
 `yunta_render::command` writes them. `Reader` moves there from the CLI's `error.rs`:
@@ -113,11 +115,15 @@ What goes away:
 
 In their place, one test in the CLI parses the line of every kind of `NextStep`, for both readers, with the CLI's clap definition: a spelling clap refuses fails it. A test in render writes every kind once.
 
-Four texts change, because a better form of a command replaces a worse one. The documentation follows each:
+Seven texts change, because a better form of a command replaces a worse one. The documentation follows each:
 - `yunta schema <kind>` becomes `yunta schema <document>`, its argument's one name, which is also what clap calls it. This touches the skill `init` writes, `docs/concepts.md`, `docs/guide.md`, `docs/reference.md`, `docs/troubleshooting.md` and `docs/compatibility.md`.
 - "the workflow fails `yunta check`" names the workflow it refused: `yunta check <path>`.
 - `--adapter mock` with `--detach` says it "hands the run to another process", since `yunta resume` is not a line to type there.
 - `yunta stats` with neither a run nor `--workflow`, or with both, is refused by clap as an argument group. That is the refusal every other usage error gets, and it removes the two hand-written sentences that named `yunta stats` bare.
+- Three texts of `yunta pack` named a subcommand bare, a line clap refuses for want of its arguments. Each becomes a whole line with the pack its context knows, chosen by the user on 2026-11-07:
+  - "use `yunta pack update` to change its ref, or `yunta pack remove` first" names `yunta pack update <publisher/name> <ref>` and `yunta pack remove <publisher/name>`;
+  - "`yunta pack add` it first" names `yunta pack add <source>`;
+  - the README `pack new` writes says it was scaffolded by `yunta pack new <publisher/name>`.
 
 **2. What a run offers next is `RunFrame::actions`.** `after_for`'s rules move whole into `crates/replay/src/frame/actions.rs`:
 
@@ -333,11 +339,11 @@ Phase 8 stands on Phase 6 alone, so it could run before Phase 7. Phase 7 goes fi
 - `cargo test -p yunta-core -p yunta-render -p yunta-replay`, the engine in batches, `-p yunta --bins`, and every golden's digest unchanged. Then the gate and commit 1.
 
 ### Phase 2: every command, spelled once
-- `NextStep` grows to every kind, with `Arg`, `Answer`, `Reach` and `PackVerb`, and `yunta_render::command` writes them.
-- The clap parse test is written first, and fails because a kind has no spelling.
-- `Spell` goes from render, the adapters, testkit-core and the engine's tests.
+- `yunta_render::command` writes the nine kinds `NextStep` holds, with `Reader`.
+- `Spell` goes from render, the adapters, testkit-core and the engine's tests. The two copies of the spelling go with it, before `NextStep` grows, so they are never extended only to be deleted.
+- `NextStep` grows to every kind, with `Arg`, `Choice` and `Reach`. The clap parse test is written first, and is seen red on a probe.
 - Every command function of `advice` goes, and its 44 callers spell through `command`.
-- The four texts change, with the docs and the tests that print them.
+- The seven texts change, with the docs and the tests that print them.
 - The smell is retargeted.
 
 ### Checkpoint C
@@ -412,7 +418,7 @@ Into `page/`, with their tests, fixtures and goldens:
 | 3. Actions | `RunFrame::actions`'s tests, moved from `advice`; a search for `after_for` finds nothing |
 | 4. One spelling | The clap parse test over every kind; `smells --check` with `command_outside_command_rs` at 0; a search for `Spell` finds nothing |
 | 5. Names | A search for each old name in the spec's table finds nothing in `crates/` |
-| 6. Nothing printed changes | 99 goldens' digests against Phase 0's; the Phase 0 outputs byte for byte, but for the four texts of decision 1; the CLI's integration tests unchanged but for those texts; the suite's count explained |
+| 6. Nothing printed changes | 99 goldens' digests against Phase 0's; the Phase 0 outputs byte for byte, but for the seven texts of decision 1; the CLI's integration tests unchanged but for those texts; the suite's count explained |
 | 7. Docs, gate | `docs --check`, `smells --check`, `schema --check`, `cargo deny check`, every step of the `ci` job, at each commit |
 
 ## Risks and Mitigations
@@ -423,7 +429,7 @@ Into `page/`, with their tests, fixtures and goldens:
 | A JSON document changes | High | The JSON keeps the types that print it today; the field's rows serialize through one serializer built on render's words; Phase 0's JSON outputs compared at Checkpoints D, H and I |
 | Removing `Spell` changes what a forge publishes | Medium | The adapters' forge tests and the engine's pull request and external gate tests pass unchanged; render's `pull-request.md` golden holds |
 | A blank or a new kind spells a line clap refuses | Medium | The clap parse test over every kind and both readers |
-| The four texts ripple into docs and tests | Medium | Each one named in decision 1; `docs_sync` and the docs' own checks pass; nothing else printed changes |
+| The seven texts ripple into docs and tests | Medium | Each one named in decision 1; `docs_sync` and the docs' own checks pass; nothing else printed changes |
 | The stats workflow page prints differently once it composes its findings | Low | Its 3 goldens decide; if they change, the work stops and asks |
 | Phases 2, 7 and 8 touch about 60 files each | High | One concern per phase; the compiler finds every caller, since no alias is left; tasks of up to ~5 files each |
 | The suite's memory on this Mac | Medium | The engine and the CLI in foreground batches, as in `run-state` |
@@ -437,4 +443,4 @@ Phase 8's 16 pages are independent of each other: each is a command's own file a
 
 ## Open Questions
 
-None. The four texts of decision 1 change by this plan's approval.
+None. The seven texts of decision 1 change by this plan's approval, the three of `yunta pack` by the user's choice during Phase 2.

@@ -2,7 +2,7 @@ banned_vocabulary 0
 bench_struct_outside_testkit 0
 cli_print_outside_output 0
 cli_word_outside_cli 0
-command_outside_advice 0
+command_outside_command_rs 0
 copied_test_helpers 0
 create_run_outside_testkit 0
 dash_in_prod_strings 0

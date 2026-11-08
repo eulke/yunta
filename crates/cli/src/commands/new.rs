@@ -15,9 +15,10 @@ use surco::components::{Fields, Furrow, Headline, Next};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::{ConfigLayer, Workflow};
+use yunta_render::command;
 
-use super::advice;
 use super::verdict::{check_again, file_named, Found};
 use crate::ask::{choose, Choice, Console, Escape, NoAnswer};
 use crate::error::{CliError, Outcome};
@@ -305,6 +306,14 @@ struct Written<'a> {
 }
 
 impl Written<'_> {
+    /// The step that runs the workflow just written.
+    fn runs_it(&self) -> (String, &'static str) {
+        let run = NextStep::Run {
+            workflow: Arg::Given(self.name.to_string()),
+        };
+        (command::line(&run), "runs it")
+    }
+
     /// The page `new` answers with: the file it wrote, and the verdict
     /// `yunta check` reaches on it, said under it. A workflow the config
     /// cannot run yet is written and said to be one, whatever the config
@@ -333,7 +342,7 @@ impl Written<'_> {
             }
         };
         let (mark, steps) = match found.errors {
-            0 => (Mark::Done, vec![(advice::run(self.name), "runs it")]),
+            0 => (Mark::Done, vec![self.runs_it()]),
             _ => (Mark::Caution, vec![check_again(&at)]),
         };
         let runs = found.said();

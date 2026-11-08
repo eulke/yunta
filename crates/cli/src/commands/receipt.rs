@@ -12,11 +12,12 @@ use std::path::{Path, PathBuf};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_core::receipt::{EventChainStatus, Receipt};
+use yunta_core::step::NextStep;
 use yunta_core::RunId;
+use yunta_render::command;
 use yunta_replay::receipt;
 use yunta_storage::ChainVerification;
 
-use super::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::{emit, Answer, Mode};
@@ -27,11 +28,7 @@ pub async fn receipt(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcom
 
     let markdown = {
         use surco::surface::Surface;
-        surco::surface::Markdown.draw(&yunta_render::receipt::document(
-            &receipt,
-            &advice::spell,
-            look.glyphs,
-        ))
+        surco::surface::Markdown.draw(&yunta_render::receipt::document(&receipt, look.glyphs))
     };
     let json_text = serde_json::to_string_pretty(&receipt)
         .map_err(|e| CliError::msg(format!("could not render receipt JSON: {e}")))?;
@@ -55,7 +52,7 @@ struct ReceiptAnswer {
 
 impl Answer for ReceiptAnswer {
     fn document(&self, look: &Look) -> Doc {
-        yunta_render::receipt::document(&self.receipt, &advice::spell, look.glyphs)
+        yunta_render::receipt::document(&self.receipt, look.glyphs)
     }
 
     fn outcome(&self) -> Outcome {
@@ -81,7 +78,7 @@ async fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), C
         // a reader where that run stands is this border's vocabulary.
         CliError::msg(format!(
             "{e}; `{}` shows where it is",
-            super::advice::status(run_id.handle())
+            command::line(&NextStep::status(run_id))
         ))
     })?;
     Ok((run_dir, receipt))

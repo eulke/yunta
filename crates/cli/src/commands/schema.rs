@@ -18,9 +18,10 @@ use surco::look::Look;
 use surco::surface::Surface;
 use surco::text::listed;
 use yunta_core::shape::contract;
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::{ArtifactKind, NodeKind, UnknownDocument};
+use yunta_render::command;
 
-use super::advice;
 use crate::error::{CliError, Outcome};
 use crate::output::{document, raw, Mode};
 
@@ -34,7 +35,7 @@ pub fn schema(name: Option<&str>, output: Mode, look: &Look) -> Result<Outcome, 
             return Err(CliError::msg(format!(
                 "`--json` emits one document's schema: name a document, or run `{}` with no \
                  arguments to list them",
-                advice::schemas()
+                command::line(&NextStep::Schemas)
             )));
         }
         document(look, list());
@@ -144,7 +145,13 @@ fn workflow_keys() -> Doc {
         ))
         .with(kinds)
         .with(Next {
-            steps: vec![(advice::schema(Shown::Workflow.as_str(), true), JSON_SCHEMA)],
+            steps: vec![(
+                command::line(&NextStep::Schema {
+                    document: Arg::Given(Shown::Workflow.as_str().to_string()),
+                    json: true,
+                }),
+                JSON_SCHEMA,
+            )],
         })
 }
 
@@ -156,8 +163,20 @@ fn list() -> Doc {
     });
     let next = Next {
         steps: vec![
-            (advice::schema("<document>", false), "the shape to write"),
-            (advice::schema("<document>", true), JSON_SCHEMA),
+            (
+                command::line(&NextStep::Schema {
+                    document: Arg::Blank,
+                    json: false,
+                }),
+                "the shape to write",
+            ),
+            (
+                command::line(&NextStep::Schema {
+                    document: Arg::Blank,
+                    json: true,
+                }),
+                JSON_SCHEMA,
+            ),
         ],
     };
     Doc::new()

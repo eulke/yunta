@@ -24,11 +24,13 @@
 //! - A decision a person meets: `gate`, `escalation`, `claim`, `evidence`,
 //!   `offers`, `shown`, `plan`, `spec`, `findings` and `found`.
 //! - What leaves the terminal: `blocks`, `published` and `receipt`.
+//! - What a reader is told to type: `command`, every command written once.
 
 pub mod blocks;
 pub mod caution;
 pub mod changes;
 pub mod claim;
+pub mod command;
 pub mod escalation;
 pub mod evidence;
 pub mod failure;

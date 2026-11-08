@@ -20,12 +20,15 @@ mod scope_words;
 mod task_words;
 mod words;
 
+use surco::doc::Depth;
 use surco::text::one_line;
 use yunta_core::events::{children, findings, gates, node, run, session};
+use yunta_core::step::NextStep;
+use yunta_core::RunId;
+use yunta_render::command;
 use yunta_replay::frame::{Happening, Moment};
 
 use super::view;
-use crate::commands::advice;
 use surco::components::Whole;
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
@@ -203,7 +206,7 @@ pub(super) fn line(moment: &Moment, look: &Look) -> Line {
 /// node in the region carries its own tree; a node that graduated
 /// carries it into the history, where the run's composition stays
 /// readable after the node that composed it is gone.
-pub(super) fn graduation(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
+pub(super) fn graduation(moment: &Moment, run: &RunId, look: &Look) -> Vec<Line> {
     let mut rows = vec![line(moment, look)];
     rows.extend(evidence(moment, run, look));
     let Happening::Node(node::happening::Happening::Reached { children, .. }) = &moment.happening
@@ -223,7 +226,7 @@ pub(super) fn graduation(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
 /// failed, and the command that shows all of it — the reason is read
 /// where the failure is, not one command away. `run` is what the run is
 /// called by. Nothing for any other moment.
-pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
+pub(super) fn evidence(moment: &Moment, run: &RunId, look: &Look) -> Vec<Line> {
     let Happening::Node(node::happening::Happening::Reached {
         state: yunta_core::events::NodeState::Failed { failure, .. },
         ..
@@ -233,8 +236,12 @@ pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
     };
     let whole = failure.output().map(|_| {
         Whole::Command(match &moment.node {
-            Some(node) => advice::status_node(run, node.as_str()),
-            None => advice::status(run),
+            Some(node) => command::line(&NextStep::Status {
+                run: run.clone(),
+                node: Some(node.clone()),
+                depth: Depth::Glance,
+            }),
+            None => command::line(&NextStep::status(run)),
         })
     });
     crate::render::blocks_lines(&FailureDetail { failure, whole }.blocks(), look)

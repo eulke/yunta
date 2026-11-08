@@ -53,7 +53,7 @@ mod tests {
     use yunta_engine::lock::LockOwner;
 
     use super::*;
-    use crate::error::Reader;
+    use yunta_render::command::Reader;
 
     const WHOLE_ID: &str = "01M6NQR1YQ3A33XN7XYM1AYC07";
     const HANDLE: &str = "1AYC07";

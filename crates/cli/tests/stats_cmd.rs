@@ -20,6 +20,27 @@ nodes:
 "#
 }
 
+/// `yunta stats` reads one run or one workflow's history: with neither named,
+/// clap refuses the line as it refuses every other usage error, before
+/// anything is read.
+#[test]
+fn stats_without_a_run_or_a_workflow_is_a_usage_error() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let stats = yunta_in!(&repo, &home, &["stats"]);
+
+    assert_eq!(stats.status.code(), Some(2), "{}", stderr(&stats));
+    assert!(
+        stderr(&stats).contains("the following required arguments were not provided"),
+        "{}",
+        stderr(&stats)
+    );
+}
+
 #[test]
 fn stats_run_output_stays_inside_80_columns_and_never_uses_ansi_color() {
     let root = tempfile::tempdir().unwrap();

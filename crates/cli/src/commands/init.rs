@@ -18,7 +18,9 @@ use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::look::Look;
+use yunta_core::step::NextStep;
 use yunta_engine::process::Supervision;
+use yunta_render::command;
 
 use crate::ask::{ask_line, Console, Escape};
 use crate::error::{CliError, Outcome};
@@ -72,7 +74,7 @@ fn render_config_yaml(
     let mut out = String::new();
     out.push_str(&format!(
         "# Written by `{}`: team-shared, commit this file.\n",
-        super::advice::init()
+        command::line(&NextStep::Init)
     ));
     out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
     out.push_str("# config layer), never in this file.\n\n");
@@ -122,7 +124,7 @@ fn render_detected(detected: &crate::detect::Detected) -> String {
         out.push_str("# What this project runs for each capability a workflow names\n");
         out.push_str(&format!(
             "# (`run: {{ command: lint }}`), as `{}` detected it.\n",
-            super::advice::init()
+            command::line(&NextStep::Init)
         ));
         out.push_str("commands:\n");
         for (name, text) in &detected.commands {
@@ -151,7 +153,7 @@ fn yaml_string(text: &str) -> String {
 /// The line `init` writes above the entries it adds to `.gitignore`, and
 /// finds again so a second `init` adds nothing.
 fn gitignore_marker() -> String {
-    format!("# added by `{}`", super::advice::init())
+    format!("# added by `{}`", command::line(&NextStep::Init))
 }
 
 /// Defensive only — `paths.runs`/`paths.worktrees` default to `~/.yunta`,
@@ -194,7 +196,7 @@ fn claude_md_suggestion() -> Vec<String> {
         "This repo uses Yunta for verified workflows. Before implementing".to_string(),
         format!(
             "something ad hoc, check `{}` (or the `list_workflows` MCP",
-            super::advice::list()
+            command::line(&NextStep::List)
         ),
         "tool) for an existing verified workflow that already covers it.".to_string(),
     ]
@@ -428,7 +430,7 @@ fn report(init: &Wrote<'_>) -> Doc {
     // to choose. Until a runner is declared, no agent node can run, so
     // that is the step this ends with.
     let runner = crate::detect::runner_step(&[], true, &crate::detect::healthy(init.probed));
-    let headline = Headline::new(Mark::Done, super::advice::init(), "done")
+    let headline = Headline::new(Mark::Done, command::line(&NextStep::Init), "done")
         .fact(format!("in {}", init.repo.display()));
     Doc::new()
         .with(headline)
@@ -447,7 +449,10 @@ fn report(init: &Wrote<'_>) -> Doc {
         .with_all(runner.blocks())
         .with(Next {
             steps: vec![(
-                super::advice::doctor(),
+                command::line(&NextStep::Doctor {
+                    sessions: false,
+                    full: false,
+                }),
                 "confirms everything above is usable",
             )],
         })

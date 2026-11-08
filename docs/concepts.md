@@ -60,7 +60,7 @@ in the schema is refused — which only works because the schema is published to
 whoever has to write one, never assumed.
 
 A node that declares one of those kinds gets its shape in context automatically.
-Outside a run, `yunta schema <kind>` prints it and the `document_shape` tool on
+Outside a run, `yunta schema <document>` prints it and the `document_shape` tool on
 `yunta mcp` returns it, so an agent working in your repo can look the format up
 the same way it looks up anything else. Nobody has to relay a format by hand.
 

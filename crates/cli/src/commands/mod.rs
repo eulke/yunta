@@ -43,7 +43,9 @@ use chrono::{DateTime, Utc};
 use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, CLAUDE_CODE_ID, CODEX_ID};
 use yunta_core::events::PauseReason;
 use yunta_core::port::{Adapter, ProbeReport};
+use yunta_core::step::NextStep;
 use yunta_core::{AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Workflow};
+use yunta_render::command;
 use yunta_replay::RunState;
 
 use crate::error::CliError;
@@ -59,7 +61,7 @@ use surco::look::Look;
 /// doing when it got this back — with the run's whole id, since the
 /// control plane is one of those surfaces.
 #[derive(Debug, thiserror::Error)]
-#[error("cannot spawn a detached `{}`: {source}", advice::resume(.run_id.as_str()))]
+#[error("cannot spawn a detached `{}`: {source}", yunta_render::command::line_for(&yunta_core::step::NextStep::Resume { run: RunId::clone(.run_id) }, yunta_render::command::Reader::Agent))]
 pub(crate) struct DetachedResumeError {
     run_id: RunId,
     #[source]
@@ -284,7 +286,7 @@ pub(crate) fn refuse_unrunnable(
              workflow with the `mock` adapter instead, declare a test case under\n\
              .yunta/tests/ and run `{test}`.",
             built = built_adapter_names(),
-            test = advice::test()
+            test = command::line(&NextStep::Test { dir: None })
         )));
     }
     Ok(())
@@ -315,7 +317,10 @@ pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError>
     Err(CliError::msg(surco::text::problems(
         format!(
             "adapter health check failed (run `{}` for detail)",
-            advice::doctor()
+            command::line(&NextStep::Doctor {
+                sessions: false,
+                full: false
+            })
         ),
         &unhealthy,
     )))
@@ -389,7 +394,9 @@ pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, output: Mode, loo
             look,
             format!(
                 "run {run_id}: {doing} (`{}` follows it)",
-                advice::follow(run_id.handle())
+                command::line(&NextStep::Follow {
+                    run: run_id.clone()
+                })
             ),
         ),
         Mode::Quiet => crate::output::say(look, run_id.to_string()),

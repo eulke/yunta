@@ -7,8 +7,8 @@ use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::text::counted;
 use yunta_core::step::NextStep;
+use yunta_render::command;
 
-use crate::commands::advice;
 use crate::error::warn;
 
 /// What a pass did, row by row as it went, and how much it could not do.
@@ -65,7 +65,7 @@ impl Report {
             (0, true) => Mark::Absent,
             _ => Mark::Caution,
         };
-        let mut headline = Headline::new(mark, advice::gc(), said);
+        let mut headline = Headline::new(mark, command::line(&NextStep::Gc), said);
         if self.problems > 0 {
             headline = headline.fact(format!("{} above", counted(self.problems, "problem")));
         }
@@ -84,7 +84,10 @@ impl Report {
             })
             .push_if("now", self.now.clone().unwrap_or_default());
         let steps = match self.dry_run && !self.rows.is_empty() {
-            true => vec![(advice::spell(&NextStep::Gc), "does what this pass would")],
+            true => vec![(
+                yunta_render::command::line(&NextStep::Gc),
+                "does what this pass would",
+            )],
             false => Vec::new(),
         };
         Doc::new()

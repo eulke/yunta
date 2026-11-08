@@ -110,10 +110,7 @@ async fn quick_run(extra: &str) -> (Bench, MockForgeState, RunReport) {
         .in_mode("quick")
         .with_inputs(&[("idea", "add dark mode")])
         .with_workflow_dir(WORKFLOWS)
-        .with_forge(Arc::new(MockForge::new(
-            forge.clone(),
-            yunta_testkit_core::spell(),
-        )));
+        .with_forge(Arc::new(MockForge::new(forge.clone())));
     sandbox(&bench);
     let workflow = std::fs::read_to_string(Path::new(WORKFLOWS).join("fragua.yaml")).unwrap();
     let report = bench

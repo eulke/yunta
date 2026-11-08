@@ -53,3 +53,11 @@ fits a share of the `2000000` that `docs/reference.md` gives as its example: `gr
 after 28 s, so such a run stops on a cut session long before it has spent the cap, and goes on only past the cap.
 Three questions stand: whether a share should be equal across nodes, whether cached tokens should count, and what
 that example should be.
+
+### A follower can miss what a session said before it listened
+Paths: `crates/cli/src/commands/status/follow.rs`, `crates/cli/tests/run_words/row.rs`
+The test `a_follower_listens_once_the_registry_names_a_socket` fails about one run in ten alone and three in ten
+beside a build, the same before and after the run's pages moved. The follower reads the registry every second
+(`REGISTRY_EVERY`) and the stub's session says its line as it starts, so a follower that hears the socket late
+misses it. Not proven: that the socket serves only what is said after a listener joins, which would make a late
+follower miss words for any run, not only in the test.

@@ -6,17 +6,21 @@
 use surco::components::{Problem, RunLine, Runs, Said};
 use surco::doc::Block;
 use yunta_core::diagnostic::{Diagnostic, Report};
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::yaml::Location;
 use yunta_engine::CheckError;
 
 use super::CliError;
-use crate::commands::advice;
 use crate::commands::run_ref::Candidate;
 use crate::commands::verdict::Unrunnable;
 
-/// What a refused workflow is refused for, said before its problems.
-pub(crate) fn unrunnable() -> String {
-    format!("the workflow fails `{}`", advice::check())
+/// What a refused workflow is refused for, said before its problems: the
+/// check to run on it again, on its file when the refusal knows one.
+pub(crate) fn unrunnable(workflow: Arg<String>) -> String {
+    format!(
+        "the workflow fails `{}`",
+        yunta_render::command::line(&NextStep::Check { workflow })
+    )
 }
 
 impl CliError {
@@ -30,9 +34,10 @@ impl CliError {
                 &report.document.path,
                 report.diagnostics.len(),
             )),
-            CliError::Unrunnable(refusal) => {
-                Some(counted_under(&unrunnable(), refusal.problems.len()))
-            }
+            CliError::Unrunnable(refusal) => Some(counted_under(
+                &unrunnable(Arg::Given(refusal.workflow.clone())),
+                refusal.problems.len(),
+            )),
             // The runs it could be are rows of the page, under it.
             CliError::AmbiguousRun { said, .. } => Some(name_one(said)),
             _ => None,
@@ -160,7 +165,14 @@ pub(crate) fn hinted(problems: Vec<Pointed>) -> Vec<Problem> {
     let mut hint = (!unread.is_empty()).then(|| {
         format!(
             "`{}` lists every {}",
-            advice::schema_workflow(),
+            yunta_render::command::line(&NextStep::Schema {
+                document: Arg::Given(
+                    crate::commands::schema::Shown::Workflow
+                        .as_str()
+                        .to_string()
+                ),
+                json: false,
+            }),
             unread.join(" and ")
         )
     });
@@ -177,7 +189,10 @@ pub(crate) fn hinted(problems: Vec<Pointed>) -> Vec<Problem> {
 /// counted and quoted, then what to declare.
 pub(super) fn unrunnable_said(refusal: &Unrunnable) -> String {
     use surco::width::INDENT;
-    let mut said = yunta_render::blocks::diagnostic::plain(&unrunnable(), refusal.problems.clone());
+    let mut said = yunta_render::blocks::diagnostic::plain(
+        &unrunnable(Arg::Given(refusal.workflow.clone())),
+        refusal.problems.clone(),
+    );
     for fix in &refusal.declare {
         said.push_str(&format!("\n{INDENT}{}", fix.said));
         for line in &fix.paste {

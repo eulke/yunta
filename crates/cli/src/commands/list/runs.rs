@@ -18,9 +18,10 @@ use surco::glyphs::{Glyphs, Mark};
 use surco::look::Look;
 use surco::text::counted;
 use surco::words::{Standing, NEED_YOU, NOTHING_NEEDS_YOU};
+use yunta_core::step::{NextStep, Reach};
+use yunta_render::command;
 
 use super::inbox::{Group, Inbox, RunRow};
-use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
@@ -269,22 +270,32 @@ impl ListRunsAnswer {
     fn next(&self) -> Next {
         let mut steps = Vec::new();
         if self.is_empty() {
-            steps.push((advice::list(), "the workflows you can run"));
+            steps.push((command::line(&NextStep::List), "the workflows you can run"));
         }
         let longest = self
             .inbox
             .needing_a_person()
             .first()
-            .map(|row| advice::status(row.run_id.handle()));
+            .map(|row| command::line(&NextStep::status(&row.run_id)));
         if let Some(status) = longest {
             steps.push((status, "opens the run that has waited longest"));
         }
         let left_out = self.count(Group::Closed) > 0 || !self.inbox.unreadable.is_empty();
         if left_out && !self.depth.reaches(Depth::Full) {
-            steps.push((advice::list_closed_runs(), "lists the closed runs too"));
+            steps.push((
+                command::line(&NextStep::ListRuns {
+                    reach: Reach::WithClosed,
+                }),
+                "lists the closed runs too",
+            ));
         }
         if self.inbox.elsewhere > 0 {
-            steps.push((advice::list_every_run(), "every run on this machine"));
+            steps.push((
+                command::line(&NextStep::ListRuns {
+                    reach: Reach::Machine,
+                }),
+                "every run on this machine",
+            ));
         }
         Next { steps }
     }

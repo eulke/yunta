@@ -7,7 +7,7 @@
 //! engine reads the log, this reads the receipt.
 
 use surco::components::{Checklist, Fields, Found, Gist, Headline, Next, Section, Whole};
-use surco::doc::{Block, Doc};
+use surco::doc::{Block, Depth, Doc};
 use surco::figures::Tokens;
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
@@ -50,7 +50,7 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>
 /// `·` for what was never asked for — then each criterion and each path
 /// outside the scope, and the command that checks it all again. `glyphs`
 /// draws the separators between the facts a line states.
-pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: Glyphs) -> Doc {
+pub fn document(receipt: &Receipt, glyphs: Glyphs) -> Doc {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
@@ -76,7 +76,7 @@ pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: 
         )
         .with(checks(receipt));
     for failed in &receipt.failed {
-        doc = doc.with(failed_node(failed, &receipt.run_id, spell));
+        doc = doc.with(failed_node(failed, &receipt.run_id));
     }
     if let Some(criteria) = criteria(receipt) {
         doc = doc
@@ -90,7 +90,7 @@ pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: 
     }
     doc.with(Next {
         steps: vec![(
-            spell(&NextStep::Verify {
+            crate::command::line(&NextStep::Verify {
                 run: receipt.run_id.clone(),
             }),
             "checks this run's evidence again",
@@ -100,7 +100,7 @@ pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: 
 
 /// A node that stands failed: its id and the sentence its failure is
 /// told in, then what it printed and the command that shows the rest.
-fn failed_node(failed: &FailedNode, run: &RunId, spell: &dyn Fn(&NextStep) -> String) -> Section {
+fn failed_node(failed: &FailedNode, run: &RunId) -> Section {
     let node = &failed.node;
     Section {
         lead: Some(surco::components::Lead::Mark(Mark::Failed)),
@@ -110,9 +110,10 @@ fn failed_node(failed: &FailedNode, run: &RunId, spell: &dyn Fn(&NextStep) -> St
             .plain(crate::failure::headline(&failed.failure)),
         blocks: FailureDetail {
             failure: &failed.failure,
-            whole: Some(Whole::Command(spell(&NextStep::Status {
+            whole: Some(Whole::Command(crate::command::line(&NextStep::Status {
                 run: run.clone(),
                 node: Some(node.clone()),
+                depth: Depth::Glance,
             }))),
         }
         .blocks(),

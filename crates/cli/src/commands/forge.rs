@@ -8,7 +8,6 @@ use yunta_adapters::GitHubForge;
 use yunta_core::port::Forge;
 use yunta_core::{describe, ConfigLayer, NodeKind, SecretSource, Workflow};
 
-use crate::commands::advice;
 use crate::error::{warn, CliError};
 
 /// The forge a real invocation can offer — `None` when either
@@ -25,7 +24,7 @@ pub(crate) fn forge_for(
 ) -> Option<Arc<dyn Forge>> {
     let github = config.forge.as_ref()?.github.as_ref()?;
     let token = secrets.get(&github.token_env)?;
-    match GitHubForge::new(github.repo.clone(), token, Arc::new(advice::spell)) {
+    match GitHubForge::new(github.repo.clone(), token) {
         Ok(forge) => Some(Arc::new(forge)),
         Err(e) => {
             warn(format!(

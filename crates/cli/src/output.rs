@@ -21,9 +21,10 @@ use surco::doc::{Block, Doc};
 use surco::line::Line;
 use surco::look::Look;
 
-use crate::error::{warning_word, CliError, Outcome, Reader};
+use crate::error::{warning_word, CliError, Outcome};
 use crate::json::to_json_string;
 use crate::render;
+use yunta_render::command::Reader;
 
 /// How a command's output is written, decided once from its flags: a
 /// person's terminal, one JSON document, or the bare run id.

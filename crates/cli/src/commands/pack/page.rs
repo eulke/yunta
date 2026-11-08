@@ -1,5 +1,6 @@
 //! What a pack command says: the headline over the inventory a person reads
-//! before a pack is vendored, and the page an install answers with.
+//! before a pack is vendored, the page an install answers with, and why it
+//! refuses a pack that is installed, or not, already.
 
 use std::path::Path;
 
@@ -8,7 +9,9 @@ use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::text::counted;
 use surco::words::Standing;
-use yunta_core::{CommitSha, PackExecutorPolicy, PackManifest};
+use yunta_core::step::{Arg, NextStep};
+use yunta_core::{CommitSha, PackExecutorPolicy, PackManifest, PackRef};
+use yunta_render::command;
 
 use super::super::pack_audit::PackTestSummary;
 use super::PackPolicy;
@@ -63,4 +66,29 @@ impl Installed<'_> {
             .with_all(self.tests.blocks())
             .with_all(self.needs)
     }
+}
+
+/// Why `add` refuses `pack`, installed already at `dest`: the lines that
+/// change its ref, or take it out first.
+pub(super) fn already_installed(pack: &PackRef, dest: &Path) -> String {
+    let update = NextStep::PackUpdate {
+        pack: pack.clone(),
+        reference: Arg::Blank,
+    };
+    let remove = NextStep::PackRemove { pack: pack.clone() };
+    format!(
+        "`{pack}` is already installed at {}; use `{}` to change its ref, or `{}` first",
+        dest.display(),
+        command::line(&update),
+        command::line(&remove)
+    )
+}
+
+/// Why `update` refuses `pack`, which is not installed: the line that adds it.
+pub(super) fn not_installed(pack: &PackRef) -> String {
+    let add = NextStep::PackAdd { source: Arg::Blank };
+    format!(
+        "`{pack}` isn't installed; `{}` it first, not update",
+        command::line(&add)
+    )
 }

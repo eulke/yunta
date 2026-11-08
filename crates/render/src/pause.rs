@@ -10,6 +10,7 @@ use surco::figures::{Bytes, Tokens};
 use surco::text;
 use surco::words::Standing;
 use yunta_core::events::PauseReason;
+use yunta_core::step::NextStep;
 use yunta_core::{NodeId, QuestionId, RunId};
 
 use crate::escalation;
@@ -128,13 +129,14 @@ fn no_room(available: u64, need: u64, keep_free: u64) -> String {
         "no room on the disk, which has {} free where {} stays free{building}; {} and resume",
         Bytes(available),
         Bytes(keep_free),
-        make_room("yunta gc")
+        make_room()
     )
 }
 
 /// What makes room on a disk the checkouts fill: `gc`, the command that
 /// reclaims, among the other ways.
-pub fn make_room(gc: &str) -> String {
+pub fn make_room() -> String {
+    let gc = crate::command::line(&NextStep::Gc);
     format!("make room (`{gc}`, close a parked run, or lower `storage.pool.keep_free`)")
 }
 

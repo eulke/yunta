@@ -41,10 +41,7 @@ fn opened(events: &[StoredEvent]) -> Vec<u64> {
 
 fn forged() -> (Bench, MockForgeState) {
     let state = MockForgeState::new();
-    let bench = Bench::new().with_forge(Arc::new(MockForge::new(
-        state.clone(),
-        yunta_testkit_core::spell(),
-    )));
+    let bench = Bench::new().with_forge(Arc::new(MockForge::new(state.clone())));
     bare_origin(&bench.worktree);
     (bench, state)
 }
@@ -271,10 +268,8 @@ async fn a_pull_request_carries_the_receipt_of_the_run_that_opened_it() {
 #[tokio::test]
 async fn the_pull_request_body_reads_as_its_golden() {
     let state = MockForgeState::new();
-    let bench = Bench::with_run_id("run-pr-golden").with_forge(Arc::new(MockForge::new(
-        state.clone(),
-        yunta_testkit_core::spell(),
-    )));
+    let bench =
+        Bench::with_run_id("run-pr-golden").with_forge(Arc::new(MockForge::new(state.clone())));
     bare_origin(&bench.worktree);
     let RunReport { terminal, .. } = bench
         .run_with_config(

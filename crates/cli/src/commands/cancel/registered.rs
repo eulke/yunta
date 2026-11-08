@@ -6,13 +6,14 @@
 use std::time::Duration;
 
 use yunta_core::events::{NodeState, RunPhaseRaw};
+use yunta_core::step::NextStep;
 use yunta_core::{describe, RunId};
 use yunta_engine::pace::Pace;
 use yunta_engine::{EngineProcessFile, Registry};
+use yunta_render::command;
 use yunta_replay::RunState;
 
 use super::ENGINE_SHUTDOWN_POLL;
-use crate::commands::advice;
 use crate::context::{Context, Opened};
 use crate::error::CliError;
 
@@ -71,7 +72,9 @@ fn registered(
             "run {called}: its `engine.json` is there and this binary cannot read it \
              ({}): `{}` recovers the run once its process has stopped.",
             describe(&error),
-            advice::resume(run_id.handle())
+            command::line(&NextStep::Resume {
+                run: run_id.clone()
+            })
         ))),
         Registry::Absent => {
             let has_live_node = state
@@ -84,7 +87,9 @@ fn registered(
                     "run {called} has a node in progress but no `engine.json` to signal \
                      through: the engine that ran it predates this build, or its scratch \
                      directory is gone. `{}` recovers the run once its process has stopped.",
-                    advice::resume(run_id.handle())
+                    command::line(&NextStep::Resume {
+                        run: run_id.clone()
+                    })
                 ))),
             }
         }

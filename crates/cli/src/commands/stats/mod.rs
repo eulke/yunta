@@ -26,7 +26,6 @@ use yunta_replay::history::{PriorEstimation, RunSummary};
 use yunta_replay::stats::RunStats;
 use yunta_replay::verification_effectiveness::VerificationFindings;
 
-use crate::commands::advice;
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::output::{emit, Answer, Mode};
@@ -37,29 +36,6 @@ use surco::figures::{duration, Tokens};
 use surco::look::Look;
 pub(crate) use workflow::verification_findings;
 use workflow::WorkflowPage;
-
-/// Prints what `run_id` spent, or what the history of `workflow` shows, as
-/// the document `output` asks for.
-pub async fn stats(
-    run_id: Option<&RunId>,
-    workflow: Option<&WorkflowName>,
-    depth: Depth,
-    output: Mode,
-    look: &Look,
-) -> Result<Outcome, CliError> {
-    match (run_id, workflow) {
-        (Some(run_id), None) => stats_run(run_id, depth, output, look).await,
-        (None, Some(workflow)) => stats_workflow(workflow, output, look).await,
-        (None, None) => Err(CliError::msg(format!(
-            "`{}` needs a run id or `--workflow <name>`",
-            advice::stats()
-        ))),
-        (Some(_), Some(_)) => Err(CliError::msg(format!(
-            "`{}` takes a run id or `--workflow <name>`, not both",
-            advice::stats()
-        ))),
-    }
-}
 
 /// What the run's spend costs at its model's price: one blended line when
 /// several models are priced, and none when no price is known.
@@ -107,7 +83,8 @@ impl Answer for RunStatsAnswer<'_> {
     }
 }
 
-async fn stats_run(
+/// Prints what the run `run_id` spent, at `depth`, as the document `output` asks for.
+pub(crate) async fn of_run(
     run_id: &RunId,
     depth: Depth,
     output: Mode,
@@ -165,7 +142,8 @@ impl Answer for WorkflowAnswer<'_> {
     }
 }
 
-async fn stats_workflow(
+/// Prints what the history of a workflow shows, as the document `output` asks for.
+pub(crate) async fn of_workflow(
     workflow_name: &WorkflowName,
     output: Mode,
     look: &Look,

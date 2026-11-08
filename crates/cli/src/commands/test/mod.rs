@@ -43,6 +43,8 @@ use surco::components::{Check, Checklist, Found, Headline};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
+use yunta_core::step::NextStep;
+use yunta_render::command;
 
 pub(crate) use case::run_case;
 
@@ -104,7 +106,11 @@ fn verdict(cases: usize, failures: usize, look: &Look) {
     crate::output::blank();
     document(
         look,
-        Doc::new().with(Headline::new(mark, super::advice::test(), tally)),
+        Doc::new().with(Headline::new(
+            mark,
+            command::line(&NextStep::Test { dir: None }),
+            tally,
+        )),
     );
 }
 

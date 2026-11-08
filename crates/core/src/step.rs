@@ -1,44 +1,123 @@
-//! What a person or an agent can type next, as data. The CLI writes each
-//! step as the command it accepts.
+//! What a person or an agent can type next, as data: every command line Yunta
+//! tells a reader to type, with the arguments a reader fills in among its data.
+//!
+//! A surface that offers a step holds it as this data, so a terminal can bind
+//! it to a key and a desktop to a button, and `yunta_render::command` writes
+//! each one as the line the CLI accepts.
 
-use crate::ids::{NodeId, OptionId, RunId};
+use surco::doc::Depth;
 
-/// What a person or an agent can type next. Data; `advice::spell` writes each one.
+use crate::ids::{NodeId, OptionId, PackRef, RunId};
+
+/// A command line a person or an agent types, as data: every one Yunta tells a
+/// reader to type, and the git command it points a reader to. Not the CLI's
+/// declaration of its commands: this is what a surface offers, which that
+/// declaration accepts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NextStep {
+    /// `yunta status <run>`, or one node of it with `--node`, at `depth`: a glance,
+    /// `--full` or `--dig`.
     Status {
         run: RunId,
         node: Option<NodeId>,
+        depth: Depth,
     },
-    Resume {
-        run: RunId,
+    /// `yunta status needs`: the run waiting on you, and how to answer it.
+    Needs,
+    /// `yunta status <run> --follow`: the run as it moves, from any process.
+    Follow { run: RunId },
+    /// `yunta resume <run>`.
+    Resume { run: RunId },
+    /// `yunta cancel <run>`.
+    Cancel { run: RunId },
+    /// `yunta close <run>`.
+    Close { run: RunId },
+    /// `yunta review <run>`: the plan a run waits on, read and answered at a terminal.
+    Review { run: RunId },
+    /// `yunta open <run>`: the run's page, drawn again and opened.
+    Open { run: RunId },
+    /// `yunta receipt <run>`.
+    Receipt { run: RunId },
+    /// `yunta verify <run>`.
+    Verify { run: RunId },
+    /// `yunta resolve-gate <run>`, answered as `choice` says.
+    ResolveGate { run: RunId, choice: Choice },
+    /// `yunta run <workflow>`.
+    Run { workflow: Arg<String> },
+    /// `yunta check <workflow>`: a workflow's check, which names each rule it breaks in words.
+    Check { workflow: Arg<String> },
+    /// `yunta list`: the workflows this repository can run.
+    List,
+    /// `yunta list --runs`, as far as `reach` reaches.
+    ListRuns { reach: Reach },
+    /// `yunta schema`: every document it shows.
+    Schemas,
+    /// `yunta schema <document>`, or with `json` the JSON Schema an editor validates against.
+    Schema { document: Arg<String>, json: bool },
+    /// `yunta doctor`, with `sessions` a session opened per binding, and with
+    /// `full` every check, the healthy ones unfolded.
+    Doctor { sessions: bool, full: bool },
+    /// `yunta test`: the test cases of the project, or of the one at `dir`.
+    Test { dir: Option<String> },
+    /// `yunta init`: a repository prepared for yunta.
+    Init,
+    /// `yunta pack add <source>`.
+    PackAdd { source: Arg<String> },
+    /// `yunta pack update <pack> <ref>`.
+    PackUpdate {
+        pack: PackRef,
+        reference: Arg<String>,
     },
-    Cancel {
-        run: RunId,
-    },
-    Close {
-        run: RunId,
-    },
-    Receipt {
-        run: RunId,
-    },
-    Verify {
-        run: RunId,
-    },
-    /// `text`: the option needs a free-text answer.
-    ResolveGate {
-        run: RunId,
-        option: Option<OptionId>,
-        text: bool,
-    },
+    /// `yunta pack remove <pack>`.
+    PackRemove { pack: PackRef },
+    /// `yunta pack new <pack>`: the skeleton a new pack starts from.
+    PackNew { pack: PackRef },
+    /// `yunta gc`: the disk of runs past their retention, reclaimed.
     Gc,
-    /// Check the workflow that composes a refused child: its check names each rule in words.
-    Check {
-        workflow: String,
-    },
+    /// `yunta --help`: what yunta does, and every command it takes.
+    Help,
+    /// `git show <commit>`: a commit a run's work is held in, by the id a reader meets it under.
+    ShowCommit { commit: String },
 }
 
-/// How a surface writes a [`NextStep`] as the command a person types. The
-/// CLI passes its own spelling; a surface that draws a next step takes one
-/// rather than spelling it.
-pub type Spell = std::sync::Arc<dyn Fn(&NextStep) -> String + Send + Sync>;
+impl NextStep {
+    /// `yunta status <run>`: the run at a glance, the step a reader is pointed
+    /// to most.
+    pub fn status(run: &RunId) -> Self {
+        NextStep::Status {
+            run: run.clone(),
+            node: None,
+            depth: Depth::Glance,
+        }
+    }
+}
+
+/// An argument of a command line: the value a reader types as it is, or a
+/// blank they fill in, which `yunta_render::command` writes as the argument's
+/// name, `<workflow>` or `<document>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Arg<T> {
+    Given(T),
+    Blank,
+}
+
+/// How a `resolve-gate` line chooses on a decision: with no option, which puts the
+/// decision to the person at a terminal; with an option left blank for the
+/// reader to pick off the menu above the line; or with `option`, the words it
+/// asks for left blank when `words`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Choice {
+    Asked,
+    Blank,
+    Picked { option: OptionId, words: bool },
+}
+
+/// Which runs `yunta list --runs` lists: this repository's, what needs a person
+/// first; the closed ones too, with `--full`; or every run on this machine,
+/// with `--all`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    Repository,
+    WithClosed,
+    Machine,
+}

@@ -279,15 +279,11 @@ async fn an_unanswered_request_is_a_transport_error() {
     // A port that accepts the connection and never answers.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let forge = GitHubForge::configure(
-        repo(),
-        Secret::new("token".to_string()),
-        yunta_testkit_core::spell(),
-    )
-    .base_url(format!("http://{addr}"))
-    .timeout(Duration::from_millis(200))
-    .build()
-    .unwrap();
+    let forge = GitHubForge::configure(repo(), Secret::new("token".to_string()))
+        .base_url(format!("http://{addr}"))
+        .timeout(Duration::from_millis(200))
+        .build()
+        .unwrap();
 
     let error = forge
         .poll(&PullRequestRef {

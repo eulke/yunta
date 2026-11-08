@@ -5,11 +5,12 @@ use surco::doc::{Block, Depth};
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use yunta_core::events::Failure;
+use yunta_core::step::NextStep;
 use yunta_render::blocks::FailureDetail;
+use yunta_render::command;
 use yunta_replay::frame::NodeFrame;
 
 use super::{failed, RunPage};
-use crate::commands::advice;
 
 impl RunPage<'_> {
     /// Every failed node, under its id, with what its failure says: its
@@ -60,7 +61,11 @@ impl RunPage<'_> {
                 self.paths.cwd,
                 self.paths.home,
             ),
-            false => Whole::Command(advice::status_node(self.run_id.handle(), node.id.as_str())),
+            false => Whole::Command(command::line(&NextStep::Status {
+                run: self.run_id.clone(),
+                node: Some(node.id.clone()),
+                depth: Depth::Glance,
+            })),
         })
     }
 }

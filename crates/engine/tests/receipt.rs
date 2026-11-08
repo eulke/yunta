@@ -22,7 +22,6 @@ use yunta_core::receipt::{
     BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry, DiagnosticCount,
     EventChainStatus, Receipt, RunnerUsage, ScopeSummary,
 };
-use yunta_core::step::NextStep;
 use yunta_core::{ArtifactKind, NodeId, RunId};
 use yunta_engine::RunReport;
 use yunta_replay::receipt;
@@ -136,22 +135,8 @@ fn render_receipt_markdown(receipt: &yunta_core::receipt::Receipt) -> String {
     use surco::surface::Surface;
     surco::surface::Markdown.draw(&yunta_render::receipt::document(
         receipt,
-        &spell,
         surco::glyphs::Glyphs::Unicode,
     ))
-}
-
-/// The command words a receipt names, spelled the way the CLI accepts them.
-/// A receipt names only these two steps, so any other one is a regression.
-fn spell(step: &NextStep) -> String {
-    match step {
-        NextStep::Verify { run } => format!("yunta verify {}", run.handle()),
-        NextStep::Status {
-            run,
-            node: Some(node),
-        } => format!("yunta status {} --node {node}", run.handle()),
-        other => panic!("a receipt names no other step: {other:?}"),
-    }
 }
 
 /// The golden file `case` is checked against.

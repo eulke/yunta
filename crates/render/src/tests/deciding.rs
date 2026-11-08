@@ -11,7 +11,6 @@ use surco::surface::{Markdown, Surface, Terminal};
 use yunta_core::events::{AuthorGate, Claim, Escalation, GateOption, GateWaitingPayload, Menu};
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{NonEmpty, TasksFile};
-use yunta_testkit_core::spell;
 
 use super::console_page::greet_escalation;
 use super::documents::{global_packs, goldens, read, review, run, shown_plan};
@@ -116,7 +115,6 @@ fn a_markdown_document_shown_is_titled_by_its_first_heading() {
             &brief(text),
             &run(),
             Form::Review,
-            &*spell(),
         ))
     };
 
@@ -201,8 +199,7 @@ fn the_page_above_a_card_does_not_carry_a_plan() {
     let escalation = greet_escalation(&greet);
     let shown = vec![shown_plan(greet)];
     let run = run();
-    let spelling = spell();
-    let page = gate::above(Some((&run, shown.as_slice())), &escalation, &*spelling)
+    let page = gate::above(Some((&run, shown.as_slice())), &escalation)
         .expect("what weighs on the decision");
     assert!(
         matches!(page.blocks(), [Block::Section(section)] if section.title.text() == "before you decide"),
@@ -217,21 +214,12 @@ fn the_page_above_a_card_does_not_carry_a_plan() {
     nothing_weighs.tasks = Vec::new();
     let shown = vec![shown_plan(nothing_weighs)];
     assert!(
-        gate::above(
-            Some((&run, shown.as_slice())),
-            &withholding_nothing(),
-            &*spelling
-        )
-        .is_none(),
+        gate::above(Some((&run, shown.as_slice())), &withholding_nothing()).is_none(),
         "with nothing weighing, the card opens on its question"
     );
 
-    let page = gate::whole_page(
-        Some((&run, shown.as_slice())),
-        &withholding_nothing(),
-        &*spelling,
-    )
-    .expect("what a terminal with no room for a desk prints");
+    let page = gate::whole_page(Some((&run, shown.as_slice())), &withholding_nothing())
+        .expect("what a terminal with no room for a desk prints");
     assert!(matches!(page.blocks().first(), Some(Block::Headline(_))));
 }
 

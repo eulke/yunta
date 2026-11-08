@@ -62,7 +62,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         &ctx.env,
     )
     .await?;
-    let preflight = preflight(ctx, &frozen.manifest, mode, output, look).await?;
+    let preflight = preflight(ctx, &frozen.manifest, workflow_path, mode, output, look).await?;
 
     let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
     // The documents the run was born with are on its log now; what the

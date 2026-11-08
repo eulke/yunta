@@ -16,9 +16,10 @@ mod runs;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use yunta_core::step::{Arg, NextStep, Reach};
 use yunta_core::{InputSpec, Workflow};
+use yunta_render::command;
 
-use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::document;
@@ -44,8 +45,13 @@ pub async fn field(look: &Look) -> Result<Outcome, CliError> {
         ))
         .with(Next {
             steps: vec![
-                (advice::list_every_run(), "every run on this machine"),
-                (advice::help(), "what yunta does"),
+                (
+                    command::line(&NextStep::ListRuns {
+                        reach: Reach::Machine,
+                    }),
+                    "every run on this machine",
+                ),
+                (command::line(&NextStep::Help), "what yunta does"),
             ],
         });
     document(look, page);
@@ -142,7 +148,12 @@ async fn listed(
     if let Some(ctx) = history_source {
         fields = estimation_field(fields, ctx, &workflow, glyphs).await;
     }
-    fields = fields.push_command("run", advice::run(name));
+    fields = fields.push_command(
+        "run",
+        command::line(&NextStep::Run {
+            workflow: Arg::Given(name.to_string()),
+        }),
+    );
     Section {
         lead: None,
         title,

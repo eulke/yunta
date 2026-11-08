@@ -76,8 +76,8 @@ fn a_detached_run_leaves_the_checkout_locked_by_the_child_that_is_in_it() {
 }
 
 /// A fixture scripts the sessions of whoever runs them, and `--detach`
-/// makes that a separate `yunta resume` — which resolves the adapters
-/// `runners:` names and reads no fixture at all. The combination is
+/// hands the run to another process, which resolves the adapters `runners:`
+/// names and reads no fixture at all. The combination is
 /// refused with what to do instead, never honoured as a run that quietly
 /// stayed attached.
 #[test]
@@ -134,8 +134,12 @@ nodes:
         );
         let stderr = stderr(&refused);
         assert!(
-            stderr.contains("--detach") && stderr.contains("yunta resume"),
+            stderr.contains("--detach") && stderr.contains("hands the run to another process"),
             "the refusal names the flag and why a detached child cannot honour it: {stderr}"
+        );
+        assert!(
+            !stderr.contains("`yunta resume`"),
+            "no bare command stands in for the process it means: {stderr}"
         );
         assert!(
             !home.join("runs").exists(),

@@ -3,7 +3,7 @@
 //! it, then the file it lives in.
 
 use surco::components::{Code, Fields, Section};
-use surco::doc::{Block, Doc};
+use surco::doc::{Block, Depth, Doc};
 use surco::line::{Line, Tone};
 use surco::text::counted;
 use yunta_core::step::NextStep;
@@ -18,14 +18,12 @@ use crate::plan::Form;
 pub const CODE_SHOWN: usize = 60;
 
 /// The tests of `file`, written by `node` when the run's log says — which
-/// `of` names — for the run `run`; each command a reader copies is written
-/// by `spell`.
+/// `of` names — for the run `run`, the one each command a reader copies takes.
 pub fn document(
     file: &SpecFile,
     (of, node): (&str, Option<&NodeId>),
     run: &RunId,
     form: Form,
-    spell: &dyn Fn(&NextStep) -> String,
 ) -> Doc {
     let tests = test_count(file);
     let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(
@@ -48,7 +46,7 @@ pub fn document(
         for test_file in &spec.files {
             let path = test_file.path.as_str();
             let content = &test_file.content;
-            let whole_at = node.map(|node| status_command(run, node, spell));
+            let whole_at = node.map(|node| status_command(run, node));
             blocks.push(
                 match (form, whole_at) {
                     (Form::Review, Some(whole_at)) => {
@@ -74,14 +72,11 @@ pub(crate) fn test_count(file: &SpecFile) -> usize {
 }
 
 /// The command that shows a spec's tests, whole, for the run `run`: the
-/// status of `node`, which wrote it, as `spell` writes it.
-pub(crate) fn status_command(
-    run: &RunId,
-    node: &NodeId,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> String {
-    spell(&NextStep::Status {
+/// status of `node`, which wrote it.
+pub(crate) fn status_command(run: &RunId, node: &NodeId) -> String {
+    crate::command::line(&NextStep::Status {
         run: run.clone(),
         node: Some(node.clone()),
+        depth: Depth::Glance,
     })
 }

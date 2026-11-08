@@ -5,7 +5,7 @@ use super::*;
 
 #[tokio::test]
 async fn polling_a_gate_the_forge_never_published_is_a_typed_error() {
-    let forge = MockForge::new(MockForgeState::new(), yunta_testkit_core::spell());
+    let forge = MockForge::new(MockForgeState::new());
     let gate = PullRequestRef {
         url: "https://forge.example/pr/99".to_string(),
         number: 99,
@@ -54,7 +54,7 @@ fn node_request(title: &str, body: &str) -> PullRequestRequest {
 #[tokio::test]
 async fn the_mock_forge_moves_the_head_only_when_what_it_publishes_changes() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let mut request = gate_request("run-1");
     request.artifacts = vec![("spec.md".to_string(), b"# spec".to_vec())];
 
@@ -81,7 +81,7 @@ async fn the_mock_forge_moves_the_head_only_when_what_it_publishes_changes() {
 #[tokio::test]
 async fn the_mock_forge_reuses_only_open_prs() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
 
     let first = forge.publish(&gate_request("run-1")).await.unwrap();
     let again = forge.publish(&gate_request("run-1")).await.unwrap();
@@ -101,7 +101,7 @@ async fn the_mock_forge_reuses_only_open_prs() {
 #[tokio::test]
 async fn the_mock_forge_reports_a_merged_pr() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let published = forge.publish(&gate_request("run-1")).await.unwrap();
 
     let merge_sha = state.merge("run-1", &"octocat".into());
@@ -120,7 +120,7 @@ async fn the_mock_forge_reports_a_merged_pr() {
 #[tokio::test]
 async fn a_reused_gate_pull_request_is_drawn_again() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let mut request = gate_request("run-1");
     let first = forge.publish(&request).await.unwrap();
     let before = state.pull_requests().remove(0);
@@ -153,7 +153,7 @@ async fn a_reused_gate_pull_request_is_drawn_again() {
 #[tokio::test]
 async fn a_reused_pull_request_of_a_node_keeps_what_it_opened_with() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let first = forge
         .open_pull_request(&node_request("Ship it", "the first body"))
         .await
@@ -185,7 +185,7 @@ async fn a_reused_pull_request_of_a_node_keeps_what_it_opened_with() {
 #[tokio::test]
 async fn a_reopened_pull_request_waits_for_a_review() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let first = forge.publish(&gate_request("run-1")).await.unwrap();
     state.close("run-1");
     let second = forge.publish(&gate_request("run-1")).await.unwrap();
@@ -211,7 +211,7 @@ async fn a_reopened_pull_request_waits_for_a_review() {
 #[tokio::test]
 async fn reopening_an_open_pull_request_keeps_its_review() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let published = forge.publish(&gate_request("run-1")).await.unwrap();
     state.approve("run-1", &"octocat".into());
     let first = forge.poll(&published).await.unwrap();
@@ -233,7 +233,7 @@ async fn reopening_an_open_pull_request_keeps_its_review() {
 #[tokio::test]
 async fn a_merged_pull_request_is_final() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let merged = forge.publish(&gate_request("run-1")).await.unwrap();
     let merge_sha = state.merge("run-1", &"octocat".into());
 
@@ -256,7 +256,7 @@ async fn a_merged_pull_request_is_final() {
 #[tokio::test]
 async fn a_merged_pull_request_is_never_reopened() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let merged = forge.publish(&gate_request("run-1")).await.unwrap();
     let merge_sha = state.merge("run-1", &"octocat".into());
 
@@ -280,7 +280,7 @@ async fn a_merged_pull_request_is_never_reopened() {
 #[tokio::test]
 async fn a_merged_pull_request_stays_merged_whatever_is_done_to_it() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let merged = forge.publish(&gate_request("run-1")).await.unwrap();
     let merge_sha = state.merge("run-1", &"octocat".into());
 
@@ -307,7 +307,7 @@ async fn a_merged_pull_request_stays_merged_whatever_is_done_to_it() {
 #[tokio::test]
 async fn a_description_past_what_the_forge_keeps_is_refused_before_anything_is_published() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
+    let forge = MockForge::new(state.clone());
     let mut request = gate_request("run-1");
     // The decision lists every file the pull request carries, at every level,
     // so enough of them outgrow the description.

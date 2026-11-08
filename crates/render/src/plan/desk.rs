@@ -11,7 +11,6 @@ use surco::look::{Look, Width};
 use surco::surface::Terminal;
 use surco::text::counted;
 use yunta_core::shown::{PlanReview, ShownDocument};
-use yunta_core::step::NextStep;
 use yunta_core::{RunId, Task};
 
 use super::{card, change, head, proof, said, steps, tree, Form};
@@ -435,13 +434,8 @@ pub fn about(review: &PlanReview, question: &str, glyphs: Glyphs) -> Vec<String>
 }
 
 /// The plan among `documents` as a person reads it, with the others as what else it
-/// shows; `None` when no document is a plan, or the plan has no place to stand on. Each
-/// command a document names is written by `spell`.
-pub fn reading<'a>(
-    documents: &'a [ShownDocument],
-    run: &RunId,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Option<Reading<'a>> {
+/// shows; `None` when no document is a plan, or the plan has no place to stand on.
+pub fn reading<'a>(documents: &'a [ShownDocument], run: &RunId) -> Option<Reading<'a>> {
     let (plan, review) = crate::shown::plan_among(documents)?;
     let mut leads = true;
     let mut also = Vec::new();
@@ -452,7 +446,7 @@ pub fn reading<'a>(
         }
         also.push(AlsoShown {
             name: crate::shown::called(document),
-            doc: crate::shown::document(document, run, Form::Review, spell),
+            doc: crate::shown::document(document, run, Form::Review),
             leads,
         });
     }

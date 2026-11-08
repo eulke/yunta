@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use surco::words::Standing;
+use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
+use yunta_render::command;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::RunState;
 use yunta_storage::Storage;
@@ -301,11 +303,12 @@ fn held(
     word: Standing,
     menu: bool,
 ) -> (Option<String>, Option<String>) {
-    let handle = frame.run_id.handle();
     match (word, &frame.phase) {
         (Standing::Stalled, _) => (
             Some(advice::STALLED.to_string()),
-            Some(advice::resume(handle)),
+            Some(command::line(&NextStep::Resume {
+                run: frame.run_id.clone(),
+            })),
         ),
         // Asked live, the question is answered where it is asked: no
         // command here reaches it.
@@ -319,13 +322,17 @@ fn held(
         (_, RunPhase::Waiting { on }) => (
             Some(advice::parked_in_full(on)),
             Some(match menu {
-                true => advice::status(handle),
-                false => advice::resume(handle),
+                true => command::line(&NextStep::status(&frame.run_id)),
+                false => command::line(&NextStep::Resume {
+                    run: frame.run_id.clone(),
+                }),
             }),
         ),
         (_, RunPhase::Broken { diagnostic }) => (
             Some(surco::text::one_line(diagnostic)),
-            Some(advice::verify(handle)),
+            Some(command::line(&NextStep::Verify {
+                run: frame.run_id.clone(),
+            })),
         ),
         (_, RunPhase::Created | RunPhase::Running) => (
             Some(crate::render::counter::line(frame, crate::render::glyphs())),
@@ -461,39 +468,4 @@ fn as_secs<S: serde::Serializer>(age: &Duration, serializer: S) -> Result<S::Ok,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_word_a_run_is_called_by_decides_the_group_it_is_listed_under() {
-        // A log that stopped making sense needs a person as much as a
-        // decision does: nothing moves it on its own again.
-        for word in [Standing::NeedsYou, Standing::Broken] {
-            assert_eq!(Group::of(word, false), Group::NeedsYou, "{word}");
-        }
-        for word in [Standing::Created, Standing::Running, Standing::Waiting] {
-            assert_eq!(Group::of(word, false), Group::Running, "{word}");
-        }
-        assert_eq!(Group::of(Standing::Stopped, false), Group::Stopped);
-        for word in [
-            Standing::Finished,
-            Standing::Reported,
-            Standing::Failed,
-            Standing::Stopped,
-            Standing::Promoted,
-        ] {
-            assert_eq!(Group::of(word, true), Group::Closed, "{word}");
-        }
-    }
-
-    #[test]
-    fn every_word_a_run_can_be_called_by_has_a_group() {
-        // The listing is an inbox: a run whose word fell through would
-        // be a run nobody goes looking for.
-        let groups: Vec<Group> = Standing::ALL
-            .into_iter()
-            .map(|word| Group::of(word, false))
-            .collect();
-        assert_eq!(groups.len(), Standing::ALL.len());
-    }
-}
+mod tests;

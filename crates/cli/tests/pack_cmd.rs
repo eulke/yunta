@@ -127,6 +127,12 @@ fn add_refuses_a_pack_already_installed() {
         "{}",
         stderr(&second)
     );
+    assert!(
+        stderr(&second).contains("`yunta pack update acme/review-pack <ref>`")
+            && stderr(&second).contains("`yunta pack remove acme/review-pack`"),
+        "the refusal names the lines that change the installed pack: {}",
+        stderr(&second)
+    );
 }
 
 #[test]
@@ -246,6 +252,11 @@ fn update_on_an_uninstalled_pack_is_refused() {
     );
     assert!(!out.status.success());
     assert!(stderr(&out).contains("isn't installed"), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("`yunta pack add <source>` it first"),
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]
@@ -576,7 +587,11 @@ fn pack_new_produces_a_pack_that_passes_check_and_test() {
 
     let pack = repo.join("demo");
     assert!(pack.join("pack.yaml").is_file(), "pack.yaml is written");
-    assert!(pack.join("README.md").is_file(), "a README is written");
+    let readme = std::fs::read_to_string(pack.join("README.md")).expect("a README is written");
+    assert!(
+        readme.contains("scaffolded by `yunta pack new acme/demo`"),
+        "the README names the line that made it: {readme}"
+    );
     assert!(
         pack.join(".yunta/workflows/example.yaml").is_file(),
         "a workflow is written"

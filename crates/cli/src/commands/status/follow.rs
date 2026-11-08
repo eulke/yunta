@@ -31,15 +31,16 @@ use surco::look::Look;
 use surco::words::Standing;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, RunEvent, StoredEvent};
+use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, RunId, Seq};
 use yunta_engine::pace::Pace;
+use yunta_render::command;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::registry::Engine;
 use yunta_replay::RunState;
 use yunta_storage::AsyncStorage;
 
-use crate::commands::advice;
 use crate::commands::drive::{report_closing, Closed};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -142,7 +143,12 @@ fn stopped_following(run_id: &RunId) -> Doc {
             "this terminal stopped following it; the run goes on without it",
         ))
         .with(Next {
-            steps: vec![(advice::follow(handle), "follows it again")],
+            steps: vec![(
+                command::line(&NextStep::Follow {
+                    run: run_id.clone(),
+                }),
+                "follows it again",
+            )],
         })
 }
 

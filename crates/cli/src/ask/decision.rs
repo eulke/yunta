@@ -26,7 +26,6 @@ use super::desk::{Asked, Leaving, Left, PlanDesk};
 use super::field::FOLDED;
 use super::held::hold;
 use super::{attributed, Answered, Console, NoAnswer};
-use crate::commands::advice;
 
 /// The fewest columns a desk is drawn on: under them a task's title and where it is no longer
 /// share a row, and code wraps at every word.
@@ -88,7 +87,7 @@ pub(crate) fn decide(console: &Console, env: &Env, mut ask: Ask<'_>) -> Answered
 /// The desk of the plan `ask` is on, when it is on one.
 fn desk_of<'a>(console: &Console, ask: &Ask<'a>, card: &DecisionCard) -> Option<PlanDesk<'a>> {
     let (run, documents) = ask.shown?;
-    let reading = plan::reading(documents, run, &advice::spell)?;
+    let reading = plan::reading(documents, run)?;
     let asked = Asked {
         question: question(ask),
         node: ask.node.map(ToString::to_string),
@@ -163,7 +162,7 @@ fn read(
 /// among the documents is read at the desk and draws nothing here. Nothing is drawn when
 /// there is neither, since the card opens on its question.
 fn present(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
-    let Some(page) = gate::above(ask.shown, ask.escalation, &advice::spell) else {
+    let Some(page) = gate::above(ask.shown, ask.escalation) else {
         return Ok(());
     };
     draw_page(console, page)
@@ -172,7 +171,7 @@ fn present(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
 /// Draws everything the decision has to say, what weighs on it last, for a terminal with no
 /// room for the desk.
 fn print_documents(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
-    let Some(page) = gate::whole_page(ask.shown, ask.escalation, &advice::spell) else {
+    let Some(page) = gate::whole_page(ask.shown, ask.escalation) else {
         return Ok(());
     };
     draw_page(console, page)

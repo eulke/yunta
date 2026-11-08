@@ -3,6 +3,8 @@
 
 use std::path::Path;
 
+use yunta_core::step::{Arg, NextStep, Reach};
+use yunta_render::command;
 /// Where the skill is written, in a project.
 pub(super) const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 
@@ -40,14 +42,17 @@ fn mechanism_skill_content() -> String {
      A tasks document, a findings artifact and a questions artifact are \
      validated strictly: a key that is not in the shape fails the node \
      that produced it. Never guess the format; ask for it:\n\n\
-     - From a shell: `{schema_kind}`, or `{schemas}` to list the \
-       kinds.\n\
+     - From a shell: `{schema}`, or `{schemas}` to list \
+       them.\n\
      - From an MCP-connected client: the `document_shape` tool.\n",
-        list = crate::commands::advice::list(),
-        list_runs = crate::commands::advice::list_runs(),
-        run = crate::commands::advice::run("<workflow>"),
-        schema_kind = crate::commands::advice::schema("<kind>", false),
-        schemas = crate::commands::advice::schemas(),
+        list = command::line(&NextStep::List),
+        list_runs = command::line(&NextStep::ListRuns { reach: Reach::Repository }),
+        run = command::line(&NextStep::Run { workflow: Arg::Blank }),
+        schema = command::line(&NextStep::Schema {
+            document: Arg::Blank,
+            json: false,
+        }),
+        schemas = command::line(&NextStep::Schemas),
     )
 }
 

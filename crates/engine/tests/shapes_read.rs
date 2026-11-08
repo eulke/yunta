@@ -468,10 +468,7 @@ async fn registration_asks_git_once_for_names_and_once_for_files() {
 #[tokio::test]
 async fn a_published_plan_says_what_its_shapes_imply() {
     let forge = MockForgeState::new();
-    let bench = Bench::new().with_forge(Arc::new(MockForge::new(
-        forge.clone(),
-        yunta_testkit_core::spell(),
-    )));
+    let bench = Bench::new().with_forge(Arc::new(MockForge::new(forge.clone())));
     holding(&bench, TREE);
 
     bench.run(PUBLISHED, &plan_session(PLAN)).await;

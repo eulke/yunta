@@ -37,6 +37,8 @@ pub struct Cli {
 mod depth;
 mod dispatch;
 mod pack;
+#[cfg(test)]
+mod tests;
 
 use depth::DepthArg;
 use dispatch::dispatch;
@@ -281,6 +283,7 @@ enum Command {
         /// The run: its handle, its id or any part that starts or ends it,
         /// `last` (this repository's newest) or `needs` (the one waiting on
         /// you).
+        #[arg(required_unless_present = "workflow")]
         run: Option<RunRef>,
         /// Aggregates every past run of this workflow instead of one run.
         #[arg(long, conflicts_with = "run")]

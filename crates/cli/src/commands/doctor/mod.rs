@@ -39,7 +39,9 @@ use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
 use yunta_core::port::ProbeReport;
+use yunta_core::step::NextStep;
 use yunta_core::AdapterId;
+use yunta_render::command;
 
 pub async fn doctor(
     session: bool,
@@ -94,7 +96,14 @@ impl DoctorAnswer {
             false => Mark::Failed,
         };
         tallied(
-            Headline::new(mark, super::advice::doctor(), self.word),
+            Headline::new(
+                mark,
+                command::line(&NextStep::Doctor {
+                    sessions: false,
+                    full: false,
+                }),
+                self.word,
+            ),
             &self.checks,
         )
     }
@@ -126,18 +135,23 @@ impl Answer for DoctorAnswer {
             true => checklist(&self.checks),
             false => checklist(&self.checks).folded("healthy"),
         };
-        let doctor = super::advice::doctor();
         let mut next = Vec::new();
         if !self.session {
             next.push((
-                format!("{doctor} --session"),
+                command::line(&NextStep::Doctor {
+                    sessions: true,
+                    full: false,
+                }),
                 "opens a session per binding, a prompt each",
             ));
         }
         // A glance that folds leaves out what each check that holds found.
         if checks.folds() {
             next.push((
-                format!("{doctor} --full"),
+                command::line(&NextStep::Doctor {
+                    sessions: false,
+                    full: true,
+                }),
                 "every check on its own row, with what it found",
             ));
         }
@@ -184,9 +198,9 @@ async fn checkouts(ctx: &Context, checks: &mut Checklist) {
 /// over their budget, each with what to do about it.
 fn kept_check(kept: &yunta_engine::PoolReport) -> Check {
     let check = |found| Check::new(found, "checkouts", kept.to_string());
-    let gc = super::advice::gc();
+    let gc = command::line(&NextStep::Gc);
     match (kept.available < kept.keep_free, kept.builds > kept.budget) {
-        (true, _) => check(Found::Problem).fix(Fix::said(yunta_render::pause::make_room(&gc))),
+        (true, _) => check(Found::Problem).fix(Fix::said(yunta_render::pause::make_room())),
         (false, true) => check(Found::Caution)
             .so("the next checkout taken empties the builds past the budget")
             .fix(Fix::said(format!("run `{gc}` to empty them now"))),

@@ -10,9 +10,10 @@ use std::str::FromStr;
 
 use surco::components::{Edge, RunLine};
 use surco::words::Standing;
+use yunta_core::step::{NextStep, Reach};
 use yunta_core::RunId;
+use yunta_render::command;
 
-use super::advice;
 use super::list::inbox::{Inbox, RunRow};
 use crate::context::Context;
 use crate::error::CliError;
@@ -56,7 +57,7 @@ impl Candidate {
     /// The run `row` is, its row ending with the command that opens it.
     fn of(row: &RunRow) -> Self {
         let handle = row.run_id.handle().to_string();
-        let opens = Edge::Command(advice::status(&handle));
+        let opens = Edge::Command(command::line(&NextStep::status(&row.run_id)));
         Candidate {
             run_id: row.run_id.clone(),
             about: Some(format!("{} ({})", row.workflow, row.mode)),
@@ -103,7 +104,9 @@ impl RunRef {
                 .ok_or_else(|| {
                     CliError::msg(format!(
                         "no run in this repository; `{}` lists every run",
-                        advice::list_every_run()
+                        command::line(&NextStep::ListRuns {
+                            reach: Reach::Machine
+                        })
                     ))
                 }),
             RunRef::Needs => waiting_run(ctx).await,
@@ -155,7 +158,9 @@ async fn waiting_run(ctx: &Context) -> Result<RunId, CliError> {
         [] => Err(CliError::msg(format!(
             "no run of this repository {}; `{}` lists them",
             Standing::NeedsYou.word(),
-            advice::list_runs()
+            command::line(&NextStep::ListRuns {
+                reach: Reach::Repository
+            })
         ))),
         [one] => Ok(one.run_id.clone()),
         several => Err(CliError::AmbiguousRun {

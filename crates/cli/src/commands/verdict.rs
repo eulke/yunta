@@ -13,13 +13,12 @@ use surco::look::Look;
 use surco::text::counted;
 use yunta_core::caution::Caution;
 use yunta_core::diagnostic::Report;
-use yunta_core::step::NextStep;
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::yaml::SourceMap;
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{CheckError, Composition};
 use yunta_render::blocks::diagnostic::located;
 
-use super::advice;
 use crate::context::Context;
 use crate::error::{page, warn, CliError, Outcome};
 use crate::output::{document, on_stderr};
@@ -270,7 +269,11 @@ impl Verdict {
                 crate::detect::suggestions(&self.errors, &detected)
             }
         };
-        Ok(Unrunnable { problems, declare })
+        Ok(Unrunnable {
+            workflow: shown,
+            problems,
+            declare,
+        })
     }
 }
 
@@ -292,6 +295,8 @@ async fn composed_problems(ctx: &Context, report: &Report) -> Vec<page::Pointed>
 /// a declaration fixes.
 #[derive(Debug)]
 pub(crate) struct Unrunnable {
+    /// The workflow refused, as a reader in this directory names its file.
+    pub(crate) workflow: String,
     pub(crate) problems: Vec<Problem>,
     pub(crate) declare: Vec<surco::components::Fix>,
 }
@@ -341,14 +346,14 @@ pub(crate) fn file_named(path: &Path) -> String {
 /// is fixed.
 pub(crate) fn check_again(shown: &str) -> (String, &'static str) {
     (
-        advice::spell(&NextStep::Check {
-            workflow: shown.to_string(),
+        yunta_render::command::line(&NextStep::Check {
+            workflow: Arg::Given(shown.to_string()),
         }),
         "again, once they are fixed",
     )
 }
 
 /// `path` as a reader in this directory names it.
-fn shown(ctx: &Context, path: &Path) -> String {
+pub(crate) fn shown(ctx: &Context, path: &Path) -> String {
     surco::paths::shown(path, &ctx.cwd, ctx.env.home.as_deref())
 }

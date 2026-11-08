@@ -17,7 +17,7 @@ impl GitHubForge {
         if let Some(existing) = self.find_open_pr(&req.head, &req.run_id).await? {
             return Ok(existing.reference);
         }
-        let body = super::pull_request_body(req, &*self.spell);
+        let body = super::pull_request_body(req);
         self.create_pr(&req.title, &req.head, &req.base, &body)
             .await
     }

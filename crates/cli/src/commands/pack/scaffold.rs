@@ -10,7 +10,9 @@ use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::look::Look;
 use surco::text::counted;
+use yunta_core::step::NextStep;
 use yunta_core::{ConfigLayer, PackManifest, PackRef, Workflow};
+use yunta_render::command;
 
 use super::super::pack_audit::run_pack_tests;
 use crate::error::{CliError, Outcome};
@@ -100,7 +102,7 @@ work counts as done. Swap the `verify` command for your own test suite.
 
 ## Testing
 
-    {{test}} --dir .
+    {{test}}
 "#;
 
 /// `template` with what a new pack is called, and how the commands it names are typed.
@@ -108,8 +110,16 @@ fn filled(template: &str, pack: &PackRef) -> String {
     template
         .replace("{{publisher}}", pack.publisher().as_str())
         .replace("{{name}}", pack.name().as_str())
-        .replace("{{test}}", &crate::commands::advice::test())
-        .replace("{{pack_new}}", &crate::commands::advice::pack("new"))
+        .replace(
+            "{{test}}",
+            &command::line(&NextStep::Test {
+                dir: Some(".".to_string()),
+            }),
+        )
+        .replace(
+            "{{pack_new}}",
+            &command::line(&NextStep::PackNew { pack: pack.clone() }),
+        )
 }
 
 /// Scaffolds a new pack at `<cwd>/<name>`: a manifest, one verified

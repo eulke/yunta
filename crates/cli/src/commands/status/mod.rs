@@ -20,17 +20,17 @@ pub(crate) mod progress;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::DecisionOn;
-use yunta_core::events::{Escalation, NodeState, StoredEvent};
+use yunta_core::events::{DecisionOn, Escalation, NodeState, StoredEvent};
 use yunta_core::shown::ShownDocument;
+use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, NodeId, RunId};
+use yunta_render::command;
 use yunta_replay::frame::{NodeStanding, RunFrame};
 use yunta_replay::RunState;
 
 use crate::commands::{advice, stats};
 use crate::context::Context;
-use crate::error::note;
-use crate::error::{CliError, Outcome};
+use crate::error::{note, CliError, Outcome};
 use crate::json::RunDocument;
 use crate::output::{emit, Answer, Mode};
 use crate::run_page::{Decided, RunPage, Scope};
@@ -231,13 +231,8 @@ pub(crate) async fn page_for_a_browser(
     if let Some(decided) = &page.decision {
         let at = at.unwrap_or(blocks.len());
         let shown = decided.shown.iter().flat_map(|document| {
-            yunta_render::shown::document(
-                document,
-                run_id,
-                yunta_render::shown::Form::Browser,
-                &advice::spell,
-            )
-            .into_blocks()
+            yunta_render::shown::document(document, run_id, yunta_render::shown::Form::Browser)
+                .into_blocks()
         });
         blocks.splice(at..at, shown.collect::<Vec<_>>());
     }
@@ -245,7 +240,9 @@ pub(crate) async fn page_for_a_browser(
         Note(format!(
             "drawn at {}; `{}` draws it again.",
             reading.now.format("%Y-%m-%d %H:%M UTC"),
-            advice::open(run_id.handle()),
+            command::line(&NextStep::Open {
+                run: run_id.clone()
+            }),
         ))
         .into(),
     );

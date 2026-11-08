@@ -41,10 +41,7 @@ const RETRY_AFTER: Duration = Duration::from_secs(60);
 fn forged_on(host: &Arc<HostClock>, state: &MockForgeState) -> Bench {
     let bench = Bench::new()
         .with_clock(host.clone())
-        .with_forge(Arc::new(MockForge::new(
-            state.clone(),
-            yunta_testkit_core::spell(),
-        )));
+        .with_forge(Arc::new(MockForge::new(state.clone())));
     bare_origin(&bench.worktree);
     bench
 }

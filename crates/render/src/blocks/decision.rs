@@ -7,25 +7,29 @@ use surco::components::{Chosen, Decision, DecisionOption};
 use surco::text;
 use yunta_core::events::{DepartureMenu, Fact};
 use yunta_core::reserved::ReservedOption;
-use yunta_core::step::NextStep;
+use yunta_core::step::{Choice, NextStep};
 use yunta_core::RunId;
 
 /// A decision a terminal chooses for `run`: each option names the command
-/// that chooses it, which `spell` writes.
-pub fn here(
-    run: &RunId,
-    options: Vec<DecisionOption>,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Decision {
+/// that chooses it.
+pub fn here(run: &RunId, options: Vec<DecisionOption>) -> Decision {
     let commands = options
         .iter()
         .map(|option| {
+            // An id that does not parse as an option names none: the line
+            // then puts the decision to the person instead.
+            let choice = match option.id.parse() {
+                Ok(id) => Choice::Picked {
+                    option: id,
+                    words: option.asks.is_some(),
+                },
+                Err(_) => Choice::Asked,
+            };
             let step = NextStep::ResolveGate {
                 run: run.clone(),
-                option: option.id.parse().ok(),
-                text: option.asks.is_some(),
+                choice,
             };
-            (option.id.clone(), spell(&step))
+            (option.id.clone(), crate::command::line(&step))
         })
         .collect();
     Decision {

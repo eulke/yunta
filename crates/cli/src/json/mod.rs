@@ -16,8 +16,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use yunta_core::caution::Caution;
-use yunta_core::events::StoredEvent;
-use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload};
+use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, StoredEvent};
 use yunta_core::{Manifest, RunId};
 use yunta_render::spend::SpendJson;
 use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
@@ -35,11 +34,12 @@ use crate::commands::advice;
 use crate::commands::stats::json::TimeJson;
 use crate::commands::status::decision_json::DecisionJson;
 use crate::commands::status::progress;
-use crate::error::{Outcome, Reader};
+use crate::error::Outcome;
 pub use crate::output::print_json;
 use crate::output::NextCommand;
 use crate::run_page::{self, artifacts_written};
 use surco::words::Standing;
+use yunta_render::command::Reader;
 
 /// What the invocation that creates a run says before the first token —
 /// on stderr for the person watching, and carried here so the document

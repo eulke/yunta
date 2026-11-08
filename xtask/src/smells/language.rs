@@ -12,7 +12,7 @@ use super::sites::Counter;
 /// Every counter this module measures.
 pub const COUNTERS: &[Counter] = &[
     ("glyph_literal_outside_glyphs", count_glyphs),
-    ("command_outside_advice", count_commands),
+    ("command_outside_command_rs", count_commands),
     ("state_phrase_outside_words", count_state_phrases),
     ("look_inside_a_block", count_look_inside_a_block),
 ];
@@ -71,13 +71,20 @@ pub(super) fn holds_a_glyph(code: &str) -> bool {
         .any(|c| !c.is_ascii() && !c.is_alphanumeric() && !c.is_whitespace() && !c.is_control())
 }
 
-/// A command written in the command line outside `commands::advice`, the one place that knows
-/// how a person types each: one spelled twice is one that drifts. Clap's own declarations of
-/// the commands are what they are named by.
+/// A command written in the command line outside `yunta_render::command`, the one module that
+/// writes each a reader types: one spelled twice is one that drifts. Clap's own declarations of
+/// the commands are what they are named by. Core and surco sit below render and cannot name its
+/// module, so a line they held would have nowhere to go: core's schema titles read like one,
+/// and surco's catalog draws sample lines.
 fn count_commands(root: &Path) -> usize {
     lines_of(
-        rs_files(&root.join("crates/cli/src")),
-        |path| path.contains("commands/advice") || path.contains("crates/cli/src/cli/"),
+        shipped(root),
+        |path| {
+            path.contains("crates/core/")
+                || path.contains("crates/surco/")
+                || path.ends_with("crates/render/src/command.rs")
+                || path.contains("crates/cli/src/cli/")
+        },
         spells_a_command,
     )
 }

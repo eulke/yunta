@@ -6,6 +6,7 @@
 //! those are the two answers here.
 
 use surco::glyphs::Glyphs;
+use yunta_core::RunId;
 use yunta_replay::frame::Moment;
 
 use super::chronicle;
@@ -27,9 +28,9 @@ impl Draw {
     /// what closed something or asked something of a person, because
     /// the region already shows the rest while it is true.
     ///
-    /// `run` is what the run is called by, for the command a quoted
-    /// failure names to read the rest of what it printed.
-    pub(super) fn record(&mut self, moment: &Moment, run: &str, glyphs: Glyphs) {
+    /// `run` is the run, for the command a quoted failure names to read
+    /// the rest of what it printed.
+    pub(super) fn record(&mut self, moment: &Moment, run: &RunId, glyphs: Glyphs) {
         match self {
             Draw::Lines(lines) => lines.moment(moment, run, glyphs),
             Draw::Live(region) => {
@@ -97,7 +98,13 @@ mod chronicle_tests {
         let history: Vec<String> = moments
             .iter()
             .filter(|moment| chronicle::kept(&moment.happening))
-            .flat_map(|moment| chronicle::graduation(moment, "Y0P5", &Look::plain()))
+            .flat_map(|moment| {
+                chronicle::graduation(
+                    moment,
+                    &yunta_core::RunId::from_static("01JQ0000000000000000000000"),
+                    &Look::plain(),
+                )
+            })
             .map(|row| {
                 Paint::Plain
                     .line(&row)

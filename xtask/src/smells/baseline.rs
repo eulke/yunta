@@ -120,7 +120,7 @@ pub(super) fn fix(name: &str) -> &'static str {
         "bench_struct_outside_testkit" => "take the bench from yunta-testkit and the clock from yunta-testkit-core",
         "cli_print_outside_output" => "print through the CLI's output module",
         "cli_word_outside_cli" => "say it in the crate's own terms and let the CLI word the command",
-        "command_outside_advice" => "spell the command in the CLI's advice module",
+        "command_outside_command_rs" => "spell the command in yunta-render's command module",
         "copied_test_helpers" => "call the helper the testkit exports: the repository helpers in yunta-testkit, the clocks in yunta-testkit-core",
         "create_run_outside_testkit" => "create the run through the engine's run module or yunta-testkit",
         "dash_in_prod_strings" => "say it with a colon, a semicolon or parentheses; the one dash a surface draws is the glyph set's",

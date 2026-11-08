@@ -19,6 +19,7 @@ use surco::figures::duration;
 use surco::glyphs::Glyphs;
 use surco::look::Look;
 use surco::paint::Paint;
+use yunta_core::RunId;
 use yunta_replay::frame::Moment;
 
 use super::{chronicle, write_line};
@@ -61,7 +62,7 @@ impl Lines {
     /// Every moment that says anything, not only the ones a watched terminal keeps: a
     /// reader who arrives after the fact has no region to have watched,
     /// so the log is all there is and it is all written.
-    pub(super) fn moment(&mut self, moment: &Moment, run: &str, glyphs: Glyphs) {
+    pub(super) fn moment(&mut self, moment: &Moment, run: &RunId, glyphs: Glyphs) {
         if !chronicle::says_anything(&moment.happening) {
             return;
         }
@@ -256,7 +257,11 @@ mod pause_reason_tests {
             out: Box::new(written.clone()),
             paint: surco::paint::Paint::Plain,
         };
-        lines.moment(moment, "Y0P5", surco::glyphs::Glyphs::Unicode);
+        lines.moment(
+            moment,
+            &RunId::from_static("01JQ0000000000000000000000"),
+            surco::glyphs::Glyphs::Unicode,
+        );
         (written.text(), chronicle::kept(&moment.happening))
     }
 

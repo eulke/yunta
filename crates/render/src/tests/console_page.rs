@@ -13,7 +13,6 @@ use yunta_core::events::{
 use yunta_core::reserved::ReservedOption;
 use yunta_core::shown::PlanReview;
 use yunta_core::{NodeId, NonEmpty, OptionId};
-use yunta_testkit_core::spell;
 
 use super::documents::{review, run, shown_plan};
 use super::publication::gate_goldens;
@@ -113,9 +112,7 @@ fn console_page() -> Doc {
     let shown = vec![shown_plan(review.clone())];
     let escalation = greet_escalation(&review);
     let run = run();
-    let spelling = spell();
-    gate::whole_page(Some((&run, shown.as_slice())), &escalation, &*spelling)
-        .expect("a plan to print")
+    gate::whole_page(Some((&run, shown.as_slice())), &escalation).expect("a plan to print")
 }
 
 /// A gate's page at a terminal matches its goldens in every environment, fits

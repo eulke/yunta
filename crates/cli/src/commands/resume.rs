@@ -22,6 +22,7 @@ use surco::look::Look;
 use yunta_adapters::MOCK_SESSION_PREFIX;
 use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
 use yunta_core::process::signal::Liveness;
+use yunta_core::step::Arg;
 use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::lock::LockError;
 use yunta_replay::history::PriorEstimation;
@@ -75,7 +76,8 @@ async fn parked(
     if predates_frozen_adapter(&manifest, &open.events) {
         return Err(ServableError::MockBeforeFrozenAdapter.into());
     }
-    servable(&manifest, state.run.mode()).await?;
+    // A run resumed from its log has no file of its own to check again.
+    servable(&manifest, state.run.mode(), Arg::Blank).await?;
     refuse_if_driven(run_id, &run_dir, &state).await?;
     if !waited_out_reset(ctx, &state, run_id, output, look).await {
         return Ok(None);

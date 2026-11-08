@@ -28,10 +28,11 @@ use yunta_core::process::group::force_kill_group;
 use yunta_core::process::mark::{close_marked, SessionMark};
 use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
 use yunta_core::process::tree::close_groups_under;
+use yunta_core::step::NextStep;
 use yunta_core::{describe, Clock, Pid, RunId};
 use yunta_engine::pace::Pace;
+use yunta_render::command;
 
-use crate::commands::advice;
 use crate::commands::close::give_back;
 use crate::context::{Context, Opened};
 use crate::error::{note, warn, CliError, Outcome};
@@ -135,7 +136,9 @@ async fn signal_live_engine(
         CliError::msg(format!(
             "{}; retry `{}`",
             describe(&e),
-            advice::cancel(run_id.handle())
+            command::line(&NextStep::Cancel {
+                run: run_id.clone()
+            })
         ))
     })?;
     await_engine(ctx, storage, run_id, registry).await
@@ -164,7 +167,7 @@ async fn await_engine(
                 note(format!(
                     "run {called}: interrupted while waiting; the engine has the SIGINT and \
                      stops on its own, and `{}` says where it got to",
-                    advice::status(run_id.handle())
+                    command::line(&NextStep::status(run_id))
                 ));
                 return Ok(CancelState::Interrupted { engine_pid });
             }

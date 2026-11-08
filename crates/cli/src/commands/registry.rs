@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use yunta_adapters::{FixtureError, MockAdapter, MockFixture, RunPaths};
+use yunta_core::step::Arg;
 use yunta_core::{
     AdapterId, Clock, ConfigLayer, Manifest, ModeName, MountSpec, Node, NodeId, NodeKind, Redactor,
     RunAdapter, RunId, RunnerName, Workflow,
@@ -88,7 +89,11 @@ impl From<ServableError> for CliError {
 /// exists or a token is spent. It judges only what the run reaches (its
 /// `Reach`) and probes only the adapters those nodes' sessions resolve
 /// to. NotPinned stays a node-time cause.
-pub(crate) async fn servable(manifest: &Manifest, mode: &ModeName) -> Result<(), CliError> {
+pub(crate) async fn servable(
+    manifest: &Manifest,
+    mode: &ModeName,
+    workflow: Arg<String>,
+) -> Result<(), CliError> {
     let pin = manifest.adapter.as_ref().and_then(RunAdapter::pinned);
     let children = frozen_children(manifest)?;
     let reach = reach(manifest, mode, &children);
@@ -107,7 +112,7 @@ pub(crate) async fn servable(manifest: &Manifest, mode: &ModeName) -> Result<(),
             .into());
         }
         super::refuse_unrunnable(&reach.nodes, &adapters)?;
-        refuse_unchecked(manifest, &reach)?;
+        refuse_unchecked(manifest, &reach, workflow)?;
         super::probe_or_refuse(&reached_adapters(manifest, &reach.nodes, pin, adapters)).await?;
     }
     Ok(())
@@ -240,7 +245,11 @@ fn reached_adapters(
 /// judged against the adapters this binary builds: the capability rules the
 /// run's declarations must still meet. A child is judged with the mounts its
 /// `use:` nodes carry in, as its own birth judges it.
-fn refuse_unchecked(manifest: &Manifest, reach: &Reach<'_>) -> Result<(), CliError> {
+fn refuse_unchecked(
+    manifest: &Manifest,
+    reach: &Reach<'_>,
+    workflow: Arg<String>,
+) -> Result<(), CliError> {
     let declared = super::declared_facts(&manifest.config);
     let mut errors = yunta_engine::check(&manifest.workflow, &manifest.config, &declared);
     for (name, child) in &reach.children {
@@ -256,7 +265,7 @@ fn refuse_unchecked(manifest: &Manifest, reach: &Reach<'_>) -> Result<(), CliErr
         return Ok(());
     }
     Err(CliError::msg(surco::text::problems(
-        crate::error::page::unrunnable(),
+        crate::error::page::unrunnable(workflow),
         &errors,
     )))
 }

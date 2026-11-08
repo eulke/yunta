@@ -69,7 +69,7 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
         &ctx.env,
     )
     .await?;
-    let preflight = preflight(ctx, &frozen.manifest, mode, output, look).await?;
+    let preflight = preflight(ctx, &frozen.manifest, workflow_path, mode, output, look).await?;
     let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     if output == Mode::Json {
         // The run's own log, read the instant it was handed off: the
@@ -130,7 +130,15 @@ pub(crate) async fn start_detached(
     // travels in the answer instead. Quiet draws nothing, so the look
     // only completes the call.
     let look = crate::render::stdout_look();
-    let preflight = preflight(ctx, &frozen.manifest, mode, Mode::Quiet, &look).await?;
+    let preflight = preflight(
+        ctx,
+        &frozen.manifest,
+        workflow_path,
+        mode,
+        Mode::Quiet,
+        &look,
+    )
+    .await?;
     let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     Ok(Started {
         run_id,

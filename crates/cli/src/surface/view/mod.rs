@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use surco::motion::Motion;
 use surco::words::{Standing, NOTHING_NEEDS_YOU};
+use yunta_core::step::{Choice, NextStep};
 use yunta_core::RunId;
+use yunta_render::command;
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 
@@ -179,8 +181,13 @@ fn answer(frame: &RunFrame) -> (Tone, String) {
 /// forge, a child.
 pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
     match answerable {
-        true => advice::decide(run_id.handle()),
-        false => advice::resume(run_id.handle()),
+        true => command::line(&NextStep::ResolveGate {
+            run: run_id.clone(),
+            choice: Choice::Asked,
+        }),
+        false => command::line(&NextStep::Resume {
+            run: run_id.clone(),
+        }),
     }
 }
 

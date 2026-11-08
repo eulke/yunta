@@ -11,13 +11,14 @@ use surco::figures::duration;
 use surco::look::Look;
 use surco::paths;
 use yunta_core::events::NodeState;
+use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
 use yunta_render::blocks::FailureDetail;
+use yunta_render::command;
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 use yunta_replay::RunState;
 
-use crate::commands::advice;
 use crate::error::CliError;
 
 /// What the page is drawn from.
@@ -68,13 +69,8 @@ impl NodePage<'_> {
             display.standing.word(),
         );
         let documents = self.documents.iter().flat_map(|document| {
-            yunta_render::shown::document(
-                document,
-                self.run_id,
-                yunta_render::shown::Form::Whole,
-                &advice::spell,
-            )
-            .into_blocks()
+            yunta_render::shown::document(document, self.run_id, yunta_render::shown::Form::Whole)
+                .into_blocks()
         });
         Doc::new()
             .with(headline)
@@ -166,7 +162,10 @@ impl NodePage<'_> {
     /// Where to read the rest of the run.
     fn next(&self) -> Next {
         Next {
-            steps: vec![(advice::status(self.run_id.handle()), "shows the whole run")],
+            steps: vec![(
+                command::line(&NextStep::status(self.run_id)),
+                "shows the whole run",
+            )],
         }
     }
 }

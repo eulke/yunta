@@ -66,10 +66,8 @@ nodes:
 /// state — the handle person B acts through, with no Yunta on their end.
 fn bench_on_a_forge() -> (Bench, MockForgeState) {
     let forge_state = MockForgeState::new();
-    let bench = Bench::with_run_id("run-gate-1").with_forge(Arc::new(MockForge::new(
-        forge_state.clone(),
-        yunta_testkit_core::spell(),
-    )));
+    let bench =
+        Bench::with_run_id("run-gate-1").with_forge(Arc::new(MockForge::new(forge_state.clone())));
     (bench, forge_state)
 }
 

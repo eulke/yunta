@@ -16,7 +16,6 @@ use yunta_core::events::{
 };
 use yunta_engine::{current_escalation, ResolveGateError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
-use yunta_testkit_core::spell;
 use yunta_testkit_core::FixedClock;
 
 mod common;
@@ -313,7 +312,7 @@ async fn an_approval_seeded_before_the_plan_was_found_unprovable_is_asked_again(
 #[tokio::test]
 async fn a_forge_gate_sends_an_unprovable_plan_back_without_publishing_it() {
     let forge = MockForgeState::new();
-    let bench = Bench::new().with_forge(Arc::new(MockForge::new(forge.clone(), spell())));
+    let bench = Bench::new().with_forge(Arc::new(MockForge::new(forge.clone())));
 
     let RunReport { terminal, .. } = bench
         .run(

@@ -10,9 +10,7 @@ use surco::words::Standing;
 use yunta_core::events::{ChangesCountedPayload, Claim, GateFolder};
 use yunta_core::port::{GateDecision, PublishRequest};
 use yunta_core::shown::PlanReview;
-use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
-use yunta_testkit_core::spell;
 
 use super::documents::{global_packs, shown_plan};
 use crate::published::{self, Publication};
@@ -53,11 +51,10 @@ pub(super) fn gate_goldens() -> PathBuf {
 
 /// GitHub as a gate's pull request names it, with `body_limit` as the most its
 /// description keeps.
-fn publication(spell: &dyn Fn(&NextStep) -> String, body_limit: usize) -> Publication<'_> {
+fn publication(body_limit: usize) -> Publication<'static> {
     Publication {
         forge: "GitHub",
         body_limit,
-        spell,
     }
 }
 
@@ -103,8 +100,7 @@ pub(super) fn description(request: &PublishRequest) -> String {
 /// The description `request` is published with when the forge keeps `limit`
 /// of it.
 pub(super) fn described(request: &PublishRequest, limit: usize) -> String {
-    let spelling = spell();
-    published::body(request, &publication(&*spelling, limit), TAIL)
+    published::body(request, &publication(limit), TAIL)
 }
 
 /// The title `request` is published under, within GitHub's limit.
@@ -251,8 +247,7 @@ fn a_pull_request_says_what_the_run_changed_above_its_documents() {
 #[test]
 fn the_pull_request_carries_the_run_s_files_unchanged() {
     let request = publishing(&global_packs());
-    let spelling = spell();
-    let files = published::files(&request, &*spelling);
+    let files = published::files(&request);
     let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
     assert_eq!(paths, [WHOLE_PLAN, TASKS_YAML, SPEC_YAML]);
     assert_eq!(files[1].1, TASKS_BYTES);

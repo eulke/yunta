@@ -206,7 +206,8 @@ async fn receipt_command(run: RunArg, output: Mode, look: &Look) -> Result<Outco
     commands::receipt::receipt(&run.named().await?, output, look).await
 }
 
-/// `yunta stats`, for the run or the workflow it names.
+/// `yunta stats`, for the run or the workflow it names: clap requires a run
+/// unless `--workflow` is named, and refuses the two together.
 async fn stats_command(
     run: Option<RunRef>,
     workflow: Option<WorkflowName>,
@@ -214,14 +215,18 @@ async fn stats_command(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    commands::stats::stats(
-        named(run.as_ref()).await?.as_ref(),
-        workflow.as_ref(),
-        depth,
-        output,
-        look,
-    )
-    .await
+    match (run, workflow) {
+        (Some(run), None) => {
+            let run_id = run.resolve(&crate::context::Context::load()?).await?;
+            commands::stats::of_run(&run_id, depth, output, look).await
+        }
+        (None, Some(workflow)) => commands::stats::of_workflow(&workflow, output, look).await,
+        // Clap refuses both and neither before this runs; a parser that let one
+        // through is refused the same way, not trusted.
+        (Some(_), Some(_)) | (None, None) => Err(CliError::msg(
+            "stats reads one run or one workflow's history: name exactly one",
+        )),
+    }
 }
 
 /// `yunta pack`: each pack subcommand, run by the module that owns it.

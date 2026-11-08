@@ -1072,6 +1072,6 @@ and publishing your own.
 This guide covers what's needed to write and reason about a workflow. See
 [the documentation index](README.md) for adapters, troubleshooting, and the
 compatibility policy. Every key of the config and the workflow language, each
-with a value, is in [the reference](reference.md); `yunta schema <kind>` prints
+with a value, is in [the reference](reference.md); `yunta schema <document>` prints
 each document a session hands over, and `yunta check` says which rule a
 workflow breaks.

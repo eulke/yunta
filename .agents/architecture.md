@@ -40,7 +40,7 @@ every state from it, and what a person reads is drawn from that data in Surco.
 - A richer layer adds no fact: every layer of a stream writes the same text, so a person without color reads
   all of it. [review]
   Paths: `crates/surco/src/paint.rs`, `crates/surco/src/surface/**`
-- A command a person is told to type is spelled in one module. [smell command_outside_advice]
+- A command a reader is told to type is spelled once. [smell command_outside_command_rs]
 - A printed sentence carries no dash: a colon explains, a semicolon comes before the hint it ends with.
   [smell dash_in_prod_strings]
 - Every adapter (`claude-code`, `codex`, `mock`) offers the same features; a gap is a defect.

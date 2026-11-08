@@ -10,7 +10,9 @@ use std::fmt::Display;
 use std::path::PathBuf;
 
 use surco::words::RUNS_THAT_NEED_YOU_FIRST;
+use yunta_core::step::{NextStep, Reach};
 use yunta_core::{Pid, RunId};
+use yunta_render::command::{self, Reader};
 
 pub use crate::output::{note, warn};
 
@@ -119,7 +121,7 @@ pub enum CliError {
     /// reader where it actually is is this border's word, so it
     /// is added here — named by its handle for a person, and by its whole
     /// id for an agent ([`CliError::said_to`]).
-    #[error("{}; `{}` shows where it is", words::resolve_gate(.refusal), crate::commands::advice::status(.run_id.handle()))]
+    #[error("{}; `{}` shows where it is", words::resolve_gate(.refusal), command::line(&NextStep::status(.run_id)))]
     NotPaused {
         run_id: RunId,
         refusal: yunta_engine::ResolveGateError,
@@ -129,7 +131,7 @@ pub enum CliError {
     /// Those pauses are settled where they were raised — a scope, an
     /// answers file, a review on a forge, a child — and the run handed
     /// back, which is what the advice names.
-    #[error("{}; settle it where it was raised, then `{}`", words::resolve_gate(.refusal), crate::commands::advice::resume(.run_id.handle()))]
+    #[error("{}; settle it where it was raised, then `{}`", words::resolve_gate(.refusal), command::line(&NextStep::Resume { run: RunId::clone(.run_id) }))]
     NoMenu {
         run_id: RunId,
         refusal: yunta_engine::ResolveGateError,
@@ -159,7 +161,7 @@ pub enum CliError {
     /// A run that cannot be closed. The words of the refusal say what is
     /// true of the run; which command moves it instead is this border's
     /// word.
-    #[error("{}{}", words::close(.refusal), close_advice(.run_id.handle(), .refusal))]
+    #[error("{}{}", words::close(.refusal), close_advice(.run_id, Reader::Person, .refusal))]
     CloseRefused {
         run_id: RunId,
         refusal: yunta_engine::CloseRunError,
@@ -330,30 +332,22 @@ fn one_per_line(candidates: &[crate::commands::run_ref::Candidate]) -> String {
         .collect()
 }
 
-/// What to do instead of closing a run the engine would not close,
-/// naming the run as `run`.
-fn close_advice(run: &str, refusal: &yunta_engine::CloseRunError) -> String {
+/// What to do instead of closing a run the engine would not close, the
+/// run named the way `reader` copies it.
+fn close_advice(run: &RunId, reader: Reader, refusal: &yunta_engine::CloseRunError) -> String {
     match refusal {
         yunta_engine::CloseRunError::Driven => format!(
             "; `{}` stops it, and then it can be closed",
-            crate::commands::advice::cancel(run)
+            command::line_for(&NextStep::Cancel { run: run.clone() }, reader)
         ),
         yunta_engine::CloseRunError::Moving => format!(
             "; `{}` shows where it is",
-            crate::commands::advice::status(run)
+            command::line_for(&NextStep::status(run), reader)
         ),
         yunta_engine::CloseRunError::AlreadyClosed
         | yunta_engine::CloseRunError::Storage(_)
         | yunta_engine::CloseRunError::Export(_) => String::new(),
     }
-}
-
-/// Who a refusal is said to: a person, who types the next command and
-/// reads a run's handle; or an agent, which copies a run's whole id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reader {
-    Person,
-    Agent,
 }
 
 impl CliError {
@@ -386,23 +380,38 @@ impl CliError {
         {
             return headline;
         }
-        let id = |run_id: &RunId| crate::commands::advice::named(run_id, reader).to_string();
-        let said = match self {
+        let said = self.sentence(reader);
+        // What caused it goes with it, to a person and an agent alike: a
+        // refusal that stops at its own sentence hides why.
+        yunta_core::with_causes(said, self)
+    }
+
+    /// The refusal's own sentence, any run it names named the way `reader`
+    /// copies it: the words of a refusal its type says, and its display for
+    /// any other.
+    fn sentence(&self, reader: Reader) -> String {
+        let id = |run_id: &RunId| reader.name_of(run_id).to_string();
+        match self {
             CliError::ResolveGate(refusal) => words::resolve_gate(refusal),
             CliError::NotPaused { run_id, refusal } => format!(
                 "{}; `{}` shows where it is",
                 words::resolve_gate(refusal),
-                crate::commands::advice::status(&id(run_id))
+                command::line_for(&NextStep::status(run_id), reader)
             ),
             CliError::NoMenu { run_id, refusal } => format!(
                 "{}; settle it where it was raised, then `{}`",
                 words::resolve_gate(refusal),
-                crate::commands::advice::resume(&id(run_id))
+                command::line_for(
+                    &NextStep::Resume {
+                        run: run_id.clone()
+                    },
+                    reader
+                )
             ),
             CliError::CloseRefused { run_id, refusal } => format!(
                 "{}{}",
                 words::close(refusal),
-                close_advice(&id(run_id), refusal)
+                close_advice(run_id, reader, refusal)
             ),
             CliError::RunMoving { run_id, pid } => words::moving(&id(run_id), *pid),
             CliError::RunHoldUnclear {
@@ -422,10 +431,7 @@ impl CliError {
                 failure,
             }) => words::refused_answer(refused, summary, failure.as_deref()),
             other => other.to_string(),
-        };
-        // What caused it goes with it, to a person and an agent alike: a
-        // refusal that stops at its own sentence hides why.
-        yunta_core::with_causes(said, self)
+        }
     }
 
     /// What `reader` is told beside the refusal: where it looked, and the
@@ -433,25 +439,42 @@ impl CliError {
     /// all in its sentence.
     pub fn advice(&self, reader: Reader) -> (Option<String>, Vec<(String, &'static str)>) {
         match self {
-            CliError::RunMoving { run_id, .. } => {
-                let run = crate::commands::advice::named(run_id, reader);
-                (
-                    None,
-                    vec![
-                        (crate::commands::advice::follow(run), "follows it"),
-                        (crate::commands::advice::cancel(run), "stops it"),
-                    ],
-                )
-            }
+            CliError::RunMoving { run_id, .. } => (
+                None,
+                vec![
+                    (
+                        command::line_for(
+                            &NextStep::Follow {
+                                run: run_id.clone(),
+                            },
+                            reader,
+                        ),
+                        "follows it",
+                    ),
+                    (
+                        command::line_for(
+                            &NextStep::Cancel {
+                                run: run_id.clone(),
+                            },
+                            reader,
+                        ),
+                        "stops it",
+                    ),
+                ],
+            ),
             CliError::RunNotFound { roots, .. } => (
                 Some(format!("looked in {}", roots.join(" and "))),
                 vec![
                     (
-                        crate::commands::advice::list_runs(),
+                        command::line(&NextStep::ListRuns {
+                            reach: Reach::Repository,
+                        }),
                         RUNS_THAT_NEED_YOU_FIRST,
                     ),
                     (
-                        crate::commands::advice::list_every_run(),
+                        command::line(&NextStep::ListRuns {
+                            reach: Reach::Machine,
+                        }),
                         "every run on this machine",
                     ),
                 ],

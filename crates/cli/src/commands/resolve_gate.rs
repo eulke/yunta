@@ -17,16 +17,16 @@ use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
 use surco::words::Standing;
-use yunta_core::events::DecisionOn;
-use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
+use yunta_core::events::{ChangesCountedPayload, DecisionOn, GateWaitingPayload, HumanChoice};
 use yunta_core::shown::ShownDocument;
-use yunta_core::step::NextStep;
+use yunta_core::step::{Choice, NextStep};
 use yunta_core::{OptionId, Responder, RunId};
+use yunta_render::command;
+use yunta_render::command::Reader;
 use yunta_render::gate::Route;
 use yunta_replay::RunState;
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
-use crate::commands::advice;
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
@@ -121,7 +121,12 @@ fn resolved(run_id: &RunId, option: &OptionId) -> Doc {
         ))
         .with(Gist::new(APPLIED))
         .with(Next {
-            steps: vec![(advice::follow(handle), "follows it")],
+            steps: vec![(
+                command::line(&NextStep::Follow {
+                    run: run_id.clone(),
+                }),
+                "follows it",
+            )],
         })
 }
 
@@ -137,7 +142,13 @@ fn needs_an_option(
         None if output == Mode::Json => Err(CliError::msg(format!(
             "`--json` needs the option: the menu a decision waits on is for a terminal; \
              name the option, as in `{}`, and add `--json`",
-            advice::resolve_gate(run_id.as_str())
+            command::line_for(
+                &NextStep::ResolveGate {
+                    run: run_id.clone(),
+                    choice: Choice::Blank,
+                },
+                Reader::Agent,
+            )
         ))),
         _ => Ok(()),
     }
@@ -233,7 +244,7 @@ pub(super) async fn asked_of(ctx: &Context, run_id: &RunId) -> Result<Asked, Cli
     let Some((on, escalation)) = decision else {
         return Err(CliError::msg(format!(
             "run {handle} waits on no decision; `{}` says where it stands",
-            advice::status(handle)
+            command::line(&NextStep::status(run_id))
         )));
     };
     Ok(Asked {
@@ -326,7 +337,13 @@ impl Answer for ResolveGateAnswer {
                     "nothing recorded: it still waits on the decision",
                 ))
                 .with(Next {
-                    steps: vec![(advice::decide(handle), "puts the decision to you again")],
+                    steps: vec![(
+                        command::line(&NextStep::ResolveGate {
+                            run: self.run_id.clone(),
+                            choice: Choice::Asked,
+                        }),
+                        "puts the decision to you again",
+                    )],
                 }),
             GateState::Interrupted => Doc::new(),
         }
@@ -398,10 +415,12 @@ pub(super) fn answering_commands(
         .map(|option| {
             let step = NextStep::ResolveGate {
                 run: run_id.clone(),
-                option: Some(option.id.clone()),
-                text: option.asks().is_some(),
+                choice: Choice::Picked {
+                    option: option.id.clone(),
+                    words: option.asks().is_some(),
+                },
             };
-            (option.id.clone(), advice::spell(&step))
+            (option.id.clone(), yunta_render::command::line(&step))
         })
         .collect()
 }
@@ -422,72 +441,4 @@ fn off_terminal(run_id: &RunId, escalation: &GateWaitingPayload) -> CliError {
 }
 
 #[cfg(test)]
-mod tests {
-    use yunta_core::{OptionId, RunId};
-
-    use super::{answer, sentence, GateState};
-    use crate::output::Answer;
-    use crate::render::draw;
-    use surco::look::Look;
-
-    #[test]
-    fn each_gate_answer_says_how_it_ended_and_what_to_type_next() {
-        let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
-        let said = |state: GateState| {
-            let reply = answer(&run, state);
-            draw(reply.document(&Look::plain()), &Look::plain())
-        };
-        let resolved = said(GateState::Resolved {
-            option: OptionId::from_static("retry"),
-        });
-        assert!(
-            resolved.starts_with("+ run AAAAAA ; resolved `retry`\n"),
-            "{resolved}"
-        );
-        assert!(resolved.contains("applies it"), "{resolved}");
-        assert!(resolved.contains("yunta status AAAAAA"), "{resolved}");
-        let declined = said(GateState::Declined);
-        assert!(
-            declined.starts_with("? run AAAAAA ; needs you\n"),
-            "{declined}"
-        );
-        assert!(
-            declined.contains("nothing recorded: it still waits on the decision."),
-            "{declined}"
-        );
-        assert!(declined.contains("yunta resolve-gate AAAAAA"), "{declined}");
-        assert_eq!(said(GateState::Interrupted), "");
-    }
-
-    /// Every recorded decision is answered alike: a resume in the background
-    /// applies it, in the words the page and the MCP sentence share.
-    #[test]
-    fn every_answer_says_a_resume_applies_it() {
-        let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
-        let abort = OptionId::from_static("abort");
-        let reply = answer(
-            &run,
-            GateState::Resolved {
-                option: abort.clone(),
-            },
-        );
-        let page = draw(reply.document(&Look::plain()), &Look::plain());
-        let said = page.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(
-            said.contains("a resume in the background applies it"),
-            "{page}"
-        );
-        assert!(!said.contains("stays open"), "{page}");
-        assert!(!said.contains("drives the run on"), "{page}");
-        assert_eq!(
-            sentence(&run, &abort),
-            "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `abort`; a resume in the background \
-             applies it"
-        );
-        assert_eq!(
-            sentence(&run, &OptionId::from_static("approve")),
-            "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `approve`; a resume in the background \
-             applies it"
-        );
-    }
-}
+mod tests;

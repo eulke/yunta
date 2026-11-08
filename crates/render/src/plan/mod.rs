@@ -19,7 +19,6 @@ use surco::components::{Code, Fold, Section};
 use surco::doc::{Block, Doc};
 use surco::line::{Line, Tone};
 use yunta_core::shown::PlanReview;
-use yunta_core::step::NextStep;
 use yunta_core::RunId;
 
 mod card;
@@ -59,14 +58,8 @@ pub enum Form {
 }
 
 /// `review` as a document, under the headline of the page that reads it.
-/// `run` is the run it is read in; each command it names is written by
-/// `spell`.
-pub fn document(
-    review: &PlanReview,
-    run: &RunId,
-    form: Form,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Doc {
+/// `run` is the run it is read in, the one each command it names takes.
+pub fn document(review: &PlanReview, run: &RunId, form: Form) -> Doc {
     let steps = review.plan.steps();
     let mut doc = head::head(review, &steps);
     if !review.departed.is_empty() {
@@ -86,7 +79,7 @@ pub fn document(
         Form::Review | Form::Published => doc,
         Form::Browser | Form::Whole => tests_whole(doc, review),
     };
-    proof::proof(doc, review, form, (run, spell))
+    proof::proof(doc, review, form, run)
 }
 
 /// `card` as a block of its step: a forge's page folds each card under its

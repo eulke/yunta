@@ -7,11 +7,12 @@ use surco::doc::Doc;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use yunta_core::shown::ShownDocument;
+use yunta_core::step::NextStep;
 use yunta_core::RunId;
+use yunta_render::command;
 use yunta_render::shown::Form;
 
 use crate::ask::{Console, Escape, Opens};
-use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::Mode;
@@ -30,7 +31,7 @@ pub async fn review(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
         return Err(CliError::msg(format!(
             "run {} waits on a decision that shows no plan; `{}` says what it does show",
             run_id.handle(),
-            advice::status(run_id.handle())
+            command::line(&NextStep::status(run_id))
         )));
     };
     let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
@@ -49,7 +50,7 @@ fn page(plan: &ShownDocument, run_id: &RunId, waiting: &Waiting) -> Doc {
         .fold(Fields::new(), |fields, (_, command)| {
             fields.push_command("", command)
         });
-    yunta_render::shown::document(plan, run_id, Form::Review, &advice::spell).with(Section {
+    yunta_render::shown::document(plan, run_id, Form::Review).with(Section {
         lead: None,
         title: Line::new().push(Tone::Strong, "answer it with"),
         blocks: vec![answers.into()],

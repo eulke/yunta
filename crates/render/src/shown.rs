@@ -16,26 +16,19 @@ use surco::line::{Line, Tone};
 use surco::text::{agreeing, counted};
 use yunta_core::events::{ArtifactId, Withheld};
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
-use yunta_core::step::NextStep;
 use yunta_core::RunId;
 
 pub use crate::plan::Form;
 
-/// What `document` says, for the run `run`, in `form`. Each command it
-/// names is written by `spell`.
-pub fn document(
-    document: &ShownDocument,
-    run: &RunId,
-    form: Form,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Doc {
+/// What `document` says, for the run `run`, in `form`.
+pub fn document(document: &ShownDocument, run: &RunId, form: Form) -> Doc {
     let producer = document.shown.producer.as_ref();
     let of = producer
         .map(|node| format!(" of `{node}`"))
         .unwrap_or_default();
     match &document.content {
-        ShownContent::Tasks(review) => crate::plan::document(review, run, form, spell),
-        ShownContent::Spec(file) => crate::spec::document(file, (&of, producer), run, form, spell),
+        ShownContent::Tasks(review) => crate::plan::document(review, run, form),
+        ShownContent::Spec(file) => crate::spec::document(file, (&of, producer), run, form),
         ShownContent::Findings(file) => crate::findings::document(file, &of),
         ShownContent::RunFindings(view) => crate::findings::run_document(view),
         ShownContent::Text(text) => {

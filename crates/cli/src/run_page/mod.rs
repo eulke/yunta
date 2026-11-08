@@ -34,10 +34,11 @@ use surco::figures::duration;
 use surco::look::Look;
 use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::caution::Caution;
-use yunta_core::events::DecisionOn;
-use yunta_core::events::{Failure, GateWaitingPayload, NodeState, PauseReason};
+use yunta_core::events::{DecisionOn, Failure, GateWaitingPayload, NodeState, PauseReason};
 use yunta_core::shown::ShownDocument;
+use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
+use yunta_render::command;
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, WaitingOn};
 use yunta_replay::RunState;
@@ -249,7 +250,12 @@ impl RunPage<'_> {
     fn otherwise(&self) -> Vec<(String, &'static str)> {
         let mut steps = advice::after(self.frame, self.decided_escalation());
         if self.scope == Scope::Status {
-            steps.push((advice::open(self.run_id.handle()), IN_A_BROWSER));
+            steps.push((
+                command::line(&NextStep::Open {
+                    run: self.run_id.clone(),
+                }),
+                IN_A_BROWSER,
+            ));
         }
         steps
     }
@@ -257,16 +263,27 @@ impl RunPage<'_> {
     /// What a person types next, for where the run stands, and where to
     /// read more of it.
     fn next(&self) -> Next {
-        let handle = self.run_id.handle();
         let mut steps = advice::after(self.frame, self.decided_escalation());
         match (self.scope, self.depth) {
-            (Scope::Closing, _) => steps.push((advice::status(handle), "shows the whole run")),
+            (Scope::Closing, _) => steps.push((
+                command::line(&NextStep::status(self.run_id)),
+                "shows the whole run",
+            )),
             (Scope::Status, Depth::Glance) => steps.push((
-                format!("{} --full", advice::status(handle)),
+                command::line(&NextStep::Status {
+                    run: self.run_id.clone(),
+                    node: None,
+                    depth: Depth::Full,
+                }),
                 "the whole story, node by node",
             )),
             (Scope::Status, Depth::Full | Depth::Dig) => {
-                steps.push((advice::open(handle), IN_A_BROWSER));
+                steps.push((
+                    command::line(&NextStep::Open {
+                        run: self.run_id.clone(),
+                    }),
+                    IN_A_BROWSER,
+                ));
             }
             (Scope::Browser, _) => {}
         }

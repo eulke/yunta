@@ -202,7 +202,7 @@ artifacts/plan/tasks.yaml: 2 errors
 A node that declares a kind under `artifacts.produces` — `tasks`, `findings` or
 `questions` — has to leave behind a document the engine can read. The heading names the file and how many
 problems it has; each line below names one problem and the entry it belongs to, in
-the document's own words. `yunta schema <kind>` prints the shape the document is
+the document's own words. `yunta schema <document>` prints the shape the document is
 read against.
 
 For a `prompt` or `loop` node, the document arrives through a run tool and the

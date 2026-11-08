@@ -3,7 +3,6 @@
 //! plan it accepted, how long it worked or a person took on it and what it
 //! spent; the calls that failed on the way; and every task.
 
-use crate::commands::advice;
 use surco::components::{Branch, Cell, Column, Fields, Holds, NodeRow, NodeTable, Row, Table};
 use surco::doc::{Block, Depth};
 use surco::figures::{duration, Tokens};
@@ -14,7 +13,9 @@ use surco::text::{counted, ordinal};
 use surco::words::{Standing, WAITED_ON_YOU};
 use yunta_core::events::{NodeState, TaskStatus};
 use yunta_core::shown::ShownContent;
+use yunta_core::step::NextStep;
 use yunta_core::NodeId;
+use yunta_render::command;
 use yunta_render::state::NodeDisplay;
 use yunta_replay::frame::{NodeFrame, NodeStanding};
 use yunta_replay::RunState;
@@ -197,7 +198,9 @@ impl RunPage<'_> {
                     said.push_str(&format!(" after {} attempts", record.attempts));
                 }
                 if let Some((_, commit)) = &record.left_work {
-                    let shown = advice::show_commit(commit.abbreviated());
+                    let shown = command::line(&NextStep::ShowCommit {
+                        commit: commit.abbreviated().to_string(),
+                    });
                     said.push_str(&format!("; its work is at {shown}"));
                 }
                 Row {

@@ -20,7 +20,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use yunta_core::step::Spell;
 use yunta_core::{CommitSha, Responder};
 
 use yunta_core::port::{
@@ -261,13 +260,12 @@ impl MockForgeState {
 
 pub struct MockForge {
     state: MockForgeState,
-    spell: Spell,
 }
 
 impl MockForge {
-    /// A double over `state` that writes its next steps with `spell`.
-    pub fn new(state: MockForgeState, spell: Spell) -> Self {
-        Self { state, spell }
+    /// A double over `state`.
+    pub fn new(state: MockForgeState) -> Self {
+        Self { state }
     }
 
     /// Commits `files` to pull request `number`'s branch. A file that
@@ -352,7 +350,7 @@ impl Forge for MockForge {
         // Titled, written and committed the one way every forge does it,
         // so a test reads what a reviewer reads.
         let title = super::gate_title(req);
-        let body = super::gate_body(req, &*self.spell)?;
+        let body = super::gate_body(req)?;
         let (published, reused) = self.open_or_reuse(
             req.run_id.as_str(),
             &req.branch,
@@ -365,7 +363,7 @@ impl Forge for MockForge {
             // request says what this lap draws.
             self.redraw(published.number, &title, &body);
         }
-        self.commit(published.number, super::gate_files(req, &*self.spell));
+        self.commit(published.number, super::gate_files(req));
         Ok(published)
     }
 
@@ -383,7 +381,7 @@ impl Forge for MockForge {
         // The body a forge's page would show, composed the one way every
         // forge composes it, so a test reads what a reviewer reads. A reused
         // pull request keeps what it opened with: only `publish` draws again.
-        let body = super::pull_request_body(req, &*self.spell);
+        let body = super::pull_request_body(req);
         let (opened, _) = self.open_or_reuse(&req.run_id, &req.head, &req.base, &req.title, &body);
         Ok(opened)
     }

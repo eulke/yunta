@@ -8,7 +8,9 @@ use surco::components::{Gist, Headline};
 use surco::doc::Doc;
 use surco::look::Look;
 use surco::words::Standing;
+use yunta_core::step::NextStep;
 use yunta_core::{Redactor, Responder, RunId};
+use yunta_render::command;
 use yunta_replay::registry::EngineLiveness;
 
 use super::cancel::settle_crash;
@@ -74,7 +76,7 @@ impl Answer for CloseAnswer {
             "closed by {}: its checkouts went back to the project, and its branch stays until \
              `{}` removes it",
             self.by,
-            super::advice::gc()
+            command::line(&NextStep::Gc)
         );
         Doc::new().with(headline).with(Gist::new(gist))
     }

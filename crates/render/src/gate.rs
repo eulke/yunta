@@ -13,7 +13,6 @@ use surco::line::{Line, Tone};
 use surco::words::Standing;
 use yunta_core::events::{GateWaitingPayload, Leads};
 use yunta_core::shown::ShownDocument;
-use yunta_core::step::NextStep;
 use yunta_core::{LeftOut, NodeId, OptionId, RunId, Workflow};
 
 use crate::shown::Form;
@@ -41,7 +40,7 @@ pub struct GatePage<'a> {
 
 /// The page: one headline, then where it waits, what it leaves out, what the
 /// run changed, each document in its form, and the decision last.
-pub fn page(page: GatePage<'_>, spell: &dyn Fn(&NextStep) -> String) -> Doc {
+pub fn page(page: GatePage<'_>) -> Doc {
     let headline = decision_headline();
     let headline = match page.shown {
         Some((run, _)) => headline.edge(run.handle()),
@@ -59,7 +58,7 @@ pub fn page(page: GatePage<'_>, spell: &dyn Fn(&NextStep) -> String) -> Doc {
     }
     if let Some((run, documents)) = page.shown {
         for document in documents {
-            let drawn = crate::shown::document(document, run, page.form, spell);
+            let drawn = crate::shown::document(document, run, page.form);
             doc = doc.with_all(drawn.into_blocks());
         }
     }
@@ -204,7 +203,6 @@ fn past_the_first(ranks: Vec<Vec<NodeId>>) -> Vec<Vec<NodeId>> {
 pub fn whole_page(
     shown: Option<(&RunId, &[ShownDocument])>,
     escalation: &GateWaitingPayload,
-    spell: &dyn Fn(&NextStep) -> String,
 ) -> Option<Doc> {
     let documents: &[ShownDocument] = match shown {
         Some((_, documents)) => documents,
@@ -218,7 +216,7 @@ pub fn whole_page(
     if let Some((run, documents)) = shown.filter(|(_, documents)| !documents.is_empty()) {
         doc = doc.with(decision_headline());
         for document in documents {
-            let drawn = crate::shown::document(document, run, Form::Review, spell);
+            let drawn = crate::shown::document(document, run, Form::Review);
             doc = doc.with_all(drawn.into_blocks());
         }
     }
@@ -234,11 +232,10 @@ pub fn whole_page(
 pub fn above(
     shown: Option<(&RunId, &[ShownDocument])>,
     escalation: &GateWaitingPayload,
-    spell: &dyn Fn(&NextStep) -> String,
 ) -> Option<Doc> {
     let documents: &[ShownDocument] = shown.map_or(&[], |(_, documents)| documents);
     match crate::shown::plan_among(documents) {
-        None => whole_page(shown, escalation, spell),
+        None => whole_page(shown, escalation),
         Some(_) => crate::shown::before_you_decide(escalation.withheld(), documents)
             .map(|before| Doc::new().with(before)),
     }

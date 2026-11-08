@@ -24,9 +24,12 @@ fn init_writes_config_gitignore_and_the_mechanism_skill() {
 
     assert!(repo.join(".yunta/config.yaml").is_file());
     assert!(repo.join(".gitignore").is_file());
-    assert!(repo
-        .join(".yunta/skills/yunta-mechanism/SKILL.md")
-        .is_file());
+    let skill =
+        std::fs::read_to_string(repo.join(".yunta/skills/yunta-mechanism/SKILL.md")).unwrap();
+    assert!(
+        skill.contains("`yunta schema <document>`, or `yunta schema` to list them"),
+        "the skill names a document's shape the way `yunta schema` takes it: {skill}"
+    );
 
     let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
     let parsed: yunta_core::yaml::Value = yunta_core::yaml::parse(&config).unwrap();

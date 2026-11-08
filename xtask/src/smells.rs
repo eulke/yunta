@@ -403,7 +403,7 @@ mod tests {
         "reason_built_by_format",
         "run_tool_named_outside_vocabulary",
         "glyph_literal_outside_glyphs",
-        "command_outside_advice",
+        "command_outside_command_rs",
         "state_phrase_outside_words",
         "look_inside_a_block",
         "dash_in_prod_strings",

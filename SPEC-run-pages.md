@@ -158,13 +158,14 @@ The CLI's integration tests print the commands whole: `status_cmd`, `status_page
    - The rules are `after_for`'s, moved whole, and the words of each effect are render's.
    - The run page, the closing, the field and the JSON a program reads all take the actions. A terminal binds keys to them, a desktop draws buttons from them.
 5. **Every command a person is told to type is a `NextStep`, spelled once.**
-   - `NextStep` grows to the whole set: review, open, follow, doctor (with or without its sessions), the listings, schema, test, init, pack, run, help and `git show`, beside the nine it holds. An argument the reader fills is part of the data (`Arg::Blank`, written as the argument's name), so a line with `<option>` or `<document>` is a `NextStep` too.
+   - `NextStep` grows to the whole set: review, open, follow, doctor (with or without its sessions), the listings, schema, test, init, pack, run, help and `git show`, beside the nine it holds. An argument the reader fills is part of the data (`Arg::Blank`, written as the argument's name; a decision's `Choice`), so a line with `<option>` or `<document>` is a `NextStep` too.
    - `yunta_render::command::line(&step)` writes each one for a person, `line_for(&step, reader)` for either reader, and `Reader` moves with it.
-   - Four texts change because a better form of a command replaces a worse one, and the documentation follows them:
+   - Seven texts change because a better form of a command replaces a worse one, and the documentation follows them:
      - `yunta schema <kind>` becomes `yunta schema <document>`, its argument's one name, in the skill `init` writes and in `docs/`;
      - "the workflow fails `yunta check`" names the workflow it refused;
      - the `--detach` refusal of `--adapter mock` names "another process" instead of a bare `yunta resume`;
-     - `yunta stats` with neither a run nor `--workflow`, or with both, is refused by clap like every other usage error.
+     - `yunta stats` with neither a run nor `--workflow`, or with both, is refused by clap like every other usage error;
+     - three texts of `yunta pack` that named a subcommand bare name a whole line with the pack their context knows: `yunta pack update <publisher/name> <ref>` and `yunta pack remove <publisher/name>` where a pack is already installed, `yunta pack add <source>` where it is not, and `yunta pack new <publisher/name>` in the README a new pack is scaffolded with.
    - Deleted: `Spell`, every parameter that carried it, the copies in `yunta-testkit-core` and the engine's tests, and the test that held two copies to agreement.
    - The smell that holds the rule counts every shipped crate but render's `command`, and is named for it.
 6. **The words of a parked run join render's `pause`,** and `advice` is gone.
@@ -176,7 +177,7 @@ The CLI's integration tests print the commands whole: `status_cmd`, `status_page
    - the live region and `--follow`.
    
    The work of each command stays where it is until `control` takes it.
-8. **Nothing printed changes but the four texts of point 5:**
+8. **Nothing printed changes but the seven texts of point 5:**
    - the 78 goldens move with the tests that read them, by `git mv`, byte for byte;
    - render's 21 stay;
    - every CLI integration test passes unchanged, and the JSON documents print the same.
@@ -239,7 +240,7 @@ Each item gets the one path and the name it should always have had, where it mov
 
 ### Out of scope
 
-- Any change to what a page says or how it is laid out, but the four texts of point 5.
+- Any change to what a page says or how it is laid out, but the seven texts of point 5.
 - The live region, the prompts, `--follow` and the JSON documents' shape.
 - Each command's work, which is `control`'s.
 - `third-party-notices`, dropped from the map.
@@ -365,7 +366,7 @@ emit(mode, &StatusAnswer { page, json }, look)
 5. **Every name in "Names and form" stands as written:**
    - `advice`, `render::counter`, `render::words`, `render::engine`, `progress::frame` and `progress::frame_of` are gone from the CLI;
    - `DecisionOn` and `ShownDocument` come from core, and the engine re-exports neither.
-6. **Nothing printed changes but the four texts of point 5:**
+6. **Nothing printed changes but the seven texts of point 5:**
    - the 78 goldens are byte for byte the same, in `crates/render/goldens/`;
    - every CLI integration test passes unchanged but where it prints one of those texts;
    - the JSON documents print the same;

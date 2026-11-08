@@ -16,8 +16,10 @@ use std::path::Path;
 
 use yunta_adapters::MOCK_ID;
 use yunta_core::caution::Caution;
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, RunAdapter, Workflow};
 use yunta_engine::{CheckError, FrozenRun};
+use yunta_render::command;
 use yunta_replay::history::PriorEstimation;
 use yunta_storage::AsyncStorage;
 
@@ -27,7 +29,6 @@ mod mode;
 
 pub(crate) use detach::start_detached;
 
-use super::advice;
 use super::drive::Prepared;
 use super::registry::{create_frozen_run, read_fixture, servable};
 use crate::context::Context;
@@ -136,22 +137,21 @@ fn mock_fixture<'a>(
 ) -> Result<Option<&'a Path>, CliError> {
     match (adapter, fixture) {
         // A fixture is read by whoever runs the sessions, and `--detach`
-        // makes that a separate `yunta resume` — which resolves the
-        // adapters `runners:` names and takes no fixture of its own.
+        // hands the run to another process, which resolves the adapters
+        // `runners:` names and takes no fixture of its own.
         (Some(id), _) if *id == MOCK_ID && detach => Err(CliError::msg(format!(
             "`--adapter mock` scripts every session from a fixture, and `--detach` hands \
-             the run to a separate `{resume}` that resolves the adapters `runners:` \
-             names and reads no fixture; drop `--detach` to run against a fixture here, \
-             or write a case and run `{test}`",
-            resume = advice::resume_any(),
-            test = advice::test()
+             the run to another process that resolves the adapters `runners:` names and \
+             reads no fixture; drop `--detach` to run against a fixture here, or write a \
+             case and run `{test}`",
+            test = command::line(&NextStep::Test { dir: None })
         ))),
         (Some(id), Some(path)) if *id == MOCK_ID => Ok(Some(path)),
         (Some(id), None) if *id == MOCK_ID => Err(CliError::msg(format!(
             "`--adapter mock` runs the workflow against a scripted fixture; pass \
              `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
              case and run `{test}`",
-            test = advice::test()
+            test = command::line(&NextStep::Test { dir: None })
         ))),
         (_, Some(_)) => Err(CliError::msg(
             "`--fixture` only applies together with `--adapter mock`",
@@ -200,7 +200,13 @@ pub(super) async fn runnable(
     let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs, ambient)
         .await?
         .with_adapter(pinned);
-    servable(&frozen.manifest, &resolve_mode(&frozen.manifest, mode)).await?;
+    let checked = Arg::Given(super::verdict::shown(ctx, &workflow_path));
+    servable(
+        &frozen.manifest,
+        &resolve_mode(&frozen.manifest, mode),
+        checked,
+    )
+    .await?;
     Ok(frozen)
 }
 
@@ -222,6 +228,7 @@ pub(super) struct Preflight {
 pub(super) async fn preflight(
     ctx: &Context,
     manifest: &Manifest,
+    workflow_path: &Path,
     mode: Option<&ModeName>,
     output: Mode,
     look: &Look,
@@ -231,9 +238,9 @@ pub(super) async fn preflight(
     let started_in = resolve_mode(manifest, mode);
     let refused = yunta_engine::check_mode_start(&manifest.workflow, &started_in);
     if !refused.is_empty() {
-        return Err(check_refusal(&refused));
+        return Err(check_refusal(&refused, ctx, workflow_path));
     }
-    let context_files = context_files(ctx, manifest, mode).await?;
+    let context_files = context_files(ctx, manifest, workflow_path, mode).await?;
     let (prior, budget) = estimate(ctx, manifest, &started_in, output, look).await;
     // The document lists the budget first, then the files a node reads.
     let cautions = budget.into_iter().chain(context_files).collect();
@@ -244,11 +251,12 @@ pub(super) async fn preflight(
 }
 
 /// The refusal a workflow's own check makes, each error in the words a
-/// person reads.
-fn check_refusal(errors: &[CheckError]) -> CliError {
+/// person reads, under the check to run again on `workflow_path`.
+fn check_refusal(errors: &[CheckError], ctx: &Context, workflow_path: &Path) -> CliError {
     let words: Vec<String> = errors.iter().map(crate::error::words::check).collect();
+    let workflow = Arg::Given(super::verdict::shown(ctx, workflow_path));
     CliError::msg(surco::text::problems(
-        crate::error::page::unrunnable(),
+        crate::error::page::unrunnable(workflow),
         &words,
     ))
 }
@@ -261,6 +269,7 @@ fn check_refusal(errors: &[CheckError]) -> CliError {
 async fn context_files(
     ctx: &Context,
     manifest: &Manifest,
+    workflow_path: &Path,
     mode: Option<&ModeName>,
 ) -> Result<Vec<Caution>, CliError> {
     let mode = resolve_mode(manifest, mode);
@@ -275,7 +284,7 @@ async fn context_files(
     )
     .await?;
     if !found.errors.is_empty() {
-        return Err(check_refusal(&found.errors));
+        return Err(check_refusal(&found.errors, ctx, workflow_path));
     }
     for warning in &found.warnings {
         warn(yunta_render::caution::line(warning));
@@ -387,7 +396,7 @@ pub(super) async fn create_run_from(
                 "{} still active and `limits.max_concurrent_runs` is {cap}; resume or \
                  cancel one (`{list}` names them) before starting another",
                 surco::text::counted(active, "run"),
-                list = advice::list()
+                list = command::line(&NextStep::List)
             )));
         }
     }

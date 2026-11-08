@@ -913,7 +913,7 @@ read those documents: `cargo xtask schema` writes them and CI fails when a
 committed file differs from what the types emit, so any change to a format is a
 visible diff in the pull request that makes it. They live inside the crate whose
 types produce them, which is also the crate that ships them: the binary embeds those exact
-files, so `yunta schema <kind> --json` prints the bytes CI checked rather than
+files, so `yunta schema <document> --json` prints the bytes CI checked rather than
 deriving a schema of its own at run time. An editor or a validator can use the
 files as they are, with or without a checkout.
 

@@ -135,7 +135,7 @@ fn tool_result(outcome: Result<String, CliError>) -> rmcp::model::CallToolRespon
     match outcome {
         Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
         Err(refusal) => CallToolResult::error(vec![ContentBlock::text(
-            refusal.said_to(crate::error::Reader::Agent),
+            refusal.said_to(yunta_render::command::Reader::Agent),
         )])
         .into(),
     }
