@@ -6,7 +6,8 @@
 //! of a workflow's historical CPTV, a comparison table between modes).
 //! Every rendered line stays inside the width stdout gets and reads
 //! with its glyphs and color stripped, because the columns, bars,
-//! words and glyphs all come from `crate::render`, which is where both
+//! words and glyphs come from `crate::output` and `yunta_render`, and the
+//! width and the glyphs are settled once in `crate::output`, where both
 //! rules live.
 
 mod facts;
@@ -27,7 +28,8 @@ use yunta_replay::stats::RunStats;
 use yunta_replay::verification_effectiveness::VerificationFindings;
 
 use crate::context::{Context, Opened};
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use json::{RunStatsJson, WorkflowHistoryJson};
 use run::RunStatsPage;

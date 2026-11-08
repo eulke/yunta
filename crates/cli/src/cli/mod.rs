@@ -10,9 +10,10 @@ use surco::look::Look;
 use yunta_core::{AdapterId, ModeName, OptionId, Responder};
 
 use crate::commands::run_ref::{RunArg, RunRef};
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::graph;
 use crate::output::Mode;
+use crate::output::Outcome;
 
 /// Yunta: a deterministic workflow engine for code agents.
 #[derive(Parser)]

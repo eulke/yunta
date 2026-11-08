@@ -8,7 +8,7 @@
 //! of a CI log met the same sentences.
 //!
 //! Every state word comes from `yunta_render::state::NodeDisplay`, every
-//! run or child close from `view::closed_as`, every capability from
+//! run or child close from `yunta_render::children::closed_as`, every capability from
 //! `Capability::as_str`. Nothing here formats a domain type with
 //! `Debug`: a reader is owed a word, not a Rust identifier.
 
@@ -28,7 +28,6 @@ use yunta_core::RunId;
 use yunta_render::command;
 use yunta_replay::frame::{Happening, Moment};
 
-use super::view;
 use surco::components::Whole;
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
@@ -217,7 +216,7 @@ pub(super) fn graduation(moment: &Moment, run: &RunId, look: &Look) -> Vec<Line>
     rows.extend(children.iter().map(|child| {
         Line::new()
             .plain(under.as_str())
-            .plain(view::child_row(child, look.glyphs))
+            .plain(yunta_render::children::child_row(child, look.glyphs))
     }));
     rows
 }
@@ -244,7 +243,7 @@ pub(super) fn evidence(moment: &Moment, run: &RunId, look: &Look) -> Vec<Line> {
             None => command::line(&NextStep::status(run)),
         })
     });
-    crate::render::blocks_lines(&FailureDetail { failure, whole }.blocks(), look)
+    crate::output::blocks_lines(&FailureDetail { failure, whole }.blocks(), look)
 }
 
 #[cfg(test)]

@@ -22,7 +22,9 @@
 //! - A run and its nodes: `state`, `pause` (what the log parked a run on),
 //!   `engine` (what holds a run its log says moves: an engine gone, or one
 //!   asking at its terminal), `outcome`, `failure`, `spend`, `changes`,
-//!   `caution`, `inputs`, `place`, `target` and `policy`.
+//!   `caution`, `inputs`, `place`, `target`, `policy`, and `progress`, how far
+//!   it has come and where it stands on one line, and `children`, the runs
+//!   it bore, under the nodes that bore them.
 //! - A decision a person meets: `gate`, `escalation`, `claim`, `evidence`,
 //!   `offers`, `shown`, `plan`, `spec`, `findings` and `found`.
 //! - What leaves the terminal: `blocks`, `published` and `receipt`.
@@ -31,6 +33,7 @@
 pub mod blocks;
 pub mod caution;
 pub mod changes;
+pub mod children;
 pub mod claim;
 pub mod command;
 pub mod engine;
@@ -47,6 +50,7 @@ pub mod pause;
 pub mod place;
 pub mod plan;
 pub mod policy;
+pub mod progress;
 pub mod published;
 pub mod receipt;
 pub mod shown;

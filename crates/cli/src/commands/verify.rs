@@ -23,8 +23,9 @@ use yunta_engine::{ArtifactIntegrity, StoreError};
 use yunta_storage::{ChainVerification, Storage};
 
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::json::SCHEMA_VERSION;
+use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 
 pub async fn verify(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
@@ -273,7 +274,7 @@ fn fault_said(error: &StoreError) -> String {
 #[cfg(test)]
 mod tests {
     use super::{checklist, CheckRow};
-    use crate::render::draw;
+    use crate::output::draw;
     use surco::components::{Checklist, Found};
     use surco::doc::Doc;
     use surco::look::Look;

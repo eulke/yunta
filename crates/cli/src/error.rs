@@ -1,10 +1,11 @@
 //! The one error a command hands back and the one place its text reaches
-//! a person. Every subcommand returns [`Result<Outcome, CliError>`]; `main`
-//! prints a [`CliError`] once, on stderr, and maps the exit code. A
-//! command that ran but reports a failing verdict (an invalid workflow, a
-//! test case that failed) returns [`Outcome::Reported`] instead — its
-//! detail is already on the command's own output, and no error banner
-//! belongs on top of it.
+//! a person. Every subcommand returns a `Result` of an
+//! [`Outcome`](crate::output::Outcome) or a [`CliError`]; `main` prints a
+//! [`CliError`] once, on stderr, and maps the exit code. A command that ran
+//! but reports a failing verdict (an invalid workflow, a test case that
+//! failed) returns [`Outcome::Reported`](crate::output::Outcome::Reported)
+//! instead — its detail is already on the command's own output, and no error
+//! banner belongs on top of it.
 
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -21,32 +22,6 @@ pub(crate) mod page;
 pub(crate) mod words;
 
 use page::{document_problems, unrunnable_said};
-
-/// How a subcommand came back when nothing stopped it from running.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Outcome {
-    /// The command did its job; exit 0.
-    Success,
-    /// The command ran and reports a failing verdict — the detail is
-    /// already on its output. Exit non-zero, no error banner.
-    Reported,
-    /// The command's whole answer is its exit code, because the process
-    /// that ran it reads one: the rail hook, whose calling CLI takes
-    /// `2` as a refusal and `0` as consent.
-    Code(u8),
-}
-
-impl Outcome {
-    /// The code the process exits with: 0 for a job done, 1 for a failing
-    /// verdict, and a code the outcome names as itself.
-    pub(crate) fn code(self) -> u8 {
-        match self {
-            Outcome::Success => 0,
-            Outcome::Reported => 1,
-            Outcome::Code(code) => code,
-        }
-    }
-}
 
 /// Everything a subcommand can fail with, phrased so its `Display` names
 /// what went wrong and what to do. `main` turns it into one line on
@@ -494,5 +469,5 @@ impl CliError {
 
 /// `warning`, as stderr is painted.
 pub(crate) fn warning_word() -> String {
-    crate::render::stderr_paint().word(surco::line::Tone::Caution, "warning")
+    crate::output::stderr_paint().word(surco::line::Tone::Caution, "warning")
 }

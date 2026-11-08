@@ -62,7 +62,6 @@ pub(crate) use feed::Diagnostics;
 pub(crate) use screen::Screen;
 pub(crate) use terminal::TerminalEnv;
 pub(crate) use turns::Curtain;
-pub(crate) use view::{child_row, children_by_node};
 
 /// Why the live region stood down, in the words the reader is given.
 /// Each one names a property of the environment this process was handed,
@@ -214,7 +213,7 @@ impl Surface {
             Delivery::Lines { reason } => Draw::Lines(Lines::open(stderr(), reason)),
             Delivery::Live => {
                 let screen = Screen::watched(Term::buffered_stderr());
-                match Region::open(screen, env.glyphs, crate::render::stderr_paint(), stderr()) {
+                match Region::open(screen, env.glyphs, crate::output::stderr_paint(), stderr()) {
                     Ok(region) => Draw::Live(Box::new(
                         region
                             .moving(TerminalEnv::settled().motion)

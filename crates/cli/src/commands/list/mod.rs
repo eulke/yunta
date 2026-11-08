@@ -21,8 +21,9 @@ use yunta_core::{InputSpec, Workflow};
 use yunta_render::command;
 
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::output::document;
+use crate::output::Outcome;
 use surco::components::{Fields, Gist, Headline, Marked, Next, Prose, Section};
 use surco::doc::{Block, Depth, Doc};
 use surco::glyphs::Mark;

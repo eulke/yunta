@@ -27,7 +27,7 @@ use yunta_replay::frame::RunFrame;
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::RunState;
 
-use crate::error::Outcome;
+use crate::output::Outcome;
 use crate::run_page::{RunPage, Scope};
 
 /// Where the run lived and what it took — what the closing block reports
@@ -128,7 +128,7 @@ impl Closing {
     /// does: a paused, failed, cancelled or promoted run ran to a stop
     /// that needs a decision, and its detail is already on this block.
     pub(crate) fn outcome(&self) -> Outcome {
-        crate::render::exit(self.frame.standing)
+        crate::output::exit(self.frame.standing)
     }
 
     /// The page this block is drawn from.

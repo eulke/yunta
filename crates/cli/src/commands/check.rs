@@ -11,7 +11,8 @@ use surco::look::Look;
 use yunta_core::ConfigLayer;
 
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 use crate::output::{blank, document};
 use crate::{load_yaml, project};
 

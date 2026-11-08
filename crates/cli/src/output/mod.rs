@@ -8,6 +8,11 @@
 //! on stderr, and a program that asked for `--json` reads one document on
 //! stdout, with stderr left empty.
 //!
+//! The code the process exits with is here ([`Outcome`], [`exit()`]), and what
+//! drawing depends on in this process is here too: the streams and the
+//! policy `main` settles once ([`stream`]), and a document laid out or drawn
+//! for a stream's look ([`draw`], [`surface_lines`], [`blocks_lines`]).
+//!
 //! Warnings and notes reach stderr through [`warn`] and [`note`], and a JSON
 //! document reaches stdout through [`print_json`]. A shell's completion
 //! script, a hook's answer and what clap made of the arguments go through
@@ -21,10 +26,19 @@ use surco::doc::{Block, Doc};
 use surco::line::Line;
 use surco::look::Look;
 
-use crate::error::{warning_word, CliError, Outcome};
+use crate::error::{warning_word, CliError};
 use crate::json::to_json_string;
-use crate::render;
 use yunta_render::command::Reader;
+
+mod exit;
+mod stream;
+
+pub(crate) use exit::{exit, Outcome, RunExit};
+
+pub(crate) use stream::{
+    glyphs, row_width, settle_color, settle_columns, settle_glyphs, stderr_look, stderr_paint,
+    stderr_width, stdout_look,
+};
 
 /// How a command's output is written, decided once from its flags: a
 /// person's terminal, one JSON document, or the bare run id.
@@ -79,7 +93,7 @@ pub(crate) fn progress(mode: Mode, look: &Look, text: String) {
 
 /// A document drawn for a stream that looks like `look`, and written.
 pub(crate) fn document(look: &Look, doc: Doc) {
-    print!("{}", render::draw(doc, look));
+    print!("{}", draw(doc, look));
 }
 
 /// One line written as it is decided, drawn the way a document draws its
@@ -236,9 +250,26 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
 /// terminal looks.
 pub(crate) fn on_stderr(look: &Look, doc: Doc) {
     let stderr = Look {
-        paint: render::stderr_paint(),
-        width: render::stderr_width(),
+        paint: stderr_paint(),
+        width: stderr_width(),
         ..*look
     };
-    eprint!("{}", render::draw(doc, &stderr));
+    eprint!("{}", draw(doc, &stderr));
+}
+
+/// `doc` laid out for a terminal stream whose lines look like `look`,
+/// unpainted.
+pub(crate) fn surface_lines(doc: Doc, look: &Look) -> Vec<Line> {
+    surco::surface::Terminal::on(*look).lines(&doc)
+}
+
+/// `blocks`, in order, laid out the same way.
+pub(crate) fn blocks_lines(blocks: &[Block], look: &Look) -> Vec<Line> {
+    surco::surface::Terminal::on(*look).blocks(blocks)
+}
+
+/// `doc` drawn on a terminal stream whose lines look like `look`.
+pub(crate) fn draw(doc: Doc, look: &Look) -> String {
+    use surco::surface::Surface;
+    surco::surface::Terminal::on(*look).draw(&doc)
 }

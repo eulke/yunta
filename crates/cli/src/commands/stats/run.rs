@@ -19,8 +19,6 @@ use yunta_render::state::NodeDisplay;
 use yunta_replay::frame::{NodeFrame, RunFrame, RunPhase};
 use yunta_replay::stats::{NodeStat, RunStats};
 
-use crate::render::node_display;
-
 use super::facts::{answers, cache, cptv, findings, rework, spent, submissions};
 
 /// What the `yunta stats <run_id>` block is drawn from: one run's stats,
@@ -70,7 +68,7 @@ impl RunStatsPage<'_> {
             .push_if("answers", answers(&stats.findings, stats.findings_settled))
             .push_if(
                 "unread",
-                yunta_render::receipt::unknown_kinds(&stats.unknown_kinds).unwrap_or_default(),
+                yunta_render::state::unknown_kinds(&stats.unknown_kinds).unwrap_or_default(),
             );
         let furrow = self.frame.nodes.iter().map(|node| node.standing).collect();
         let gist = super::time::gist(&stats.time, self.person());
@@ -155,7 +153,10 @@ impl RunStatsPage<'_> {
             .nodes
             .iter()
             .find(|frame| frame.id == stat.node_id);
-        let display = frame.map_or_else(|| NodeDisplay::of(Standing::NeverRan, None), node_display);
+        let display = frame.map_or_else(
+            || NodeDisplay::of(Standing::NeverRan, None),
+            NodeDisplay::from,
+        );
         let person = frame.is_some_and(NodeFrame::person_took);
         NodeRow {
             stat,

@@ -273,7 +273,7 @@ impl Region {
         surco::look::Look {
             glyphs: self.glyphs,
             paint: self.paint,
-            width: crate::render::row_width(usize::from(self.screen.width())),
+            width: crate::output::row_width(usize::from(self.screen.width())),
         }
     }
 
@@ -305,7 +305,7 @@ impl Region {
     /// row wraps, which is the tear [`Region::fit`] exists to prevent.
     /// Asked on every redraw, so a window resized mid-run is followed.
     fn width(&self) -> usize {
-        crate::render::row_width(usize::from(self.screen.width())).cells()
+        crate::output::row_width(usize::from(self.screen.width())).cells()
     }
 }
 

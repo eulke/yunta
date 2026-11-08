@@ -27,7 +27,7 @@ const NO_NODE: &str = "under no node on this run's log";
 /// terminal still says a child is open and loses only which one. What
 /// it never becomes is a number: heterogeneous children averaged into
 /// one figure is the lying percentage under another name.
-pub(crate) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
+pub fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
     let standing = child_standing(child.terminal);
     format!(
         "{} {} {} child run {}",
@@ -40,7 +40,7 @@ pub(crate) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
 
 /// Every child this run bore, grouped under the node that bore it, each
 /// group in the order the parent's log recorded it.
-pub(crate) fn children_by_node(frame: &RunFrame) -> Vec<(String, Vec<&ChildLink>)> {
+pub fn children_by_node(frame: &RunFrame) -> Vec<(String, Vec<&ChildLink>)> {
     let mut groups: Vec<(String, Vec<&ChildLink>)> = Vec::new();
     for child in &frame.children {
         let parent = match &child.node {
@@ -57,7 +57,7 @@ pub(crate) fn children_by_node(frame: &RunFrame) -> Vec<(String, Vec<&ChildLink>
 
 /// The children `node` bore, in the order the parent's log recorded
 /// them.
-pub(super) fn children_of<'a>(frame: &'a RunFrame, node: &NodeId) -> Vec<&'a ChildLink> {
+pub fn children_of<'a>(frame: &'a RunFrame, node: &NodeId) -> Vec<&'a ChildLink> {
     frame
         .children
         .iter()
@@ -71,7 +71,7 @@ pub(super) fn children_of<'a>(frame: &'a RunFrame, node: &NodeId) -> Vec<&'a Chi
 /// A child the parent's log has no close for is open and nothing more:
 /// how far it has got is on the child's own log, which this run never
 /// opens.
-pub(in crate::surface) fn child_standing(terminal: Option<TerminalState>) -> (Mark, &'static str) {
+pub fn child_standing(terminal: Option<TerminalState>) -> (Mark, &'static str) {
     match terminal {
         None => (Mark::Running, "still open"),
         Some(terminal) => {
@@ -87,7 +87,7 @@ pub(in crate::surface) fn child_standing(terminal: Option<TerminalState>) -> (Ma
 ///
 /// The log's close knows how the run ended and nothing of the findings
 /// still standing, so a run that closed done reads finished here.
-pub(in crate::surface) fn closed_as(state: TerminalState) -> Standing {
+pub fn closed_as(state: TerminalState) -> Standing {
     match state {
         TerminalState::Done => Standing::Finished,
         TerminalState::Failed => Standing::Failed,

@@ -10,7 +10,8 @@ use yunta_core::{Responder, WorkflowName};
 
 use super::{Command, ListArgs, NewArgs, PackAction, ResolveGateArgs, RunArgs};
 use crate::commands::run_ref::{named, RunArg, RunRef};
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 use crate::output::{self, Mode};
 use crate::{commands, graph};
 

@@ -161,7 +161,10 @@ impl HumanInteraction for ConsoleInteraction {
             asking.left_out,
             asking.node,
         );
-        let called = Some(crate::render::called(&asking.workflow.name, asking.mode));
+        let called = Some(yunta_render::state::called(
+            &asking.workflow.name,
+            asking.mode,
+        ));
         let escalation = escalation.clone();
         let shown = asking.shown.to_vec();
         let run = asking.run.clone();

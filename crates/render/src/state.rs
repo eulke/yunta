@@ -1,12 +1,16 @@
-//! The detail that qualifies the word a node is called by.
+//! The detail that qualifies the word a node is called by, what a run is
+//! called on a page, and what every page about a run says of a log it reads
+//! only in part.
 //!
 //! The words themselves are Surco's ([`surco::words::Standing`]), and the
-//! engine decides which one a node is called by; this module says what
+//! frame decides which one a node is called by; this module says what
 //! qualifies it — the outcome it finished with, why it failed, which
 //! attempt runs, what it waits on.
 
+use surco::text::counted;
 use surco::words::Standing;
-use yunta_core::events::{NodeState, NodeWait};
+use yunta_core::events::{NodeState, NodeWait, UnknownKindCount};
+use yunta_replay::frame::{NodeFrame, NodeStanding};
 
 /// A node's state as a surface shows it: the word that carries the
 /// meaning, and the detail that qualifies it.
@@ -89,11 +93,49 @@ impl NodeDisplay {
     }
 }
 
+impl From<&NodeFrame> for NodeDisplay {
+    /// How a node of a frame reads: the word the frame decided for it, and
+    /// what qualifies it.
+    fn from(node: &NodeFrame) -> Self {
+        match &node.state {
+            NodeStanding::Skipped => NodeDisplay::skipped(),
+            NodeStanding::LeftOut(because) => NodeDisplay::left_out(&because.to_string()),
+            NodeStanding::ToGo => NodeDisplay::of(node.standing, None),
+            NodeStanding::Paused { attempt } => NodeDisplay::held(node.standing, *attempt),
+            NodeStanding::Reached(state) => NodeDisplay::of(node.standing, Some(state)),
+        }
+    }
+}
+
+/// What a run is called on a page: the workflow it follows and the mode it
+/// follows it in.
+pub fn called(workflow: impl std::fmt::Display, mode: impl std::fmt::Display) -> String {
+    format!("{workflow} ({mode})")
+}
+
 /// `text` on one line, or `None` when it says nothing — an empty
 /// modifier would leave a line ending in a colon that introduces nothing.
 fn detail(text: &str) -> Option<String> {
     let text = surco::text::one_line(text);
     (!text.is_empty()).then_some(text)
+}
+
+/// How a partially interpreted run says so, on the receipt and on every
+/// page about the run: every event kind this binary does not know, with
+/// how many events carried it. `None` when the log is interpreted in full.
+pub fn unknown_kinds(counts: &[UnknownKindCount]) -> Option<String> {
+    if counts.is_empty() {
+        return None;
+    }
+    let kinds: Vec<String> = counts
+        .iter()
+        .map(|count| format!("`{}` {}", count.kind, counted(count.events, "time")))
+        .collect();
+    Some(format!(
+        "{} this binary does not know, interpreted partially: {}",
+        counted(counts.len(), "event kind"),
+        kinds.join(", ")
+    ))
 }
 
 #[cfg(test)]

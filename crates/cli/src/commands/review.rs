@@ -14,8 +14,9 @@ use yunta_render::shown::Form;
 
 use crate::ask::{Console, Escape, Opens};
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::output::Mode;
+use crate::output::Outcome;
 use crate::surface::Diagnostics;
 
 use super::resolve_gate::{answering_commands, chosen_on, settled, Waiting};

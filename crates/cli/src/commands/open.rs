@@ -13,7 +13,8 @@ use yunta_core::RunId;
 
 use super::status::page_for_a_browser;
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 
 /// The file a run's page is written to, in the run's folder.

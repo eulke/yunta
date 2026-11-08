@@ -26,7 +26,8 @@ use yunta_engine::audit_pack;
 
 use super::pack_audit::{count_pack_tests, inventory, run_pack_tests};
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 use crate::output::{blank, document};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,

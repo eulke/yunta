@@ -31,9 +31,9 @@ use yunta_replay::RunState;
 use super::registry::{adapters_for, servable, ScriptedPaths, ServableError};
 use crate::commands::drive::{drive, Driving, Prepared};
 use crate::commands::stats;
-use crate::commands::status::progress;
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 use crate::output::{progress, Mode};
 
 /// A run this invocation is about to pick up, as its own frozen manifest
@@ -90,10 +90,11 @@ async fn parked(
         .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
     let worktree = still_or_again(ctx, &manifest, run_id, worktree).await?;
     let now = ctx.clock.now();
-    let frame = progress::frame_of(
+    let frame = yunta_replay::frame::RunFrame::of(
         run_id,
-        &manifest,
+        &manifest.workflow,
         &state,
+        None,
         &yunta_engine::read_engine(&run_dir, &yunta_engine::lock::SystemProbe),
         now,
     );
@@ -260,7 +261,7 @@ pub async fn resume(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
         hold,
     }) = parked(&ctx, run_id, output, look).await?
     else {
-        return Ok(crate::render::RunExit::Interrupted.outcome());
+        return Ok(crate::output::RunExit::Interrupted.outcome());
     };
     let adapters = adapters_for(
         &manifest,

@@ -11,9 +11,9 @@ use yunta_core::step::NextStep;
 use yunta_core::{Pid, RunId};
 use yunta_render::command;
 
-use crate::error::Outcome;
 use crate::json::SCHEMA_VERSION;
 use crate::output::Answer;
+use crate::output::Outcome;
 
 /// What `cancel` found and did, as a document carries it.
 #[derive(serde::Serialize)]
@@ -184,9 +184,9 @@ fn already_stopped(
 #[cfg(test)]
 mod tests {
     use super::{answer, CancelState};
-    use crate::error::Outcome;
+    use crate::output::draw;
     use crate::output::Answer;
-    use crate::render::draw;
+    use crate::output::Outcome;
     use surco::look::Look;
     use surco::words::Standing;
     use yunta_core::{Pid, RunId};

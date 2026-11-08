@@ -36,7 +36,7 @@ impl WorkflowPage<'_> {
         if let Some(advice) = self.findings.as_ref().and_then(verification_findings) {
             doc = doc
                 .with(Block::Lines(vec![Line::new()]))
-                .with(Block::Lines(crate::render::surface_lines(advice, look)));
+                .with(Block::Lines(crate::output::surface_lines(advice, look)));
         }
         doc
     }

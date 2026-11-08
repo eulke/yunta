@@ -3,9 +3,10 @@
 //! what its session last said under it, and the counters under it all.
 //!
 //! Every surface here draws the same frame, so this is where the words
-//! for it are chosen once. What the words are *drawn with* — the glyphs,
-//! the column widths, the duration format — belongs to
-//! [`crate::render`], and nothing here reimplements a piece of it.
+//! for it are chosen once. What the words are *drawn with* — the glyphs
+//! and the column widths ([`crate::output`]), the duration format (Surco's
+//! `figures`) — is chosen elsewhere, and nothing here reimplements a piece
+//! of it.
 
 use std::time::Duration;
 
@@ -19,12 +20,9 @@ use yunta_render::pause;
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 
-mod children;
 mod said;
 
-use children::children_of;
-pub(crate) use children::{child_row, children_by_node};
-pub(super) use children::{child_standing, closed_as};
+use yunta_render::children::{child_row, children_of};
 
 use surco::components::Attention;
 use surco::doc::Block;
@@ -126,7 +124,7 @@ enum Said {
 /// order; the answer is never dropped.
 fn footer_words(frame: &RunFrame, glyphs: Glyphs, width: usize) -> Line {
     let sep = format!(" {} ", glyphs.sep());
-    let mut said = vec![(Said::Counter, crate::render::counter::line(frame, glyphs))];
+    let mut said = vec![(Said::Counter, yunta_render::progress::line(frame, glyphs))];
     if frame.tokens.total() > 0 {
         said.push((Said::Tokens, Breakdown(&frame.tokens).to_string()));
     }
@@ -252,7 +250,7 @@ const QUIET_AFTER: Duration = Duration::from_secs(10);
 /// the runner it resolved through with the adapter and model behind it. When a
 /// row is cut to fit, what it runs on goes first.
 fn headline(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
-    let standing = crate::render::node_display(node).standing;
+    let standing = yunta_render::state::NodeDisplay::from(node).standing;
     let running = standing == Standing::Running;
     let quiet = node
         .last_event_age

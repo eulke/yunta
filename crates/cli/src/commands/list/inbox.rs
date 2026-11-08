@@ -19,7 +19,6 @@ use yunta_render::pause;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_storage::Storage;
 
-use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::project::Project;
@@ -324,7 +323,7 @@ fn held(frame: &RunFrame, word: Standing, menu: bool) -> (Option<String>, Option
             })),
         ),
         (_, RunPhase::Created | RunPhase::Running) => (
-            Some(crate::render::counter::line(frame, crate::render::glyphs())),
+            Some(yunta_render::progress::line(frame, crate::output::glyphs())),
             None,
         ),
         (
@@ -380,7 +379,7 @@ fn run_row(
         })?;
     let state = yunta_replay::RunState::replay(&events);
     let engine = yunta_engine::read_engine(&run_dir, &yunta_engine::lock::SystemProbe);
-    let frame = progress::frame_of(&run_id, &manifest, &state, &engine, now);
+    let frame = RunFrame::of(&run_id, &manifest.workflow, &state, None, &engine, now);
     // Only a parked run has a menu to rebuild, and rebuilding one is a
     // walk of the run's state.
     let menu = matches!(frame.phase, RunPhase::Waiting { .. })
@@ -413,7 +412,7 @@ fn said(frame: &RunFrame) -> String {
         (_, RunPhase::Waiting { on }) => pause::parked_claim(on),
         (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
         (_, RunPhase::Created | RunPhase::Running) => {
-            crate::render::counter::progress(frame, crate::render::glyphs())
+            yunta_render::progress::row(frame, crate::output::glyphs())
         }
         (
             _,

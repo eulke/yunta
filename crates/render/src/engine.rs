@@ -18,8 +18,20 @@ use std::time::Duration;
 use surco::figures::duration;
 use yunta_replay::registry::Asking;
 
+/// The clause both sayings of a stall open with, written once: `concat!`
+/// joins only literals, and the two constants are read at compile time.
+macro_rules! not_driven {
+    () => {
+        "no process is driving it"
+    };
+}
+
+/// That nothing drives a run whose log says it moves: what a summary's one
+/// line has room for, beside the run's word.
+pub const NOT_DRIVEN: &str = not_driven!();
+
 /// What holds a run whose log says it is moving and whose engine is gone.
-pub const STALLED: &str = "no process is driving it: the engine that ran it is gone";
+pub const STALLED: &str = concat!(not_driven!(), ": the engine that ran it is gone");
 
 /// What holds a run whose engine is asking a person at its terminal: who
 /// asks, at which terminal, and that the answer is given there.

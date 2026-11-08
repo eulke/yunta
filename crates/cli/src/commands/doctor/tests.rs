@@ -3,9 +3,9 @@ use surco::look::Look;
 use yunta_core::AdapterId;
 
 use super::{kept_check, versioned, DoctorAnswer};
-use crate::error::Outcome;
+use crate::output::draw;
 use crate::output::Answer;
-use crate::render::draw;
+use crate::output::Outcome;
 
 /// What a machine ready to run finds: two checks that hold, and a first run
 /// worth a look, with what that means and how to make it hold.

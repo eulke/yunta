@@ -22,7 +22,9 @@ use yunta_core::step::{Arg, NextStep};
 use yunta_core::{ArtifactKind, NodeKind, UnknownDocument};
 use yunta_render::command;
 
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+
+use crate::output::Outcome;
 use crate::output::{document, raw, Mode};
 
 /// What a document's JSON Schema is for, wherever a page offers it.

@@ -35,7 +35,8 @@ use yunta_render::command;
 
 use crate::commands::close::give_back;
 use crate::context::{Context, Opened};
-use crate::error::{note, warn, CliError, Outcome};
+use crate::error::{note, warn, CliError};
+use crate::output::Outcome;
 use crate::output::{emit, progress, Mode};
 
 /// How long the engine gets to react to the SIGINT before the escalation
@@ -68,8 +69,9 @@ pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
         let killed = settle_stopped(&ctx, &open, run_id).await;
         let now = ctx.clock.now();
         let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
+        let workflow = &open.manifest.doc.workflow;
         let standing =
-            super::status::progress::frame_of(run_id, &open.manifest.doc, &state, &engine, now)
+            yunta_replay::frame::RunFrame::of(run_id, workflow, &state, None, &engine, now)
                 .standing;
         CancelState::AlreadyStopped {
             killed,

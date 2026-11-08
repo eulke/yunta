@@ -86,7 +86,7 @@ pub(crate) struct RunToolFailureJson {
 
 impl NodeJson {
     pub(super) fn of(node: &NodeFrame, record: Option<&yunta_core::events::NodeRecord>) -> Self {
-        let display = crate::render::node_display(node);
+        let display = yunta_render::state::NodeDisplay::from(node);
         NodeJson {
             id: node.id.to_string(),
             state: display.standing,

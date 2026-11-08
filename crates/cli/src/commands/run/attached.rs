@@ -14,8 +14,9 @@ use super::{create_run_from, preflight, runnable};
 use crate::commands::drive::{drive, Driving, Prepared};
 use crate::commands::registry::{adapters_for, ScriptedPaths};
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::output::Mode;
+use crate::output::Outcome;
 
 /// What driving a run here needs: the same workflow reference, inputs and
 /// overrides every run resolves, plus the fixture that scripts its

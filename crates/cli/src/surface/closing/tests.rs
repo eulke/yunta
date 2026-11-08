@@ -27,7 +27,7 @@ fn closing(frame: RunFrame, decision: Option<(DecisionOn, GateWaitingPayload)>) 
 
 /// The block as a terminal draws it: its page's document, drawn for `look`.
 fn draw_closing(closing: &Closing, look: &Look) -> String {
-    crate::render::draw(closing.page().document(look), look)
+    crate::output::draw(closing.page().document(look), look)
 }
 
 #[test]

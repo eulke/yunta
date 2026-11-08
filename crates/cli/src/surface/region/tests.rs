@@ -172,7 +172,7 @@ fn a_row_is_cut_to_the_terminal_and_never_past_the_width_it_is_written_for() {
             &RUN,
             true,
         );
-        let room = crate::render::row_width(usize::from(columns)).cells();
+        let room = crate::output::row_width(usize::from(columns)).cells();
         let drawn = rows(&term);
         assert_eq!(
             drawn.len(),

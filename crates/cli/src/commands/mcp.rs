@@ -34,7 +34,9 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
 
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+
+use crate::output::Outcome;
 
 mod answers;
 mod read;

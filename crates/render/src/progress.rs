@@ -1,11 +1,12 @@
 //! How far a run has come, in the one line every surface prints it in:
 //! `status`, the run listing, the live region and the block that closes
-//! a run.
+//! a run, and where it stands, on the one line `yunta status` and
+//! `yunta list --runs` both have room for ([`summary`]).
 //!
 //! One owner, because the same frame counted two ways is two answers to
 //! one question: a page that said one count while the block above it said
 //! another left a reader to work out which was right. Every count reads
-//! `N of M`.
+//! `N of M`: a percentage lies the moment a reroute grows the denominator.
 
 use std::collections::BTreeMap;
 
@@ -13,7 +14,9 @@ use surco::glyphs::{Glyphs, Mark};
 use surco::text::counted;
 use surco::words::Standing;
 use yunta_core::events::{TaskLedger, TaskStatus};
-use yunta_replay::frame::{Counter, RunFrame, TaskCounter};
+use yunta_replay::frame::{Counter, RunFrame, RunPhase, TaskCounter};
+
+use crate::{engine, pause};
 
 /// How many names a row of a page says before it counts the rest: enough
 /// to recognise a place by, few enough that the row stays one row. Every
@@ -24,7 +27,7 @@ const NAMES: usize = 3;
 /// nodes done of the ones this run will do, what narrowed that total, and
 /// the reroutes that grew it. Where each other node stands is said by
 /// [`places`], with its name.
-pub(crate) fn progress(frame: &RunFrame, glyphs: Glyphs) -> String {
+pub fn row(frame: &RunFrame, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
     let flow = &frame.flow;
     let mut text = format!("{}{}", done(flow), narrowed(flow, sep));
@@ -39,7 +42,7 @@ pub(crate) fn progress(frame: &RunFrame, glyphs: Glyphs) -> String {
 /// names. In the furrow's order: what the run left behind, where it is
 /// now, what is ahead of it. Nothing when every node finished, which the
 /// progress row already says.
-pub(crate) fn places(frame: &RunFrame) -> Vec<(Mark, String)> {
+pub fn places(frame: &RunFrame) -> Vec<(Mark, String)> {
     let mut places: BTreeMap<(u8, Standing), Vec<&str>> = BTreeMap::new();
     // What the run's mode or project leaves out is not work this run will
     // do: the progress row counts it apart.
@@ -78,7 +81,7 @@ pub(crate) fn places(frame: &RunFrame) -> Vec<(Mark, String)> {
 /// The run's tasks, as a page's `tasks` row says them: done of the total,
 /// then each status that stops or holds a task, with the tasks it holds
 /// named. `None` for a run with no tasks.
-pub(crate) fn tasks_row(frame: &RunFrame, ledger: &TaskLedger, glyphs: Glyphs) -> Option<String> {
+pub fn tasks_row(frame: &RunFrame, ledger: &TaskLedger, glyphs: Glyphs) -> Option<String> {
     let counter = frame.tasks.as_ref()?;
     let sep = glyphs.sep();
     let mut text = format!("{} of {} done", counter.done, counter.total);
@@ -145,7 +148,7 @@ fn narrowed(counter: &Counter, sep: char) -> String {
 /// and `running`, that same event reads as a move between places, which
 /// is what makes a denominator that grew attributable to the event that
 /// grew it. Each node is counted under the word its row says.
-pub(crate) fn line(frame: &RunFrame, glyphs: Glyphs) -> String {
+pub fn line(frame: &RunFrame, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
     let mut line = nodes(&frame.flow, sep);
     if let Some(tasks) = &frame.tasks {
@@ -155,6 +158,48 @@ pub(crate) fn line(frame: &RunFrame, glyphs: Glyphs) -> String {
         line.push_str(&format!(" {sep} {}", counted(frame.reroutes, "reroute")));
     }
     line
+}
+
+/// The counters and the phase on one line: the counters every surface
+/// prints for the run, then the word the run is called by and what
+/// qualifies it, and the event kinds this binary reads only in part.
+///
+/// `yunta status` prints it for one run and `yunta list --runs` under every
+/// row, from the same [`RunFrame`]: a listing whose row said one thing while
+/// the run's own page said another would be a listing nobody could act on.
+pub fn summary(frame: &RunFrame, glyphs: Glyphs) -> String {
+    let sep = glyphs.sep();
+    let mut summary = format!("{} {sep} {}", line(frame, glyphs), phase_label(frame));
+    if let Some(note) = crate::state::unknown_kinds(&frame.unknown_kinds) {
+        summary.push_str(&format!(" {sep} {note}"));
+    }
+    summary
+}
+
+/// The phase on one line, for the end of a summary: the word every
+/// surface calls it by, and what qualifies it when something does.
+fn phase_label(frame: &RunFrame) -> String {
+    let word = frame.standing;
+    if word == Standing::Stalled {
+        return format!("{word}: {}", engine::NOT_DRIVEN);
+    }
+    if let (Standing::NeedsYou, Some(asking)) = (word, &frame.asking) {
+        return format!("{word}: {}", engine::asking_in_full(asking));
+    }
+    match &frame.phase {
+        // A parked run is waiting on a person, not stuck, and what it is
+        // parked on is the thing a reader acts on next.
+        RunPhase::Waiting { on } => format!("{word}: {}", pause::parked_on(on)),
+        RunPhase::Broken { diagnostic } => {
+            format!("{word}: {}", surco::text::one_line(diagnostic))
+        }
+        RunPhase::Created
+        | RunPhase::Running
+        | RunPhase::Finished
+        | RunPhase::Failed { .. }
+        | RunPhase::Cancelled
+        | RunPhase::Promoted { .. } => word.to_string(),
+    }
 }
 
 /// The places a node stands in that the line names beside what finished,

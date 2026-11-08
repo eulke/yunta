@@ -305,9 +305,9 @@ impl Console {
     /// its rows in place.
     pub(crate) fn look(&self) -> surco::look::Look {
         surco::look::Look {
-            glyphs: crate::render::glyphs(),
-            paint: crate::render::stderr_paint(),
-            width: crate::render::row_width(usize::from(self.term.size().1)),
+            glyphs: crate::output::glyphs(),
+            paint: crate::output::stderr_paint(),
+            width: crate::output::row_width(usize::from(self.term.size().1)),
         }
     }
 

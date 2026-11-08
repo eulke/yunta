@@ -41,7 +41,7 @@ impl Lines {
         );
         Self {
             out,
-            paint: crate::render::stderr_paint(),
+            paint: crate::output::stderr_paint(),
         }
     }
 
@@ -69,7 +69,7 @@ impl Lines {
         let look = Look {
             glyphs,
             paint: self.paint,
-            width: crate::render::stderr_width(),
+            width: crate::output::stderr_width(),
         };
         let said = self.paint.line(&chronicle::line(moment, &look));
         write_line(

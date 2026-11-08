@@ -20,7 +20,8 @@ use yunta_engine::{CheckError, Composition};
 use yunta_render::blocks::diagnostic::located;
 
 use crate::context::Context;
-use crate::error::{page, warn, CliError, Outcome};
+use crate::error::{page, warn, CliError};
+use crate::output::Outcome;
 use crate::output::{document, on_stderr};
 
 /// How much of the project a verdict reads beyond the workflow itself.

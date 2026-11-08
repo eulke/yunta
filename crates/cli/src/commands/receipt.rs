@@ -19,7 +19,8 @@ use yunta_replay::receipt;
 use yunta_storage::ChainVerification;
 
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 
 pub async fn receipt(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {

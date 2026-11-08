@@ -72,10 +72,11 @@ pub(super) async fn tool_workflow_status(
     let (events, manifest) = (open.events, open.manifest.doc);
     let state = yunta_replay::RunState::replay(&events);
     let decision = crate::json::decision_of(&manifest, &open.run_dir, &state).await?;
-    let mut frame = crate::commands::status::progress::frame_of(
+    let mut frame = yunta_replay::frame::RunFrame::of(
         &run_id,
-        &manifest,
+        &manifest.workflow,
         &state,
+        None,
         &engine,
         ctx.clock.now(),
     );

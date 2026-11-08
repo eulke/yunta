@@ -15,8 +15,9 @@ use super::{create_run_from, preflight, runnable};
 use crate::commands::drive::report_run_json;
 use crate::commands::{spawn_detached_resume, started, DetachedResumeError};
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::output::Mode;
+use crate::output::Outcome;
 
 /// What a detached start needs to reach a run of its own: the same
 /// workflow reference, inputs and overrides every run resolves, plus how
@@ -129,7 +130,7 @@ pub(crate) async fn start_detached(
     // would land in the middle of a response. What it has to say
     // travels in the answer instead. Quiet draws nothing, so the look
     // only completes the call.
-    let look = crate::render::stdout_look();
+    let look = crate::output::stdout_look();
     let preflight = preflight(
         ctx,
         &frozen.manifest,

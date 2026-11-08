@@ -23,8 +23,9 @@ use yunta_render::command;
 
 use super::inbox::{Group, Inbox, RunRow};
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::json::SCHEMA_VERSION;
+use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 
 /// How many unreadable runs a glance names before it counts the rest:

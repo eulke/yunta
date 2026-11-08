@@ -34,10 +34,9 @@ use waiting::WaitingOnJson;
 
 use crate::commands::stats::json::TimeJson;
 use crate::commands::status::decision_json::DecisionJson;
-use crate::commands::status::progress;
-use crate::error::Outcome;
 pub use crate::output::print_json;
 use crate::output::NextCommand;
+use crate::output::Outcome;
 use crate::run_page::{self, artifacts_written};
 use surco::words::Standing;
 use yunta_render::command::{self, Reader};
@@ -234,10 +233,10 @@ impl RunDocument {
             mode: frame.mode.to_string(),
             outcome: frame.standing,
             // A document reads the same whichever terminal asked for it.
-            summary: progress::summary(frame, surco::glyphs::Glyphs::Unicode),
+            summary: yunta_render::progress::summary(frame, surco::glyphs::Glyphs::Unicode),
             said: run_page::gist(frame),
             counts: CountsJson::of(frame),
-            exit_code: crate::render::exit(frame.standing).code(),
+            exit_code: crate::output::exit(frame.standing).code(),
             reason: reason(&frame.phase),
             cautions: run_page::cautions(frame),
             budget_warning: None,
@@ -293,7 +292,7 @@ impl RunDocument {
     /// What an invocation that drove this run to this word reports, by
     /// the one mapping every surface uses.
     pub(crate) fn verdict(&self) -> Outcome {
-        crate::render::exit(self.outcome)
+        crate::output::exit(self.outcome)
     }
 }
 

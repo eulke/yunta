@@ -32,9 +32,10 @@ pub(crate) use detach::start_detached;
 use super::drive::Prepared;
 use super::registry::{create_frozen_run, read_fixture, servable};
 use crate::context::Context;
-use crate::error::{warn, CliError, Outcome};
+use crate::error::{warn, CliError};
 use crate::json::PreRunWarnings;
 use crate::output::Mode;
+use crate::output::Outcome;
 use mode::resolve_mode;
 use surco::look::Look;
 

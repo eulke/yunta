@@ -129,14 +129,14 @@ impl RunPage<'_> {
         let word = self.frame.standing;
         let mut headline = Headline::new(
             word.mark(),
-            crate::render::called(&self.frame.workflow, &self.frame.mode),
+            yunta_render::state::called(&self.frame.workflow, &self.frame.mode),
             word.word(),
         );
         for fact in self.stood() {
             headline = headline.fact(fact);
         }
         if self.scope == Scope::Closing {
-            let code = crate::render::exit(word).code();
+            let code = crate::output::exit(word).code();
             headline = headline.fact(format!("exit {code}"));
         }
         headline.edge(self.run_id.handle())

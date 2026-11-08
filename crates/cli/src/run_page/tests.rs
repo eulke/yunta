@@ -31,7 +31,7 @@ fn goldens() -> PathBuf {
 
 /// The page as a terminal draws it for `look`.
 fn draw(page: &RunPage<'_>, look: &Look) -> String {
-    crate::render::draw(page.document(look), look)
+    crate::output::draw(page.document(look), look)
 }
 
 #[test]

@@ -743,7 +743,7 @@ The rest is a reshape, guarded by every test and golden.
 
 ### Checkpoint E: after Tasks 16–18f
 - [x] The suites; every golden's digest; the captures; the decision's JSON. Measured after Task 18b, and measured again after Task 18f: `proof/run-pages/checkpoint-e.txt`.
-- [ ] The user reviews the phase. Then every step of the `ci` job, commit 4, `cargo clean`.
+- [x] The user reviews the phase. Then every step of the `ci` job, commit 4, `cargo clean`: commit `f81661f9`.
 
 ## Phase 5: what is left of the CLI's `render`
 
@@ -757,12 +757,17 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] `crate::render::counter` and `progress::summary` are gone, and every progress line is the same.
+- [x] `crate::render::counter` and `progress::summary` are gone, and every progress line is the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta-render` (270: the counter's 3 tests moved with it), `cargo test -p yunta --bins` (343), `cargo xtask smells --check`, `cargo xtask docs --check`
 
 **Dependencies:** Checkpoint E
+
+**Found while doing it:**
+- In render the counter's `progress` would read `progress::progress`. It is the page's `progress` row, beside `tasks_row` and `places`, so it is `progress::row`.
+- The summary said a stall as "no process is driving it", the clause `STALLED` opens with, written a second time. `engine::NOT_DRIVEN` is that clause, and `STALLED` is built on the same literal by `not_driven!`, so the two cannot drift.
+- `status/progress.rs` keeps only the frames, which Task 20 removes; its `//!` says so much and no more.
 
 **Files likely touched:** `crates/render/src/{progress,state,receipt,lib}.rs`, `crates/cli/src/{render/{mod,counter}.rs,commands/status/progress.rs,commands/list/inbox.rs,run_page/facts.rs,json/mod.rs,commands/stats/run.rs}`
 
@@ -777,12 +782,18 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] A search for `progress::frame` finds nothing, and no caller replays one log twice (`rs_twice_any.py`).
+- [x] A search for `progress::frame` finds nothing, and no caller replays one log twice (`rs_twice_any.py`).
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`, the CLI's batches
+- [x] `cargo test -p yunta --bins` (343), the CLI's batches (60 binaries, 858 tests: Task 18f's 861 less the counter's 3, now render's)
 
 **Dependencies:** Task 19
+
+**Found while doing it:**
+- Each caller writes `RunFrame::of(run, &manifest.workflow, &state, None, &engine, now)`. The `None` is the history the frame compares with, which only `status`, `drive` and the control plane's status tool read, and set after.
+- `graph` framed through `progress::frame`, which replayed the log itself; it now replays once where it frames.
+- `rs_twice_any.py` names only tests that replay one log twice on purpose, to hold replay deterministic: none is a caller.
+- `status/progress.rs` held Task 19's cut, read before `git rm -f` removed it.
 
 **Files likely touched:** `crates/cli/src/{commands/status/progress.rs,commands/cancel.rs,commands/drive.rs,commands/list/inbox.rs,commands/mcp/tools.rs,commands/resume.rs,commands/status/{follow,mod}.rs,graph.rs}`
 
@@ -797,12 +808,18 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] `render/words.rs` holds only `RunExit` and `exit`, and every golden is the same.
+- [x] `render/words.rs` holds only `RunExit` and `exit`, and every golden is the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta-render` (274: children's 4 tests moved with it), `cargo test -p yunta --bins` (339), `cargo xtask smells --check`, `cargo xtask docs --check`
 
 **Dependencies:** Task 20
+
+**Found while doing it:**
+- The node words have 6 callers and `called` 3, the 9 the task counted as 8. `NodeDisplay::from` reads as the conversion it is: `stats/run` hands it to `map_or_else` by name.
+- The chronicle's words already name core's `events::children`, so they import render's `child_standing` and `closed_as` by name, and the chronicle's `//!` names where they live.
+- `children.rs`'s five functions are render's public words now, where three were the surface's alone.
+- The full paths Task 20 wrote for `RunFrame::of` were wrapped by `rustfmt` and pushed `follow` past 50 lines, as `yunta_render::children::closed_as` did `run_words`. A file that imports `RunFrame` names it short, and the long-function count stays at its baseline.
 
 **Files likely touched:** `crates/render/src/{state,children,lib}.rs`, `crates/cli/src/{render/{mod,words}.rs,surface/{mod,view/mod,view/children,chronicle/mod}.rs,run_page/{facts,story}.rs,commands/stats/run.rs,commands/status/node.rs,graph.rs,json/node.rs}`
 
@@ -818,12 +835,16 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] `crates/cli/src/render/` holds only `words.rs`.
+- [x] `crates/cli/src/render/` holds only `words.rs`, beside the `mod.rs` that declares it.
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`, the CLI's batches
+- [x] `cargo test -p yunta --bins` (339), the CLI's batches (60 binaries, 854 tests: Task 20's 858 less children's 4, now render's)
 
 **Dependencies:** Task 21
+
+**Found while doing it:**
+- The callers are 31 paths in 22 files, the 4 settlements in `main.rs`, and the 4 inside `output` itself, which call their own module's functions by name now.
+- `output/mod.rs`'s `//!` says what drawing depends on lives there, and `main.rs`'s map says `output` owns the streams a command's output is drawn to.
 
 **Files likely touched:** `crates/cli/src/{output.rs,output/{mod,stream}.rs,render/{mod,stream}.rs,main.rs}`, and the 36 callers
 
@@ -841,20 +862,26 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] A search for `crate::render` and `error::Outcome` finds nothing.
-- [ ] `a_run_waiting_on_a_clock_exits_on_its_own_and_a_stop_is_not_a_success` passes in its new place.
+- [x] A search for `crate::render` and `error::Outcome` finds nothing.
+- [x] `a_run_waiting_on_a_clock_exits_on_its_own_and_a_stop_is_not_a_success` passes in its new place, `output::exit::tests`.
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`, the CLI's batches, `cargo xtask docs --check`
+- [x] `cargo test -p yunta --bins` (339), the CLI's batches (60 binaries, 854 tests), `cargo xtask docs --check`, `cargo xtask smells --check`, the gate's `doc` step
 
 **Dependencies:** Task 22
+
+**Found while doing it:**
+- 38 files named `Outcome` from `error` or the exit from `render`; each names them from `output` now.
+- Three comments and a `//!` named `crate::render`: the live region's view, the graph's labels and the stats page. Each names where the thing lives now, and the gate's `doc` step found the one that was a link. `output`'s `//!` links `exit()`, since `exit` is a module and a function there.
+- The smell `cli_print_outside_output` named `crates/cli/src/output.rs` as the one file that prints. That file is `output/mod.rs` now, and the smell and its test name it.
+- **An intermittent test, not this task's.** `session_ends::cancel_after_its_engine_died_leaves_no_command` failed once in the CLI's fifth batch: the stub did not record its child's pid within the testkit's 30 s rendezvous. It passed when the batch ran again, 10 of 10 alone, and in the batches of Checkpoint E and Tasks 20 and 22. What it waits on, a stub starting its child under a session the engine launched, is no code this phase changed.
 
 **Files likely touched:** `crates/cli/src/{output/exit.rs,output/mod.rs,render/words.rs,error.rs,main.rs}`, and the 39 callers
 
 **Estimated scope:** L (a move)
 
 ### Checkpoint F: after Tasks 19–23
-- [ ] The suites; every golden's digest; the captures.
+- [x] The suites; every golden's digest; the captures: `proof/run-pages/checkpoint-f.txt`.
 - [ ] The user reviews the phase. Then every step of the `ci` job, commit 5, `cargo clean`.
 
 ## Phase 6: one form

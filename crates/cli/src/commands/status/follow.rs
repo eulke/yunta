@@ -43,7 +43,8 @@ use yunta_storage::AsyncStorage;
 
 use crate::commands::drive::{report_closing, Closed};
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 use crate::surface::{Delivery, EngineReading, Surface, SurfaceEnv, TerminalEnv};
 
 mod listen;
@@ -72,10 +73,10 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
     let state = RunState::replay(&open.events);
     let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
     let manifest = open.manifest.doc;
-    let frame = super::progress::frame_of(run_id, &manifest, &state, &engine, now);
+    let frame = RunFrame::of(run_id, &manifest.workflow, &state, None, &engine, now);
     if ending(frame.standing, &frame.phase).is_some() {
         let standing = super::print_page(&ctx, run_id, look).await?;
-        return Ok(crate::render::exit(standing));
+        return Ok(crate::output::exit(standing));
     }
     let started = open.events.first().map(|event| event.timestamp);
     let sample = crate::commands::stats::budget_sample(&ctx, &manifest, &frame.mode, started).await;
@@ -109,11 +110,11 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
         // what holds it.
         Ended::Stalled => {
             let standing = super::print_page(&ctx, run_id, look).await?;
-            Ok(crate::render::exit(standing))
+            Ok(crate::output::exit(standing))
         }
         Ended::Interrupted => {
             crate::output::document(look, stopped_following(run_id));
-            Ok(crate::render::RunExit::Interrupted.outcome())
+            Ok(crate::output::RunExit::Interrupted.outcome())
         }
     }
 }
@@ -206,7 +207,7 @@ impl Followed {
                 storage,
                 clock: Arc::new(ctx.clock),
                 delivery: Delivery::choose(false, TerminalEnv::settled()),
-                glyphs: crate::render::glyphs(),
+                glyphs: crate::output::glyphs(),
                 engine: EngineReading::Registry(self.run_dir.clone()),
             },
             self.events.clone(),
@@ -341,7 +342,14 @@ impl Followed {
                 yunta_engine::read_engine(&self.run_dir, &yunta_engine::lock::SystemProbe);
             self.registry_read_at = now;
         }
-        super::progress::frame_of(&self.run_id, &self.manifest, &self.state, &self.engine, now)
+        RunFrame::of(
+            &self.run_id,
+            &self.manifest.workflow,
+            &self.state,
+            None,
+            &self.engine,
+            now,
+        )
     }
 
     /// The block `yunta run` leaves when the run stops, read from the log, and

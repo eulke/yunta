@@ -23,9 +23,10 @@ use yunta_engine::process::Supervision;
 use yunta_render::command;
 
 use crate::ask::{ask_line, Console, Escape};
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::interrupt::Interrupt;
-use crate::render::RunExit;
+use crate::output::Outcome;
+use crate::output::RunExit;
 use crate::surface::Diagnostics;
 
 /// The base branch a project starts from: the remote's default, else the

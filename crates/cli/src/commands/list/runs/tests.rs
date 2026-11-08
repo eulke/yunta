@@ -50,7 +50,7 @@ fn answer(rows: Vec<RunRow>, unreadable: Vec<Unreadable>, depth: Depth) -> ListR
 /// The field drawn the way the command draws it, unpainted.
 fn render_at(rows: Vec<RunRow>, unreadable: Vec<Unreadable>, depth: Depth) -> String {
     let look = Look::plain();
-    crate::render::draw(answer(rows, unreadable, depth).document(&look), &look)
+    crate::output::draw(answer(rows, unreadable, depth).document(&look), &look)
 }
 
 fn render(rows: Vec<RunRow>) -> String {
@@ -239,7 +239,7 @@ fn the_field_matches_its_goldens() {
         let page = answer(field(), Vec::new(), Depth::Glance).document(&look);
         assert_golden(
             &environment.golden(&goldens, "runs"),
-            &crate::render::draw(page, &look),
+            &crate::output::draw(page, &look),
         );
     }
 }

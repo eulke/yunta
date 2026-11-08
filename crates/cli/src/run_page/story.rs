@@ -50,7 +50,7 @@ impl RunPage<'_> {
             .iter()
             .enumerate()
             .map(|(at, node)| {
-                let display = crate::render::node_display(node);
+                let display = NodeDisplay::from(node);
                 let person = node.person_took();
                 NodeRow {
                     mark: display.standing.mark(),

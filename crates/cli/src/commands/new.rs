@@ -21,8 +21,9 @@ use yunta_render::command;
 
 use super::verdict::{check_again, file_named, Found};
 use crate::ask::{choose, Choice, Console, Escape, NoAnswer};
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::output::document;
+use crate::output::Outcome;
 use crate::project;
 use crate::surface::Diagnostics;
 

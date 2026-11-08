@@ -28,10 +28,11 @@ use yunta_replay::RunState;
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
 use crate::context::{Context, Opened};
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::json::SCHEMA_VERSION;
+use crate::output::Outcome;
+use crate::output::RunExit;
 use crate::output::{emit, Answer, Mode};
-use crate::render::RunExit;
 use crate::surface::Diagnostics;
 
 /// Records the decision and hands the run back, returning the sentence
@@ -287,7 +288,7 @@ impl Asked {
             shown,
             routes,
             changed: state.current_change().cloned(),
-            called: crate::render::called(&open.manifest.doc.workflow.name, state.run.mode()),
+            called: yunta_render::state::called(&open.manifest.doc.workflow.name, state.run.mode()),
         })
     }
 }

@@ -1,8 +1,8 @@
 use yunta_core::{OptionId, RunId};
 
 use super::{answer, sentence, GateState};
+use crate::output::draw;
 use crate::output::Answer;
-use crate::render::draw;
 use surco::look::Look;
 
 #[test]

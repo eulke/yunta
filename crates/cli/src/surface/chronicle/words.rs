@@ -3,7 +3,7 @@
 //! Each domain reads its own kinds and nothing else, so a kind added
 //! to one never silently borrows another's phrasing. Every state word
 //! comes from `NodeDisplay`, every run or child close from
-//! `view::closed_as`, every enum its own published word — nothing here
+//! `yunta_render::children::closed_as`, every enum its own published word — nothing here
 //! formats a domain type with `Debug`.
 
 use surco::figures::duration;
@@ -17,11 +17,10 @@ use yunta_core::events::{
 };
 use yunta_core::fence::Coverage;
 use yunta_core::NonEmpty;
+use yunta_render::children::{child_standing, closed_as};
 use yunta_render::spend::Breakdown;
 use yunta_render::state::NodeDisplay;
 use yunta_replay::frame::Happening;
-
-use super::super::view;
 
 /// What the moment carries beyond its subject, and the state it is
 /// marked with.
@@ -78,7 +77,7 @@ fn run_words(happening: &run::happening::Happening, glyphs: Glyphs) -> (Option<M
             yunta_render::changes::said(*files, *added, *removed, glyphs)
                 .unwrap_or_else(|| "no file changed".to_string())
         ),
-        H::Closed { terminal, .. } => view::closed_as(*terminal).word().to_string(),
+        H::Closed { terminal, .. } => closed_as(*terminal).word().to_string(),
         H::PromotionSignaled {
             to,
             cause,
@@ -425,7 +424,7 @@ fn child_words(happening: &children::happening::Happening) -> (Option<Mark>, Str
             format!("child run {} opened", run_id.handle()),
         ),
         H::Closed { run_id, terminal } => {
-            let (mark, closed) = view::child_standing(Some(*terminal));
+            let (mark, closed) = child_standing(Some(*terminal));
             (
                 Some(mark),
                 format!("child run {} {closed}", run_id.handle()),

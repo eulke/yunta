@@ -37,8 +37,10 @@ mod case;
 
 use std::path::{Path, PathBuf};
 
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+
 use crate::output::document;
+use crate::output::Outcome;
 use surco::components::{Check, Checklist, Found, Headline};
 use surco::doc::Doc;
 use surco::glyphs::Mark;

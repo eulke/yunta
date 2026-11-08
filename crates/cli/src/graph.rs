@@ -19,7 +19,8 @@ use yunta_replay::frame::RunFrame;
 
 use crate::commands::{resolve_workflow_ref, verdict};
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 
 type Labels = HashMap<NodeId, String>;
 
@@ -71,10 +72,11 @@ pub async fn graph(
             let open = ctx.open_run(run_id).await?;
             let manifest = open.manifest.doc;
             let now = ctx.clock.now();
-            let frame = crate::commands::status::progress::frame(
+            let frame = RunFrame::of(
                 run_id,
-                &manifest,
-                &open.events,
+                &manifest.workflow,
+                &yunta_replay::RunState::replay(&open.events),
+                None,
                 &yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe),
                 now,
             );
@@ -103,8 +105,8 @@ pub async fn graph(
 }
 
 /// One label per node of the graph, derived from the event log
-/// (`RunState::replay`) and worded by `crate::render`, which is where
-/// `status` and every other surface take the same words from.
+/// (`RunState::replay`) and worded by `yunta_render::state::NodeDisplay`,
+/// which is where `status` and every other surface take the same words from.
 ///
 /// Every node gets one, not only the ones the log mentions: a diagram
 /// that leaves a node bare says nothing about whether the run has yet
@@ -117,7 +119,12 @@ fn derived_labels(frame: &RunFrame) -> Option<Labels> {
         frame
             .nodes
             .iter()
-            .map(|node| (node.id.clone(), crate::render::node_display(node).label()))
+            .map(|node| {
+                (
+                    node.id.clone(),
+                    yunta_render::state::NodeDisplay::from(node).label(),
+                )
+            })
             .collect(),
     )
 }

@@ -15,8 +15,9 @@ use yunta_replay::registry::Engine;
 
 use super::cancel::settle_crash;
 use crate::context::Context;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::json::SCHEMA_VERSION;
+use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 
 pub async fn close(

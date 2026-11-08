@@ -10,7 +10,7 @@ use yunta_core::events::{
 use yunta_replay::frame::{Declares, GateAsks, NodeFrame};
 
 use super::*;
-use crate::render::surface_lines;
+use crate::output::surface_lines;
 
 const RUN: yunta_core::RunId = yunta_core::RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
@@ -91,7 +91,7 @@ fn render_run_stats(
         pricing,
         depth: Depth::Glance,
     };
-    crate::render::draw(page.document(look), look)
+    crate::output::draw(page.document(look), look)
 }
 
 fn render(stats: &RunStats, look: &Look) -> String {

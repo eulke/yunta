@@ -15,8 +15,9 @@ use yunta_core::{ConfigLayer, PackManifest, PackRef, Workflow};
 use yunta_render::command;
 
 use super::super::pack_audit::run_pack_tests;
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
 use crate::output::document;
+use crate::output::Outcome;
 
 // Written as literal templates (not built from the typed values) so the
 // generated files read exactly as an author would write them; `{{name}}`

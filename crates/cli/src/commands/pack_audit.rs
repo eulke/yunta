@@ -22,9 +22,10 @@ use yunta_core::PackRef;
 use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit, WorkflowUnread};
 
 use super::test::{case_found, discover_case_paths, run_case};
-use crate::error::{page, CliError, Outcome};
+use crate::error::{page, CliError};
 use crate::interrupt::Interrupt;
 use crate::output::document;
+use crate::output::Outcome;
 use crate::pack::{packs_root, read_manifest, vendor_dir};
 
 pub async fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {

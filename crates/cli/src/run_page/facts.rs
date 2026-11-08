@@ -19,12 +19,13 @@ use surco::text::{counted, counted_as};
 use surco::words::{AT_WORK, WAITING_ON_YOU};
 use yunta_core::events::{EngineFact, NodeOutcome, NodeState};
 use yunta_core::Isolation;
+use yunta_render::children;
+use yunta_render::progress;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::TimeSpent;
 
 use super::{caution_row, RunPage, Scope};
-use crate::render::counter;
 
 /// How many of the run's longest nodes the `slowest` row names. Enough to
 /// point at where the time went, few enough that the row stays one row.
@@ -36,13 +37,13 @@ impl RunPage<'_> {
     pub(super) fn facts(&self, glyphs: Glyphs) -> Fields {
         let full = self.depth.reaches(Depth::Full);
         let harvest = self.holds_harvest();
-        let mut fields = Fields::new().push_if("progress", counter::progress(self.frame, glyphs));
+        let mut fields = Fields::new().push_if("progress", progress::row(self.frame, glyphs));
         // The whole story names every node and task in a table of its own.
         if !full {
-            for (mark, place) in counter::places(self.frame) {
+            for (mark, place) in progress::places(self.frame) {
                 fields = fields.push_marked("nodes", mark, place);
             }
-            let tasks = counter::tasks_row(self.frame, &self.state.tasks, glyphs);
+            let tasks = progress::tasks_row(self.frame, &self.state.tasks, glyphs);
             fields = fields.push_if("tasks", tasks.unwrap_or_default());
         }
         for left in self.left_out() {
@@ -62,7 +63,7 @@ impl RunPage<'_> {
         }
         fields = fields.push_if(
             "unread",
-            yunta_render::receipt::unknown_kinds(&self.frame.unknown_kinds).unwrap_or_default(),
+            yunta_render::state::unknown_kinds(&self.frame.unknown_kinds).unwrap_or_default(),
         );
         if self.depth.reaches(Depth::Dig) {
             fields = fields.push_if("id", self.run_id.to_string()).push_if(
@@ -266,14 +267,14 @@ impl RunPage<'_> {
             return Vec::new();
         }
         let mut blocks = vec![Block::Heading("children".to_string())];
-        for (under, born) in crate::surface::children_by_node(self.frame) {
+        for (under, born) in children::children_by_node(self.frame) {
             blocks.push(
                 Section {
                     lead: None,
                     title: Line::new().push(Tone::Plain, under),
                     blocks: vec![Said(
                         born.iter()
-                            .map(|child| crate::surface::child_row(child, glyphs))
+                            .map(|child| children::child_row(child, glyphs))
                             .collect(),
                     )
                     .into()],

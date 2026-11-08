@@ -182,7 +182,7 @@ fn print_documents(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
 /// blank line that sets the card apart.
 fn draw_page(console: &Console, page: Doc) -> std::io::Result<()> {
     let look = console.look();
-    for line in crate::render::draw(page, &look).lines() {
+    for line in crate::output::draw(page, &look).lines() {
         console.say(line)?;
     }
     console.say("")

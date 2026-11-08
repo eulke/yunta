@@ -8,7 +8,8 @@
 //!   resolves the project and its config, and `detect` reads what a repository
 //!   says about itself.
 //! - What a person sees and answers: `output` owns what a command writes,
-//!   `surface` and `render` draw a run as it happens, `run_page` draws where a
+//!   the streams it is drawn to and the code it exits with, `surface` draws a
+//!   run as it happens, `run_page` draws where a
 //!   run stands, `ask` and `human_interaction` take a person's answers, and
 //!   `identity` names who decided.
 //! - For machines and the process: `json` is the versioned JSON the CLI emits,
@@ -45,7 +46,6 @@ mod json;
 mod output;
 mod pack;
 mod project;
-mod render;
 mod run_page;
 mod surface;
 
@@ -59,7 +59,9 @@ use clap::{FromArgMatches, ValueEnum};
 use surco::paint::ColorWhen;
 use yunta_core::Env;
 
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+
+use crate::output::Outcome;
 
 fn main() -> ExitCode {
     let started = Instant::now();
@@ -79,16 +81,16 @@ fn main() -> ExitCode {
         help::parse(&args, stdout_paint, stderr_paint).unwrap_or_else(|error| help::exit(&error));
     let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|error| help::exit(&error));
     init_tracing(&env);
-    render::settle_color(
+    output::settle_color(
         color_policy(&env, cli.color),
         set_var(&env, surco::paint::LOOK_VAR),
     );
-    render::settle_columns(columns(&env));
-    render::settle_glyphs(&glyph_env(&env));
+    output::settle_columns(columns(&env));
+    output::settle_glyphs(&glyph_env(&env));
     surface::terminal::settle(&env);
     // Read once the settling above is done, so every line this process
     // writes to stdout takes the same color, width and glyphs.
-    let look = render::stdout_look();
+    let look = output::stdout_look();
     let mode = cli.mode();
     tracing::debug!("starting");
 

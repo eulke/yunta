@@ -62,7 +62,7 @@ impl NodePage<'_> {
     /// said or what failed it, its failure whole, what it took, the
     /// documents it produced, and what to type next.
     pub(super) fn document(&self, _look: &Look) -> Doc {
-        let display = crate::render::node_display(self.node);
+        let display = yunta_render::state::NodeDisplay::from(self.node);
         let headline = Headline::new(
             display.standing.mark(),
             format!("node {} of run {}", self.node.id, self.run_id.handle()),

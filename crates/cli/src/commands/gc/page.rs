@@ -102,7 +102,7 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::Report;
-    use crate::render::draw;
+    use crate::output::draw;
     use surco::look::Look;
 
     #[test]
