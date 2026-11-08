@@ -9,18 +9,6 @@ use super::parse::{describe, list};
 use crate::events::NameProblem;
 use crate::yaml::{Mapping, Value};
 
-/// The run directory's own name for where artifacts live. Every path a
-/// run records for an artifact is relative to the run directory and
-/// starts here, which is the shape the log, the diagnostics and the run
-/// contract all use — so writing one and reading one back read the same
-/// name.
-pub const ARTIFACTS_DIR: &str = "artifacts";
-
-/// The run directory that holds every artifact's bytes, by hash: the store
-/// writes and reads them under this name, and what says where they are
-/// names it the same way.
-pub const OBJECTS_DIR: &str = "objects";
-
 /// `artifacts.produces`. Each entry is one bare string: `tasks`, `spec`,
 /// `findings` and `questions` name the documents the engine reads, and
 /// every other string is the name of a file it only carries.

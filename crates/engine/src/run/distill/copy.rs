@@ -66,10 +66,7 @@ async fn missing_declared(
         &format!("distill-missing-{}-{}", declaration.node, declaration.id),
         FindingSeverity::Minor,
         Location::run(
-            RelativePath::of([crate::artifacts::store::view_path(
-                Some(&declaration.node),
-                &name,
-            )]),
+            RelativePath::of([yunta_core::run_dir::view(Some(&declaration.node), &name)]),
             None,
         ),
         FindingCause::DistillMissing {

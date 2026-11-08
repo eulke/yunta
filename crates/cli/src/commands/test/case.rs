@@ -362,7 +362,7 @@ async fn answered(
 ) -> Result<yunta_engine::RunReport, CliError> {
     while !decisions.is_empty() {
         // A case names its answers by node, so a decision the run owns ends its answers.
-        let Some(yunta_engine::DecisionOn::Node(node)) =
+        let Some(yunta_core::events::DecisionOn::Node(node)) =
             yunta_engine::awaits_decision(manifest, &report.state)
         else {
             break;

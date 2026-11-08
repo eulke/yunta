@@ -1056,7 +1056,7 @@ nodes:
 on_finish:
   - distill: [{{ node: plan, name: plan.md }}]
 "#,
-        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+        view = yunta_core::run_dir::artifacts(&bench.run_dir()).display()
     );
     let fixture = distill_fixture(&bench);
     let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;

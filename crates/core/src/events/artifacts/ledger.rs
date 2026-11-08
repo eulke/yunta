@@ -27,7 +27,8 @@ use crate::events::{
 };
 use crate::hash::ContentHash;
 use crate::ids::{NodeId, Seq};
-use crate::workflow::{ArtifactKind, ARTIFACTS_DIR};
+use crate::run_dir::ARTIFACTS_DIR;
+use crate::workflow::ArtifactKind;
 
 /// What identifies one artifact within a run: what it is, and which node
 /// produced it — `None` for what the run acquired without one.

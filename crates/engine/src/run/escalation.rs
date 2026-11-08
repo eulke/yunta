@@ -10,8 +10,9 @@
 use std::sync::Arc;
 
 use yunta_core::events::{
-    Asks, Claim, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu, GateOption,
-    GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal, Remedy, Withheld,
+    Asks, Claim, DecisionOn, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu,
+    GateOption, GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal,
+    Remedy, Withheld,
 };
 use yunta_core::protected::Protected;
 use yunta_core::reserved::ReservedOption;
@@ -117,24 +118,6 @@ fn named_options(remedies: &[Remedy]) -> Vec<ReservedOption> {
         }
     }
     named
-}
-
-/// Whom a parked run's decision belongs to: a node, or the run itself. Not an
-/// `Option<NodeId>`: beside a decision that may not exist, `None` would read as none.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DecisionOn {
-    Node(NodeId),
-    Run,
-}
-
-impl DecisionOn {
-    /// The node the decision is recorded against, when one owns it.
-    pub fn node(&self) -> Option<&NodeId> {
-        match self {
-            DecisionOn::Node(node) => Some(node),
-            DecisionOn::Run => None,
-        }
-    }
 }
 
 /// Reconstructs the escalation object a paused run is

@@ -88,7 +88,7 @@ impl Bench {
     /// left in the run's `artifacts/` directory; every test about what
     /// the run holds asks [`artifact`](Self::artifact).
     pub fn projection(&self, producer: Option<&str>, name: &str) -> std::io::Result<Vec<u8>> {
-        let mut path = self.run_dir().join(yunta_core::ARTIFACTS_DIR);
+        let mut path = yunta_core::run_dir::artifacts(&self.run_dir());
         if let Some(node) = producer {
             path.push(node);
         }

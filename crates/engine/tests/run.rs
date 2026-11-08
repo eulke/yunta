@@ -1106,7 +1106,7 @@ nodes:
     until: all_tasks_complete
     prompt: "Read your task from the tasks document and implement it."
 "#,
-        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+        view = yunta_core::run_dir::artifacts(&bench.run_dir()).display()
     );
     let fixture = r#"
 dialect: claude-code

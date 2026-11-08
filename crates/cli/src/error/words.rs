@@ -15,7 +15,8 @@ use std::path::Path;
 
 use yunta_core::events::{Claim, FailureMenu, Refusal};
 use yunta_core::inputs::InputsProblem;
-use yunta_core::{Pid, ARTIFACTS_DIR};
+use yunta_core::run_dir::ARTIFACTS_DIR;
+use yunta_core::Pid;
 use yunta_engine::{CloseRunError, ResolveGateError, RunError, StoreError};
 
 /// What a run another engine drives says: whose it is.

@@ -3197,6 +3197,7 @@ dependencies = [
  "serde",
  "serde_json",
  "yunta-core",
+ "yunta-replay",
  "yunta-surco",
  "yunta-testkit-core",
 ]

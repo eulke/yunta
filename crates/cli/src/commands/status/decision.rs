@@ -29,9 +29,10 @@ use std::path::Path;
 
 use surco::components::{Decision, Note, Prose, Section};
 use surco::doc::Block;
+use yunta_core::events::DecisionOn;
 use yunta_core::events::GateWaitingPayload;
+use yunta_core::shown::ShownDocument;
 use yunta_core::RunId;
-use yunta_engine::{DecisionOn, ShownDocument};
 
 use crate::commands::advice;
 use crate::run_page::Decided;
@@ -70,7 +71,7 @@ pub(crate) fn section(
     let escalation = &decided.escalation;
     let mut blocks = account(escalation, decided.beside, &decided.shown);
     for shown in escalation.shows() {
-        let about = format!("about: {}", yunta_engine::view_of(shown).display());
+        let about = format!("about: {}", yunta_core::run_dir::view_of(shown).display());
         blocks.push(Prose(about).into());
     }
     if let Some(external_ref) = escalation.external_ref() {

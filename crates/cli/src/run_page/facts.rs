@@ -213,7 +213,7 @@ impl RunPage<'_> {
             "{} under {}",
             counted(written, "artifact"),
             paths::shown(
-                &yunta_engine::run_dir::artifacts_view(self.paths.run_dir),
+                &yunta_core::run_dir::artifacts(self.paths.run_dir),
                 self.paths.cwd,
                 self.paths.home
             )

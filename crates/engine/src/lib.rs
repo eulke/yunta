@@ -10,7 +10,8 @@
 //! - Birth and resume: `run` creates a run and drives its loop, from what
 //!   `manifest` freezes and `frozen` keeps; `inputs`, `catalog`,
 //!   `agents`, `skills` and `runner` resolve what a workflow names, and
-//!   `run_dir` and `session_dir` lay out what a run keeps on disk.
+//!   `run_dir` and `session_dir` lay out the working space a run keeps on
+//!   disk, beside what a reader resolves there (`yunta_core::run_dir`).
 //! - A node's work: `task_cycle` runs a task through its checks, over what
 //!   `tasks` means to the run; `scope`, `scope_expansion` and `permissions`
 //!   judge what it wrote; `answers`, `human_interaction` and `reserved` carry a
@@ -98,8 +99,8 @@ pub use answers::{
     answer_questions, AnswerQuestionsError, AnswersError, Recorded as AnswersRecorded,
     Reply as AnswersReply,
 };
-pub use artifacts::shown::{documents as shown_documents, produced as produced_documents, view_of};
-pub use artifacts::store::{view_path, ObjectStore, StoreError};
+pub use artifacts::shown::{documents as shown_documents, produced as produced_documents};
+pub use artifacts::store::{ObjectStore, StoreError};
 pub use artifacts::{
     close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity, StagedHash,
     VerifiedArtifact,
@@ -116,9 +117,7 @@ pub use check::{
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
-pub use human_interaction::{
-    Asking, HumanInteraction, NoInteraction, QuestionsReply, ShownContent, ShownDocument,
-};
+pub use human_interaction::{Asking, HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
 pub use observer::{Observed, RunObserver};
@@ -136,8 +135,8 @@ pub use run::{
     awaits_decision, close_run, create_promotion_successor, create_run, current_escalation,
     execute_run, read_manifest, record_pause_after_crash, resolve_gate, run_redactor,
     session_token_budget, BirthArtifact, BirthOrigin, CallerInfra, CloseRunError, CreateRunParams,
-    DecisionOn, ManifestReadError, OwedMeasurement, Predecessor, PromotionSuccessor,
-    ResolveGateError, RunEnv, RunError, RunReport, RunRoots, RunTerminal,
+    ManifestReadError, OwedMeasurement, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv,
+    RunError, RunReport, RunRoots, RunTerminal,
 };
 pub use run_hold::{contention_for, hold_refused, hold_run, RunHold};
 pub use run_tools::{

@@ -953,7 +953,7 @@ nodes:
     mounts:
       - artifact: {{ node: plan, name: plan.yaml, as: brief.md }}
 "#,
-        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+        view = yunta_core::run_dir::artifacts(&bench.run_dir()).display()
     );
     let RunReport { terminal, state } = bench.run(&parent, EMPTY_FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");

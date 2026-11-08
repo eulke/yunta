@@ -5,8 +5,10 @@
 //!
 //! One crate, because two readers told the same fact in two words — a person at
 //! a terminal, a file a run leaves, a pull request — read it side by side. It
-//! sits on `yunta-core` and `yunta-surco`: the engine hands core data, and the
-//! CLI and the adapters draw it with these words and blocks. What depends on the
+//! sits on `yunta-core`, `yunta-replay` and `yunta-surco`: the engine hands core
+//! data, replay reads what a run is from its log, and the CLI and the adapters
+//! draw both with these words and blocks. Nothing here reads a disk, a clock or
+//! a process, which `tests/pure.rs` holds: what was read, and what depends on the
 //! process — which stream is a terminal, how wide it measures, what the
 //! environment asked for — is the caller's to settle and pass in.
 //!

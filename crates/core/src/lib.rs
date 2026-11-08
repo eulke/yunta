@@ -8,7 +8,8 @@
 //!   `agent`, `template`, `policy`, `schema` and `schema_range`, entering
 //!   through `yaml` and judged by `shape` and `diagnostic`.
 //! - The log and what a run is frozen with: `events`, `manifest`, `hash`,
-//!   `persisted`, and `receipt`, built from the log alone.
+//!   `persisted`, and `receipt`, built from the log alone; `run_dir`, where a
+//!   reader finds what a run holds under its directory.
 //! - What a session may call and write: `port`, `capabilities`, `run_tool`,
 //!   `confinement`, `protected`, `glob`, `fence`, `rail` and `expansion`.
 //! - What a person is shown and may answer: `shown`, `reserved`, `step` and
@@ -67,6 +68,7 @@ mod questions;
 pub mod rail;
 pub mod receipt;
 pub mod reserved;
+pub mod run_dir;
 mod run_tool;
 pub mod schema;
 mod schema_range;
@@ -146,7 +148,7 @@ pub use workflow::{
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
     NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
     RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownDocument,
-    Workflow, WorkflowFault, ARTIFACTS_DIR, OBJECTS_DIR,
+    Workflow, WorkflowFault,
 };
 
 /// The schema major this binary speaks — what a

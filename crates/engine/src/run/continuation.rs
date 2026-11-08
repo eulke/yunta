@@ -61,7 +61,7 @@ pub(super) async fn sent_back(ctx: &RunCtx<'_>, node: &NodeId) -> Result<Option<
         .artifacts
         .by_producer(node)
         .map(|held| {
-            ctx.run_dir.join(crate::artifacts::store::view_path(
+            ctx.run_dir.join(yunta_core::run_dir::view(
                 held.producer.as_ref(),
                 &held.artifact.view_name(),
             ))

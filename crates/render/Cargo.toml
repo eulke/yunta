@@ -18,9 +18,12 @@ yunta-core.workspace = true
 # Yunta's facts are said and drawn in Surco's words, blocks and surfaces.
 yunta-surco.workspace = true
 serde = { workspace = true, features = ["derive"] }
+# What a run is, as its log says: the frame, the stats and the history a page draws.
+yunta-replay.workspace = true
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
+yunta-replay = { workspace = true, features = ["testkit"] }
 yunta-testkit-core.workspace = true
 yunta-surco = { workspace = true, features = ["golden"] }
 serde_json.workspace = true

@@ -9,8 +9,9 @@ use yunta_core::events::{
     ArtifactId, EventPayload, InTree, Outside, ScopeDerivedPayload, ScopeEvent, ShapeRead,
     ShapesReadPayload, StoredEvent, TaskEvent,
 };
+use yunta_core::shown::ShownContent;
 use yunta_core::{ArtifactKind, CommitSha, ContentHash, NodeId};
-use yunta_engine::{BirthArtifact, BirthOrigin, RunReport, RunTerminal, ShownContent};
+use yunta_engine::{BirthArtifact, BirthOrigin, RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, Bench};
 
 mod common;

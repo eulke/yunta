@@ -245,7 +245,7 @@ pub(crate) fn interpreted(
     bytes: &[u8],
 ) -> Result<VerifiedArtifact, ArtifactFailure> {
     let artifact = ArtifactId::from(spec);
-    let path = super::store::view_path(node, &artifact.view_name());
+    let path = yunta_core::run_dir::view(node, &artifact.view_name());
     let content = interpret(
         spec.kind(),
         bytes,
@@ -264,7 +264,7 @@ pub(crate) fn interpreted(
 
 /// Where `node`'s view of `artifact` sits, as a diagnostic names it.
 pub(super) fn view_path(node: &NodeId, artifact: &ArtifactId) -> String {
-    super::store::view_path(Some(node), &artifact.view_name())
+    yunta_core::run_dir::view(Some(node), &artifact.view_name())
         .display()
         .to_string()
 }

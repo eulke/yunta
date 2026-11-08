@@ -122,7 +122,7 @@ async fn no_reroute_is_spent_on_a_command_the_frozen_config_lacks() {
         .await
         .unwrap()
         .expect("the failure is a pause with a menu");
-    assert_eq!(node, yunta_engine::DecisionOn::Node("lint".into()));
+    assert_eq!(node, yunta_core::events::DecisionOn::Node("lint".into()));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, ["abort"]);
 }

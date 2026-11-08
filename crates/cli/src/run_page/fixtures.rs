@@ -195,7 +195,7 @@ pub(crate) fn parked_on_lint() -> (RunPhase, Decided) {
         },
     };
     let decided = Decided {
-        on: yunta_engine::DecisionOn::Node(NodeId::from("lint")),
+        on: yunta_core::events::DecisionOn::Node(NodeId::from("lint")),
         escalation: exhausted_escalation().into_payload(),
         shown: Vec::new(),
         beside: Beside { evidence: true },

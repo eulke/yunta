@@ -95,9 +95,7 @@ pub use budget::session_token_budget;
 pub use close::{close_run, CloseRunError};
 pub use create::{create_run, run_redactor, BirthArtifact, BirthOrigin, CreateRunParams};
 pub(crate) use ctx::RunCtx;
-pub use escalation::{
-    awaits_decision, current_escalation, resolve_gate, DecisionOn, ResolveGateError,
-};
+pub use escalation::{awaits_decision, current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
 pub(in crate::run) use exec::find_node;
 pub(in crate::run) use pause::pause;

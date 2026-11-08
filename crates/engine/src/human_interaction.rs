@@ -41,7 +41,7 @@ pub struct Asking<'a> {
     pub mode: &'a yunta_core::ModeName,
 }
 
-pub use yunta_core::shown::{ShownContent, ShownDocument};
+use yunta_core::shown::ShownDocument;
 
 /// One surface's reply to a `kind: questions` artifact:
 /// the answers plus which channel produced them and who answered — the

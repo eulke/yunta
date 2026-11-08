@@ -1,370 +1,440 @@
-# Implementation Plan: `run-state`
+# Implementation Plan: `run-pages`
 
-Spec: `SPEC-run-state.md`, approved on 2026-11-07. Status: **approved on 2026-11-07**. Task list: `tasks/todo.md`. Base: `feature/yunta-tui` at `8c833576`. `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`.
+Spec: `SPEC-run-pages.md`, approved on 2026-11-07. Status: **approved on 2026-11-07**. Task list: `tasks/todo.md`. Base: `feature/yunta-tui` at `13cdd69c`. `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`.
 
 ## Overview
 
-What derives a run's state from its log leaves `yunta-engine` for a crate of its own, `yunta-replay`, at `crates/replay`. The move goes module by module, bottom up, so the workspace compiles and its suite passes after each phase.
+Every page Yunta shows becomes a value in `yunta-render` that one trait draws. What a run offers next becomes data in `yunta-replay`, and every command a reader is told to type becomes a `NextStep`, spelled once.
 
-Every caller's import changes in it, so each item takes its one path and its name in the same step: there is no alias, no re-export and no old name at any point. The phases are:
-1. what nothing else depends on: `modes` and the registry's values;
-2. replay, with the cycle cut under a test that sees it;
-3. the stats and the history;
-4. the receipt and the verification findings;
-5. what a node is doing now, and the frame;
-6. the docs, the proof and the close.
+The work goes bottom up, so that by the time a page moves it names nothing of the CLI:
+1. what the pages stand on: the crate edge, `DecisionOn`, the run directory's layout;
+2. the commands, as data and spelled once;
+3. the actions a run offers;
+4. one decision block, and the words of a parked run;
+5. what is left of the CLI's `render` module;
+6. one form for every page, changed in place;
+7. the run's pages move;
+8. every other command's page moves;
+9. the review.
+
+Each phase ends with the workspace compiling, its suite green and every golden byte for byte. The user reviews it, and it is committed.
 
 ## Architecture Decisions
 
-**1. The crate.** `crates/replay/Cargo.toml`:
-
-```toml
-[package]
-name = "yunta-replay"
-description = "What a run is, as its log says: replay and every reading derived from it"
-# version, edition, rust-version, license and repository from the workspace
-
-[dependencies]
-yunta-core.workspace = true
-# The words a frame calls a run and a node by, and their marks.
-yunta-surco.workspace = true
-chrono.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-thiserror.workspace = true
-```
-
-- The root is replay. `lib.rs` holds what `replay.rs` holds today: `RunState`, its fold and its reads, and `dedup_findings`.
-- Replay's parts stay private files of the root: `activity`, `clock`, `decisions`, `refuse`, `tree`, and `attempt` for what `live` held.
-- What lives in a private part and is part of the root's API is named once, at the root: `TimeSpent`, `Timeline`, `ReplayError`, `Submissions`, `FindingActivity`. That is its only path.
-- `RunView`, the events read and the state they replay to, is the engine's alone (`pub(crate)`, 48 uses): it stays in the engine, in `run_log.rs`, beside the log it reads.
-- The readings are public modules, each the only path to its items: `modes`, `registry`, `stats`, `history`, `receipt`, `verification_effectiveness` and `frame`. The root re-exports nothing from them.
-- Its `//!`:
+**1. Every command a reader is told to type is a `NextStep`.** It is never serialized: no payload, schema or JSON document holds one, so its shape is free, and its unused `Serialize`, `Deserialize` and `JsonSchema` derives go. A blank the reader fills is part of the data:
 
 ```rust
-//! What a run is, as its log says: the events folded into a [`RunState`],
-//! and every reading of a run derived from that state and its inputs: the
-//! frame a surface draws ([`frame`]), the stats, a workflow's history, the
-//! receipt, the verification findings, and the nodes a mode schedules.
-//!
-//! Pure: nothing here opens a file, reads a clock or spawns a task. An
-//! instant, the registry's word on the engine, a past run's log: each comes
-//! in as an argument its caller read. So a crate that reads a run needs none
-//! of the engine that drives one, and a reading at a chosen instant is the
-//! same in a test as in production.
-//!
-//! Its modules stand in layers, each naming only the ones beneath:
-//! `modes` and `registry`; replay, at the root; `stats`; `history`; then
-//! `receipt`, `verification_effectiveness` and `frame`.
-```
-
-**2. The two rules, held by tests.**
-
-```rust
-// crates/replay/tests/pure.rs
-/// What replay derives depends on its inputs alone, so its manifest names no
-/// runtime, no store and no engine: the day one is added, this says where
-/// the work belongs instead.
-#[test]
-fn the_crate_reads_nothing_but_its_inputs() {
-    let manifest = include_str!("../Cargo.toml");
-    for named in ["tokio", "rusqlite", "sqlx", "yunta-storage", "yunta-engine"] {
-        assert!(
-            !manifest.contains(named),
-            "yunta-replay names {named}; what reads a disk, a clock or a process belongs to the engine"
-        );
-    }
+// crates/core/src/step.rs
+/// A command line a person or an agent types, as data: every one Yunta tells
+/// a reader to type, and the git command it points a reader to.
+/// `yunta_render::command` writes each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NextStep {
+    Status { run: RunId, node: Option<NodeId> },
+    Follow { run: RunId },
+    Resume { run: RunId },
+    Cancel { run: RunId },
+    Close { run: RunId },
+    Review { run: RunId },
+    Open { run: RunId },
+    Receipt { run: RunId },
+    Verify { run: RunId },
+    ResolveGate { run: RunId, answer: Answer },
+    Run { workflow: Arg<String> },
+    Check { workflow: String },
+    List,
+    ListRuns { reach: Reach },
+    Schemas,
+    Schema { document: Arg<String>, json: bool },
+    Doctor { sessions: bool },
+    Test,
+    Init,
+    Pack { verb: PackVerb },
+    Gc,
+    Help,
+    ShowCommit { commit: String },
 }
 
-// crates/replay/tests/layers.rs
-/// The crate's modules from the bottom. A file belongs to the public module
-/// its path starts with, and every other file to replay, at the root.
-const LAYERS: [&[&str]; 5] = [
-    &["modes", "registry"],
-    &["replay"],
-    &["stats"],
-    &["history"],
-    &["receipt", "verification_effectiveness", "frame"],
-];
-
-/// What replay folds never depends on what is read off it: each module names,
-/// through `crate::`, only modules in a layer beneath its own.
-#[test]
-fn each_module_names_only_the_modules_beneath_it() { /* walks src/ */ }
-```
-
-- `layers.rs` reads `src/` at test time (a test may read files; the crate may not).
-- `crate::RunState` names the root, and `crate::stats::RunStats` names `stats`. A file in a layer that names its own layer's sibling, or a layer above, fails with both names.
-
-**3. Replay's names.**
-
-```rust
-impl RunState {
-    /// The state `events` leave a run in, folded in order.
-    pub fn replay(events: &[StoredEvent]) -> RunState;
-    /// How many events of each kind this binary does not know, which a
-    /// newer engine wrote.
-    pub fn unknown_kinds(&self) -> Vec<UnknownKindCount>;
-    // The field it counts, `unknown_kinds: Vec<(Seq, String)>`, is `unknown_events`:
-    // the method and the field are two things, with two names.
-
-    // attempt.rs, what `live` held: what a node is doing now
-    pub fn running_since(&self, node: &NodeId) -> Option<DateTime<Utc>>;
-    pub fn last_event_age(&self, node: &NodeId, now: DateTime<Utc>) -> Option<Duration>;
-    pub fn open_sessions(&self, node: &NodeId) -> Vec<OpenSession>;
-    pub fn recent_tool_calls(&self, node: &NodeId, limit: usize) -> Vec<ToolCall>;
-}
-```
-
-- `UnknownKindCount`, `NodeState`, `NodeWait`, `OpenSession` and `ToolCall` are imported from `yunta_core::events` by whoever names them.
-- `Submissions` and `FindingActivity` move from `stats.rs` into `activity.rs`, and are public at the root: what replay counts, which the stats read.
-
-**4. The stats.**
-
-```rust
-impl RunStats {
-    /// The run's stats as they stand at `now`: an open attempt reports how
-    /// long it has been working, and a run still going measures its clock to
-    /// `now`. A run that finished or broke stops at its last event.
-    pub fn at(state: &RunState, workflow: &Workflow, now: DateTime<Utc>) -> RunStats;
-    /// The run's stats as its log stands, with no instant after it: an
-    /// attempt still open has no elapsed time, which is unknown, not zero.
-    pub fn as_logged(state: &RunState, workflow: &Workflow) -> RunStats;
-}
-```
-
-- `stats_observed_at` becomes the private `observed(state, workflow, until: Option<DateTime<Utc>>)` behind the two.
-- `compute_run_stats`, `compute_run_stats_of` and `compute_run_stats_at` are gone. Their 31 callers replay once and call one of the two.
-- `median` stays in `stats`.
-
-**5. The history.**
-
-```rust
-impl RunSummary {
-    pub fn of(run_id: RunId, workflow_hash: ContentHash, workflow: &Workflow, events: &[StoredEvent]) -> RunSummary;
-}
-impl PriorEstimation {
-    /// What the past runs say a new one costs; `None` below [`MIN_SAMPLES`].
-    pub fn of(history: &[RunSummary]) -> Option<PriorEstimation>;
-}
-/// Fewer independent samples than this say nothing: a number without a
-/// distribution behind it reads like knowledge it is not. Every signal
-/// read across past runs, an estimate or a verification finding, keeps it.
-pub const MIN_SAMPLES: usize = 3;
-```
-
-- `budget_caution` and `Percentiles` stay as they are.
-
-**6. The receipt and the verification findings.**
-
-```rust
-// receipt.rs: Receipt and its parts are yunta_core::receipt's, named from there
-pub fn closed(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], event_chain: EventChainStatus) -> Result<Receipt, ReceiptError>;
-pub fn so_far(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], event_chain: EventChainStatus) -> Receipt;
-
-// verification_effectiveness.rs
-impl VerificationFindings {
-    pub fn of(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> VerificationFindings;
-}
-```
-
-- `render_json` is gone: its callers write `serde_json::to_string_pretty(&receipt)`.
-- `verification_effectiveness::MIN_SAMPLES` is gone: it reads `history::MIN_SAMPLES`.
-
-**7. The modes.**
-
-```rust
-pub fn scheduled(workflow: &Workflow, mode: &ModeName, left_out: &[LeftOut]) -> Option<HashSet<NodeId>>;
-pub fn included(workflow: &Workflow, mode: &ModeName) -> Option<HashSet<NodeId>>;
-pub fn reached<'a>(workflow: &'a Workflow, mode: &ModeName, left_out: &[LeftOut]) -> Vec<&'a Node>;
-pub fn dependencies(workflow: &Workflow, included: Option<&HashSet<NodeId>>) -> HashMap<NodeId, Vec<NodeId>>;
-```
-
-They were `included_nodes`, `mode_included_nodes`, `reached_nodes` and `dependencies_in_mode`; each body stays as it is.
-
-**8. The registry's values, and the read that stays.**
-
-```rust
-// crates/replay/src/registry.rs: what a run's registry says, as values
-pub struct Engine { pub liveness: EngineLiveness, pub prompt: Option<Prompt>, pub words: Option<PathBuf>, pub at: DateTime<Utc> }
-pub enum EngineLiveness { Alive, Dead, Unrecorded, Unknown }
-pub struct Prompt { pub node: Option<NodeId>, pub since: DateTime<Utc>, pub pid: Pid }
-impl Engine {
-    pub fn this(at: DateTime<Utc>) -> Engine;
-    pub fn asks_about(&self, node: &NodeId) -> bool;
+/// An argument of a command line: the value a reader types as it is, or a
+/// blank they fill in, written as the argument's name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Arg<T> {
+    Given(T),
+    Blank,
 }
 
-// crates/engine/src/process_registry.rs
-/// What the registry under `run_dir` says about the engine driving it, at `at`.
-pub fn read_engine(run_dir: &Path, probe: &dyn OwnerProbe, at: DateTime<Utc>) -> Engine;
+/// How a `resolve-gate` line answers a decision: with no option, which puts
+/// the decision to the person at a terminal; with an option left blank for
+/// the reader to pick off the menu above it; or with `option`, its words left
+/// blank when it asks for some.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Answer {
+    Asked,
+    Blank,
+    Picked { option: OptionId, words: bool },
+}
+
+/// Which runs `list --runs` lists: this repository's open ones, the closed
+/// ones too, or every run on this machine.
+pub enum Reach { Repository, WithClosed, Machine }
+
+/// What `yunta pack` does to a pack.
+pub enum PackVerb { Add, Update, Remove, New }
 ```
 
-`engine_liveness`, `engine_prompt`, `engine_words`, `read_registry` and `child_pid` stay, returning the crate's values.
-
-**9. The frame.**
+`yunta_render::command` writes them. `Reader` moves there from the CLI's `error.rs`:
 
 ```rust
+// crates/render/src/command.rs
+/// Who copies a command off a line: a person, who reads a run by its handle,
+/// or an agent, who copies its whole id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reader { Person, Agent }
+
+impl Reader {
+    /// The run as this reader names it on a line.
+    pub fn name_of(self, run: &RunId) -> &str;
+}
+
+/// The command line a person types for `step`.
+pub fn line(step: &NextStep) -> String;
+
+/// The command line `reader` types for `step`.
+pub fn line_for(step: &NextStep, reader: Reader) -> String;
+
+/// What an action does, in the words beside its command.
+pub fn effect(effect: &Effect) -> &'static str;
+```
+
+What goes away:
+- `Spell`, and every parameter that carries it: render's gate, plan, spec, shown, receipt, published and decision block; the forge's `GitHubForge::configure(repo, token)` and `MockForge::new(state)`.
+- `yunta_testkit_core::spell`, the copy in `engine/tests/receipt.rs`, and `the_test_spelling_matches_the_cli_for_every_step`.
+- Every command function of `advice`. `render::pause::make_room` stops spelling `yunta gc` itself.
+
+In their place, one test in the CLI parses the line of every kind of `NextStep`, for both readers, with the CLI's clap definition: a spelling clap refuses fails it. A test in render writes every kind once.
+
+Four texts change, because a better form of a command replaces a worse one. The documentation follows each:
+- `yunta schema <kind>` becomes `yunta schema <document>`, its argument's one name, which is also what clap calls it. This touches the skill `init` writes, `docs/concepts.md`, `docs/guide.md`, `docs/reference.md`, `docs/troubleshooting.md` and `docs/compatibility.md`.
+- "the workflow fails `yunta check`" names the workflow it refused: `yunta check <path>`.
+- `--adapter mock` with `--detach` says it "hands the run to another process", since `yunta resume` is not a line to type there.
+- `yunta stats` with neither a run nor `--workflow`, or with both, is refused by clap as an argument group. That is the refusal every other usage error gets, and it removes the two hand-written sentences that named `yunta stats` bare.
+
+**2. What a run offers next is `RunFrame::actions`.** `after_for`'s rules move whole into `crates/replay/src/frame/actions.rs`:
+
+```rust
+/// What a reader can do next for a run: the command, and what it does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Action {
+    pub step: NextStep,
+    pub effect: Effect,
+}
+
+/// What an action does to the run it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    ContinuesFromLog,
+    ContinuesWhereStopped,
+    WaitsForReset,
+    HandsBackOnceSettled,
+    RetriesOnceTreeChanged,
+    ReadsPlan,
+    ShowsWhatItWaitsOn,
+    Stops,
+    Closes,
+    Certifies,
+    FindsWhereLogStops,
+}
+
 impl RunFrame {
-    /// One run's frame: from its replayed state, the workflow its manifest
-    /// froze, the history the caller read, what its registry says about the
-    /// engine driving it, and the instant it is looked at.
-    pub fn of(run_id: &RunId, workflow: &Workflow, state: &RunState, prior: Option<&PriorEstimation>, engine: &Engine, now: DateTime<Utc>) -> RunFrame;
+    /// The actions a reader can take next for this run, `decision` being the
+    /// one it stopped on when its log rebuilds one.
+    pub fn actions(&self, decision: Option<&GateWaitingPayload>) -> Vec<Action>;
+}
+
+impl RunPhase {
+    /// What a parked run waits on; `None` for a run nobody has to touch.
+    pub fn waiting_on(&self) -> Option<&WaitingOn>;
+    /// The node a run paused on a limit's reset is held for, and when it resumes.
+    pub fn reset_wait(&self) -> Option<(&NodeId, DateTime<Utc>)>;
 }
 ```
 
-- `run_frame` and `run_frame_of` are gone.
-- `chronicle`, `run_standing`, `node_word`, `Counter`, `TaskCounter` and every frame type keep their names in `frame`.
-- `ChildLink`, `Degradation` and `Reroute` are named from `yunta_core::events`.
+- `advice::parked` and `advice::reset_pause` become those two methods: they are readings of replay's data.
+- The run page and the closing take the actions and draw them with `command::line` and `command::effect`. The JSON a program reads draws them with `command::line_for(.., Reader::Agent)`.
+- A step one page adds of its own stays the page's: the run page's `open` "in a browser", or the field's listings. It is a `NextStep` beside words of that page.
 
-**10. Callers change in the step that changes what they call.**
-- A module's names change first, in place in the engine, with every caller. Then the module moves, with every caller's path.
-- The move does all of this:
-  - the file moves with `git mv`, so its history follows;
-  - the engine's root stops re-exporting it;
-  - each caller is changed: the engine's modules (from `crate::`), its tests, the CLI and the testkit;
-  - the crate's dependencies are added to each manifest where its first use arrives, along with the crate table.
-- Neither step leaves an alias, a re-export or an old name, and the workspace compiles and passes after each. Where a name can only stand in the new crate (a method of `RunState`), its rename and its move are one step.
+**3. The run directory a reader resolves is core's.** `ARTIFACTS_DIR` and `OBJECTS_DIR` are already core's, in `workflow/artifacts.rs`. They move to a new `crates/core/src/run_dir.rs` with the compositions that use them:
+- `object(run_dir, hash)` was `ObjectStore::path_of`;
+- `view(node, name)` was `view_path`;
+- `view_of(shown)`;
+- `artifacts(run_dir)` was `artifacts_view`.
 
-A step that leaves an old name or a second path is not done.
+The engine's `ObjectStore`, `run_dir.rs` and `artifacts/shown.rs` call them, and the engine keeps its working space (`scratch/`, staging, units), which no reader resolves. The run's branch is one value per run, so the caller computes it with `run_branch` and hands it to the page. Each item has one path, `yunta_core::run_dir::…`, and core's root re-export of the two constants goes.
 
-**11. Tests beside their code.** A test stands with the code it proves, in the step that moves that code:
-- A target that proves only the new crate's code moves into `crates/replay/tests/`, with its fixtures and its assertions as they are.
-- A target that proves two crates' code splits, each assertion with the crate that owns what it checks. Together they prove what the one did.
-- A type's test samples stand beside the type, behind the crate's `testkit` feature, as `yunta-core`'s literal ids and `sample_payloads` do; the crate's own tests enable it through a dev-dependency on the crate.
-
-The survey of the engine's targets, by what each reads:
-
-| Target | Reads | Where it goes | Task |
-|---|---|---|---|
-| `logs_from_runs`, with `tests/fixtures/logs/` | replay; one assertion reads a pause's sentence through `yunta-render` | splits: replay asserts the `PauseReason` the old log replays to, and `yunta-render`'s `pause.rs` tests assert that value's sentence; the target and its fixtures move, and its tag becomes `[test replay/logs_from_runs]` | 6 |
-| `replay`, with `replay/` | replay and `yunta-testkit-core` | moves | 6 |
-| `older_words` | `yunta-core` and `yunta-render`, nothing of the engine | moves to `yunta-render`, and its tag becomes `[test render/older_words]` | 6 |
-| `time_spent`, `stats` | the stats and the history | move | 8 |
-| `verification_effectiveness` | the verification findings | moves | 10 |
-| `live_derivation`, with `live_derivation/` | the stats and what `live` held | moves | 11 |
-| `view`, with `view/{declared,standing,stops}.rs` | the frame, and the testkit's `node_frame` | moves as `frame`, once the frame's samples stand beside the frame | 13 |
-| `chronicle` | the frame's chronicle | moves | 13 |
-| `properties` | replay's fold, the frame and the chronicle; and runs on a `Bench` | splits: the properties of the fold, the chronicle and the frame move as `properties`, with the log generator; those that drive an engine stay | 13 |
-
-A target that drives an engine (a `Bench`, a run) stays in the engine.
-
-The frame's samples: `yunta-testkit/src/frames.rs` builds frame values only because the frame stood in the engine. They become associated functions of their types in `frame`, behind `#[cfg(feature = "testkit")]`, and `frames.rs` goes:
+**4. One decision block, in `yunta_render::escalation`.**
+- `status/decision.rs` joins it: `section`, `claim_words` and `run_tree_line`.
+- So do `gate::decision`, `gate::record`, `gate::routes` and `Route`.
+- `run_page::Decided` becomes `escalation::Decision`:
 
 ```rust
-RunFrame { phase, nodes, ..RunFrame::sample(&RUN) }
-NodeFrame { attempt: Some(2), ..NodeFrame::sample(&id, standing) }
+/// The decision a parked run waits on, as its log rebuilds it: whose it is,
+/// the escalation, and the documents it shows.
+pub struct Decision<'a> {
+    pub on: &'a DecisionOn,
+    pub escalation: &'a GateWaitingPayload,
+    pub shown: &'a [ShownDocument],
+}
 ```
 
-**12. What names a path, in the step that moves it.**
-- From Phase 1:
-  - the workspace's `members` and `[workspace.dependencies]`;
-  - CI's "check each crate in isolation";
-  - `release.yml`: publish `yunta-replay` after `yunta-core`, wait for its index, and only then `yunta-engine`;
-  - the crate table of `.agents/architecture.md`.
-- From Phase 2: `AGENTS.md`'s "replay, the log store" row (`crates/replay/src/lib.rs`), and `xtask/src/smells.rs`'s `wildcards_in_folds` path.
-- Phase 6 writes:
-  - the engine's `//!`, its map losing what left;
-  - the crate's `//!`, and each moved module's;
-  - `CAPABILITY-MAP.md`, already done.
+`DecisionOn` moves from `engine/src/run/escalation.rs` to `core/src/events/gates/escalation.rs`, beside `Escalation`, in Phase 1. The CLI's prompts (`ask/`), `resolve-gate` and `review` take `Route` from `escalation`.
+
+**5. The words of a parked run join `yunta_render::pause`:** `STALLED`, `asking`, `asking_on`, `parked_on`, `parked_claim` and `parked_in_full`. With decisions 1, 2 and 4, nothing is left in `advice`, and it is deleted. Its tests split by what they hold:
+- the actions go to `crates/replay/src/frame/actions/tests.rs`;
+- the spelling to `crates/render/src/command/tests.rs`;
+- the words to `crates/render/src/pause/tests.rs`.
+
+**6. Nothing of the CLI's `render` module is left.**
+- `counter.rs` and `status/progress.rs`'s `summary` become `crates/render/src/progress.rs`.
+- `node_display` becomes `impl From<&NodeFrame> for NodeDisplay`, and `called` moves into `crates/render/src/state.rs`.
+- `render::engine` is gone: its callers call `yunta_engine::read_engine`.
+- `progress::frame` and `frame_of` are gone: their 9 callers replay once and call `RunFrame::of`.
+- `stream.rs`, `surface_lines`, `blocks_lines`, `draw`, `RunExit` and `exit` join `output`, which becomes `crates/cli/src/output/` (`mod.rs`, `stream.rs`, `exit.rs`).
+- `Outcome` moves from `error.rs` to `output/exit.rs`.
+- `surface::child_row` and `children_by_node` become `crates/render/src/children.rs`, which the run page and the live region both read.
+
+**7. One form for a page.**
+
+```rust
+// crates/render/src/page.rs
+/// A page a person reads: a value its caller fills with what it read, drawn
+/// into one document.
+pub trait Page {
+    fn document(&self, look: &Look) -> Doc;
+}
+
+// crates/cli/src/output/mod.rs
+/// What a command hands back: the page a person reads, the JSON a program
+/// reads (the answer itself), and the verdict its exit code reports.
+pub(crate) trait Answer: serde::Serialize {
+    fn page(&self) -> impl Page + '_;
+    fn outcome(&self) -> Outcome;
+}
+```
+
+- `emit` draws `answer.page()` for a person and serializes the answer for `--json`, so the JSON documents keep the types that print them today.
+- A page moves in two steps. First its form changes in place: a struct, named by what it shows, implementing `Page`. Then it moves with `git mv`.
+- `impl<P: Page + ?Sized> Page for &P` lets a page be handed by reference. While an answer still draws its page in the CLI, it is its own page (`fn page(&self) -> impl Page + '_ { self }`). When its page moves to render, `page()` builds the render value from the answer's fields.
+- A command with no JSON draws its page with `output::show(look, &page)`, which takes the place of `output::document(look, doc)`.
+- `crates/render/src/page.rs` is the map of every page, and `crates/render/src/page/` holds them:
+
+| Page | From |
+|---|---|
+| `page::Run` (scopes `Status`, `Closing`, `Browser`), with `run/{facts,story,evidence}.rs` | `cli/src/run_page/` |
+| `page::Node` | `cli/src/commands/status/node.rs` |
+| `page::Field` (`field::{Group, Row}`) | `cli/src/commands/list/{runs,inbox}.rs` |
+| `page::Stats`, `page::History` (`stats/{facts,time}.rs`) | `cli/src/commands/stats/{run,workflow,facts,time}.rs` |
+| `page::Doctor`, `page::Verified` (`checklist.rs`) | `cli/src/commands/{doctor/mod,verify}.rs` |
+| `page::Gate` | `render/src/gate.rs` (`GatePage`, `page`, `whole_page`, `above`) |
+| `page::Plan`, its desk | `render/src/plan/` |
+| `page::Spec`, `page::Shown`, `page::Findings`, `page::Receipt` | `render/src/{spec,shown,findings,receipt}.rs` |
+| `page::Cancelled`, `page::Closed`, `page::Opened` | `cancel/page.rs`, `close.rs`, `open.rs` |
+| `page::Answered`, `page::Collected`, `page::Review` | `resolve_gate.rs`, `gc/page.rs`, `review.rs` (the plan off a terminal, with the commands that answer it) |
+| `page::Catalog`, `page::Initialized`, `page::NewWorkflow`, `page::Schema` | `list/mod.rs`, `init.rs`, `new.rs`, `schema.rs` |
+| `page::Installed`, `page::PackInventory`, `page::NewPack` | `pack.rs` with `pack/page.rs`, `pack_audit.rs`, `pack/scaffold.rs` |
+| `page::Tested`, `page::Verdict`, `page::Stopped` | `test/mod.rs`, `verdict.rs`, `drive.rs` |
+
+`receipt::unknown_kinds`, which every page about a run reads, goes to `yunta_render::state` rather than into the receipt's page.
+
+A name the work finds better is settled when the page moves and recorded in the task. `published` stays a module of render: it is what a forge publishes, made of pages, not a page.
+
+**8. A page reads nothing.** `surface::closing::Outline` becomes `page::Places`:
+
+```rust
+/// Where a run lives and where its paths are shown from, as the caller found them.
+pub struct Places<'a> {
+    pub run_dir: &'a Path,
+    pub worktree: &'a Path,
+    /// The run's own branch.
+    pub branch: &'a str,
+    /// The branch it started from, as its manifest froze it.
+    pub base_branch: &'a str,
+    pub isolation: Isolation,
+    pub cwd: &'a Path,
+    pub home: Option<&'a Path>,
+}
+```
+
+- The decision comes in as `escalation::Decision`, the documents as `ShownDocument`s, the engine's word as `Engine`, and the closing's exit code as a number.
+- The stats workflow page stops drawing a sub-document to terminal lines: it appends the findings document's blocks. Its 3 goldens say whether that prints the same. If it does not, the work stops and asks.
+- `crates/render/tests/pure.rs` reads render's manifest: core, replay and surco, and no engine, store or runtime.
+
+**9. A row of the field is data.** `Inbox`'s `RunRow` holds `reason`, `command` and `said` already worded. `field::Row` holds instead:
+- what the run is;
+- the action it is listed for;
+- what holds it, as replay's `WaitingOn` and the registry's `Prompt`.
+
+Render words each row. `list --runs --json` serializes the same fields through a serializer in the CLI's `json/`, built on render's words, so its bytes stay the same.
+
+**10. The goldens move with their tests, by `git mv`.** `crates/cli/goldens/{status,closing,open,stats,field}` go to `crates/render/goldens/`, beside its own `blocks`, `document` and `gate`, with no clash. Each test reads `CARGO_MANIFEST_DIR/goldens/<dir>`, so only the crate changes. The CLI keeps no golden.
+
+**11. The smell is `command_outside_command_rs`.**
+- It counts every shipped crate but the two below render: core, whose schema titles read `yunta workflow`, and surco, whose catalog's samples are drawn. Neither can name render's `command` module.
+- It skips `crates/render/src/command.rs` and the CLI's clap declarations.
+- Measured over that reach at the base, it counts one line, `pause::make_room`'s `yunta gc`, which decision 1 removes.
+- `xtask/smells.baseline` renames its key and keeps 0.
+- Its fix reads "spell the command in yunta-render's command module".
+
+**12. The docs, each in the commit that changes what it says:**
+- `.agents/architecture.md`: render's row (core, replay, surco) and its rule's smell;
+- render's `//!` map;
+- each moved module's `//!`;
+- the CLI's `main.rs` map;
+- `docs/` for the texts of decision 1;
+- `CAPABILITY-MAP.md`.
+
+**13. A commit per phase.** Each one follows the user's approval of its checkpoint, after every step of the `ci` job passes one build at a time with `CARGO_INCREMENTAL=0`, and is followed by `cargo clean`. Phase 9 updates pull request #30.
 
 ## Dependency Order
 
 ```
-0 baseline: release size, stub runs
-1 crate + pure test + modes + registry ── engine, CLI, testkit import them
-    └── 2 replay at the root, the cycle cut under layers.rs
-            └── 3 stats, history (RunStats::at, PriorEstimation::of, MIN_SAMPLES)
-                    ├── 4 receipt, verification_effectiveness
-                    └── 5 attempt (RunState's methods), frame (RunFrame::of)
-                            └── 6 docs, gate, measure, review, commit
+0 baseline: goldens' digests, JSON outputs, release size
+1 the edge render → replay, pure.rs, DecisionOn to core, core::run_dir, NextStep's derives
+    └── 2 NextStep's kinds, yunta_render::command, Spell gone, advice's commands gone, the smell
+            └── 3 RunFrame::actions, Effect, RunPhase's readings; after and after_for gone
+                    └── 4 escalation's one decision block; pause's words; advice gone
+                            └── 5 the CLI's render module gone: progress, state, children, output
+                                    └── 6 Page, Answer::page, render's documents as pages, every page's form in place
+                                            ├── 7 the run's pages, their goldens, Places
+                                            └── 8 every other command's page
+                                                    └── 9 review, measure, pull request
 ```
 
-Phases 4 and 5 both stand on 3 and on nothing of each other; they run in that order to keep one change in review at a time.
+Phase 8 stands on Phase 6 alone, so it could run before Phase 7. Phase 7 goes first because it moves most of the goldens, and so proves the method on the largest page.
 
 ## Phases
 
 ### Phase 0: the baseline
-- A release build at `8c833576`, twice: the size of each, and how much the two differ.
-- `replay_cost.py`, from `session-ends`' `ends_cost.py`: 15 runs on the Claude Code stub, base against base, with medians of `between_secs`, `working_secs` and the wall time. The engine replays its log at every step, so `between_secs` is where a slower replay would show.
-- Kept in `.plans/yunta-tui/proof/run-state/`.
+- The digest of each of the 99 goldens, 78 in the CLI and 21 in render.
+- The JSON and terminal outputs of `status`, `status --node`, `status --json`, `list --runs [--json]`, `stats [--json]` and `stats --workflow`. They are printed by a release build at the base, over a copy of a few runs in a scratch home; `~/.yunta` is never touched.
+- The release binary's size.
+- All kept in `.plans/yunta-tui/proof/run-pages/`. No commit.
 
 ### Checkpoint A
-- The baseline's numbers, and the spread of the base against itself.
+- The numbers, and the suite's count at the base: 274 binaries and 4,531 tests.
 
-### Phase 1: the crate, its purity, and what nothing else depends on
-- The crate's manifest, `lib.rs` and `tests/pure.rs`. `pure.rs` fails first because the crate does not exist.
-- `modes` moves with its new names, and `registry` with the three values. `Engine::read` becomes `yunta_engine::read_engine`.
-- The workspace, CI, the release order and the crate table follow (decision 12).
+### Phase 1: what the pages stand on
+- `crates/render/tests/pure.rs` is written first, and holds from the start. The edge to `yunta-replay` follows, and the test still holds.
+- `DecisionOn` moves to core, and `ShownDocument` and `ShownContent` are named from `yunta_core::shown`; the engine's re-export goes.
+- `core/src/run_dir.rs` takes the constants and the four compositions.
+- `NextStep` loses its unused derives.
+- `.agents/architecture.md`'s row.
 
 ### Checkpoint B
-- `cargo test -p yunta-replay`, `-p yunta-engine`, `-p yunta --bins` green. `docs --check` and `smells --check` pass.
+- `cargo test -p yunta-core -p yunta-render -p yunta-replay`, the engine in batches, `-p yunta --bins`, and every golden's digest unchanged. Then the gate and commit 1.
 
-### Phase 2: replay, and the cycle cut
-- `replay.rs` and `replay/` move into the root, with `RunState::replay` and `unknown_kinds`.
-- `tests/layers.rs` is written first, and is seen red: `Submissions` and `FindingActivity` first move into `crates/replay/src/stats.rs`, the start of `stats`, so replay names a module above it. Then they move into `activity.rs`, and the test passes.
-- About 200 calls of `derive` and the 58 engine modules that reach `crate::replay` change.
-- `logs_from_runs` splits and moves, `replay` moves, and `older_words` moves to `yunta-render` (decision 11). `AGENTS.md` and the smell counter's path follow.
+### Phase 2: every command, spelled once
+- `NextStep` grows to every kind, with `Arg`, `Answer`, `Reach` and `PackVerb`, and `yunta_render::command` writes them.
+- The clap parse test is written first, and fails because a kind has no spelling.
+- `Spell` goes from render, the adapters, testkit-core and the engine's tests.
+- Every command function of `advice` goes, and its 44 callers spell through `command`.
+- The four texts change, with the docs and the tests that print them.
+- The smell is retargeted.
 
 ### Checkpoint C
-- The same suites green, and `layers.rs` seen red, then green. No `derive(` call and no `crate::replay` is left.
+- The same suites, the adapters' forge tests, the CLI's integration tests, `smells --check` at 0, `docs --check`, and every golden unchanged. The only output that changed is the four texts. Then the gate and commit 2.
 
-### Phase 3: the stats and the history
-- `stats.rs` and `history.rs` move, with `RunStats::at` and `as_logged`, `RunSummary::of`, `PriorEstimation::of` and one `MIN_SAMPLES`.
-- `time_spent` moves.
-
-### Phase 4: the receipt and the verification findings
-- `receipt/` becomes `receipt.rs`, with `closed` and `so_far`; `render_json` is gone. `verification_effectiveness.rs` moves, with `VerificationFindings::of`.
+### Phase 3: what a run offers next
+- `actions.rs`, with `after_for`'s tests moved and seen to pass against `RunFrame::actions`.
+- `RunPhase::waiting_on` and `reset_wait`.
+- The run page, the closing and the JSON take actions.
+- `after` and `after_for` are gone.
 
 ### Checkpoint D
-- After Phases 3 and 4: the same suites green, and the engine's receipt goldens byte for byte.
+- `-p yunta-replay`, `-p yunta --bins`, `status_cmd`, `run_flow`, the parked-runs targets, and the JSON outputs of Phase 0 byte for byte. Then the gate and commit 3.
 
-### Phase 5: what a node is doing now, and the frame
-- `live.rs` becomes `attempt.rs`, as methods of `RunState`. `view/` becomes `frame/`, with `RunFrame::of`.
-- The `view` target moves as `frame`.
-- No file of the eight is left in `crates/engine/src`.
+### Phase 4: one decision, and the words of a parked run
+- `escalation` takes the decision block and `Decision`. The gate's page and the run page draw from it.
+- `pause` takes the words. `advice` and its tests are gone, its tests split by owner.
 
 ### Checkpoint E
-- The same suites green, and every golden of the CLI and the engine byte for byte. A search for each old name in the spec's criterion 4 finds nothing.
+- The status, closing and gate goldens byte for byte, and the decision's JSON the same. Then the gate and commit 4.
 
-### Phase 6: what it says, proof and close
-- The `//!`s (decision 12), and `cargo xtask docs --about` on the module's diff.
-- Every step of the `ci` job, one build at a time, with `CARGO_INCREMENTAL=0`.
-- The release size and `replay_cost.py`, base against module.
+### Phase 5: what is left of the CLI's `render`
+- `progress.rs`, `NodeDisplay::from`, `called`, `children.rs`.
+- `output/` with `stream`, `exit`, `Outcome` and `RunExit`.
+- `render::engine`, `frame` and `frame_of` are gone.
 
 ### Checkpoint F
-- The user reviews the whole diff and the measurements. No commit until approved.
-- Then: one commit, the push, the pull request's list and test plan, CI on Linux and macOS, and `cargo clean`.
+- No `crate::render` is left in the CLI; the same suites. Then the gate and commit 5.
+
+### Phase 6: one form
+- `page.rs` and `Page`.
+- Render's documents become pages under `page/`, by `git mv`, losing their positional arguments: gate, plan, spec, shown, findings, receipt.
+- `Answer::page`. The CLI's pages change form in place: each a struct that implements `Page`, with nothing moved yet.
+
+### Checkpoint G
+- Render's 21 goldens and the CLI's 78 byte for byte. Then the gate and commit 6.
+
+### Phase 7: the run's pages
+Into `page/`, with their tests, fixtures and goldens:
+- the run page;
+- the node page;
+- the field, with its rows as data;
+- the stats and history;
+- the doctor's and `verify`'s checklist.
+
+`Places` replaces `Outline`.
+
+### Checkpoint H
+- The 78 goldens, now under `crates/render/goldens/`, byte for byte by digest; the Phase 0 outputs the same; `pure.rs`. Then the gate and commit 7.
+
+### Phase 8: every other command's page
+- The 16 pages of decision 7's last five rows, each moved with its test.
+
+### Checkpoint I
+- No CLI file builds a `Doc` but `output` and the live region, which a search confirms. Then the gate and commit 8.
+
+### Phase 9: the review
+- `cargo xtask docs --about` on the whole diff.
+- The suite's count explained against the base.
+- The release size against Phase 0.
+- A review of the module's diff, then pull request #30's list and test plan, CI on Linux and macOS, and `cargo clean`.
+
+### Checkpoint J
+- The user reviews the measurements and the pull request.
 
 ## Verification
 
 | Spec criterion | How |
 |---|---|
-| 1. The crate, pure | `tests/pure.rs`; `cargo tree -p yunta-replay -e normal` lists no store. It lists `tokio`, which reaches it only through `yunta-core`, whose port and process modules declare it: `core` with no IO is out of the map on purpose |
-| 2. No cycle | `tests/layers.rs`, seen red in Phase 2 before the cut |
-| 3. One path | A search for `pub use` in `crates/replay/src/lib.rs` finds only its private parts' items; the engine's `lib.rs` names nothing that moved; `yunta_core` types are named from `yunta_core` |
-| 4. Names | A search for each old name finds nothing in `crates/` |
-| 5. The engine reads only the registry | `crates/engine/src` holds none of the eight files |
-| 6. Goldens, suite | `git status` shows no golden changed; the suite's count is explained against 270 binaries and 4,528 tests. The new crate adds its library's binary and `pure` and `layers`, and the moved targets keep their tests |
-| 7. CI, release, docs | The gate's `crates` step checks `yunta-replay` alone; `release.yml` reviewed; `docs --check` and `smells --check` |
-| 8. No dependency | `cargo deny check`, and `Cargo.lock`'s diff adds only the workspace's own crate |
-| 9. Cost | The release size and `replay_cost.py`, base against module, within the base's own spread |
+| 1. Every page in `page`, one form | Every page implements `Page`; a search for `Doc::new` in `crates/cli/src` finds only `output` and the live region |
+| 2. Render reads nothing | `crates/render/tests/pure.rs`; a search for `yunta_engine` in `crates/render` finds nothing |
+| 3. Actions | `RunFrame::actions`'s tests, moved from `advice`; a search for `after_for` finds nothing |
+| 4. One spelling | The clap parse test over every kind; `smells --check` with `command_outside_command_rs` at 0; a search for `Spell` finds nothing |
+| 5. Names | A search for each old name in the spec's table finds nothing in `crates/` |
+| 6. Nothing printed changes | 99 goldens' digests against Phase 0's; the Phase 0 outputs byte for byte, but for the four texts of decision 1; the CLI's integration tests unchanged but for those texts; the suite's count explained |
+| 7. Docs, gate | `docs --check`, `smells --check`, `schema --check`, `cargo deny check`, every step of the `ci` job, at each commit |
 
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| A diff of about 190 files hides a change of behavior | High | No assertion changes, no golden changes; each phase compiles and passes before the next; the bodies of moved functions are compared with `git diff -M` against their old files |
-| A rename leaves a caller on an old name | Medium | The compiler finds every one: no old name survives as an alias. Criterion 4's search confirms |
-| Git loses a file's history | Low | `git mv` before any edit, and each moved file's diff read with `-M` |
-| The crate table outgrows `.agents/architecture.md`'s 6,144 bytes | Medium | The row and the dependency lists take about 85 of the 99 bytes left; the engine's row loses "replay". If it does not fit, cut what the code already says, never the table |
-| A doc link names `crate::` in the engine | Low | `cargo doc` with `-D warnings`, which the gate runs |
-| A call across the crates costs time | Low | `lto = "fat"`, `codegen-units = 1`; Phase 0 and Phase 6 measure it |
-| The suite's memory on this Mac | Medium | The gate runs in the foreground or with its steps apart, as the last module's had to |
+| A move changes what a page prints | High | Every golden's digest at each checkpoint against Phase 0's; a move is `git mv` before any edit, read with `-M`; a page's form changes in place before it moves |
+| A JSON document changes | High | The JSON keeps the types that print it today; the field's rows serialize through one serializer built on render's words; Phase 0's JSON outputs compared at Checkpoints D, H and I |
+| Removing `Spell` changes what a forge publishes | Medium | The adapters' forge tests and the engine's pull request and external gate tests pass unchanged; render's `pull-request.md` golden holds |
+| A blank or a new kind spells a line clap refuses | Medium | The clap parse test over every kind and both readers |
+| The four texts ripple into docs and tests | Medium | Each one named in decision 1; `docs_sync` and the docs' own checks pass; nothing else printed changes |
+| The stats workflow page prints differently once it composes its findings | Low | Its 3 goldens decide; if they change, the work stops and asks |
+| Phases 2, 7 and 8 touch about 60 files each | High | One concern per phase; the compiler finds every caller, since no alias is left; tasks of up to ~5 files each |
+| The suite's memory on this Mac | Medium | The engine and the CLI in foreground batches, as in `run-state` |
+| `.agents/architecture.md` outgrows its budget | Low | Render's row changes in place, a few bytes |
 
 ## Parallelization
 
-None. Each phase changes the imports the next one reads. A worker per caller crate within one phase would edit the same moved files' callers, so the lead moves each module and its callers in one pass, and the compiler checks it.
+Phases 1 to 7 change, one after another, the imports the next phase reads, so they run in order.
+
+Phase 8's 16 pages are independent of each other: each is a command's own file and its test. They could be built by workers in waves on Haiku, with one audit each, if the user chooses that for Phase 8. Otherwise the lead moves them one by one.
 
 ## Open Questions
 
-None. The spec's three were answered when it was approved.
+None. The four texts of decision 1 change by this plan's approval.

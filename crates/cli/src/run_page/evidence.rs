@@ -56,7 +56,7 @@ impl RunPage<'_> {
         let output = failure.output()?;
         Some(match self.depth.reaches(Depth::Dig) {
             true => Whole::file(
-                yunta_engine::ObjectStore::at(self.paths.run_dir).path_of(output),
+                yunta_core::run_dir::object(self.paths.run_dir, output),
                 self.paths.cwd,
                 self.paths.home,
             ),

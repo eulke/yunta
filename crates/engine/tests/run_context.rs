@@ -1090,7 +1090,7 @@ nodes:
     context:
       - artifact: {{ name: report.md }}
 "#,
-        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+        view = yunta_core::run_dir::artifacts(&bench.run_dir()).display()
     );
     let fixture = format!(
         r#"

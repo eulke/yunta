@@ -47,8 +47,8 @@ What moves:
 | What | To | Note |
 |---|---|---|
 | `replay`, `view`, `live`, `stats`, `history`, `receipt`, `verification_effectiveness`, `modes`, the value types `Engine`, `EngineLiveness`, `Prompt` | `yunta-replay` | About 2,650 lines at the base, 4,143 at `8c833576`. They import only core, surco and each other. Reading `engine.json` stays in the engine |
-| `run_page`, inbox pages, status, stats, doctor | `yunta-render` | They take data; `exit` and disk paths stay outside |
-| The `after_for` table and the spelling of commands | `after_for` to `yunta-replay`, spelling to `yunta-render`, both in `run-pages` | One table: the CLI spells it, the TUI binds keys, the desktop shows buttons |
+| Every page a command shows: `run_page`, the node, the field, stats and history, doctor, and the answer of every other command; and render's own gate, plan, spec, shown, findings and receipt documents | `yunta-render`, as values of one `Page` trait, in `page::` | They take data; reading, the exit code, the streams and the JSON stay in `yunta`. The decision block is one, in `escalation` |
+| The `after_for` table and the spelling of commands | `after_for` to `yunta-replay` as `RunFrame::actions`; every command a person is told to type a `NextStep`, spelled once in `yunta-render`'s `command`; both in `run-pages` | One table: the CLI spells it, the TUI binds keys, the desktop shows buttons. `advice` and `Spell` are gone |
 | Gathering the inbox, run admission, resolve, cancel, close, gc, packs, doctor's checks, detection, the test runner | `yunta-control` | They return data and never print |
 | The models of `card`, `menu`, `form`, `field`, `desk`, `Stroke`, `Press` | `yunta-app` | `hold`, `Console`, `keyboard` and the live region stay in `yunta` |
 | `json/` | stays in `yunta` | Only the CLI and MCP use it; the desktop links the library |
@@ -77,14 +77,13 @@ What moves:
 | `session-ends` | A Codex retry notice no longer ends its session, and no command an agent started outlives its session | nothing |
 | `surco-screen` | Public reading of styles; the ribbon, legend and attention blocks; a screen as data, drawn as Markdown and HTML; a pane's exact width; with their goldens | nothing |
 | `run-state` | The `yunta-replay` crate, cutting the cycle between `replay` and `stats`, each item with one path and a name that says what it is | nothing |
-| `run-pages` | The pages in `yunta-render`, with the CLI printing exactly the same | `run-state` |
+| `run-pages` | Every page in `yunta-render`, in one form; what a run offers next as actions; every command spelled once; the CLI printing exactly the same | `run-state` |
 | `control` | `yunta-control`, with the CLI and MCP mounted on it | `log-follow`, `run-state` |
 | `app-core` | `yunta-app`: stages, screens, effects and moved prompts | `control`, `run-pages`, `surco-screen` |
 | `tui` | `yunta-tui`, bare `yunta` and `deny.toml`, in slices: watch, decide, start. It lays a screen out with Ratatui's `Layout`, draws each pane through Surco's terminal at `Width::exact`, and draws the overlay's box in Surco's glyphs; `surco-screen`'s `tui-reference` frames are its reference | `app-core`, `parked-answers` |
-| `third-party-notices` | Third-party license notices, included when the binary is distributed | nothing |
 | `desktop` | Reserved only: no spec and no code yet | `app-core` |
 
-**Order:** `run-guard`, `parked-answers`, `log-follow`, `run-words`, `session-ends`, `surco-screen`, `run-state` and `third-party-notices`, which do not depend on each other → `run-pages` and `control` → `app-core` → `tui`.
+**Order:** `run-guard`, `parked-answers`, `log-follow`, `run-words`, `session-ends`, `surco-screen` and `run-state`, which do not depend on each other → `run-pages` and `control` → `app-core` → `tui`.
 
 **How each module is built:** spec, plan, tasks, implementation, in that order and each with its own approval. The next module starts when this one is closed.
 
@@ -115,6 +114,6 @@ The from-scratch reorganization does not enter: `core` with no IO, `yunta-policy
 
 - `yunta-control` and `yunta-app` are separate crates.
 - `yunta review` at a terminal opens the application at that decision, and the duplicated full-screen loop is deleted. Outside a terminal it prints as before.
-- `third-party-notices` is its own module.
+- `third-party-notices` was dropped on 2026-11-07, at the user's choice, when its spec was read: the license stands in each package's definition, and nowhere else.
 - The names `yunta-control`, `yunta-app` and `yunta-tui` are fixed, as are the module ids. `yunta-state` became `yunta-replay` on 2026-11-07, at the user's choice, when its spec was approved: "state" is `RunState` and `yunta-app`'s own state, and replay is what every module of the crate does.
 - `session-ends` was added on 2026-11-05, after `run-words`: the two bugs the agent audit of 2026-11-03 confirmed, still present at `3456baea`.

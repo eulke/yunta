@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 use surco::doc::Doc;
 use surco::glyphs::Glyphs;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
+use yunta_core::shown::ShownDocument;
 use yunta_core::{Env, NodeId, OptionId, RunId};
-use yunta_engine::ShownDocument;
 use yunta_render::gate::{self, Route};
 use yunta_render::{changes, plan};
 

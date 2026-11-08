@@ -33,7 +33,8 @@ use yunta_core::events::artifacts::{ArtifactLedger, ArtifactRef};
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, EventPayload, RecordedOrigin, StoredEvent,
 };
-use yunta_core::{ArtifactKind, NodeId, NodeKind, ARTIFACTS_DIR};
+use yunta_core::run_dir::ARTIFACTS_DIR;
+use yunta_core::{ArtifactKind, NodeId, NodeKind};
 
 use crate::run_log::RunLog;
 use store::ObjectStore;
@@ -265,7 +266,7 @@ impl<'a> RunArtifacts<'a> {
 /// How a diagnostic names one artifact the run holds: where its view
 /// sits, which is the file a reader opens.
 pub(crate) fn describe(held: &ArtifactRef) -> String {
-    store::view_path(held.producer.as_ref(), &held.artifact.view_name())
+    yunta_core::run_dir::view(held.producer.as_ref(), &held.artifact.view_name())
         .display()
         .to_string()
 }

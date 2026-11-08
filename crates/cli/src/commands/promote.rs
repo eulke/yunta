@@ -271,7 +271,7 @@ nodes:
         // stands: the artifact is there and carries what it should.
         assert_eq!(
             std::fs::read_to_string(
-                yunta_engine::run_dir::artifacts_view(&successor_run_dir).join("plan.yaml")
+                yunta_core::run_dir::artifacts(&successor_run_dir).join("plan.yaml")
             )
             .unwrap(),
             "tasks: []\n"

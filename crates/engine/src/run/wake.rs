@@ -32,7 +32,7 @@ pub(super) async fn resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunEr
             None,
             "engine-artifact-store",
             FindingSeverity::Minor,
-            Location::run(RelativePath::of([yunta_core::OBJECTS_DIR]), None),
+            Location::run(RelativePath::of([yunta_core::run_dir::OBJECTS_DIR]), None),
             FindingCause::ArtifactsUnverified {
                 unchecked,
                 verified,

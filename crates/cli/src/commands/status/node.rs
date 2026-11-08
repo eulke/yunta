@@ -108,7 +108,7 @@ impl NodePage<'_> {
         };
         let whole = failure.output().map(|output| {
             Whole::file(
-                yunta_engine::ObjectStore::at(self.run_dir).path_of(output),
+                yunta_core::run_dir::object(self.run_dir, output),
                 self.cwd,
                 self.home,
             )
@@ -138,7 +138,7 @@ impl NodePage<'_> {
             .iter()
             .map(|artifact| {
                 paths::shown(
-                    &self.run_dir.join(yunta_engine::view_path(
+                    &self.run_dir.join(yunta_core::run_dir::view(
                         Some(&node.id),
                         &artifact.view_name(),
                     )),

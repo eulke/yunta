@@ -18,7 +18,7 @@ every state from it, and what a person reads is drawn from that data in Surco.
 | `yunta-core` | domain types, the port, shapes, protection | surco |
 | `yunta-storage` | the append-only log; SQLite stays behind its interface | core |
 | `yunta-replay` | replay and every reading of a run, with no IO | core, surco |
-| `yunta-render` | Yunta's own facts and documents, said in Surco | core, surco |
+| `yunta-render` | Yunta's own facts and documents, said in Surco | core, replay, surco |
 | `yunta-adapters` | `claude-code`, `codex` and `mock` behind the port | core, render, surco |
 | `yunta-engine` | scheduling, the task cycle | core, storage, replay, surco |
 | `yunta` | the commands | core, storage, replay, engine, adapters, render, surco |

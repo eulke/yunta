@@ -17,11 +17,11 @@ use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
 use surco::words::Standing;
+use yunta_core::events::DecisionOn;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
+use yunta_core::shown::ShownDocument;
 use yunta_core::step::NextStep;
 use yunta_core::{OptionId, Responder, RunId};
-use yunta_engine::DecisionOn;
-use yunta_engine::ShownDocument;
 use yunta_render::gate::Route;
 use yunta_replay::RunState;
 

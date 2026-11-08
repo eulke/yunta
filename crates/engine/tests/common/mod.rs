@@ -533,7 +533,7 @@ sessions:
 /// instead of hanging a test).
 pub struct SequencedInteraction {
     choices: std::sync::Mutex<std::collections::VecDeque<yunta_core::events::HumanChoice>>,
-    shown: std::sync::Mutex<Vec<Vec<yunta_engine::ShownDocument>>>,
+    shown: std::sync::Mutex<Vec<Vec<yunta_core::shown::ShownDocument>>>,
 }
 
 impl SequencedInteraction {
@@ -559,7 +559,7 @@ impl SequencedInteraction {
     }
 
     /// The documents each decision was asked with, oldest first.
-    pub fn shown(&self) -> Vec<Vec<yunta_engine::ShownDocument>> {
+    pub fn shown(&self) -> Vec<Vec<yunta_core::shown::ShownDocument>> {
         self.shown.lock().unwrap().clone()
     }
 }

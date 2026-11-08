@@ -266,3 +266,21 @@ impl std::ops::Deref for Escalation {
         &self.0
     }
 }
+
+/// Whom a parked run's decision belongs to: a node, or the run itself. Not an
+/// `Option<NodeId>`: beside a decision that may not exist, `None` would read as none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionOn {
+    Node(NodeId),
+    Run,
+}
+
+impl DecisionOn {
+    /// The node the decision is recorded against, when one owns it.
+    pub fn node(&self) -> Option<&NodeId> {
+        match self {
+            DecisionOn::Node(node) => Some(node),
+            DecisionOn::Run => None,
+        }
+    }
+}

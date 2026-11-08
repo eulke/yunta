@@ -297,7 +297,7 @@ impl ToolsHost {
 fn born_run_dir(root: &std::path::Path) -> PathBuf {
     let run_dir = root.join("run");
     for dir in [
-        yunta_core::ARTIFACTS_DIR,
+        yunta_core::run_dir::ARTIFACTS_DIR,
         yunta_engine::run_dir::SCRATCH_DIR,
     ] {
         std::fs::create_dir_all(run_dir.join(dir)).expect("create the run's own directories");

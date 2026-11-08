@@ -349,7 +349,7 @@ pub(super) async fn materialize(
 ) -> std::io::Result<(PathBuf, ContentHash)> {
     let store = ObjectStore::at(run_dir);
     let hash = store.put(content).await?;
-    let path = store.path_of(&hash);
+    let path = yunta_core::run_dir::object(run_dir, &hash);
     Ok((path, hash))
 }
 

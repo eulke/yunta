@@ -6,8 +6,8 @@
 use std::sync::Mutex;
 
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
-use yunta_core::shown::Answered;
-use yunta_engine::{RunReport, RunTerminal, ShownContent, ShownDocument};
+use yunta_core::shown::{Answered, ShownContent, ShownDocument};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 mod common;

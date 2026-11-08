@@ -9,7 +9,8 @@ mod common;
 
 use common::*;
 use yunta_core::events::{EventPayload, Finding, FindingAnswer, FindingSays, GateEvent};
-use yunta_engine::{RunReport, RunTerminal, ShownContent};
+use yunta_core::shown::ShownContent;
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 /// Two reviewers, a fix that answers, and a gate showing the run's

@@ -58,7 +58,7 @@ pub mod reads;
 
 pub use artifacts::{
     ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, ReservedIdentity,
-    UnknownDocument, ARTIFACTS_DIR, OBJECTS_DIR,
+    UnknownDocument,
 };
 pub use command::{node_commands, Resolved, RunCommand};
 pub use context::{

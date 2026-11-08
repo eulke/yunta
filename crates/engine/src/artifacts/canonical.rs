@@ -161,7 +161,7 @@ pub(crate) fn derive_findings(
 /// path to name it by — and the view is where a reader of the run opens
 /// it, which is what a refusal and a diagnostic both have to point at.
 fn document_path(node: Option<&NodeId>, artifact: &ArtifactId) -> String {
-    super::store::view_path(node, &artifact.view_name())
+    yunta_core::run_dir::view(node, &artifact.view_name())
         .display()
         .to_string()
 }

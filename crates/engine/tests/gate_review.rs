@@ -9,8 +9,9 @@
 use yunta_core::events::{
     ArtifactId, Asks, Claim, EventPayload, GateEvent, NodeEvent, Refusal, SessionEvent, Shown,
 };
+use yunta_core::shown::ShownContent;
 use yunta_core::{ArtifactKind, HeldEntry};
-use yunta_engine::{current_escalation, RunError, RunReport, RunTerminal, ShownContent};
+use yunta_engine::{current_escalation, RunError, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
 mod common;

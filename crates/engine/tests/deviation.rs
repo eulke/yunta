@@ -375,7 +375,7 @@ async fn a_plan_shown_after_its_work_carries_the_departures_a_person_accepted() 
     assert_eq!(terminal, RunTerminal::Finished);
     let shown = interaction.shown();
     let at_ship = shown.last().expect("the gate was asked");
-    let yunta_engine::ShownContent::Tasks(review) = &at_ship[0].content else {
+    let yunta_core::shown::ShownContent::Tasks(review) = &at_ship[0].content else {
         panic!("the plan is shown as its tasks: {at_ship:?}");
     };
     let [departure] = review.departed.as_slice() else {

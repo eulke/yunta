@@ -221,7 +221,10 @@ impl RunDocument {
         manifest: &Manifest,
         frame: &RunFrame,
         engine: &yunta_replay::registry::Engine,
-        decision: Option<(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
+        decision: Option<(
+            yunta_core::events::DecisionOn,
+            yunta_core::events::Escalation,
+        )>,
     ) -> Self {
         let escalation = parked_escalation(frame, decision.as_ref());
         RunDocument {
@@ -318,7 +321,10 @@ fn tasks_of(state: &RunState) -> BTreeMap<String, &'static str> {
 /// that is not parked, whatever decision the log rebuilt.
 fn parked_escalation(
     frame: &RunFrame,
-    decision: Option<&(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
+    decision: Option<&(
+        yunta_core::events::DecisionOn,
+        yunta_core::events::Escalation,
+    )>,
 ) -> Option<GateWaitingPayload> {
     decision
         .filter(|_| advice::parked(&frame.phase).is_some())
@@ -379,7 +385,10 @@ fn reason(phase: &RunPhase) -> Option<String> {
 /// pause that reconstructs no menu.
 fn parked_decision(
     run_id: &RunId,
-    decision: Option<(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
+    decision: Option<(
+        yunta_core::events::DecisionOn,
+        yunta_core::events::Escalation,
+    )>,
     phase: &RunPhase,
 ) -> Option<DecisionJson> {
     if !matches!(phase, RunPhase::Waiting { .. }) {
@@ -396,7 +405,10 @@ pub(crate) async fn decision_of(
     run_dir: &std::path::Path,
     state: &RunState,
 ) -> Result<
-    Option<(yunta_engine::DecisionOn, yunta_core::events::Escalation)>,
+    Option<(
+        yunta_core::events::DecisionOn,
+        yunta_core::events::Escalation,
+    )>,
     crate::error::CliError,
 > {
     Ok(yunta_engine::current_escalation(manifest, run_dir, state).await?)
@@ -409,7 +421,7 @@ pub(crate) async fn shown_of(
     run_dir: &std::path::Path,
     escalation: &yunta_core::events::GateWaitingPayload,
     state: &RunState,
-) -> Result<Vec<yunta_engine::ShownDocument>, crate::error::CliError> {
+) -> Result<Vec<yunta_core::shown::ShownDocument>, crate::error::CliError> {
     Ok(
         yunta_engine::shown_documents(run_dir, escalation.shows(), state, manifest.request())
             .await?,

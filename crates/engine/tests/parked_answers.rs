@@ -1,11 +1,12 @@
 //! A run stopped by its token cap, answered from another process: the answer waits on the
 //! log for the engine that takes it, and one answer pays for one engine.
 
+use yunta_core::events::DecisionOn;
 use yunta_core::events::{
     EventDraft, EventPayload, GateEvent, GateResolvedPayload, HumanChoice, NodeEvent, PauseReason,
     RunEvent, RunPausedPayload, RunResumedPayload,
 };
-use yunta_engine::{awaits_decision, current_escalation, DecisionOn, RunTerminal};
+use yunta_engine::{awaits_decision, current_escalation, RunTerminal};
 use yunta_replay::RunState;
 use yunta_testkit::Bench;
 use yunta_testkit_core::{FixedClock, Log};

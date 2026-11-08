@@ -1,12 +1,10 @@
 //! What a person or an agent can type next, as data. The CLI writes each
 //! step as the command it accepts.
 
-use serde::{Deserialize, Serialize};
-
 use crate::ids::{NodeId, OptionId, RunId};
 
 /// What a person or an agent can type next. Data; `advice::spell` writes each one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NextStep {
     Status {
         run: RunId,
