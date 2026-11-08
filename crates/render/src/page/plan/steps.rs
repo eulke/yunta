@@ -63,7 +63,7 @@ pub(super) fn steps(doc: Doc, steps: &[Vec<&Task>]) -> Doc {
 /// task, labelled by `labels` in the order the steps hold the tasks, and an
 /// arrow from each to every task that waits on it. `None` when no task waits
 /// on another: every task is in one step, which the index says.
-pub(super) fn order(steps: &[Vec<&Task>], labels: &[&str]) -> Option<Diagram> {
+pub(in crate::page) fn order(steps: &[Vec<&Task>], labels: &[&str]) -> Option<Diagram> {
     let tasks: Vec<&Task> = steps.iter().flatten().copied().collect();
     let place = |id: &yunta_core::TaskId| tasks.iter().position(|task| task.id == *id);
     let links: Vec<(usize, usize)> = tasks
@@ -84,7 +84,7 @@ pub(super) fn order(steps: &[Vec<&Task>], labels: &[&str]) -> Option<Diagram> {
 /// What tells `ids` apart: each without the words they all open with, where they share
 /// any and each has something left. `global-pack-storage` and `global-pack-cli` are
 /// `storage` and `cli`; `T001` and `T002` share no word and stay as they are.
-pub(super) fn short_names(ids: &[&str]) -> Vec<String> {
+pub(in crate::page) fn short_names(ids: &[&str]) -> Vec<String> {
     let first = ids.first().copied().unwrap_or_default();
     let shared = first
         .match_indices('-')

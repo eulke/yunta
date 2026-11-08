@@ -32,13 +32,13 @@ use yunta_storage::Storage;
 
 use crate::context::Context;
 use crate::error::CliError;
-use crate::output::document;
+use crate::output::show;
 use crate::output::Outcome;
 use crate::project::Project;
 
 mod page;
 
-use page::Report;
+use page::Collected;
 
 pub async fn gc(dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -54,32 +54,32 @@ pub async fn gc(dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
         limits,
         std::sync::Arc::new(ctx.clock),
     );
-    let mut report = Report::new(dry_run);
+    let mut collected = Collected::new(dry_run);
     let Reclaimed {
         removed,
         given_back,
         idle,
-    } = reclaim(&ctx, &pool, &mut report).await?;
+    } = reclaim(&ctx, &pool, &mut collected).await?;
     for run_id in &removed {
-        forget_units(&ctx, &pool, run_id, &mut report).await;
+        forget_units(&ctx, &pool, run_id, &mut collected).await;
     }
     if !dry_run {
         for (run_id, tree) in &given_back {
-            give_back(&ctx, &pool, run_id, tree, &mut report).await;
+            give_back(&ctx, &pool, run_id, tree, &mut collected).await;
         }
-        adopt(&ctx, &pool, &mut report).await;
+        adopt(&ctx, &pool, &mut collected).await;
         for (run_id, places) in &idle {
-            take_old_layouts(&ctx, run_id, places, &mut report).await;
+            take_old_layouts(&ctx, run_id, places, &mut collected).await;
         }
-        tidy(&ctx, &pool, &mut report).await;
+        tidy(&ctx, &pool, &mut collected).await;
     } else {
-        would_adopt(&ctx, &pool, &mut report).await;
+        would_adopt(&ctx, &pool, &mut collected).await;
         match pool.report(ctx.supervision()).await {
-            Ok(kept) => report.now = Some(kept.to_string()),
-            Err(e) => report.problem(format!("the project's checkouts: {e}")),
+            Ok(kept) => collected.now = Some(kept.to_string()),
+            Err(e) => collected.problem(format!("the project's checkouts: {e}")),
         }
     }
-    document(look, report.page());
+    show(look, &collected);
     Ok(Outcome::Success)
 }
 
@@ -101,11 +101,11 @@ async fn give_back(
     pool: &yunta_engine::CheckoutPool,
     run_id: &RunId,
     tree: &Path,
-    report: &mut Report,
+    collected: &mut Collected,
 ) {
     let released = yunta_engine::release_run_checkout(pool, tree, run_id, ctx.supervision());
     if let Err(e) = released.await {
-        report.problem(format!("run {}: {e}", run_id.handle()));
+        collected.problem(format!("run {}: {e}", run_id.handle()));
     }
 }
 
@@ -117,42 +117,42 @@ async fn forget_units(
     ctx: &Context,
     pool: &yunta_engine::CheckoutPool,
     run_id: &RunId,
-    report: &mut Report,
+    collected: &mut Collected,
 ) {
     let supervision = ctx.supervision();
     if let Err(e) = yunta_engine::prune_worktrees(&ctx.cwd, supervision).await {
-        report.problem(format!("run {}: {e}", run_id.handle()));
+        collected.problem(format!("run {}: {e}", run_id.handle()));
         return;
     }
     if let Err(e) = yunta_engine::forget_run_units(pool, &ctx.cwd, run_id, supervision).await {
-        report.problem(format!("run {}: {e}", run_id.handle()));
+        collected.problem(format!("run {}: {e}", run_id.handle()));
     }
 }
 
 /// Takes in the units' branches runs made before refs kept their work:
 /// what each unit committed stays, kept by its ref, and no list of the
 /// project's branches shows it.
-async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, report: &mut Report) {
+async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, collected: &mut Collected) {
     match yunta_engine::adopt_unit_branches(pool, &ctx.cwd, None, ctx.supervision()).await {
         Ok(taken) if !taken.is_empty() => {
             let branches = surco::text::counted_as(taken.len(), "unit branch", "unit branches");
-            report.did("kept", format!("the work of {branches} by refs"));
+            collected.did("kept", format!("the work of {branches} by refs"));
         }
         Ok(_) => {}
-        Err(e) => report.problem(format!("the units' branches: {e}")),
+        Err(e) => collected.problem(format!("the units' branches: {e}")),
     }
 }
 
 /// Says which of the units' branches runs made before refs kept their work
 /// a pass would take in, taking none.
-async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, report: &mut Report) {
+async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, collected: &mut Collected) {
     match yunta_engine::adoptable_unit_branches(pool, &ctx.cwd, ctx.supervision()).await {
         Ok(branches) if !branches.is_empty() => {
             let branches = surco::text::counted_as(branches.len(), "unit branch", "unit branches");
-            report.did("would keep", format!("the work of {branches} by refs"));
+            collected.did("would keep", format!("the work of {branches} by refs"));
         }
         Ok(_) => {}
-        Err(e) => report.problem(format!("the units' branches: {e}")),
+        Err(e) => collected.problem(format!("the units' branches: {e}")),
     }
 }
 
@@ -160,7 +160,7 @@ async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, report: &
 /// measured where nobody did, a build unused within retention is emptied,
 /// the builds stay within the budget, and a free checkout holding no
 /// build goes — and says what the pool keeps.
-async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool, report: &mut Report) {
+async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool, collected: &mut Collected) {
     let unused = ctx
         .project
         .config
@@ -172,7 +172,7 @@ async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool, report: &mut Rep
     match pool.tidy(unused, ctx.supervision()).await {
         Ok(tidied) => {
             for (checkout, bytes) in &tidied.emptied {
-                report.did(
+                collected.did(
                     "emptied",
                     format!(
                         "the build of {} ({})",
@@ -182,31 +182,36 @@ async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool, report: &mut Rep
                 );
             }
             for checkout in &tidied.removed {
-                report.did(
+                collected.did(
                     "removed",
                     format!("the unused checkout {}", shown(checkout)),
                 );
             }
-            report.now = Some(tidied.kept.to_string());
+            collected.now = Some(tidied.kept.to_string());
         }
-        Err(e) => report.problem(format!("the project's checkouts: {e}")),
+        Err(e) => collected.problem(format!("the project's checkouts: {e}")),
     }
 }
 
 /// Takes away the clean checkouts run `run_id`, which nothing drives,
 /// kept at `places` before the project's pool, and names the ones kept.
-async fn take_old_layouts(ctx: &Context, run_id: &RunId, places: &[PathBuf], report: &mut Report) {
+async fn take_old_layouts(
+    ctx: &Context,
+    run_id: &RunId,
+    places: &[PathBuf],
+    collected: &mut Collected,
+) {
     let shown = |dir: &Path| surco::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
     for place in places {
         match yunta_engine::remove_old_checkouts(&ctx.cwd, place, ctx.supervision()).await {
             Ok(done) => {
                 for checkout in done {
                     match checkout {
-                        yunta_engine::OldCheckout::Removed(path) => report.did(
+                        yunta_engine::OldCheckout::Removed(path) => collected.did(
                             "removed",
                             format!("{} of run {}", shown(&path), run_id.handle()),
                         ),
-                        yunta_engine::OldCheckout::Kept(path) => report.did(
+                        yunta_engine::OldCheckout::Kept(path) => collected.did(
                             "kept",
                             format!(
                                 "{} of run {}: something in it is uncommitted",
@@ -217,7 +222,7 @@ async fn take_old_layouts(ctx: &Context, run_id: &RunId, places: &[PathBuf], rep
                     }
                 }
             }
-            Err(e) => report.problem(format!("run {}: {e}", run_id.handle())),
+            Err(e) => collected.problem(format!("run {}: {e}", run_id.handle())),
         }
     }
 }
@@ -229,7 +234,7 @@ async fn take_old_layouts(ctx: &Context, run_id: &RunId, places: &[PathBuf], rep
 async fn reclaim(
     ctx: &Context,
     pool: &yunta_engine::CheckoutPool,
-    report: &mut Report,
+    collected: &mut Collected,
 ) -> Result<Reclaimed, CliError> {
     let Some(retention_days) = ctx
         .project
@@ -238,7 +243,7 @@ async fn reclaim(
         .as_ref()
         .and_then(|s| s.retention_days)
     else {
-        report.unretained = true;
+        collected.unretained = true;
         return Ok(Reclaimed::default());
     };
 
@@ -248,12 +253,12 @@ async fn reclaim(
         .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())?;
 
     let now = yunta_core::Clock::now(&ctx.clock);
-    let mut collected = Reclaimed::default();
+    let mut reclaimed = Reclaimed::default();
     for run_id in run_ids {
         let events = match storage.events_for_run(&run_id) {
             Ok(events) => events,
             Err(e) => {
-                report.problem(format!("run {}: {e}", run_id.handle()));
+                collected.problem(format!("run {}: {e}", run_id.handle()));
                 continue;
             }
         };
@@ -262,8 +267,8 @@ async fn reclaim(
         let state = yunta_replay::RunState::replay(&events);
         let is_terminal = state.ended();
         if !is_terminal {
-            if let Some(places) = old_layouts(ctx, pool, &run_id, &state, report).await {
-                collected.idle.push((run_id.clone(), places));
+            if let Some(places) = old_layouts(ctx, pool, &run_id, &state, collected).await {
+                reclaimed.idle.push((run_id.clone(), places));
             }
         }
         let age_days = (now - last.timestamp).num_days();
@@ -271,8 +276,8 @@ async fn reclaim(
             continue;
         }
         if !is_terminal {
-            if let Some(tree) = parked_checkout(ctx, pool, &state, report).await {
-                collected.given_back.push((run_id.clone(), tree));
+            if let Some(tree) = parked_checkout(ctx, pool, &state, collected).await {
+                reclaimed.given_back.push((run_id.clone(), tree));
             }
             continue;
         }
@@ -284,45 +289,45 @@ async fn reclaim(
         match ctx.project.run_dir(run_id.as_str()) {
             Some(run_dir) => {
                 let bound = state.run.checkout();
-                let tree = worktree_of(&ctx.project, &run_dir, &run_id, bound, report);
+                let tree = worktree_of(&ctx.project, &run_dir, &run_id, bound, collected);
                 if let Some(tree) = &tree {
-                    if pool_owns(pool, ctx, tree, report).await == Some(true) {
-                        collected.given_back.push((run_id.clone(), tree.clone()));
+                    if pool_owns(pool, ctx, tree, collected).await == Some(true) {
+                        reclaimed.given_back.push((run_id.clone(), tree.clone()));
                     }
                 }
-                if remove_run(ctx, pool, &run_dir, &run_id, bound, report).await {
-                    report.reclaimed += 1;
-                    if !report.dry_run {
-                        collected.removed.push(run_id.clone());
+                if remove_run(ctx, pool, &run_dir, &run_id, bound, collected).await {
+                    collected.reclaimed += 1;
+                    if !collected.dry_run {
+                        reclaimed.removed.push(run_id.clone());
                     }
                 }
             }
             None => {
-                if purge_rows(&storage, &run_id, events.len(), report) {
-                    report.reclaimed += 1;
+                if purge_rows(&storage, &run_id, events.len(), collected) {
+                    collected.reclaimed += 1;
                 }
             }
         }
     }
-    Ok(collected)
+    Ok(reclaimed)
 }
 
 /// Purges the rows of a terminal run whose `run.dir` is already gone, and
 /// answers whether they went; under a dry run they only would.
-fn purge_rows(storage: &Storage, run: &RunId, events: usize, report: &mut Report) -> bool {
-    if report.dry_run {
+fn purge_rows(storage: &Storage, run: &RunId, events: usize, collected: &mut Collected) -> bool {
+    if collected.dry_run {
         let count = surco::text::counted(events, "event");
-        report.did("would purge", format!("{count} of run {}", run.handle()));
+        collected.did("would purge", format!("{count} of run {}", run.handle()));
         return true;
     }
     match storage.purge_run(run) {
         Ok(purged) => {
             let count = surco::text::counted(purged.rows, "event");
-            report.did("purged", format!("{count} of run {}", run.handle()));
+            collected.did("purged", format!("{count} of run {}", run.handle()));
             true
         }
         Err(e) => {
-            report.problem(format!("run {}: {e}", run.handle()));
+            collected.problem(format!("run {}: {e}", run.handle()));
             false
         }
     }
@@ -336,7 +341,7 @@ async fn old_layouts(
     pool: &yunta_engine::CheckoutPool,
     run_id: &RunId,
     state: &yunta_replay::RunState,
-    report: &mut Report,
+    collected: &mut Collected,
 ) -> Option<Vec<PathBuf>> {
     let run_dir = ctx.project.run_dir(run_id.as_str())?;
     let engine = yunta_engine::read_engine(&run_dir, &yunta_engine::lock::SystemProbe);
@@ -348,8 +353,8 @@ async fn old_layouts(
     }
     let mut places = vec![yunta_engine::run_dir::unit_worktrees(&run_dir)];
     let bound = state.run.checkout();
-    if let Some(tree) = worktree_of(&ctx.project, &run_dir, run_id, bound, report) {
-        if pool_owns(pool, ctx, &tree, report).await == Some(false) {
+    if let Some(tree) = worktree_of(&ctx.project, &run_dir, run_id, bound, collected) {
+        if pool_owns(pool, ctx, &tree, collected).await == Some(false) {
             places.push(tree);
         }
     }
@@ -363,13 +368,13 @@ async fn pool_owns(
     pool: &yunta_engine::CheckoutPool,
     ctx: &Context,
     tree: &Path,
-    report: &mut Report,
+    collected: &mut Collected,
 ) -> Option<bool> {
     match pool.owns(tree, ctx.supervision()).await {
         Ok(owned) => Some(owned),
         Err(e) => {
             let shown = surco::paths::shown(tree, &ctx.cwd, ctx.env.home.as_deref());
-            report.problem(format!("left {shown} alone: {e}"));
+            collected.problem(format!("left {shown} alone: {e}"));
             None
         }
     }
@@ -383,7 +388,7 @@ async fn parked_checkout(
     ctx: &Context,
     pool: &yunta_engine::CheckoutPool,
     state: &yunta_replay::RunState,
-    report: &mut Report,
+    collected: &mut Collected,
 ) -> Option<PathBuf> {
     let tree = state.run.checkout()?;
     let continued = state.nodes.iter().any(|(_, record)| {
@@ -395,7 +400,7 @@ async fn parked_checkout(
     if continued {
         return None;
     }
-    (pool_owns(pool, ctx, tree, report).await == Some(true)).then(|| tree.to_path_buf())
+    (pool_owns(pool, ctx, tree, collected).await == Some(true)).then(|| tree.to_path_buf())
 }
 
 /// Removes a terminal run's on-disk footprint — its `run.dir` and, for a
@@ -411,43 +416,43 @@ async fn remove_run(
     run_dir: &Path,
     run_id: &RunId,
     bound: Option<&Path>,
-    report: &mut Report,
+    collected: &mut Collected,
 ) -> bool {
     let shown = |dir: &Path| surco::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
     let (mut removed_any, mut all_removed) = (false, true);
     // The worktree goes through git, which unregisters it as well. A
     // checkout of the project's pool is given back, never taken away.
     if let Some(tree) =
-        worktree_of(&ctx.project, run_dir, run_id, bound, report).filter(|tree| tree.exists())
+        worktree_of(&ctx.project, run_dir, run_id, bound, collected).filter(|tree| tree.exists())
     {
-        match pool_owns(pool, ctx, &tree, report).await {
+        match pool_owns(pool, ctx, &tree, collected).await {
             Some(true) => {}
             None => all_removed = false,
-            Some(false) if report.dry_run => {
-                report.did("would remove", shown(&tree));
+            Some(false) if collected.dry_run => {
+                collected.did("would remove", shown(&tree));
                 removed_any = true;
             }
             Some(false) => match yunta_engine::remove_checkout(&tree, ctx.supervision()).await {
                 Ok(()) => {
-                    report.did("removed", shown(&tree));
+                    collected.did("removed", shown(&tree));
                     removed_any = true;
                 }
                 Err(e) => {
-                    report.problem(format!("failed to remove {}: {e}", shown(&tree)));
+                    collected.problem(format!("failed to remove {}: {e}", shown(&tree)));
                     all_removed = false;
                 }
             },
         }
     }
     if run_dir.exists() {
-        if report.dry_run {
-            report.did("would remove", shown(run_dir));
+        if collected.dry_run {
+            collected.did("would remove", shown(run_dir));
             removed_any = true;
         } else if let Err(e) = tokio::fs::remove_dir_all(run_dir).await {
-            report.problem(format!("failed to remove {}: {e}", shown(run_dir)));
+            collected.problem(format!("failed to remove {}: {e}", shown(run_dir)));
             all_removed = false;
         } else {
-            report.did("removed", shown(run_dir));
+            collected.did("removed", shown(run_dir));
             removed_any = true;
         }
     }
@@ -466,7 +471,7 @@ fn worktree_of(
     run_dir: &Path,
     run_id: &RunId,
     bound: Option<&Path>,
-    report: &mut Report,
+    collected: &mut Collected,
 ) -> Option<PathBuf> {
     let manifest: Manifest =
         match crate::load_manifest(&yunta_engine::run_dir::manifest_path(run_dir))
@@ -474,7 +479,7 @@ fn worktree_of(
         {
             Ok(manifest) => manifest,
             Err(e) => {
-                report.problem(format!("run {}: {e}", run_id.handle()));
+                collected.problem(format!("run {}: {e}", run_id.handle()));
                 return None;
             }
         };

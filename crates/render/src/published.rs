@@ -22,8 +22,7 @@ use yunta_core::port::{GateDecision, PublishRequest};
 use yunta_core::shown::{ShownContent, ShownDocument};
 use yunta_core::step::NextStep;
 
-use crate::gate::GatePage;
-use crate::plan::Form;
+use crate::page::{Form, Gate, Page, Shown};
 
 /// The forge a gate's pull request is drawn for, and what it keeps.
 pub struct Publication<'a> {
@@ -74,7 +73,12 @@ pub fn body(request: &PublishRequest, publication: &Publication<'_>, tail: &str)
 pub fn files(request: &PublishRequest) -> Vec<(String, Vec<u8>)> {
     let drawn = request.shown.iter().filter_map(|document| {
         let name = drawn_name(document)?;
-        let doc = crate::shown::document(document, &request.run_id, Form::Whole);
+        let shown = Shown {
+            document,
+            run: &request.run_id,
+            form: Form::Whole,
+        };
+        let doc = shown.document(&Markdown.look());
         Some((request.folder.at(&name), Markdown.draw(&doc).into_bytes()))
     });
     let held = request
@@ -173,21 +177,27 @@ fn draw(
         }
         Level::NoDocuments | Level::Decision => (&[], Leaves::Nothing),
     };
-    let page = crate::gate::page(GatePage {
-        shown: Some((&request.run_id, documents)),
-        waits: Some(format!(
-            "Gate `{}` waits on this pull request, for {}.",
-            request.decision.node, request.decision.assignee
-        )),
-        note: note(publication, level),
-        changed: request
-            .changed
-            .as_ref()
-            .and_then(|change| crate::changes::of(change, Glyphs::Unicode)),
-        form: Form::Published,
-        decision: decision(request, publication, question, level),
-    });
-    Description { leaves }.draw(&page).trim_end().to_string()
+    let waits = format!(
+        "Gate `{}` waits on this pull request, for {}.",
+        request.decision.node, request.decision.assignee
+    );
+    let note = note(publication, level);
+    let changed = request
+        .changed
+        .as_ref()
+        .and_then(|change| crate::changes::of(change, Glyphs::Unicode));
+    let gate = Gate::OnTheForge {
+        run: &request.run_id,
+        documents,
+        waits: &waits,
+        note: note.as_deref(),
+        changed: changed.as_deref(),
+    };
+    let description = Description { leaves };
+    let page =
+        gate.document(&description.look())
+            .with(decision(request, publication, question, level));
+    description.draw(&page).trim_end().to_string()
 }
 
 /// `document` with a text document's words down to the heading it opens on: its title on the
@@ -195,7 +205,7 @@ fn draw(
 fn down_to_its_title(document: &ShownDocument) -> ShownDocument {
     let mut document = document.clone();
     if let ShownContent::Text(text) = &mut document.content {
-        *text = crate::shown::heading_line(text);
+        *text = crate::page::shown::heading_line(text);
     }
     document
 }
@@ -241,7 +251,7 @@ fn decision(
     let weighing = match level {
         Level::Decision => None,
         Level::Documents(_) | Level::TextTitled | Level::NoDocuments => {
-            crate::shown::before_you_decide(&[], &request.shown)
+            crate::page::shown::before_you_decide(&[], &request.shown)
         }
     };
     blocks.extend(weighing.map(Block::Section));

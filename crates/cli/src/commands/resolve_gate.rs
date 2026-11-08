@@ -24,6 +24,7 @@ use yunta_core::{OptionId, Responder, RunId};
 use yunta_render::command;
 use yunta_render::command::Reader;
 use yunta_render::escalation::Route;
+use yunta_render::page::Page;
 use yunta_replay::RunState;
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
@@ -323,11 +324,18 @@ fn answer(run_id: &RunId, state: GateState) -> ResolveGateAnswer {
     }
 }
 
-impl Answer for ResolveGateAnswer {
+/// A gate's answer, as the person who gave it reads it: what was recorded,
+/// or that nothing was and the run still waits.
+struct Answered<'a> {
+    run_id: &'a RunId,
+    state: &'a GateState,
+}
+
+impl Page for Answered<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let handle = self.run_id.handle();
-        match &self.state {
-            GateState::Resolved { option } => resolved(&self.run_id, option),
+        match self.state {
+            GateState::Resolved { option } => resolved(self.run_id, option),
             GateState::Declined => Doc::new()
                 .with(Headline::new(
                     Standing::NeedsYou.mark(),
@@ -347,6 +355,15 @@ impl Answer for ResolveGateAnswer {
                     )],
                 }),
             GateState::Interrupted => Doc::new(),
+        }
+    }
+}
+
+impl Answer for ResolveGateAnswer {
+    fn page(&self) -> impl Page + '_ {
+        Answered {
+            run_id: &self.run_id,
+            state: &self.state,
         }
     }
 

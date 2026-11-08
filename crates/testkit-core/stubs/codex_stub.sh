@@ -101,11 +101,12 @@ if [ -n "$CODEX_STUB_CHILD_PID_FILE" ]; then
   echo $! > "$CODEX_STUB_CHILD_PID_FILE"
 fi
 
-# Each child opens `ready`, a fifo of this process's, once it is in its
-# group and its pid is written; reading it to its end is the rendezvous.
-ready="${TMPDIR:-/tmp}/codex-stub-ready.$$"
-
+# Each child opens `ready`, a fifo beside the one its knob names, once it is
+# in its group and its pid is written; reading it to its end is the
+# rendezvous. Beside the test's own fifo, it goes with the test's directory
+# however this process ends, and no two stubs meet on one name.
 if [ -n "$CODEX_STUB_GROUP_CHILD" ]; then
+  ready="${CODEX_STUB_GROUP_CHILD}.ready"
   mkfifo "$ready"
   perl -e 'setpgrp(0, 0); open(my $f, ">", $ARGV[0]) or die; print $f $$; close $f; open(my $r, ">", $ARGV[1]) or die; close $r; exec "sleep", "600"' "$CODEX_STUB_GROUP_CHILD" "$ready" < /dev/null > /dev/null 2>&1 &
   cat "$ready" > /dev/null
@@ -113,6 +114,7 @@ if [ -n "$CODEX_STUB_GROUP_CHILD" ]; then
 fi
 
 if [ -n "$CODEX_STUB_ORPHAN_CHILD" ]; then
+  ready="${CODEX_STUB_ORPHAN_CHILD}.ready"
   mkfifo "$ready"
   sh -c 'python3 -c "import os, sys, time; os.setpgrp(); f = open(sys.argv[1], \"w\"); f.write(str(os.getpid())); f.close(); open(sys.argv[2], \"w\").close(); time.sleep(600)" "$0" "$1" < /dev/null > /dev/null 2>&1 &' "$CODEX_STUB_ORPHAN_CHILD" "$ready"
   cat "$ready" > /dev/null

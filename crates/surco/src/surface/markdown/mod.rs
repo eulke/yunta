@@ -5,11 +5,13 @@
 
 use crate::components::{
     Cell, Check, Checklist, Concern, Edge, Evidence, Fields, Holds, Lead, Marked, Next, Paths,
-    Problem, Reads, Refusal, Runs, Section, Table, Whole,
+    Reads, Runs, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Line, Tone};
+use crate::look::{Look, Width};
+use crate::paint::Paint;
 use crate::surface::Surface;
 use text::{cell, cell_code_span, code_span, literal, plain_text};
 
@@ -20,6 +22,7 @@ mod diffstat;
 mod fence;
 pub(in crate::surface) mod fold;
 mod headline;
+mod problem;
 mod screen;
 mod text;
 
@@ -45,6 +48,18 @@ pub struct Markdown;
 
 /// The set a Markdown reader is drawn with: any viewer draws it.
 const GLYPHS: Glyphs = Glyphs::Unicode;
+
+impl Markdown {
+    /// The look a document is built with for a Markdown reader: its glyphs,
+    /// no paint, and no width, since a viewer wraps a file's words.
+    pub fn look(&self) -> Look {
+        Look {
+            glyphs: GLYPHS,
+            paint: Paint::Plain,
+            width: Width::of(None, None),
+        }
+    }
+}
 
 impl Surface for Markdown {
     /// The document, its blocks separated by a blank line.
@@ -105,8 +120,8 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         Block::Diffstat(stat) => diffstat::diffstat(stat),
         Block::Decision(decision) => decision::decision(decision),
         Block::Checklist(list) => self::checklist(list),
-        Block::Problem(problem) => self::problem(problem),
-        Block::Refusal(refusal) => self::refusal(refusal),
+        Block::Problem(said) => problem::problem(said),
+        Block::Refusal(refusal) => problem::refusal(refusal),
         Block::Next(next) => self::next(next),
         Block::Legend(legend) => screen::legend(legend),
         Block::Attention(attention) => screen::attention(attention),
@@ -441,54 +456,6 @@ fn hung(so: Option<&str>, fix: Option<&crate::components::Fix>) -> String {
         }
     }
     out
-}
-
-/// The problem's word in bold and what it says, then where it is and its
-/// line with the part at fault marked under it, fenced as text; then what
-/// helps fix it after an italic `help:`, the items a separator apart.
-fn problem(problem: &Problem) -> String {
-    let mut out = format!(
-        "**{}** {}",
-        problem.severity.word(),
-        plain_text(&problem.said)
-    );
-    if let Some(place) = &problem.at {
-        out.push_str(&format!("  \nat {}", code_span(&place.named())));
-        if let Some((source, before, len)) = place.fault() {
-            let number = place.line;
-            let pad = place.pad();
-            let gutter = GLYPHS.gutter();
-            let marks = GLYPHS.fault().to_string().repeat(len);
-            let under = " ".repeat(crate::width::cell_width(&before));
-            let body = format!("{number} {gutter} {source}\n{pad} {gutter} {under}{marks}");
-            let fence = code::fence(&body);
-            out.push_str(&format!("\n\n{fence}text\n{body}\n{fence}"));
-        }
-    }
-    if !problem.help.is_empty() {
-        let help: Vec<String> = problem.help.iter().map(|item| plain_text(item)).collect();
-        let help = help.join(&format!(" {} ", GLYPHS.sep()));
-        out.push_str(&format!("\n\n_{}_ {help}", crate::surface::terminal::HELP));
-    }
-    out
-}
-
-/// What a command would not do, in bold, and where it looked under it.
-fn refusal(refusal: &Refusal) -> String {
-    let said = format!(
-        "**{}** {}",
-        crate::surface::terminal::REFUSED,
-        refusal
-            .said
-            .split('\n')
-            .map(plain_text)
-            .collect::<Vec<_>>()
-            .join("  \n")
-    );
-    match &refusal.detail {
-        Some(detail) => format!("{said}  \n_{}_", plain_text(detail)),
-        None => said,
-    }
 }
 
 #[cfg(test)]

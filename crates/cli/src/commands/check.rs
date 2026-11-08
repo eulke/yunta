@@ -13,7 +13,7 @@ use yunta_core::ConfigLayer;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
-use crate::output::{blank, document};
+use crate::output::{blank, show};
 use crate::{load_yaml, project};
 
 pub async fn check(
@@ -59,9 +59,14 @@ pub async fn check(
         yunta_replay::verification_effectiveness::VerificationFindings::of(&workflow, &history);
     let outcome = verdict.report(&ctx, &workflow_path, look).await?;
     // Advice after the verdict, which is what was asked for.
-    if let Some(advice) = super::stats::verification_findings(&findings) {
+    if !findings.is_empty() {
         blank();
-        document(look, advice);
+        show(
+            look,
+            &super::stats::VerificationEffectiveness {
+                findings: &findings,
+            },
+        );
     }
     Ok(outcome)
 }

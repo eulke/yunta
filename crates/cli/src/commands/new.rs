@@ -18,11 +18,12 @@ use surco::look::Look;
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_render::command;
+use yunta_render::page::Page;
 
-use super::verdict::{check_again, file_named, Found};
+use super::verdict::{check_again, file_named, Diagnosis};
 use crate::ask::{choose, Choice, Console, Escape, NoAnswer};
 use crate::error::CliError;
-use crate::output::document;
+use crate::output::show;
 use crate::output::Outcome;
 use crate::project;
 use crate::surface::Diagnostics;
@@ -260,7 +261,7 @@ pub async fn new_workflow(
         workflow: &workflow,
         path: &path,
     };
-    written.page(&cwd, &config, look).await
+    written.report(&cwd, &config, look).await
 }
 
 /// The workflow a `shape` skeleton parses to, or why it does not parse.
@@ -298,6 +299,52 @@ async fn write_skeleton(
     Ok(path)
 }
 
+/// What `new` answers with: the file it wrote, and the verdict `yunta check`
+/// reaches on it, said under it; the file alone where something stopped the
+/// check.
+struct NewWorkflow<'a> {
+    /// The workflow's name, which the command that runs it takes.
+    name: &'a str,
+    shape: Shape,
+    path: &'a Path,
+    /// Where the file is, as a reader in this directory names it.
+    at: &'a str,
+    diagnosis: Option<&'a Diagnosis>,
+}
+
+impl Page for NewWorkflow<'_> {
+    fn document(&self, _look: &Look) -> Doc {
+        let written =
+            |mark| Headline::new(mark, file_named(self.path), "written").fact(self.shape.label());
+        let Some(diagnosis) = self.diagnosis else {
+            return Doc::new()
+                .with(written(Mark::Done))
+                .with(Furrow(Vec::new()))
+                .with(Fields::new().push_if("at", self.at));
+        };
+        let (mark, steps) = match diagnosis.errors() {
+            0 => (Mark::Done, vec![self.runs_it()]),
+            _ => (Mark::Caution, vec![check_again(self.at)]),
+        };
+        Doc::new()
+            .with(written(mark).fact(diagnosis.said()))
+            .with(Furrow(Vec::new()))
+            .with(Fields::new().push_if("at", self.at))
+            .with_all(diagnosis.blocks())
+            .with(Next { steps })
+    }
+}
+
+impl NewWorkflow<'_> {
+    /// The step that runs the workflow just written.
+    fn runs_it(&self) -> (String, &'static str) {
+        let run = NextStep::Run {
+            workflow: Arg::Given(self.name.to_string()),
+        };
+        (command::line(&run), "runs it")
+    }
+}
+
 /// A workflow `new` wrote: its name, the shape it took, and where.
 struct Written<'a> {
     name: &'a str,
@@ -307,67 +354,38 @@ struct Written<'a> {
 }
 
 impl Written<'_> {
-    /// The step that runs the workflow just written.
-    fn runs_it(&self) -> (String, &'static str) {
-        let run = NextStep::Run {
-            workflow: Arg::Given(self.name.to_string()),
-        };
-        (command::line(&run), "runs it")
-    }
-
-    /// The page `new` answers with: the file it wrote, and the verdict
-    /// `yunta check` reaches on it, said under it. A workflow the config
-    /// cannot run yet is written and said to be one, whatever the config
-    /// has to declare first, and the exit says so too.
-    async fn page(
+    /// Says what `new` wrote, with the verdict `yunta check` reaches on it
+    /// under it. A workflow the config cannot run yet is written and said to
+    /// be one, whatever the config has to declare first, and the exit says
+    /// so too.
+    async fn report(
         &self,
         cwd: &Path,
         config: &ConfigLayer,
         look: &Look,
     ) -> Result<Outcome, CliError> {
         let at = surco::paths::shown(self.path, cwd, None);
-        let found = match self.found(cwd, config).await {
-            Ok(found) => found,
-            Err(stop) => {
-                // The file is on disk whatever stopped the check of it.
-                let headline = Headline::new(Mark::Done, file_named(self.path), "written")
-                    .fact(self.shape.label());
-                document(
-                    look,
-                    Doc::new()
-                        .with(headline)
-                        .with(Furrow(Vec::new()))
-                        .with(Fields::new().push_if("at", at)),
-                );
-                return Err(stop);
-            }
+        let page = |diagnosis| NewWorkflow {
+            name: self.name,
+            shape: self.shape,
+            path: self.path,
+            at: &at,
+            diagnosis,
         };
-        let (mark, steps) = match found.errors {
-            0 => (Mark::Done, vec![self.runs_it()]),
-            _ => (Mark::Caution, vec![check_again(&at)]),
-        };
-        let runs = found.said();
-        let Found { blocks, errors } = found;
-        let headline = Headline::new(mark, file_named(self.path), "written")
-            .fact(self.shape.label())
-            .fact(runs);
-        document(
-            look,
-            Doc::new()
-                .with(headline)
-                .with(Furrow(Vec::new()))
-                .with(Fields::new().push_if("at", at))
-                .with_all(blocks)
-                .with(Next { steps }),
-        );
-        Ok(match errors {
+        // The file is on disk whatever stopped the check of it.
+        let diagnosis = self
+            .diagnosis(cwd, config)
+            .await
+            .inspect_err(|_| show(look, &page(None)))?;
+        show(look, &page(Some(&diagnosis)));
+        Ok(match diagnosis.errors() {
             0 => Outcome::Success,
             _ => Outcome::Reported,
         })
     }
 
     /// The verdict `yunta check` reaches on the written file.
-    async fn found(&self, cwd: &Path, config: &ConfigLayer) -> Result<Found, CliError> {
+    async fn diagnosis(&self, cwd: &Path, config: &ConfigLayer) -> Result<Diagnosis, CliError> {
         let ctx = crate::context::Context::load()?;
         let verdict = super::verdict::verdict(
             &ctx,
@@ -378,6 +396,6 @@ impl Written<'_> {
             super::verdict::Reach::Workflow,
         )
         .await?;
-        verdict.found(&ctx).await
+        verdict.diagnosis(&ctx).await
     }
 }

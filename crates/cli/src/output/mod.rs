@@ -21,7 +21,6 @@
 
 use std::fmt::Display;
 
-use surco::components::{Next, Refusal};
 use surco::doc::{Block, Doc};
 use surco::line::Line;
 use surco::look::Look;
@@ -29,6 +28,7 @@ use surco::look::Look;
 use crate::error::{warning_word, CliError};
 use crate::json::to_json_string;
 use yunta_render::command::Reader;
+use yunta_render::page::Page;
 
 mod exit;
 mod stream;
@@ -60,11 +60,12 @@ impl Mode {
     }
 }
 
-/// What a command answers. The command returns it; [`emit`] writes it.
+/// What a command answers: the page a person reads, the JSON a program reads
+/// (the answer itself, serialized), and the verdict its exit code reports.
+/// The command returns it; [`emit`] writes it.
 pub(crate) trait Answer: serde::Serialize {
-    /// The answer as the document a person reads, drawn on a stream that
-    /// looks like `look`.
-    fn document(&self, look: &Look) -> Doc;
+    /// The page a person reads for this answer.
+    fn page(&self) -> impl Page + '_;
     /// The verdict the answer carries, which the exit code reports.
     fn outcome(&self) -> Outcome;
 }
@@ -75,7 +76,7 @@ pub(crate) fn emit<A: Answer>(mode: Mode, answer: &A, look: &Look) -> Result<Out
         Mode::Json => {
             print_json(answer)?;
         }
-        Mode::Human => document(look, answer.document(look)),
+        Mode::Human => show(look, &answer.page()),
         // `--quiet` says the run id and its verdict, and an answer has nothing
         // to add to that.
         Mode::Quiet => {}
@@ -91,8 +92,14 @@ pub(crate) fn progress(mode: Mode, look: &Look, text: String) {
     }
 }
 
-/// A document drawn for a stream that looks like `look`, and written.
-pub(crate) fn document(look: &Look, doc: Doc) {
+/// A page drawn for a stream that looks like `look`, and written.
+pub(crate) fn show(look: &Look, page: &impl Page) {
+    document(look, page.document(look));
+}
+
+/// A document drawn for a stream that looks like `look`, and written: what
+/// [`show`] writes of a page, and [`say`] of a line.
+fn document(look: &Look, doc: Doc) {
     print!("{}", draw(doc, look));
 }
 
@@ -233,28 +240,20 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
         }
         return;
     }
-    let (detail, steps) = error.advice(Reader::Person);
-    let page = Doc::new()
-        .with(Refusal {
-            said: error.said_to(Reader::Person),
-            detail,
-        })
-        .with_all(error.blocks())
-        .with(Next { steps });
-    on_stderr(look, page);
+    show_on_stderr(look, error);
 }
 
 /// A page a person reads on stderr: a refusal, or a verdict that fails.
 /// It is painted and measured for stderr, whatever stdout is: a stream
 /// redirected away from the terminal does not decide how a page on the
 /// terminal looks.
-pub(crate) fn on_stderr(look: &Look, doc: Doc) {
+pub(crate) fn show_on_stderr(look: &Look, page: &impl Page) {
     let stderr = Look {
         paint: stderr_paint(),
         width: stderr_width(),
         ..*look
     };
-    eprint!("{}", draw(doc, &stderr));
+    eprint!("{}", draw(page.document(&stderr), &stderr));
 }
 
 /// `doc` laid out for a terminal stream whose lines look like `look`,

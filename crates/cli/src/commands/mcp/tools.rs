@@ -52,12 +52,10 @@ pub(super) async fn tool_list_workflows(
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt).ok();
     // An agent reads the catalog as Markdown: no terminal's width or
     // locale decides what it is told.
-    let catalog =
-        super::super::list::catalog(cwd, ctx.as_ref(), surco::glyphs::Glyphs::Unicode).await;
-    Ok(surco::surface::Surface::draw(
-        &surco::surface::Markdown,
-        &catalog,
-    ))
+    use surco::surface::{Markdown, Surface};
+    use yunta_render::page::Page;
+    let catalog = super::super::list::Catalog::read(cwd, ctx.as_ref()).await;
+    Ok(Markdown.draw(&catalog.document(&Markdown.look())))
 }
 
 pub(super) async fn tool_workflow_status(

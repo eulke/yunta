@@ -1,7 +1,7 @@
 //! The receipt as a person reads it — in a file, a pull request or a
 //! terminal.
 //!
-//! Every number here is already on the [`Receipt`] — this module chooses
+//! Every number here is already on the run's receipt — this page chooses
 //! wording and order, never derives a fact. Keeping it apart from the
 //! derivation is what makes "the receipt IS the evidence" checkable: the
 //! engine reads the log, this reads the receipt.
@@ -11,35 +11,31 @@ use surco::doc::{Block, Depth, Doc};
 use surco::figures::Tokens;
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
+use surco::look::Look;
 use surco::text::counted;
 use surco::words::Standing;
 use yunta_core::events::{BaselineOrigin, TerminalState};
-use yunta_core::receipt::{
-    BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode, Receipt, RunnerUsage,
-};
+use yunta_core::receipt::{self, BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode};
 use yunta_core::step::NextStep;
-use yunta_core::{NodeId, RunId};
+use yunta_core::RunId;
 
 use crate::blocks::FailureDetail;
+use crate::page::Page;
 use crate::spend::Breakdown;
 
-/// Fan-out siblings share their base id (`<base>@<runner>`, see
-/// `manifest.rs`) — grouped here purely for the receipt's review check; the JSON receipt exposes the flat
-/// `runners` list instead and leaves grouping to whoever consumes it.
-pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>)> {
-    let mut groups: Vec<(NodeId, Vec<&RunnerUsage>)> = Vec::new();
-    for usage in runners {
-        if !usage.node_id.is_fan_out() {
-            continue;
-        }
-        let base = usage.node_id.base();
-        match groups.iter_mut().find(|(b, _)| *b == base) {
-            Some((_, members)) => members.push(usage),
-            None => groups.push((base, vec![usage])),
-        }
+/// The receipt of a run, as the page a person reads it on.
+#[derive(Debug, Clone, Copy)]
+pub struct Receipt<'a> {
+    pub receipt: &'a receipt::Receipt,
+}
+
+impl Page for Receipt<'_> {
+    /// What the receipt says, as a document any surface draws: a file writes
+    /// it as Markdown, a terminal lays it out. `look`'s glyphs draw the
+    /// separators between the facts a line states.
+    fn document(&self, look: &Look) -> Doc {
+        document(self.receipt, look.glyphs)
     }
-    groups.retain(|(_, members)| members.len() > 1);
-    groups
 }
 
 /// What the receipt says, as a document any surface draws: a file writes
@@ -50,7 +46,7 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>
 /// `·` for what was never asked for — then each criterion and each path
 /// outside the scope, and the command that checks it all again. `glyphs`
 /// draws the separators between the facts a line states.
-pub fn document(receipt: &Receipt, glyphs: Glyphs) -> Doc {
+fn document(receipt: &receipt::Receipt, glyphs: Glyphs) -> Doc {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
@@ -121,7 +117,7 @@ fn failed_node(failed: &FailedNode, run: &RunId) -> Section {
 }
 
 /// Each criterion the run ran, by the task it judged, when it ran any.
-fn criteria(receipt: &Receipt) -> Option<Checklist> {
+fn criteria(receipt: &receipt::Receipt) -> Option<Checklist> {
     if receipt.criteria.entries.is_empty() {
         return None;
     }
@@ -141,7 +137,7 @@ fn criteria(receipt: &Receipt) -> Option<Checklist> {
 }
 
 /// Each path the run wrote outside its scope, when it wrote any.
-fn outside(receipt: &Receipt) -> Option<Checklist> {
+fn outside(receipt: &receipt::Receipt) -> Option<Checklist> {
     if receipt.scope.violations.is_empty() {
         return None;
     }
@@ -166,7 +162,7 @@ fn standing(state: TerminalState, blocking_findings: usize) -> Standing {
 
 /// One check per thing the run held its work to, in the order a reader
 /// meets them.
-fn checks(receipt: &Receipt) -> Checklist {
+fn checks(receipt: &receipt::Receipt) -> Checklist {
     let mut checks = Checklist::default();
     criteria_check(&mut checks, receipt);
     caution_checks(&mut checks, receipt);
@@ -180,7 +176,7 @@ fn checks(receipt: &Receipt) -> Checklist {
 
 /// The run's criteria, each command green or not; none declared is not
 /// applicable.
-fn criteria_check(checks: &mut Checklist, receipt: &Receipt) {
+fn criteria_check(checks: &mut Checklist, receipt: &receipt::Receipt) {
     let criteria = &receipt.criteria;
     match (criteria.total, criteria.green == criteria.total) {
         (0, _) => checks.push(
@@ -198,7 +194,7 @@ fn criteria_check(checks: &mut Checklist, receipt: &Receipt) {
 
 /// The event kinds this binary reads only in part, and the artifact problems
 /// reported during the run, when there are any.
-fn caution_checks(checks: &mut Checklist, receipt: &Receipt) {
+fn caution_checks(checks: &mut Checklist, receipt: &receipt::Receipt) {
     if let Some(said) = crate::state::unknown_kinds(&receipt.unknown_kinds) {
         checks.push(Found::Caution, "event kinds", said);
     }
@@ -224,7 +220,7 @@ fn caution_checks(checks: &mut Checklist, receipt: &Receipt) {
 }
 
 /// The files the run touched, and the paths it wrote outside its scope.
-fn scope_check(checks: &mut Checklist, receipt: &Receipt) {
+fn scope_check(checks: &mut Checklist, receipt: &receipt::Receipt) {
     checks.push(
         match receipt.scope.violations.is_empty() {
             true => Found::Holds,
@@ -244,8 +240,8 @@ fn scope_check(checks: &mut Checklist, receipt: &Receipt) {
 
 /// The review of the run's work: one check per group of fan-out siblings, or
 /// a note that no runner fanned out.
-fn review_checks(checks: &mut Checklist, receipt: &Receipt) {
-    let groups = fan_out_groups(&receipt.runners);
+fn review_checks(checks: &mut Checklist, receipt: &receipt::Receipt) {
+    let groups = receipt.fan_out_groups();
     if groups.is_empty() {
         checks.push(
             Found::NotApplicable,
@@ -271,7 +267,7 @@ fn review_checks(checks: &mut Checklist, receipt: &Receipt) {
 }
 
 /// Whether the run's events form one hash-linked chain, or where it breaks.
-fn event_chain_check(checks: &mut Checklist, receipt: &Receipt) {
+fn event_chain_check(checks: &mut Checklist, receipt: &receipt::Receipt) {
     match &receipt.event_chain {
         EventChainStatus::Intact { events } => checks.push(
             Found::Holds,
@@ -288,7 +284,7 @@ fn event_chain_check(checks: &mut Checklist, receipt: &Receipt) {
 
 /// What the run spent: every token, in and out, per task once the run
 /// had tasks, and the reroutes it took.
-fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
+fn cost(receipt: &receipt::Receipt, glyphs: Glyphs) -> String {
     let cost = &receipt.cost;
     if cost.tokens.total() == 0 && cost.reroutes == 0 {
         return "nothing spent".to_string();
@@ -315,7 +311,7 @@ fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
 
 /// What the run changed from its base to its newest tree, as git last
 /// counted it; nothing when nothing counted it, or it touched no file.
-fn changed(receipt: &Receipt, glyphs: Glyphs) -> String {
+fn changed(receipt: &receipt::Receipt, glyphs: Glyphs) -> String {
     receipt
         .changed
         .as_ref()

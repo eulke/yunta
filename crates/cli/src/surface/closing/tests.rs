@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use surco::golden::{assert_golden, ENVIRONMENTS};
 use surco::look::Look;
 use yunta_core::events::TokenUsage;
+use yunta_render::page::Page;
 use yunta_replay::frame::RunPhase;
 use yunta_replay::RunState;
 

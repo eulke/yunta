@@ -12,19 +12,19 @@
 
 use std::path::Path;
 
-use surco::components::{Check, Checklist, Code, Fields, Found, Furrow, Headline, Marked, Section};
-use surco::doc::{Block, Doc};
+use surco::components::{Check, Checklist, Fields, Found};
+use surco::doc::Block;
 use surco::glyphs::Mark;
-use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::text::counted;
 use yunta_core::PackRef;
-use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit, WorkflowUnread};
+use yunta_engine::audit_pack;
 
-use super::test::{case_found, discover_case_paths, run_case};
-use crate::error::{page, CliError};
+use super::page::Inventory;
+use crate::commands::test::{case_found, discover_case_paths, run_case};
+use crate::error::CliError;
 use crate::interrupt::Interrupt;
-use crate::output::document;
+use crate::output::show;
 use crate::output::Outcome;
 use crate::pack::{packs_root, read_manifest, vendor_dir};
 
@@ -42,140 +42,13 @@ pub async fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
 
     let report = audit_pack(&pack_dir, manifest);
     let tests = run_pack_tests(&pack_dir, ctx.interrupt()).await;
-    let headline = Headline::new(tests.mark(), format!("pack {pack}"), "audited")
-        .fact(report.manifest.version.to_string());
-    document(look, inventory(&report, headline).with_all(tests.blocks()));
-    Ok(Outcome::Success)
-}
-
-/// The inventory as a page under `headline`: what the pack declares, then
-/// each workflow, node by node. `audit` shows it on demand, and `pack add`
-/// before anything is vendored.
-pub fn inventory(report: &PackAudit, headline: Headline) -> Doc {
-    let m = &report.manifest;
-    let runners: Vec<String> = m
-        .requires
-        .runners
-        .iter()
-        .map(|r| r.name.to_string())
-        .collect();
-    let declares = Fields::new()
-        .push_if("permissions", m.declares.permissions.as_str())
-        .push_if(
-            "network",
-            match m.declares.network {
-                true => "used",
-                false => "none",
-            },
-        )
-        .push_if(
-            "executors",
-            match m.declares.executors.is_empty() {
-                true => "none".to_string(),
-                false => m.declares.executors.join(", "),
-            },
-        )
-        .push_if("runners", runners.join(", "))
-        .push_if("mcp servers", m.requires.mcp_servers.join(", "))
-        .push_if("programs", m.requires.programs.join(", "));
-    let mut doc = Doc::new()
-        .with(headline)
-        .with(Furrow(Vec::new()))
-        .with(declares);
-    for workflow in &report.workflows {
-        doc = doc.with(workflow_section(workflow));
-    }
-    doc
-}
-
-fn workflow_section(workflow: &WorkflowAudit) -> Section {
-    let blocks = match &workflow.error {
-        Some(WorkflowUnread::Missing(error)) => vec![Marked {
-            mark: Mark::Failed,
-            items: vec![format!("does not read: {error}")],
-        }
-        .into()],
-        Some(WorkflowUnread::Refused { report, text }) => page::hinted(
-            report
-                .diagnostics
-                .iter()
-                .map(|diagnostic| page::found(diagnostic, &workflow.declared_path, Some(text)))
-                .collect(),
-        )
-        .into_iter()
-        .map(Block::from)
-        .collect(),
-        None => workflow
-            .nodes
-            .iter()
-            .map(|node| node_section(node).into())
-            .collect(),
+    let inventory = Inventory::Audited {
+        audit: &report,
+        pack,
+        tests: &tests,
     };
-    Section {
-        lead: None,
-        title: Line::new()
-            .plain("workflow ")
-            .push(Tone::Strong, workflow.declared_path.to_string()),
-        blocks,
-    }
-}
-
-/// What a node runs, may do and is given, one row each.
-fn node_fields(node: &NodeAudit) -> Fields {
-    let mut fields = Fields::new();
-    if let Some(command) = &node.command {
-        fields = fields.push_command("command", command.as_str());
-    }
-    for step in &node.hooks_before {
-        fields = fields.push_command("hook before", step.to_string());
-    }
-    for step in &node.hooks_after {
-        fields = fields.push_command("hook after", step.to_string());
-    }
-    if let Some(permissions) = node.permissions {
-        fields = fields.push_if("permissions", permissions.to_string());
-    }
-    if let Some(agent) = &node.agent {
-        fields = fields.push_if("agent", agent.to_string());
-    }
-    for server in &node.mcp_servers {
-        fields = fields.push_if("mcp server", server.to_string());
-    }
-    if let Some(executor) = &node.executor {
-        fields = fields.push_if("executor", format!("{executor}, code that runs"));
-    }
-    fields = fields.push_if("paths", node.paths.join(", "));
-    for entry in &node.context {
-        fields = fields.push_if("context", entry.to_string());
-    }
-    fields
-}
-
-fn node_section(node: &NodeAudit) -> Section {
-    let fields = node_fields(node);
-    let mut blocks: Vec<Block> = vec![fields.into()];
-    match &node.prompt {
-        None => {}
-        Some(Ok(text)) => blocks.push(Code::whole("prompt", None, text).into()),
-        Some(Err(error)) => blocks.push(
-            Marked {
-                mark: Mark::Failed,
-                items: vec![format!(
-                    "prompt unreadable: {}",
-                    yunta_core::describe(error)
-                )],
-            }
-            .into(),
-        ),
-    }
-    Section {
-        lead: None,
-        title: Line::new()
-            .plain("node ")
-            .push(Tone::Strong, format!("`{}`", node.id))
-            .push(Tone::Muted, format!(" {}", node.kind)),
-        blocks,
-    }
+    show(look, &inventory);
+    Ok(Outcome::Success)
 }
 
 /// Whether the pack ships tests under its own `.yunta/tests/` (same case

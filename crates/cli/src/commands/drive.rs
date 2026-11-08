@@ -368,8 +368,7 @@ pub(crate) async fn report_verdict(closed: Closed<'_>) -> Result<Outcome, CliErr
 /// out, handing back the verdict the exit code carries.
 pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliError> {
     let closing = closing_of(&closed).await?;
-    let page = closing.page();
-    crate::output::document(closed.look, page.document(closed.look));
+    crate::output::show(closed.look, &closing.page());
     Ok(closing.outcome())
 }
 

@@ -25,6 +25,7 @@ use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, NodeId, RunId};
 use yunta_render::command;
 use yunta_render::escalation::Decision;
+use yunta_render::page::{Form, Page, Shown};
 use yunta_replay::frame::{NodeStanding, RunFrame};
 use yunta_replay::RunState;
 
@@ -253,14 +254,19 @@ pub(crate) async fn page_for_a_browser(
     let page = (Mode::Human, Depth::Full);
     let mut page = run_page_for(ctx, run_id, &reading, &documents, page).await?;
     page.scope = Scope::Browser;
-    let doc = page.document(&surco::surface::Html.look());
+    let look = surco::surface::Html.look();
+    let doc = page.document(&look);
     let at = doc.decision_at();
     let mut blocks = doc.into_blocks();
     if let Some(decision) = page.decision {
         let at = at.unwrap_or(blocks.len());
         let shown = decision.shown.iter().flat_map(|document| {
-            yunta_render::shown::document(document, run_id, yunta_render::shown::Form::Browser)
-                .into_blocks()
+            let shown = Shown {
+                document,
+                run: run_id,
+                form: Form::Browser,
+            };
+            shown.document(&look).into_blocks()
         });
         blocks.splice(at..at, shown.collect::<Vec<_>>());
     }
@@ -356,12 +362,18 @@ impl serde::Serialize for StatusAnswer<'_> {
     }
 }
 
-impl Answer for StatusAnswer<'_> {
+impl Page for Body<'_> {
     fn document(&self, look: &Look) -> Doc {
-        match &self.body {
+        match self {
             Body::Run(page) => page.document(look),
             Body::Node(page) => page.document(look),
         }
+    }
+}
+
+impl Answer for StatusAnswer<'_> {
+    fn page(&self) -> impl Page + '_ {
+        &self.body
     }
 
     /// Whatever the run is doing, `yunta status` reports success: what it

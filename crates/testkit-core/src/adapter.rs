@@ -177,10 +177,22 @@ const PID_DEADLINE: Duration = Duration::from_secs(30);
 /// rendezvous, not a timed poll. The deadline turns a stub that never
 /// records the pid into a failed test rather than a hung one.
 pub async fn grandchild_pid(child_pid_fifo: &Path) -> String {
-    grandchild_pid_within(child_pid_fifo, PID_DEADLINE).await
+    recorded_pid(child_pid_fifo)
+        .await
+        .unwrap_or_else(|| panic!("the stub records the child pid before the deadline"))
 }
 
-pub(crate) async fn grandchild_pid_within(child_pid_fifo: &Path, deadline: Duration) -> String {
+/// The pid the stub recorded in `child_pid_fifo`, or `None` when it recorded
+/// none within the deadline: for a test that says, when the stub never got
+/// there, what the run did instead.
+pub async fn recorded_pid(child_pid_fifo: &Path) -> Option<String> {
+    recorded_pid_within(child_pid_fifo, PID_DEADLINE).await
+}
+
+pub(crate) async fn recorded_pid_within(
+    child_pid_fifo: &Path,
+    deadline: Duration,
+) -> Option<String> {
     let fifo = child_pid_fifo.to_path_buf();
     let reading = fifo.clone();
     let mut reader = tokio::task::spawn_blocking(move || std::fs::read_to_string(reading));
@@ -192,12 +204,14 @@ pub(crate) async fn grandchild_pid_within(child_pid_fifo: &Path, deadline: Durat
         std::thread::spawn(move || drop(std::fs::OpenOptions::new().write(true).open(fifo)));
         // best-effort: the reader only has to end; what it read is not looked at.
         let _ = reader.await;
-        panic!("the stub records the child pid before the deadline");
+        return None;
     };
-    read.expect("the pid reader joins")
-        .expect("the child-pid fifo reads")
-        .trim()
-        .to_string()
+    Some(
+        read.expect("the pid reader joins")
+            .expect("the child-pid fifo reads")
+            .trim()
+            .to_string(),
+    )
 }
 
 #[cfg(test)]

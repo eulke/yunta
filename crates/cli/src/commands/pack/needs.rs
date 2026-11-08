@@ -5,67 +5,63 @@
 
 use std::path::Path;
 
-use surco::components::Said;
-use surco::doc::Block;
 use yunta_core::{ConfigKey, NodeId, PackManifest, Workflow};
 
 use crate::context::Context;
 use crate::detect::Detected;
 use crate::error::CliError;
 
+/// What a node of an installed pack needs from this project and its config
+/// does not declare.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Need {
+    pub(super) node: NodeId,
+    pub(super) key: ConfigKey,
+    /// Whether a run leaves the node out until the project declares it; a
+    /// run is refused for it otherwise.
+    pub(super) leaves_node_out: bool,
+    /// What this repository was detected to answer for it, when it was.
+    pub(super) detected: Option<String>,
+}
+
 /// What `manifest`'s workflows, vendored at `pack_dir`, need and the
-/// project lacks, as the blocks a page draws; none when they need nothing.
-pub(crate) async fn blocks(
+/// project lacks, each once; none when they need nothing.
+pub(super) async fn unmet(
     ctx: &Context,
     pack_dir: &Path,
     manifest: &PackManifest,
-) -> Result<Vec<Block>, CliError> {
+) -> Result<Vec<Need>, CliError> {
     let detected = Detected::in_repo(&ctx.cwd, ctx.supervision()).await?;
-    let mut lines: Vec<String> = Vec::new();
+    let mut unmet: Vec<Need> = Vec::new();
     for declared in &manifest.contents.workflows {
         let Ok(workflow) = crate::load_workflow(&pack_dir.join(declared)) else {
             continue;
         };
-        for line in needs(&workflow, &ctx.project.config, &detected) {
-            if !lines.contains(&line) {
-                lines.push(line);
+        for need in needs(&workflow, &ctx.project.config, &detected) {
+            if !unmet.contains(&need) {
+                unmet.push(need);
             }
         }
     }
-    if lines.is_empty() {
-        return Ok(Vec::new());
-    }
-    Ok(vec![
-        Block::Heading("needs from this project".to_string()),
-        Said(lines).into(),
-    ])
+    Ok(unmet)
 }
 
-/// One line per key `workflow` needs and `config` leaves unset — saying
-/// whether a run is refused for it or leaves the node out — each
-/// followed by what this repository answers for it, when it does.
-fn needs(
-    workflow: &Workflow,
-    config: &yunta_core::ConfigLayer,
-    detected: &Detected,
-) -> Vec<String> {
+/// Each key a node of `workflow` needs and `config` leaves unset, with
+/// whether a run leaves the node out for it and what this repository
+/// answers for it.
+fn needs(workflow: &Workflow, config: &yunta_core::ConfigLayer, detected: &Detected) -> Vec<Need> {
     let left_out: Vec<NodeId> = yunta_core::left_out(workflow, config)
         .into_iter()
         .map(|left| left.node)
         .collect();
-    let mut lines = Vec::new();
-    let mut need = |node: &NodeId, key: ConfigKey, optional: bool| {
-        let fate = match optional {
-            true => "a run leaves the node out until it does",
-            false => "a run is refused until it does",
-        };
-        lines.push(format!(
-            "node `{node}`: the project declares {}; {fate}",
-            key.undeclared()
-        ));
-        if let Some(suggestion) = detected.suggestion(&key) {
-            lines.push(format!("  {suggestion}"));
-        }
+    let mut needs = Vec::new();
+    let mut need = |node: &NodeId, key: ConfigKey, leaves_node_out: bool| {
+        needs.push(Need {
+            node: node.clone(),
+            detected: detected.suggestion(&key),
+            key,
+            leaves_node_out,
+        });
     };
     for (node, group) in workflow.iter_nodes_with_group() {
         let optional = left_out.contains(group.map_or(&node.id, |group| &group.id));
@@ -80,5 +76,5 @@ fn needs(
             need(&node.id, ConfigKey::BaselineSuite, optional);
         }
     }
-    lines
+    needs
 }

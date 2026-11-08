@@ -13,14 +13,13 @@
 
 use std::collections::BTreeMap;
 
-use surco::doc::Doc;
 use surco::glyphs::Glyphs;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
 use yunta_core::shown::ShownDocument;
 use yunta_core::{Env, NodeId, OptionId, RunId};
+use yunta_render::changes;
 use yunta_render::escalation::{self, Route};
-use yunta_render::gate;
-use yunta_render::{changes, plan};
+use yunta_render::page::{desk, Gate, Page};
 
 use super::card::{Answer, DecisionCard, Reply};
 use super::desk::{Asked, Leaving, Left, PlanDesk};
@@ -88,7 +87,7 @@ pub(crate) fn decide(console: &Console, env: &Env, mut ask: Ask<'_>) -> Answered
 /// The desk of the plan `ask` is on, when it is on one.
 fn desk_of<'a>(console: &Console, ask: &Ask<'a>, card: &DecisionCard) -> Option<PlanDesk<'a>> {
     let (run, documents) = ask.shown?;
-    let reading = plan::reading(documents, run)?;
+    let reading = desk::reading(documents, run)?;
     let asked = Asked {
         question: question(ask),
         node: ask.node.map(ToString::to_string),
@@ -163,25 +162,31 @@ fn read(
 /// among the documents is read at the desk and draws nothing here. Nothing is drawn when
 /// there is neither, since the card opens on its question.
 fn present(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
-    let Some(page) = gate::above(ask.shown, ask.escalation) else {
-        return Ok(());
+    let page = Gate::AboveTheCard {
+        shown: ask.shown,
+        escalation: ask.escalation,
     };
-    draw_page(console, page)
+    draw_page(console, &page)
 }
 
 /// Draws everything the decision has to say, what weighs on it last, for a terminal with no
 /// room for the desk.
 fn print_documents(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
-    let Some(page) = gate::whole_page(ask.shown, ask.escalation) else {
-        return Ok(());
+    let page = Gate::InPlaceOfTheDesk {
+        shown: ask.shown,
+        escalation: ask.escalation,
     };
-    draw_page(console, page)
+    draw_page(console, &page)
 }
 
 /// Draws `page` the way a prompt draws what it stands under: each line said, then a
-/// blank line that sets the card apart.
-fn draw_page(console: &Console, page: Doc) -> std::io::Result<()> {
+/// blank line that sets the card apart. A page with nothing to say draws nothing.
+fn draw_page(console: &Console, page: &impl Page) -> std::io::Result<()> {
     let look = console.look();
+    let page = page.document(&look);
+    if page.blocks().is_empty() {
+        return Ok(());
+    }
     for line in crate::output::draw(page, &look).lines() {
         console.say(line)?;
     }
@@ -213,8 +218,8 @@ fn edge(ask: &Ask<'_>, glyphs: Glyphs) -> Option<String> {
 fn about(ask: &Ask<'_>, glyphs: Glyphs) -> Vec<String> {
     let documents = ask.shown.map_or(&[][..], |(_, documents)| documents);
     let question = question(ask);
-    let mut about: Vec<String> = yunta_render::shown::plan_among(documents)
-        .map(|(_, review)| plan::about(review, &question, glyphs))
+    let mut about: Vec<String> = desk::plan_among(documents)
+        .map(|(_, review)| desk::about(review, &question, glyphs))
         .unwrap_or_default();
     about.extend(escalation::record(ask.escalation, documents));
     about.extend(ask.changed.and_then(|change| changes::of(change, glyphs)));

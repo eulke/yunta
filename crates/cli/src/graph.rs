@@ -60,7 +60,7 @@ pub async fn graph(
             .await?;
             // A verdict with nothing to say stays off the drawing's way.
             if !verdict.passes() || verdict.warns() {
-                crate::output::on_stderr(look, verdict.page(&ctx, &path).await?);
+                crate::output::show_on_stderr(look, &verdict.checked(&ctx, &path).await?);
             }
             let outcome = match verdict.passes() {
                 true => Outcome::Success,

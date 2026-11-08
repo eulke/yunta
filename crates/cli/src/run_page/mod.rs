@@ -37,6 +37,7 @@ use yunta_core::{NodeId, RunId};
 use yunta_render::command::{self, Reader};
 use yunta_render::engine;
 use yunta_render::escalation::{self, Beside, Decision};
+use yunta_render::page::Page;
 use yunta_render::pause;
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, WaitingOn};
@@ -80,10 +81,10 @@ pub(crate) struct RunPage<'a> {
     pub(crate) plans: Vec<(NodeId, String)>,
 }
 
-impl RunPage<'_> {
+impl Page for RunPage<'_> {
     /// The page as one document, in the order a person reads it for.
-    /// Nothing here paints: `render::draw` does.
-    pub(crate) fn document(&self, look: &Look) -> Doc {
+    /// Nothing here paints: `output::draw` does.
+    fn document(&self, look: &Look) -> Doc {
         let mut doc = Doc::new().with(self.headline()).with(Furrow(
             self.frame.nodes.iter().map(|node| node.standing).collect(),
         ));
@@ -105,7 +106,9 @@ impl RunPage<'_> {
         doc.with_all(self.no_menu().map(Block::from))
             .with(self.next())
     }
+}
 
+impl RunPage<'_> {
     /// What a run parked on a person says when its pause rebuilds no menu
     /// — a scope, an answers file, a review on a forge, a child: that no
     /// option answers it here, so a reader who knows the menus other stops

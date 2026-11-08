@@ -28,6 +28,7 @@ use crate::interrupt::Interrupt;
 use crate::output::Outcome;
 use crate::output::RunExit;
 use crate::surface::Diagnostics;
+use yunta_render::page::Page;
 
 /// The base branch a project starts from: the remote's default, else the
 /// branch checked out here, else `main`. Only git's "no remote HEAD" answer
@@ -297,14 +298,14 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
     let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);
     let (wrote, skipped) = write_project(&repo, &config_path, config_yaml, force).await?;
 
-    let init = Wrote {
+    let init = Initialized {
         repo: &repo,
         wrote: &wrote,
         skipped: &skipped,
         detected: &detected,
         probed: &probed,
     };
-    crate::output::document(look, report(&init));
+    crate::output::show(look, &init);
     Ok(Outcome::Success)
 }
 
@@ -353,8 +354,8 @@ async fn write_project(
     Ok((wrote, skipped))
 }
 
-/// What `init` did and found, for the report it ends with.
-struct Wrote<'a> {
+/// What `init` did and found, as the page it ends with.
+struct Initialized<'a> {
     repo: &'a Path,
     wrote: &'a [String],
     skipped: &'a [String],
@@ -365,7 +366,7 @@ struct Wrote<'a> {
 /// What `init` wrote and detected, as the fields the page opens with: the
 /// files it wrote and the ones it left as they were, the ecosystem it found
 /// and its cache tip, and the forge `origin` is on.
-fn detected_fields(init: &Wrote<'_>) -> Fields {
+fn detected_fields(init: &Initialized<'_>) -> Fields {
     let detected = init.detected;
     let ecosystem = match &detected.ecosystem {
         Some(ecosystem) => format!(
@@ -405,56 +406,58 @@ fn detected_fields(init: &Wrote<'_>) -> Fields {
         )
 }
 
-/// The page `init` ends with: what it wrote and detected, as fields; each
-/// adapter this machine answers for, as a check; the lines to paste into
-/// the project's CLAUDE.md; and the runner to declare, because no agent
-/// node runs until one is.
-fn report(init: &Wrote<'_>) -> Doc {
-    let mut adapters = Checklist::default();
-    for adapter in init.probed {
-        match adapter.healthy {
-            true => adapters.push(
-                Found::Holds,
-                adapter.id.as_str(),
-                format!("healthy ({})", adapter.detail),
-            ),
-            false => adapters.push(
-                Found::Caution,
-                adapter.id.as_str(),
-                format!("unavailable ({})", adapter.detail),
-            ),
+impl Page for Initialized<'_> {
+    /// The page `init` ends with: what it wrote and detected, as fields; each
+    /// adapter this machine answers for, as a check; the lines to paste into
+    /// the project's CLAUDE.md; and the runner to declare, because no agent
+    /// node runs until one is.
+    fn document(&self, _look: &Look) -> Doc {
+        let mut adapters = Checklist::default();
+        for adapter in self.probed {
+            match adapter.healthy {
+                true => adapters.push(
+                    Found::Holds,
+                    adapter.id.as_str(),
+                    format!("healthy ({})", adapter.detail),
+                ),
+                false => adapters.push(
+                    Found::Caution,
+                    adapter.id.as_str(),
+                    format!("unavailable ({})", adapter.detail),
+                ),
+            }
         }
+        let suggestion = claude_md_suggestion();
+        // The config is written with its runners commented out: a probe
+        // names an adapter and never a model, and the model is the project's
+        // to choose. Until a runner is declared, no agent node can run, so
+        // that is the step this ends with.
+        let runner = crate::detect::runner_step(&[], true, &crate::detect::healthy(self.probed));
+        let headline = Headline::new(Mark::Done, command::line(&NextStep::Init), "done")
+            .fact(format!("in {}", self.repo.display()));
+        Doc::new()
+            .with(headline)
+            .with(Furrow(Vec::new()))
+            .with(detected_fields(self))
+            .with(adapters)
+            .with(Block::Heading(
+                "for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file"
+                    .to_string(),
+            ))
+            .with(Said(suggestion))
+            .with(Block::Heading(
+                "no runner is declared, so a workflow's agent nodes cannot run until one is"
+                    .to_string(),
+            ))
+            .with_all(runner.blocks())
+            .with(Next {
+                steps: vec![(
+                    command::line(&NextStep::Doctor {
+                        sessions: false,
+                        full: false,
+                    }),
+                    "confirms everything above is usable",
+                )],
+            })
     }
-    let suggestion = claude_md_suggestion();
-    // The config is written with its runners commented out: a probe
-    // names an adapter and never a model, and the model is the project's
-    // to choose. Until a runner is declared, no agent node can run, so
-    // that is the step this ends with.
-    let runner = crate::detect::runner_step(&[], true, &crate::detect::healthy(init.probed));
-    let headline = Headline::new(Mark::Done, command::line(&NextStep::Init), "done")
-        .fact(format!("in {}", init.repo.display()));
-    Doc::new()
-        .with(headline)
-        .with(Furrow(Vec::new()))
-        .with(detected_fields(init))
-        .with(adapters)
-        .with(Block::Heading(
-            "for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file"
-                .to_string(),
-        ))
-        .with(Said(suggestion))
-        .with(Block::Heading(
-            "no runner is declared, so a workflow's agent nodes cannot run until one is"
-                .to_string(),
-        ))
-        .with_all(runner.blocks())
-        .with(Next {
-            steps: vec![(
-                command::line(&NextStep::Doctor {
-                    sessions: false,
-                    full: false,
-                }),
-                "confirms everything above is usable",
-            )],
-        })
 }

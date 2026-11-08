@@ -362,8 +362,8 @@ pub(crate) trait Answer: serde::Serialize {
 | `page::Cancelled`, `page::Closed`, `page::Opened` | `cancel/page.rs`, `close.rs`, `open.rs` |
 | `page::Answered`, `page::Collected`, `page::Review` | `resolve_gate.rs`, `gc/page.rs`, `review.rs` (the plan off a terminal, with the commands that answer it) |
 | `page::Catalog`, `page::Initialized`, `page::NewWorkflow`, `page::Schema` | `list/mod.rs`, `init.rs`, `new.rs`, `schema.rs` |
-| `page::Installed`, `page::PackInventory`, `page::NewPack` | `pack.rs` with `pack/page.rs`, `pack_audit.rs`, `pack/scaffold.rs` |
-| `page::Tested`, `page::Verdict`, `page::Stopped` | `test/mod.rs`, `verdict.rs`, `drive.rs` |
+| `page::pack::{Installed, Inventory, Updated, Removed, Listed, NewPack}` | `pack/page.rs`, `pack/scaffold.rs` |
+| `page::Tested`, `page::TestedCase`, `page::Checked`, `VerificationFindings` as a page | `test/mod.rs`, `verdict.rs`, `stats/workflow.rs`; `drive.rs` has no page of its own |
 
 `receipt::unknown_kinds`, which every page about a run reads, goes to `yunta_render::state` rather than into the receipt's page.
 
@@ -498,9 +498,11 @@ Phase 8 stands on Phase 6 alone, so it could run before Phase 7. Phase 7 goes fi
 - No `crate::render` is left in the CLI; the same suites. Then the gate and commit 5.
 
 ### Phase 6: one form
+- A stop after a crash finds what the session started, every time: the intermittent `session_ends` test, measured at Checkpoint F. Added at the user's request.
 - `page.rs` and `Page`.
 - Render's documents become pages under `page/`, by `git mv`, losing their positional arguments: gate, plan, spec, shown, findings, receipt.
-- `Answer::page`. The CLI's pages change form in place: each a struct that implements `Page`, with nothing moved yet.
+- `Answer::page`. The CLI's pages change form in place: each a struct that implements `Page`, with nothing moved yet. A page that read while it drew reads first, and its page draws what it read (the user's choice at Checkpoint G).
+- `receipt.md` is written with the Markdown look whatever terminal `yunta receipt` runs on, as the forge's body and the engine's receipt are. Found in Task 28.
 
 ### Checkpoint G
 - Render's 21 goldens and the CLI's 78 byte for byte. Then the gate and commit 6.

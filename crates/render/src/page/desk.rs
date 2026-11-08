@@ -1,6 +1,10 @@
 //! A plan as its desk reads it: the places a person can stand on, what each shows, and
 //! what the rail says of the plan as a whole. Pure: where a person stands comes in, and
 //! what stands in front of them goes out.
+//!
+//! No page: a terminal reads a plan here a place at a time, from the parts the plan's
+//! page draws whole, and the desk finds that plan among what a decision shows, with
+//! [`plan_among`], beside the documents it shows with it.
 
 use surco::components::{Desk, DeskFoot, Pane, RailGroup, RailRow};
 use surco::diagram::Diagram;
@@ -10,17 +14,18 @@ use surco::line::Line;
 use surco::look::{Look, Width};
 use surco::surface::Terminal;
 use surco::text::counted;
-use yunta_core::shown::{PlanReview, ShownDocument};
+use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
 use yunta_core::{RunId, Task};
 
-use super::{card, change, head, proof, said, steps, tree, Form};
+use super::plan::{card, change, head, proof, said, steps, tree, Form};
+use super::{Page, Shown};
 
 /// What else a decision shows beside its plan: a place of its own.
-pub struct AlsoShown {
+pub struct AlsoShown<'a> {
     /// The name the desk's rail and pane give it.
     pub name: String,
-    /// What it shows, drawn whole.
-    pub doc: Doc,
+    /// What it shows, drawn whole in the pane, with the pane's look.
+    pub shown: Shown<'a>,
     /// Whether the decision lists it before its plan, so it is read before it.
     pub leads: bool,
 }
@@ -68,12 +73,12 @@ pub struct Reading<'a> {
     review: &'a PlanReview,
     places: Vec<Place<'a>>,
     steps: Vec<Vec<&'a Task>>,
-    also: Vec<AlsoShown>,
+    also: Vec<AlsoShown<'a>>,
 }
 
 impl<'a> Reading<'a> {
     /// `review` as a person reads it, with what else its decision shows.
-    pub fn of(review: &'a PlanReview, also: Vec<AlsoShown>) -> Self {
+    pub fn of(review: &'a PlanReview, also: Vec<AlsoShown<'a>>) -> Self {
         let steps = review.plan.steps();
         let mut places: Vec<Place<'a>> = also
             .iter()
@@ -161,10 +166,9 @@ impl<'a> Reading<'a> {
                 let doc = change::deciding(self.review, spot.choice, look.glyphs);
                 terminal.lines(&doc)
             }
-            (_, Place::Also(at)) => self
-                .also
-                .get(*at)
-                .map_or_else(Vec::new, |also| terminal.lines(&also.doc)),
+            (_, Place::Also(at)) => self.also.get(*at).map_or_else(Vec::new, |also| {
+                terminal.lines(&also.shown.document(&inner))
+            }),
             (View::Proof, Place::Task { task, .. }) => {
                 terminal.lines(&proof::of_task(task, self.review))
             }
@@ -435,8 +439,8 @@ pub fn about(review: &PlanReview, question: &str, glyphs: Glyphs) -> Vec<String>
 
 /// The plan among `documents` as a person reads it, with the others as what else it
 /// shows; `None` when no document is a plan, or the plan has no place to stand on.
-pub fn reading<'a>(documents: &'a [ShownDocument], run: &RunId) -> Option<Reading<'a>> {
-    let (plan, review) = crate::shown::plan_among(documents)?;
+pub fn reading<'a>(documents: &'a [ShownDocument], run: &'a RunId) -> Option<Reading<'a>> {
+    let (plan, review) = plan_among(documents)?;
     let mut leads = true;
     let mut also = Vec::new();
     for document in documents {
@@ -445,8 +449,12 @@ pub fn reading<'a>(documents: &'a [ShownDocument], run: &RunId) -> Option<Readin
             continue;
         }
         also.push(AlsoShown {
-            name: crate::shown::called(document),
-            doc: crate::shown::document(document, run, Form::Review),
+            name: super::shown::called(document),
+            shown: Shown {
+                document,
+                run,
+                form: Form::Review,
+            },
             leads,
         });
     }
@@ -455,11 +463,23 @@ pub fn reading<'a>(documents: &'a [ShownDocument], run: &RunId) -> Option<Readin
 
 /// Whether `review` holds a place for a person to stand on: a task, or what it says of
 /// itself. A plan with neither has nothing to read at a desk.
-pub(crate) fn has_a_place(review: &PlanReview) -> bool {
+fn has_a_place(review: &PlanReview) -> bool {
     !review.plan.tasks.is_empty() || says_of_itself(review)
 }
 
 /// Whether the plan says anything of itself as a whole.
 fn says_of_itself(review: &PlanReview) -> bool {
     said(&review.plan.description).is_some() || said(&review.plan.design).is_some()
+}
+
+/// The first document among `documents` that is a plan with something to read,
+/// with the plan it holds: what a person reads at a desk. A plan with no task,
+/// description or design is a document like any other.
+pub fn plan_among(documents: &[ShownDocument]) -> Option<(&ShownDocument, &PlanReview)> {
+    documents
+        .iter()
+        .find_map(|document| match &document.content {
+            ShownContent::Tasks(review) if has_a_place(review) => Some((document, &**review)),
+            _ => None,
+        })
 }

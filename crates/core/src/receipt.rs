@@ -159,6 +159,26 @@ impl Receipt {
     /// who has no log to derive it from and needs to know what shape
     /// they were handed.
     pub const SCHEMA_VERSION: u32 = 2;
+
+    /// The fan-out siblings among the runners, by the base id they share
+    /// (`<base>@<runner>`): each group of two or more, its members in the
+    /// order the runners are listed. The JSON receipt keeps the flat
+    /// `runners` list and leaves grouping to whoever reads it.
+    pub fn fan_out_groups(&self) -> Vec<(NodeId, Vec<&RunnerUsage>)> {
+        let mut groups: Vec<(NodeId, Vec<&RunnerUsage>)> = Vec::new();
+        for usage in &self.runners {
+            if !usage.node_id.is_fan_out() {
+                continue;
+            }
+            let base = usage.node_id.base();
+            match groups.iter_mut().find(|(b, _)| *b == base) {
+                Some((_, members)) => members.push(usage),
+                None => groups.push((base, vec![usage])),
+            }
+        }
+        groups.retain(|(_, members)| members.len() > 1);
+        groups
+    }
 }
 
 impl std::fmt::Display for DiagnosticCount {

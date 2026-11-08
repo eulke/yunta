@@ -3,12 +3,15 @@
 //! mean, and the blocks under it. An agent reads no page: the same problems
 //! reach it as plain text, each with its `help:` line.
 
-use surco::components::{Problem, RunLine, Runs, Said};
-use surco::doc::Block;
+use surco::components::{Next, Problem, Refusal, RunLine, Runs, Said};
+use surco::doc::{Block, Doc};
+use surco::look::Look;
 use yunta_core::diagnostic::{Diagnostic, Report};
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::yaml::Location;
 use yunta_engine::CheckError;
+use yunta_render::command::Reader;
+use yunta_render::page::Page;
 
 use super::CliError;
 use crate::commands::run_ref::Candidate;
@@ -57,7 +60,7 @@ impl CliError {
                 .into_iter()
                 .map(Block::from)
                 .collect(),
-            CliError::Unrunnable(refusal) => refusal.blocks(Vec::new()),
+            CliError::Unrunnable(refusal) => refusal.blocks(&[]),
             _ => Vec::new(),
         }
     }
@@ -200,4 +203,20 @@ pub(super) fn unrunnable_said(refusal: &Unrunnable) -> String {
         }
     }
     said
+}
+
+/// A refusal as a person reads it on stderr: the sentence and where it
+/// looked, each problem it found pointed at in its line, and the commands
+/// that go on from here.
+impl Page for CliError {
+    fn document(&self, _look: &Look) -> Doc {
+        let (detail, steps) = self.advice(Reader::Person);
+        Doc::new()
+            .with(Refusal {
+                said: self.said_to(Reader::Person),
+                detail,
+            })
+            .with_all(self.blocks())
+            .with(Next { steps })
+    }
 }

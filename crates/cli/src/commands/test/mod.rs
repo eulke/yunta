@@ -39,7 +39,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::CliError;
 
-use crate::output::document;
+use crate::output::show;
 use crate::output::Outcome;
 use surco::components::{Check, Checklist, Found, Headline};
 use surco::doc::Doc;
@@ -47,6 +47,7 @@ use surco::glyphs::Mark;
 use surco::look::Look;
 use yunta_core::step::NextStep;
 use yunta_render::command;
+use yunta_render::page::Page;
 
 pub(crate) use case::run_case;
 
@@ -70,7 +71,12 @@ pub async fn test(dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> 
         }
     }
 
-    verdict(case_paths.len(), failures, look);
+    crate::output::blank();
+    let tested = Tested {
+        cases: case_paths.len(),
+        failures,
+    };
+    show(look, &tested);
     if failures == 0 {
         Ok(Outcome::Success)
     } else {
@@ -98,22 +104,51 @@ fn cases_under(root: &Path) -> Result<Vec<std::path::PathBuf>, CliError> {
 }
 
 /// The verdict under the rows it counts, as a run's closing comes under
-/// what it showed while it ran.
-fn verdict(cases: usize, failures: usize, look: &Look) {
-    let tally = format!("{}, {failures} failed", surco::text::counted(cases, "case"));
-    let mark = match failures {
-        0 => Mark::Done,
-        _ => Mark::Failed,
-    };
-    crate::output::blank();
-    document(
-        look,
+/// what it showed while it ran: how many cases ran, and how many failed.
+struct Tested {
+    cases: usize,
+    failures: usize,
+}
+
+impl Page for Tested {
+    fn document(&self, _look: &Look) -> Doc {
+        let tally = format!(
+            "{}, {} failed",
+            surco::text::counted(self.cases, "case"),
+            self.failures
+        );
+        let mark = match self.failures {
+            0 => Mark::Done,
+            _ => Mark::Failed,
+        };
         Doc::new().with(Headline::new(
             mark,
             command::line(&NextStep::Test { dir: None }),
             tally,
-        )),
-    );
+        ))
+    }
+}
+
+/// A case tested, said as it ends: what it found, in the column every case's
+/// name lines up in, with what went wrong under it.
+struct TestedCase<'a> {
+    /// Every case's name, which sets the column the rows share.
+    names: &'a [String],
+    name: String,
+    found: Found,
+    said: String,
+    problems: Vec<String>,
+}
+
+impl Page for TestedCase<'_> {
+    fn document(&self, _look: &Look) -> Doc {
+        let mut row = Checklist::aligned(self.names.to_vec());
+        row.push_check(
+            Check::new(self.found, self.name.as_str(), self.said.as_str())
+                .details(self.problems.clone()),
+        );
+        Doc::new().with(row)
+    }
 }
 
 /// The project whose `.yunta/` holds the cases: `dir` when given, the
@@ -234,14 +269,18 @@ async fn report(
     interrupt: crate::interrupt::Interrupt,
     (names, look): (&[String], &surco::look::Look),
 ) -> bool {
-    let name = case_name(case_path);
     let (found, said, problems) = case_found(run_case(root, case_path, interrupt).await);
     let passed = problems.is_empty();
     // The cases run one at a time and each row is drawn as its case ends:
     // the column every row shares is the list's, not the row's.
-    let mut row = Checklist::aligned(names.to_vec());
-    row.push_check(Check::new(found, name, said).details(problems));
-    document(look, Doc::new().with(row));
+    let row = TestedCase {
+        names,
+        name: case_name(case_path),
+        found,
+        said,
+        problems,
+    };
+    show(look, &row);
     passed
 }
 

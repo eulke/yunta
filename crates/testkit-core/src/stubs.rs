@@ -30,3 +30,6 @@ fn stub(name: &str) -> PathBuf {
         .join("stubs")
         .join(name)
 }
+
+#[cfg(test)]
+mod tests;

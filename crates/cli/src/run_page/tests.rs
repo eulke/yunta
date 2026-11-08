@@ -17,6 +17,7 @@ use yunta_testkit_core::{fixed_now, Log};
 
 use super::fixtures::{blocked_log, cases, outline, Case, RUN};
 use super::{RunPage, Scope};
+use yunta_render::page::Page;
 
 /// Every depth a page is read at, by the name its golden carries.
 const DEPTHS: [(Depth, &str); 3] = [

@@ -21,7 +21,7 @@ use super::{card, titled, Form};
 /// said beside the decision, once.
 pub(super) fn proof(doc: Doc, review: &PlanReview, form: Form, run: &RunId) -> Doc {
     let showing = match (form, &review.spec_node) {
-        (Form::Review, Some(node)) => Some(crate::spec::status_command(run, node)),
+        (Form::Review, Some(node)) => Some(crate::page::spec::status_command(run, node)),
         _ => None,
     };
     let mut blocks = held(review, showing);
@@ -37,7 +37,7 @@ pub(super) fn proof(doc: Doc, review: &PlanReview, form: Form, run: &RunId) -> D
 /// What proves the plan as a whole, on the desk, where each file the spec
 /// wrote is a key away: the tests counted, the suite, every guard and the
 /// promises no guard checks.
-pub(super) fn of_plan(review: &PlanReview) -> Doc {
+pub(in crate::page) fn of_plan(review: &PlanReview) -> Doc {
     let mut blocks = held(review, None);
     if blocks.is_empty() {
         blocks.push(nothing("nothing here proves the plan"));
@@ -48,7 +48,7 @@ pub(super) fn of_plan(review: &PlanReview) -> Doc {
 /// What proves `task`, a key away from its card: what tests it, the suite
 /// every task keeps passing, its guards, what it promises that no guard of
 /// its own checks, and each file the spec wrote for it, whole.
-pub(super) fn of_task(task: &Task, review: &PlanReview) -> Doc {
+pub(in crate::page) fn of_task(task: &Task, review: &PlanReview) -> Doc {
     let judged = card::judged(review, task);
     let fields = suite(card::tested(Fields::new(), task, review, judged), review);
     let guards = judged.map_or(&[][..], |judged| judged.guards.as_slice());
@@ -95,7 +95,7 @@ pub(super) fn of_task(task: &Task, review: &PlanReview) -> Doc {
 /// the suite, each guard a task keeps, and the promises no guard checks.
 /// `showing` is the command that shows the spec's tests whole, when a
 /// review leaves them to it.
-pub(super) fn held(review: &PlanReview, showing: Option<String>) -> Vec<Block> {
+pub(in crate::page) fn held(review: &PlanReview, showing: Option<String>) -> Vec<Block> {
     let fields = guards(measured(review, showing), review);
     let mut blocks: Vec<Block> = Vec::new();
     if !fields.is_empty() {
@@ -128,7 +128,7 @@ fn nothing(said: &str) -> Block {
 fn measured(review: &PlanReview, showing: Option<String>) -> Fields {
     let mut fields = Fields::new();
     if let Some(spec) = &review.spec {
-        let tests = crate::spec::test_count(spec);
+        let tests = crate::page::spec::test_count(spec);
         let files: Vec<&str> = spec
             .specs
             .iter()
@@ -190,7 +190,10 @@ fn folded(blocks: Vec<Block>, review: &PlanReview, form: Form) -> Vec<Block> {
 /// `4 spec tests and the suite`, `2 guards and the suite`, `the suite`.
 /// `None` when none of them holds it, and the proof is not folded.
 fn summary(review: &PlanReview) -> Option<String> {
-    let tests = review.spec.as_ref().map_or(0, crate::spec::test_count);
+    let tests = review
+        .spec
+        .as_ref()
+        .map_or(0, crate::page::spec::test_count);
     let guards: usize = review.tasks.iter().map(|judged| judged.guards.len()).sum();
     let parts: Vec<String> = [
         (tests > 0).then(|| counted(tests, "spec test")),

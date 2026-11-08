@@ -18,11 +18,12 @@ use yunta_core::yaml::SourceMap;
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{CheckError, Composition};
 use yunta_render::blocks::diagnostic::located;
+use yunta_render::page::Page;
 
 use crate::context::Context;
 use crate::error::{page, warn, CliError};
 use crate::output::Outcome;
-use crate::output::{document, on_stderr};
+use crate::output::{show, show_on_stderr};
 
 /// How much of the project a verdict reads beyond the workflow itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,53 +170,35 @@ impl Verdict {
         path: &Path,
         look: &Look,
     ) -> Result<Outcome, CliError> {
-        let page = self.page(ctx, path).await?;
+        let checked = self.checked(ctx, path).await?;
         if self.passes() {
-            document(look, page);
+            show(look, &checked);
             return Ok(Outcome::Success);
         }
-        on_stderr(look, page);
+        show_on_stderr(look, &checked);
         Ok(Outcome::Reported)
     }
 
-    /// The verdict as its page: whether the workflow read from `path` can
-    /// run here, what it found, and the check to run again.
-    pub(crate) async fn page(&self, ctx: &Context, path: &Path) -> Result<Doc, CliError> {
-        let found = self.found(ctx).await?;
-        let mark = match found.errors {
-            0 => Mark::Done,
-            _ => Mark::Failed,
-        };
-        let mut headline = Headline::new(mark, file_named(path), found.said());
-        let Found { blocks, errors } = found;
-        if !self.warnings.is_empty() {
-            headline = headline.fact(counted(self.warnings.len(), "warning"));
-        }
-        let steps = match errors {
-            0 => Vec::new(),
-            _ => vec![check_again(&shown(ctx, path))],
-        };
-        Ok(Doc::new()
-            .with(headline)
-            .with(Furrow(Vec::new()))
-            .with(Fields::new().push_if("at", shown(ctx, path)))
-            .with_all(blocks)
-            .with(Next { steps }))
+    /// The verdict on the workflow read from `path`, as its page says it.
+    pub(crate) async fn checked(&self, ctx: &Context, path: &Path) -> Result<Checked, CliError> {
+        Ok(Checked {
+            file: file_named(path),
+            at: shown(ctx, path),
+            diagnosis: self.diagnosis(ctx).await?,
+        })
     }
 
-    /// What the verdict found, as the blocks a page draws: each problem in
-    /// the order the file has them, each warning, and what this project
-    /// could declare; and how many of them stop the workflow.
-    pub(crate) async fn found(&self, ctx: &Context) -> Result<Found, CliError> {
-        let unrunnable = self.unrunnable(ctx).await?;
+    /// What the verdict diagnosed: why the workflow cannot run here, each
+    /// problem in the order the file has them, and each warning.
+    pub(crate) async fn diagnosis(&self, ctx: &Context) -> Result<Diagnosis, CliError> {
         let warnings = self
             .warnings
             .iter()
             .map(|warning| Problem::warning(yunta_render::caution::line(warning)))
             .collect();
-        Ok(Found {
-            blocks: unrunnable.blocks(warnings),
-            errors: unrunnable.problems.len(),
+        Ok(Diagnosis {
+            unrunnable: self.unrunnable(ctx).await?,
+            warnings,
         })
     }
 
@@ -305,32 +288,80 @@ pub(crate) struct Unrunnable {
 impl Unrunnable {
     /// The blocks a page draws: each problem, then `warnings`, then what to
     /// declare.
-    pub(crate) fn blocks(&self, warnings: Vec<Problem>) -> Vec<Block> {
+    pub(crate) fn blocks(&self, warnings: &[Problem]) -> Vec<Block> {
         self.problems
             .iter()
-            .cloned()
             .chain(warnings)
+            .cloned()
             .map(Block::from)
             .chain(self.declare.iter().flat_map(surco::components::Fix::blocks))
             .collect()
     }
 }
 
-/// What a verdict found, as a page draws it, and how many of the problems
-/// stop the workflow.
-pub(crate) struct Found {
-    pub(crate) blocks: Vec<Block>,
-    pub(crate) errors: usize,
+/// What `check` diagnosed: why the workflow cannot run here, each problem
+/// quoted from its file, and what does not stop it but should be heard. Not
+/// surco's `Found`, the result of one check's row.
+pub(crate) struct Diagnosis {
+    unrunnable: Unrunnable,
+    /// Each warning, as the problem a page says it in.
+    warnings: Vec<Problem>,
 }
 
-impl Found {
+impl Diagnosis {
+    /// How many problems stop the workflow.
+    pub(crate) fn errors(&self) -> usize {
+        self.unrunnable.problems.len()
+    }
+
     /// The verdict in words: the workflow can run here, or how many
     /// problems stop it.
     pub(crate) fn said(&self) -> String {
-        match self.errors {
+        match self.errors() {
             0 => "can run here".to_string(),
             errors => counted(errors, "error"),
         }
+    }
+
+    /// What a page draws of it: each problem, each warning, and what this
+    /// project could declare.
+    pub(crate) fn blocks(&self) -> Vec<Block> {
+        self.unrunnable.blocks(&self.warnings)
+    }
+}
+
+/// The verdict on a workflow file, as `check` prints it and `graph` beside
+/// its drawing: whether it can run here, what was found, and the check to
+/// run again once it is fixed.
+pub(crate) struct Checked {
+    /// The file, as a headline names it.
+    file: String,
+    /// Where it is, as a reader in this directory names it.
+    at: String,
+    diagnosis: Diagnosis,
+}
+
+impl Page for Checked {
+    fn document(&self, _look: &Look) -> Doc {
+        let diagnosis = &self.diagnosis;
+        let mark = match diagnosis.errors() {
+            0 => Mark::Done,
+            _ => Mark::Failed,
+        };
+        let mut headline = Headline::new(mark, self.file.as_str(), diagnosis.said());
+        if !diagnosis.warnings.is_empty() {
+            headline = headline.fact(counted(diagnosis.warnings.len(), "warning"));
+        }
+        let steps = match diagnosis.errors() {
+            0 => Vec::new(),
+            _ => vec![check_again(&self.at)],
+        };
+        Doc::new()
+            .with(headline)
+            .with(Furrow(Vec::new()))
+            .with(Fields::new().push_if("at", self.at.as_str()))
+            .with_all(diagnosis.blocks())
+            .with(Next { steps })
     }
 }
 

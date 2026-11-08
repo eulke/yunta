@@ -4,8 +4,10 @@ use yunta_core::AdapterId;
 
 use super::{kept_check, versioned, DoctorAnswer};
 use crate::output::draw;
-use crate::output::Answer;
 use crate::output::Outcome;
+use yunta_render::page::Page;
+
+use crate::output::Answer;
 
 /// What a machine ready to run finds: two checks that hold, and a first run
 /// worth a look, with what that means and how to make it hold.
@@ -37,7 +39,7 @@ fn a_glance_folds_what_holds_and_says_how_to_make_a_caution_hold() {
     let answer = DoctorAnswer::of(false, false, &ready());
     let furrow = ".".repeat(80);
     assert_eq!(
-        draw(answer.document(&Look::plain()), &Look::plain()),
+        draw(answer.page().document(&Look::plain()), &Look::plain()),
         format!(
             "+ yunta doctor ; ready ; 1 thing worth a look\n{furrow}\n\n  \
              + 2 healthy  claude-code 2.1.305 ; git\n\n  \
@@ -59,7 +61,7 @@ fn a_glance_folds_what_holds_and_says_how_to_make_a_caution_hold() {
 #[test]
 fn the_whole_list_gives_every_check_its_own_row() {
     let answer = DoctorAnswer::of(false, true, &ready());
-    let page = draw(answer.document(&Look::plain()), &Look::plain());
+    let page = draw(answer.page().document(&Look::plain()), &Look::plain());
     assert!(
         page.contains("\n  + claude-code  healthy (2.1.305 (Claude Code))\n"),
         "{page}"
@@ -80,7 +82,7 @@ fn a_problem_makes_the_machine_not_ready_and_is_counted() {
         "github acme/web: `TOKEN`, the variable its token is in, is not set",
     );
     let answer = DoctorAnswer::of(false, false, &checks);
-    let page = draw(answer.document(&Look::plain()), &Look::plain());
+    let page = draw(answer.page().document(&Look::plain()), &Look::plain());
     assert!(
         page.starts_with("! yunta doctor ; not ready ; 1 problem ; 1 thing worth a look\n"),
         "{page}"
@@ -105,7 +107,7 @@ fn a_healthy_adapter_folds_as_its_id_and_the_version_it_reported() {
 #[test]
 fn the_whole_list_offers_no_list_to_unfold() {
     let answer = DoctorAnswer::of(false, true, &ready());
-    let page = draw(answer.document(&Look::plain()), &Look::plain());
+    let page = draw(answer.page().document(&Look::plain()), &Look::plain());
     assert!(!page.contains("--full"), "{page}");
 }
 

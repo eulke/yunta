@@ -20,6 +20,7 @@ use surco::text::counted;
 use surco::words::{Standing, NEED_YOU, NOTHING_NEEDS_YOU};
 use yunta_core::step::{NextStep, Reach};
 use yunta_render::command;
+use yunta_render::page::Page;
 
 use super::inbox::{Group, Inbox, RunRow};
 use crate::context::Context;
@@ -65,7 +66,17 @@ pub(crate) struct ListRunsAnswer {
     depth: Depth,
 }
 
-impl Answer for ListRunsAnswer {
+/// The field as a person reads it: what needs them first, then every
+/// other run by where it stands, as deep as `depth` asks, and where this
+/// project keeps its runs when there are none.
+struct Field<'a> {
+    inbox: &'a Inbox,
+    /// Where this project keeps its runs, which a field with none names.
+    storage: &'a str,
+    depth: Depth,
+}
+
+impl Page for Field<'_> {
     fn document(&self, look: &Look) -> Doc {
         let doc = Doc::new().with(self.headline()).with(Furrow(Vec::new()));
         if self.is_empty() {
@@ -74,7 +85,7 @@ impl Answer for ListRunsAnswer {
                 _ => "no runs in this repository yet",
             };
             // Where the runs would be: a reader who expected some checks it.
-            let kept = Fields::new().push_if("kept in", self.storage.as_str());
+            let kept = Fields::new().push_if("kept in", self.storage);
             return doc
                 .with(Gist::new(gist))
                 .with(kept)
@@ -86,13 +97,23 @@ impl Answer for ListRunsAnswer {
             .with_all(self.footer(look.glyphs))
             .with(self.next())
     }
+}
+
+impl Answer for ListRunsAnswer {
+    fn page(&self) -> impl Page + '_ {
+        Field {
+            inbox: &self.inbox,
+            storage: &self.storage,
+            depth: self.depth,
+        }
+    }
 
     fn outcome(&self) -> Outcome {
         Outcome::Success
     }
 }
 
-impl ListRunsAnswer {
+impl Field<'_> {
     /// Whether the field has no run to show at all.
     fn is_empty(&self) -> bool {
         self.inbox.rows.is_empty() && self.inbox.unreadable.is_empty()

@@ -5,11 +5,12 @@
 use surco::components::{Code, Fields, Section};
 use surco::doc::{Block, Depth, Doc};
 use surco::line::{Line, Tone};
+use surco::look::Look;
 use surco::text::counted;
 use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId, SpecFile};
 
-use crate::plan::Form;
+use super::plan::Form;
 
 /// The lines of a file of tests a spec's page shows before the rest is a
 /// command away: the length of a test that checks one behavior, so a page
@@ -17,14 +18,27 @@ use crate::plan::Form;
 /// off the screen.
 pub const CODE_SHOWN: usize = 60;
 
+/// The tests a plan's tasks are held to, as the page a person reads when
+/// they are shown without the plan: `file`, written by `producer` when the
+/// run's log says — which `of` names — for the run `run`, in `form`.
+#[derive(Debug, Clone, Copy)]
+pub struct Spec<'a> {
+    pub file: &'a SpecFile,
+    pub of: &'a str,
+    pub producer: Option<&'a NodeId>,
+    pub run: &'a RunId,
+    pub form: Form,
+}
+
+impl super::Page for Spec<'_> {
+    fn document(&self, _look: &Look) -> Doc {
+        document(self.file, (self.of, self.producer), self.run, self.form)
+    }
+}
+
 /// The tests of `file`, written by `node` when the run's log says — which
 /// `of` names — for the run `run`, the one each command a reader copies takes.
-pub fn document(
-    file: &SpecFile,
-    (of, node): (&str, Option<&NodeId>),
-    run: &RunId,
-    form: Form,
-) -> Doc {
+fn document(file: &SpecFile, (of, node): (&str, Option<&NodeId>), run: &RunId, form: Form) -> Doc {
     let tests = test_count(file);
     let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(
         Line::new()

@@ -15,6 +15,7 @@ use surco::text::counted;
 use surco::width::{cell_width, id_column, middle_cut, truncate, INDENT, INDENT_WIDTH};
 use surco::words::{Standing, WAITING_ON_YOU};
 use yunta_core::NodeId;
+use yunta_render::page::Page;
 use yunta_render::state::NodeDisplay;
 use yunta_replay::frame::{NodeFrame, RunFrame, RunPhase};
 use yunta_replay::stats::{NodeStat, RunStats};
@@ -35,7 +36,7 @@ pub(super) struct RunStatsPage<'a> {
     pub(super) depth: Depth,
 }
 
-impl RunStatsPage<'_> {
+impl Page for RunStatsPage<'_> {
     /// The whole `yunta stats <run_id>` block: the run's headline and
     /// furrow, where most of its time went, its facts — a row each that
     /// has something to say — then its time, at `--full` its rails, its
@@ -44,7 +45,7 @@ impl RunStatsPage<'_> {
     /// A block rather than a run of `println!`s: what this command says
     /// about a run is one thing a test reads whole, and a number nobody can
     /// assert is a number nobody is holding to anything.
-    pub(super) fn document(&self, look: &Look) -> Doc {
+    fn document(&self, look: &Look) -> Doc {
         let stats = self.stats;
         let asleep = match stats.asleep.is_zero() {
             true => String::new(),
@@ -84,7 +85,9 @@ impl RunStatsPage<'_> {
         doc.with(Block::Lines(self.nodes_lines(look)))
             .with(Block::Lines(runner_lines(stats, look)))
     }
+}
 
+impl RunStatsPage<'_> {
     /// The node a person was asked about longest, when it holds most of a
     /// person's part of the run: where the gist says that part went. A part
     /// spread over nodes, or held by asks of the run itself, names none.

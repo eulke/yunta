@@ -1,6 +1,7 @@
-//! `yunta pack add/new/remove/list/update`: the command layer — argument
-//! handling and printing — over `crate::pack`'s git/filesystem
-//! mechanics. `add` and `update` also enforce `permissions.packs`: the
+//! `yunta pack add/new/remove/list/update/audit`: the command layer —
+//! argument handling and printing — over `crate::pack`'s git/filesystem
+//! mechanics. Its pages are `page`'s, the audit is `audit`, what a vendored
+//! pack needs from the project is `needs`, and `new` is `scaffold`. `add` and `update` also enforce `permissions.packs`: the
 //! publisher allow-list refuses a source outside it, and the
 //! `executors: allow|prompt|deny` policy governs the confirmation
 //! gate — `prompt` (the default) requires `--yes` after the audit has
@@ -14,9 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::components::{Checklist, Fields, Found, Furrow, Headline};
-use surco::doc::Doc;
-use surco::glyphs::Mark;
+use surco::components::Found;
 use surco::look::Look;
 use yunta_core::{
     ConfigLayer, ContentHash, PackExecutorPolicy, PackLock, PackLockEntry, PackManifest, PackRef,
@@ -24,21 +23,24 @@ use yunta_core::{
 };
 use yunta_engine::audit_pack;
 
-use super::pack_audit::{count_pack_tests, inventory, run_pack_tests};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
-use crate::output::{blank, document};
+use crate::output::{blank, show};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
     vendor_into_place, with_cleanup, PackError, Swap,
 };
 
+mod audit;
+mod needs;
 mod page;
 mod scaffold;
 
-use page::{about_to, Installed};
+pub use audit::audit;
+use audit::{count_pack_tests, run_pack_tests};
+use page::{Installed, Inventory, Listed, Removed, Updated, VendoredPack};
 pub use scaffold::new_pack;
 
 /// The merged `permissions.packs` verdicts, with the layers that
@@ -46,6 +48,15 @@ pub use scaffold::new_pack;
 /// *which* config file to change isn't actionable, since a permissions
 /// ceiling set by a higher layer may name a file the user can't even
 /// edit.
+/// Whether the executors `manifest` declares wait on a person's `--yes`
+/// before the pack is vendored: under a policy that prompts, until they
+/// confirm.
+fn waits_on_yes(policy: &PackPolicy, manifest: &PackManifest, confirmed: bool) -> bool {
+    !manifest.declares.executors.is_empty()
+        && policy.executors == PackExecutorPolicy::Prompt
+        && !confirmed
+}
+
 struct PackPolicy {
     /// Non-empty allow-list, with the declaring layer names — `None`
     /// when no layer restricts publishers (empty = everyone).
@@ -266,8 +277,11 @@ pub async fn add(
     // The audit is read, never run: the inventory a person confirms
     // against, shown before anything is vendored.
     let audit = audit_pack(clone_dir.path(), manifest.clone());
-    let headline = about_to(&policy, &manifest, confirmed_executors, "installing");
-    document(look, inventory(&audit, headline));
+    let inventory = Inventory::Installing {
+        audit: &audit,
+        waits_on_yes: waits_on_yes(&policy, &manifest, confirmed_executors),
+    };
+    show(look, &inventory);
     blank();
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "install")?;
 
@@ -297,7 +311,7 @@ pub async fn add(
         true => run_pack_tests(&dest, ctx.interrupt()).await,
         false => count_pack_tests(&dest),
     };
-    let needs = super::pack_needs::blocks(&ctx, &dest, &manifest).await;
+    let needs = needs::unmet(&ctx, &dest, &manifest).await;
     let installed = |needs| Installed {
         manifest: &manifest,
         commit: &commit,
@@ -307,8 +321,8 @@ pub async fn add(
         needs,
     };
     // The pack is installed whatever stopped the reading of its needs.
-    let needs = needs.inspect_err(|_| document(look, installed(Vec::new()).page()))?;
-    document(look, installed(needs).page());
+    let needs = needs.inspect_err(|_| show(look, &installed(Vec::new())))?;
+    show(look, &installed(needs));
     Ok(Outcome::Success)
 }
 
@@ -358,11 +372,12 @@ pub async fn update(
         // The decision being demanded needs the same evidence `add`
         // shows: nothing executes until a person has seen the inventory,
         // shown only when there is a decision to make.
-        let headline = about_to(&policy, &manifest, confirmed_executors, "updating");
-        document(
-            look,
-            inventory(&audit_pack(clone_dir.path(), manifest.clone()), headline),
-        );
+        let audit = audit_pack(clone_dir.path(), manifest.clone());
+        let inventory = Inventory::Updating {
+            audit: &audit,
+            waits_on_yes: waits_on_yes(&policy, &manifest, confirmed_executors),
+        };
+        show(look, &inventory);
         blank();
     }
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "update")?;
@@ -382,10 +397,12 @@ pub async fn update(
         }
     })?;
 
-    let headline = Headline::new(Mark::Done, format!("pack {pack}"), "updated")
-        .fact(format!("to {new_ref}"))
-        .fact(commit.abbreviated());
-    document(look, Doc::new().with(headline));
+    let updated = Updated {
+        pack,
+        to: new_ref,
+        commit: &commit,
+    };
+    show(look, &updated);
     Ok(Outcome::Success)
 }
 
@@ -407,8 +424,7 @@ pub fn remove(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
         swap.commit();
     }
 
-    let headline = Headline::new(Mark::Done, format!("pack {pack}"), "removed");
-    document(look, Doc::new().with(headline));
+    show(look, &Removed { pack });
     Ok(Outcome::Success)
 }
 
@@ -447,14 +463,8 @@ pub fn list(look: &Look) -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let lock = load_lock(&cwd)?;
     if lock.packs.is_empty() {
-        let root = surco::paths::shown(&packs_root(&cwd), &cwd, None);
-        document(
-            look,
-            Doc::new()
-                .with(Headline::new(Mark::Absent, "packs", "none installed"))
-                .with(Furrow(Vec::new()))
-                .with(Fields::new().push_if("looked in", root)),
-        );
+        let looked_in = surco::paths::shown(&packs_root(&cwd), &cwd, None);
+        show(look, &Listed::Empty { looked_in });
         return Ok(Outcome::Success);
     }
 
@@ -462,27 +472,21 @@ pub fn list(look: &Look) -> Result<Outcome, CliError> {
     // re-hash what's actually vendored on disk and say so when it no
     // longer matches what the lock recorded, rather than just trusting
     // the lock's own numbers back at the user.
-    let mut checks = Checklist::default();
-    for (key, entry) in &lock.packs {
-        let dest = vendor_dir(&cwd, key);
-        let installed = format!("{} ({})", entry.r#ref, entry.commit.abbreviated());
-        let (found, said) = vendored_verdict(&dest, entry, &installed);
-        checks.push(found, key.to_string(), said);
-    }
-    let lock_file = surco::paths::shown(&lock_path(&cwd), &cwd, None);
-    let mark = match checks.holds() {
-        true => Mark::Done,
-        false => Mark::Failed,
-    };
-    let installed = Headline::new(mark, "packs", format!("{} installed", lock.packs.len()))
-        .tally(checks.count(Found::Problem), checks.count(Found::Caution));
-    document(
-        look,
-        Doc::new()
-            .with(installed)
-            .with(Furrow(Vec::new()))
-            .with(checks)
-            .with(Fields::new().push_if("lock", lock_file)),
-    );
+    let packs = lock
+        .packs
+        .iter()
+        .map(|(key, entry)| {
+            let dest = vendor_dir(&cwd, key);
+            let installed = format!("{} ({})", entry.r#ref, entry.commit.abbreviated());
+            let (found, said) = vendored_verdict(&dest, entry, &installed);
+            VendoredPack {
+                pack: key.to_string(),
+                found,
+                said,
+            }
+        })
+        .collect();
+    let lock = surco::paths::shown(&lock_path(&cwd), &cwd, None);
+    show(look, &Listed::Locked { packs, lock });
     Ok(Outcome::Success)
 }

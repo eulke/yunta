@@ -10,7 +10,7 @@ use yunta_testkit::{
     full_run_id, git, hermetic, init_repo, run_id_from, runs_root, stdout, wait_until, write,
     yunta_in, CliChild,
 };
-use yunta_testkit_core::adapter::{child_pid_fifo, grandchild_pid, wait_until_gone};
+use yunta_testkit_core::adapter::{child_pid_fifo, recorded_pid, wait_until_gone};
 
 /// Each scripted CLI, its knobs' prefix, and the lines of a session that
 /// opens, says something and ends its turn.
@@ -64,6 +64,12 @@ fn project(repo: &Path, adapter: &str, lines: &[&str]) {
     git(repo, &["commit", "-q", "-m", "project"]);
 }
 
+/// What a stub starts in a process group of its own, under it.
+const GROUPED: &str = "its command in a group of its own";
+
+/// What a stub starts from a shell that leaves at once, so its parent is gone.
+const ORPHANED: &str = "its orphaned command";
+
 /// Processes a test started, killed when it ends, passed or not.
 #[derive(Default)]
 struct Started(Vec<Pid>);
@@ -77,9 +83,50 @@ impl Drop for Started {
     }
 }
 
-/// The pid a stub's command writes to `fifo` once it runs.
-async fn pid_in(fifo: &Path) -> Pid {
-    Pid::try_from(grandchild_pid(fifo).await.parse::<u32>().unwrap()).unwrap()
+/// The pid a stub's `command` writes to `fifo` once it runs. A stub that never
+/// writes it fails the test with what the run under `home` left, since a run
+/// that never reached its session says why only there.
+async fn pid_in(command: &str, fifo: &Path, repo: &Path, home: &Path) -> Pid {
+    let Some(pid) = recorded_pid(fifo).await else {
+        // The stub makes its rendezvous with the command beside the fifo:
+        // there, it started the command and waits on it.
+        let waits = Path::new(&format!("{}.ready", fifo.display())).exists();
+        panic!(
+            "the stub never recorded the pid of {command} (the stub {} it); the run left:\n{}",
+            if waits {
+                "started it and waits on"
+            } else {
+                "never started"
+            },
+            left(repo, home)
+        );
+    };
+    Pid::try_from(pid.parse::<u32>().unwrap()).unwrap()
+}
+
+/// What the one run under `home` left: what its detached process wrote, what
+/// its registry names, and where its log says it stands.
+fn left(repo: &Path, home: &Path) -> String {
+    let Some(run) = std::fs::read_dir(runs_root(home))
+        .ok()
+        .and_then(|mut runs| runs.next())
+        .and_then(Result::ok)
+    else {
+        return "no run directory".to_string();
+    };
+    let id = run.file_name().to_string_lossy().into_owned();
+    let scratch = |name: &str| {
+        std::fs::read_to_string(run.path().join("scratch").join(name))
+            .unwrap_or_else(|error| format!("({error})"))
+    };
+    let status = yunta_in!(repo, home, &["status", &id]);
+    format!(
+        "detached.log:\n{}\nengine.json:\n{}\nyunta status {id}:\n{}{}",
+        scratch("detached.log"),
+        scratch("engine.json"),
+        stdout(&status),
+        String::from_utf8_lossy(&status.stderr)
+    )
 }
 
 /// A Codex session that prints a retry notice and goes on finishes its node,
@@ -134,8 +181,10 @@ async fn no_command_outlives_a_session_that_ends_by_itself() {
             .env(format!("{prefix}_LINGER"), "1");
         let run = CliChild::spawn(command, None).unwrap();
         let mut started = Started::default();
-        started.0.push(pid_in(&under).await);
-        started.0.push(pid_in(&orphan).await);
+        started.0.push(pid_in(GROUPED, &under, &repo, &home).await);
+        started
+            .0
+            .push(pid_in(ORPHANED, &orphan, &repo, &home).await);
 
         let output = run.wait_with_output().unwrap();
 
@@ -207,8 +256,10 @@ async fn no_command_outlives(stop: Stop) {
         let detached = yunta_in!(&repo, &home, &["run", "wf.yaml", "--detach"], &knobs);
         assert!(detached.status.success(), "{adapter}: {detached:?}");
         let mut started = Started::default();
-        started.0.push(pid_in(&under).await);
-        started.0.push(pid_in(&orphan).await);
+        started.0.push(pid_in(GROUPED, &under, &repo, &home).await);
+        started
+            .0
+            .push(pid_in(ORPHANED, &orphan, &repo, &home).await);
         let id = full_run_id(&home, &run_id_from(&detached));
         // An engine killed while the CLI still writes takes the CLI with it,
         // by SIGPIPE, and its commands with no parent link to follow: that

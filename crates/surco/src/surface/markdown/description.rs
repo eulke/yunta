@@ -2,7 +2,10 @@
 //! file is, with what it leaves out said by whoever draws it.
 
 use crate::doc::Doc;
+use crate::look::Look;
 use crate::surface::Surface;
+
+use super::Markdown;
 
 /// A forge's page: the description of a pull request, under the title the
 /// forge draws above it. It is drawn as a Markdown file is, except that its
@@ -26,6 +29,14 @@ pub enum Leaves {
     CodeLines,
     /// Those, and what each fold holds: its title stays, as a line.
     Folds,
+}
+
+impl Description {
+    /// The look a document is built with for a forge's page: a Markdown
+    /// file's, since the page is drawn as one.
+    pub fn look(&self) -> Look {
+        Markdown.look()
+    }
 }
 
 impl Surface for Description {

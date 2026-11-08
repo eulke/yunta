@@ -4,13 +4,15 @@ use super::{answer, sentence, GateState};
 use crate::output::draw;
 use crate::output::Answer;
 use surco::look::Look;
+use yunta_render::page::Page;
 
 #[test]
 fn each_gate_answer_says_how_it_ended_and_what_to_type_next() {
     let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
     let said = |state: GateState| {
         let reply = answer(&run, state);
-        draw(reply.document(&Look::plain()), &Look::plain())
+        let page = reply.page().document(&Look::plain());
+        draw(page, &Look::plain())
     };
     let resolved = said(GateState::Resolved {
         option: OptionId::from_static("retry"),
@@ -46,7 +48,7 @@ fn every_answer_says_a_resume_applies_it() {
             option: abort.clone(),
         },
     );
-    let page = draw(reply.document(&Look::plain()), &Look::plain());
+    let page = draw(reply.page().document(&Look::plain()), &Look::plain());
     let said = page.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         said.contains("a resume in the background applies it"),

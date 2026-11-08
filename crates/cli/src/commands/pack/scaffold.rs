@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use surco::components::{Fields, Furrow, Headline};
+use surco::components::{Fields, Furrow, Headline, Problem};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::look::Look;
@@ -13,10 +13,11 @@ use surco::text::counted;
 use yunta_core::step::NextStep;
 use yunta_core::{ConfigLayer, PackManifest, PackRef, Workflow};
 use yunta_render::command;
+use yunta_render::page::Page;
 
-use super::super::pack_audit::run_pack_tests;
+use super::audit::{run_pack_tests, PackTestSummary};
 use crate::error::CliError;
-use crate::output::document;
+use crate::output::show;
 use crate::output::Outcome;
 
 // Written as literal templates (not built from the typed values) so the
@@ -161,19 +162,88 @@ pub async fn new_pack(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> 
         PACK_FIXTURE_TEMPLATE,
     )
     .await?;
-    let page = |mark: Mark, found: Vec<Block>| {
-        Doc::new()
-            .with(Headline::new(mark, format!("pack {pack}"), "written"))
-            .with(Furrow(Vec::new()))
-            .with(Fields::new().push_if("at", surco::paths::shown(&dir, &cwd, None)))
-            .with_all(found)
+    let at = surco::paths::shown(&dir, &cwd, None);
+    let page = |checked| NewPack {
+        pack,
+        at: &at,
+        checked,
     };
     // The files are on disk whatever stopped the check of them.
-    let (mark, found, outcome) = verify_scaffold(&dir, &workflow)
+    let checked = check_pack(&dir, &workflow)
         .await
-        .inspect_err(|_| document(look, page(Mark::Done, Vec::new())))?;
-    document(look, page(mark, found));
-    Ok(outcome)
+        .inspect_err(|_| show(look, &page(None)))?;
+    show(look, &page(Some(&checked)));
+    Ok(checked.outcome())
+}
+
+/// A pack `pack new` wrote, as a person reads it: where it is, and what its
+/// check found; the files alone where something stopped the check.
+struct NewPack<'a> {
+    pack: &'a PackRef,
+    /// Where the pack is, as a reader in this directory names it.
+    at: &'a str,
+    checked: Option<&'a PackCheck>,
+}
+
+impl Page for NewPack<'_> {
+    fn document(&self, _look: &Look) -> Doc {
+        let mark = self.checked.map_or(Mark::Done, PackCheck::mark);
+        Doc::new()
+            .with(Headline::new(
+                mark,
+                format!("pack {}", self.pack),
+                "written",
+            ))
+            .with(Furrow(Vec::new()))
+            .with(Fields::new().push_if("at", self.at))
+            .with_all(self.checked.map(PackCheck::blocks).unwrap_or_default())
+    }
+}
+
+/// The check `pack new` runs on the pack it wrote: the problems that stop
+/// its example workflow, or, when none does, what the pack's own cases say.
+enum PackCheck {
+    /// The example workflow does not check: each problem, as `check` says it.
+    Refused(Vec<Problem>),
+    /// It checks, and the pack's cases ran.
+    Tested(PackTestSummary),
+}
+
+impl PackCheck {
+    /// The mark the page opens with: worth a look where the example does not
+    /// check, else the case's.
+    fn mark(&self) -> Mark {
+        match self {
+            PackCheck::Refused(_) => Mark::Caution,
+            PackCheck::Tested(tests) => tests.mark(),
+        }
+    }
+
+    /// What the page says of it: how many problems stop the example, and
+    /// each; or what the pack's case says.
+    fn blocks(&self) -> Vec<Block> {
+        match self {
+            PackCheck::Refused(problems) => std::iter::once(
+                Fields::new()
+                    .push_if(
+                        "check",
+                        format!("{} in {EXAMPLE}", counted(problems.len(), "error")),
+                    )
+                    .into(),
+            )
+            .chain(problems.iter().cloned().map(Block::from))
+            .collect(),
+            PackCheck::Tested(tests) => tests.blocks(),
+        }
+    }
+
+    /// The exit: reported where the example does not check or a case failed.
+    fn outcome(&self) -> Outcome {
+        match self {
+            PackCheck::Tested(tests) if tests.failed == 0 => Outcome::Success,
+            PackCheck::Refused(_) | PackCheck::Tested(_) => Outcome::Reported,
+        }
+    }
 }
 
 /// Writes one file of the scaffold under `dir`, creating its directory
@@ -191,13 +261,9 @@ async fn write_under(dir: &Path, rel: &str, contents: &str) -> Result<(), CliErr
 }
 
 /// Checks the scaffolded workflow against the pack's own self-test config,
-/// and runs the pack's case when the check passes: the mark the page opens
-/// with, what it found, and the outcome. A check that fails reports every
-/// problem and runs nothing.
-async fn verify_scaffold(
-    dir: &Path,
-    workflow: &Workflow,
-) -> Result<(Mark, Vec<Block>, Outcome), CliError> {
+/// and runs the pack's case when the check passes. A check that fails
+/// reports every problem and runs nothing.
+async fn check_pack(dir: &Path, workflow: &Workflow) -> Result<PackCheck, CliError> {
     let config = ConfigLayer::merge_layers(
         crate::project::load_named_layers(dir)?
             .into_iter()
@@ -206,28 +272,13 @@ async fn verify_scaffold(
     let facts = crate::commands::declared_facts(&config);
     let errors = yunta_engine::check(workflow, &config, &facts);
     if !errors.is_empty() {
-        let found = std::iter::once(
-            Fields::new()
-                .push_if(
-                    "check",
-                    format!("{} in {EXAMPLE}", counted(errors.len(), "error")),
-                )
-                .into(),
-        )
-        .chain(
-            errors
-                .iter()
-                .map(|error| crate::error::page::refused(error, None, EXAMPLE, None).into()),
-        )
-        .collect();
-        return Ok((Mark::Caution, found, Outcome::Reported));
+        let problems = errors
+            .iter()
+            .map(|error| crate::error::page::refused(error, None, EXAMPLE, None))
+            .collect();
+        return Ok(PackCheck::Refused(problems));
     }
     let interrupt = crate::interrupt::Interrupt::ctrl_c()
         .map_err(|source| CliError::io("install the interrupt handler for", "pack new", source))?;
-    let tests = run_pack_tests(dir, interrupt).await;
-    let outcome = match tests.failed {
-        0 => Outcome::Success,
-        _ => Outcome::Reported,
-    };
-    Ok((tests.mark(), tests.blocks(), outcome))
+    Ok(PackCheck::Tested(run_pack_tests(dir, interrupt).await))
 }

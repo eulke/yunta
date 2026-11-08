@@ -132,11 +132,9 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
 
 /// The receipt as a file holds it.
 fn render_receipt_markdown(receipt: &yunta_core::receipt::Receipt) -> String {
-    use surco::surface::Surface;
-    surco::surface::Markdown.draw(&yunta_render::receipt::document(
-        receipt,
-        surco::glyphs::Glyphs::Unicode,
-    ))
+    use surco::surface::{Markdown, Surface};
+    use yunta_render::page::Page;
+    Markdown.draw(&yunta_render::page::Receipt { receipt }.document(&Markdown.look()))
 }
 
 /// The golden file `case` is checked against.

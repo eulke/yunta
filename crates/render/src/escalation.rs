@@ -214,7 +214,7 @@ pub fn section(title: impl Into<String>, blocks: Vec<Block>) -> Section {
 /// names. Each reason is said once: under that section when it names them,
 /// and in the record when no plan on the page does.
 pub fn record(escalation: &GateWaitingPayload, shown: &[ShownDocument]) -> Vec<String> {
-    match crate::shown::says_why(escalation.withheld(), shown) {
+    match crate::page::shown::says_why(escalation.withheld(), shown) {
         true => noted(escalation),
         false => evidence(escalation),
     }

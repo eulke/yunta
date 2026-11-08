@@ -10,6 +10,7 @@ use surco::words::Standing;
 use yunta_core::step::NextStep;
 use yunta_core::{Pid, RunId};
 use yunta_render::command;
+use yunta_render::page::Page;
 
 use crate::json::SCHEMA_VERSION;
 use crate::output::Answer;
@@ -60,7 +61,14 @@ pub(super) fn answer(run_id: &RunId, state: CancelState) -> CancelAnswer {
     }
 }
 
-impl Answer for CancelAnswer {
+/// A cancel, as the person who asked for it reads it: what it found the run
+/// doing, what it did to it, and what goes on from here.
+struct Cancelled<'a> {
+    run_id: &'a RunId,
+    state: &'a CancelState,
+}
+
+impl Page for Cancelled<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let called = self.run_id.handle();
         let Some((mark, said, gist, steps)) = self.said() else {
@@ -72,6 +80,15 @@ impl Answer for CancelAnswer {
             .with(Headline::new(mark, format!("run {called}"), said))
             .with(Gist::new(gist))
             .with(Next { steps })
+    }
+}
+
+impl Answer for CancelAnswer {
+    fn page(&self) -> impl Page + '_ {
+        Cancelled {
+            run_id: &self.run_id,
+            state: &self.state,
+        }
     }
 
     fn outcome(&self) -> Outcome {
@@ -86,13 +103,13 @@ impl Answer for CancelAnswer {
 /// sentence under it and the commands that go on from here.
 type Said = (Mark, &'static str, String, Vec<(String, &'static str)>);
 
-impl CancelAnswer {
+impl Cancelled<'_> {
     /// What the page says of the run, or `None` for a stop the
     /// engine answers to itself.
     fn said(&self) -> Option<Said> {
         let stopped =
             |said, gist: String, steps| Some((Standing::Stopped.mark(), said, gist, steps));
-        match &self.state {
+        match self.state {
             CancelState::AlreadyStopped {
                 killed,
                 parked,
@@ -113,7 +130,7 @@ impl CancelAnswer {
                 "nothing to cancel",
                 "it closed before the interrupt reached it".to_string(),
                 vec![(
-                    command::line(&NextStep::status(&self.run_id)),
+                    command::line(&NextStep::status(self.run_id)),
                     "shows how it ended",
                 )],
             )),
@@ -190,13 +207,15 @@ mod tests {
     use surco::look::Look;
     use surco::words::Standing;
     use yunta_core::{Pid, RunId};
+    use yunta_render::page::Page;
 
     #[test]
     fn a_cancel_that_finds_nothing_to_stop_says_so_in_its_words() {
         let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
         let said = |state: CancelState| {
             let reply = answer(&run, state);
-            draw(reply.document(&Look::plain()), &Look::plain())
+            let page = reply.page().document(&Look::plain());
+            draw(page, &Look::plain())
         };
         assert_eq!(
             said(CancelState::NothingRunning),
@@ -234,7 +253,8 @@ mod tests {
         let engine = Pid::try_from(4321u32).unwrap();
         let said = |state: CancelState| {
             let reply = answer(&run, state);
-            draw(reply.document(&Look::plain()), &Look::plain())
+            let page = reply.page().document(&Look::plain());
+            draw(page, &Look::plain())
         };
         assert_eq!(
             said(CancelState::Cancelled {

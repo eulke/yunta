@@ -15,8 +15,6 @@ pub mod mcp;
 pub mod new;
 pub mod open;
 pub mod pack;
-pub mod pack_audit;
-pub(crate) mod pack_needs;
 pub(crate) mod promote;
 pub mod rail;
 pub mod receipt;

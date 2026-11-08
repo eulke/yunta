@@ -18,6 +18,7 @@ mod workflow;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
+use yunta_render::page::Page;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{PauseReason, StoredEvent};
@@ -33,10 +34,10 @@ use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use json::{RunStatsJson, WorkflowHistoryJson};
 use run::RunStatsPage;
-use surco::doc::{Depth, Doc};
+use surco::doc::Depth;
 use surco::figures::{duration, Tokens};
 use surco::look::Look;
-pub(crate) use workflow::verification_findings;
+pub(crate) use workflow::VerificationEffectiveness;
 use workflow::WorkflowPage;
 
 /// What the run's spend costs at its model's price: one blended line when
@@ -76,8 +77,8 @@ struct RunStatsAnswer<'a> {
 }
 
 impl Answer for RunStatsAnswer<'_> {
-    fn document(&self, look: &Look) -> Doc {
-        self.page.document(look)
+    fn page(&self) -> impl Page + '_ {
+        &self.page
     }
 
     fn outcome(&self) -> Outcome {
@@ -135,8 +136,8 @@ struct WorkflowAnswer<'a> {
 }
 
 impl Answer for WorkflowAnswer<'_> {
-    fn document(&self, look: &Look) -> Doc {
-        self.page.document(look)
+    fn page(&self) -> impl Page + '_ {
+        &self.page
     }
 
     fn outcome(&self) -> Outcome {

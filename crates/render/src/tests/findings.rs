@@ -7,6 +7,7 @@ use yunta_core::events::FindingSeverity;
 use yunta_core::{FindingsFile, HeldEntry, HeldFindings};
 
 use super::documents::goldens;
+use crate::page::{Findings, Page};
 
 const FINDINGS: &str = r#"
 findings:
@@ -29,7 +30,11 @@ fn a_review_s_findings_match_their_golden() {
     let held = HeldFindings {
         findings: file.findings.into_iter().map(HeldEntry::Written).collect(),
     };
-    let doc = crate::findings::document(&held, " of `review`");
+    let doc = Findings::Held {
+        held: &held,
+        of: " of `review`",
+    }
+    .document(&Look::plain());
     for environment in &ENVIRONMENTS {
         assert_golden(
             &environment.golden(&goldens(), "findings"),
@@ -38,7 +43,7 @@ fn a_review_s_findings_match_their_golden() {
     }
     assert_golden(&goldens().join("findings.md"), &Markdown.draw(&doc));
     assert_eq!(
-        crate::findings::mark(FindingSeverity::Blocking),
+        crate::page::findings::mark(FindingSeverity::Blocking),
         surco::glyphs::Mark::Failed
     );
 }

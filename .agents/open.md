@@ -53,3 +53,13 @@ fits a share of the `2000000` that `docs/reference.md` gives as its example: `gr
 after 28 s, so such a run stops on a cut session long before it has spent the cap, and goes on only past the cap.
 Three questions stand: whether a share should be equal across nodes, whether cached tokens should count, and what
 that example should be.
+
+### A stub can wait on a child that never reaches its rendezvous
+Paths: `crates/cli/tests/session_ends.rs`, `crates/testkit-core/stubs/**`
+The test `cancel_after_its_engine_died_leaves_no_command`, in `crates/cli/tests/session_ends.rs`, failed once in
+four runs of the CLI's fifth batch: the run's Claude Code stub started its children and waited on one that never
+wrote its pid within 30 s. The test alone, its target beside a build or from four workers at once, the target right
+after a relink, and the batch itself did not show it again in 128 runs and ten batches. The order of the fifos, the
+engine's probe, a sibling's sweep and a slow `python3` are ruled out. The test now names the command it waited on,
+whether the stub started it, and what the run left (`detached.log`, `engine.json`, `yunta status`), so the next miss
+names its cause.

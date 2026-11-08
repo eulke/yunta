@@ -11,6 +11,7 @@ use surco::words::Standing;
 use yunta_core::step::NextStep;
 use yunta_core::{Redactor, Responder, RunId};
 use yunta_render::command;
+use yunta_render::page::Page;
 use yunta_replay::registry::Engine;
 
 use super::cancel::settle_crash;
@@ -66,7 +67,15 @@ pub(crate) struct CloseAnswer {
     by: Responder,
 }
 
-impl Answer for CloseAnswer {
+/// A close, as the person who asked for it reads it: the word the run
+/// stands in, who closed it, and what stays until `gc`.
+struct Closed<'a> {
+    run_id: &'a RunId,
+    word: Standing,
+    by: &'a Responder,
+}
+
+impl Page for Closed<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let headline = Headline::new(
             self.word.mark(),
@@ -80,6 +89,16 @@ impl Answer for CloseAnswer {
             command::line(&NextStep::Gc)
         );
         Doc::new().with(headline).with(Gist::new(gist))
+    }
+}
+
+impl Answer for CloseAnswer {
+    fn page(&self) -> impl Page + '_ {
+        Closed {
+            run_id: &self.run_id,
+            word: self.word,
+            by: &self.by,
+        }
     }
 
     fn outcome(&self) -> Outcome {

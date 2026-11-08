@@ -18,20 +18,17 @@
 use surco::components::{Code, Fold, Section};
 use surco::doc::{Block, Doc};
 use surco::line::{Line, Tone};
+use surco::look::Look;
 use yunta_core::shown::PlanReview;
 use yunta_core::RunId;
 
-mod card;
-mod change;
-mod desk;
+pub(super) mod card;
+pub(super) mod change;
 mod flawed;
-mod head;
-mod proof;
-mod steps;
-mod tree;
-
-pub(crate) use desk::has_a_place;
-pub use desk::{about, reading, AlsoShown, Reading, Spot, View};
+pub(super) mod head;
+pub(super) mod proof;
+pub(super) mod steps;
+pub(super) mod tree;
 
 pub(crate) use card::codeless;
 pub(crate) use flawed::concerns;
@@ -57,9 +54,24 @@ pub enum Form {
     Whole,
 }
 
+/// A plan, as the page a person deciding on its change reads: `review`,
+/// read in the run `run`, the one each command it names takes, in `form`.
+#[derive(Debug, Clone, Copy)]
+pub struct Plan<'a> {
+    pub review: &'a PlanReview,
+    pub run: &'a RunId,
+    pub form: Form,
+}
+
+impl super::Page for Plan<'_> {
+    fn document(&self, _look: &Look) -> Doc {
+        document(self.review, self.run, self.form)
+    }
+}
+
 /// `review` as a document, under the headline of the page that reads it.
 /// `run` is the run it is read in, the one each command it names takes.
-pub fn document(review: &PlanReview, run: &RunId, form: Form) -> Doc {
+fn document(review: &PlanReview, run: &RunId, form: Form) -> Doc {
     let steps = review.plan.steps();
     let mut doc = head::head(review, &steps);
     if !review.departed.is_empty() {

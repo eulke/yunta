@@ -13,65 +13,81 @@ use surco::components::{Marked, Section};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
+use surco::look::Look;
 use surco::text::{agreeing, counted};
 use yunta_core::events::{ArtifactId, Withheld};
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
 use yunta_core::RunId;
 
-pub use crate::plan::Form;
+use super::{Findings, Form, Page, Plan, Spec};
 
-/// What `document` says, for the run `run`, in `form`.
-pub fn document(document: &ShownDocument, run: &RunId, form: Form) -> Doc {
-    let producer = document.shown.producer.as_ref();
-    let of = producer
-        .map(|node| format!(" of `{node}`"))
-        .unwrap_or_default();
-    match &document.content {
-        ShownContent::Tasks(review) => crate::plan::document(review, run, form),
-        ShownContent::Spec(file) => crate::spec::document(file, (&of, producer), run, form),
-        ShownContent::Findings(file) => crate::findings::document(file, &of),
-        ShownContent::RunFindings(view) => crate::findings::run_document(view),
-        ShownContent::Text(text) => {
-            let named = match &document.shown.artifact {
-                ArtifactId::Interpreted { kind } => format!("the {kind} document{of}"),
-                ArtifactId::Opaque { name } => format!("{name}{of}"),
-            };
-            // A document that opens on a heading is called what it calls
-            // itself — what a brief asks for, before which file it is.
-            let (title, body) = match headed(text) {
-                Some((heading, body)) => (
-                    Line::new()
-                        .push(Tone::Strong, heading)
-                        .push(Tone::Muted, format!(": {named}")),
-                    body,
-                ),
-                None => (Line::new().push(Tone::Strong, named), text.as_str()),
-            };
-            let doc = Doc::new().with(Block::Title(surco::components::Title::named(title)));
-            match body.trim().is_empty() {
-                true => doc,
-                false => doc.with(Block::Markdown(body.to_string())),
+/// A document an escalation shows, as the page the person deciding reads:
+/// `document`, for the run `run`, in `form`.
+#[derive(Debug, Clone, Copy)]
+pub struct Shown<'a> {
+    pub document: &'a ShownDocument,
+    pub run: &'a RunId,
+    pub form: Form,
+}
+
+/// What the document says, as the page of what it is: a plan, a spec or
+/// findings drawn as theirs, with this page's look, and a text under the
+/// title it is called by.
+impl Page for Shown<'_> {
+    fn document(&self, look: &Look) -> Doc {
+        let Shown {
+            document,
+            run,
+            form,
+        } = *self;
+        let producer = document.shown.producer.as_ref();
+        let of = producer
+            .map(|node| format!(" of `{node}`"))
+            .unwrap_or_default();
+        match &document.content {
+            ShownContent::Tasks(review) => Plan { review, run, form }.document(look),
+            ShownContent::Spec(file) => Spec {
+                file,
+                of: &of,
+                producer,
+                run,
+                form,
             }
+            .document(look),
+            ShownContent::Findings(held) => Findings::Held { held, of: &of }.document(look),
+            ShownContent::RunFindings(view) => Findings::Run(view).document(look),
+            ShownContent::Text(text) => text_document(document, text, &of),
         }
     }
 }
 
-/// The first document among `documents` that is a plan with something to read,
-/// with the plan it holds: what a person reads at a desk. A plan with no task,
-/// description or design is a document like any other.
-pub fn plan_among(documents: &[ShownDocument]) -> Option<(&ShownDocument, &PlanReview)> {
-    documents
-        .iter()
-        .find_map(|document| match &document.content {
-            ShownContent::Tasks(review) if crate::plan::has_a_place(review) => {
-                Some((document, &**review))
-            }
-            _ => None,
-        })
+/// A text document, `of` the node that produced it: titled by the heading it
+/// opens on, else by its artifact, and its words after.
+fn text_document(document: &ShownDocument, text: &str, of: &str) -> Doc {
+    let named = match &document.shown.artifact {
+        ArtifactId::Interpreted { kind } => format!("the {kind} document{of}"),
+        ArtifactId::Opaque { name } => format!("{name}{of}"),
+    };
+    // A document that opens on a heading is called what it calls
+    // itself — what a brief asks for, before which file it is.
+    let (title, body) = match headed(text) {
+        Some((heading, body)) => (
+            Line::new()
+                .push(Tone::Strong, heading)
+                .push(Tone::Muted, format!(": {named}")),
+            body,
+        ),
+        None => (Line::new().push(Tone::Strong, named), text),
+    };
+    let doc = Doc::new().with(Block::Title(surco::components::Title::named(title)));
+    match body.trim().is_empty() {
+        true => doc,
+        false => doc.with(Block::Markdown(body.to_string())),
+    }
 }
 
 /// What a document is called on a page that shows it beside others: the
-/// heading a text document opens on, else its artifact, named as `document`
+/// heading a text document opens on, else its artifact, named as its page
 /// names it without the producer it came from.
 pub(crate) fn called(document: &ShownDocument) -> String {
     let heading = match &document.content {
@@ -116,7 +132,7 @@ pub(crate) fn heading_line(text: &str) -> String {
 /// being proven; how its planner got it accepted, when it took more than
 /// one handover; what of it shows no code; and the risks it names. `None`
 /// when there is nothing to say.
-pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Option<Section> {
+pub(crate) fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Option<Section> {
     let mut blocks: Vec<Block> = Vec::new();
     for review in shown.iter().filter_map(|document| match &document.content {
         ShownContent::Tasks(review) => Some(&**review),
@@ -159,7 +175,7 @@ pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Opti
 /// Whether the section `before_you_decide` draws over `shown` says why the
 /// options `withheld` names are not offered: it does when a plan among
 /// `shown` has a flaw, under which `unprovable` names each withheld option.
-pub fn says_why(withheld: &[Withheld], shown: &[ShownDocument]) -> bool {
+pub(crate) fn says_why(withheld: &[Withheld], shown: &[ShownDocument]) -> bool {
     !withheld.is_empty()
         && shown.iter().any(|document| match &document.content {
             ShownContent::Tasks(review) => !review.flaws().is_empty(),
@@ -191,7 +207,7 @@ fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block> {
     vec![Section {
         lead: None,
         title: Line::new().push(Tone::Caution, heading),
-        blocks: crate::plan::concerns(&flaws),
+        blocks: super::plan::concerns(&flaws),
     }
     .into()]
 }
@@ -230,7 +246,7 @@ fn handed(review: &PlanReview) -> Option<String> {
 /// How many of the changes the plan's cards draw show no code: neither
 /// their own nor a shape of their task's.
 fn codeless(review: &PlanReview) -> Option<String> {
-    let (codeless, changes) = crate::plan::codeless(review);
+    let (codeless, changes) = super::plan::codeless(review);
     (codeless > 0).then(|| {
         format!(
             "{codeless} of {} {} no code",

@@ -41,7 +41,7 @@ pub(super) fn head(review: &PlanReview, steps: &[Vec<&Task>]) -> Doc {
 /// How big the plan is and what it holds for its reader, a fact each: its
 /// tasks and the steps they take, the choices it made for them, what it
 /// risks and what it leaves out.
-pub(super) fn facts(review: &PlanReview, steps: usize) -> Vec<String> {
+pub(in crate::page) fn facts(review: &PlanReview, steps: usize) -> Vec<String> {
     let plan = &review.plan;
     let mut facts = vec![size(review, steps)];
     let decided = super::change::decided_for_you(review).count();
@@ -58,7 +58,7 @@ pub(super) fn facts(review: &PlanReview, steps: usize) -> Vec<String> {
 }
 
 /// How big the plan is: its tasks, and the steps they take when they take more than one.
-pub(super) fn size(review: &PlanReview, steps: usize) -> String {
+pub(in crate::page) fn size(review: &PlanReview, steps: usize) -> String {
     let tasks = counted(review.plan.tasks.len(), "task");
     match steps {
         0 | 1 => tasks,
@@ -67,7 +67,7 @@ pub(super) fn size(review: &PlanReview, steps: usize) -> String {
 }
 
 /// What keeps the plan from being proven, counted, when anything does.
-pub(super) fn flawed(review: &PlanReview) -> Option<String> {
+pub(in crate::page) fn flawed(review: &PlanReview) -> Option<String> {
     let flaws = review.flaws().len();
     (flaws > 0).then(|| {
         format!(

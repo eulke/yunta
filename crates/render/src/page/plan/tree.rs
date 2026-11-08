@@ -64,7 +64,10 @@ fn beyond<'a>(
 /// What the plan's `shapes` imply past its tasks, as a line each for a place with little
 /// room: how many files beyond the plan name what it changes, each file counted once
 /// however many shapes it names, and each shape too many files carry the name of.
-pub(super) fn implied_by_all(shapes: &[Shape], read: Option<&ShapesReadPayload>) -> Vec<String> {
+pub(in crate::page) fn implied_by_all(
+    shapes: &[Shape],
+    read: Option<&ShapesReadPayload>,
+) -> Vec<String> {
     let mut files: BTreeSet<&str> = BTreeSet::new();
     let mut common = Vec::new();
     for shape in shapes {

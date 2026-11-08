@@ -10,7 +10,7 @@ use surco::components::{ChoiceRow, DeskFoot, FootRow, Legend};
 use surco::look::{Look, Width};
 use surco::surface::Placed;
 use surco::words::Standing;
-use yunta_render::plan::{Reading, Spot, View};
+use yunta_render::page::desk::{Reading, Spot, View};
 
 use super::held::{Held, Press};
 use super::keys::Stroke;

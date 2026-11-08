@@ -15,6 +15,7 @@ use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
 use yunta_render::blocks::FailureDetail;
 use yunta_render::command;
+use yunta_render::page::{Form, Page, Shown};
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 use yunta_replay::RunState;
@@ -57,11 +58,11 @@ pub(super) fn find<'a>(
         })
 }
 
-impl NodePage<'_> {
+impl Page for NodePage<'_> {
     /// The page for the node, as one document: where it stands, what it
     /// said or what failed it, its failure whole, what it took, the
     /// documents it produced, and what to type next.
-    pub(super) fn document(&self, _look: &Look) -> Doc {
+    fn document(&self, look: &Look) -> Doc {
         let display = yunta_render::state::NodeDisplay::from(self.node);
         let headline = Headline::new(
             display.standing.mark(),
@@ -69,8 +70,12 @@ impl NodePage<'_> {
             display.standing.word(),
         );
         let documents = self.documents.iter().flat_map(|document| {
-            yunta_render::shown::document(document, self.run_id, yunta_render::shown::Form::Whole)
-                .into_blocks()
+            let shown = Shown {
+                document,
+                run: self.run_id,
+                form: Form::Whole,
+            };
+            shown.document(look).into_blocks()
         });
         Doc::new()
             .with(headline)
@@ -80,7 +85,9 @@ impl NodePage<'_> {
             .with_all(documents)
             .with(self.next())
     }
+}
 
+impl NodePage<'_> {
     /// The whole of what the node's state says: its failure, every line
     /// of it, or what its agent said when it finished, as it wrote it.
     fn said(&self) -> Vec<Block> {

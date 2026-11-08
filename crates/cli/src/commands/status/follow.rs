@@ -35,6 +35,7 @@ use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, RunId, Seq};
 use yunta_engine::pace::Pace;
 use yunta_render::command;
+use yunta_render::page::Page;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::registry::Engine;
@@ -113,7 +114,7 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
             Ok(crate::output::exit(standing))
         }
         Ended::Interrupted => {
-            crate::output::document(look, stopped_following(run_id));
+            crate::output::show(look, &LeftRunning { run_id });
             Ok(crate::output::RunExit::Interrupted.outcome())
         }
     }
@@ -130,27 +131,33 @@ enum Ended {
     Interrupted,
 }
 
-/// What a person who stopped following a run is told: it goes on without this
-/// terminal, and the command that follows it again.
-fn stopped_following(run_id: &RunId) -> Doc {
-    let handle = run_id.handle();
-    Doc::new()
-        .with(Headline::new(
-            Standing::Running.mark(),
-            format!("run {handle}"),
-            Standing::Running.word(),
-        ))
-        .with(Gist::new(
-            "this terminal stopped following it; the run goes on without it",
-        ))
-        .with(Next {
-            steps: vec![(
-                command::line(&NextStep::Follow {
-                    run: run_id.clone(),
-                }),
-                "follows it again",
-            )],
-        })
+/// The run a person stopped following, left running without this terminal,
+/// and the command that follows it again.
+struct LeftRunning<'a> {
+    run_id: &'a RunId,
+}
+
+impl Page for LeftRunning<'_> {
+    fn document(&self, _look: &Look) -> Doc {
+        let handle = self.run_id.handle();
+        Doc::new()
+            .with(Headline::new(
+                Standing::Running.mark(),
+                format!("run {handle}"),
+                Standing::Running.word(),
+            ))
+            .with(Gist::new(
+                "this terminal stopped following it; the run goes on without it",
+            ))
+            .with(Next {
+                steps: vec![(
+                    command::line(&NextStep::Follow {
+                        run: self.run_id.clone(),
+                    }),
+                    "follows it again",
+                )],
+            })
+    }
 }
 
 /// Waits one look's interval, or until `stop` trips: whether it tripped.

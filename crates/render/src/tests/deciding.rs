@@ -15,8 +15,7 @@ use yunta_core::{NonEmpty, TasksFile};
 use super::console_page::greet_escalation;
 use super::documents::{global_packs, goldens, read, review, run, shown_plan};
 use super::publication::description;
-use crate::gate;
-use crate::plan::Form;
+use crate::page::{Form, Gate, Page, Shown};
 
 #[test]
 fn what_weighs_on_a_decision_matches_its_goldens() {
@@ -46,7 +45,7 @@ fn what_weighs_on_a_decision_matches_its_goldens() {
             "the plan cannot be proven as it is written".into(),
         ),
     }];
-    let before = crate::shown::before_you_decide(&withheld, &shown)
+    let before = crate::page::shown::before_you_decide(&withheld, &shown)
         .expect("a plan that cannot be proven weighs on the decision");
     let doc = surco::doc::Doc::new().with(before);
     for environment in &ENVIRONMENTS {
@@ -94,7 +93,7 @@ fn a_pull_request_says_what_weighs_on_its_review_before_its_answers() {
 }
 
 /// `text` as the brief a gate shows.
-fn brief(text: &str) -> yunta_core::shown::ShownDocument {
+pub(super) fn brief(text: &str) -> yunta_core::shown::ShownDocument {
     yunta_core::shown::ShownDocument {
         shown: yunta_core::events::Shown {
             producer: Some("brief".into()),
@@ -111,11 +110,12 @@ fn brief(text: &str) -> yunta_core::shown::ShownDocument {
 #[test]
 fn a_markdown_document_shown_is_titled_by_its_first_heading() {
     let read = |text: &str| {
-        Terminal::on(Look::plain()).draw(&crate::shown::document(
-            &brief(text),
-            &run(),
-            Form::Review,
-        ))
+        let shown = Shown {
+            document: &brief(text),
+            run: &run(),
+            form: Form::Review,
+        };
+        Terminal::on(Look::plain()).draw(&shown.document(&Look::plain()))
     };
 
     let headed = read("# Global pack installation\n\nA pack installs for the user.\n");
@@ -160,8 +160,8 @@ fn a_plan_with_flaws_says_why_an_option_is_withheld_once_under_the_section() {
         "{}",
         record.join("\n")
     );
-    let section =
-        crate::shown::before_you_decide(escalation.withheld(), &shown).expect("what weighs on it");
+    let section = crate::page::shown::before_you_decide(escalation.withheld(), &shown)
+        .expect("what weighs on it");
     let drawn = Terminal::on(Look::plain()).draw(&surco::doc::Doc::new().with(section));
     assert_eq!(
         drawn.matches("is not offered, because").count(),
@@ -199,8 +199,11 @@ fn the_page_above_a_card_does_not_carry_a_plan() {
     let escalation = greet_escalation(&greet);
     let shown = vec![shown_plan(greet)];
     let run = run();
-    let page = gate::above(Some((&run, shown.as_slice())), &escalation)
-        .expect("what weighs on the decision");
+    let page = Gate::AboveTheCard {
+        shown: Some((&run, shown.as_slice())),
+        escalation: &escalation,
+    }
+    .document(&Look::plain());
     assert!(
         matches!(page.blocks(), [Block::Section(section)] if section.title.text() == "before you decide"),
     );
@@ -214,12 +217,21 @@ fn the_page_above_a_card_does_not_carry_a_plan() {
     nothing_weighs.tasks = Vec::new();
     let shown = vec![shown_plan(nothing_weighs)];
     assert!(
-        gate::above(Some((&run, shown.as_slice())), &withholding_nothing()).is_none(),
+        Gate::AboveTheCard {
+            shown: Some((&run, shown.as_slice())),
+            escalation: &withholding_nothing(),
+        }
+        .document(&Look::plain())
+        .blocks()
+        .is_empty(),
         "with nothing weighing, the card opens on its question"
     );
 
-    let page = gate::whole_page(Some((&run, shown.as_slice())), &withholding_nothing())
-        .expect("what a terminal with no room for a desk prints");
+    let page = Gate::InPlaceOfTheDesk {
+        shown: Some((&run, shown.as_slice())),
+        escalation: &withholding_nothing(),
+    }
+    .document(&Look::plain());
     assert!(matches!(page.blocks().first(), Some(Block::Headline(_))));
 }
 

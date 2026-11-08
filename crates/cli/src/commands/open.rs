@@ -4,6 +4,7 @@
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use yunta_render::page::Page;
 
 use surco::components::{Fields, Note};
 use surco::doc::Doc;
@@ -66,14 +67,30 @@ struct OpenAnswer {
     opened: Option<bool>,
 }
 
-impl Answer for OpenAnswer {
+/// Where a run's page was written, and, when nothing here could open it,
+/// that the person opens it themselves.
+struct Opened<'a> {
+    page: &'a str,
+    opened: Option<bool>,
+}
+
+impl Page for Opened<'_> {
     fn document(&self, _look: &Look) -> Doc {
-        let doc = Doc::new().with(Fields::new().push_literal("page", self.page.clone()));
+        let doc = Doc::new().with(Fields::new().push_literal("page", self.page.to_string()));
         match self.opened {
             Some(false) => doc.with(Note(
                 "nothing here could open it: open that file in a browser.".to_string(),
             )),
             _ => doc,
+        }
+    }
+}
+
+impl Answer for OpenAnswer {
+    fn page(&self) -> impl Page + '_ {
+        Opened {
+            page: &self.page,
+            opened: self.opened,
         }
     }
 

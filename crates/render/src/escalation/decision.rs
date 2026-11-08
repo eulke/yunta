@@ -71,7 +71,9 @@ impl Decision<'_> {
         if let Some(external_ref) = escalation.external_ref() {
             blocks.push(Prose(format!("published at {external_ref}")).into());
         }
-        if let Some(before) = crate::shown::before_you_decide(escalation.withheld(), self.shown) {
+        if let Some(before) =
+            crate::page::shown::before_you_decide(escalation.withheld(), self.shown)
+        {
             blocks.push(before.into());
         }
         let mut menu = menu(run, escalation);

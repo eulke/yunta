@@ -25,10 +25,13 @@
 //!   `caution`, `inputs`, `place`, `target`, `policy`, and `progress`, how far
 //!   it has come and where it stands on one line, and `children`, the runs
 //!   it bore, under the nodes that bore them.
-//! - A decision a person meets: `gate`, `escalation`, `claim`, `evidence`,
-//!   `offers`, `shown`, `plan`, `spec`, `findings` and `found`.
-//! - What leaves the terminal: `blocks`, `published` and `receipt`.
+//! - A decision a person meets: `escalation`, `claim`, `evidence`, `offers`
+//!   and `found`.
+//! - What leaves the terminal: `blocks` and `published`.
 //! - What a reader is told to type: `command`, every command written once.
+//! - Every page, in the one form it takes: `page`, with the receipt, the
+//!   findings, a gate's page, and what a decision shows: a plan, read at its
+//!   desk, a spec, or any document.
 
 pub mod blocks;
 pub mod caution;
@@ -40,21 +43,16 @@ pub mod engine;
 pub mod escalation;
 pub mod evidence;
 pub mod failure;
-mod findings;
 pub mod found;
-pub mod gate;
 pub mod inputs;
 pub mod offers;
 pub mod outcome;
+pub mod page;
 pub mod pause;
 pub mod place;
-pub mod plan;
 pub mod policy;
 pub mod progress;
 pub mod published;
-pub mod receipt;
-pub mod shown;
-mod spec;
 pub mod spend;
 pub mod state;
 pub mod target;

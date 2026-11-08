@@ -68,7 +68,7 @@ pub(super) fn change(mut doc: Doc, review: &PlanReview, form: Form) -> Doc {
 
 /// The decisions the plan made for the person: each that restates no
 /// answer of theirs.
-pub(super) fn decided_for_you(review: &PlanReview) -> impl Iterator<Item = &Decision> {
+pub(in crate::page) fn decided_for_you(review: &PlanReview) -> impl Iterator<Item = &Decision> {
     review
         .plan
         .decisions
@@ -77,7 +77,9 @@ pub(super) fn decided_for_you(review: &PlanReview) -> impl Iterator<Item = &Deci
 }
 
 /// Each decision that restates what a person answered, with the answer.
-pub(super) fn answered(review: &PlanReview) -> impl Iterator<Item = (&Decision, &Answered)> {
+pub(in crate::page) fn answered(
+    review: &PlanReview,
+) -> impl Iterator<Item = (&Decision, &Answered)> {
     review
         .plan
         .decisions
@@ -94,7 +96,7 @@ fn answer_of<'a>(review: &'a PlanReview, decision: &Decision) -> Option<&'a Answ
 
 /// What the plan says of itself as a whole, as a desk reads it: its
 /// description, every diagram in it drawn, and its design.
-pub(super) fn words(review: &PlanReview) -> Doc {
+pub(in crate::page) fn words(review: &PlanReview) -> Doc {
     let mut doc = Doc::new();
     if let Some(description) = said(&review.plan.description) {
         doc = doc.with(Block::Markdown(description.to_string()));
@@ -108,7 +110,7 @@ pub(super) fn words(review: &PlanReview) -> Doc {
 /// What was decided, as a person walks it: each decision made for them, with
 /// `pointed` open under a pointer and the rest by their question alone; then
 /// what they answered, what the plan risks and what it leaves out, whole.
-pub(super) fn deciding(review: &PlanReview, pointed: usize, glyphs: Glyphs) -> Doc {
+pub(in crate::page) fn deciding(review: &PlanReview, pointed: usize, glyphs: Glyphs) -> Doc {
     let mut doc = Doc::new();
     for (at, decision) in decided_for_you(review).enumerate() {
         doc = doc.with(walked(at, decision, at == pointed, glyphs));

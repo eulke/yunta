@@ -16,7 +16,7 @@ use yunta_core::{NodeId, NonEmpty, OptionId};
 
 use super::documents::{review, run, shown_plan};
 use super::publication::gate_goldens;
-use crate::gate;
+use crate::page::{Gate, Page};
 
 /// The payload of the escalation a gate of the greet plan raises: its claim
 /// asks to approve the plan's change, its menu offers approve, adjust and
@@ -112,7 +112,11 @@ fn console_page() -> Doc {
     let shown = vec![shown_plan(review.clone())];
     let escalation = greet_escalation(&review);
     let run = run();
-    gate::whole_page(Some((&run, shown.as_slice())), &escalation).expect("a plan to print")
+    Gate::InPlaceOfTheDesk {
+        shown: Some((&run, shown.as_slice())),
+        escalation: &escalation,
+    }
+    .document(&Look::plain())
 }
 
 /// A gate's page at a terminal matches its goldens in every environment, fits

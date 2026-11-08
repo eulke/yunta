@@ -8,13 +8,37 @@ use surco::components::{Fields, Prose, Section};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
+use surco::look::Look;
 use yunta_core::events::findings::{RunFindings, Settled, StandingFinding};
 use yunta_core::events::{Finding, FindingSeverity};
 use yunta_core::HeldFindings;
 
 use crate::found;
+use crate::page::Page;
 
-pub fn document(held: &HeldFindings, of: &str) -> Doc {
+/// What a review found, as the page the person deciding reads: the findings
+/// one document holds, or the run's findings with what was answered.
+#[derive(Debug, Clone, Copy)]
+pub enum Findings<'a> {
+    /// The findings `held`, of the node or document `of` names (` of
+    /// `review``, or nothing).
+    Held { held: &'a HeldFindings, of: &'a str },
+    /// The run's findings, each with the node that found it and what other
+    /// nodes answered.
+    Run(&'a RunFindings),
+}
+
+impl Page for Findings<'_> {
+    fn document(&self, _look: &Look) -> Doc {
+        match self {
+            Findings::Held { held, of } => held_document(held, of),
+            Findings::Run(view) => run_document(view),
+        }
+    }
+}
+
+/// The findings `held` holds, the most severe first.
+fn held_document(held: &HeldFindings, of: &str) -> Doc {
     let mut sorted: Vec<Finding> = held.findings.iter().cloned().map(Finding::from).collect();
     sorted.sort_by_key(|finding| finding.severity);
     let counts = counted(sorted.iter().map(|finding| finding.severity));
@@ -37,7 +61,8 @@ pub fn document(held: &HeldFindings, of: &str) -> Doc {
     doc
 }
 
-pub fn run_document(view: &RunFindings) -> Doc {
+/// The run's findings, the most severe first, with how many were answered and settled.
+fn run_document(view: &RunFindings) -> Doc {
     let mut sorted: Vec<&StandingFinding> = view.findings.iter().collect();
     sorted.sort_by_key(|standing| standing.finding.severity);
     let counts = counted(sorted.iter().map(|standing| standing.finding.severity));
@@ -120,7 +145,7 @@ fn titled(severity: FindingSeverity, title: &str) -> Line {
 
 /// The mark a severity is drawn with: a cross for what blocks, caution
 /// for what matters, and the quiet mark for the rest.
-pub fn mark(severity: FindingSeverity) -> Mark {
+pub(crate) fn mark(severity: FindingSeverity) -> Mark {
     match severity {
         FindingSeverity::Blocking => Mark::Failed,
         FindingSeverity::Major => Mark::Caution,

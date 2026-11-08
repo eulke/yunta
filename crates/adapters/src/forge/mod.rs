@@ -19,6 +19,7 @@ use surco::surface::{Description, Surface};
 use yunta_core::port::{ForgeError, PublishRequest, PullRequestRequest};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
+use yunta_render::page::{self, Page};
 use yunta_render::published::{self, Publication};
 
 /// What a reviewer answers a gate on.
@@ -59,9 +60,10 @@ pub(crate) fn marked(body: &str, run_id: &str) -> bool {
 pub(crate) fn pull_request_body(req: &PullRequestRequest) -> String {
     let receipt = req.receipt.as_ref().map(|receipt| {
         // A description, not a page: the forge's title already heads the pull
-        // request, so the receipt draws no title of its own. Its separators are
-        // the Unicode set whatever look the terminal chose.
-        Description::default().draw(&yunta_render::receipt::document(receipt, Glyphs::Unicode))
+        // request, so the receipt draws no title of its own, in the forge's look
+        // whatever look the terminal chose.
+        let description = Description::default();
+        description.draw(&page::Receipt { receipt }.document(&description.look()))
     });
     let author = req.body.trim();
     let marker = run_marker(&req.run_id);

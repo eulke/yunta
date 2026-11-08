@@ -882,9 +882,63 @@ The rest is a reshape, guarded by every test and golden.
 
 ### Checkpoint F: after Tasks 19–23
 - [x] The suites; every golden's digest; the captures: `proof/run-pages/checkpoint-f.txt`.
-- [ ] The user reviews the phase. Then every step of the `ci` job, commit 5, `cargo clean`.
+- [x] The user reviews the phase. Then every step of the `ci` job, commit 5, `cargo clean`: commit `1bc7795c`.
 
 ## Phase 6: one form
+
+### Task 23b: a stop after a crash finds what the session started, every time
+
+Added at the user's request, after the measurement of Checkpoint F.
+
+**Description:**
+- **What fails.** `session_ends::cancel_after_its_engine_died_leaves_no_command` (`crates/cli/tests/session_ends.rs`) failed once in four runs of the CLI's fifth batch: the testkit waited its 30 s for the stub to record the pid of a child it starts, and the pid never came. It passed when the batch ran again, and 10 of 10 alone.
+- **What is known.** Both stubs start their two children in the order the test reads their fifos, each child writes its pid before the stub goes on, and a fifo's two ends meet whichever opens first. So the order alone is no deadlock. The test says nothing of what the run did while it waited.
+- **The work:**
+  - measure the rate, alone and beside a build, as `tools/repeat_test.py` measured Task 18b's;
+  - reproduce the miss, and name its cause with what the run left: its detached log, its registry, its event log;
+  - fix it where it lives, in the product when the product drops something, in the test or its stub when they assume what is not promised;
+  - make the test hold every time, and say when it waits what it waited on.
+- **The stubs leave no fifo behind** (added at the user's request, found while doing it). Each stub's `ready` fifo lives beside the fifo its knob names, in the test's own directory, instead of in the user's `TMPDIR` under the stub's pid: it goes with the test's directory, and no two stubs can meet on one name.
+
+**Fails first:**
+- a test that puts the run where the miss shows it, and finds what it promised. It fails before the fix, for the cause named;
+- `stubs::tests`: each stub is started with a child that never reaches its rendezvous, killed while it waits, and found to have left nothing in the `TMPDIR` it was given. It fails today because the stub's `ready` fifo stays there.
+
+**Acceptance criteria:**
+- [ ] The cause is named in the task, with what shows it. **Not met:** no condition tried shows the miss again (below). What it left, and what the test now says when it waits, are in `.agents/open.md`, the open question's home, to be deleted with the fix a next miss explains.
+- [x] `session_ends::cancel_after_its_engine_died_leaves_no_command` passes 30 runs out of 30, alone and beside a build, with the stubs as this task leaves them.
+- [x] A run of the adapters' contract tests leaves no new fifo in `TMPDIR`: 0 new after 329 tests, where each run left 4 to 6 before.
+
+**Verification:**
+- [x] `python3 .plans/yunta-tui/tools/repeat_test.py <worktree> 30 yunta session_ends cancel_after_its_engine_died_leaves_no_command`, alone and beside a release build, 0 of 30 each; `cargo test -p yunta --test session_ends`
+- [x] `cargo test -p yunta-testkit-core` (3: the stubs' two tests failed first, on the fifo each left), `cargo test -p yunta-adapters` (329) through `tools/new_fifos.py`, and the gate's `fmt`, `clippy`, `smells` and `docs` steps
+
+**Dependencies:** Checkpoint F
+
+**Files likely touched:** `crates/cli/tests/session_ends.rs`, `crates/testkit-core/src/{adapter.rs,stubs.rs,stubs/tests.rs}`, `crates/testkit-core/stubs/{claude_code,codex}_stub.sh`, and where the cause lives
+
+**Estimated scope:** M
+
+**Found while doing it:**
+- **What the miss left.** The stubs make their rendezvous through a fifo `ready`, named by the stub's pid in the user's `TMPDIR`, which lives only between the stub's `mkfifo` and its `rm`. One `claude-stub-ready.<pid>` was born at 13:51:12, three seconds into the failing batch, whose first target was `session_ends`, and no other CLI test starts these children. So the failing run's Claude Code stub did start, and waited on a child that never opened `ready`: the child neither wrote its pid nor reached that line.
+- **What does not reproduce it**, with the test reporting what the run left:
+  - the test alone: 0 of 30 (and 0 of 10 before);
+  - its whole target, its five tests side by side, beside a release build: 0 of 30;
+  - the target's binary from four workers at once, beside a release build: 0 of 40;
+  - the target right after its binaries were linked again: 0 of 8;
+  - the whole fifth batch as the gate runs it: 0 of 10.
+- **What is ruled out:**
+  - the order of the two fifos, which the stubs and the test share;
+  - a probe reaching the children, since the engine only probes `--version`, which a stub answers before it starts any;
+  - a sibling's sweep, since a mark names its run;
+  - a slow `python3`, which starts in 0.02 s cold, five at once;
+  - a stale fifo of the same name, since the miss's fifo was born new.
+- **A defect found on the way.** A stub killed between its `mkfifo` and its `rm` leaves its fifo behind in the user's `TMPDIR`. The adapter contract tests do it each run, killing a session the moment its child's pid arrives, and 78 had piled up there.
+- **What the task leaves.**
+  - `recorded_pid` returns `None` when no pid comes, and `grandchild_pid` panics on that for its other callers.
+  - `session_ends` names the command it waited for (`GROUPED`, `ORPHANED`), whether the stub started it (its `ready` fifo is there), and what the run left: `detached.log`, `engine.json` and `yunta status`. A next miss names its cause.
+  - Each stub's `ready` lives beside its knob's fifo, in the test's directory, and the 78 fifos earlier runs left in `TMPDIR` were removed once by hand.
+- The stubs' test waits for the child with `yield_now`, as the testkit's waits do: the `sleep_outside_mock_latency` smell holds a sleep to its exempt files.
 
 ### Task 24: `Page`, and an answer that hands its page
 
@@ -898,13 +952,18 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none: a form. The guard is every golden and the captures.
 
 **Acceptance criteria:**
-- [ ] No `fn document` is left in an `impl Answer`.
-- [ ] The JSON captures are byte for byte the same.
+- [x] No `fn document` is left in an `impl Answer`: the 11 answers each have an `impl Page`, and their `page()` returns `self`.
+- [x] The JSON captures are byte for byte the same: 104 views, 0 differ from Checkpoint F's.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`, the CLI's batches, `pages.sh` against the base
+- [x] `cargo test -p yunta-render` (274), `cargo test -p yunta --bins` (339), the CLI's batches (60 binaries, 854 tests), `pages.sh` against the base (the four texts of Phase 2, and no other), the 99 digests, `cargo xtask smells --check`, `cargo xtask docs --check`
 
 **Dependencies:** Checkpoint F
+
+**Found while doing it:**
+- `emit` draws a person's page through `output::show`, so `show` has its first caller in this task; the commands that still build a bare `Doc` keep `output::document` until Task 29 makes each of them a page, as the plan says.
+- The tests that drew an answer called `document` through `Answer`; they name `Page` now, and those that also read the outcome keep `Answer`.
+- `page.rs`'s `//!` says the form and that each page of the crate is one of its modules; it lists them as they move in, from Task 25.
 
 **Files likely touched:** `crates/render/src/{page,lib}.rs`, `crates/cli/src/output/mod.rs`, the 11 answers' files, the 6 callers of `output::document`
 
@@ -921,12 +980,19 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none: a form and a move.
 
 **Acceptance criteria:**
-- [ ] The receipt's and the findings' goldens and the forge's receipt body are byte for byte the same.
+- [x] The receipt's and the findings' goldens and the forge's receipt body are byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render -p yunta-adapters`, `cargo test -p yunta --test receipt_cmd`, the engine's `receipt` target
+- [x] `cargo test -p yunta-render -p yunta-adapters -p yunta-core` (1,436), `cargo test -p yunta --test receipt_cmd`, the engine's `receipt` target, the 99 digests
 
 **Dependencies:** Task 24
+
+**Found while doing it:**
+- **`fan_out_groups` is the receipt's data, not its page.** Grouping fan-out siblings by their base id derives from the runners the receipt holds, and the engine's test reads it apart from any page. Kept with the page, it would have needed a path like `page::fan_out_groups`, which names no page. It is `yunta_core::receipt::Receipt::fan_out_groups(&self)`, which the review check and the engine's test both call.
+- **One path to each page.** `page`'s modules are the crate's own, and `page::Receipt` and `page::Findings` are each one public path. `findings::mark` stays crate-visible for render's own test of it.
+- `page::Receipt` names core's receipt as `receipt::Receipt`, since the page takes its name. The forge draws it with the Unicode separators it always used, through a `Look` of `Glyphs::Unicode`.
+- `ReceiptAnswer`'s page is `page::Receipt` of its receipt, so it keeps no `impl Page` of its own.
+- `shown` names `page::findings::{held_document, run_document}` until Task 27 makes every page a page holds a page drawn with its look.
 
 **Files likely touched:** `crates/render/src/{receipt,findings,page,lib}.rs`, `crates/render/src/page/{receipt,findings}.rs`, `crates/adapters/src/forge/mod.rs`, `crates/cli/src/commands/receipt.rs`, `crates/engine/tests/{receipt.rs,receipt/from_a_log.rs}`
 
@@ -943,12 +1009,19 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] The `document/` goldens are byte for byte the same.
+- [x] The `document/` goldens are byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta-render` (274), `cargo test -p yunta --bins` (339), the 99 digests, `smells --check`, `docs --check`
 
 **Dependencies:** Task 25
+
+**Found while doing it:**
+- **The desk is `page::desk`, and no page.** It is how a terminal reads a plan a place at a time, so it sits beside the pages, not inside the plan's: `page::desk::{Reading, Spot, View, AlsoShown, about, reading}`. The parts of the plan it reads (`card`, `change`, `head`, `proof`, `steps`, `tree`) are `pub(in crate::page)`: the plan's own, read by the desk and by nothing outside `page`.
+- **`plan_among` is the desk's, not `Shown`'s.** Which document a desk opens is the desk's rule, `has_a_place`, now private to it; the gate's `above`, `review` and the decision's desk ask the desk. `before_you_decide` stays with `page::Shown`, as planned.
+- **One path to `Form`:** `page::Form`. `shown` no longer re-exports it.
+- Inside render, the gate, `published` and the desk's `reading` hold no look in this task, so they draw `page::shown`'s body, crate-visible with the bodies it composes. Task 27 gives each of them a look.
+- The CLI fills `page::Shown` and draws it with the look it holds: the browser's status page with the `Html` look, the node page with its own, `review` with its own.
 
 **Files likely touched:** `crates/render/src/{shown,spec,plan/*,page,gate,published,escalation/decision}.rs`, `crates/render/src/page/{shown,spec,plan/*}.rs`, `crates/cli/src/{ask/desk.rs,ask/decision.rs,commands/review.rs,commands/status/{mod,node}.rs}`
 
@@ -964,12 +1037,24 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] The `gate/` goldens, `pull-request.md` among them, are byte for byte the same.
+- [x] The `gate/` goldens, `pull-request.md` among them, are byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render -p yunta-adapters`, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta-render -p yunta-adapters -p yunta-surco` (1,063), `cargo test -p yunta --bins` (339), the engine's `receipt` target, the 99 digests, `smells --check`, `docs --check`, rustdoc over private items
 
 **Dependencies:** Task 26
+
+**Found while doing it:**
+- **`page::Gate` is an enum whose variant is where it is drawn**, as `page::Findings` is one of what it shows: `OnTheForge { run, documents, waits, note, changed }`, `AboveTheCard { shown, escalation }` (what a prompt's card stands under, the plan left to its desk) and `InPlaceOfTheDesk { shown, escalation }` (all of it, for a terminal too small for the desk). `whole_page` and `above` returned `Option<Doc>`; a page with nothing to say is now an empty document, and the prompt's `draw_page` draws nothing for it.
+- **What answers the decision is not the page's.** Surco's blocks do not clone, and a page draws from `&self`, so a page holds what it was filled with, never a section built before it. A terminal's card follows the page; `published` ends a pull request's description on the decision a review gives, after the page. `GatePage.form` is gone: the forge's page is always `Form::Published`, a terminal's `Form::Review`.
+- **A page that holds another draws it as a page, with its own look.** The gate draws `Shown`; `Shown` draws `Plan`, `Spec` or `Findings`; `published` draws each file the pull request carries as `Shown` with the Markdown look. The desk keeps what else a decision shows as its `Shown` page (`AlsoShown<'a>`), and the pane draws it with the pane's look, as it draws the rest. Each page's body is private to its module, so a page is drawn one way only.
+- **A forge's look is surco's:** `Markdown::look()` and `Description::look()` (Unicode glyphs, no paint, no width), as `Html::look()` is. The forge's receipt and the engine's receipt test use it instead of a look built by hand.
+- Three files went past 500 lines and split along what they hold:
+  - Markdown's `problem` and `refusal` drawers go to `surface/markdown/problem.rs`, as the terminal surface keeps them;
+  - the desk's rail tests go to `tests/desk/rail.rs`;
+  - the spec page's test goes to `tests/documents/spec.rs`.
+
+  Render's plan tests draw through `documents::plan_page`.
 
 **Files likely touched:** `crates/render/src/{gate,page,published,lib}.rs`, `crates/render/src/page/gate.rs`, `crates/render/src/tests/console_page.rs`, `crates/cli/src/ask/decision.rs`
 
@@ -985,12 +1070,21 @@ The rest is a reshape, guarded by every test and golden.
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] The status, closing, open, field and stats goldens are byte for byte the same.
+- [x] The status, closing, open, field and stats goldens are byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`, the CLI's batches
+- [x] `cargo test -p yunta --bins` (339), the 99 digests, `smells --check`, `docs --check`
+- [x] the CLI's batches (60 binaries, 855 tests), run once at Checkpoint G on the tree Tasks 28 and 29 leave
 
 **Dependencies:** Task 27
+
+**Found while doing it:**
+- `RunPage`, `NodePage`, `RunStatsPage` and `WorkflowPage` implement `Page`: each one's `document` moved into the impl unchanged.
+- **`status`'s body is its page.** `status` shows a run's page or a node's, so `Body` implements `Page` and `StatusAnswer::page` lends it. The answer keeps the inputs of its JSON document beside it.
+- **The answer holds the data once; its page lends it.** The field's, the doctor's and `verify`'s pages are `Field`, `Doctor` and `Verified`, named as the plan's table names them so they move without a rename, and private to their command. Each answer holds the runs or the checks once for `--json`, and its `page()` lends them. What draws the field (`headline`, `parts`, `footer`, ...) and the doctor's headline are the page's now, not the answer's.
+- `drive`'s closing shows `RunPage` through `output::show`, now that it is a page.
+- `RunPage::document`'s doc named `render::draw`, a module Phase 5 removed; it says `output::draw`.
+- **A defect, for Task 29.** `yunta receipt` writes `receipt.md` beside the run with the terminal's look. What the run removed reads `1 file, -1` when the command runs with ASCII glyphs and `1 file, −1` with Unicode ones, as do the separators of a cost per verified task. The pull request's body and the engine always draw the receipt with Unicode, so a file's bytes depend on the terminal that ran the command.
 
 **Files likely touched:** `crates/cli/src/{run_page/mod.rs,commands/status/{mod,node}.rs,commands/list/runs.rs,commands/stats/{mod,run,workflow}.rs,commands/doctor/mod.rs,commands/verify.rs}`
 
@@ -1002,24 +1096,64 @@ The rest is a reshape, guarded by every test and golden.
 - Each of the 16 pages of plan decision 7's last five rows becomes a struct implementing `Page`, named as there, still in its command's file. Its command fills it and emits it.
 - `drive`, `init`, `review`, `schema` and `verdict` draw through `output::show`.
 - `output::document` is left only if `status/follow`, part of the live region, still needs to print a `Doc` that is no page. Otherwise it is gone.
+- `yunta receipt` builds `receipt.md` with the Markdown look, as the forge and the engine do, whatever the terminal it runs on.
+- A page that read while it drew reads first, and its page draws what it read: the user's choice at Checkpoint G, so that Tasks 39 to 41 only move files.
 
-**Fails first:** none.
+**Fails first:** `receipt_cmd::the_receipt_file_is_the_same_whatever_terminal_asks_for_it`: a run removes a line, and the `receipt.md` that `yunta receipt` writes with ASCII glyphs says `1 file, -1` where the Unicode one says `1 file, −1`. Seen failing for that cause.
 
 **Acceptance criteria:**
-- [ ] Each of the 16 is a `Page`, and the captures are byte for byte the same.
-- [ ] `output::document`'s callers are the live region's alone, or none.
+- [x] Each of the 16 that exists is a `Page` (`page::Stopped` names nothing), with the pages the table did not count, and the captures are byte for byte the same.
+- [x] `output::document`'s callers: none. It is private to `output`, which writes what `show` draws of a page and `say` of a line.
+- [x] `receipt.md` is the same bytes whatever terminal `yunta receipt` runs on.
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`, the CLI's batches, `pages.sh` against the base
+- [x] `cargo test -p yunta --bins` (339), the 99 digests, `smells --check`, `docs --check`
+- [x] the CLI's batches (60 binaries, 855 tests); `pages.sh`: 104 views, none differ from Checkpoint F's, and the base's four from Phase 2 the only ones that differ from the base
 
 **Dependencies:** Task 28
 
-**Files likely touched:** `crates/cli/src/commands/{cancel/page,close,open,resolve_gate,gc/page,review,list/mod,init,new,schema,pack,pack/page,pack_audit,pack/scaffold,test/mod,verdict,drive}.rs`
+**Files likely touched:** `crates/cli/src/commands/{cancel/page,close,open,resolve_gate,gc/page,review,list/mod,init,new,schema,pack,pack/page,pack/audit,pack/needs,pack/scaffold,test/mod,verdict,drive}.rs`
+
+**Done so far:**
+- [x] `receipt.md` is drawn with the Markdown look: `receipt_cmd::the_receipt_file_is_the_same_whatever_terminal_asks_for_it`, seen failing for its cause, passes.
+- [x] Each a struct implementing `Page`, the answer or the command lending it its data:
+  - `Cancelled`, `Closed`, `Opened` and `Answered`, each from its answer's fields;
+  - `Collected`, the pass's record, renamed from `Report`;
+  - `Initialized`, renamed from `Wrote`;
+  - `Schema` (`Documents`, `WorkflowKeys`);
+  - `Review`;
+  - `Signpost`, what `yunta` alone shows where it has no field to show;
+  - `Installed`, `Inventory`, `Updated`, `Removed` and `Listed`, all in `pack/page.rs`.
+- [x] What read while it drew reads first, then its page draws, as the user chose at Checkpoint G:
+  - **the verdict:** `Verdict::diagnosis` reads into `Diagnosis`, which holds `Unrunnable` and the warnings as problems; `Verdict::checked` gives the page, `Checked`. It is `page::Verdict` in the table, but the CLI's `Verdict` is the judgment itself, and `check` answers with what it did, as `Verified` and `Tested` do.
+  - **`new`:** `Written::report` reads the verdict, and `NewWorkflow` draws the file and its `Diagnosis`.
+  - **`pack new`:** `check_pack` reads into `PackCheck` (`Refused` with its problems, or `Tested` with its cases' summary), and `NewPack` draws it.
+  - **`test`:** `TestedCase`, said as each case ends, and `Tested`, the tally under them.
+  - **how effective a workflow's checks were:** `VerificationEffectiveness`, which `check` shows and `stats --workflow` draws inside its page. It wraps replay's `VerificationFindings` because the CLI cannot give a type of replay's a trait of render's; in render the page is that type itself.
+  - **the catalog:** `Catalog::read` reads each workflow it offers (`Offered`): a `Readable` workflow with its estimation, or why it is `Unreadable`; and each broken pack. `impl Page for Catalog` draws them with the look's glyphs. The control plane's `list_workflows` draws it with `Markdown.look()`, where it passed `Glyphs::Unicode`.
+- [x] Pages the table did not count:
+  - a refusal, which is its error's page: `impl Page for CliError`, in `error/page.rs`; `output::show_on_stderr` draws a page with stderr's look, as `show` draws one with stdout's;
+  - `LeftRunning`, the run a person stopped following, left running without this terminal.
+- [x] The names the user asked for at Checkpoint G's review: each says what it is, not a condition, a format or a string standing in for a variant. A pack's code is one module tree, `commands::pack::{audit, needs, page, scaffold}`; in gc's `collect`, what the pass reclaimed is `reclaimed`, beside the record it writes, `collected`.
+
+**Found while doing it:**
+- **A page holds what it says, never blocks drawn before it.** Surco's blocks do not clone, and a page draws from `&self`, so a page that held blocks could not be drawn. So:
+  - `Installed` holds its needs as data: `needs::unmet` gives each `Need` (its node, the key, whether a run leaves the node out, what this repository detected), where `pack_needs::blocks` gave blocks. The page says them, each line once, as the reading did.
+  - `Inventory` is what heads a pack's inventory: `Installing` or `Updating`, each with whether the executors wait on a person's `--yes`, or `Audited`. Whether they wait is the policy's call, so the command computes it, with `waits_on_yes`.
+  - `Listed` (`Empty`, or `Locked`) holds each pack's verdict against the lock as `VendoredPack` rows, not a built checklist.
+- **Some pages read while they draw.**
+  - The verdict's page is async: it reads the workflow's file and the project's remote while drawing.
+  - The catalog reads the disk and the runs' history while drawing.
+  - `new` and `pack new` draw what `check` found as the verdict's built blocks (`Found { blocks }`).
+  - `test` writes a row as each case ends.
+
+  A `Page` cannot await, nor give away a block it holds, so these six take the form only once what they read is data. The user chose to split them here, so that Tasks 39 to 41 only move files.
+- **`drive` has no page of its own.** At the base, it prints the run's closing page, which is `RunPage` and now shown through `output::show`, and a quiet run's verdict, which is that page's headline on stderr. The table's `page::Stopped` names nothing at the base.
 
 **Estimated scope:** L (a form)
 
 ### Checkpoint G: after Tasks 24–29
-- [ ] The suites; render's 21 goldens and the CLI's 78 by digest; the captures.
+- [x] The suites (275 binaries, 4,552 tests, none failed); render's 21 goldens and the CLI's 78 by digest; the captures. In `.plans/yunta-tui/proof/run-pages/checkpoint-g.txt`.
 - [ ] The user reviews the phase. Then every step of the `ci` job, commit 6, `cargo clean`.
 
 ## Phase 7: the run's pages
@@ -1218,7 +1352,7 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 
 ### Task 39: the catalog, `init`, `new` and `schema`
 
-**Description:** `page::Catalog`, `page::Initialized`, `page::NewWorkflow`, `page::Schema`. The skill `init` writes is a file, not a page, so it stays with `init`.
+**Description:** `page::Catalog`, `page::Initialized`, `page::NewWorkflow`, `page::Schema`, each moved as Task 29 left it, what it reads staying with its command (`Catalog::read`, `Written::report`). The skill `init` writes is a file, not a page, so it stays with `init`.
 
 **Fails first:** none.
 
@@ -1236,7 +1370,7 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 
 ### Task 40: a pack's pages
 
-**Description:** `page::Installed` (from `pack.rs` and `pack/page.rs`), `page::PackInventory` (from `pack_audit.rs`, with the inventory `pack/page.rs` heads), `page::NewPack` (from `pack/scaffold.rs`; its templates stay with the command).
+**Description:** a pack's pages, grouped as `page::pack::{Installed, Inventory, Updated, Removed, Listed, NewPack}` rather than six names with a `Pack` prefix in a flat `page::` (the user's choice at Checkpoint G), from `pack/page.rs` and `pack/scaffold.rs` (`NewPack` with `PackCheck`; the templates and `check_pack`, which reads, stay with the command).
 
 **Fails first:** none.
 
@@ -1248,13 +1382,13 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 
 **Dependencies:** Task 39
 
-**Files likely touched:** `crates/cli/src/commands/{pack,pack/page,pack_audit,pack/scaffold}.rs`, `crates/render/src/page/{installed,pack_inventory,new_pack}.rs`, `crates/render/src/page.rs`
+**Files likely touched:** `crates/cli/src/commands/{pack,pack/page,pack/scaffold}.rs`, `crates/render/src/page/pack.rs`, `crates/render/src/page/pack/{installed,inventory,updated,removed,listed,new_pack}.rs`, `crates/render/src/page.rs`
 
 **Estimated scope:** M
 
 ### Task 41: `test`'s report, a verdict, and how a driven run stopped
 
-**Description:** `page::Tested`, `page::Verdict`, `page::Stopped`. `drive`'s note of a verdict draws `page::Verdict` through `output`.
+**Description:** `page::Tested` and `page::TestedCase`, `page::Checked` with `Diagnosis` (the verdict's page; what reads it stays with `Verdict`), and `impl Page for VerificationFindings`, which takes the place of the CLI's `VerificationEffectiveness`. `drive` has no page of its own (Task 29): its closing is `page::Run`, and a quiet run's verdict is that page's headline on stderr.
 
 **Fails first:** none.
 

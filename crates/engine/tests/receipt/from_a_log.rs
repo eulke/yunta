@@ -126,7 +126,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     );
     assert!(receipt.scope.files_touched > 0);
 
-    let groups = yunta_render::receipt::fan_out_groups(&receipt.runners);
+    let groups = receipt.fan_out_groups();
     assert_eq!(groups.len(), 1);
     let (base, members) = &groups[0];
     assert_eq!(base, "review");

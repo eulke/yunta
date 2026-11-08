@@ -43,6 +43,7 @@ use yunta_core::port::ProbeReport;
 use yunta_core::step::NextStep;
 use yunta_core::AdapterId;
 use yunta_render::command;
+use yunta_render::page::Page;
 
 pub async fn doctor(
     session: bool,
@@ -88,7 +89,21 @@ pub(crate) struct DoctorAnswer {
     full: bool,
 }
 
-impl DoctorAnswer {
+/// What `doctor` found, as a person reads it: whether this machine is
+/// ready, each check — those that hold folded on a glance — and what to
+/// run for more.
+struct Doctor<'a> {
+    /// Whether `--session` opened a session per binding.
+    session: bool,
+    holds: bool,
+    /// The word the headline says.
+    word: &'static str,
+    checks: &'a [CheckRow],
+    /// Whether every check stands on its own row.
+    full: bool,
+}
+
+impl Doctor<'_> {
     /// Whether this machine is ready to run, and how many checks stop a
     /// run or are worth a look.
     fn headline(&self) -> Headline {
@@ -105,10 +120,12 @@ impl DoctorAnswer {
                 }),
                 self.word,
             ),
-            &self.checks,
+            self.checks,
         )
     }
+}
 
+impl DoctorAnswer {
     fn of(session: bool, full: bool, checks: &Checklist) -> Self {
         let holds = checks.holds();
         Self {
@@ -130,11 +147,11 @@ fn word_of(holds: bool) -> &'static str {
     }
 }
 
-impl Answer for DoctorAnswer {
+impl Page for Doctor<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let checks = match self.full {
-            true => checklist(&self.checks),
-            false => checklist(&self.checks).folded("healthy"),
+            true => checklist(self.checks),
+            false => checklist(self.checks).folded("healthy"),
         };
         let mut next = Vec::new();
         if !self.session {
@@ -161,6 +178,18 @@ impl Answer for DoctorAnswer {
             .with(Furrow(Vec::new()))
             .with(checks)
             .with(Next { steps: next })
+    }
+}
+
+impl Answer for DoctorAnswer {
+    fn page(&self) -> impl Page + '_ {
+        Doctor {
+            session: self.session,
+            holds: self.holds,
+            word: self.word,
+            checks: &self.checks,
+            full: self.full,
+        }
     }
 
     fn outcome(&self) -> Outcome {

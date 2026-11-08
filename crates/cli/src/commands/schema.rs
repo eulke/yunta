@@ -25,7 +25,8 @@ use yunta_render::command;
 use crate::error::CliError;
 
 use crate::output::Outcome;
-use crate::output::{document, raw, Mode};
+use crate::output::{raw, show, Mode};
+use yunta_render::page::Page;
 
 /// What a document's JSON Schema is for, wherever a page offers it.
 const JSON_SCHEMA: &str = "the JSON Schema an editor validates against";
@@ -40,14 +41,14 @@ pub fn schema(name: Option<&str>, output: Mode, look: &Look) -> Result<Outcome, 
                 command::line(&NextStep::Schemas)
             )));
         }
-        document(look, list());
+        show(look, &Schema::Documents);
         return Ok(Outcome::Success);
     };
     // One parse and one sentence: a name no document has is answered with
     // every name there is, and the one it is a slip from.
     match (name.parse::<Shown>()?, output) {
         (Shown::Workflow, Mode::Json) => raw(yunta_core::schema::workflow_json()),
-        (Shown::Workflow, _) => document(look, workflow_keys()),
+        (Shown::Workflow, _) => show(look, &Schema::WorkflowKeys),
         // The committed bytes CI proves still match the types (`cargo
         // xtask schema --check`), never a schema generated here:
         // generating it would pull `schemars` and the whole
@@ -119,6 +120,22 @@ impl std::str::FromStr for Shown {
                 value: name.to_string(),
                 names: Shown::all().map(Shown::as_str).collect(),
             })
+    }
+}
+
+/// What `schema` shows a person: the documents it can show the shape of, or
+/// every key a workflow reads.
+enum Schema {
+    Documents,
+    WorkflowKeys,
+}
+
+impl Page for Schema {
+    fn document(&self, _look: &Look) -> Doc {
+        match self {
+            Schema::Documents => list(),
+            Schema::WorkflowKeys => workflow_keys(),
+        }
     }
 }
 

@@ -7,7 +7,7 @@ use surco::look::{Look, Width};
 use surco::paint::Paint;
 use yunta_core::shown::PlanReview;
 use yunta_core::TasksFile;
-use yunta_render::plan::Reading;
+use yunta_render::page::desk::Reading;
 
 use super::super::held::{Held, Press};
 use super::super::keys::Stroke;

@@ -9,12 +9,12 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::doc::Doc;
 use surco::look::Look;
 use yunta_core::receipt::{EventChainStatus, Receipt};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
 use yunta_render::command;
+use yunta_render::page::{self, Page};
 use yunta_replay::receipt;
 use yunta_storage::ChainVerification;
 
@@ -27,9 +27,11 @@ pub async fn receipt(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcom
     let ctx = Context::load()?;
     let (run_dir, receipt) = gathered(&ctx, run_id).await?;
 
+    // A file a forge is handed as a pull request's body: drawn with the
+    // Markdown look whatever this terminal reads, as the forge draws it.
     let markdown = {
-        use surco::surface::Surface;
-        surco::surface::Markdown.draw(&yunta_render::receipt::document(&receipt, look.glyphs))
+        use surco::surface::{Markdown, Surface};
+        Markdown.draw(&page::Receipt { receipt: &receipt }.document(&Markdown.look()))
     };
     let json_text = serde_json::to_string_pretty(&receipt)
         .map_err(|e| CliError::msg(format!("could not render receipt JSON: {e}")))?;
@@ -52,8 +54,10 @@ struct ReceiptAnswer {
 }
 
 impl Answer for ReceiptAnswer {
-    fn document(&self, look: &Look) -> Doc {
-        yunta_render::receipt::document(&self.receipt, look.glyphs)
+    fn page(&self) -> impl Page + '_ {
+        page::Receipt {
+            receipt: &self.receipt,
+        }
     }
 
     fn outcome(&self) -> Outcome {

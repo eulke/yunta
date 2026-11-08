@@ -20,6 +20,7 @@ use surco::look::Look;
 use yunta_core::events::FindingCause;
 use yunta_core::RunId;
 use yunta_engine::{ArtifactIntegrity, StoreError};
+use yunta_render::page::Page;
 use yunta_storage::{ChainVerification, Storage};
 
 use crate::context::Context;
@@ -73,7 +74,17 @@ fn word_of(holds: bool) -> &'static str {
     }
 }
 
-impl Answer for VerifyAnswer {
+/// The verdict on a run's evidence, as a person reads it: whether it is
+/// intact, and each check in the order it ran.
+struct Verified<'a> {
+    run_id: &'a RunId,
+    holds: bool,
+    /// The word the headline says.
+    word: &'static str,
+    checks: &'a [CheckRow],
+}
+
+impl Page for Verified<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let mark = match self.holds {
             true => Mark::Done,
@@ -81,9 +92,20 @@ impl Answer for VerifyAnswer {
         };
         let headline = tallied(
             Headline::new(mark, format!("run {}", self.run_id.handle()), self.word),
-            &self.checks,
+            self.checks,
         );
-        Doc::new().with(headline).with(checklist(&self.checks))
+        Doc::new().with(headline).with(checklist(self.checks))
+    }
+}
+
+impl Answer for VerifyAnswer {
+    fn page(&self) -> impl Page + '_ {
+        Verified {
+            run_id: &self.run_id,
+            holds: self.holds,
+            word: self.word,
+            checks: &self.checks,
+        }
     }
 
     fn outcome(&self) -> Outcome {

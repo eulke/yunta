@@ -244,7 +244,7 @@ async fn pack_command(action: PackAction, look: &Look) -> Result<Outcome, CliErr
         PackAction::New { pack } => commands::pack::new_pack(&pack, look).await,
         PackAction::Remove { pack } => commands::pack::remove(&pack, look),
         PackAction::List => commands::pack::list(look),
-        PackAction::Audit { pack } => commands::pack_audit::audit(&pack, look).await,
+        PackAction::Audit { pack } => commands::pack::audit(&pack, look).await,
     }
 }
 
