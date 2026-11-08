@@ -38,7 +38,7 @@ use yunta_core::events::{DecisionOn, Failure, GateWaitingPayload, NodeState, Pau
 use yunta_core::shown::ShownDocument;
 use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
-use yunta_render::command;
+use yunta_render::command::{self, Reader};
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, WaitingOn};
 use yunta_replay::RunState;
@@ -245,10 +245,20 @@ impl RunPage<'_> {
         blocks
     }
 
+    /// What the run offers a person next, each action as its line and what
+    /// it does.
+    fn offered(&self) -> Vec<(String, &'static str)> {
+        self.frame
+            .actions(self.decided_escalation())
+            .iter()
+            .map(|action| command::said(action, Reader::Person))
+            .collect()
+    }
+
     /// What moves a run that waits on a decision without choosing one of
     /// its options, and, for a person reading `status`, where to read all of it.
     fn otherwise(&self) -> Vec<(String, &'static str)> {
-        let mut steps = advice::after(self.frame, self.decided_escalation());
+        let mut steps = self.offered();
         if self.scope == Scope::Status {
             steps.push((
                 command::line(&NextStep::Open {
@@ -263,7 +273,7 @@ impl RunPage<'_> {
     /// What a person types next, for where the run stands, and where to
     /// read more of it.
     fn next(&self) -> Next {
-        let mut steps = advice::after(self.frame, self.decided_escalation());
+        let mut steps = self.offered();
         match (self.scope, self.depth) {
             (Scope::Closing, _) => steps.push((
                 command::line(&NextStep::status(self.run_id)),

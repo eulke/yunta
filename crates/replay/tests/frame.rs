@@ -39,6 +39,8 @@ use yunta_replay::RunState;
 
 const RUN: &str = "run-1";
 
+#[path = "frame/actions.rs"]
+mod actions;
 #[path = "frame/declared.rs"]
 mod declared;
 #[path = "frame/standing.rs"]

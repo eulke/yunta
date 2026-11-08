@@ -168,3 +168,30 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
         }
     );
 }
+
+#[test]
+fn a_parked_phase_says_what_it_waits_on_and_a_moving_one_nothing() {
+    let on = WaitingOn::Run {
+        reason: PauseReason::BudgetExhausted { spent: 5, cap: 4 },
+    };
+    let parked = RunPhase::Waiting { on: on.clone() };
+    assert_eq!(parked.waiting_on(), Some(&on));
+    assert_eq!(RunPhase::Running.waiting_on(), None);
+    assert_eq!(RunPhase::Finished.waiting_on(), None);
+}
+
+#[test]
+fn a_run_paused_on_a_reset_names_its_node_and_the_moment_it_resumes() {
+    let at = Utc.with_ymd_and_hms(2026, 10, 13, 12, 0, 0).unwrap();
+    let phase = RunPhase::Waiting {
+        on: WaitingOn::Run {
+            reason: PauseReason::AwaitingReset {
+                node: NodeId::from_static("build"),
+                at,
+            },
+        },
+    };
+    let (node, resumes) = phase.reset_wait().expect("a run paused on a reset");
+    assert_eq!((node.as_str(), resumes), ("build", at));
+    assert!(RunPhase::Running.reset_wait().is_none());
+}

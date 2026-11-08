@@ -9,6 +9,7 @@
 //! frame answers *what* a person is being asked for and not only *which*
 //! node is asking. No surface goes back to the log for it.
 
+use chrono::{DateTime, Utc};
 use yunta_core::events::{Failure, LoggedWords, NodeState, NodeWait, PauseReason, TerminalState};
 use yunta_core::{ModeName, NodeId, Workflow};
 
@@ -54,6 +55,35 @@ pub enum RunPhase {
     Broken {
         diagnostic: String,
     },
+}
+
+impl RunPhase {
+    /// What a parked run is waiting on, or `None` for a run nobody has to
+    /// touch: the one answer that decides whether a surface says anything
+    /// about a decision at all.
+    pub fn waiting_on(&self) -> Option<&WaitingOn> {
+        match self {
+            RunPhase::Waiting { on } => Some(on),
+            RunPhase::Created
+            | RunPhase::Running
+            | RunPhase::Finished
+            | RunPhase::Failed { .. }
+            | RunPhase::Cancelled
+            | RunPhase::Promoted { .. }
+            | RunPhase::Broken { .. } => None,
+        }
+    }
+
+    /// The node a run paused on a limit's reset is held for, and the moment
+    /// the run resumes at by itself. `None` for a run in any other state.
+    pub fn reset_wait(&self) -> Option<(&NodeId, DateTime<Utc>)> {
+        match self {
+            RunPhase::Waiting {
+                on: WaitingOn::Run { reason },
+            } => reason.reset_wait(),
+            _ => None,
+        }
+    }
 }
 
 /// What a waiting run is waiting on. Only `PartialEq`, because a

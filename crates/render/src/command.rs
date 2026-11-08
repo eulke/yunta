@@ -1,5 +1,6 @@
 //! Every command a reader is told to type, written once: each [`NextStep`] as
-//! the line a person or an agent types.
+//! the line a person or an agent types, and each action a run offers as that
+//! line beside what it does.
 //!
 //! Every surface that tells a reader what to type next writes it here: a page, a
 //! refusal, a pull request's body, the JSON an agent reads. So a phrase met on
@@ -14,6 +15,7 @@
 use surco::doc::Depth;
 use yunta_core::step::{Arg, Choice, NextStep, Reach};
 use yunta_core::{NodeId, RunId};
+use yunta_replay::frame::{Action, Effect};
 
 /// Who copies a command off a line: a person, who reads a run by its handle,
 /// or an agent, which copies its whole id. Not who a page is for: both read
@@ -130,6 +132,29 @@ fn flag(on: bool, words: &str) -> &str {
     } else {
         ""
     }
+}
+
+/// What `effect` does to the run its action names, in the words beside its line.
+pub fn effect(effect: Effect) -> &'static str {
+    match effect {
+        Effect::ContinuesFromLog => "continues it from its log",
+        Effect::ContinuesWhereStopped => "continues it where it stopped",
+        Effect::WaitsForReset => "waits for the reset, then drives on",
+        Effect::HandsBackOnceSettled => "hands it back once that is settled",
+        Effect::RetriesOnceTreeChanged => "offers a retry once the run's tree changed",
+        Effect::ReadsPlan => "reads its plan, and answers it there",
+        Effect::ShowsWhatItWaitsOn => "shows what it is waiting on",
+        Effect::Stops => "stops it and everything under it",
+        Effect::Closes => "closes it for good",
+        Effect::Certifies => "certifies what it did",
+        Effect::FindsWhereLogStops => "says where its log stops reading",
+    }
+}
+
+/// An action as a reader meets it beside a run: its line, as `reader` types
+/// it, and what it does.
+pub fn said(action: &Action, reader: Reader) -> (String, &'static str) {
+    (line_for(&action.step, reader), effect(action.effect))
 }
 
 /// An argument as a line writes it: the value given, or the blank `name` a

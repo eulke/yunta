@@ -424,10 +424,10 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 **Fails first:** the moved test does not build until `RunPhase::reset_wait` exists.
 
 **Acceptance criteria:**
-- [ ] `advice` defines neither function, and the moved test passes.
+- [x] `advice` defines neither function, and the moved test passes.
 
 **Verification:**
-- [ ] `cargo test -p yunta-replay`, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta --bins`
 
 **Dependencies:** Checkpoint C
 
@@ -442,26 +442,26 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 - `crates/render/src/command.rs`: `effect`, the words of each `Effect`, the same 11 sentences.
 - The run page (`after` twice) and the JSON (`after_for` with an agent) take `frame.actions(decision)`, spelled with `command::line` or `line_for` beside `command::effect`.
 - `advice::{after, after_for, after_reset}` are gone.
-- `advice/tests.rs`'s six tests of what a run is offered move to `crates/replay/src/frame/actions/tests.rs`, asserting `Action`s.
+- `advice/tests.rs`'s tests of what a run is offered move to `crates/replay/tests/frame/actions.rs`, beside the frame's other tests, asserting `Action`s: `RunFrame::sample` exists under the `testkit` feature, which replay's integration tests enable. A sixth test pins a finished, a broken and a moving run, which no test held. Render's `command::effect` words each effect and `command::said` writes an action for a reader, each with its test.
 
 **Fails first:** the six moved tests do not build until `RunFrame::actions` exists, and each then passes for the rule it names.
 
 **Acceptance criteria:**
-- [ ] A search for `after_for`, `after_reset` and `advice::after` finds nothing.
-- [ ] `status --json`'s next steps and every status and closing golden are byte for byte the same.
+- [x] A search for `after_for`, `after_reset` and `advice::after` finds nothing.
+- [x] `status --json`'s next steps and every status and closing golden are byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-replay -p yunta-render`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_cmd --test run_flow`, the parked-runs targets, `pages.sh` against the base
+- [x] `cargo test -p yunta-replay -p yunta-render`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_cmd --test run_flow`, the parked-runs targets, `pages.sh` against the base
 
 **Dependencies:** Task 14
 
-**Files likely touched:** `crates/replay/src/frame/{mod,actions}.rs`, `crates/replay/src/frame/actions/tests.rs`, `crates/render/src/command.rs`, `crates/cli/src/{run_page/mod.rs,json/mod.rs,commands/advice.rs,commands/advice/tests.rs}`
+**Files likely touched:** `crates/replay/src/frame/{mod,actions}.rs`, `crates/replay/tests/{frame.rs,frame/actions.rs}`, `crates/render/src/command.rs`, `crates/cli/src/{run_page/mod.rs,json/mod.rs,commands/advice.rs,commands/advice/tests.rs}`
 
 **Estimated scope:** M
 
 ### Checkpoint D: after Tasks 14–15
-- [ ] The suites; every golden's digest; the JSON captures byte for byte.
-- [ ] The user reviews the phase. Then every step of the `ci` job, commit 3, `cargo clean`.
+- [x] The suites; every golden's digest; the JSON captures byte for byte.
+- [x] The user reviews the phase. Then every step of the `ci` job, commit 3, `cargo clean`.
 
 ## Phase 4: one decision, and the words of a parked run
 

@@ -28,7 +28,7 @@ use yunta_render::command;
 use yunta_replay::frame::{NodeStanding, RunFrame};
 use yunta_replay::RunState;
 
-use crate::commands::{advice, stats};
+use crate::commands::stats;
 use crate::context::Context;
 use crate::error::{note, CliError, Outcome};
 use crate::json::RunDocument;
@@ -253,7 +253,7 @@ pub(crate) async fn page_for_a_browser(
 /// beside it. `None` for a run that is not parked, and for a pause that
 /// rebuilds no menu: the page's ask says what that one waits on.
 async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
-    if advice::parked(&reading.frame.phase).is_none() {
+    if reading.frame.phase.waiting_on().is_none() {
         return Ok(None);
     }
     let Some((on, escalation)) = &reading.decision else {

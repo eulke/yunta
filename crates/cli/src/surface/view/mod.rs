@@ -68,7 +68,7 @@ pub(super) fn attention(
     if !matches!(frame.standing, Standing::NeedsYou) {
         return None;
     }
-    let on = advice::parked(&frame.phase)?;
+    let on = frame.phase.waiting_on()?;
     let row = Attention::command(advice::parked_on(on), answer_command(run_id, answerable));
     Terminal::on(*look)
         .block(&Block::Attention(row))

@@ -19,18 +19,19 @@ use yunta_core::caution::Caution;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, StoredEvent};
 use yunta_core::{Manifest, RunId};
 use yunta_render::spend::SpendJson;
-use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
+use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::RunState;
 
 mod diagnostics;
 mod facts;
 mod node;
+mod waiting;
 
 use diagnostics::{node_diagnostics, ArtifactProblems};
 use facts::{BranchJson, CountsJson, PullRequestJson};
-use node::{NodeJson, NodeWaitJson};
+use node::NodeJson;
+use waiting::WaitingOnJson;
 
-use crate::commands::advice;
 use crate::commands::stats::json::TimeJson;
 use crate::commands::status::decision_json::DecisionJson;
 use crate::commands::status::progress;
@@ -39,7 +40,7 @@ pub use crate::output::print_json;
 use crate::output::NextCommand;
 use crate::run_page::{self, artifacts_written};
 use surco::words::Standing;
-use yunta_render::command::Reader;
+use yunta_render::command::{self, Reader};
 
 /// What the invocation that creates a run says before the first token —
 /// on stderr for the person watching, and carried here so the document
@@ -327,24 +328,31 @@ fn parked_escalation(
     )>,
 ) -> Option<GateWaitingPayload> {
     decision
-        .filter(|_| advice::parked(&frame.phase).is_some())
+        .filter(|_| frame.phase.waiting_on().is_some())
         .map(|(_, escalation)| escalation.clone().into_payload())
 }
 
 /// The reset a run paused on a limit's reset waits for, for the document to carry.
 fn awaiting_reset_of(frame: &RunFrame) -> Option<AwaitingResetJson> {
-    advice::reset_pause(&frame.phase).map(|(node, at)| AwaitingResetJson {
-        node: node.to_string(),
-        at,
-    })
+    frame
+        .phase
+        .reset_wait()
+        .map(|(node, at)| AwaitingResetJson {
+            node: node.to_string(),
+            at,
+        })
 }
 
 /// What a program types next for the run, each command with what it does: the steps a
 /// person reads at the end of the run's page, naming the run by its whole id.
 fn next_of(frame: &RunFrame, escalation: Option<&GateWaitingPayload>) -> Vec<NextCommand> {
-    advice::after_for(frame, escalation, Reader::Agent)
-        .into_iter()
-        .map(|(command, why)| NextCommand::new(command, why))
+    frame
+        .actions(escalation)
+        .iter()
+        .map(|action| {
+            let (line, does) = command::said(action, Reader::Agent);
+            NextCommand::new(line, does)
+        })
         .collect()
 }
 
@@ -426,71 +434,4 @@ pub(crate) async fn shown_of(
         yunta_engine::shown_documents(run_dir, escalation.shows(), state, manifest.request())
             .await?,
     )
-}
-
-/// What a waiting run is waiting on.
-///
-/// Told apart by `on`, which each shape carries once, so a reader matches on the shape
-/// instead of inferring it from which fields are set: a node parked on a person is a
-/// different thing from the run itself stopping, and only one of them has a node to name.
-#[derive(serde::Serialize)]
-#[serde(untagged)]
-pub(crate) enum WaitingOnJson {
-    /// A node is parked on a person. With several parked at once this
-    /// is the first in the workflow's declaration order. `on` is the
-    /// kind of wait the node is in, from the node's own shape.
-    Node {
-        node: String,
-        /// What that node waits on, in the same shape a node of
-        /// `nodes` carries; it names `on`.
-        #[serde(flatten)]
-        waiting: NodeWaitJson,
-        /// What the run's standing pause recorded, absent for a node
-        /// parked while the run itself keeps moving.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-    },
-    /// The run itself paused, with the reason it recorded.
-    Run { on: &'static str, reason: String },
-    /// The engine driving the run is asking a person at its terminal,
-    /// where the only answer it takes is given.
-    Prompt {
-        on: &'static str,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        node: Option<String>,
-        since: chrono::DateTime<chrono::Utc>,
-        pid: yunta_core::Pid,
-    },
-}
-
-impl WaitingOnJson {
-    /// The frame's own answer, in the document's shape — or, for a run
-    /// that is moving, the question its engine is asking at its terminal.
-    /// `None` for a run that is not waiting on anything.
-    fn of(phase: &RunPhase, engine: &yunta_replay::registry::Engine) -> Option<Self> {
-        let RunPhase::Waiting { on } = phase else {
-            let moving = matches!(phase, RunPhase::Created | RunPhase::Running);
-            return engine
-                .prompt
-                .as_ref()
-                .filter(|_| moving)
-                .map(|prompt| WaitingOnJson::Prompt {
-                    on: "prompt",
-                    node: prompt.node.as_ref().map(ToString::to_string),
-                    since: prompt.since,
-                    pid: prompt.pid,
-                });
-        };
-        Some(match on {
-            WaitingOn::Node { node, on, reason } => WaitingOnJson::Node {
-                node: node.to_string(),
-                waiting: NodeWaitJson::of(on),
-                reason: reason.as_ref().map(yunta_render::pause::sentence),
-            },
-            WaitingOn::Run { reason } => WaitingOnJson::Run {
-                on: "run",
-                reason: yunta_render::pause::sentence(reason),
-            },
-        })
-    }
 }
