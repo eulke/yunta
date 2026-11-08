@@ -46,7 +46,7 @@ What moves:
 
 | What | To | Note |
 |---|---|---|
-| `replay`, `view`, `live`, `stats`, `history`, `receipt`, `verification_effectiveness`, `modes`, the value types `Engine`, `EngineLiveness`, `Prompt` | `yunta-replay` | About 2,650 lines at the base, 4,143 at `8c833576`. They import only core, surco and each other. Reading `engine.json` stays in the engine |
+| `replay`, `view`, `live`, `stats`, `history`, `receipt`, `verification_effectiveness`, `modes`, the value types `Engine`, `Prompt`, `Asking` | `yunta-replay` | About 2,650 lines at the base, 4,143 at `8c833576`. They import only core, surco and each other. Reading `engine.json` stays in the engine |
 | Every page a command shows: `run_page`, the node, the field, stats and history, doctor, and the answer of every other command; and render's own gate, plan, spec, shown, findings and receipt documents | `yunta-render`, as values of one `Page` trait, in `page::` | They take data; reading, the exit code, the streams and the JSON stay in `yunta`. The decision block is one, in `escalation` |
 | The `after_for` table and the spelling of commands | `after_for` to `yunta-replay` as `RunFrame::actions`; every command a person is told to type a `NextStep`, spelled once in `yunta-render`'s `command`; both in `run-pages` | One table: the CLI spells it, the TUI binds keys, the desktop shows buttons. `advice` and `Spell` are gone |
 | Gathering the inbox, run admission, resolve, cancel, close, gc, packs, doctor's checks, detection, the test runner | `yunta-control` | They return data and never print |

@@ -28,9 +28,10 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use surco::words::Standing;
 
+use crate::clock::TimeSpent;
 use crate::history::PriorEstimation;
 use crate::modes;
-use crate::registry::{Engine, EngineLiveness};
+use crate::registry::{Asking, Engine};
 use crate::stats::RunStats;
 use crate::RunState;
 use yunta_core::events::{
@@ -123,6 +124,17 @@ pub struct RunFrame {
     /// The run's wall-clock: to `now` while it has not finished, to its
     /// last event once it has. `None` for an empty log.
     pub elapsed: Option<Duration>,
+    /// Where the run's wall-clock went: to `now` while the run is open, to
+    /// its last event once it has ended.
+    pub time: TimeSpent,
+    /// From the log's last event to `now`: how long the run has stood where
+    /// it is. Zero for an event stamped after `now`, `None` for a log with
+    /// none.
+    pub since_last_event: Option<Duration>,
+    /// The person the process driving the run is asking at its terminal,
+    /// measured at `now`. A question asked live is on no log until it is
+    /// answered, so this is the one place a surface finds it.
+    pub asking: Option<Asking>,
     /// The DAG's nodes.
     pub flow: Counter,
     /// The run's tasks — `None` until a `task_registered` arrives, so
@@ -164,12 +176,13 @@ pub struct RunFrame {
 impl RunFrame {
     /// One run's frame: from its replayed state, the workflow its manifest
     /// froze, the history the caller read, what its registry says about the
-    /// engine driving it, and the instant it is looked at.
+    /// process driving it, and the instant it is looked at.
     ///
     /// Pure: same inputs, same frame, always. `now` is the caller's own
     /// clock, injected — nothing in this module reads one — so a frame
     /// rendered at a chosen instant is reproducible in a test; `engine` is
-    /// read by the caller the same way.
+    /// read by the caller the same way, and `now` is the one instant every
+    /// duration on the frame is measured to.
     ///
     /// **What it costs.** The log is folded once, by [`RunState::replay`],
     /// before this is called; the frame is then read off that state, so
@@ -216,13 +229,12 @@ impl RunFrame {
             standing: run_standing(&phase, &nodes, blocking_findings, engine),
             phase,
             elapsed: stats.wall_clock,
+            time: stats.time,
+            since_last_event: state.clock().since_last(now),
+            asking: engine.asking(now),
             flow: flow_counter(&nodes, &mode),
             tasks: task_counter(state),
-            reroutes: state
-                .nodes
-                .values()
-                .map(|record| record.reroutes as usize)
-                .sum(),
+            reroutes: reroutes(state),
             tokens: state.spend().so_far(),
             prior: prior.cloned(),
             nodes,
@@ -232,6 +244,15 @@ impl RunFrame {
             blocking_findings,
         }
     }
+}
+
+/// Every `node_rerouted` on the log, over all the run's nodes.
+fn reroutes(state: &RunState) -> usize {
+    state
+        .nodes
+        .values()
+        .map(|record| record.reroutes as usize)
+        .sum()
 }
 
 /// How many findings the run has not settled that keep it from being done.
@@ -260,10 +281,8 @@ pub fn run_standing(
     engine: &Engine,
 ) -> Standing {
     match phase {
-        RunPhase::Created | RunPhase::Running if engine.liveness == EngineLiveness::Dead => {
-            Standing::Stalled
-        }
-        RunPhase::Created | RunPhase::Running if engine.prompt.is_some() => Standing::NeedsYou,
+        RunPhase::Created | RunPhase::Running if *engine == Engine::Dead => Standing::Stalled,
+        RunPhase::Created | RunPhase::Running if engine.prompt().is_some() => Standing::NeedsYou,
         RunPhase::Created => Standing::Created,
         RunPhase::Running => Standing::Running,
         RunPhase::Waiting { on } => match on.reason() {

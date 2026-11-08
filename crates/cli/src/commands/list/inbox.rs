@@ -14,11 +14,11 @@ use surco::words::Standing;
 use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
 use yunta_render::command;
+use yunta_render::engine;
+use yunta_render::pause;
 use yunta_replay::frame::{RunFrame, RunPhase};
-use yunta_replay::RunState;
 use yunta_storage::Storage;
 
-use crate::commands::advice;
 use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::CliError;
@@ -88,7 +88,9 @@ pub(crate) struct RunRow {
     pub(crate) workflow: WorkflowName,
     pub(crate) mode: ModeName,
     /// How long the run has been where it is — what the rows of a group
-    /// are ordered by.
+    /// are ordered by: the time since its last event, which is the event
+    /// that put it there (a parked run's own `run_paused`, a running node's
+    /// last word, a closed run's `run_finished`). Zero for a log with none.
     #[serde(rename = "age_secs", serialize_with = "as_secs")]
     pub(crate) age: Duration,
     /// What holds the run where it is, said whole; `None` for a run
@@ -258,19 +260,15 @@ impl Here {
 
 impl RunRow {
     /// One row from the run's own frame: which group it belongs in, what
-    /// the run is, what holds it and what moves it. `menu` says whether
-    /// the run stopped on a decision whose options `yunta status` lists.
-    fn of(
-        frame: &RunFrame,
-        engine: &yunta_replay::registry::Engine,
-        age: Duration,
-        menu: bool,
-    ) -> Self {
+    /// the run is, how long it has stood there, what holds it and what moves
+    /// it. `menu` says whether the run stopped on a decision whose options
+    /// `yunta status` lists.
+    fn of(frame: &RunFrame, menu: bool) -> Self {
         let word = frame.standing;
-        let (reason, command) = held(frame, engine, word, menu);
+        let (reason, command) = held(frame, word, menu);
         let asking = word == Standing::NeedsYou
             && matches!(frame.phase, RunPhase::Created | RunPhase::Running)
-            && engine.prompt.is_some();
+            && frame.asking.is_some();
         let closed = matches!(
             frame.phase,
             RunPhase::Finished
@@ -284,10 +282,10 @@ impl RunRow {
             word,
             workflow: frame.workflow.clone(),
             mode: frame.mode.clone(),
-            age,
+            age: frame.since_last_event.unwrap_or_default(),
             reason,
             command,
-            said: said(frame, engine),
+            said: said(frame),
             furrow: frame.nodes.iter().map(|node| node.standing).collect(),
             asking,
         }
@@ -297,30 +295,21 @@ impl RunRow {
 /// What holds a run whose word is `word`, and the command that moves it:
 /// `menu` says whether it stopped on a decision `yunta status` lists the
 /// options of.
-fn held(
-    frame: &RunFrame,
-    engine: &yunta_replay::registry::Engine,
-    word: Standing,
-    menu: bool,
-) -> (Option<String>, Option<String>) {
+fn held(frame: &RunFrame, word: Standing, menu: bool) -> (Option<String>, Option<String>) {
     match (word, &frame.phase) {
         (Standing::Stalled, _) => (
-            Some(advice::STALLED.to_string()),
+            Some(engine::STALLED.to_string()),
             Some(command::line(&NextStep::Resume {
                 run: frame.run_id.clone(),
             })),
         ),
         // Asked live, the question is answered where it is asked: no
         // command here reaches it.
-        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => (
-            engine
-                .prompt
-                .as_ref()
-                .map(|prompt| advice::asking(prompt, Some(engine.at))),
-            None,
-        ),
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => {
+            (frame.asking.as_ref().map(engine::asking_in_full), None)
+        }
         (_, RunPhase::Waiting { on }) => (
-            Some(advice::parked_in_full(on)),
+            Some(pause::parked_in_full(on)),
             Some(match menu {
                 true => command::line(&NextStep::status(&frame.run_id)),
                 false => command::line(&NextStep::Resume {
@@ -390,13 +379,13 @@ fn run_row(
             )
         })?;
     let state = yunta_replay::RunState::replay(&events);
-    let engine = crate::render::engine(&run_dir, now);
+    let engine = yunta_engine::read_engine(&run_dir, &yunta_engine::lock::SystemProbe);
     let frame = progress::frame_of(&run_id, &manifest, &state, &engine, now);
     // Only a parked run has a menu to rebuild, and rebuilding one is a
     // walk of the run's state.
     let menu = matches!(frame.phase, RunPhase::Waiting { .. })
         && yunta_engine::awaits_decision(&manifest, &state).is_some();
-    let row = RunRow::of(&frame, &engine, time_in_state(&state, now), menu);
+    let row = RunRow::of(&frame, menu);
     Ok((row, manifest.project.map(|project| project.git_common_dir)))
 }
 
@@ -409,33 +398,19 @@ impl Unreadable {
     }
 }
 
-/// How long the run has been where it is: the time since its last event,
-/// which is the event that put it there — a parked run's own
-/// `run_paused`, a running node's last word, a closed run's
-/// `run_finished`. Zero for a log with no events, and for one whose last
-/// event is stamped after `now`, since a run cannot have been somewhere
-/// for a negative time.
-fn time_in_state(state: &RunState, now: DateTime<Utc>) -> Duration {
-    state
-        .clock()
-        .last_at()
-        .map(|at| (now - at).to_std().unwrap_or(Duration::ZERO))
-        .unwrap_or(Duration::ZERO)
-}
-
 /// What holds a run, on the one line a field's row has room for: the node
 /// a live engine asks about, the claim a parked run stopped on, the stall,
 /// how far a moving run has come, what failed a closed one. Nothing for a
 /// run that finished.
-fn said(frame: &RunFrame, engine: &yunta_replay::registry::Engine) -> String {
+fn said(frame: &RunFrame) -> String {
     match (frame.standing, &frame.phase) {
-        (Standing::Stalled, _) => advice::STALLED.to_string(),
-        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => engine
-            .prompt
+        (Standing::Stalled, _) => engine::STALLED.to_string(),
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => frame
+            .asking
             .as_ref()
-            .map(advice::asking_on)
+            .map(engine::asking_on)
             .unwrap_or_default(),
-        (_, RunPhase::Waiting { on }) => advice::parked_claim(on),
+        (_, RunPhase::Waiting { on }) => pause::parked_claim(on),
         (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
         (_, RunPhase::Created | RunPhase::Running) => {
             crate::render::counter::progress(frame, crate::render::glyphs())

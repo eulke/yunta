@@ -338,11 +338,10 @@ async fn old_layouts(
     report: &mut Report,
 ) -> Option<Vec<PathBuf>> {
     let run_dir = ctx.project.run_dir(run_id.as_str())?;
-    let liveness = yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe);
+    let engine = yunta_engine::read_engine(&run_dir, &yunta_engine::lock::SystemProbe);
     if !matches!(
-        liveness,
-        yunta_replay::registry::EngineLiveness::Dead
-            | yunta_replay::registry::EngineLiveness::Unrecorded
+        engine,
+        yunta_replay::registry::Engine::Dead | yunta_replay::registry::Engine::Unrecorded
     ) {
         return None;
     }

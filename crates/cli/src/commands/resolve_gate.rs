@@ -23,7 +23,7 @@ use yunta_core::step::{Choice, NextStep};
 use yunta_core::{OptionId, Responder, RunId};
 use yunta_render::command;
 use yunta_render::command::Reader;
-use yunta_render::gate::Route;
+use yunta_render::escalation::Route;
 use yunta_replay::RunState;
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
@@ -66,7 +66,7 @@ async fn record(
     // Said here because the resume below would say it only to `detached.log`, with
     // the answer already on the log and the run reading as moving.
     let state = yunta_replay::RunState::replay(&open.events);
-    super::resume::refuse_if_driven(run_id, &open.run_dir, &state).await?;
+    super::resume::refuse_if_driven(ctx, run_id, &open.run_dir, &state).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
     let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
@@ -275,7 +275,7 @@ impl Asked {
         let asked = open.manifest.doc.request();
         let shown =
             yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state, asked).await?;
-        let routes = yunta_render::gate::routes(
+        let routes = yunta_render::escalation::routes(
             &escalation,
             &open.manifest.doc.workflow,
             state.run.left_out(),

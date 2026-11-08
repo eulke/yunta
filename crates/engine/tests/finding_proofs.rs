@@ -168,7 +168,7 @@ fn blocking(bench: &Bench, workflow: &str) -> usize {
         &workflow,
         &yunta_replay::RunState::replay(&events),
         None,
-        &yunta_replay::registry::Engine::this(at),
+        &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         at,
     )
     .blocking_findings

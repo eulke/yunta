@@ -210,10 +210,9 @@ pub(crate) struct AwaitingResetJson {
 }
 
 impl RunDocument {
-    /// The run as its own log describes it. `frame` is the run as the caller framed it, with
-    /// the history it read, and `engine` — what the run's registry says about the process
-    /// driving it — qualifies a run that looks like it is moving; both were read at one
-    /// instant. `state` is the run derived from `events`; the log is read again only for the
+    /// The run as its own log describes it. `frame` is the run as the caller framed it at one
+    /// instant, with the history it read and what the run's registry says about the process
+    /// driving it. `state` is the run derived from `events`; the log is read again only for the
     /// failures each node's diagnostics name.
     pub(crate) fn of(
         run_id: &RunId,
@@ -221,7 +220,6 @@ impl RunDocument {
         state: &RunState,
         manifest: &Manifest,
         frame: &RunFrame,
-        engine: &yunta_replay::registry::Engine,
         decision: Option<(
             yunta_core::events::DecisionOn,
             yunta_core::events::Escalation,
@@ -236,8 +234,8 @@ impl RunDocument {
             mode: frame.mode.to_string(),
             outcome: frame.standing,
             // A document reads the same whichever terminal asked for it.
-            summary: progress::summary(frame, engine, surco::glyphs::Glyphs::Unicode),
-            said: run_page::gist(frame, engine),
+            summary: progress::summary(frame, surco::glyphs::Glyphs::Unicode),
+            said: run_page::gist(frame),
             counts: CountsJson::of(frame),
             exit_code: crate::render::exit(frame.standing).code(),
             reason: reason(&frame.phase),
@@ -250,11 +248,11 @@ impl RunDocument {
             shapes_read: shapes_read(state),
             diagnostics: node_diagnostics(events),
             decision: parked_decision(run_id, decision, &frame.phase),
-            waiting_on: WaitingOnJson::of(&frame.phase, engine),
+            waiting_on: WaitingOnJson::of(frame),
             awaiting_reset: awaiting_reset_of(frame),
             tokens: SpendJson::of(&state.spend()),
             elapsed_secs: frame.elapsed.map(|elapsed| elapsed.as_secs_f64()),
-            time: TimeJson::of(&state.time_spent((!state.ended()).then_some(engine.at))),
+            time: TimeJson::of(&frame.time),
             changed: state.current_change().cloned(),
             branch: BranchJson::of(manifest, run_id),
             pull_requests: PullRequestJson::all_of(frame),

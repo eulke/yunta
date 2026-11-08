@@ -25,26 +25,23 @@ mod story;
 pub(crate) use facts::{artifacts_written, pull_requests_of};
 pub(crate) use story::handed;
 
-use std::time::Duration;
-
-use chrono::{DateTime, Utc};
 use surco::components::{Furrow, Gist, Headline, Next, Note, Prose};
 use surco::doc::{Block, Depth, Doc};
 use surco::figures::duration;
 use surco::look::Look;
 use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::caution::Caution;
-use yunta_core::events::{DecisionOn, Failure, GateWaitingPayload, NodeState, PauseReason};
-use yunta_core::shown::ShownDocument;
+use yunta_core::events::{Failure, GateWaitingPayload, NodeState, PauseReason};
 use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
 use yunta_render::command::{self, Reader};
+use yunta_render::engine;
+use yunta_render::escalation::{self, Beside, Decision};
+use yunta_render::pause;
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, WaitingOn};
 use yunta_replay::RunState;
 
-use crate::commands::advice;
-use crate::commands::status::decision::{self, Beside};
 use crate::surface::Outline;
 
 /// Which page a run is drawn as.
@@ -62,18 +59,6 @@ pub(crate) enum Scope {
 /// What `yunta open` is offered as.
 const IN_A_BROWSER: &str = "the whole page, in a browser";
 
-/// The decision a parked run waits on, as the run's log rebuilds it.
-#[derive(Debug, Clone)]
-pub(crate) struct Decided {
-    /// Whom the decision belongs to.
-    pub(crate) on: DecisionOn,
-    pub(crate) escalation: GateWaitingPayload,
-    /// The documents the decision shows, as the run holds them.
-    pub(crate) shown: Vec<ShownDocument>,
-    /// What the page says beside the decision already.
-    pub(crate) beside: Beside,
-}
-
 /// What a page is drawn from: one run as its log derives it, the places
 /// its page names, the decision it waits on, and how much of it a reader
 /// asked for.
@@ -81,14 +66,14 @@ pub(crate) struct RunPage<'a> {
     pub(crate) scope: Scope,
     pub(crate) depth: Depth,
     pub(crate) run_id: &'a RunId,
-    /// What the run's registry says about the process driving it.
-    pub(crate) engine: yunta_replay::registry::Engine,
+    /// The run at the instant the page is read at: what drives it, and how
+    /// long it has stood where it is, measured there.
     pub(crate) frame: &'a RunFrame,
     /// The run as its log derives it; the frame is read from the same log.
     pub(crate) state: &'a RunState,
     /// Where the page's paths are shown from, and the tree the run works in.
     pub(crate) paths: Outline<'a>,
-    pub(crate) decision: Option<Decided>,
+    pub(crate) decision: Option<Decision<'a>>,
     /// The change each finished node's accepted plan says it makes, by that
     /// node: the story says it in the node's row, in place of what the node
     /// said last. Empty where the page draws no story.
@@ -161,13 +146,12 @@ impl RunPage<'_> {
     /// run has been there, and how long a closed one took and how long ago
     /// it stopped. Nothing for a log with no event.
     fn stood(&self) -> Vec<String> {
-        let last = self.state.clock().last_at();
         let open = matches!(
             self.frame.phase,
             RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
         );
         if self.scope != Scope::Closing && open {
-            return self.open_for(last).into_iter().collect();
+            return self.open_for().into_iter().collect();
         }
         let Some(took) = self.frame.elapsed else {
             return Vec::new();
@@ -176,8 +160,12 @@ impl RunPage<'_> {
             Standing::Finished | Standing::Reported => format!("in {}", duration(took)),
             _ => format!("after {}", duration(took)),
         }];
-        if let (true, false, Some(last)) = (self.scope != Scope::Closing, open, last) {
-            stood.push(format!("{} ago", duration(self.since(last))));
+        if let (true, false, Some(ago)) = (
+            self.scope != Scope::Closing,
+            open,
+            self.frame.since_last_event,
+        ) {
+            stood.push(format!("{} ago", duration(ago)));
         }
         stood
     }
@@ -185,17 +173,14 @@ impl RunPage<'_> {
     /// How long an open run has stood at its word: since it was asked at
     /// a terminal, since its last event for one that went quiet or parked,
     /// and since it started for one that moves.
-    fn open_for(&self, last: Option<DateTime<Utc>>) -> Option<String> {
-        if let Some(prompt) = &self.engine.prompt {
-            return Some(format!("for {}", duration(self.since(prompt.since))));
+    fn open_for(&self) -> Option<String> {
+        if let Some(asking) = &self.frame.asking {
+            return Some(format!("for {}", duration(asking.waited)));
         }
+        let quiet = self.frame.since_last_event;
         match (self.frame.standing, &self.frame.phase) {
-            (Standing::Stalled, _) => {
-                last.map(|last| format!("quiet for {}", duration(self.since(last))))
-            }
-            (_, RunPhase::Waiting { .. }) => {
-                last.map(|last| format!("for {}", duration(self.since(last))))
-            }
+            (Standing::Stalled, _) => quiet.map(|quiet| format!("quiet for {}", duration(quiet))),
+            (_, RunPhase::Waiting { .. }) => quiet.map(|stood| format!("for {}", duration(stood))),
             _ => self
                 .frame
                 .elapsed
@@ -203,15 +188,10 @@ impl RunPage<'_> {
         }
     }
 
-    /// How long ago `then` was, at the instant the page is read at.
-    fn since(&self, then: DateTime<Utc>) -> Duration {
-        (self.engine.at - then).to_std().unwrap_or_default()
-    }
-
     /// The page's gist: what it asks of its reader, or what holds the run,
     /// as one sentence. `None` when the run's word already says it.
     pub(crate) fn gist(&self) -> Option<String> {
-        gist(self.frame, &self.engine)
+        gist(self.frame)
     }
 
     /// The decision the run waits on, as the section the page ends on, and
@@ -220,17 +200,22 @@ impl RunPage<'_> {
     /// not stand there already. A person who has just watched their terminal
     /// stop is the one who needs telling that nothing holds the answer open.
     fn decided(&self) -> Vec<Block> {
-        let Some(decided) = self.decision.as_ref() else {
+        let Some(decision) = self.decision else {
             return Vec::new();
         };
         let mut blocks: Vec<Block> = Vec::new();
         // The closing's branch row says where the run works.
         let shown = surco::paths::shown(self.paths.worktree, self.paths.cwd, self.paths.home);
         if self.scope != Scope::Closing && !self.depth.reaches(Depth::Full) && shown != "." {
-            let tree = decision::run_tree_line(self.paths.worktree);
+            let tree = escalation::run_tree_line(self.paths.worktree);
             blocks.push(Prose(tree).into());
         }
-        let mut section = decision::section(self.run_id, decided, self.otherwise());
+        // A failed node's evidence is quoted above the decision, so the
+        // decision does not repeat it.
+        let beside = Beside {
+            evidence: failed(self.frame).any(|(node, _)| decision.on.node() == Some(&node.id)),
+        };
+        let mut section = decision.section(self.run_id, beside, self.otherwise());
         if self.scope == Scope::Closing {
             section.blocks.push(
                 Note(
@@ -302,7 +287,7 @@ impl RunPage<'_> {
 
     /// The escalation the run stopped on, when the log rebuilds one.
     pub(crate) fn decided_escalation(&self) -> Option<&GateWaitingPayload> {
-        self.decision.as_ref().map(|decided| &decided.escalation)
+        self.decision.map(|decision| decision.escalation)
     }
 
     /// Settled and in-flight spend, split in and out: nothing for a run that
@@ -316,15 +301,15 @@ impl RunPage<'_> {
 
 /// The sentence under a page's headline: what the run comes to, as a person reads it. `None`
 /// for a run whose word says it all.
-pub(crate) fn gist(frame: &RunFrame, engine: &yunta_replay::registry::Engine) -> Option<String> {
+pub(crate) fn gist(frame: &RunFrame) -> Option<String> {
     let blocking = frame.blocking_findings;
     Some(match (frame.standing, &frame.phase) {
-        (Standing::Stalled, _) => advice::STALLED.to_string(),
-        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => match &engine.prompt {
-            Some(prompt) => advice::asking(prompt, None),
+        (Standing::Stalled, _) => engine::STALLED.to_string(),
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => match &frame.asking {
+            Some(asking) => engine::asking_claim(asking),
             None => format!("it {}", Standing::NeedsYou.word()),
         },
-        (_, RunPhase::Waiting { on }) => advice::parked_claim(on),
+        (_, RunPhase::Waiting { on }) => pause::parked_claim(on),
         (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
         (
             _,

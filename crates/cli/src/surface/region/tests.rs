@@ -33,7 +33,7 @@ fn running(id: &'static str) -> yunta_replay::frame::NodeFrame {
 
 /// A run of `nodes` in `phase`, counted as the region counts them.
 fn frame(phase: RunPhase, nodes: Vec<yunta_replay::frame::NodeFrame>) -> RunFrame {
-    let engine = yunta_replay::registry::Engine::this(chrono::DateTime::UNIX_EPOCH);
+    let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
     let standing = yunta_replay::frame::run_standing(&phase, &nodes, 0, &engine);
     RunFrame {
         standing,
@@ -86,7 +86,7 @@ fn the_attention_row_opens_the_region_only_while_something_needs_you() {
     region.show(
         &frame(RunPhase::Running, vec![running("plan")]),
         &RUN,
-        (false, None),
+        false,
     );
     let quiet = rows(&term);
     assert!(
@@ -102,7 +102,7 @@ fn the_attention_row_opens_the_region_only_while_something_needs_you() {
         "and the footer says nothing needs you: {quiet:?}"
     );
 
-    region.show(&parked_on_plan(), &RUN, (true, None));
+    region.show(&parked_on_plan(), &RUN, true);
     let demanded = rows(&term);
     let first = demanded.first().map(String::as_str).unwrap_or_default();
     assert!(
@@ -115,7 +115,7 @@ fn the_attention_row_opens_the_region_only_while_something_needs_you() {
     region.show(
         &frame(RunPhase::Running, vec![running("plan")]),
         &RUN,
-        (false, None),
+        false,
     );
     assert_eq!(rows(&term), quiet, "and it leaves once it is answered");
 }
@@ -128,7 +128,7 @@ fn a_closed_region_leaves_nothing_of_itself_on_the_terminal() {
     region.show(
         &frame(RunPhase::Running, vec![running("plan")]),
         &RUN,
-        (false, None),
+        false,
     );
     assert!(!term.shown().is_empty(), "there is a region to take down");
 
@@ -170,7 +170,7 @@ fn a_row_is_cut_to_the_terminal_and_never_past_the_width_it_is_written_for() {
                 vec![running(PARKED)],
             ),
             &RUN,
-            (true, None),
+            true,
         );
         let room = crate::render::row_width(usize::from(columns)).cells();
         let drawn = rows(&term);
@@ -201,11 +201,7 @@ fn a_child_run_is_drawn_under_the_node_that_bore_it_and_never_as_a_number() {
     let scrollback = Captured::default();
     let mut region = region(&term, &scrollback);
 
-    region.show(
-        &composing("compose", vec![running("compose")]),
-        &RUN,
-        (false, None),
-    );
+    region.show(&composing("compose", vec![running("compose")]), &RUN, false);
     let drawn = rows(&term);
     let node = drawn
         .iter()
@@ -237,11 +233,7 @@ fn a_child_row_cut_to_a_narrow_terminal_still_says_where_the_child_stands() {
     let scrollback = Captured::default();
     let mut region = region(&term, &scrollback);
 
-    region.show(
-        &composing("compose", vec![running("compose")]),
-        &RUN,
-        (false, None),
-    );
+    region.show(&composing("compose", vec![running("compose")]), &RUN, false);
     let drawn = rows(&term);
     assert!(
         drawn.iter().any(|row| row.contains("still open")),
@@ -267,7 +259,7 @@ fn the_footer_stays_the_last_row_as_nodes_come_and_go() {
         vec![running("plan"), running("build")],
         vec![running("build")],
     ] {
-        region.show(&frame(RunPhase::Running, nodes), &RUN, (false, None));
+        region.show(&frame(RunPhase::Running, nodes), &RUN, false);
         let drawn = rows(&term);
         assert!(
             drawn
@@ -305,7 +297,7 @@ fn a_node_that_works_again_does_not_show_what_its_last_attempt_said() {
     region.show(
         &frame(RunPhase::Running, vec![running("build")]),
         &RUN,
-        (false, None),
+        false,
     );
     assert!(
         rows(&term)
@@ -318,15 +310,42 @@ fn a_node_that_works_again_does_not_show_what_its_last_attempt_said() {
     region.show(
         &frame(RunPhase::Running, vec![running("test")]),
         &RUN,
-        (false, None),
+        false,
     );
     region.show(
         &frame(RunPhase::Running, vec![running("build")]),
         &RUN,
-        (false, None),
+        false,
     );
     assert!(
         !rows(&term).iter().any(|row| row.contains("says:")),
+        "{:?}",
+        rows(&term)
+    );
+}
+
+/// A follower hears a session off the run's socket and reads its node's start
+/// off the log, and the words can come first. What a node that has not started
+/// yet said is kept, and shown once the node works.
+#[test]
+fn what_a_node_said_before_its_start_is_shown_once_it_works() {
+    let term = Watched::sized(16, 80);
+    let scrollback = Captured::default();
+    let mut region = region(&term, &scrollback);
+    region.hear(said(&RUN, "build", "First I read the parser."));
+
+    let to_go = NodeFrame::sample(&NodeId::from_static("build"), NodeStanding::ToGo);
+    region.show(&frame(RunPhase::Running, vec![to_go]), &RUN, false);
+    region.show(
+        &frame(RunPhase::Running, vec![running("build")]),
+        &RUN,
+        false,
+    );
+
+    assert!(
+        rows(&term)
+            .iter()
+            .any(|row| row.contains("says: First I read the parser.")),
         "{:?}",
         rows(&term)
     );
@@ -344,7 +363,7 @@ fn what_another_run_said_is_not_shown() {
     region.show(
         &frame(RunPhase::Running, vec![running("build")]),
         &RUN,
-        (false, None),
+        false,
     );
 
     assert!(

@@ -123,6 +123,8 @@ fn a_follower_shows_the_row_the_attached_run_shows() {
 /// A follower that starts before the run's engine has bound its socket, as it
 /// does on a run `--detach` has just handed over or one being resumed,
 /// listens to the socket once the run's registry names it.
+///
+/// Reached by: `crates/cli/src/surface/region.rs`
 #[test]
 fn a_follower_listens_once_the_registry_names_a_socket() {
     let root = tempfile::tempdir().unwrap();

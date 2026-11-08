@@ -48,7 +48,7 @@ pub(super) fn standing_problems(case: &TestCase, played: &Played) -> Vec<String>
         &played.manifest.workflow,
         state,
         None,
-        &yunta_replay::registry::Engine::this(read_at),
+        &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         read_at,
     );
     let mut problems = Vec::new();

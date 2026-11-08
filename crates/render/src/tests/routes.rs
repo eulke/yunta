@@ -7,7 +7,7 @@ use yunta_core::events::{
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{Because, LeftOut, NodeId, NonEmpty, OptionId, Workflow};
 
-use crate::gate::{routes, Route};
+use crate::escalation::{routes, Route};
 
 const FLOW: &str = r#"
 name: flow

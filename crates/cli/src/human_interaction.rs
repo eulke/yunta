@@ -155,8 +155,12 @@ impl HumanInteraction for ConsoleInteraction {
         escalation: &GateWaitingPayload,
         asking: &yunta_engine::Asking<'_>,
     ) -> Option<HumanChoice> {
-        let routes =
-            yunta_render::gate::routes(escalation, asking.workflow, asking.left_out, asking.node);
+        let routes = yunta_render::escalation::routes(
+            escalation,
+            asking.workflow,
+            asking.left_out,
+            asking.node,
+        );
         let called = Some(crate::render::called(&asking.workflow.name, asking.mode));
         let escalation = escalation.clone();
         let shown = asking.shown.to_vec();

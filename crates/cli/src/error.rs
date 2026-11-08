@@ -174,9 +174,9 @@ pub enum CliError {
 
     /// A run whose engine is asking a person at its terminal, the one place
     /// that moves it.
-    #[error("{}", crate::commands::advice::asking(.prompt, None))]
+    #[error("{}", yunta_render::engine::asking_claim(.asking))]
     RunAsking {
-        prompt: yunta_replay::registry::Prompt,
+        asking: yunta_replay::registry::Asking,
     },
 
     /// A claim whose holder cannot be told from a leftover: a pid this user

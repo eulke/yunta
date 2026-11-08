@@ -19,7 +19,7 @@ use super::Lease;
 use crate::lock::{self, Acquired, Contention, LockError, LockOwner, SystemProbe};
 use crate::process::Supervision;
 use crate::process_registry;
-use yunta_replay::registry::EngineLiveness;
+use yunta_replay::registry::Engine;
 
 /// What every checkout of the pool is called, followed by its number.
 pub(super) const SLOT: &str = "slot-";
@@ -219,10 +219,10 @@ fn agents_still_work(home: &Path, number: u32) -> bool {
     else {
         return false;
     };
-    match process_registry::engine_liveness(&held.by, &SystemProbe) {
-        EngineLiveness::Alive | EngineLiveness::Unknown => true,
-        EngineLiveness::Unrecorded => false,
-        EngineLiveness::Dead => groups_at_work(&held.by),
+    match process_registry::read_engine(&held.by, &SystemProbe) {
+        Engine::Alive { .. } | Engine::Unknown => true,
+        Engine::Unrecorded => false,
+        Engine::Dead => groups_at_work(&held.by),
     }
 }
 

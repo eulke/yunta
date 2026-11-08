@@ -18,7 +18,8 @@ use surco::glyphs::Glyphs;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
 use yunta_core::shown::ShownDocument;
 use yunta_core::{Env, NodeId, OptionId, RunId};
-use yunta_render::gate::{self, Route};
+use yunta_render::escalation::{self, Route};
+use yunta_render::gate;
 use yunta_render::{changes, plan};
 
 use super::card::{Answer, DecisionCard, Reply};
@@ -215,7 +216,7 @@ fn about(ask: &Ask<'_>, glyphs: Glyphs) -> Vec<String> {
     let mut about: Vec<String> = yunta_render::shown::plan_among(documents)
         .map(|(_, review)| plan::about(review, &question, glyphs))
         .unwrap_or_default();
-    about.extend(gate::record(ask.escalation, documents));
+    about.extend(escalation::record(ask.escalation, documents));
     about.extend(ask.changed.and_then(|change| changes::of(change, glyphs)));
     about
 }

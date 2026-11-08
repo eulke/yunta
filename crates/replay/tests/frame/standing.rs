@@ -3,20 +3,18 @@
 
 use super::*;
 use yunta_core::Pid;
-use yunta_replay::registry::{EngineLiveness, Prompt};
+use yunta_replay::registry::Prompt;
 
 /// What a run's registry says while its engine asks a person about `node`
 /// at its terminal.
 fn asking(node: &str) -> Engine {
-    Engine {
-        liveness: EngineLiveness::Alive,
+    Engine::Alive {
+        pid: Pid::try_from(4242).expect("a pid"),
         prompt: Some(Prompt {
             node: Some(node.into()),
             since: at(5),
-            pid: Pid::try_from(4242).expect("a pid"),
         }),
         words: None,
-        at: at(10),
     }
 }
 
@@ -148,12 +146,7 @@ fn a_moving_run_whose_engine_is_gone_is_stalled() {
         (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
     ]);
-    let gone = Engine {
-        liveness: EngineLiveness::Dead,
-        prompt: None,
-        words: None,
-        at: at(10),
-    };
+    let gone = Engine::Dead;
     let frame = RunFrame::of(
         &RUN.into(),
         &chain(),

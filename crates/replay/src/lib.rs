@@ -3,12 +3,12 @@
 //! frame a surface draws ([`frame`]), the stats ([`stats`]), a workflow's
 //! history ([`history`]), the receipt ([`receipt`]), the verification
 //! findings ([`verification_effectiveness`]), the nodes a mode schedules
-//! ([`modes`]), and the registry's word on the engine as values
-//! ([`registry`]).
+//! ([`modes`]), and what the registry says of the process driving a run, as
+//! values ([`registry`]).
 //!
 //! Pure: nothing here opens a file, reads a clock or spawns a task. An
-//! instant, the registry's word on the engine, a past run's log: each comes
-//! in as an argument its caller read. So a crate that reads a run needs none
+//! instant, the process driving the run as its registry says, a past run's
+//! log: each comes in as an argument its caller read. So a crate that reads a run needs none
 //! of the engine that drives one, and a reading at a chosen instant is the
 //! same in a test as in production.
 //!

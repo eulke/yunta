@@ -107,6 +107,15 @@ impl Timeline {
         self.last_at
     }
 
+    /// How long from the last applied event to `now`: how long the run has
+    /// stood where it is. Zero for an event stamped after `now`, since a run
+    /// cannot have been somewhere for a negative time; `None` for a log with
+    /// no event.
+    pub fn since_last(&self, now: DateTime<Utc>) -> Option<Duration> {
+        self.last_at
+            .map(|last| (now - last).to_std().unwrap_or_default())
+    }
+
     /// The span the clock covers up to `until`, or up to the last applied
     /// event when `until` is `None`: from the first event to that end.
     /// `None` for a log with no event.

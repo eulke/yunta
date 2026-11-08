@@ -127,8 +127,8 @@ pub use pack_audit::{
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
 pub use permissions::command_violation;
 pub use process_registry::{
-    engine_liveness, engine_prompt, read_engine, read_registry, registry_path, running_groups,
-    Asked, EngineProcessFile, ProcessRegistry, Registry,
+    read_engine, read_registry, registry_path, running_groups, EngineProcessFile, ProcessRegistry,
+    Registry,
 };
 pub use run::schedule::{decide, follows_build, Decision, Policy as SchedulingPolicy};
 pub use run::{

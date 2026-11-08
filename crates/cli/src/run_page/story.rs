@@ -92,7 +92,12 @@ impl RunPage<'_> {
         glyphs: Glyphs,
     ) -> String {
         let accepted = self.plans.iter().find(|(id, _)| *id == node.id);
-        let said = match (self.engine.asks_about(&node.id), accepted) {
+        let asked_about = self
+            .frame
+            .asking
+            .as_ref()
+            .is_some_and(|asking| asking.prompt.is_about(&node.id));
+        let said = match (asked_about, accepted) {
             (true, _) => Some("asking at its terminal".to_string()),
             (false, Some((_, summary))) => Some(summary.clone()),
             (false, None) => display
@@ -135,7 +140,7 @@ impl RunPage<'_> {
     fn decision_says_how_its_plan_got_accepted(&self) -> bool {
         self.decision
             .iter()
-            .flat_map(|decided| &decided.shown)
+            .flat_map(|decision| decision.shown)
             .any(|document| {
                 matches!(
                     &document.content,

@@ -213,7 +213,7 @@ fn page_of(events: Vec<StoredEvent>, scope: Scope) -> RunPage<'static> {
         &workflow(),
         state,
         None,
-        &yunta_replay::registry::Engine::this(fixed_now()),
+        &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         fixed_now(),
     )));
     let run_id: &'static RunId = Box::leak(Box::new(RUN));
@@ -221,7 +221,6 @@ fn page_of(events: Vec<StoredEvent>, scope: Scope) -> RunPage<'static> {
         scope,
         depth: Depth::Glance,
         run_id,
-        engine: yunta_replay::registry::Engine::this(fixed_now()),
         frame,
         state,
         paths: outline(),

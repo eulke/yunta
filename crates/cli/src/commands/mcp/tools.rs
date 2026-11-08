@@ -68,7 +68,7 @@ pub(super) async fn tool_workflow_status(
     let run_id = required_run_id(args)?;
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
     let open = ctx.open_run(&run_id).await?;
-    let engine = crate::render::engine(&open.run_dir, ctx.clock.now());
+    let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
     let (events, manifest) = (open.events, open.manifest.doc);
     let state = yunta_replay::RunState::replay(&events);
     let decision = crate::json::decision_of(&manifest, &open.run_dir, &state).await?;
@@ -84,7 +84,7 @@ pub(super) async fn tool_workflow_status(
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.
     crate::json::to_json_string(&crate::json::RunDocument::of(
-        &run_id, &events, &state, &manifest, &frame, &engine, decision,
+        &run_id, &events, &state, &manifest, &frame, decision,
     ))
     .map_err(CliError::msg)
 }
@@ -153,7 +153,7 @@ pub(super) async fn tool_resume_run(
     // Said here because the process below would say it only to `detached.log`,
     // which no caller of this tool reads.
     let state = yunta_replay::RunState::replay(&open.events);
-    super::super::resume::refuse_if_driven(&run_id, &open.run_dir, &state).await?;
+    super::super::resume::refuse_if_driven(&ctx, &run_id, &open.run_dir, &state).await?;
     // A run paused on a limit's reset is handed to a resume that waits for
     // the reset first, so it does not spend the limit before it lifts.
     super::super::spawn_detached_resume(&open.run_dir, run_id.as_str(), cwd)
@@ -201,7 +201,7 @@ pub(super) async fn tool_answer_questions(
     // Said here because the resume below would say it only to `detached.log`, with
     // the answers already on the log.
     let state = yunta_replay::RunState::replay(&open.events);
-    super::super::resume::refuse_if_driven(&run_id, &open.run_dir, &state).await?;
+    super::super::resume::refuse_if_driven(&ctx, &run_id, &open.run_dir, &state).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
     let storage = ctx.async_storage().await?;

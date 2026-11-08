@@ -1,7 +1,6 @@
 //! One module per subcommand, beside the few things more than one of
 //! them shares; `main.rs` only parses and dispatches.
 
-pub(crate) mod advice;
 pub mod cancel;
 pub mod check;
 pub mod close;

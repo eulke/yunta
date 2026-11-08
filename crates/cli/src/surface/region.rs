@@ -6,8 +6,10 @@
 //!
 //! It is the one place that keeps what a session said: the last frame
 //! for each working node, which it lets go when the node stops working.
-//! A frame from another run is never drawn, so a child's words stay with
-//! the child.
+//! A node yet to start keeps what it said too, since a follower hears a
+//! session off the run's socket and reads the node's start off the log, and
+//! the words can come first. A frame from another run is never drawn, so a
+//! child's words stay with the child.
 //!
 //! It takes no alternate screen, no raw mode and no mouse capture, which
 //! is why the reader keeps their scrollback, their text selection, and a
@@ -33,7 +35,7 @@ use surco::motion::Motion;
 use surco::paint::Paint;
 use yunta_core::{NodeId, RunId};
 use yunta_engine::said::Said;
-use yunta_replay::frame::RunFrame;
+use yunta_replay::frame::{NodeStanding, RunFrame};
 
 use super::scrollback::Scrollback;
 use super::{view, Screen};
@@ -74,7 +76,8 @@ pub(super) struct Region {
     bell: bool,
     /// Whether the window's title says a person is being asked.
     told: bool,
-    /// What a session of each working node said last, by run and node.
+    /// What a session of each working node, or of one yet to start, said
+    /// last, by run and node.
     /// Only a region keeps it, so nothing said reaches a surface that is
     /// not a terminal.
     said: HashMap<(RunId, NodeId), Said>,
@@ -138,26 +141,23 @@ impl Region {
     ///
     /// `answerable` says whether the run stopped on a menu of its own —
     /// which decides the command the attention row offers, and which
-    /// only the run's frozen manifest can answer. `asking` is whom the
-    /// engine asks at its own terminal, as a process that follows the run
-    /// reads it off the registry; the row says so instead.
-    pub(super) fn show(
-        &mut self,
-        frame: &RunFrame,
-        run_id: &RunId,
-        (answerable, asking): (bool, Option<&yunta_replay::registry::Prompt>),
-    ) {
-        let attention = match asking {
-            Some(prompt) => view::asked(prompt, &self.look()),
+    /// only the run's frozen manifest can answer. When the engine asks at
+    /// its own terminal, as a process that follows the run reads it off the
+    /// registry, the row says so instead.
+    pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
+        let attention = match &frame.asking {
+            Some(asking) => view::asked(asking, &self.look()),
             None => view::attention(frame, run_id, answerable, &self.look()),
         }
         .map(|line| self.fit(&line));
         self.attend(attention);
         let working = view::working(frame);
         // What a node that stopped working said, and what another run said,
-        // is let go: a node that works again says something new.
+        // is let go: a node that works again says something new. A node yet
+        // to start keeps what it said until it works.
         self.said.retain(|(run, node), _| {
-            run == run_id && working.iter().any(|working| &working.id == node)
+            run == run_id
+                && (working.iter().any(|working| &working.id == node) || yet_to_start(frame, node))
         });
         let rows: Vec<String> = working
             .into_iter()
@@ -313,6 +313,14 @@ impl Region {
 /// it, and the plain-text style.
 fn row(style: &ProgressStyle) -> ProgressBar {
     ProgressBar::no_length().with_style(style.clone())
+}
+
+/// Whether `frame` holds `node` and has not started it.
+fn yet_to_start(frame: &RunFrame, node: &NodeId) -> bool {
+    frame
+        .nodes
+        .iter()
+        .any(|held| &held.id == node && matches!(held.state, NodeStanding::ToGo))
 }
 
 #[cfg(test)]

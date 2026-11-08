@@ -266,7 +266,7 @@ fn decision(
             ),
         ],
     }));
-    crate::gate::decision(question, blocks)
+    crate::escalation::section(question, blocks)
 }
 
 /// Where what follows a review's options is typed: on the machine that holds

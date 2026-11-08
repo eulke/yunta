@@ -96,8 +96,6 @@ mod pause_reason_tests {
     use yunta_core::{NodeId, QuestionId, RunId};
     use yunta_replay::frame::WaitingOn;
 
-    use crate::commands::advice;
-
     use super::super::chronicle;
     use super::Lines;
 
@@ -327,8 +325,8 @@ mod pause_reason_tests {
                 reason: payload.pause.clone(),
             };
             let one_line = surco::text::one_line(&sentence);
-            assert_eq!(advice::parked_on(&waiting), one_line);
-            assert_eq!(advice::parked_in_full(&waiting), one_line);
+            assert_eq!(yunta_render::pause::parked_on(&waiting), one_line);
+            assert_eq!(yunta_render::pause::parked_in_full(&waiting), one_line);
         }
     }
 }

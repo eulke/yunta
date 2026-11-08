@@ -87,7 +87,7 @@ impl RunCtx<'_> {
             .await?;
         }
         if let Some(registry) = &self.process_registry {
-            registry.asking(Some(crate::process_registry::Asked {
+            registry.asking(Some(yunta_replay::registry::Prompt {
                 node: node.cloned(),
                 since: self.clock.now(),
             }));

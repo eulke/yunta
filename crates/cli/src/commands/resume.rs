@@ -78,7 +78,7 @@ async fn parked(
     }
     // A run resumed from its log has no file of its own to check again.
     servable(&manifest, state.run.mode(), Arg::Blank).await?;
-    refuse_if_driven(run_id, &run_dir, &state).await?;
+    refuse_if_driven(ctx, run_id, &run_dir, &state).await?;
     if !waited_out_reset(ctx, &state, run_id, output, look).await {
         return Ok(None);
     }
@@ -94,7 +94,7 @@ async fn parked(
         run_id,
         &manifest,
         &state,
-        &crate::render::engine(&run_dir, now),
+        &yunta_engine::read_engine(&run_dir, &yunta_engine::lock::SystemProbe),
         now,
     );
     let prior = stats::budget_prior(ctx, &manifest, &frame, &open.events).await;
@@ -115,6 +115,7 @@ async fn parked(
 /// Takes nothing, so it only says the run is free at this moment: the claim is what
 /// makes it so.
 pub(crate) async fn refuse_if_driven(
+    ctx: &Context,
     run_id: &RunId,
     run_dir: &std::path::Path,
     state: &RunState,
@@ -125,7 +126,12 @@ pub(crate) async fn refuse_if_driven(
             liveness: Liveness::Alive,
             ..
         }) if state.run.paused().is_some() => Ok(()),
-        Some(refusal) => Err(CliError::refused_hold(run_id, run_dir, refusal)),
+        Some(refusal) => Err(CliError::refused_hold(
+            run_id,
+            run_dir,
+            refusal,
+            ctx.clock.now(),
+        )),
     }
 }
 
@@ -141,7 +147,12 @@ async fn claimed(
     match yunta_engine::hold_run(run_dir, contention, &ctx.clock, ctx.cancellation()).await {
         Ok(hold) => Ok(Some(hold)),
         Err(LockError::Cancelled { .. }) => Ok(None),
-        Err(refused) => Err(CliError::refused_hold(run_id, run_dir, refused)),
+        Err(refused) => Err(CliError::refused_hold(
+            run_id,
+            run_dir,
+            refused,
+            ctx.clock.now(),
+        )),
     }
 }
 

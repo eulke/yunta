@@ -16,11 +16,11 @@ use surco::glyphs::Glyphs;
 use surco::words::Standing;
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
+use yunta_render::engine;
+use yunta_render::pause;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::registry::Engine;
 use yunta_replay::RunState;
-
-use crate::commands::advice;
 
 /// Frames a run for the surfaces that say where it stands in one line.
 ///
@@ -68,20 +68,12 @@ pub(crate) fn frame_of(
 /// The counters and the phase on one line: the counters every surface
 /// prints for the run, then the word the run is called by and what
 /// qualifies it.
-///
-/// `engine` is what the run's registry says about the process driving
-/// it, which is what tells a run that is moving from one whose engine is
-/// gone.
-pub(crate) fn summary(
-    frame: &RunFrame,
-    engine: &yunta_replay::registry::Engine,
-    glyphs: Glyphs,
-) -> String {
+pub(crate) fn summary(frame: &RunFrame, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
     let mut summary = format!(
         "{} {sep} {}",
         crate::render::counter::line(frame, glyphs),
-        phase_label(frame, engine)
+        phase_label(frame)
     );
     if let Some(note) = yunta_render::receipt::unknown_kinds(&frame.unknown_kinds) {
         summary.push_str(&format!(" {sep} {note}"));
@@ -91,18 +83,18 @@ pub(crate) fn summary(
 
 /// The phase on one line, for the end of a summary: the word every
 /// surface calls it by, and what qualifies it when something does.
-fn phase_label(frame: &RunFrame, engine: &yunta_replay::registry::Engine) -> String {
+fn phase_label(frame: &RunFrame) -> String {
     let word = frame.standing;
     if word == Standing::Stalled {
         return format!("{word}: no process is driving it");
     }
-    if let (Standing::NeedsYou, Some(prompt)) = (word, &engine.prompt) {
-        return format!("{word}: {}", advice::asking(prompt, Some(engine.at)));
+    if let (Standing::NeedsYou, Some(asking)) = (word, &frame.asking) {
+        return format!("{word}: {}", engine::asking_in_full(asking));
     }
     match &frame.phase {
         // A parked run is waiting on a person, not stuck, and what it is
         // parked on is the thing a reader acts on next.
-        RunPhase::Waiting { on } => format!("{word}: {}", advice::parked_on(on)),
+        RunPhase::Waiting { on } => format!("{word}: {}", pause::parked_on(on)),
         RunPhase::Broken { diagnostic } => {
             format!("{word}: {}", surco::text::one_line(diagnostic))
         }

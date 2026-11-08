@@ -54,7 +54,7 @@ fn child_offered_by(repo: &Path, home: &Path, id: &str) -> String {
 /// What stopped a child stands on the child's log, so the parent's page and its document
 /// each hand their reader the way there, and what it shows is the child's decision.
 ///
-/// Reached by: `crates/cli/src/commands/advice.rs`
+/// Reached by: `crates/replay/src/frame/actions.rs`
 #[test]
 fn the_parent_of_a_stopped_child_offers_the_command_that_reaches_it() {
     let root = tempfile::tempdir().unwrap();

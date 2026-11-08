@@ -121,7 +121,7 @@ async fn a_left_out_node_stands_apart_from_a_mode_skipped_one() {
         &workflow,
         &yunta_replay::RunState::replay(&events),
         None,
-        &yunta_replay::registry::Engine::this(closed_at),
+        &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         closed_at,
     );
 

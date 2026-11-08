@@ -14,8 +14,8 @@
 //! it writes it ([`RunObserver`]), so that process never asks storage for what
 //! it wrote an instant earlier. A process that follows a run another one drives
 //! reads the log past what it holds and hands each event over itself
-//! ([`Surface::deliver`]), with the engine read from the run's registry
-//! ([`EngineReading`]). The log stays the truth: what the surface holds is the
+//! ([`Surface::deliver`]), with the process driving it read from the run's
+//! registry ([`EngineReading`]). The log stays the truth: what the surface holds is the
 //! cache of one invocation, and every hole in it is closed by reading the log.
 //! What a session says is on no log: the driving process gets it from the
 //! observer, a follower off the run's socket, and only the region draws it.
@@ -43,6 +43,7 @@ use indicatif::TermLike;
 use tokio::task::JoinHandle;
 
 use yunta_core::events::StoredEvent;
+use yunta_core::Pid;
 use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::RunObserver;
 use yunta_replay::history::PriorEstimation;
@@ -125,7 +126,7 @@ impl Delivery {
     }
 }
 
-/// Where the frame a surface draws reads the engine driving its run from.
+/// Where the frame a surface draws reads the process driving its run from.
 ///
 /// The process that drives a run is alive, and asks its own terminal, so it
 /// reads itself. A process that follows a run another one drives reads the
@@ -153,11 +154,13 @@ impl EngineReading {
         }
     }
 
-    /// The engine driving the run, as this reading says at `at`.
-    pub(crate) fn read(&self, at: chrono::DateTime<chrono::Utc>) -> Engine {
+    /// The process driving the run, as this reading says now.
+    pub(crate) fn read(&self) -> Engine {
         match self {
-            EngineReading::This => Engine::this(at),
-            EngineReading::Registry(run_dir) => crate::render::engine(run_dir, at),
+            EngineReading::This => Engine::this(Pid::current()),
+            EngineReading::Registry(run_dir) => {
+                yunta_engine::read_engine(run_dir, &yunta_engine::lock::SystemProbe)
+            }
         }
     }
 }
@@ -179,7 +182,7 @@ pub(crate) struct SurfaceEnv<'a> {
     /// invocation so the region and the block that closes it cannot
     /// disagree — and so an unusable override is reported once.
     pub(crate) glyphs: Glyphs,
-    /// Where the frame reads the engine driving the run from.
+    /// Where the frame reads the process driving the run from.
     pub(crate) engine: EngineReading,
 }
 

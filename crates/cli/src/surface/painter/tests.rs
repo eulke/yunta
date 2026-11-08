@@ -7,7 +7,8 @@ use yunta_core::events::{
 };
 use yunta_core::{CommitSha, ConfigLayer, ContentHash, Isolation, NodeId, Pid};
 use yunta_engine::lock::OwnerProbe;
-use yunta_engine::{Asked, EngineProcessFile};
+use yunta_engine::EngineProcessFile;
+use yunta_replay::registry::Prompt;
 use yunta_testkit_core::{Captured, FixedClock, Log};
 
 use super::*;
@@ -125,8 +126,8 @@ fn born() -> EventPayload {
     }))
 }
 
-/// A painter on a run whose `build` node has started, reading the engine the
-/// way `engine` says, and drawing lines nobody reads.
+/// A painter on a run whose `build` node has started, reading the process
+/// driving it the way `engine` says, and drawing lines nobody reads.
 async fn painter_of(engine: EngineReading, at: &Path) -> Painter {
     let storage = AsyncStorage::open(at.join("events.db"))
         .await
@@ -164,7 +165,7 @@ fn registered(dir: &Path, pid: Pid, asking: Option<&str>) {
             .started(pid)
             .unwrap_or(chrono::DateTime::UNIX_EPOCH),
         process_groups: Vec::new(),
-        asking: asking.map(|node| Asked {
+        asking: asking.map(|node| Prompt {
             node: Some(NodeId::from(node)),
             since: chrono::DateTime::UNIX_EPOCH,
         }),

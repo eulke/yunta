@@ -5,11 +5,10 @@ use surco::look::Look;
 use yunta_core::events::TokenUsage;
 use yunta_replay::frame::RunPhase;
 use yunta_replay::RunState;
-use yunta_testkit_core::fixed_now;
 
 use super::*;
 use crate::run_page::fixtures::{
-    exhausted_escalation, failed_lint, finished, frame, lint_failure, outline, parked_on_lint, RUN,
+    failed_lint, finished, frame, lint_decision, lint_failure, outline, parked_on_lint, RUN,
 };
 
 fn goldens() -> PathBuf {
@@ -21,7 +20,6 @@ fn closing(frame: RunFrame, decision: Option<(DecisionOn, GateWaitingPayload)>) 
         &RUN,
         frame,
         RunState::default(),
-        fixed_now(),
         (decision, Vec::new()),
         &outline(),
     )
@@ -76,14 +74,10 @@ fn a_failed_run_closes_with_the_tail_of_what_failed() {
 /// finished, it failed, it needs them, and it finished with work nobody
 /// has accepted.
 fn cases() -> Vec<(&'static str, Closing)> {
-    let (parked, _) = parked_on_lint();
+    let parked = parked_on_lint();
     let failed = RunPhase::Failed {
         failure: Some(lint_failure()),
     };
-    let decision = (
-        DecisionOn::Node("lint".into()),
-        exhausted_escalation().into_payload(),
-    );
     vec![
         (
             "finished",
@@ -105,7 +99,7 @@ fn cases() -> Vec<(&'static str, Closing)> {
         ),
         (
             "needs-you",
-            closing(frame(parked, vec![failed_lint()], 0), Some(decision)),
+            closing(frame(parked, vec![failed_lint()], 0), Some(lint_decision())),
         ),
         (
             "reported",

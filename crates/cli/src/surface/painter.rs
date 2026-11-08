@@ -63,7 +63,7 @@ pub(super) struct Painter {
     written: usize,
     /// The glyph set every moment this painter puts out is marked with.
     glyphs: Glyphs,
-    /// Where the frame reads the engine driving the run from.
+    /// Where the frame reads the process driving the run from.
     engine: super::EngineReading,
     /// The diagnostics raised while the terminal was somebody else's,
     /// in the order they were raised. A line a person is owed is not a
@@ -208,21 +208,20 @@ impl Painter {
         }
     }
 
-    /// The run's state, its frame and the engine driving it, as they stand
-    /// at this instant.
-    fn reading(&self) -> (RunState, RunFrame, yunta_replay::registry::Engine) {
+    /// The run's state and its frame, with what drives it, as they stand at
+    /// this instant.
+    fn reading(&self) -> (RunState, RunFrame) {
         let state = RunState::replay(self.folded.settled());
         let now = self.clock.now();
-        let engine = self.engine.read(now);
         let frame = RunFrame::of(
             &self.run_id,
             &self.manifest.workflow,
             &state,
             self.prior.as_ref(),
-            &engine,
+            &self.engine.read(),
             now,
         );
-        (state, frame, engine)
+        (state, frame)
     }
 
     /// Redraws the region from the run as it stands at this instant,
@@ -231,14 +230,14 @@ impl Painter {
         if self.standing == Standing::StoodDown || !matches!(self.draw, Draw::Live(_)) {
             return;
         }
-        let (state, frame, engine) = self.reading();
+        let (state, frame) = self.reading();
         // Only a parked run has a menu to rebuild, and rebuilding one is
         // a walk of the run's state — asked exactly when the answer changes
         // what the attention row says.
         let answerable = matches!(frame.phase, yunta_replay::frame::RunPhase::Waiting { .. })
             && yunta_engine::awaits_decision(&self.manifest, &state).is_some();
         if let Draw::Live(region) = &mut self.draw {
-            region.show(&frame, &self.run_id, (answerable, engine.prompt.as_ref()));
+            region.show(&frame, &self.run_id, answerable);
         }
     }
 
@@ -290,7 +289,7 @@ impl Painter {
         match standing {
             Standing::StoodDown => {
                 if matches!(self.draw, Draw::Live(_)) {
-                    let (_, frame, _) = self.reading();
+                    let (_, frame) = self.reading();
                     if let Draw::Live(region) = &mut self.draw {
                         // A prompt has the terminal: a person is being asked,
                         // whatever the log has got to. Not from the frames: the

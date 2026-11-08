@@ -1,6 +1,6 @@
 # Tasks: `run-pages`
 
-Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval**. Base: `13cdd69c`.
+Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-07, amended on 2026-11-08** (Tasks 18c to 18f, the plan's decision 5). Base: `13cdd69c`.
 
 **How these run:**
 - One at a time, with `incremental-implementation` and `test-driven-development`, stopping at each checkpoint for the user.
@@ -474,10 +474,10 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] `gate` defines none of the four, and every gate and decision golden is byte for byte the same.
+- [x] `gate` defines none of the four, and every gate and decision golden is byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta-render`, `cargo test -p yunta --bins`
 
 **Dependencies:** Checkpoint D
 
@@ -497,13 +497,20 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] `crates/cli/src/commands/status/decision.rs` is gone, and so is `Decided`.
-- [ ] The status, closing and gate goldens and the decision's JSON are byte for byte the same.
+- [x] `crates/cli/src/commands/status/decision.rs` is gone, and so is `Decided`.
+- [x] The status, closing and gate goldens and the decision's JSON are byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_cmd`
+- [x] `cargo test -p yunta-render`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_cmd`
 
 **Dependencies:** Task 16
+
+**Found while doing it:**
+- `Decision` borrows what it draws, as the plan writes it, so the closing lends the page its decision without a clone. `yunta status` reads the documents a page shows once, in `Reading::documents`: a node's page shows what the node produced, and the run's page what its decision shows.
+- What the page says beside the decision is the page's to say: the run page sets `Beside` from the failed nodes whose evidence it quotes, which the closing already did, in place of each caller computing it.
+- The section every decision ends a page on is `escalation::section`, since `escalation::Decision` now names the decision itself. `Decision::section` builds the run's on it, and the published page builds its own.
+- `claim_words` sits beside `escalation::sentence`, which says the same claim and now calls it.
+- The run page fixtures keep one decision, `lint_decision`, which the closing's tests share.
 
 **Files likely touched:** `crates/render/src/{escalation.rs,escalation/decision.rs,gate.rs}`, `crates/cli/src/{commands/status/{mod,decision_json}.rs,run_page/{mod,fixtures}.rs,surface/closing/mod.rs,commands/advice.rs}`
 
@@ -520,20 +527,222 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] A search for `advice` in `crates/` finds no module, path or test.
-- [ ] Every golden is byte for byte the same.
+- [x] A search for `advice` in `crates/` finds no module, path or test.
+- [x] Every golden is byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`, the CLI's batches
+- [x] `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+- [x] the CLI's batches, at Checkpoint E
 
 **Dependencies:** Task 17
+
+**Found while doing it:**
+- `advice/tests.rs` was already gone: Task 15 took its tests to replay. `pause`'s own tests move to `pause/tests.rs`, which keeps `pause.rs` clear of the 500-line smell.
+- `yunta-render` names no clock type, and the spec adds no crate to it. So this task left a person asked at a terminal said by two functions named by what they take: `asking(prompt)`, and `engine_asking(engine)`, which subtracted the prompt's start from the engine's reading. At the user's request, Tasks 18c to 18f do it right: the frame measures, the registry reads as one `Engine` enum, and render's `engine` names each length.
+- `parked_runs/child.rs` is reached by `RunFrame::actions` now, and its `Reached by:` line says so.
 
 **Files likely touched:** `crates/render/src/{pause.rs,pause/tests.rs}`, `crates/cli/src/{commands/mod.rs,commands/advice.rs,commands/advice/tests.rs,commands/list/inbox.rs,commands/status/progress.rs,error.rs,run_page/mod.rs,surface/lines.rs,surface/view/mod.rs}`
 
 **Estimated scope:** M (a move)
 
-### Checkpoint E: after Tasks 16–18
-- [ ] The suites; every golden's digest; the decision's JSON.
+### Task 18b: a follower hears what a session said before it listened
+
+Added at the user's request, after the measurement of Checkpoint C.
+
+**Description:**
+- **What fails.** `row::a_follower_listens_once_the_registry_names_a_socket` (`crates/cli/tests/run_words/row.rs`) fails about one run in ten alone, and three in ten beside a build. The rate is the same at `737499bd`, before this module.
+- **What the failing screen shows.** The node is running for six seconds, and no `says:` row is drawn. So the follower follows the log, but what the session said never reached its region.
+- **Measured, not the cause.** A late listener does not lose the words by the socket: `said::Voices` hands a new reader the recent past before what comes next.
+- **The hypothesis to prove or drop first.** The past a follower hears when it connects reaches the region through its observer. That can happen before the region has taken the `node_started` its words belong to, and words for a node the region does not hold yet are dropped.
+- **The work:**
+  - reproduce the miss on purpose, by holding the region's events back while the socket's past arrives, and so name the cause;
+  - fix it where it lives, so a follower that hears a session's words early keeps them until their node is drawn, or hears them only once the node is;
+  - make the test hold every time.
+- **What the work reads:** `follow.rs`, `follow/listen.rs`, the surface's observer and region (`crates/cli/src/surface/`), and `said`'s `Voices`.
+
+**Fails first:** a test that puts a session's words before its node's start, the way the follower can, and finds them drawn. It fails before the fix, for the cause named.
+
+**Acceptance criteria:**
+- [x] The cause is named in the task, with the run that shows it.
+- [x] `row::a_follower_listens_once_the_registry_names_a_socket` passes 30 runs out of 30 with `tools/repeat_test.py`, alone and beside a build.
+- [x] The entry "A follower can miss what a session said before it listened" is deleted from `.agents/open.md`.
+
+**Verification:**
+- [x] `python3 .plans/yunta-tui/tools/repeat_test.py <worktree> 30 yunta run_words row::a_follower_listens_once_the_registry_names_a_socket`, `cargo test -p yunta --test run_words --test status_follow`, `cargo test -p yunta --bins`
+
+**Dependencies:** Task 18
+
+**Found while doing it:**
+- **The cause.** The region let go of what a node said whenever the frame it redrew did not have the node working, and a node whose start the follower has not read yet is not working. A follower hears the socket's past through the surface's observer as soon as a registry reading names the socket, but reads the node's start off the log at its own pace, up to a tenth of a second later. When the words come first, the redraw between them drops the words, and the stub's session says nothing more: the failing screen of Checkpoint C, a node running for six seconds with no `says:` row.
+- **The reproduction.** `surface::region::tests::what_a_node_said_before_its_start_is_shown_once_it_works` hears the words while the node is still to go, then shows it working. It failed for that cause before the fix.
+- **Measured after the fix:** 0 of 30 failed alone, and 0 of 30 beside a release build of the CLI in a target of its own, which ran through all 30. Before it: 1 in 10 alone, 3 in 10 beside a build.
+- **The fix lives in the region.** It keeps a node's words while the frame has not started the node, and still lets them go once the node stops or when they are another run's. The follower and the socket stay as they are: `said::Voices` already hands a late listener the recent past.
+
+**Files likely touched:** `crates/cli/src/commands/status/{follow.rs,follow/listen.rs}`, `crates/cli/src/surface/{region,view}/*`, `crates/cli/tests/run_words/row.rs`, `.agents/open.md`
+
+**Estimated scope:** M
+
+### Task 18c: the frame measures what a page says of time
+
+Added at the user's request on 2026-11-08, with Tasks 18d to 18f (plan decision 5).
+
+**Description:**
+- `crates/replay/src/registry.rs` gains `Asking { pid, prompt, waited }`: the process driving a run asking a person at its terminal, measured at an instant (plan decision 5).
+  - `Engine::asking(at)` builds it, and nothing else does: the pid and the question the reading holds, and how long since the prompt's `since`, zero for a prompt stamped after `at`.
+  - Task 18e takes the pid from `Alive` instead, where it belongs.
+- `RunFrame` gains three fields, measured at its `now`:
+  - `asking`: `engine.asking(now)`;
+  - `since_last_event`: from the log's last event to `now`, zero for an event stamped after it, `None` for a log with none;
+  - `time`: where the run's time went, to `now` while the run is open and to its last event once it has ended, as `state.time_spent` gives it.
+- `RunFrame::sample` sets them: no prompt, no event, no time.
+- Nothing reads them yet. The pages read them in Task 18d.
+
+**Fails first:** `crates/replay/tests/frame/measures.rs`, new, beside `standing.rs`, fails because the frame carries none of the three. It reads:
+- a frame read 3m10s after its engine's prompt began, and 2m after its last event, carries an `asking` with the engine's pid and a `waited` of 3m10s, and `since_last_event` of 2m;
+- one read before its last event's stamp has stood zero;
+- one whose engine asks no one has no `asking`;
+- its `time` is `state.time_spent` to the same instant.
+
+**Acceptance criteria:**
+- [x] Each measure is the subtraction it replaces, read at the frame's `now`.
+- [x] Every golden is byte for byte the same.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay`, `cargo test -p yunta --bins` (with Task 18d's), and `cargo check --workspace --all-targets` with no warning
+
+**Dependencies:** Task 18b
+
+**Found while doing it:**
+- `measures.rs` failed for want of the three fields, and passes with them: seven readings, two of them of time known apart from the code (an open run's working time grows by the gap between two reads, and an ended run's does not grow).
+- `time` is the frame's own stats' `time`, which `RunStats::at` already reads to `now` while the run is open and to its last event once it has ended.
+
+**Files likely touched:** `crates/replay/src/{registry.rs,frame/mod.rs,frame/sample.rs}`, `crates/replay/tests/{frame.rs,frame/measures.rs}`
+
+**Estimated scope:** S
+
+### Task 18d: every page reads the frame's measures
+
+**Description:**
+- The pages read what the frame measured, and none reads the engine's reading:
+  - the run page: its headline's `open_for` and `stood` read `asking.waited` and `since_last_event`, its gist reads `asking`, and its facts read `frame.time`. Its `engine` field and `since` are gone.
+  - the field: `held`, `said` and the row's `asking` read `frame.asking`, and `time_in_state` is gone for `since_last_event`.
+  - the status summary: `summary(frame, glyphs)` and `phase_label` read `frame.asking`.
+  - the JSON: `RunDocument::of` takes no engine. `waiting_on` reads `frame.asking`, and `time` reads `frame.time`.
+  - the live region: the painter hands the region `frame.asking`, and its row says `asking_on` of it.
+- The three sayings of an asking process take one `Asking`, as `pause`'s three take one `WaitingOn`:
+  - `pause::asking(prompt)` becomes `asking_claim(&Asking)`;
+  - `engine_asking(engine)` becomes `asking_in_full(&Asking)`;
+  - `asking_on(prompt)` becomes `asking_on(&Asking)`.
+  
+  Their tests build an `Asking`.
+- The refusal (`CliError::RunAsking`) holds an `Asking`, from `read_engine(..).asking(now)`. `refused_hold` takes the instant, which its two callers in `resume.rs` read off the context's clock. Its words stay the same.
+- `status`'s `Reading`, the closing, `drive` and every other reader keep the engine's reading only to build the frame.
+- The run page's fixtures build frames by hand and read the page `READ_AFTER` their last event. Each frame carries the measures that instant gives: `since_last_event` of `READ_AFTER`, and its state's `time` to the same instant.
+
+**Fails first:** none. The measures are Task 18c's, and the pages say the same. The guard is every golden, the captures and the JSON captures, byte for byte.
+
+**Acceptance criteria:**
+- [x] No file of `run_page/`, `list/inbox.rs`, `status/progress.rs`, `json/` or `surface/painter.rs` reads `.prompt` or `.at` off the engine's reading.
+- [x] `time_in_state`, the run page's `since` and `engine_asking` are gone, and no saying of an asking process takes a `Prompt`.
+- [x] Every golden's digest equals the base's, the captures equal Checkpoint D's, and the refusal says what it said.
+
+**Verification:**
+- [x] `cargo test -p yunta-render -p yunta-replay` (464), `cargo test -p yunta --bins` (346), `cargo test -p yunta --test status_cmd --test status_page_cmd --test status_follow --test three_questions --test run_words --test parked_runs --test mcp_flow`, `cargo test -p yunta --test run_flow guarding`, `pages.sh` against Checkpoint D's captures: 104 views, 0 differ
+
+**Dependencies:** Task 18c
+
+**Found while doing it:**
+- The run page's story asked the engine whether it asks about a node. The rule now lives on the question, `Prompt::is_about`, which `Engine::asks_about` and the story through `frame.asking` both read.
+- `Region::show` reads the asking off the frame and takes `answerable` alone; the painter's reading returns the state and the frame. The closing's `framed` takes no instant.
+- `refuse_if_driven` takes the context: its callers are four, `resume`, `resolve-gate` and two control-plane tools, where the plan counted the two in `resume.rs`.
+- The fixtures read a case through `Case::logged`, which measures on the log the case keeps: `needs_you` set its state after its frame, and now hands its log at once.
+- The captures were taken with the debug binary the tests built, named as `normalize.py` expects: the CLI prints the same bytes in either profile.
+
+**Files likely touched:** `crates/cli/src/{run_page/{mod,facts,fixtures,tests}.rs,commands/list/inbox.rs,commands/status/{progress,mod}.rs,json/{mod,waiting}.rs,surface/{painter,region,view/mod,closing/mod}.rs,surface/{region,view}/tests.rs,commands/drive.rs,commands/resume.rs,error.rs,error/hold.rs}`, `crates/render/src/{pause.rs,pause/tests.rs}`
+
+**Estimated scope:** L (each page reads a field in place of a subtraction, and three signatures lose the engine)
+
+### Task 18e: what a run's registry says is one `Engine` enum
+
+**Description:**
+- `yunta_replay::registry::{Engine, EngineLiveness}` become one enum, `Engine` (plan decision 5): `Alive { pid, prompt, words }`, `Dead`, `Unrecorded`, `Unknown`. It holds no instant: `RunFrame::of`'s `now` is the one.
+  - `Alive`'s pid is the registry's `engine_pid`: the process's, where the question used to carry a copy.
+  - `Engine::asking(at)` builds an `Asking` from `Alive`'s pid and prompt, in place of reading the prompt's copy of it. `words()` reads `Alive`'s socket, and `asks_about` stays.
+  - `Engine::this(pid)` is the process reading the run. Its callers hand it `Pid::current()`: `drive`, the closing, `EngineReading::This` and `yunta test`'s case. The tests hand it a fixed pid.
+- `Prompt` loses its `pid` and becomes the one type of the record:
+  - it derives serde as the engine's `Asked` did, with the same field attributes;
+  - `EngineProcessFile.asking` holds a `Prompt`, and `ProcessRegistry::asking` takes one;
+  - `process_registry::Asked` is gone, with its re-export from the engine's root.
+- In `crates/engine/src/process_registry.rs`, `engine_liveness`, `engine_prompt` and `engine_words` are gone into one function, `read_engine(run_dir, probe)`, which reads `engine.json` once and probes its process once, with no instant.
+- Every reader changes once:
+  - the frame (`run_standing`, a node's word) takes `&Engine`;
+  - `close_run`, the pool's slot, `gc` and the CLI's `close` match the variant;
+  - the refusal (`error/hold.rs`) reads `read_engine(..).asking(now)`;
+  - the follower takes the socket off `Alive`;
+  - the CLI's `render::engine` is gone. Its callers call `yunta_engine::read_engine(run_dir, &SystemProbe)`: `cancel`, `list/inbox`, `mcp/tools`, `resume`, `stats/mod`, `status/{follow,mod}`, `graph` and `surface/mod`;
+  - `surface::EngineReading::read()` takes no instant;
+  - the 20 `Engine::this(at)` become `Engine::this(pid)`.
+- `CAPABILITY-MAP.md`'s row for `yunta-replay` names `Engine`, `Prompt` and `Asking`.
+
+**Fails first:** `process_registry/tests.rs`'s readings, rewritten to compare whole readings, fail against the struct `read_engine` returned, which named no pid and took an instant:
+- a registry whose process wrote it and asks reads `Alive`, with the registry's `engine_pid`, its prompt and its socket;
+- a gone process, or a number the host gave to another, reads `Dead`;
+- no registry reads `Unrecorded`;
+- an unreadable one reads `Unknown`.
+
+**Written first, passing before the change and after it:** a test in `process_registry/tests.rs` pins the `asking` an asking engine writes to `engine.json`, `{"node": …, "since": …}`, and that it reads back. It holds the file's bytes while `Asked` becomes `Prompt`.
+
+The rest is a reshape, guarded by every test and golden.
+
+**Acceptance criteria:**
+- [x] A search in `crates/` for `EngineLiveness`, `engine_liveness`, `engine_prompt`, the registry's `engine_words`, `render::engine`, `process_registry::Asked` and `Driver` finds nothing; `Prompt` holds no pid, and `Engine` no instant.
+- [x] `read_engine` reads `engine.json` once and probes its process once.
+- [x] The pinned `asking` reads and writes the same bytes.
+- [x] Every golden's digest and the captures are the same.
+
+**Verification:**
+- [x] `cargo test -p yunta-replay -p yunta-render` (464), `cargo test -p yunta-engine --lib` (216), `cargo test -p yunta-engine --test cancel --test live_prompt --test finding_answers --test finding_proofs --test gate_findings --test optional_nodes --test persisted --test run_words`, `cargo test -p yunta --bins` (346), `cargo test -p yunta --test close_cmd --test gc_cmd --test gc_lock --test status_follow --test run_words --test parked_runs --test status_cmd --test status_page_cmd --test three_questions --test mcp_flow --test stalled_runs`, `cargo test -p yunta --test run_flow guarding`, `pages.sh` against Checkpoint D's captures (104 views, 0 differ), the 99 digests against the base, `cargo fmt --check`, `cargo xtask smells --check`, `cargo xtask docs --check`
+
+**Dependencies:** Task 18d
+
+**Found while doing it:**
+- **The name.** The task was first written for `Driver`, and `smells --check` refused it: `driver` is a word this repository retired, what an adapter is not (`banned_vocabulary`, 131 lines). The user chose `Engine` on 2026-11-08: the process driving a run is the engine everywhere else, in `engine.json`, its `engine_pid`, `engine.lock` and what a reader reads. The spec and the plan say so.
+- **A function past its budget.** `RunFrame::of` grew to 54 lines with the measures. Two seams came out: how long since the last event is the log's clock's to say, `Timeline::since_last(now)`, and the count of reroutes is `reroutes(state)`, beside `task_counter`.
+- The follower keeps when it last read the registry as `registry_read_at`, since the reading itself holds no instant; `close` judges the run by `settled_engine`.
+- `engine_words` in `crates/engine/tests/log_words.rs` is that test's helper for the words the engine writes to the log, not a reading of the registry.
+- `Engine::this(pid)` takes `Pid::current()` in `drive`, the closing, `EngineReading::This` and `yunta test`'s case, and in the tests that frame a run the test process reads.
+
+**Files likely touched:** `crates/replay/src/{registry.rs,clock.rs,lib.rs,frame/{mod,node}.rs}`, `crates/replay/tests/{frame.rs,frame/standing.rs,frame/measures.rs}`, `crates/engine/src/{process_registry.rs,process_registry/{tests,write}.rs,lib.rs,run/{asking,close}.rs,worktree/pool/slot.rs}`, `crates/engine/tests/{cancel,live_prompt,finding_answers,finding_proofs,gate_findings,optional_nodes}.rs`, `crates/cli/src/{render/words.rs,surface/{mod,painter,turns,closing/mod}.rs,error/hold.rs,graph.rs,run_page/fixtures.rs,commands/{close,cancel,resume,drive,drive/watch,mcp/tools,stats/mod,list/inbox,gc/mod,test/case/problems,status/{follow,mod}}.rs}`, the CLI's tests that build an engine's reading, `CAPABILITY-MAP.md`
+
+**Estimated scope:** L (a reshape: the compiler names every reader)
+
+### Task 18f: the driving engine's words, in `yunta_render::engine`
+
+**Description:**
+- `STALLED`, `asking_on`, `asking_claim` and `asking_in_full` move from `crates/render/src/pause.rs` to a new `crates/render/src/engine.rs`, and their tests to `engine/tests.rs`.
+- `pause`'s `//!` again says only what the log recorded. `engine`'s says what holds a run whose log says it moves: an engine that is gone, or one asking at its terminal. Render's map names `engine`.
+- Their callers change path: `list/inbox`, `status/progress`, `error.rs`, `run_page/mod` and `surface/view/mod`.
+
+**Fails first:** none: a move.
+
+**Acceptance criteria:**
+- [x] `pause` defines none of the four, and every golden is byte for byte the same.
+
+**Verification:**
+- [x] `cargo test -p yunta-render` (267), `cargo test -p yunta --bins` (346), `cargo xtask docs --check`, `cargo xtask smells --check`
+
+**Dependencies:** Task 18e
+
+**Found while doing it:**
+- The CLI names the module `engine::` beside `yunta_engine::`, which it always writes whole, and beside a local `engine` reading in `list/inbox`'s `run_row`; a module path and a value never resolve to each other, and the compiler confirms each one.
+- Render already holds `failure::engine`, the words of a failure inside the engine's own steps. `crate::engine` is what holds a run; neither names the other.
+
+**Files likely touched:** `crates/render/src/{lib.rs,pause.rs,pause/tests.rs,engine.rs,engine/tests.rs}`, `crates/cli/src/{commands/list/inbox.rs,commands/status/progress.rs,error.rs,run_page/mod.rs,surface/view/mod.rs}`
+
+**Estimated scope:** M (a move)
+
+### Checkpoint E: after Tasks 16–18f
+- [x] The suites; every golden's digest; the captures; the decision's JSON. Measured after Task 18b, and measured again after Task 18f: `proof/run-pages/checkpoint-e.txt`.
 - [ ] The user reviews the phase. Then every step of the `ci` job, commit 4, `cargo clean`.
 
 ## Phase 5: what is left of the CLI's `render`
@@ -563,19 +772,19 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 
 **Description:**
 - `status/progress.rs` is deleted: its `frame` and `frame_of` are gone. Their callers replay once and call `RunFrame::of`: `cancel`, `drive`, `list/inbox`, `mcp/tools`, `resume`, `status/{follow,mod}` and `graph`.
-- `render::engine` is gone. Its callers (`list/inbox`, `stats/mod`, `status/follow`, `status/mod`) call `yunta_engine::read_engine(run_dir, &SystemProbe, at)`.
+- `render::engine` went with Task 18e, where every reader of the registry changed to `read_engine(run_dir, probe)`.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] A search for `progress::frame` and `render::engine` finds nothing, and no caller replays one log twice (`rs_twice_any.py`).
+- [ ] A search for `progress::frame` finds nothing, and no caller replays one log twice (`rs_twice_any.py`).
 
 **Verification:**
 - [ ] `cargo test -p yunta --bins`, the CLI's batches
 
 **Dependencies:** Task 19
 
-**Files likely touched:** `crates/cli/src/{commands/status/progress.rs,commands/cancel.rs,commands/drive.rs,commands/list/inbox.rs,commands/mcp/tools.rs,commands/resume.rs,commands/status/{follow,mod}.rs,graph.rs,commands/stats/mod.rs,render/words.rs}`
+**Files likely touched:** `crates/cli/src/{commands/status/progress.rs,commands/cancel.rs,commands/drive.rs,commands/list/inbox.rs,commands/mcp/tools.rs,commands/resume.rs,commands/status/{follow,mod}.rs,graph.rs}`
 
 **Estimated scope:** L (a rename)
 
@@ -814,6 +1023,7 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 - `crates/cli/src/run_page/` moves, with `git mv`, to `crates/render/src/page/run/`, with `facts`, `story`, `evidence`, `fixtures` and its tests. `RunPage` becomes `page::Run`, and `Places` moves with it.
 - `crates/cli/goldens/status/` and `open/` move to `crates/render/goldens/`.
 - Its callers fill it from `yunta_render::page`: `status/mod`, the closing, `json/{mod,facts}` (`gist`, `cautions`, `artifacts_written`, `pull_requests_of`) and `drive`.
+- `page::Run` holds no `Engine`, and names no clock type: since Task 18d, what drives the run and every time it says come on the frame.
 
 **Fails first:** none: a move. The guard is the 60 goldens, now read from render.
 
@@ -872,7 +1082,7 @@ Spec: `SPEC-run-pages.md`. Plan: `tasks/plan.md`. Status: **draft, for approval*
 ### Task 34: the field moves, its rows as data
 
 **Description:**
-- `Inbox`'s `Group` and `RunRow` become `page::field::{Group, Row}` (plan decision 9): a row holds the run, the action it is listed for, and what holds it. The page words it.
+- `Inbox`'s `Group` and `RunRow` become `page::field::{Group, Row}` (plan decision 9): a row holds the run, the action it is listed for, what holds it (the frame's `WaitingOn` and `Asking`), and how long it has stood there (`since_last_event`). The page words it.
 - `list/runs.rs`'s page moves to `crates/render/src/page/field.rs` as `page::Field`, and `list/runs/tests.rs`, with `crates/cli/goldens/field/`, moves to render.
 - Gathering the inbox stays in `list/inbox.rs`.
 - `list --runs --json` serializes the same fields through a serializer in `crates/cli/src/json/field.rs`, which words each row with render.

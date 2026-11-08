@@ -146,7 +146,7 @@ async fn an_answered_blocking_finding_still_keeps_the_run_from_success() {
         &workflow,
         &yunta_replay::RunState::replay(&events),
         None,
-        &yunta_replay::registry::Engine::this(at),
+        &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         at,
     );
     assert_eq!(

@@ -9,7 +9,7 @@ use yunta_core::persisted::Persisted;
 use yunta_core::port::RunToolsEndpoint;
 use yunta_core::Pid;
 
-use super::{read_registry, registry_path, running_groups, Asked, EngineProcessFile, Registry};
+use super::{read_registry, registry_path, running_groups, EngineProcessFile, Prompt, Registry};
 
 /// Handle the run's imperative shell holds for the registry file.
 pub struct ProcessRegistry {
@@ -82,8 +82,8 @@ impl ProcessRegistry {
     /// Records that this engine is asking a person at its terminal, or,
     /// with `None`, that it no longer is. Failures warn, never fail the
     /// run.
-    pub fn asking(&self, asked: Option<Asked>) {
-        if let Err(e) = self.commit(|state| state.asking = asked) {
+    pub fn asking(&self, prompt: Option<Prompt>) {
+        if let Err(e) = self.commit(|state| state.asking = prompt) {
             tracing::warn!(error = %e, "failed to record a live question in engine.json");
         }
     }

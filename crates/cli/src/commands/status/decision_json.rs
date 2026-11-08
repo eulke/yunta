@@ -9,8 +9,8 @@ use yunta_core::step::{Choice, NextStep};
 use yunta_core::RunId;
 use yunta_render::command;
 
-use super::decision::claim_words;
 use yunta_render::command::Reader;
+use yunta_render::escalation::claim_words;
 
 /// A parked run's decision as the versioned JSON carries it: the node it
 /// belongs to, the claim and the facts a person reads beside it, every option

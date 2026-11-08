@@ -70,7 +70,7 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
     let open = ctx.open_run(run_id).await?;
     let now = ctx.clock.now();
     let state = RunState::replay(&open.events);
-    let engine = crate::render::engine(&open.run_dir, now);
+    let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
     let manifest = open.manifest.doc;
     let frame = super::progress::frame_of(run_id, &manifest, &state, &engine, now);
     if ending(frame.standing, &frame.phase).is_some() {
@@ -87,7 +87,7 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
         events: open.events,
         state,
         engine,
-        engine_read_at: now,
+        registry_read_at: now,
         seen: HashSet::new(),
         listening: listen::Listening::default(),
     };
@@ -182,8 +182,11 @@ struct Followed {
     /// which is what says where it broke.
     events: Vec<StoredEvent>,
     state: RunState,
+    /// The process driving the run, as its registry said when last read.
     engine: Engine,
-    engine_read_at: chrono::DateTime<chrono::Utc>,
+    /// When the registry was last read: the follower reads it again once a
+    /// second has passed.
+    registry_read_at: chrono::DateTime<chrono::Utc>,
     /// Every run whose head the follower has looked at, which no successor of
     /// this run can be.
     seen: HashSet<RunId>,
@@ -193,7 +196,7 @@ struct Followed {
 
 impl Followed {
     /// The surface `yunta run` draws, seeded with what was read, and reading the
-    /// engine from the run's registry.
+    /// process driving the run from its registry.
     fn surface(&self, ctx: &Context, storage: &AsyncStorage) -> Surface {
         Surface::open(
             SurfaceEnv {
@@ -232,8 +235,7 @@ impl Followed {
                 surface.deliver(event).await;
             }
             let frame = self.frame(ctx.clock.now());
-            self.listening
-                .to(self.engine.words.as_deref(), surface.observer());
+            self.listening.to(self.engine.words(), surface.observer());
             match ending(frame.standing, &frame.phase) {
                 None => {}
                 Some(Ended::Stopped) if matches!(frame.phase, RunPhase::Promoted { .. }) => {
@@ -308,8 +310,8 @@ impl Followed {
         self.manifest = open.manifest.doc;
         self.state = RunState::replay(&open.events);
         self.events = open.events;
-        self.engine = crate::render::engine(&self.run_dir, now);
-        self.engine_read_at = now;
+        self.engine = yunta_engine::read_engine(&self.run_dir, &yunta_engine::lock::SystemProbe);
+        self.registry_read_at = now;
         Ok(())
     }
 
@@ -331,12 +333,13 @@ impl Followed {
     /// The run's frame at `now`, with the registry read again once it is a
     /// second old.
     fn frame(&mut self, now: chrono::DateTime<chrono::Utc>) -> RunFrame {
-        let stale = (now - self.engine_read_at)
+        let stale = (now - self.registry_read_at)
             .to_std()
             .is_ok_and(|age| age >= REGISTRY_EVERY);
         if stale {
-            self.engine = crate::render::engine(&self.run_dir, now);
-            self.engine_read_at = now;
+            self.engine =
+                yunta_engine::read_engine(&self.run_dir, &yunta_engine::lock::SystemProbe);
+            self.registry_read_at = now;
         }
         super::progress::frame_of(&self.run_id, &self.manifest, &self.state, &self.engine, now)
     }
@@ -374,19 +377,12 @@ mod tests {
     use yunta_core::events::NodeState;
     use yunta_core::NodeId;
     use yunta_replay::frame::{NodeStanding, RunPhase};
-    use yunta_replay::registry::EngineLiveness;
 
     use super::*;
 
-    /// How a run reads with one node running, under an engine whose registry
-    /// says `liveness`.
-    fn under(liveness: EngineLiveness) -> (Standing, RunPhase) {
-        let engine = Engine {
-            liveness,
-            prompt: None,
-            words: None,
-            at: chrono::DateTime::UNIX_EPOCH,
-        };
+    /// How a run reads with one node running, under a process whose registry
+    /// says `engine`.
+    fn under(engine: Engine) -> (Standing, RunPhase) {
         let nodes = vec![yunta_replay::frame::NodeFrame::sample(
             &NodeId::from_static("build"),
             NodeStanding::Reached(NodeState::Running { attempt: 1 }),
@@ -403,9 +399,9 @@ mod tests {
     /// move. Only an engine its registry names, and that is gone, stalls it.
     #[test]
     fn an_absent_registry_is_not_a_stall() {
-        let (standing, phase) = under(EngineLiveness::Unrecorded);
+        let (standing, phase) = under(Engine::Unrecorded);
         assert!(ending(standing, &phase).is_none());
-        let (standing, phase) = under(EngineLiveness::Dead);
+        let (standing, phase) = under(Engine::Dead);
         assert!(matches!(ending(standing, &phase), Some(Ended::Stalled)));
     }
 }

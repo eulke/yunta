@@ -1,11 +1,9 @@
 //! What the engine's own types read as at this terminal, and how the
 //! invocation that drove a run exits for the word it ended on.
 
-use chrono::{DateTime, Utc};
 use surco::words::Standing;
 use yunta_render::state::NodeDisplay;
 use yunta_replay::frame::{NodeFrame, NodeStanding};
-use yunta_replay::registry::Engine;
 
 use crate::error::Outcome;
 
@@ -35,12 +33,6 @@ impl RunExit {
 /// What a run is called on a page: the workflow it follows and the mode it follows it in.
 pub(crate) fn called(workflow: impl std::fmt::Display, mode: impl std::fmt::Display) -> String {
     format!("{workflow} ({mode})")
-}
-
-/// What the registry of the run under `run_dir` says at `at` about the
-/// engine driving it, as this host's processes tell.
-pub(crate) fn engine(run_dir: &std::path::Path, at: DateTime<Utc>) -> Engine {
-    yunta_engine::read_engine(run_dir, &yunta_engine::lock::SystemProbe, at)
 }
 
 /// How the invocation that drove a run to `standing` exits: 0 for a run

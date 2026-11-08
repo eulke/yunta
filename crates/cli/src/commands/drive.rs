@@ -390,7 +390,7 @@ async fn documented(
     let events = storage.events_for_run(run_id.clone()).await?;
     let state = yunta_replay::RunState::replay(&events);
     // This invocation is the engine that drove the run.
-    let engine = yunta_replay::registry::Engine::this(ctx.clock.now());
+    let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
     let decision = match ctx.project.run_dir(run_id.as_str()) {
         Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &state).await?,
         None => None,
@@ -404,7 +404,7 @@ async fn documented(
     );
     frame.prior = crate::commands::stats::budget_prior(ctx, manifest, &frame, &events).await;
     Ok(
-        crate::json::RunDocument::of(run_id, &events, &state, manifest, &frame, &engine, decision)
+        crate::json::RunDocument::of(run_id, &events, &state, manifest, &frame, decision)
             .warnings(warnings),
     )
 }

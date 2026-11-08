@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 use yunta_core::persisted::Persisted;
 use yunta_core::process::group::group_runs;
 use yunta_core::process::signal::Liveness;
-use yunta_core::{NodeId, Pid, RelativePath};
-use yunta_replay::registry::{Engine, EngineLiveness, Prompt};
+use yunta_core::{Pid, RelativePath};
+use yunta_replay::registry::{Engine, Prompt};
 
 impl Persisted for EngineProcessFile {
     /// The version this binary writes; a newer one is refused, never guessed at.
@@ -62,25 +62,16 @@ pub struct EngineProcessFile {
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
     pub process_groups: Vec<Pid>,
-    /// The person this engine is asking at its terminal, while it asks:
+    /// The question this engine holds at its terminal, while it asks one:
     /// a question asked live leaves nothing on the log until it is
     /// answered, and a reader elsewhere has to be able to tell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asking: Option<Asked>,
+    pub asking: Option<Prompt>,
     /// The socket this engine serves what the run's sessions say on, while
     /// it serves one. An engine older than the socket names none, and a
     /// reader of such a run hears nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub words: Option<PathBuf>,
-}
-
-/// What an engine asks a person at its terminal: the node that asks,
-/// when one does, and since when.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Asked {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node: Option<NodeId>,
-    pub since: DateTime<Utc>,
 }
 
 mod write;
@@ -159,64 +150,27 @@ impl EngineProcessFile {
     }
 }
 
-/// What the registry under `run_dir` says about the engine driving it.
+/// What the registry under `run_dir` says about the process driving the
+/// run: one read of the file and one probe of its process, so a reading
+/// never joins what two instants said.
 ///
-/// Only [`EngineLiveness::Dead`] is proof that nothing drives the run: an
-/// absent registry is also what a run being handed between processes
-/// looks like, and a reader that called that stalled would be wrong for
-/// the instant it lasts.
-pub fn engine_liveness(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> EngineLiveness {
+/// Only [`Engine::Dead`] is proof that nothing drives the run: an absent
+/// registry is also what a run being handed between processes looks like,
+/// and a reader that called that stalled would be wrong for the instant it
+/// lasts.
+pub fn read_engine(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> Engine {
     match read_registry(run_dir) {
-        Registry::Absent => EngineLiveness::Unrecorded,
-        Registry::Corrupt(_) => EngineLiveness::Unknown,
+        Registry::Absent => Engine::Unrecorded,
+        Registry::Corrupt(_) => Engine::Unknown,
         Registry::Read(registry) => match registry.doc.liveness(probe) {
-            Liveness::Alive => EngineLiveness::Alive,
-            Liveness::Dead => EngineLiveness::Dead,
-            Liveness::Unknown => EngineLiveness::Unknown,
+            Liveness::Alive => Engine::Alive {
+                pid: registry.doc.engine_pid,
+                prompt: registry.doc.asking.clone(),
+                words: registry.doc.words.clone(),
+            },
+            Liveness::Dead => Engine::Dead,
+            Liveness::Unknown => Engine::Unknown,
         },
-    }
-}
-
-/// Whom the engine driving the run under `run_dir` is asking at its
-/// terminal; `None` when it asks no one, or no live engine drives it.
-pub fn engine_prompt(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> Option<Prompt> {
-    let Registry::Read(registry) = read_registry(run_dir) else {
-        return None;
-    };
-    if registry.doc.liveness(probe) != Liveness::Alive {
-        return None;
-    }
-    let asked = registry.doc.asking.clone()?;
-    Some(Prompt {
-        node: asked.node,
-        since: asked.since,
-        pid: registry.doc.engine_pid,
-    })
-}
-
-/// The socket the engine driving the run under `run_dir` serves the run's
-/// words on; `None` when it serves none, or no live engine drives it.
-pub fn engine_words(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> Option<PathBuf> {
-    let Registry::Read(registry) = read_registry(run_dir) else {
-        return None;
-    };
-    if registry.doc.liveness(probe) != Liveness::Alive {
-        return None;
-    }
-    registry.doc.words.clone()
-}
-
-/// What the registry under `run_dir` says about the engine driving it, at `at`.
-pub fn read_engine(
-    run_dir: &Path,
-    probe: &dyn crate::lock::OwnerProbe,
-    at: DateTime<Utc>,
-) -> Engine {
-    Engine {
-        liveness: engine_liveness(run_dir, probe),
-        prompt: engine_prompt(run_dir, probe),
-        words: engine_words(run_dir, probe),
-        at,
     }
 }
 

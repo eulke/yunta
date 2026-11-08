@@ -1,5 +1,6 @@
 use super::*;
 use crate::lock::OwnerProbe;
+use yunta_core::NodeId;
 use yunta_testkit_core::AtClock;
 
 /// A host whose process table holds one process, started at a fixed
@@ -55,7 +56,14 @@ fn a_registry_under_a_frozen_clock_names_its_live_engine() {
         &AtClock(frozen),
     )
     .unwrap();
-    assert_eq!(engine_liveness(run.path(), &host), EngineLiveness::Alive);
+    assert_eq!(
+        read_engine(run.path(), &host),
+        Engine::Alive {
+            pid: Pid::try_from(1u32).unwrap(),
+            prompt: None,
+            words: None,
+        }
+    );
 }
 
 #[test]
@@ -69,7 +77,7 @@ fn an_engine_record_naming_a_process_that_exited_reads_as_dead() {
         alive: Liveness::Dead,
         started: None,
     };
-    assert_eq!(engine_liveness(run.path(), &gone), EngineLiveness::Dead);
+    assert_eq!(read_engine(run.path(), &gone), Engine::Dead);
 }
 
 #[test]
@@ -81,12 +89,19 @@ fn a_reused_pid_that_started_after_the_record_reads_as_dead() {
         alive: Liveness::Alive,
         started: Some(recorded + chrono::Duration::hours(1)),
     };
-    assert_eq!(engine_liveness(run.path(), &stranger), EngineLiveness::Dead);
+    assert_eq!(read_engine(run.path(), &stranger), Engine::Dead);
     let engine = Host {
         alive: Liveness::Alive,
         started: Some(recorded),
     };
-    assert_eq!(engine_liveness(run.path(), &engine), EngineLiveness::Alive);
+    assert_eq!(
+        read_engine(run.path(), &engine),
+        Engine::Alive {
+            pid: Pid::try_from(4321u32).expect("a pid"),
+            prompt: None,
+            words: None,
+        }
+    );
 }
 
 #[test]
@@ -96,10 +111,7 @@ fn a_run_with_no_engine_record_is_never_called_dead() {
         alive: Liveness::Dead,
         started: None,
     };
-    assert_eq!(
-        engine_liveness(run.path(), &gone),
-        EngineLiveness::Unrecorded
-    );
+    assert_eq!(read_engine(run.path(), &gone), Engine::Unrecorded);
 }
 
 #[test]
@@ -112,7 +124,7 @@ fn a_registry_that_does_not_read_proves_nothing() {
         alive: Liveness::Dead,
         started: None,
     };
-    assert_eq!(engine_liveness(run.path(), &gone), EngineLiveness::Unknown);
+    assert_eq!(read_engine(run.path(), &gone), Engine::Unknown);
 }
 
 #[test]
@@ -206,11 +218,11 @@ fn running_groups_keeps_a_group_whose_leader_exited_while_a_child_runs() {
     signal_group(group, Signal::SIGKILL).unwrap();
 }
 
-/// The engine reading names the socket a live engine serves, and none for a
-/// registry that names none, as an older engine's does, or for an engine
-/// that is gone.
+/// The reading of the registry names the socket a live engine serves, and
+/// none for a registry that names none, as an older engine's does, or for an
+/// engine that is gone.
 #[test]
-fn the_engine_reading_names_the_socket_only_while_its_engine_lives() {
+fn the_registry_reading_names_the_socket_only_while_its_engine_lives() {
     let run = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
     let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
@@ -225,7 +237,7 @@ fn the_engine_reading_names_the_socket_only_while_its_engine_lives() {
         &AtClock(started),
     )
     .unwrap();
-    assert_eq!(read_engine(run.path(), &alive, started).words, None);
+    assert_eq!(read_engine(run.path(), &alive).words(), None);
 
     // The field as an engine that serves its socket writes it.
     let path = registry_path(run.path());
@@ -234,14 +246,55 @@ fn the_engine_reading_names_the_socket_only_while_its_engine_lives() {
     file["words"] = "/tmp/yunta-501/run.sock".into();
     std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
     assert_eq!(
-        read_engine(run.path(), &alive, started).words,
-        Some(PathBuf::from("/tmp/yunta-501/run.sock"))
+        read_engine(run.path(), &alive).words(),
+        Some(Path::new("/tmp/yunta-501/run.sock"))
     );
     let gone = Host {
         alive: Liveness::Dead,
         started: None,
     };
-    assert_eq!(read_engine(run.path(), &gone, started).words, None);
-    assert_eq!(Engine::this(started).words, None);
+    assert_eq!(read_engine(run.path(), &gone).words(), None);
+    assert_eq!(Engine::this(Pid::try_from(1u32).unwrap()).words(), None);
+    drop(registry);
+}
+
+/// What an engine asking a person at its terminal writes into `engine.json`
+/// is the node it asks about and since when, as two fields, and a reading of
+/// the file returns the question it wrote. A reader elsewhere, of any
+/// version, finds the question under these names.
+#[test]
+fn an_engine_asking_writes_the_node_and_the_instant_and_reads_them_back() {
+    let run = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
+    let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+    let alive = Host {
+        alive: Liveness::Alive,
+        started: Some(started),
+    };
+    let pid = Pid::try_from(1u32).unwrap();
+    let registry = ProcessRegistry::create(run.path(), pid, &alive, &AtClock(started)).unwrap();
+    let since = started + chrono::Duration::seconds(5);
+    registry.asking(Some(Prompt {
+        node: Some(NodeId::from("approve")),
+        since,
+    }));
+
+    let file: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(registry_path(run.path())).unwrap()).unwrap();
+    assert_eq!(
+        file["asking"],
+        serde_json::json!({"node": "approve", "since": "2023-11-14T22:13:25Z"})
+    );
+    assert_eq!(
+        read_engine(run.path(), &alive),
+        Engine::Alive {
+            pid,
+            prompt: Some(Prompt {
+                node: Some(NodeId::from("approve")),
+                since,
+            }),
+            words: None,
+        }
+    );
     drop(registry);
 }

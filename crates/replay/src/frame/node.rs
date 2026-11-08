@@ -252,7 +252,7 @@ pub(super) struct Reading<'a> {
     /// Whether the run has not closed: a correction under way belongs to
     /// a run that can still reach it.
     pub(super) open: bool,
-    /// The engine driving the run, as its registry said when the caller
+    /// The process driving the run, as its registry said when the caller
     /// read it.
     pub(super) engine: &'a Engine,
 }

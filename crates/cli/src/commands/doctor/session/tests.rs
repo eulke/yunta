@@ -118,7 +118,7 @@ fn doctor_and_the_phase_page_name_the_same_last_failure() {
         &workflow,
         &yunta_replay::RunState::replay(&events),
         None,
-        &yunta_replay::registry::Engine::this(fixed_now()),
+        &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         fixed_now(),
     );
     let RunPhase::Failed { failure: page } = frame.phase else {

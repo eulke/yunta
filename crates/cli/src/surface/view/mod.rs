@@ -14,6 +14,8 @@ use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::step::{Choice, NextStep};
 use yunta_core::RunId;
 use yunta_render::command;
+use yunta_render::engine;
+use yunta_render::pause;
 use yunta_render::spend::Breakdown;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 
@@ -24,7 +26,6 @@ use children::children_of;
 pub(crate) use children::{child_row, children_by_node};
 pub(super) use children::{child_standing, closed_as};
 
-use crate::commands::advice;
 use surco::components::Attention;
 use surco::doc::Block;
 use surco::figures::duration;
@@ -44,8 +45,8 @@ const DETAIL_DEPTH: usize = 2;
 /// the answer is given there, drawn at `look` as an [`Attention`] answered
 /// elsewhere. The engine that asks draws no such row, since its prompt has the
 /// terminal.
-pub(super) fn asked(prompt: &yunta_replay::registry::Prompt, look: &Look) -> Option<Line> {
-    let row = Attention::elsewhere(advice::asking_on(prompt));
+pub(super) fn asked(asking: &yunta_replay::registry::Asking, look: &Look) -> Option<Line> {
+    let row = Attention::elsewhere(engine::asking_on(asking));
     Terminal::on(*look)
         .block(&Block::Attention(row))
         .into_iter()
@@ -69,7 +70,7 @@ pub(super) fn attention(
         return None;
     }
     let on = frame.phase.waiting_on()?;
-    let row = Attention::command(advice::parked_on(on), answer_command(run_id, answerable));
+    let row = Attention::command(pause::parked_on(on), answer_command(run_id, answerable));
     Terminal::on(*look)
         .block(&Block::Attention(row))
         .into_iter()

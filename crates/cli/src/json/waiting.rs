@@ -2,7 +2,7 @@
 //! program: a node parked on a person, the run itself paused, or the engine
 //! asking at its terminal.
 
-use yunta_replay::frame::{RunPhase, WaitingOn};
+use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
 
 use super::node::NodeWaitJson;
 
@@ -45,18 +45,18 @@ impl WaitingOnJson {
     /// The frame's own answer, in the document's shape — or, for a run
     /// that is moving, the question its engine is asking at its terminal.
     /// `None` for a run that is not waiting on anything.
-    pub(super) fn of(phase: &RunPhase, engine: &yunta_replay::registry::Engine) -> Option<Self> {
-        let RunPhase::Waiting { on } = phase else {
-            let moving = matches!(phase, RunPhase::Created | RunPhase::Running);
-            return engine
-                .prompt
+    pub(super) fn of(frame: &RunFrame) -> Option<Self> {
+        let RunPhase::Waiting { on } = &frame.phase else {
+            let moving = matches!(frame.phase, RunPhase::Created | RunPhase::Running);
+            return frame
+                .asking
                 .as_ref()
                 .filter(|_| moving)
-                .map(|prompt| WaitingOnJson::Prompt {
+                .map(|asking| WaitingOnJson::Prompt {
                     on: "prompt",
-                    node: prompt.node.as_ref().map(ToString::to_string),
-                    since: prompt.since,
-                    pid: prompt.pid,
+                    node: asking.prompt.node.as_ref().map(ToString::to_string),
+                    since: asking.prompt.since,
+                    pid: asking.pid,
                 });
         };
         Some(match on {

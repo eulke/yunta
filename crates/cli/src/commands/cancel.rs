@@ -67,7 +67,7 @@ pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
     let end = if state.broken.is_some() || stopped {
         let killed = settle_stopped(&ctx, &open, run_id).await;
         let now = ctx.clock.now();
-        let engine = crate::render::engine(&open.run_dir, now);
+        let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
         let standing =
             super::status::progress::frame_of(run_id, &open.manifest.doc, &state, &engine, now)
                 .standing;

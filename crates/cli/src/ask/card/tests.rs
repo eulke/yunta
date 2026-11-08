@@ -7,7 +7,7 @@ use surco::look::Look;
 use yunta_core::events::{AuthorGate, Claim, Escalation, GateOption, Leads, Menu};
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{NodeId, NonEmpty, OptionId};
-use yunta_render::gate::Route;
+use yunta_render::escalation::Route;
 
 use super::super::held::{Held, Press};
 use super::super::keys::Stroke;

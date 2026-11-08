@@ -218,7 +218,7 @@ fn standing(phase: RunPhase, prior: Option<yunta_replay::history::PriorEstimatio
             &phase,
             &[],
             0,
-            &yunta_replay::registry::Engine::this(chrono::DateTime::UNIX_EPOCH),
+            &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         ),
         phase,
         prior,
@@ -290,13 +290,16 @@ fn the_attention_row_is_drawn_only_while_something_needs_you() {
 /// mark and `needs you`, and nothing to type here: the answer is given there.
 #[test]
 fn the_row_of_a_run_asked_at_its_terminal_says_whom_it_asks() {
-    let prompt = yunta_replay::registry::Prompt {
-        node: Some(NodeId::from_static("implement")),
-        since: chrono::DateTime::UNIX_EPOCH,
+    let asking = yunta_replay::registry::Asking {
         pid: yunta_core::Pid::current(),
+        prompt: yunta_replay::registry::Prompt {
+            node: Some(NodeId::from_static("implement")),
+            since: chrono::DateTime::UNIX_EPOCH,
+        },
+        waited: std::time::Duration::ZERO,
     };
 
-    let row = asked(&prompt, &ascii()).map(|row| Paint::Plain.line(&row));
+    let row = asked(&asking, &ascii()).map(|row| Paint::Plain.line(&row));
 
     assert_eq!(
         row.as_deref(),

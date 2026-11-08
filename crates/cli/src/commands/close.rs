@@ -11,7 +11,7 @@ use surco::words::Standing;
 use yunta_core::step::NextStep;
 use yunta_core::{Redactor, Responder, RunId};
 use yunta_render::command;
-use yunta_replay::registry::EngineLiveness;
+use yunta_replay::registry::Engine;
 
 use super::cancel::settle_crash;
 use crate::context::Context;
@@ -32,14 +32,14 @@ pub async fn close(
     // the close here, and the run stays as it is.
     let redactor = yunta_engine::run_redactor(&open.manifest.doc, &yunta_core::ProcessSecrets)?;
     let run_dir = open.run_dir.clone();
-    let engine = settled_liveness(&ctx, &storage, run_id, &run_dir, &redactor).await?;
+    let engine = settled_engine(&ctx, &storage, run_id, &run_dir, &redactor).await?;
     let by = crate::identity::responder(by, ctx.env.user.as_deref());
     yunta_engine::close_run(
         &storage,
         run_id,
         &run_dir,
         &ctx.clock,
-        engine,
+        &engine,
         by.clone(),
         &redactor,
     )
@@ -86,21 +86,21 @@ impl Answer for CloseAnswer {
     }
 }
 
-/// The liveness `close` judges the run by. A dead engine whose registry
+/// What drives the run, as `close` judges it. A dead engine whose registry
 /// reads is settled first, so what it left behind is recorded before the
-/// close is written.
-async fn settled_liveness(
+/// close is written, and the run reads as no registry names it.
+async fn settled_engine(
     ctx: &Context,
     storage: &yunta_storage::AsyncStorage,
     run_id: &RunId,
     run_dir: &std::path::Path,
     redactor: &Redactor,
-) -> Result<EngineLiveness, CliError> {
-    let mut engine = yunta_engine::engine_liveness(run_dir, &yunta_engine::lock::SystemProbe);
-    if engine == EngineLiveness::Dead {
+) -> Result<Engine, CliError> {
+    let mut engine = yunta_engine::read_engine(run_dir, &yunta_engine::lock::SystemProbe);
+    if engine == Engine::Dead {
         if let yunta_engine::Registry::Read(registry) = yunta_engine::read_registry(run_dir) {
             settle_crash(ctx, storage, run_id, run_dir, &registry.doc, redactor).await?;
-            engine = EngineLiveness::Unrecorded;
+            engine = Engine::Unrecorded;
         }
     }
     Ok(engine)

@@ -9,23 +9,24 @@ use chrono::{DateTime, Utc};
 use surco::doc::Depth;
 use surco::words::Standing;
 use yunta_core::events::{
-    AccountLimit, Claim, CommandExit, Escalation, EventPayload, ExhaustedReroute, Failure,
-    FailureMenu, GateOption, LimitSource, Menu, NodeEvent, NodeFinishedPayload, NodeOutcome,
-    NodeStartedPayload, NodeState, NodeWait, PauseReason, TaskEvent, TaskRegisteredPayload,
-    TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    AccountLimit, Claim, CommandExit, DecisionOn, Escalation, EventPayload, ExhaustedReroute,
+    Failure, FailureMenu, GateOption, GateWaitingPayload, LimitSource, Menu, NodeEvent,
+    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, NodeState, NodeWait, PauseReason,
+    StoredEvent, TaskEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
+    TokenUsage,
 };
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{
     AdapterId, CommitSha, ContentHash, Isolation, NodeId, NonEmpty, RunId, Seq, TaskId,
 };
+use yunta_render::escalation::Decision;
 use yunta_replay::frame::{
     Counter, NodeFrame, NodeStanding, RunFrame, RunPhase, TaskCounter, WaitingOn,
 };
 use yunta_replay::RunState;
 use yunta_testkit_core::{fixed_now, Log};
 
-use super::{Decided, RunPage, Scope};
-use crate::commands::status::decision::Beside;
+use super::{RunPage, Scope};
 use crate::surface::Outline;
 
 pub(crate) const RUN: RunId = RunId::from_static("01K3W48MFW7H0ZZA5PZ07E5PH4");
@@ -138,7 +139,7 @@ pub(crate) fn frame(phase: RunPhase, nodes: Vec<NodeFrame>, blocking_findings: u
             &phase,
             &nodes,
             blocking_findings,
-            &yunta_replay::registry::Engine::this(DateTime::UNIX_EPOCH),
+            &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         ),
         phase,
         blocking_findings,
@@ -184,28 +185,28 @@ pub(crate) fn exhausted_escalation() -> Escalation {
     )
 }
 
-/// A run parked on `lint`, whose reroutes are spent: the decision it
-/// waits on, as the page receives it.
-pub(crate) fn parked_on_lint() -> (RunPhase, Decided) {
-    let phase = RunPhase::Waiting {
+/// A run parked on `lint`, whose reroutes are spent.
+pub(crate) fn parked_on_lint() -> RunPhase {
+    RunPhase::Waiting {
         on: WaitingOn::Node {
             node: NodeId::from("lint"),
             on: NodeWait::Gate { external_ref: None },
             reason: Some(PauseReason::Escalation(Box::new(exhausted_escalation()))),
         },
-    };
-    let decided = Decided {
-        on: yunta_core::events::DecisionOn::Node(NodeId::from("lint")),
-        escalation: exhausted_escalation().into_payload(),
-        shown: Vec::new(),
-        beside: Beside { evidence: true },
-    };
-    (phase, decided)
+    }
+}
+
+/// The decision a run [`parked_on_lint`] waits on, as the log rebuilds it.
+pub(crate) fn lint_decision() -> (DecisionOn, GateWaitingPayload) {
+    (
+        DecisionOn::Node(NodeId::from("lint")),
+        exhausted_escalation().into_payload(),
+    )
 }
 
 /// The log of a run that registered four tasks — one done, one blocked,
 /// two not begun — its last event at `fixed_now`.
-fn tasks_log() -> Vec<yunta_core::events::StoredEvent> {
+fn tasks_log() -> Vec<StoredEvent> {
     let ids = [
         "global-pack-catalog",
         "global-pack-storage",
@@ -236,7 +237,7 @@ fn tasks_log() -> Vec<yunta_core::events::StoredEvent> {
 }
 
 /// The log of a run with one task, blocked, whose last attempt left work.
-pub(crate) fn blocked_log() -> Vec<yunta_core::events::StoredEvent> {
+pub(crate) fn blocked_log() -> Vec<StoredEvent> {
     let blocked = TaskStatusChangedPayload::blocked(
         TaskId::from("T001"),
         Seq::from(1u64),
@@ -265,7 +266,7 @@ pub(crate) struct Case {
     run_id: RunId,
     pub(crate) frame: RunFrame,
     pub(crate) state: RunState,
-    pub(crate) decision: Option<Decided>,
+    pub(crate) decision: Option<(DecisionOn, GateWaitingPayload)>,
 }
 
 impl Case {
@@ -284,10 +285,25 @@ impl Case {
             .after(12)
             .node(first, EventPayload::Node(NodeEvent::Finished(finished)))
             .build();
+        Case::logged(name, frame, &log)
+    }
+
+    /// The run `frame` describes, its log `log`, read `READ_AFTER` that
+    /// log's last event: the frame carries what that instant measures, as
+    /// `RunFrame::of` measures it.
+    fn logged(name: &'static str, frame: RunFrame, log: &[StoredEvent]) -> Self {
+        let state = yunta_replay::RunState::replay(log);
+        let read_at = state.clock().last_at().unwrap_or_else(fixed_now)
+            + chrono::Duration::from_std(READ_AFTER).expect("a wait fits a chrono duration");
+        let frame = RunFrame {
+            since_last_event: Some(READ_AFTER),
+            time: state.time_spent((!state.ended()).then_some(read_at)),
+            ..frame
+        };
         Case {
             name,
             run_id: RUN,
-            state: yunta_replay::RunState::replay(&log),
+            state,
             frame,
             decision: None,
         }
@@ -295,17 +311,18 @@ impl Case {
 
     /// The page this run is drawn as, read `READ_AFTER` its last event.
     pub(crate) fn page(&self, scope: Scope, depth: Depth) -> RunPage<'_> {
-        let at = self.state.clock().last_at().unwrap_or_else(fixed_now)
-            + chrono::Duration::from_std(READ_AFTER).expect("a wait fits a chrono duration");
         RunPage {
             scope,
             depth,
             run_id: &self.run_id,
-            engine: yunta_replay::registry::Engine::this(at),
             frame: &self.frame,
             state: &self.state,
             paths: outline(),
-            decision: self.decision.clone(),
+            decision: self.decision.as_ref().map(|(on, escalation)| Decision {
+                on,
+                escalation,
+                shown: &[],
+            }),
             plans: Vec::new(),
         }
     }
@@ -368,7 +385,7 @@ pub(crate) fn cases() -> Vec<Case> {
 /// A run parked on `lint`'s exhausted reroute, one task of its four
 /// blocked, with the decision it waits on.
 fn needs_you() -> Case {
-    let (parked, decided) = parked_on_lint();
+    let parked = parked_on_lint();
     let nodes = vec![
         finished("plan"),
         finished("build"),
@@ -376,7 +393,7 @@ fn needs_you() -> Case {
         ahead("fix-lint"),
         ahead("ship"),
     ];
-    let mut case = Case::new("needs-you", frame(parked, nodes, 0));
+    let mut case = Case::logged("needs-you", frame(parked, nodes, 0), &tasks_log());
     case.frame.reroutes = 1;
     case.frame.tasks = Some(TaskCounter {
         done: 1,
@@ -385,8 +402,7 @@ fn needs_you() -> Case {
         total: 4,
         ..TaskCounter::default()
     });
-    case.state = yunta_replay::RunState::replay(&tasks_log());
-    case.decision = Some(decided);
+    case.decision = Some(lint_decision());
     case
 }
 

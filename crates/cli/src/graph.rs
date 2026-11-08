@@ -75,7 +75,7 @@ pub async fn graph(
                 run_id,
                 &manifest,
                 &open.events,
-                &crate::render::engine(&open.run_dir, now),
+                &yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe),
                 now,
             );
             (manifest.workflow, derived_labels(&frame), Outcome::Success)

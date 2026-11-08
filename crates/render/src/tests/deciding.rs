@@ -138,7 +138,7 @@ fn a_markdown_document_shown_is_titled_by_its_first_heading() {
 #[test]
 fn a_withheld_reason_is_recorded_when_no_plan_is_shown() {
     let escalation = greet_escalation(&review());
-    let record = crate::gate::record(&escalation, &[]);
+    let record = crate::escalation::record(&escalation, &[]);
     assert!(
         record
             .iter()
@@ -154,7 +154,7 @@ fn a_withheld_reason_is_recorded_when_no_plan_is_shown() {
 fn a_plan_with_flaws_says_why_an_option_is_withheld_once_under_the_section() {
     let shown = [shown_plan(review())];
     let escalation = greet_escalation(&review());
-    let record = crate::gate::record(&escalation, &shown);
+    let record = crate::escalation::record(&escalation, &shown);
     assert!(
         !record.iter().any(|line| line.contains("withheld")),
         "{}",

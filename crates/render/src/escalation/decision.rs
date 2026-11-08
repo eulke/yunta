@@ -2,11 +2,10 @@
 //!
 //! A run stops on a person from a process that is already gone: the menu
 //! it stopped on was never written to the log, because building it is a
-//! computation, not a fact anyone recorded.
-//! `yunta_engine::current_escalation` rebuilds that menu from the
-//! manifest and the log alone, which is what lets a second terminal
-//! answer a run it never started — and what this prints, so the answer
-//! does not have to be guessed from the exported JSONL.
+//! computation, not a fact anyone recorded. The engine rebuilds that menu
+//! from the manifest and the log alone, which is what lets a second terminal
+//! answer a run it never started — and what this draws, so the answer does
+//! not have to be guessed from the exported JSONL.
 //!
 //! **One block, wherever it is shown.** `yunta status` and the block a
 //! run leaves on the terminal show the same decision the same way: the
@@ -27,18 +26,73 @@
 
 use std::path::Path;
 
-use surco::components::{Decision, Note, Prose, Section};
+use surco::components::{self, Note, Prose, Section};
 use surco::doc::Block;
 use yunta_core::events::{DecisionOn, GateWaitingPayload};
 use yunta_core::shown::ShownDocument;
 use yunta_core::RunId;
 
-use crate::run_page::Decided;
+/// The decision a parked run waits on, as its log rebuilds it: whose it is,
+/// the escalation, and the documents it shows.
+#[derive(Debug, Clone, Copy)]
+pub struct Decision<'a> {
+    /// Whom the decision belongs to.
+    pub on: &'a DecisionOn,
+    pub escalation: &'a GateWaitingPayload,
+    /// The documents the decision shows, as the run holds them.
+    pub shown: &'a [ShownDocument],
+}
+
+/// What the page showing a decision says beside it already.
+#[derive(Debug, Clone, Copy)]
+pub struct Beside {
+    /// The record the engine attached — a page that quotes a failed
+    /// node's evidence already shows it.
+    pub evidence: bool,
+}
+
+impl Decision<'_> {
+    /// The section a page about `run` ends on: the record the engine
+    /// attached to the decision and what it is about, less what the page says
+    /// `beside` it. Then what weighs on it, every option with the command that
+    /// chooses it, and `otherwise`: what moves the run without choosing one.
+    pub fn section(
+        &self,
+        run: &RunId,
+        beside: Beside,
+        otherwise: Vec<(String, &'static str)>,
+    ) -> Section {
+        let escalation = self.escalation;
+        let mut blocks = account(escalation, beside, self.shown);
+        for shown in escalation.shows() {
+            let about = format!("about: {}", yunta_core::run_dir::view_of(shown).display());
+            blocks.push(Prose(about).into());
+        }
+        if let Some(external_ref) = escalation.external_ref() {
+            blocks.push(Prose(format!("published at {external_ref}")).into());
+        }
+        if let Some(before) = crate::shown::before_you_decide(escalation.withheld(), self.shown) {
+            blocks.push(before.into());
+        }
+        let mut menu = menu(run, escalation);
+        menu.otherwise = otherwise;
+        blocks.push(menu.into());
+        super::section(self.heading(), blocks)
+    }
+
+    /// Whose the decision is, as the section's title says it.
+    fn heading(&self) -> String {
+        match self.on {
+            DecisionOn::Node(node) => format!("decision on node `{node}`"),
+            DecisionOn::Run => "decision on the run".to_string(),
+        }
+    }
+}
 
 /// Where a run works, as the page says it above a decision: the path
 /// whole — it is copied into another terminal, never cut — and what it
 /// means for a decision about the run.
-pub(crate) fn run_tree_line(tree: &Path) -> String {
+pub fn run_tree_line(tree: &Path) -> String {
     surco::text::detailed(
         "the run works in",
         &format!(
@@ -48,74 +102,26 @@ pub(crate) fn run_tree_line(tree: &Path) -> String {
     )
 }
 
-/// What the surface showing a decision says beside it already.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Beside {
-    /// The record the engine attached — a page that quotes a failed
-    /// node's evidence already shows it.
-    pub(crate) evidence: bool,
-}
-
-/// The decision a parked run waits on, as the section a page ends on: the
-/// record the engine attached to it and what it is about, less what the
-/// page says beside it. Then what weighs on it, every option with the
-/// command that chooses it, and `otherwise`: what moves the run without
-/// choosing one.
-pub(crate) fn section(
-    run_id: &RunId,
-    decided: &Decided,
-    otherwise: Vec<(String, &'static str)>,
-) -> Section {
-    let escalation = &decided.escalation;
-    let mut blocks = account(escalation, decided.beside, &decided.shown);
-    for shown in escalation.shows() {
-        let about = format!("about: {}", yunta_core::run_dir::view_of(shown).display());
-        blocks.push(Prose(about).into());
-    }
-    if let Some(external_ref) = escalation.external_ref() {
-        blocks.push(Prose(format!("published at {external_ref}")).into());
-    }
-    if let Some(before) =
-        yunta_render::shown::before_you_decide(escalation.withheld(), &decided.shown)
-    {
-        blocks.push(before.into());
-    }
-    let mut menu = menu(run_id, escalation);
-    menu.otherwise = otherwise;
-    blocks.push(menu.into());
-    let heading = match &decided.on {
-        DecisionOn::Node(node) => format!("decision on node `{node}`"),
-        DecisionOn::Run => "decision on the run".to_string(),
-    };
-    yunta_render::gate::decision(heading, blocks)
-}
-
 /// The record the engine attached to a decision, to audit it against, less
 /// what the surface showing it says beside it: a page that quotes a failed
 /// node's evidence draws none of it again. Which reasons the record leaves
-/// to "before you decide" is decided by `gate::record`, from the plans on
-/// the page, so the status page and the prompt say each reason once.
+/// to "before you decide" is decided by `record`, from the plans on the
+/// page, so the status page and the prompt say each reason once.
 fn account(escalation: &GateWaitingPayload, beside: Beside, shown: &[ShownDocument]) -> Vec<Block> {
     match beside.evidence {
         true => Vec::new(),
-        false => yunta_render::gate::record(escalation, shown)
+        false => super::record(escalation, shown)
             .into_iter()
             .map(|fact| Note(fact).into())
             .collect(),
     }
 }
 
-/// The claim of a decision in the words a reader sees: what the escalation
-/// says happened, with the reroute a failed node has used up named in it.
-pub(crate) fn claim_words(escalation: &GateWaitingPayload) -> String {
-    yunta_render::claim::sentence(escalation.summary(), escalation.failure())
-}
-
 /// Every option of a decision: what it costs and the command that
 /// chooses it.
-fn menu(run_id: &RunId, escalation: &GateWaitingPayload) -> Decision {
-    let options = yunta_render::offers::decision_options(escalation);
-    yunta_render::blocks::decision::here(run_id, options)
+fn menu(run: &RunId, escalation: &GateWaitingPayload) -> components::Decision {
+    let options = crate::offers::decision_options(escalation);
+    crate::blocks::decision::here(run, options)
 }
 
 #[cfg(test)]
@@ -136,6 +142,7 @@ mod tests {
     use surco::doc::Doc;
     use surco::line::Line;
     use surco::look::Look;
+    use surco::surface::Terminal;
     use surco::width::cell_width;
     use yunta_core::step::NextStep;
     use yunta_core::{ArtifactKind, ContentHash, NodeId, TaskId, TasksFile};
@@ -187,23 +194,28 @@ mod tests {
 
     /// The lines of the section a page ends on for `escalation`, with nothing shown.
     fn drawn(escalation: &GateWaitingPayload, beside: Beside) -> Vec<String> {
-        drawn_with(&Decided {
-            on: DecisionOn::Node(NODE),
-            escalation: escalation.clone(),
-            shown: Vec::new(),
+        let on = DecisionOn::Node(NODE);
+        drawn_with(
+            Decision {
+                on: &on,
+                escalation,
+                shown: &[],
+            },
             beside,
-        })
+        )
     }
 
     /// A decision no node owns says whose it is in its heading.
     #[test]
     fn a_decision_the_run_owns_says_so() {
-        let lines = drawn_with(&Decided {
-            on: DecisionOn::Run,
-            escalation: escalation(),
-            shown: Vec::new(),
-            beside: NOTHING_BESIDE,
-        });
+        let lines = drawn_with(
+            Decision {
+                on: &DecisionOn::Run,
+                escalation: &escalation(),
+                shown: &[],
+            },
+            NOTHING_BESIDE,
+        );
         assert!(
             lines
                 .iter()
@@ -216,14 +228,16 @@ mod tests {
         );
     }
 
-    /// The lines of the section a page ends on for `decided`, drawn plain.
-    fn drawn_with(decided: &Decided) -> Vec<String> {
+    /// The lines of the section a page ends on for `decision`, with what the
+    /// page says `beside` it, drawn plain.
+    fn drawn_with(decision: Decision<'_>, beside: Beside) -> Vec<String> {
         let close = (
-            yunta_render::command::line(&NextStep::Close { run: RUN }),
+            crate::command::line(&NextStep::Close { run: RUN }),
             "closes it for good",
         );
-        let doc = Doc::new().with(section(&RUN, decided, vec![close]));
-        crate::render::surface_lines(doc, &Look::plain())
+        let doc = Doc::new().with(decision.section(&RUN, beside, vec![close]));
+        Terminal::on(Look::plain())
+            .lines(&doc)
             .iter()
             .map(Line::text)
             .collect()
@@ -356,7 +370,8 @@ mod tests {
         let withheld = withholding_for_a_flaw();
         let record = account(&withheld, NOTHING_BESIDE, &[flawed_plan()]);
         let page = Doc::new().with_all(record);
-        let drawn: Vec<String> = crate::render::surface_lines(page, &Look::plain())
+        let drawn: Vec<String> = Terminal::on(Look::plain())
+            .lines(&page)
             .iter()
             .map(Line::text)
             .collect();
@@ -369,13 +384,14 @@ mod tests {
             "{drawn:#?}"
         );
         // The section a page ends on says the reason once, under its title.
-        let decided = Decided {
-            on: DecisionOn::Node(NODE),
-            escalation: withheld,
-            shown: vec![flawed_plan()],
-            beside: NOTHING_BESIDE,
+        let on = DecisionOn::Node(NODE);
+        let shown = [flawed_plan()];
+        let decision = Decision {
+            on: &on,
+            escalation: &withheld,
+            shown: &shown,
         };
-        let lines = drawn_with(&decided);
+        let lines = drawn_with(decision, NOTHING_BESIDE);
         let reason = "is not offered, because";
         let title = lines
             .iter()

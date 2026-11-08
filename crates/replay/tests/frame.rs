@@ -43,10 +43,18 @@ const RUN: &str = "run-1";
 mod actions;
 #[path = "frame/declared.rs"]
 mod declared;
+#[path = "frame/measures.rs"]
+mod measures;
 #[path = "frame/standing.rs"]
 mod standing;
 #[path = "frame/stops.rs"]
 mod stops;
+
+/// The process reading the run is the one driving it, under a pid of its
+/// own the test chose.
+fn this_process() -> Engine {
+    Engine::this(yunta_core::Pid::try_from(1000u32).expect("a pid"))
+}
 
 fn base() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
@@ -109,7 +117,7 @@ fn frame(workflow: &Workflow, events: &[StoredEvent], now_secs: i64) -> RunFrame
         workflow,
         &RunState::replay(events),
         None,
-        &Engine::this(at(now_secs)),
+        &this_process(),
         at(now_secs),
     )
 }
@@ -329,7 +337,7 @@ fn what_past_runs_cost_is_the_callers_to_hand_over_and_travels_unchanged() {
             &workflow,
             &state,
             None,
-            &Engine::this(at(100)),
+            &this_process(),
             at(100)
         )
         .prior,
@@ -358,7 +366,7 @@ fn what_past_runs_cost_is_the_callers_to_hand_over_and_travels_unchanged() {
             &workflow,
             &state,
             Some(&prior),
-            &Engine::this(at(100)),
+            &this_process(),
             at(100)
         )
         .prior,

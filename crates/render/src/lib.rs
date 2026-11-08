@@ -19,8 +19,10 @@
 //!
 //! Its map:
 //!
-//! - A run and its nodes: `state`, `pause`, `outcome`, `failure`, `spend`,
-//!   `changes`, `caution`, `inputs`, `place`, `target` and `policy`.
+//! - A run and its nodes: `state`, `pause` (what the log parked a run on),
+//!   `engine` (what holds a run its log says moves: an engine gone, or one
+//!   asking at its terminal), `outcome`, `failure`, `spend`, `changes`,
+//!   `caution`, `inputs`, `place`, `target` and `policy`.
 //! - A decision a person meets: `gate`, `escalation`, `claim`, `evidence`,
 //!   `offers`, `shown`, `plan`, `spec`, `findings` and `found`.
 //! - What leaves the terminal: `blocks`, `published` and `receipt`.
@@ -31,6 +33,7 @@ pub mod caution;
 pub mod changes;
 pub mod claim;
 pub mod command;
+pub mod engine;
 pub mod escalation;
 pub mod evidence;
 pub mod failure;

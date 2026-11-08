@@ -1,6 +1,6 @@
 # Spec: `run-pages`
 
-Module of `CAPABILITY-MAP.md`: "The pages in `yunta-render`, with the CLI printing exactly the same". Status: **approved on 2026-11-07**.
+Module of `CAPABILITY-MAP.md`: "The pages in `yunta-render`, with the CLI printing exactly the same". Status: **approved on 2026-11-07, amended on 2026-11-08** at the user's request: the frame measures every time a page says, and what a run's registry says is one enum, `Engine`, read once.
 Base: `feature/yunta-tui` at `13cdd69c`. Depends on: `run-state`. Needed by: `control` (whose data the pages draw) and `app-core` (whose screens hold them).
 
 ## Objective
@@ -72,6 +72,17 @@ The decision a gate's page ends with is built in `gate` (`decision`, `record`, `
 - **The caller reads first:**
   - the decision, through `current_escalation`, which reads the documents a gate shows from disk;
   - the engine's word, through `render::engine`, a wrapper over one call of `read_engine`.
+- **What a run's registry says is a struct over a choice:** `yunta_replay::registry::Engine { liveness, prompt, words, at }`, with `EngineLiveness { Alive, Dead, Unrecorded, Unknown }`.
+  - `prompt` and `words` hold only for a live process, and the type admits a dead one that asks.
+  - `read_engine` reads `engine.json` and probes its process three times, once each through `engine_liveness`, `engine_prompt` and `engine_words`, so one reading can mix two instants.
+  - `at` is the instant the registry was read, and every caller of `RunFrame::of` hands the same instant again as `now`.
+  - `Prompt { node, since, pid }` carries a copy of the registry's `engine_pid`, so the reading keeps the process's identity only while it asks. Without that copy, `Prompt` is the engine's own `Asked { node, since }`, the record `engine.json` holds, under a second name.
+- **Each page measures time itself:**
+  - how long a person has been asked at a terminal: `advice::asking(prompt, at)`, and again the run page's headline (`open_for`);
+  - how long a run has stood where it is: the field's `time_in_state`, and the run page's `since`;
+  - where its time went: the run page's facts and the JSON, each with `state.time_spent`, which the frame's own stats already compute.
+  
+  Each subtracts `chrono` instants. `yunta-render` names no clock type, so the run page could not move as it is written.
 
 **What a person can do next:**
 - **The table:** `advice::after_for(frame, decision, reader) -> Vec<(String, &'static str)>` decides the steps by the run's standing and the decision it waits on. It spells each one as a command and words what it does, in one function.
@@ -115,7 +126,7 @@ The CLI's integration tests print the commands whole: `status_cmd`, `status_page
 - `yunta-render` (4,004 lines in its root files) depends on core and surco.
 - The pages it would hold read from `yunta-replay`:
   - `frame`: `RunFrame`, `NodeFrame`, `NodeStanding`, `RunPhase`, `WaitingOn`, `Counter`;
-  - `registry`: `Engine`, `Prompt`;
+  - `registry`: `Prompt` (and `Engine`, which this module takes out of every page's reach);
   - `stats`: `RunStats`, `NodeStat`, `median`;
   - `history`: `RunSummary`, `PriorEstimation`, `MIN_SAMPLES`;
   - `verification_effectiveness`: `VerificationFindings`;
@@ -148,9 +159,17 @@ The CLI's integration tests print the commands whole: `status_cmd`, `status_page
    - where the run lives, its branch and where paths are shown from, as the caller found them. Where an artifact's bytes and its view sit under the run's directory is core's (`yunta_core::run_dir`), beside the `ARTIFACTS_DIR` and `OBJECTS_DIR` core already holds, so the engine that writes there and the page that names it share one layout;
    - the exit code a closing shows;
    - the decision and the documents it shows;
-   - the engine's reading.
+   - the run's frame, which carries what the process driving the run says.
    
    `yunta-render`'s manifest names neither the engine, nor the store, nor a runtime, and `tests/pure.rs` reads it to say so, as `yunta-replay`'s does.
+   - **The frame measures every time a page says,** at the one instant its caller hands `RunFrame::of`:
+     - how long a person has been asked at a terminal (`RunFrame::asking`, a `registry::Asking { pid, prompt, waited }`, which `Engine::asking(at)` builds and nothing else does);
+     - how long the run has stood where it is (`since_last_event`);
+     - where its time went (`time`).
+     
+     A page says durations, and `yunta-render` names no clock type. The run page's headline and its gist read the same `waited`, and the field and the run page the same `since_last_event`.
+   - **What a run's registry says is one enum, `Engine`:** `Alive` with its process's pid, the `Prompt` it holds at its terminal and the socket it serves its words on, `Dead`, `Unrecorded` or `Unknown`, read off the registry with one read and one probe. It is an input of the frame, `close`, `gc`, the pool, the follower and the refusal of a command on a run that asks. No page takes it. Its name is the engine's because that process is the engine everywhere else (`engine.json`, its `engine_pid`, `engine.lock`, and what a reader reads: "its engine is asking"); `driver` is a word this repository retired, what an adapter is not, which the `banned_vocabulary` smell holds.
+   - **The pid is the process's, and the question is the question.** `Prompt` is `{ node, since }`, one type for the record `engine.json` holds and the reading returns. A sentence about a process that asks takes `Asking`, which joins the two.
 3. **One home for how a decision reads.** The CLI's `status/decision.rs` and the decision `gate` builds become one block in render's `escalation`, which already holds the words a decision is met by. The decision a run waits on, its type and its block, live there, and the gate's page, the run page and the closing all draw it from there.
 4. **What a person can do next, as data in `yunta-replay`.**
    - `RunFrame::actions(decision) -> Vec<Action>`, where `Action { step: NextStep, effect: Effect }`.
@@ -168,7 +187,12 @@ The CLI's integration tests print the commands whole: `status_cmd`, `status_page
      - three texts of `yunta pack` that named a subcommand bare name a whole line with the pack their context knows: `yunta pack update <publisher/name> <ref>` and `yunta pack remove <publisher/name>` where a pack is already installed, `yunta pack add <source>` where it is not, and `yunta pack new <publisher/name>` in the README a new pack is scaffolded with.
    - Deleted: `Spell`, every parameter that carried it, the copies in `yunta-testkit-core` and the engine's tests, and the test that held two copies to agreement.
    - The smell that holds the rule counts every shipped crate but render's `command`, and is named for it.
-6. **The words of a parked run join render's `pause`,** and `advice` is gone.
+6. **The words of a parked run join render's `pause`, the words of the engine driving a run are render's `engine`,** and `advice` is gone.
+   - `pause` says what the log recorded: a pause, and what a parked run waits on.
+   - `engine` says what holds a run whose log says it moves: a process that is gone (`STALLED`), or one asking a person at its terminal. It says an `Asking` at three lengths, as `pause` says a `WaitingOn`:
+     - `asking_on`, a row's one line: the node;
+     - `asking_claim`, beside a headline that says how long, and in a refusal: the node and the pid;
+     - `asking_in_full`: the node, the pid and how long.
 7. **The CLI keeps what depends on its process, in its own modules:**
    - reading a run: its log, its manifest, the decision through `current_escalation`, the registry through `read_engine`, the paths;
    - each command's work, and its `Answer`: the page it shows, with its exit code and its JSON;
@@ -198,6 +222,11 @@ Each item gets the one path and the name it should always have had, where it mov
 | `render::node_display(&node)` (CLI) | `NodeDisplay::from(&node)`, in `yunta_render::state` |
 | `render::called(workflow, mode)` (CLI) | in `yunta_render::state`, beside a node's words |
 | `render::engine(run_dir, at)` (CLI) | gone: callers call `yunta_engine::read_engine` |
+| `yunta_replay::registry::{Engine, EngineLiveness}`, a struct over a choice | `yunta_replay::registry::Engine`, one enum: `Alive { pid, prompt, words }`, `Dead`, `Unrecorded`, `Unknown` |
+| `yunta_replay::registry::Prompt { node, since, pid }` and the engine's `process_registry::Asked { node, since }` | `yunta_replay::registry::Prompt { node, since }`, one type, which `engine.json` holds; the pid is `Alive`'s |
+| `yunta_engine::{engine_liveness, engine_prompt, engine_words}`, and `read_engine(run_dir, probe, at)` over them | `yunta_engine::read_engine(run_dir, probe)`: one read of the registry, one probe of its process |
+| `Engine::at`, a second name for the frame's instant | gone: `RunFrame::of`'s `now` is the one instant |
+| the subtractions in `advice::asking`, the run page's `since` and `open_for`, the field's `time_in_state`, and `time_spent` in the run page's facts and the JSON | `RunFrame::{asking, since_last_event, time}`, with `yunta_replay::registry::Asking { pid, prompt, waited }`, built by `Engine::asking(at)` |
 | `advice::after_for(frame, decision, reader)`, `advice::after(...)` | `RunFrame::actions(decision) -> Vec<Action>`, in `yunta_replay::frame` |
 | a `&'static str` beside a spelled command | `Effect`, in `yunta_replay::frame`; its words in `yunta-render` |
 | `advice::spell_for`, `advice::spell`, `advice::{review, open, follow, doctor, stats, list_runs, schema, ...}` | `yunta_render::command::{line, line_for}`; every command a `NextStep` |
@@ -207,7 +236,8 @@ Each item gets the one path and the name it should always have had, where it mov
 | `surface::{child_row, children_by_node}` | `yunta_render::children`, read by the run page and the live region |
 | `crate::error::Reader` | `yunta_render::command::Reader` |
 | `yunta_core::step::Spell`, every `spell` parameter, `yunta_testkit_core::spell()` | gone |
-| `advice::{STALLED, asking, asking_on, parked, parked_on, parked_claim, parked_in_full, reset_pause}` | `yunta_render::pause` |
+| `advice::{parked_on, parked_claim, parked_in_full}` | `yunta_render::pause` |
+| `advice::{STALLED, asking, asking_on}` | `yunta_render::engine::{STALLED, asking_claim, asking_in_full, asking_on}`: `asking` splits by length, `asking_claim` without how long and `asking_in_full` with it |
 | `advice` | gone |
 | `yunta_engine::DecisionOn` | `yunta_core::events::DecisionOn`, beside `Escalation` |
 | `yunta_engine::{ShownDocument, ShownContent}`, re-exported | named from `yunta_core::shown`; the re-export is gone |
@@ -237,6 +267,7 @@ Each item gets the one path and the name it should always have had, where it mov
 5. `NextStep` is never serialized: no payload, schema or JSON document holds one (measured), so its shape is free and its unused serde and schema derives go. `cargo xtask schema --check` passes with no change to `crates/core/schemas/`.
 6. `tasks/plan.md` and `tasks/todo.md` are replaced for this module; those of `run-state` stay in its commit, `13cdd69c`.
 7. `CAPABILITY-MAP.md`'s row and its "What moves" line say this module's scope: every page, the actions and every command's spelling.
+8. The refusal a command meets on a run whose driving process asks at its terminal (`CliError::RunAsking`) keeps its words. It holds the `Asking` that `read_engine(..).asking(now)` gives at its own instant, with no frame, and says `asking_claim`: where to answer, and not for how long. The length decides what a sentence says, not the data it holds, as under a run page's headline. Saying how long would change what a person reads.
 
 ### Out of scope
 
@@ -247,7 +278,7 @@ Each item gets the one path and the name it should always have had, where it mov
 
 ## Tech Stack
 
-Rust 1.98.0. `yunta-render` gains `yunta-replay` as a dependency; no crate outside the workspace is added. Surco's `golden` feature holds the goldens, as it does now.
+Rust 1.98.0. `yunta-render` gains `yunta-replay` as a dependency; no crate outside the workspace is added. `yunta-render` names no clock type: every duration it says is measured in `yunta-replay`. Surco's `golden` feature holds the goldens, as it does now.
 
 ## Commands
 
@@ -283,10 +314,12 @@ crates/render/src/page/              one module per page: run, node, field, stat
 crates/render/src/command.rs         every NextStep as the command a reader types, and Reader
 crates/render/src/progress.rs        how far a run has come, the one line every surface prints it in
 crates/render/src/pause.rs           why a run is parked, now with the words of a parked run
+crates/render/src/engine.rs          the words of the engine driving a run: gone, or asking at its terminal
 crates/render/src/escalation.rs      the decision a run waits on, its words and its one block
 crates/render/goldens/               its 21 goldens, and the CLI's 78, moved with their tests
 crates/render/tests/pure.rs          the manifest names no engine, store or runtime
 crates/replay/src/frame/actions.rs   what a person can do next for a run, as actions
+crates/replay/src/registry.rs        what a run's registry says: Engine, Prompt, and Asking, a live process's prompt measured
 crates/core/src/step.rs              NextStep, every command a reader is told to type, and its blanks
 crates/core/src/run_dir.rs           where a reader finds an artifact's bytes and view under a run's directory
 crates/render/src/children.rs        the runs a run bore, as the rows a person reads them in
@@ -332,6 +365,7 @@ emit(mode, &StatusAnswer { page, json }, look)
 - **The CLI's integration tests pass unchanged.** With the goldens, they prove the CLI prints exactly the same.
 - **The actions:** `advice/tests.rs`'s assertions move with what they test. The actions a frame offers go to `yunta-replay`, the spelling of every `NextStep` to `yunta-render`, where one test spells each kind.
 - **Purity:** `crates/render/tests/pure.rs` reads render's manifest.
+- **The frame's measures:** replay's frame tests read a frame at a chosen instant and find how long its person has been asked, how long since its last event, and its time. `read_engine`'s tests read the four kinds of registry, with `Alive`'s pid the one the registry names. A test written before the change pins the `asking` an asking engine writes to `engine.json`, and passes before and after it.
 - **One spelling:** the agreement test is deleted with the second copy. A search for `Spell` and for a command written as a string outside `command.rs` finds nothing, and the smell holds it.
 - **The schemas:** `cargo xtask schema --check` passes with `crates/core/schemas/` unchanged, since no schema holds a `NextStep`.
 - **Every line parses:** one CLI test writes every kind of `NextStep` for both readers and parses it with the CLI's clap definition.
@@ -349,7 +383,7 @@ emit(mode, &StatusAnswer { page, json }, look)
   - a change to a JSON document's shape;
   - a new dependency of `yunta-render`.
 - **Never:**
-  - a page that reads the disk, the clock, a process or the environment;
+  - a page that reads the disk, the clock, a process or the environment, or subtracts two instants;
   - an alias or a re-export left for a caller;
   - a command spelled twice;
   - a change to what a person reads.
@@ -357,7 +391,7 @@ emit(mode, &StatusAnswer { page, json }, look)
 ## Success Criteria
 
 1. **Every page is a value in `yunta_render::page`** and implements `Page`. No CLI file builds a `Doc` but `output` drawing one and the live region. Each command fills its page and emits it.
-2. **Render's manifest names core, replay and surco,** and neither the engine, the store nor a runtime, which `tests/pure.rs` holds. No page names a path function of the engine.
+2. **Render's manifest names core, replay and surco,** and neither the engine, the store nor a runtime, which `tests/pure.rs` holds. No page names a path function of the engine or a clock type, and none holds an `Engine`: a search for `DateTime` and `chrono` in `crates/render/src` finds nothing.
 3. **What a person can do next is `RunFrame::actions`,** returning `Action`s. `after_for` and `after` are gone, and every surface that offered next steps reads the actions.
 4. **Every command a person is told to type is a `NextStep`,** spelled only by `yunta_render::command`, and a test parses every kind's line with the CLI's clap:
    - `Spell`, the copies in `yunta-testkit-core` and the engine's tests, and the agreement test are gone;
@@ -365,6 +399,8 @@ emit(mode, &StatusAnswer { page, json }, look)
    - the smell finds none elsewhere.
 5. **Every name in "Names and form" stands as written:**
    - `advice`, `render::counter`, `render::words`, `render::engine`, `progress::frame` and `progress::frame_of` are gone from the CLI;
+   - `EngineLiveness`, `engine_liveness`, `engine_prompt`, `engine_words`, `Engine::at` and the engine's `process_registry::Asked` are gone, and so are `time_in_state` and the run page's `since`; `read_engine` reads the registry once;
+   - `engine.json` reads and writes the same bytes;
    - `DecisionOn` and `ShownDocument` come from core, and the engine re-exports neither.
 6. **Nothing printed changes but the seven texts of point 5:**
    - the 78 goldens are byte for byte the same, in `crates/render/goldens/`;

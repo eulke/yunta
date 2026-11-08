@@ -22,13 +22,13 @@ use yunta_core::events::DecisionOn;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::shown::ShownDocument;
 use yunta_core::{Isolation, RunId, Workflow};
+use yunta_render::escalation::Decision;
 use yunta_replay::frame::RunFrame;
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::RunState;
 
-use crate::commands::status::decision::Beside;
 use crate::error::Outcome;
-use crate::run_page::{failed, Decided, RunPage, Scope};
+use crate::run_page::{RunPage, Scope};
 
 /// Where the run lived and what it took — what the closing block reports
 /// that the run's own log does not carry.
@@ -76,8 +76,6 @@ pub(crate) struct Closing {
     isolation: Isolation,
     cwd: PathBuf,
     home: Option<PathBuf>,
-    /// The process that drove the run is this one, which asks no one.
-    engine: yunta_replay::registry::Engine,
 }
 
 impl Closing {
@@ -91,14 +89,13 @@ impl Closing {
             env.workflow,
             env.state,
             env.prior,
-            &yunta_replay::registry::Engine::this(env.now),
+            &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
             env.now,
         );
         Self::framed(
             env.run_id,
             frame,
             env.state.clone(),
-            env.now,
             (env.decision, env.shown),
             &env.outline,
         )
@@ -109,7 +106,6 @@ impl Closing {
         run_id: &RunId,
         frame: RunFrame,
         state: RunState,
-        now: DateTime<Utc>,
         (decision, shown): (Option<(DecisionOn, GateWaitingPayload)>, Vec<ShownDocument>),
         outline: &Outline<'_>,
     ) -> Self {
@@ -125,7 +121,6 @@ impl Closing {
             isolation: outline.isolation,
             cwd: outline.cwd.to_path_buf(),
             home: outline.home.map(Path::to_path_buf),
-            engine: yunta_replay::registry::Engine::this(now),
         }
     }
 
@@ -142,7 +137,6 @@ impl Closing {
             scope: Scope::Closing,
             depth: Depth::Glance,
             run_id: &self.run_id,
-            engine: self.engine.clone(),
             frame: &self.frame,
             state: &self.state,
             paths: Outline {
@@ -153,24 +147,13 @@ impl Closing {
                 cwd: &self.cwd,
                 home: self.home.as_deref(),
             },
-            decision: self.decided(),
+            decision: self.decision.as_ref().map(|(on, escalation)| Decision {
+                on,
+                escalation,
+                shown: &self.shown,
+            }),
             plans: Vec::new(),
         }
-    }
-
-    /// The decision a parked run stopped on, with what the page says beside
-    /// it already: the record a failed node's evidence quotes.
-    fn decided(&self) -> Option<Decided> {
-        let (on, escalation) = self.decision.as_ref()?;
-        Some(Decided {
-            on: on.clone(),
-            escalation: escalation.clone(),
-            shown: self.shown.clone(),
-            beside: Beside {
-                evidence: failed(&self.frame)
-                    .any(|(failed_node, _)| on.node() == Some(&failed_node.id)),
-            },
-        })
     }
 }
 

@@ -138,19 +138,14 @@ impl RunPage<'_> {
         fields
             .push_if(
                 "time",
-                time_row(&self.time_spent(), glyphs).unwrap_or_default(),
+                // Read to the instant the page is read at while the run is
+                // open: the log says nothing of a wait until it is answered.
+                time_row(&self.frame.time, glyphs).unwrap_or_default(),
             )
             .push_if("slowest", self.slowest(glyphs).unwrap_or_default())
             .push_if("branch", self.branch())
             .push_if("artifacts", self.artifacts())
             .push_if("degraded", self.degraded())
-    }
-
-    /// Where the run's time went, read to the instant the page is read at while
-    /// the run is open: the log says nothing of a wait until it is answered.
-    fn time_spent(&self) -> TimeSpent {
-        self.state
-            .time_spent((!self.state.ended()).then_some(self.engine.at))
     }
 
     /// The files the run's change moved most, on a page that holds the change.

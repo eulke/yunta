@@ -107,7 +107,7 @@ pub(crate) async fn of_run(
         &manifest.workflow,
         &state,
         None,
-        &crate::render::engine(&open.run_dir, now),
+        &yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe),
         now,
     );
     let answer = RunStatsAnswer {

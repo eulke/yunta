@@ -12,7 +12,7 @@ use yunta_core::{Clock, Redactor, Responder, RunId};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::run_log::RunLog;
-use yunta_replay::registry::EngineLiveness;
+use yunta_replay::registry::Engine;
 
 /// Why a run cannot be closed. Each variant's display is its code; the
 /// words a reader sees are the caller's to write.
@@ -50,7 +50,7 @@ pub async fn close_run(
     run_id: &RunId,
     run_dir: &Path,
     clock: &dyn Clock,
-    engine: EngineLiveness,
+    engine: &Engine,
     by: Responder,
     redactor: &Redactor,
 ) -> Result<(), CloseRunError> {
@@ -60,10 +60,8 @@ pub async fn close_run(
     }
     if !state.tail_paused() {
         return Err(match engine {
-            EngineLiveness::Alive => CloseRunError::Driven,
-            EngineLiveness::Dead | EngineLiveness::Unrecorded | EngineLiveness::Unknown => {
-                CloseRunError::Moving
-            }
+            Engine::Alive { .. } => CloseRunError::Driven,
+            Engine::Dead | Engine::Unrecorded | Engine::Unknown => CloseRunError::Moving,
         });
     }
     let closed =

@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use chrono::{DateTime, Utc};
 use yunta_core::process::signal::Liveness;
 use yunta_core::RunId;
 use yunta_engine::lock::{LockError, SystemProbe};
@@ -12,15 +13,21 @@ use super::CliError;
 
 impl CliError {
     /// Who drives the run when that can be told, and the lock's file when only a
-    /// person can tell. Any other failure of the lock is the run's own.
-    pub fn refused_hold(run_id: &RunId, run_dir: &Path, refusal: LockError) -> Self {
+    /// person can tell. Any other failure of the lock is the run's own. `at` is
+    /// the instant the refusal reads the run's registry at.
+    pub fn refused_hold(
+        run_id: &RunId,
+        run_dir: &Path,
+        refusal: LockError,
+        at: DateTime<Utc>,
+    ) -> Self {
         let unclear = |lock_path, pid| CliError::RunHoldUnclear {
             run_id: run_id.clone(),
             lock_path,
             pid,
         };
-        let driven = |pid| match yunta_engine::engine_prompt(run_dir, &SystemProbe) {
-            Some(prompt) => CliError::RunAsking { prompt },
+        let driven = |pid| match yunta_engine::read_engine(run_dir, &SystemProbe).asking(at) {
+            Some(asking) => CliError::RunAsking { asking },
             None => CliError::RunMoving {
                 run_id: run_id.clone(),
                 pid,
@@ -76,7 +83,12 @@ mod tests {
     }
 
     fn refused(refusal: LockError) -> CliError {
-        CliError::refused_hold(&RunId::from_static(WHOLE_ID), run_dir(), refusal)
+        CliError::refused_hold(
+            &RunId::from_static(WHOLE_ID),
+            run_dir(),
+            refusal,
+            DateTime::UNIX_EPOCH,
+        )
     }
 
     #[test]

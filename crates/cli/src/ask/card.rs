@@ -11,7 +11,7 @@ use surco::look::Look;
 use surco::surface::Placed;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::OptionId;
-use yunta_render::gate::Route;
+use yunta_render::escalation::Route;
 
 use super::field::{Edit, Field};
 use super::held::{Held, Press};

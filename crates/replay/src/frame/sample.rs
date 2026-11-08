@@ -18,6 +18,7 @@ use yunta_core::events::TokenUsage;
 use yunta_core::{ModeName, NodeId, RunId};
 
 use super::{Counter, Declares, Happening, Moment, NodeFrame, NodeStanding, RunFrame, RunPhase};
+use crate::TimeSpent;
 
 /// How long a built node has been working, and how long ago it last
 /// said anything — a node alive and speaking, which is what a surface
@@ -38,6 +39,9 @@ impl RunFrame {
             standing: Standing::Running,
             phase: RunPhase::Running,
             elapsed: Some(Duration::from_secs(30)),
+            time: TimeSpent::default(),
+            since_last_event: None,
+            asking: None,
             flow: Counter::default(),
             tasks: None,
             reroutes: 0,
