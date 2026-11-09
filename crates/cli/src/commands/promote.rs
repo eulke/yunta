@@ -31,7 +31,7 @@ pub(crate) struct PromotionEnv<'a> {
     /// subprocesses are born in and the hook its sessions ask.
     pub(crate) ctx: &'a Context,
     pub(crate) storage: &'a AsyncStorage,
-    pub adapters: &'a super::Adapters,
+    pub adapters: &'a yunta_api::machine::Adapters,
     pub forge: Option<&'a dyn Forge>,
     /// Where every successor puts its questions — the same console the
     /// predecessor used, so a prompt takes its turn with the same
@@ -106,7 +106,7 @@ async fn create_successor(
         },
         yunta_engine::CallerInfra {
             storage: env.storage,
-            ids: &env.ctx.ids,
+            ids: env.ctx.ids.as_ref(),
             supervision: env.ctx.supervision(),
             environment: yunta_engine::process::execution_environment(Some(&env.ctx.env)),
             secrets: &yunta_core::ProcessSecrets,
@@ -127,8 +127,8 @@ async fn run_successor(
         worktree: &successor.worktree,
         adapters: env.adapters,
         storage: env.storage,
-        clock: Arc::new(env.ctx.clock),
-        ids: &env.ctx.ids,
+        clock: std::sync::Arc::clone(&env.ctx.clock),
+        ids: env.ctx.ids.as_ref(),
         human_interaction: env.human_interaction,
         forge: env.forge,
         cancel: env.ctx.cancellation(),
@@ -211,16 +211,20 @@ nodes:
         let root = tempfile::tempdir().unwrap();
         let ctx = Context::for_test(
             bench.worktree.clone(),
-            crate::project::Project {
+            yunta_api::Project {
                 config: ConfigLayer::default(),
                 runs_root: bench.runs_root.clone(),
                 worktrees_root: root.path().join("worktrees"),
                 storage_path: root.path().join("yunta.db"),
+                user_root: root.path().to_path_buf(),
+                workspace: crate::shell::Shell::for_test(bench.worktree.clone())
+                    .workspace()
+                    .clone(),
             },
         );
         let project = &ctx.project;
         let storage = &bench.storage;
-        let adapters = crate::commands::Adapters::new();
+        let adapters = yunta_api::machine::Adapters::new();
         let run_id = bench.run_id.clone();
 
         let (final_id, _final_manifest, _final_worktree, final_report) = drive_promotions(

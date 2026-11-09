@@ -35,6 +35,7 @@ use crate::pack::{
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
     vendor_into_place, with_cleanup, PackError, Swap,
 };
+use crate::shell::Shell;
 
 mod audit;
 mod needs;
@@ -69,8 +70,8 @@ struct PackPolicy {
     executors_declared_by: Vec<&'static str>,
 }
 
-fn load_pack_policy(cwd: &std::path::Path) -> Result<PackPolicy, CliError> {
-    let layers = crate::project::load_named_layers(cwd)?;
+fn load_pack_policy(cwd: &std::path::Path, env: &yunta_core::Env) -> Result<PackPolicy, CliError> {
+    let layers = yunta_api::config_layers(cwd, env)?;
     let merged = ConfigLayer::merge_layers(layers.iter().map(|(_, layer)| layer.clone()));
     let packs = merged
         .permissions
@@ -238,6 +239,7 @@ fn vendor_and_lock(
 /// executes before the confirmation, and a failure at any step leaves
 /// the repository exactly as it was.
 pub async fn add(
+    shell: &Shell,
     source: &str,
     confirmed_executors: bool,
     run_tests: bool,
@@ -245,7 +247,7 @@ pub async fn add(
 ) -> Result<Outcome, CliError> {
     // The invocation's own composition root: `pack add` clones, and a
     // clone is a subprocess that answers to whoever ran the command.
-    let ctx = Context::load()?;
+    let ctx = Context::of(shell)?;
     let cwd = ctx.cwd.clone();
 
     let (source_part, ref_arg) = split_source_and_ref(source);
@@ -271,7 +273,7 @@ pub async fn add(
     // Policy first: a refused publisher or a denied executor leaves no
     // decision for a person to make, so the audit is not even printed.
     enforce_schema_range(&manifest)?;
-    let policy = load_pack_policy(&cwd)?;
+    let policy = load_pack_policy(&cwd, &shell.workspace().env)?;
     enforce_publisher_allowed(&policy, &manifest.publisher)?;
     if policy.executors == PackExecutorPolicy::Deny && !manifest.declares.executors.is_empty() {
         enforce_executor_policy(&policy, &manifest, confirmed_executors, "install")?;
@@ -311,7 +313,7 @@ pub async fn add(
     // The pack's own cases run last, on the vendored copy, and only on
     // request: after the confirmation, never as part of deciding it.
     let cases = match run_tests {
-        true => run_cases(&dest, ctx.interrupt()).await,
+        true => run_cases(shell, &dest).await,
         false => count_cases(&dest),
     };
     let needs = needs::unmet(&ctx, &dest, &manifest).await;
@@ -330,12 +332,13 @@ pub async fn add(
 }
 
 pub async fn update(
+    shell: &Shell,
     pack: &PackRef,
     new_ref: &str,
     confirmed_executors: bool,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+    let ctx = Context::of(shell)?;
     let cwd = ctx.cwd.clone();
     let lock = load_lock(&cwd)?;
     let Some(entry) = lock.packs.get(pack).cloned() else {
@@ -366,7 +369,7 @@ pub async fn update(
     // code first appears, and an allow-list narrowed since the install
     // must stop pulling from a publisher it no longer trusts.
     enforce_schema_range(&manifest)?;
-    let policy = load_pack_policy(&cwd)?;
+    let policy = load_pack_policy(&cwd, &shell.workspace().env)?;
     enforce_publisher_allowed(&policy, pack.publisher())?;
     if policy.executors == PackExecutorPolicy::Deny && !manifest.declares.executors.is_empty() {
         enforce_executor_policy(&policy, &manifest, confirmed_executors, "update")?;
@@ -409,8 +412,8 @@ pub async fn update(
     Ok(Outcome::Success)
 }
 
-pub fn remove(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+pub fn remove(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
+    let cwd = shell.workspace().dir.clone();
     let mut lock = load_lock(&cwd)?;
     if lock.packs.remove(pack).is_none() {
         return Err(CliError::msg(format!("`{pack}` isn't installed")));
@@ -445,8 +448,8 @@ fn vendored_tree(dest: &Path, entry: &PackLockEntry) -> VendoredTree {
     }
 }
 
-pub fn list(look: &Look) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+pub fn list(shell: &Shell, look: &Look) -> Result<Outcome, CliError> {
+    let cwd = shell.workspace().dir.clone();
     let lock = load_lock(&cwd)?;
     if lock.packs.is_empty() {
         let looked_in = surco::paths::shown(&packs_root(&cwd), &cwd, None);

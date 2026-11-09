@@ -19,7 +19,8 @@ pub(super) async fn unmet(
     pack_dir: &Path,
     manifest: &PackManifest,
 ) -> Result<Needs, CliError> {
-    let detected = crate::detect::in_repo(&ctx.cwd, ctx.supervision()).await?;
+    let detected =
+        yunta_api::machine::in_repo(&ctx.project.workspace, &ctx.cwd, &ctx.stop()).await?;
     let mut unmet: Vec<Need> = Vec::new();
     for declared in &manifest.contents.workflows {
         let Ok(workflow) = crate::load_workflow(&pack_dir.join(declared)) else {

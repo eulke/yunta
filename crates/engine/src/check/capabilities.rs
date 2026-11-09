@@ -21,18 +21,9 @@
 //! and [`super::check_warnings`] names those nodes.
 
 use super::*;
+use yunta_core::check::AdapterFacts;
 use yunta_core::port::{absence_of, Absence, PermissionProfile};
-use yunta_core::{
-    AdapterId, Capabilities, Capability, EditSandbox, NodePermissions, RunnerName, Worktree,
-};
-
-/// What `check` knows of an adapter this binary builds: what it declares,
-/// and the `sandbox` its settings give an `edit` session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdapterFacts {
-    pub capabilities: Capabilities,
-    pub edit_sandbox: EditSandbox,
-}
+use yunta_core::{AdapterId, Capability, NodePermissions, RunnerName, Worktree};
 
 /// Every node's declarations checked against the adapters its runner
 /// could resolve to. `declared` answers for an adapter this binary

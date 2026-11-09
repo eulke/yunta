@@ -66,7 +66,7 @@ fn run_words(happening: &run::happening::Happening, glyphs: Glyphs) -> (Option<M
             "host suspended for {}, which durations leave out; new sessions wait until it has \
              been awake {}",
             duration(*slept),
-            duration(yunta_engine::SETTLE_AFTER_SUSPENSION)
+            duration(yunta_core::SETTLE_AFTER_SUSPENSION)
         ),
         H::ChangesCounted {
             files,

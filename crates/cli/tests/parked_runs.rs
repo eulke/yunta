@@ -577,6 +577,64 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
     assert!(finished.success());
 }
 
+/// A listing's document is what a program reads, and a program reads one
+/// document whatever terminal asked for it: a running run's row, whose words
+/// a person's terminal draws with its own glyphs, writes them as every run's
+/// document writes them.
+#[test]
+fn a_listing_document_reads_the_same_whatever_glyphs_the_terminal_asks_for() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo_with(root.path(), &[("holds-open", HOLDS_OPEN)]);
+    let home = root.path().join("state");
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    let mut running = command
+        .args(["run", "holds-open.yaml"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to run the yunta binary");
+    let worktree = wait_for(
+        || {
+            yunta_testkit::pool_checkouts(&home)
+                .into_iter()
+                .find(|checkout| checkout.join("started.txt").exists())
+        },
+        || "the holding node never started".to_string(),
+    );
+
+    let listed = |glyphs: Option<&str>| {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+        yunta_testkit::hermetic(&mut command, &repo, &home);
+        if let Some(glyphs) = glyphs {
+            command.env("YUNTA_GLYPHS", glyphs);
+        }
+        let out = command
+            .args(["list", "--runs", "--json"])
+            .output()
+            .expect("failed to run the yunta binary");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&out.stdout).expect("the listing is one JSON document");
+        // How long a run has stood is read at each listing.
+        for row in document["rows"].as_array_mut().into_iter().flatten() {
+            row["age_secs"] = serde_json::Value::Null;
+        }
+        document
+    };
+    assert_eq!(listed(None), listed(Some("ascii")));
+
+    write(&worktree.join("go.txt"), "go");
+    let finished = running.wait().expect("the running run exits");
+    assert!(finished.success());
+}
+
 #[test]
 fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
     // A node parked on a person is the phase every surface reports, so

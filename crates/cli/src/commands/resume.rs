@@ -23,18 +23,18 @@ use yunta_adapters::MOCK_SESSION_PREFIX;
 use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
 use yunta_core::process::signal::Liveness;
 use yunta_core::step::Arg;
-use yunta_core::{Clock, Manifest, RunId};
+use yunta_core::{Manifest, RunId};
 use yunta_engine::lock::LockError;
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::RunState;
 
 use super::registry::{adapters_for, servable, ScriptedPaths, ServableError};
 use crate::commands::drive::{drive, Driving, Prepared};
-use crate::commands::stats;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{progress, Mode};
+use crate::shell::Shell;
 
 /// A run this invocation is about to pick up, as its own frozen manifest
 /// describes it: where its state lives and the tree it works in.
@@ -66,10 +66,10 @@ async fn parked(
     output: Mode,
     look: &Look,
 ) -> Result<Option<Parked>, CliError> {
-    let open = ctx.open_run(run_id).await?;
+    let open = ctx.project.run(run_id).await?;
     let state = yunta_replay::RunState::replay(&open.events);
-    let bound = crate::project::bound_checkout(&state);
-    let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
+    let bound = state.run.checkout().map(std::path::Path::to_path_buf);
+    let (run_dir, manifest) = (open.dir, open.manifest.doc);
     // Resolved before any checkout is taken, so a refused resume takes no
     // checkout and writes nothing; the wake resolves the same redactor again.
     yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
@@ -98,7 +98,10 @@ async fn parked(
         &yunta_engine::read_engine(&run_dir, &yunta_engine::lock::SystemProbe),
         now,
     );
-    let prior = stats::budget_prior(ctx, &manifest, &frame, &open.events).await;
+    let prior = ctx
+        .project
+        .budget_prior(&manifest, &frame, &open.events)
+        .await;
     Ok(Some(Parked {
         run_dir,
         manifest,
@@ -145,7 +148,8 @@ async fn claimed(
     state: &RunState,
 ) -> Result<Option<yunta_engine::RunHold>, CliError> {
     let contention = yunta_engine::contention_for(state);
-    match yunta_engine::hold_run(run_dir, contention, &ctx.clock, ctx.cancellation()).await {
+    match yunta_engine::hold_run(run_dir, contention, ctx.clock.as_ref(), ctx.cancellation()).await
+    {
         Ok(hold) => Ok(Some(hold)),
         Err(LockError::Cancelled { .. }) => Ok(None),
         Err(refused) => Err(CliError::refused_hold(
@@ -184,9 +188,7 @@ async fn still_or_again(
         return Ok(named);
     }
     let run_dir = ctx.project.runs_root.join(run_id.as_str());
-    let pool = ctx
-        .project
-        .pool_of(manifest, &ctx.cwd, &run_dir, std::sync::Arc::new(ctx.clock));
+    let pool = ctx.pool_of(manifest, &run_dir);
     Ok(pool
         .wake_checkout(run_id, &named, ctx.supervision())
         .await?)
@@ -195,8 +197,12 @@ async fn still_or_again(
 /// Waits until `at`, the reset the run is paused on, before anything is
 /// taken from it. An interrupt ends the wait first and returns `false`: the
 /// run stays parked, and nothing was taken. A past instant returns at once.
-async fn waited_until(at: DateTime<Utc>, interrupt: &tokio_util::sync::CancellationToken) -> bool {
-    waited_out(|| crate::context::time_until(at), interrupt).await
+async fn waited_until(
+    clock: &dyn yunta_core::Clock,
+    at: DateTime<Utc>,
+    interrupt: &tokio_util::sync::CancellationToken,
+) -> bool {
+    waited_out(|| crate::context::time_until(clock, at), interrupt).await
 }
 
 /// Sleeps until `left` reads nothing left, asking it again after each sleep:
@@ -234,10 +240,10 @@ async fn waited_out_reset(
     let (Some(at), Some((reason, _))) = (super::reset_at(state), state.run.paused()) else {
         return true;
     };
-    if !crate::context::time_until(at).is_zero() {
+    if !crate::context::time_until(ctx.clock.as_ref(), at).is_zero() {
         progress(output, look, waiting_line(run_id, reason));
     }
-    waited_until(at, ctx.cancellation()).await
+    waited_until(ctx.clock.as_ref(), at, ctx.cancellation()).await
 }
 
 /// The line a person reads when a resume waits for a limit's reset: the
@@ -251,8 +257,13 @@ fn waiting_line(run_id: &RunId, reason: &PauseReason) -> String {
     )
 }
 
-pub async fn resume(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+pub async fn resume(
+    shell: &Shell,
+    run_id: &RunId,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let ctx = Context::of(shell)?;
     let Some(Parked {
         run_dir,
         manifest,
@@ -313,7 +324,7 @@ mod tests {
         interrupt.cancel();
         // A reset no test run reaches: the wait can only end by the interrupt.
         let ahead = Utc.with_ymd_and_hms(2100, 1, 1, 0, 0, 0).unwrap();
-        assert!(!waited_until(ahead, &interrupt).await);
+        assert!(!waited_until(&yunta_testkit_core::FixedClock, ahead, &interrupt).await);
     }
 
     #[tokio::test]
@@ -339,7 +350,14 @@ mod tests {
     #[tokio::test]
     async fn a_reset_already_past_is_not_waited_for() {
         let past = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
-        assert!(waited_until(past, &CancellationToken::new()).await);
+        assert!(
+            waited_until(
+                &yunta_testkit_core::FixedClock,
+                past,
+                &CancellationToken::new()
+            )
+            .await
+        );
     }
 
     #[test]

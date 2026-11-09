@@ -1,4 +1,4 @@
-//! Cadence of a poll over state another process owns. The condition and the
+//! See [`crate`]. Cadence of a poll over state another process owns. The condition and the
 //! deadline stay at the call site; this type only spaces the looks.
 
 /// How long a poll waits between two looks at the state it watches.

@@ -42,13 +42,13 @@ use console::Term;
 use indicatif::TermLike;
 use tokio::task::JoinHandle;
 
+use yunta_api::{EventLog, RunRegistry};
 use yunta_core::events::StoredEvent;
 use yunta_core::port::RunObserver;
 use yunta_core::Pid;
 use yunta_core::{Clock, Manifest, RunId};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::registry::Engine;
-use yunta_storage::AsyncStorage;
 
 use surco::glyphs::Glyphs;
 
@@ -135,8 +135,8 @@ impl Delivery {
 pub(crate) enum EngineReading {
     /// This process drives the run.
     This,
-    /// Another process drives it: the run's registry, under this run directory.
-    Registry(std::path::PathBuf),
+    /// Another process drives it: the run's registry says which.
+    Registry(RunRegistry),
 }
 
 impl EngineReading {
@@ -147,8 +147,8 @@ impl EngineReading {
     pub(crate) fn of_successor(&self, successor: &RunId) -> Self {
         match self {
             EngineReading::This => EngineReading::This,
-            EngineReading::Registry(run_dir) => {
-                EngineReading::Registry(run_dir.with_file_name(successor.as_str()))
+            EngineReading::Registry(registry) => {
+                EngineReading::Registry(registry.of_successor(successor))
             }
         }
     }
@@ -157,9 +157,7 @@ impl EngineReading {
     pub(crate) fn read(&self) -> Engine {
         match self {
             EngineReading::This => Engine::this(Pid::current()),
-            EngineReading::Registry(run_dir) => {
-                yunta_engine::read_engine(run_dir, &yunta_engine::lock::SystemProbe)
-            }
+            EngineReading::Registry(registry) => registry.engine(),
         }
     }
 }
@@ -174,7 +172,7 @@ pub(crate) struct SurfaceEnv<'a> {
     /// comparison. `None` below the history floor.
     pub(crate) prior: Option<&'a PriorEstimation>,
     /// Where a hole in the delivered stream is closed.
-    pub(crate) storage: &'a AsyncStorage,
+    pub(crate) log: &'a EventLog,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) delivery: Delivery,
     /// The characters this process may draw with, read once by the

@@ -24,11 +24,13 @@ use yunta_render::page::{GateAnswered, Page, Resolution};
 use yunta_replay::RunState;
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
-use crate::context::{Context, Opened};
+use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
+use crate::shell::Shell;
 use crate::surface::Diagnostics;
+use yunta_api::OpenedRun;
 use yunta_render::document::SCHEMA_VERSION;
 
 /// Records the decision and hands the run back, returning the sentence
@@ -59,12 +61,12 @@ async fn record(
     resolved_by: Option<&Responder>,
     free_text: Option<&str>,
 ) -> Result<(), CliError> {
-    let open = ctx.open_run(run_id).await?;
+    let open = ctx.project.run(run_id).await?;
     // Said here because the resume below would say it only to `detached.log`, with
     // the answer already on the log and the run reading as moving.
     let state = yunta_replay::RunState::replay(&open.events);
-    super::resume::refuse_if_driven(ctx, run_id, &open.run_dir, &state).await?;
-    let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
+    super::resume::refuse_if_driven(ctx, run_id, &open.dir, &state).await?;
+    let (run_dir, manifest) = (open.dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
     let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
 
@@ -73,7 +75,7 @@ async fn record(
         &run_dir,
         &storage,
         run_id,
-        &ctx.clock,
+        ctx.clock.as_ref(),
         HumanChoice {
             option: option.clone(),
             by: crate::identity::responder(resolved_by, ctx.env.user.as_deref()),
@@ -84,7 +86,7 @@ async fn record(
     .await
     .map_err(|refusal| CliError::from_gate(run_id, refusal))?;
 
-    super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd)
+    super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd, &ctx.binary)
         .await
         .map_err(|source| CliError::GateRecordedNotResumed {
             source: super::DetachedResumeError::new(run_id, source),
@@ -119,6 +121,7 @@ fn needs_an_option(
 /// Answers `run_id`'s decision with `option`, or — with none — with
 /// the option a person picks off the run's own menu on this terminal.
 pub async fn resolve_gate(
+    shell: &Shell,
     run_id: &RunId,
     option: Option<&OptionId>,
     resolved_by: Option<&Responder>,
@@ -127,7 +130,7 @@ pub async fn resolve_gate(
     look: &Look,
 ) -> Result<Outcome, CliError> {
     needs_an_option(run_id, option, output)?;
-    let ctx = Context::load()?;
+    let ctx = Context::of(shell)?;
     let picked = match option {
         Some(option) => Chosen::Answered(HumanChoice {
             option: option.clone(),
@@ -197,12 +200,11 @@ pub(super) struct Waiting {
 
 /// The decision `run_id` waits on, before anything it shows is read; a refusal that says
 /// what serves when it waits on none.
-pub(super) async fn asked_of(ctx: &Context, run_id: &RunId) -> Result<Asked, CliError> {
-    let open = ctx.open_run(run_id).await?;
+pub(super) async fn asked_of<'p>(ctx: &'p Context, run_id: &RunId) -> Result<Asked<'p>, CliError> {
+    let open = ctx.project.run(run_id).await?;
     let state = yunta_replay::RunState::replay(&open.events);
     let handle = run_id.handle();
-    let decision =
-        yunta_engine::current_escalation(&open.manifest.doc, &open.run_dir, &state).await?;
+    let decision = yunta_engine::current_escalation(&open.manifest.doc, &open.dir, &state).await?;
     let Some((on, escalation)) = decision else {
         return Err(CliError::msg(format!(
             "run {handle} waits on no decision; `{}` says where it stands",
@@ -218,14 +220,14 @@ pub(super) async fn asked_of(ctx: &Context, run_id: &RunId) -> Result<Asked, Cli
 }
 
 /// A decision a run waits on, before what it shows is read.
-pub(super) struct Asked {
-    open: Opened,
+pub(super) struct Asked<'p> {
+    open: OpenedRun<'p>,
     state: RunState,
     on: DecisionOn,
     pub(super) escalation: GateWaitingPayload,
 }
 
-impl Asked {
+impl Asked<'_> {
     /// The decision with the documents it shows and what the run changed.
     pub(super) async fn read(self) -> Result<Waiting, CliError> {
         let Asked {
@@ -236,7 +238,7 @@ impl Asked {
         } = self;
         let asked = open.manifest.doc.request();
         let shown =
-            yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state, asked).await?;
+            yunta_engine::shown_documents(&open.dir, escalation.shows(), &state, asked).await?;
         let routes = yunta_render::escalation::routes(
             &escalation,
             &open.manifest.doc.workflow,

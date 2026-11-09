@@ -71,7 +71,10 @@ pub(crate) fn refuse_unreachable_forge(
 /// otherwise.
 fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> Check {
     let config = &ctx.project.config;
-    let opening: Vec<String> = super::list::catalog_workflows(&ctx.cwd)
+    let opening: Vec<String> = ctx
+        .project
+        .workspace
+        .catalog_workflows()
         .into_iter()
         .filter(|(_, workflow)| opens_a_pull_request(workflow, config))
         .map(|(name, _)| name)

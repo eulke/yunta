@@ -162,7 +162,7 @@ fn check_child(
         &|adapter| {
             ctx.adapters
                 .get(adapter)
-                .map(|adapter| crate::check::AdapterFacts {
+                .map(|adapter| yunta_core::check::AdapterFacts {
                     capabilities: adapter.capabilities(),
                     edit_sandbox: adapter.edit_sandbox(),
                 })

@@ -105,7 +105,7 @@ pub use signpost::Signpost;
 pub use spec::Spec;
 pub use stats::{History, Stats};
 pub use tested::{CaseRun, RanCase, Tested, TestedCase};
-pub use verified::Verified;
+pub use verified::{FaultCause, ObjectFault, ObjectsChecked, ObjectsRead, Verification, Verified};
 
 /// A page a person reads: a value its caller fills with what it read, drawn
 /// into one document for a surface that looks like `look`.

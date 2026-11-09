@@ -94,7 +94,7 @@ async fn ready(
     ctx: &Context,
     manifest: &yunta_core::Manifest,
     prepared: &Prepared,
-) -> Result<(crate::commands::Adapters, yunta_engine::RunHold), CliError> {
+) -> Result<(yunta_api::machine::Adapters, yunta_engine::RunHold), CliError> {
     let adapters = adapters_for(
         manifest,
         &ScriptedPaths {

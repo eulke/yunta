@@ -15,12 +15,13 @@
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use yunta_api::Stop;
 
 /// The two stages of this invocation's interruption, and the task that
 /// trips them.
 pub(crate) struct Interrupt {
-    stop: CancellationToken,
-    abort: CancellationToken,
+    /// The two stages, as the API reads them.
+    stages: Stop,
     /// The listener, kept so it dies with the `Interrupt` that owns it.
     /// A derived `Interrupt` has none: only the root installs a stream.
     listener: Option<JoinHandle<()>>,
@@ -44,8 +45,7 @@ impl Interrupt {
     #[cfg(test)]
     pub(crate) fn never() -> Self {
         Interrupt {
-            stop: CancellationToken::new(),
-            abort: CancellationToken::new(),
+            stages: Stop::new(),
             listener: None,
         }
     }
@@ -55,44 +55,46 @@ impl Interrupt {
     /// no listener of its own, so one stream serves the whole process.
     pub(crate) fn shared(&self) -> Self {
         Interrupt {
-            stop: self.stop.clone(),
-            abort: self.abort.clone(),
+            stages: self.stages.clone(),
             listener: None,
         }
     }
 
     /// The token everything this invocation spawned to work answers to.
     pub(crate) fn stop(&self) -> &CancellationToken {
-        &self.stop
+        self.stages.work()
     }
 
     /// The token what gives a take back answers to: it survives the
     /// first interrupt and falls to the second.
     pub(crate) fn abort(&self) -> &CancellationToken {
-        &self.abort
+        self.stages.teardown()
+    }
+
+    /// The two stages, as an operation of the API is handed them.
+    pub(crate) fn stages(&self) -> Stop {
+        self.stages.clone()
     }
 
     /// Trips the stages from `source`, one interrupt at a time.
     fn driven_by(mut source: impl Interrupts) -> Self {
-        let stop = CancellationToken::new();
-        let abort = CancellationToken::new();
-        let (stopping, aborting) = (stop.clone(), abort.clone());
+        let stages = Stop::new();
+        let tripped = stages.clone();
         let listener = tokio::spawn(async move {
             if source.next().await.is_none() {
                 return;
             }
-            stopping.cancel();
+            tripped.stop();
             if source.next().await.is_none() {
                 return;
             }
-            aborting.cancel();
+            tripped.abort();
             // Nothing after the second: this invocation has said
             // everything it has to say about being interrupted, and
             // what is left is the command unwinding.
         });
         Interrupt {
-            stop,
-            abort,
+            stages,
             listener: Some(listener),
         }
     }

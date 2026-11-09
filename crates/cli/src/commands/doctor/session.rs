@@ -15,7 +15,6 @@
 //! to be reported as itself.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use surco::components::{Check, Found};
 use surco::words::Standing;
@@ -50,7 +49,7 @@ nodes:
 /// given, with the prefix its CLI mounts its tools under. An adapter this
 /// binary does not build has no naming of its own, so the bare name stands in.
 fn submit_called(adapter: &AdapterId) -> String {
-    let naming = crate::commands::built_adapter(adapter)
+    let naming = yunta_api::machine::built_adapter(adapter)
         .map_or(ToolNaming::Bare, |built| built.capabilities().tool_naming);
     RunTool::Submit(ArtifactKind::Questions).called(naming)
 }
@@ -211,8 +210,8 @@ async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outco
         worktree: &prepared.worktree,
         adapters: &adapters,
         storage: &storage,
-        clock: Arc::new(ctx.clock),
-        ids: &ctx.ids,
+        clock: std::sync::Arc::clone(&ctx.clock),
+        ids: ctx.ids.as_ref(),
         // An empty questions document needs no human response.
         human_interaction: &yunta_core::port::NoInteraction,
         forge: None,

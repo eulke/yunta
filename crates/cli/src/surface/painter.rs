@@ -8,12 +8,12 @@ use std::time::Duration;
 use surco::glyphs::Glyphs;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
+use yunta_api::EventLog;
 use yunta_core::events::{StoredEvent, TerminalState};
 use yunta_core::{Clock, Manifest, RunId};
 use yunta_replay::frame::RunFrame;
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::RunState;
-use yunta_storage::AsyncStorage;
 
 pub(super) use super::draw::Draw;
 use super::feed::Beat;
@@ -42,7 +42,7 @@ pub(super) struct Painter {
     manifest: Manifest,
     folded: Folded,
     draw: Draw,
-    storage: AsyncStorage,
+    log: EventLog,
     clock: Arc<dyn Clock>,
     prior: Option<PriorEstimation>,
     /// Whether the hole in the stream was already there at the last beat.
@@ -80,7 +80,7 @@ impl Painter {
             manifest: env.manifest.clone(),
             folded: Folded::default(),
             draw,
-            storage: env.storage.clone(),
+            log: env.log.clone(),
             clock: Arc::clone(&env.clock),
             prior: env.prior.cloned(),
             stale_gap: false,
@@ -231,11 +231,7 @@ impl Painter {
             return;
         }
         let (state, frame) = self.reading();
-        // Only a parked run has a menu to rebuild, and rebuilding one is
-        // a walk of the run's state — asked exactly when the answer changes
-        // what the attention row says.
-        let answerable = matches!(frame.phase, yunta_replay::frame::RunPhase::Waiting { .. })
-            && yunta_engine::awaits_decision(&self.manifest, &state).is_some();
+        let answerable = yunta_api::offers_a_menu(&frame, &self.manifest, &state);
         if let Draw::Live(region) = &mut self.draw {
             region.show(&frame, &self.run_id, answerable);
         }
@@ -254,7 +250,7 @@ impl Painter {
     /// dropped comes back. The log is the truth; this is the surface
     /// admitting its copy is behind.
     async fn reread(&mut self) {
-        let Ok(events) = self.storage.events_for_run(self.run_id.clone()).await else {
+        let Ok(events) = self.log.events(&self.run_id).await else {
             // A read that failed leaves the surface exactly as behind as
             // it was, and the next beat asks again.
             return;

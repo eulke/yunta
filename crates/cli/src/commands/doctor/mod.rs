@@ -33,6 +33,7 @@ use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
+use crate::shell::Shell;
 use surco::components::{Check, Checklist, Fix, Found};
 use surco::look::Look;
 use yunta_core::port::ProbeReport;
@@ -43,12 +44,13 @@ use yunta_render::page::{Doctor, Page};
 use yunta_render::{command, declare};
 
 pub async fn doctor(
+    shell: &Shell,
     session: bool,
     full: bool,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+    let ctx = Context::of(shell)?;
     let mut checks = Checklist::default();
     let (healthy, answered) = probe_adapters(&ctx, &mut checks).await;
     match super::committer::committer(&ctx).await {
@@ -133,7 +135,7 @@ async fn checkouts(ctx: &Context, checks: &mut Checklist) {
         &ctx.project.worktrees_root,
         &ctx.cwd,
         limits,
-        std::sync::Arc::new(ctx.clock),
+        std::sync::Arc::clone(&ctx.clock),
     );
     match pool.report(ctx.supervision()).await {
         Ok(kept) => checks.push_check(kept_check(&kept)),
@@ -184,10 +186,10 @@ async fn probe_adapters(
         checks.push_check(check);
     }
     let answered = match healthy.is_empty() {
-        true => MachineAdapters::probed(&crate::detect::probe_known_adapters().await),
+        true => MachineAdapters::probed(&yunta_api::machine::probe_known_adapters().await),
         false => MachineAdapters {
             healthy: healthy.iter().cloned().collect(),
-            known: super::built_adapter_ids(),
+            known: yunta_api::machine::built_adapter_ids(),
         },
     };
     (healthy, answered)
@@ -239,14 +241,14 @@ async fn no_runner_declared(ctx: &Context, checks: &mut Checklist) -> MachineAda
         .iter()
         .flat_map(|(_, errors)| errors.iter().cloned())
         .collect();
-    let answered = MachineAdapters::probed(&crate::detect::probe_known_adapters().await);
+    let answered = MachineAdapters::probed(&yunta_api::machine::probe_known_adapters().await);
     let detected = Detected {
         adapters: answered.clone(),
         ..Detected::default()
     };
     // The errors are all about runners, so what answers them is the one
     // runner to declare.
-    let fix = crate::detect::suggestions(&errors, &detected)
+    let fix = yunta_api::machine::suggestions(&errors, &detected)
         .pop()
         .unwrap_or_else(|| declare::runners(&[], true, &answered));
     let names: Vec<&str> = needing.iter().map(|(name, _)| name.as_str()).collect();
@@ -273,8 +275,10 @@ async fn no_runner_declared(ctx: &Context, checks: &mut Checklist) -> MachineAda
 /// Every catalog workflow that names a runner the config lacks, with
 /// what `check` says about each.
 fn needing_a_runner(ctx: &Context) -> Vec<(String, Vec<yunta_core::check::CheckError>)> {
-    let facts = super::declared_facts(&ctx.project.config);
-    super::list::catalog_workflows(&ctx.cwd)
+    let facts = yunta_api::machine::declared_facts(&ctx.project.config);
+    ctx.project
+        .workspace
+        .catalog_workflows()
         .into_iter()
         .map(|(name, workflow)| {
             let errors = yunta_engine::check(&workflow, &ctx.project.config, &facts)

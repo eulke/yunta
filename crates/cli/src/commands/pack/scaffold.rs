@@ -15,6 +15,7 @@ use super::audit::run_cases;
 use crate::error::CliError;
 use crate::output::show;
 use crate::output::Outcome;
+use crate::shell::Shell;
 
 // Written as literal templates (not built from the typed values) so the
 // generated files read exactly as an author would write them; `{{name}}`
@@ -126,8 +127,8 @@ fn filled(template: &str, pack: &PackRef) -> String {
 /// then the pack is checked and its case is run, so a freshly
 /// scaffolded pack passes from the first command. Refuses to write
 /// over an existing directory.
-pub async fn new_pack(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+pub async fn new_pack(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
+    let cwd = shell.workspace().dir.clone();
     let dir = cwd.join(pack.name().as_str());
     if dir.exists() {
         return Err(CliError::msg(format!(
@@ -165,7 +166,7 @@ pub async fn new_pack(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> 
         checked,
     };
     // The files are on disk whatever stopped the check of them.
-    let checked = check_pack(&dir, &workflow)
+    let checked = check_pack(shell, &dir, &workflow)
         .await
         .inspect_err(|_| show(look, &page(None)))?;
     show(look, &page(Some(&checked)));
@@ -197,13 +198,17 @@ async fn write_under(dir: &Path, rel: &str, contents: &str) -> Result<(), CliErr
 /// Checks the scaffolded workflow against the pack's own self-test config,
 /// and runs the pack's case when the check passes. A check that fails
 /// reports every problem and runs nothing.
-async fn check_pack(dir: &Path, workflow: &Workflow) -> Result<NewPackCheck, CliError> {
+async fn check_pack(
+    shell: &Shell,
+    dir: &Path,
+    workflow: &Workflow,
+) -> Result<NewPackCheck, CliError> {
     let config = ConfigLayer::merge_layers(
-        crate::project::load_named_layers(dir)?
+        yunta_api::config_layers(dir, &shell.workspace().env)?
             .into_iter()
             .map(|(_, layer)| layer),
     );
-    let facts = crate::commands::declared_facts(&config);
+    let facts = yunta_api::machine::declared_facts(&config);
     let errors = yunta_engine::check(workflow, &config, &facts);
     if !errors.is_empty() {
         let problems = errors
@@ -215,7 +220,5 @@ async fn check_pack(dir: &Path, workflow: &Workflow) -> Result<NewPackCheck, Cli
             problems,
         });
     }
-    let interrupt = crate::interrupt::Interrupt::ctrl_c()
-        .map_err(|source| CliError::io("install the interrupt handler for", "pack new", source))?;
-    Ok(NewPackCheck::Tested(run_cases(dir, interrupt).await))
+    Ok(NewPackCheck::Tested(run_cases(shell, dir).await))
 }

@@ -5,11 +5,47 @@
 use std::path::Path;
 
 use crate::command;
+use surco::words::Standing;
 use yunta_core::events::{Claim, FailureMenu, Refusal};
 use yunta_core::inputs::InputsProblem;
 use yunta_core::refusal::{AnswersRefusal, CloseRefusal, GateRefusal};
-use yunta_core::step::{Arg, NextStep};
+use yunta_core::step::{Arg, NextStep, Reach};
 use yunta_core::{PackRef, Pid};
+use yunta_replay::receipt::ReceiptError;
+
+/// What `last` says where the repository it is asked in has no run, and the
+/// command that lists every run instead.
+pub(super) fn no_run_here() -> String {
+    format!(
+        "no run in this repository; `{}` lists every run",
+        command::line(&NextStep::ListRuns {
+            reach: Reach::Machine
+        })
+    )
+}
+
+/// What `needs` says where no run of the repository it is asked in waits on a
+/// person, and the command that lists them.
+pub(super) fn none_needs_you() -> String {
+    format!(
+        "no run of this repository {}; `{}` lists them",
+        Standing::NeedsYou.word(),
+        command::line(&NextStep::ListRuns {
+            reach: Reach::Repository
+        })
+    )
+}
+
+/// What a receipt asked of a run that has not finished says: the state the
+/// run is in, then the command that shows where it stands, which is this
+/// border's vocabulary rather than the derivation's.
+pub(super) fn no_receipt(error: &ReceiptError) -> String {
+    let ReceiptError::NotFinished(run) = error;
+    format!(
+        "{error}; `{}` shows where it is",
+        command::line(&NextStep::status(run))
+    )
+}
 
 /// What a run another engine drives says: whose it is.
 pub fn moving(run: &str, pid: Pid) -> String {

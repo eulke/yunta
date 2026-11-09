@@ -176,7 +176,14 @@ async fn create_and_detach(
     // is in there and it is dropped. Left as it is, it names a dead
     // process the moment this one exits, and the next run takes over a
     // checkout the child is still working in.
-    match spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd).await {
+    match spawn_detached_resume(
+        &prepared.run_dir,
+        prepared.run_id.as_str(),
+        &ctx.cwd,
+        &ctx.binary,
+    )
+    .await
+    {
         Ok(child) => {
             hand_off(child, isolation, &ctx.cwd, ctx.teardown()).await?;
             Ok(prepared.run_id)

@@ -41,11 +41,11 @@ impl Listening {
         };
         let path = socket.to_path_buf();
         let task = tokio::spawn(async move {
-            let Ok(mut hearing) = yunta_engine::said::connect(&path).await else {
+            let Some(mut words) = yunta_api::Words::hear(&path).await else {
                 return;
             };
-            while let Some(heard) = hearing.next().await {
-                ear.said(&heard.said);
+            while let Some(said) = words.next().await {
+                ear.said(&said);
             }
         });
         self.to = Some((socket.to_path_buf(), task));

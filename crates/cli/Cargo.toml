@@ -18,6 +18,8 @@ path = "src/main.rs"
 yunta-core.workspace = true
 yunta-engine.workspace = true
 yunta-replay.workspace = true
+# What can be asked of Yunta, handed the workspace this process reads once.
+yunta-api.workspace = true
 # The shape every MCP result of Yunta takes, which the control plane answers in.
 yunta-mcp-protocol.workspace = true
 yunta-render.workspace = true

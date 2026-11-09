@@ -18,7 +18,7 @@ use yunta_adapters::MOCK_ID;
 use yunta_core::caution::Caution;
 use yunta_core::check::CheckError;
 use yunta_core::step::{Arg, NextStep};
-use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, RunAdapter, Workflow};
+use yunta_core::{AdapterId, InputName, Manifest, ModeName, RunAdapter, Workflow};
 use yunta_engine::FrozenRun;
 use yunta_render::command;
 use yunta_replay::history::PriorEstimation;
@@ -37,6 +37,7 @@ use crate::error::CliError;
 use crate::output::warn;
 use crate::output::Mode;
 use crate::output::Outcome;
+use crate::shell::Shell;
 use mode::resolve_mode;
 use surco::look::Look;
 use yunta_render::document::PreRunWarnings;
@@ -85,6 +86,7 @@ async fn count_non_terminal_runs(
 /// its end, or handed to a detached child that outlives this process.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
+    shell: &Shell,
     workflow_path: &Path,
     raw_inputs: &[String],
     adapter: Option<&AdapterId>,
@@ -94,7 +96,7 @@ pub async fn run(
     detach: bool,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+    let ctx = Context::of(shell)?;
     let storage = ctx.async_storage().await?;
     let mock_fixture = mock_fixture(adapter, fixture, detach)?;
 
@@ -319,8 +321,7 @@ async fn estimate(
     output: Mode,
     look: &Look,
 ) -> (Option<PriorEstimation>, Option<Caution>) {
-    let history = super::stats::budget_sample(ctx, manifest, mode, None).await;
-    let estimation = yunta_replay::history::PriorEstimation::of(&history);
+    let estimation = ctx.project.prior_estimation(manifest, mode, None).await;
     if let Some(estimation) = &estimation {
         crate::output::progress(
             output,
@@ -418,9 +419,7 @@ pub(super) async fn create_run_from(
         // or — for a run whose units build — the one holding the least.
         yunta_core::Isolation::Worktree => {
             let run_dir = ctx.project.runs_root.join(run_id.as_str());
-            let pool =
-                ctx.project
-                    .pool_of(manifest, &ctx.cwd, &run_dir, std::sync::Arc::new(ctx.clock));
+            let pool = ctx.pool_of(manifest, &run_dir);
             let birth = yunta_engine::Birth::of(&manifest.workflow);
             let (checkout, _held) = pool
                 .open_run(&run_id, &manifest.base_commit, birth, ctx.supervision())

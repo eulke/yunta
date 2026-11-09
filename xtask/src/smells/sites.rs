@@ -280,7 +280,7 @@ fn count_system_clock_outside_boundary(root: &Path) -> usize {
     outside(
         root,
         &[Text("SystemClock"), Text("Utc::now")],
-        &["crates/core/src/clock.rs", "crates/cli/src/context.rs"],
+        &["crates/core/src/clock.rs", "crates/cli/src/shell.rs"],
     )
 }
 
@@ -331,7 +331,7 @@ fn count_sleep_outside_mock_latency(root: &Path) -> usize {
         &[
             "crates/adapters/src/mock/script.rs",
             "crates/testkit*/src/wait.rs",
-            "crates/engine/src/pace.rs",
+            "crates/core/src/pace.rs",
         ],
     )
 }

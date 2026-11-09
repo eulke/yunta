@@ -64,17 +64,15 @@ pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Wat
     } else {
         // The run's creation is written before any observer exists, so the
         // first thing the surface knows is read once, here.
-        let seed = env
-            .storage
-            .events_for_run(env.prepared.run_id.clone())
-            .await?;
+        let log = env.ctx.project.event_log().await?;
+        let seed = log.events(&env.prepared.run_id).await?;
         Some(Surface::open(
             SurfaceEnv {
                 run_id: &env.prepared.run_id,
                 manifest: env.manifest,
                 prior: env.prior.as_ref(),
-                storage: env.storage,
-                clock: std::sync::Arc::new(env.ctx.clock),
+                log: &log,
+                clock: std::sync::Arc::clone(&env.ctx.clock),
                 delivery: shown.delivery,
                 glyphs: shown.glyphs,
                 engine: EngineReading::This,

@@ -32,16 +32,13 @@ pub mod test;
 pub(crate) mod verdict;
 pub mod verify;
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, CLAUDE_CODE_ID, CODEX_ID};
 use yunta_core::events::PauseReason;
-use yunta_core::port::{Adapter, ProbeReport};
+use yunta_core::port::ProbeReport;
 use yunta_core::step::NextStep;
-use yunta_core::{AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Workflow};
+use yunta_core::{Pid, RunId, Workflow};
 use yunta_render::command;
 use yunta_replay::RunState;
 
@@ -96,13 +93,14 @@ pub(crate) async fn spawn_detached_resume(
     run_dir: &Path,
     run_id: &str,
     cwd: &Path,
+    binary: &Path,
 ) -> std::io::Result<Pid> {
     let log_path = run_dir
         .join(yunta_engine::run_dir::SCRATCH_DIR)
         .join("detached.log");
     let log = detached_log(&log_path).await?;
     let log_err = log.try_clone()?;
-    let mut child_cmd = tokio::process::Command::new(crate::context::own_binary());
+    let mut child_cmd = tokio::process::Command::new(binary);
     child_cmd
         .arg("resume")
         .arg(run_id)
@@ -149,136 +147,12 @@ pub(crate) fn reset_at(state: &RunState) -> Option<DateTime<Utc>> {
     }
 }
 
-/// The adapters a run executes its sessions on, by the name `runners:`
-/// reaches each one under. Named beside the function that builds it, so
-/// every caller that passes a registry around spells the same type.
-pub(crate) type Adapters = HashMap<AdapterId, Arc<dyn Adapter>>;
-
-/// Every adapter this binary builds, with `settings` applied to each —
-/// the composition root's one declaration of what a real invocation can
-/// run on. Adding an adapter is adding a line here: what `runners:` may
-/// name, what `doctor` probes, what `init` offers and what a refusal
-/// lists all read from this.
-///
-/// The mock is not among them. Mock fixtures stay routed through `yunta
-/// test`, so a real run never gets a simulated agent.
-pub(crate) fn built_adapters(
-    settings: impl Fn(&AdapterId) -> AdapterSettings,
-) -> Vec<Arc<dyn Adapter>> {
-    vec![
-        Arc::new(ClaudeCodeAdapter::new(&settings(&CLAUDE_CODE_ID))),
-        Arc::new(CodexAdapter::new(&settings(&CODEX_ID))),
-    ]
-}
-
-/// Every variable a built adapter reaches its service by, once each: what
-/// the shell captures so a probe reaches the endpoint the adapter's CLI
-/// will, without anything below the shell reading the process.
-pub(crate) fn service_vars() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = built_adapters(|_| AdapterSettings::default())
-        .iter()
-        .flat_map(|adapter| adapter.service_vars().iter().copied())
-        .collect();
-    names.sort_unstable();
-    names.dedup();
-    names
-}
-
-/// What every adapter this binary builds declares it can do, and what its
-/// sandbox is set to for an `edit` session, each under the settings the
-/// config gives it: what `check` judges a workflow's `permissions:` and
-/// `agent:` against. `None` for an adapter this binary does not build: a
-/// capability it cannot see is not one it can call absent.
-pub(crate) fn declared_facts(
-    config: &ConfigLayer,
-) -> impl Fn(&AdapterId) -> Option<yunta_engine::AdapterFacts> {
-    let configured = config.adapters.clone().unwrap_or_default();
-    let built_facts: Vec<(AdapterId, yunta_engine::AdapterFacts)> =
-        built_adapters(|id| configured.get(id).cloned().unwrap_or_default())
-            .iter()
-            .map(|built| {
-                let facts = yunta_engine::AdapterFacts {
-                    capabilities: built.capabilities(),
-                    edit_sandbox: built.edit_sandbox(),
-                };
-                (built.id().clone(), facts)
-            })
-            .collect();
-    move |id| {
-        built_facts
-            .iter()
-            .find(|(built, _)| built == id)
-            .map(|(_, facts)| facts.clone())
-    }
-}
-
-/// The adapter this binary built under `id`, constructed without a
-/// probe: what a rail hook needs to reach one adapter's codec.
-pub(crate) fn built_adapter(id: &AdapterId) -> Option<std::sync::Arc<dyn Adapter>> {
-    built_adapters(|_| AdapterSettings::default())
-        .into_iter()
-        .find(|built| built.id() == id)
-}
-
-/// What this binary can run on, as a person reads it: every built
-/// adapter's own id, in order, comma-separated — the phrase a refusal
-/// ends with, derived rather than written.
-pub(crate) fn built_adapter_names() -> String {
-    surco::text::listed(built_adapter_ids().iter().map(AdapterId::as_str))
-}
-
-/// Every adapter this binary builds, by its own id, in the order the
-/// composition root declares them.
-pub(crate) fn built_adapter_ids() -> Vec<AdapterId> {
-    built_adapters(|_| AdapterSettings::default())
-        .iter()
-        .map(|adapter| adapter.id().clone())
-        .collect()
-}
-
-/// The id a surface names when it shows what a `runners:` entry looks
-/// like. The first this binary builds, so the example is always an
-/// adapter that exists.
-pub(crate) fn first_built_adapter() -> AdapterId {
-    built_adapters(|_| AdapterSettings::default())
-        .first()
-        .map(|adapter| adapter.id().clone())
-        .unwrap_or_else(|| CLAUDE_CODE_ID.clone())
-}
-
-/// The adapters a real invocation offers: those of [`built_adapters`]
-/// that `runners:` names as a candidate somewhere in the merged config,
-/// each with that adapter's own settings (a `binary` override, if
-/// declared).
-pub(crate) fn real_adapters(config: &ConfigLayer) -> Adapters {
-    let named: Vec<&AdapterId> = config
-        .runners
-        .iter()
-        .flatten()
-        .flat_map(|(_, candidates)| candidates.iter())
-        .map(|candidate| &candidate.adapter)
-        .collect();
-
-    built_adapters(|id| {
-        config
-            .adapters
-            .as_ref()
-            .and_then(|adapters| adapters.get(id))
-            .cloned()
-            .unwrap_or_default()
-    })
-    .into_iter()
-    .filter(|adapter| named.contains(&adapter.id()))
-    .map(|adapter| (adapter.id().clone(), adapter))
-    .collect()
-}
-
 /// Refuses early when one of `nodes`, the nodes a run reaches, needs an
 /// agent session and no available adapter can provide one: an error in
 /// check, never emulation at runtime.
 pub(crate) fn refuse_unrunnable(
     nodes: &[&yunta_core::Node],
-    adapters: &Adapters,
+    adapters: &yunta_api::machine::Adapters,
 ) -> Result<(), CliError> {
     let needs_sessions = nodes.iter().any(|node| node.opens_session());
     if needs_sessions && adapters.is_empty() {
@@ -287,7 +161,7 @@ pub(crate) fn refuse_unrunnable(
              names no adapter this binary can run (built: {built}). To exercise this\n\
              workflow with the `mock` adapter instead, declare a test case under\n\
              .yunta/tests/ and run `{test}`.",
-            built = built_adapter_names(),
+            built = yunta_api::machine::built_adapter_names(),
             test = command::line(&NextStep::Test { dir: None })
         )));
     }
@@ -300,7 +174,9 @@ pub(crate) fn refuse_unrunnable(
 /// unhealthy. `yunta doctor` calls the same adapters' `probe()` directly
 /// instead of through this helper, since it reports every result as a
 /// check of its own rather than refusing.
-pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError> {
+pub(crate) async fn probe_or_refuse(
+    adapters: &yunta_api::machine::Adapters,
+) -> Result<(), CliError> {
     let mut unhealthy = Vec::new();
     for (name, adapter) in adapters {
         match adapter.probe().await {
@@ -409,7 +285,8 @@ pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, output: Mode, loo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yunta_core::describe;
+    use yunta_api::machine::{built_adapters, Adapters};
+    use yunta_core::{describe, AdapterSettings};
 
     #[tokio::test]
     async fn a_later_link_of_a_detached_chain_adds_to_the_log() {
@@ -456,18 +333,5 @@ mod tests {
                 adapter.id()
             );
         }
-    }
-
-    /// The example a surface offers is an adapter that exists, so
-    /// copying the line it prints produces a config this binary can run.
-    #[test]
-    fn the_example_a_surface_offers_is_an_adapter_this_binary_builds() {
-        let example = first_built_adapter();
-        assert!(
-            built_adapters(|_| AdapterSettings::default())
-                .iter()
-                .any(|adapter| *adapter.id() == example),
-            "`{example}` is offered as an example and is not built"
-        );
     }
 }

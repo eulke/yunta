@@ -335,18 +335,18 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 - `crates/api`, package `yunta-api`, library `yunta_api`, with the dependencies the plan's decision 2 names; its root's `//!` maps the crate by the subjects of decision 4.
 - `workspace.rs`: `Workspace`, the six fields of decision 3. `stop.rs`: `Stop`, its two stages, and the engine's `Supervision` built from it inside the crate.
 - `error.rs`: `Error { Refused(Refused), Failed(Failure), Stopped }`; `Failure` boxes the cause and says its chain as the CLI's `describe` says it.
-- `.agents/architecture.md`'s table gains the row.
+- `.agents/architecture.md`'s table gains the row; the crate names what it uses so far (core, render, and the engine from Task 15), and the CI's and the gate's crate-by-crate check name it. The file stands at its budget: a few rows and sentences say the same facts in fewer words.
 
 **Fails first:**
 - `Failure`'s words: a test that a store failure wrapped twice says the same line `describe` says for it today, red until `Failure` says its chain.
 - `Stop`: a test that stopping cancels what runs and leaves the abort standing, and that aborting cancels both, red until `Stop` holds two tokens.
 
 **Acceptance criteria:**
-- [ ] The crate builds with no public item that takes or returns an engine, store or adapter type.
-- [ ] Both tests pass; `cargo xtask docs --check` passes.
+- [x] The crate builds with no public item that takes or returns an engine, store or adapter type.
+- [x] Both tests pass; `cargo xtask docs --check` passes.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`.
+- [x] Tests pass: `cargo test -p yunta-api`.
 
 **Dependencies:** Checkpoint A
 
@@ -360,16 +360,18 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 - `crates/cli/src/shell.rs` replaces `context.rs`'s reading of the process: the directory, `Env`, the clock, the id source, the secrets, the binary (`current_exe`), and the interrupt, which gives the `Stop`. It builds the `Workspace` and the `Stop` once.
 - `main.rs` builds the shell first; the terminal's variables it reads for the look come from the shell's `Env`.
 - `process_env()` (five callers), `process_clock()`, `own_binary()`, `time_until`'s own clock and the `current_dir` reads in `init`, `list`, `new`, `pack`, `pack/scaffold` and `test` go: each takes the workspace.
-- The MCP server reads its directory once when it starts, not at each call.
+- The MCP server reads its directory once when it starts, not at each call: it holds a shell that shares the stages.
+- `main`'s reads go there too: `shell::environment()` and `shell::arguments()`. The router reads the shell once for every command, `completions`, `schema` and the rail hook included, so no arm can read it twice and none is left without it; `route` holds the arms, and no command answers the field.
+- The CLI's interrupt trips the API's `Stop`; the context is `Context::of(shell)` or `Context::in_dir(shell, dir)`, its clock and ids the workspace's `Arc`s, its binary the shell's. `system_clock_outside_boundary` allows `shell.rs` in place of `context.rs` now, since the clock is built there.
 
 **Fails first:** none: the same values reach the same places.
 
 **Acceptance criteria:**
-- [ ] `git grep -n 'current_dir()\|current_exe()\|process_env\|process_clock\|args_os' -- crates/cli/src` finds only `shell.rs`.
-- [ ] The suite passes unchanged.
+- [x] `git grep -n 'current_dir()\|current_exe()\|process_env\|process_clock\|args_os' -- crates/cli/src` finds only `shell.rs`.
+- [x] The suite passes unchanged.
 
 **Verification:**
-- [ ] Tests pass: `suite.py cli-1..5`.
+- [x] Tests pass: `suite.py cli-1..5`.
 
 **Dependencies:** Task 13
 
@@ -382,37 +384,40 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 **Description:**
 - `Workspace::project()` returns `yunta_api::Project`, from `crates/cli/src/project.rs` and `context.rs`: the config layers, the roots, the store's path, a run's directory, the pool and tree a run uses, and the layers `yunta schema`'s config reading names.
 - `ProjectError`'s cases become the API's: a missing state root and an unreadable layer are failures; none is a refusal today.
-- What a project remarks while it resolves (an unknown key) reaches the caller through `yunta_api::remark::Remarks`, a sink of `Remark`s the caller passes, in order: what an operation says while it works, said by render. Not a session's note, and not Surco's `Note`. The CLI says each one where it said it.
+- Measured: resolving a project says nothing on the way, so `Remarks` is born with its first sayer, an estimate's caution (Task 25).
+- `Workspace::project()` and `project_at(dir)` resolve it; `config_layers(dir, env)` reads the layers `yunta check` names. The project holds the user root it was resolved under, so finding a run reads no environment.
+- The pool a run takes its trees from is the engine's, so it stays on the CLI's context (`Context::pool_of`) until the run path moves; `bound_checkout` was a wrapper of replay's `state.run.checkout()`, which its callers read directly.
 - The CLI's `Project` is gone; its `Context` holds the API's `Project` and, until their last user moves, the store and the supervision the remaining commands use.
 
 **Fails first:** none: every project resolves as it did.
 
 **Acceptance criteria:**
-- [ ] The CLI has no `project.rs`; every project resolves through `Workspace::project()`.
-- [ ] The suite passes unchanged, and the captures equal the base's.
+- [x] The CLI has no `project.rs`; every project resolves through `Workspace::project()`.
+- [x] The suite passes unchanged, and the captures equal the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
+- [x] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
 
 **Dependencies:** Task 14
 
-**Files likely touched:** `crates/api/src/{project.rs,remark.rs,lib.rs}`, `crates/cli/src/{project.rs,context.rs,error.rs,commands/schema.rs}`
+**Files likely touched:** `crates/api/src/{project.rs,workspace.rs,lib.rs}`, `crates/cli/src/{project.rs,context.rs,error.rs,commands/schema.rs}`
 
 **Estimated scope:** M
 
 ### Task 16: the adapters a binary builds are the API's
 
 **Description:**
-- `yunta_api::machine::adapters` takes from `commands/mod.rs`: `built_adapters`, `built_adapter`, `built_adapter_names`, `built_adapter_ids`, `first_built_adapter`, `service_vars` and `declared_facts`, with the adapters' ids they name.
+- `yunta_api::machine` takes from `commands/mod.rs`: `built_adapters`, `built_adapter`, `built_adapter_names`, `built_adapter_ids`, `first_built_adapter`, `real_adapters`, `service_vars`, `declared_facts` and the `Adapters` they make, with the adapters' ids they name. Its test of the example a surface offers moves with it.
+- What `check` knows of an adapter, `AdapterFacts`, is check data like the rest: it moves to `core::check`, so `declared_facts` names no engine type.
 - Every caller asks the API.
 
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] `commands/mod.rs` names no adapter crate; the suite passes unchanged.
+- [x] `commands/mod.rs` names no adapter crate; the suite passes unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
+- [x] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
 
 **Dependencies:** Task 15
 
@@ -424,15 +429,16 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 
 **Description:**
 - `crates/cli/src/detect/` moves with `git mv` to `crates/api/src/machine/detection/`, with its tests: what a repository is, what it runs, and its remote.
+- `in_repo(workspace, repo, stop)` builds the supervision git reads the remote under from the workspace and the caller's `Stop`, inside the API (`Workspace::supervision`); a stop while it reads is `Error::Stopped`. The CLI's context carries the workspace and gives the stop, for the commands still outside the API.
 - `init`, `doctor` and the pages that show `Detected` ask the API.
 
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] The CLI has no `detect` module; the detection tests pass in the API, unchanged.
+- [x] The CLI has no `detect` module; the detection tests pass in the API, unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, the CLI's `detected_cmd` target, `suite.py cli-1..5`.
+- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `detected_cmd` target, `suite.py cli-1..5`.
 
 **Dependencies:** Task 16
 
@@ -440,29 +446,9 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 
 **Estimated scope:** M (mechanical)
 
-### Task 18: the catalog is the API's
-
-**Description:**
-- `Project::catalog()` returns render's `Catalog` data, from `commands/list/mod.rs`: the workflows here, the installed packs' and their publishers'.
-- `yunta list --workflows` and the MCP tool `list_workflows` call it.
-
-**Fails first:** none: the same catalog.
-
-**Acceptance criteria:**
-- [ ] One function reads the catalog for both; `list`'s captures and `list_workflows`' answer equal the base's.
-
-**Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, the CLI's `run_inbox_cmd`, `pack_resolution_cmd` and `mcp_flow` targets.
-
-**Dependencies:** Task 15
-
-**Files likely touched:** `crates/api/src/catalog.rs`, `crates/cli/src/commands/{list/mod.rs,mcp/tools.rs}`
-
-**Estimated scope:** S
-
 ### Group check: the workspace
-- [ ] The CLI resolves every project through the API; the environment is read once.
-- [ ] The suite and the captures equal the base's.
+- [x] The CLI resolves every project through the API; the environment is read once.
+- [x] The suite and the captures equal the base's.
 
 ### Task 19: the field is the API's
 
@@ -471,15 +457,16 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 - `yunta list` and `yunta list --runs` ask it.
 - Its answer document moves to `render::document` with it, its fields read off what the API returns.
 - Found in Phase 1: `list --runs --json` writes each row's reason and words with this terminal's glyphs, so `YUNTA_GLYPHS=ascii` changes the document, while a run's document always writes Unicode. A document reads the same whichever terminal asked for it: the field's rows take Unicode, as a run's do, and the glyphs leave `document::field::rows`.
+- Found in Task 19's turn: how deep a listing reads is the page's, never the reading's, so the API takes `Project::field(FieldReach::Here | Machine, &stop)` and returns a `FieldReading`, named apart from render's page; core's `step::Reach` stays the command line's. A project carries the workspace it was resolved from, which its operations read the directory, clock and environment from, so the context's own copy goes. A git the caller's stop cancelled is `Error::Stopped`, in one conversion. render's `FieldDocument` is the whole listing document, which the CLI's answer serializes.
 
 **Fails first:** a test that `list --runs --json` under `YUNTA_GLYPHS=ascii` writes the same document as without it, red while the rows take the terminal's glyphs.
 
 **Acceptance criteria:**
-- [ ] `list --runs --json` writes one document whatever glyphs the terminal asks for; `list`'s page still draws them.
-- [ ] `inbox.rs` names no engine or store; `list`'s captures and documents equal the base's.
+- [x] `list --runs --json` writes one document whatever glyphs the terminal asks for; `list`'s page still draws them.
+- [x] `inbox.rs` names no engine or store; `list`'s captures and documents equal the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, the CLI's `run_inbox_cmd`, `stalled_runs` and `surface_parity` targets.
+- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `run_inbox_cmd`, `stalled_runs` and `surface_parity` targets.
 
 **Dependencies:** Task 18
 
@@ -492,14 +479,15 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 **Description:**
 - `Project::run(&RunRef)` resolves a reference (`last`, a handle, an id) and returns an `OpenedRun`: its manifest and directory. The resolving moves from `commands/run_ref.rs`; `RunArg`, clap's, stays in the CLI.
 - `Context::open_run`, `near_run` and `run_roots` move with it; a run nobody has and a reference that names several are the API's refusals.
+- Found in Task 20's turn: a reference names a run and an id opens one, two questions an interface asks apart (a person types a reference, the field and the control plane hold ids), so the API answers `Project::find(&RunRef, &stop) -> RunId` and `Project::run(&RunId) -> OpenedRun { id, dir, manifest, events }`. A candidate of an ambiguous reference holds its field row and render draws it with the reader's glyphs, so the API refuses without reading a terminal. `last` with no run, `needs` with none waiting and a text no id can be are render's refusals, said as before.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] Every command that names a run opens it through the API; a missed id still says the near one.
+- [x] Every command that names a run opens it through the API; a missed id still says the near one.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
+- [x] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
 
 **Dependencies:** Task 19
 
@@ -512,14 +500,15 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 **Description:**
 - `OpenedRun::reading(depth)` returns a `RunReading`: its state, frame, decision, documents and plans, with the engine that drives it and the branch.
 - `status`, `status --node`, `graph` and the JSON's decision read it; the documents of Task 12 take the decision from it.
+- Found in Task 21's turn: an opened run is asked again, so `OpenedRun<'p>` keeps the project it was opened in, and `reading()` takes no depth: how deep a page reads is the page's, and the reading answers `waits_on`, `shown`, `produced(node)` and `plans()` when a page asks. `graph` reads `frame()`, which rebuilds no decision, so a run with an unreadable document still draws. The reading's frame carries the estimate a run parked on its budget was told, which reads the workflow's history, so `Project::history` (`WorkflowHistory`), `prior_estimation` and `budget_prior` come here from Task 22, and `status/decision.rs` goes: the drive calls the engine's two readers itself until it moves. A `RunError` the API meets is a refusal, the stop, or a failure, in one conversion.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `status/mod.rs`, `graph.rs` and render's documents name no engine; their captures and documents equal the base's.
+- [x] `status/mod.rs`, `graph.rs` and render's documents name no engine; their captures and documents equal the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, the CLI's `status_cmd`, `status_node_cmd`, `status_nodes_cmd`, `status_page_cmd` and `graph_cmd` targets.
+- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `status_cmd`, `status_node_cmd`, `status_nodes_cmd`, `status_page_cmd` and `graph_cmd` targets.
 
 **Dependencies:** Task 20
 
@@ -530,16 +519,17 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 ### Task 22: a run's stats, history, receipt, verification and open page
 
 **Description:**
-- `OpenedRun::stats()`, `Project::history(&workflow)`, `OpenedRun::receipt()`, `OpenedRun::verification()` and `OpenedRun::opened()` return the data `stats`, `stats --workflow`, `receipt`, `verify` and `open` draw.
+- `OpenedRun::stats()`, `OpenedRun::receipt()`, `OpenedRun::verification()` and `OpenedRun::opened()` return the data `stats`, `receipt`, `verify` and `open` draw; `stats --workflow` reads `Project::history`, which Task 21 brought.
 - `verify`'s answer document moves to `render::document` with it, its fields read off what the API returns.
+- Found in Task 22's turn: `OpenedRun::stats()` returns a `StatsReading` (the frame, the counts, the project's prices). `OpenedRun::receipt()` derives the receipt and writes both formats beside the run, which a later node reads, so every interface leaves them; a run not finished is render's `Refused::NoReceipt`. A run is verified by its id, `Project::verification(&id)`, never opened, because the chain answers about a log whose payloads no longer parse; it returns render's `Verification` (the chain, and what reading the objects found), whose `checks()` render says, and `VerificationDocument` writes them. `open` draws the reading Task 21 gave it; the page file it writes and the browser it asks for are how a terminal shows a page, which a desktop shows its own way, so no `opened()` operation. render's documents each have one path at `document::`.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] Those five commands name no engine or store; their captures equal the base's.
+- [x] Those five commands name no engine or store; their captures equal the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, the CLI's `stats_cmd`, `receipt_cmd`, `verify_cmd`, `open_cmd` and `verification_effectiveness_cmd` targets.
+- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `stats_cmd`, `receipt_cmd`, `verify_cmd`, `open_cmd` and `verification_effectiveness_cmd` targets.
 
 **Dependencies:** Task 21
 
@@ -552,20 +542,43 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 **Description:**
 - `OpenedRun::follow()` reads the run's heads, its log after a seq, whom its engine asks, and its words over the socket (`said::connect`'s reader).
 - `status --follow`, the live region's gaps (`surface/mod.rs`, `painter.rs`, `turns.rs`) and the MCP tool `workflow_status` read it.
+- Found in Task 23's turn: what follows a moving run is held by a task that draws it, so the API hands owned handles rather than one borrowing the project: `EventLog` (a run's log, what came past a seq, the runs it holds), `RunRegistry` (the process driving a run, and its successor's registry) and `Words` (what the sessions say on the registry's socket). `offers_a_menu` decides a parked run's menu for the field's rows and the region's alike. The drive opens an `EventLog` for its region and its closing until it moves into the API, which then builds it on the store it drives with. `Pace`, the cadence of a poll over state another process owns, moves to `core::pace`, since the engine, `cancel` and the follower all space their looks with it. The workflow_status tool reads the run as Task 21 left it.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] The surface and `status --follow` name no engine or store; the follow tests and `workflow_status`' answers equal the base's.
+- [x] The surface and `status --follow` name no engine or store; the follow tests and `workflow_status`' answers equal the base's.
 
 **Verification:**
-- [ ] Tests pass: the CLI's `status_follow`, `live_motion`, `run_words`, `run_surface` and `mcp_flow` targets.
+- [x] Tests pass: the CLI's `status_follow`, `live_motion`, `run_words`, `run_surface` and `mcp_flow` targets.
 
 **Dependencies:** Task 21
 
 **Files likely touched:** `crates/api/src/run/follow.rs`, `crates/cli/src/commands/status/{follow.rs,follow/listen.rs}`, `crates/cli/src/surface/{mod.rs,painter.rs,turns.rs}`, `crates/cli/src/commands/mcp/tools.rs`
 
 **Estimated scope:** M
+
+### Task 18: the catalog is the API's
+
+**Description:**
+- `Project::catalog()` returns render's `Catalog` data, from `commands/list/mod.rs`: the workflows here, the installed packs' and their publishers'.
+- `yunta list --workflows` and the MCP tool `list_workflows` call it.
+- Found in Task 18's turn: each entry's estimate reads the workflow's history off the store, which the API reads from Task 22 on; so the catalog follows it, and `catalog_workflows`, which `doctor` and the forge read, goes with it.
+- Found in Task 18's turn: what the catalog offers is read off the repository alone, and `list --workflows` lists in a project that does not resolve, only without estimates; so the catalog is the workspace's, `Workspace::catalog()` and `Workspace::catalog_workflows()`, and the project is tried for the history only.
+
+**Fails first:** none: the same catalog.
+
+**Acceptance criteria:**
+- [x] One function reads the catalog for both; `list`'s captures and `list_workflows`' answer equal the base's.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `run_inbox_cmd`, `pack_resolution_cmd` and `mcp_flow` targets.
+
+**Dependencies:** Task 22
+
+**Files likely touched:** `crates/api/src/catalog.rs`, `crates/cli/src/commands/{list/mod.rs,mcp/tools.rs}`
+
+**Estimated scope:** S
 
 ### Task 24: the wait after a host sleeps is core's
 
@@ -575,10 +588,10 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] `surface/chronicle/words.rs` reads it from core; `host_suspension` passes unchanged.
+- [x] `surface/chronicle/words.rs` reads it from core; `host_suspension` passes unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-engine --test host_suspension`, the CLI's chronicle tests.
+- [x] Tests pass: `cargo test -p yunta-engine --test host_suspension`, the CLI's chronicle tests.
 
 **Dependencies:** Task 18
 
@@ -587,8 +600,8 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 **Estimated scope:** S
 
 ### Checkpoint B: the workspace and reading
-- [ ] The CLI resolves every project and reads every run through the API; the environment is read once.
-- [ ] The captures, the documents and the follow tests equal the base's.
+- [x] The CLI resolves every project and reads every run through the API; the environment is read once.
+- [x] The captures, the documents and the follow tests equal the base's.
 - [ ] The user reviews; the phase commits.
 
 ## Phase 3: running a run, answering it and ending it, through the API
@@ -1060,6 +1073,7 @@ Its groups, each green before the next: the project's upkeep through the API; th
 **Estimated scope:** M
 
 ### Checkpoint D: the module
+- [ ] The release binary's code against Checkpoint A's, by crate and by copy (`tools/size_by_crate.py`, `tools/copies.py`, both built with symbols): found at Checkpoint B, the code grew 2.49 MB, nearly all of it serde's deserializers instantiated once more in each crate that reads the same documents (a release build shares no generics: `ConfigLayer`'s visitor 1 → 2 copies, `Workflow`'s 9 → 13), while the CLI and the API both read them. Once the CLI reads nothing itself, what is left duplicated is read through one concrete reader in core per document, so one crate instantiates it.
 - [ ] The user reviews the proof and the review.
 - [ ] The phase commits and is pushed; Task 47 follows, then `cargo clean`.
 

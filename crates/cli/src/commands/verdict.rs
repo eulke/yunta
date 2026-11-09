@@ -63,7 +63,7 @@ pub(crate) async fn verdict(
     conflicts: Vec<String>,
     reach: Reach,
 ) -> Result<Verdict, CliError> {
-    let facts = super::declared_facts(config);
+    let facts = yunta_api::machine::declared_facts(config);
     let mut errors = yunta_engine::check(workflow, config, &facts);
     let mut warnings = yunta_engine::check_warnings(workflow, config, &facts);
     // Composition references (`use:`) resolve against the repo catalog
@@ -109,7 +109,7 @@ pub(crate) async fn resolve_runnable(
         &workflow,
         &resolved,
         &ctx.project.config,
-        layer_conflicts(&ctx.cwd)?,
+        layer_conflicts(&ctx.cwd, &ctx.env)?,
         Reach::RunFront,
     )
     .await?;
@@ -122,8 +122,8 @@ pub(crate) async fn resolve_runnable(
 
 /// What the project's config layers refuse among themselves: a lower
 /// layer re-permitting what a higher one denied, naming both.
-pub(crate) fn layer_conflicts(cwd: &Path) -> Result<Vec<String>, CliError> {
-    let layers = crate::project::load_named_layers(cwd)?;
+pub(crate) fn layer_conflicts(cwd: &Path, env: &yunta_core::Env) -> Result<Vec<String>, CliError> {
+    let layers = yunta_api::config_layers(cwd, env)?;
     let named: Vec<(&str, &ConfigLayer)> =
         layers.iter().map(|(name, layer)| (*name, layer)).collect();
     Ok(yunta_core::permission_layer_conflicts(&named))
@@ -244,22 +244,27 @@ impl Verdict {
                 .iter()
                 .map(|conflict| located(conflict.clone(), None, &shown, None)),
         );
-        let declare = match self.errors.is_empty() {
-            true => Vec::new(),
-            false => {
-                let in_repo = crate::detect::in_repo(&ctx.cwd, ctx.supervision()).await?;
-                let detected = Detected {
-                    adapters: crate::detect::adapters_for(&self.errors).await,
-                    ..in_repo
-                };
-                crate::detect::suggestions(&self.errors, &detected)
-            }
-        };
         Ok(Unrunnable {
             workflow: shown,
             problems,
-            declare,
+            declare: self.declarations(ctx).await?,
         })
+    }
+
+    /// What this project could declare for the problems a declaration fixes,
+    /// from what the repository and this machine answer for: none when
+    /// nothing is refused.
+    async fn declarations(&self, ctx: &Context) -> Result<Vec<surco::components::Fix>, CliError> {
+        if self.errors.is_empty() {
+            return Ok(Vec::new());
+        }
+        let in_repo =
+            yunta_api::machine::in_repo(&ctx.project.workspace, &ctx.cwd, &ctx.stop()).await?;
+        let detected = Detected {
+            adapters: yunta_api::machine::adapters_for(&self.errors).await,
+            ..in_repo
+        };
+        Ok(yunta_api::machine::suggestions(&self.errors, &detected))
     }
 }
 

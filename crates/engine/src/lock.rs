@@ -20,7 +20,7 @@ use yunta_core::durable::{self, Durability};
 use yunta_core::process::signal::{self, Liveness};
 use yunta_core::{Clock, Pid};
 
-use crate::pace::Pace;
+use yunta_core::pace::Pace;
 
 /// What the host says about a lock's holder. `Send + Sync` so a
 /// `&dyn OwnerProbe` can be held across the awaits in [`acquire`] in a

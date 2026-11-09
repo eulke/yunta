@@ -13,13 +13,19 @@ use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Mode;
 use crate::output::Outcome;
+use crate::shell::Shell;
 use crate::surface::Diagnostics;
 
 use super::resolve_gate::{chosen_on, settled};
 
 /// Reads and answers the plan `run_id` waits on.
-pub async fn review(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+pub async fn review(
+    shell: &Shell,
+    run_id: &RunId,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let ctx = Context::of(shell)?;
     let waiting = super::resolve_gate::asked_of(&ctx, run_id)
         .await?
         .read()

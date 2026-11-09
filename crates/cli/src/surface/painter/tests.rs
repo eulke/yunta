@@ -129,7 +129,7 @@ fn born() -> EventPayload {
 /// A painter on a run whose `build` node has started, reading the process
 /// driving it the way `engine` says, and drawing lines nobody reads.
 async fn painter_of(engine: EngineReading, at: &Path) -> Painter {
-    let storage = AsyncStorage::open(at.join("events.db"))
+    let log = EventLog::open(&at.join("events.db"))
         .await
         .expect("a store opens under the test's own directory");
     let manifest = manifest();
@@ -138,7 +138,7 @@ async fn painter_of(engine: EngineReading, at: &Path) -> Painter {
         run_id: &run_id,
         manifest: &manifest,
         prior: None,
-        storage: &storage,
+        log: &log,
         clock: Arc::new(FixedClock),
         delivery: Delivery::Lines { reason: "a test" },
         glyphs: Glyphs::Ascii,
@@ -195,7 +195,7 @@ async fn a_painter_reading_the_registry_calls_a_run_with_a_dead_engine_stalled()
     let dead = tempfile::tempdir().unwrap();
     registered(dead.path(), gone(), None);
     let painter = painter_of(
-        EngineReading::Registry(dead.path().to_path_buf()),
+        EngineReading::Registry(yunta_api::RunRegistry::at(dead.path().to_path_buf())),
         at.path(),
     )
     .await;
@@ -205,7 +205,7 @@ async fn a_painter_reading_the_registry_calls_a_run_with_a_dead_engine_stalled()
     let this = Pid::try_from(std::process::id()).unwrap();
     registered(asking.path(), this, Some("build"));
     let painter = painter_of(
-        EngineReading::Registry(asking.path().to_path_buf()),
+        EngineReading::Registry(yunta_api::RunRegistry::at(asking.path().to_path_buf())),
         at.path(),
     )
     .await;

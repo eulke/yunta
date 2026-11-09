@@ -9,16 +9,16 @@
 
 use std::path::PathBuf;
 
-use yunta_core::events::StoredEvent;
-use yunta_core::persisted::PersistedDoc;
+use std::sync::Arc;
 use yunta_core::rail::RailCommand;
-use yunta_core::{Clock, Manifest, RunId, SystemClock, SystemIdSource};
+
+use yunta_core::{Clock, IdSource, Manifest};
 use yunta_storage::{AsyncStorage, Storage};
 
 use crate::error::CliError;
 use crate::interrupt::Interrupt;
-use crate::project::{self, Project};
-use yunta_render::refusal::Refused;
+use crate::shell::Shell;
+use yunta_api::Project;
 
 /// Everything a subcommand resolves before it can act: the current
 /// directory, the project rooted there, and the injected clock and id
@@ -26,8 +26,8 @@ use yunta_render::refusal::Refused;
 pub struct Context {
     pub cwd: PathBuf,
     pub project: Project,
-    pub clock: SystemClock,
-    pub ids: SystemIdSource,
+    pub clock: Arc<dyn Clock>,
+    pub ids: Arc<dyn IdSource>,
     /// The ambient environment this invocation runs in, read once here
     /// rather than from the process below: the user state root and the
     /// variables layered onto every subprocess.
@@ -37,47 +37,37 @@ pub struct Context {
     /// the shell decides which stage it answers to.
     interrupt: Interrupt,
     /// This binary, as the hook a CLI runs to ask the judge about one
-    /// write. Resolved once here, so nothing below the shell reads the
+    /// write. Resolved once in the shell, so nothing below it reads the
     /// process to find out where it lives.
     pub rail_command: RailCommand,
+    /// This binary, which a detached run and a resume handed on start.
+    pub binary: PathBuf,
 }
 
 impl Context {
-    /// Reads the current directory and resolves the project there — the
-    /// prologue a command run from a shell shares.
-    pub fn load() -> Result<Self, CliError> {
-        let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-        // The SIGINT stream is installed before this returns, so an
-        // interrupt that lands while the project is still resolving is
-        // one this invocation catches.
-        let interrupt = Interrupt::ctrl_c().map_err(|source| {
-            CliError::io("install the interrupt handler for", "this command", source)
-        })?;
-        Self::resolve_in(cwd, interrupt)
+    /// The project rooted where the shell runs: the prologue a command run
+    /// from a shell shares.
+    pub fn of(shell: &Shell) -> Result<Self, CliError> {
+        Self::in_dir(shell, shell.workspace().dir.clone())
     }
 
-    /// Resolves the project rooted at an explicit directory — what the
-    /// control plane (`yunta mcp`) and `yunta test --dir` need, since
-    /// they act on a directory they were handed, not the one they run in.
-    /// The single place `project::resolve` is called.
-    pub fn resolve_in(cwd: PathBuf, interrupt: Interrupt) -> Result<Self, CliError> {
-        let project = project::resolve(&cwd)?;
+    /// The project rooted at `dir`, with the shell's clock, environment and
+    /// interrupt: what the control plane and `yunta test --dir` need, since
+    /// they act on a directory they were handed. The single place
+    /// `project::resolve` is called.
+    pub fn in_dir(shell: &Shell, dir: PathBuf) -> Result<Self, CliError> {
+        let workspace = shell.workspace();
+        let project = workspace.project_at(&dir)?;
         Ok(Self {
-            cwd,
+            cwd: dir.clone(),
             project,
-            clock: *process_clock(),
-            ids: SystemIdSource,
-            env: crate::project::process_env(),
-            interrupt,
-            rail_command: rail_command(),
+            clock: Arc::clone(&workspace.clock),
+            ids: Arc::clone(&workspace.ids),
+            env: workspace.env.clone(),
+            interrupt: shell.interrupt(),
+            rail_command: shell.rail_command(),
+            binary: workspace.binary.clone(),
         })
-    }
-
-    /// The same interruption, for a `Context` derived from this one —
-    /// a sandbox, a request the control plane handles. One stream per
-    /// process, two stages every derived context shares.
-    pub fn interrupt(&self) -> Interrupt {
-        self.interrupt.shared()
     }
 
     /// The token the work of this invocation answers to: the first
@@ -89,17 +79,23 @@ impl Context {
     /// What the work runs under: no registry — a command is not a run —
     /// the first stage, and this invocation's clock and environment.
     pub fn supervision(&self) -> yunta_engine::process::Supervision<'_> {
-        yunta_engine::process::Supervision::outside_any_run(self.cancellation(), &self.clock)
-            .with_env(&self.env.subprocess_vars)
-            .with_path(&self.env.path)
+        yunta_engine::process::Supervision::outside_any_run(
+            self.cancellation(),
+            self.clock.as_ref(),
+        )
+        .with_env(&self.env.subprocess_vars)
+        .with_path(&self.env.path)
     }
 
     /// What gives a take back once the work stopped — `released`, a
     /// hand-over — runs under: the second stage. Something that runs
     /// *because* the first interrupt fired cannot answer to it.
     pub fn teardown(&self) -> yunta_engine::process::Supervision<'_> {
-        yunta_engine::process::Supervision::outside_any_run(self.interrupt.abort(), &self.clock)
-            .with_path(&self.env.path)
+        yunta_engine::process::Supervision::outside_any_run(
+            self.interrupt.abort(),
+            self.clock.as_ref(),
+        )
+        .with_path(&self.env.path)
     }
 
     /// A context over a project a test built by hand, with nothing to
@@ -108,14 +104,17 @@ impl Context {
     /// `project::resolve` would find.
     #[cfg(test)]
     pub(crate) fn for_test(cwd: PathBuf, project: Project) -> Self {
+        let shell = Shell::for_test(cwd.clone());
+        let workspace = shell.workspace();
         Self {
             cwd,
             project,
-            clock: *process_clock(),
-            ids: SystemIdSource,
-            env: yunta_core::Env::default(),
-            interrupt: Interrupt::never(),
-            rail_command: rail_command(),
+            clock: Arc::clone(&workspace.clock),
+            ids: Arc::clone(&workspace.ids),
+            env: workspace.env.clone(),
+            interrupt: shell.interrupt(),
+            rail_command: shell.rail_command(),
+            binary: workspace.binary.clone(),
         }
     }
 
@@ -131,21 +130,49 @@ impl Context {
     /// in what its sessions do, not in when they happened.
     pub fn sandboxed(&self, worktree: PathBuf, sandbox: &std::path::Path) -> Self {
         Self {
-            cwd: worktree,
+            cwd: worktree.clone(),
             project: Project {
                 config: self.project.config.clone(),
                 runs_root: sandbox.join("runs"),
                 worktrees_root: sandbox.join("worktrees"),
                 storage_path: sandbox.join("events.db"),
+                user_root: self.project.user_root.clone(),
+                workspace: yunta_api::Workspace {
+                    dir: worktree.clone(),
+                    ..self.project.workspace.clone()
+                },
             },
-            clock: self.clock,
-            ids: self.ids,
+            clock: Arc::clone(&self.clock),
+            ids: Arc::clone(&self.ids),
             env: self.env.clone(),
             // One stream per process: a sandbox sees the same two
             // stages the invocation that made it does.
             interrupt: self.interrupt.shared(),
             rail_command: self.rail_command.clone(),
+            binary: self.binary.clone(),
         }
+    }
+
+    /// The pool of checkouts run `manifest` takes its trees from, for the run
+    /// whose directory is `run_dir`, reached from this checkout and reading
+    /// time as this command does.
+    pub fn pool_of(
+        &self,
+        manifest: &Manifest,
+        run_dir: &std::path::Path,
+    ) -> Arc<yunta_engine::CheckoutPool> {
+        yunta_engine::CheckoutPool::of_run(
+            &self.project.worktrees_root_for(manifest),
+            &self.cwd,
+            run_dir,
+            manifest,
+            Arc::clone(&self.clock),
+        )
+    }
+
+    /// The two stages this context stops in, as the API is handed them.
+    pub fn stop(&self) -> yunta_api::Stop {
+        self.interrupt.stages()
     }
 
     /// The async event-log handle `run`, `resume`, `cancel` and `status`
@@ -162,104 +189,13 @@ impl Context {
 
     /// The adapter registry this project's `runners:` names, each built
     /// with its own configured settings — the real agents a run can use.
-    pub fn adapters(&self) -> crate::commands::Adapters {
-        crate::commands::real_adapters(&self.project.config)
-    }
-
-    /// Everything a command needs to say something about one run: where
-    /// it lives, the manifest it froze, and its whole log.
-    ///
-    /// The one prologue every run-opening command shares. Twelve of them
-    /// each found the directory, read the manifest and loaded the events
-    /// their own way, and each wrote its own sentence for a run that is
-    /// not there — so a person who mistyped an id was told a different
-    /// thing by `status` than by `receipt`. One prologue means one
-    /// sentence, and a run that is open is open the same way everywhere.
-    pub async fn open_run(&self, id: &RunId) -> Result<Opened, CliError> {
-        let events = self
-            .async_storage()
-            .await?
-            .events_for_run(id.clone())
-            .await?;
-        let run_dir = self.project.run_dir(id.as_str());
-        if events.is_empty() && run_dir.is_none() {
-            return Err(Refused::UnknownRun {
-                run: id.clone(),
-                roots: self
-                    .run_roots()
-                    .iter()
-                    .map(|root| surco::paths::shown(root, &self.cwd, self.env.home.as_deref()))
-                    .collect(),
-                near: self.near_run(id),
-            }
-            .into());
-        }
-        let run_dir = run_dir.unwrap_or_else(|| self.project.runs_root.join(id.as_str()));
-        let manifest = crate::load_manifest(&yunta_engine::run_dir::manifest_path(&run_dir))?;
-        Ok(Opened {
-            run_id: id.clone(),
-            run_dir,
-            manifest,
-            events,
-        })
-    }
-
-    /// The run `id` is one slip away from, by its handle or by its whole
-    /// id, when exactly one is.
-    fn near_run(&self, id: &RunId) -> Option<String> {
-        let runs = self.storage().ok()?.list_runs().ok()?;
-        let typed = id.as_str().to_ascii_uppercase();
-        let named: Vec<String> = runs
-            .iter()
-            .flat_map(|run| [run.run_id.handle().to_string(), run.run_id.to_string()])
-            .collect();
-        surco::text::nearest(&typed, named.iter().map(String::as_str)).map(str::to_string)
-    }
-
-    /// Where a run is looked for, in search order — what a refusal names
-    /// so a person knows where this binary did look.
-    pub fn run_roots(&self) -> Vec<PathBuf> {
-        let here = self.project.runs_root.clone();
-        let default = project::user_root().ok().map(|root| root.join("runs"));
-        std::iter::once(here.clone())
-            .chain(default.filter(|default| *default != here))
-            .collect()
+    pub fn adapters(&self) -> yunta_api::machine::Adapters {
+        yunta_api::machine::real_adapters(&self.project.config)
     }
 }
 
-/// One run, open: what every command that says something about a run
-/// needs before it can.
-pub struct Opened {
-    /// The run this is, so a caller that passes `Opened` on does not
-    /// carry the id beside it.
-    #[allow(dead_code)]
-    pub run_id: RunId,
-    pub run_dir: PathBuf,
-    pub manifest: PersistedDoc<Manifest>,
-    pub events: Vec<StoredEvent>,
-}
-
-/// Where this binary lives, for the child processes that run it back:
-/// the rail hook, and the detached `resume` a `--detach` run spawns. A
-/// host that will not say falls back to the name on `PATH`.
-pub fn own_binary() -> PathBuf {
-    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta"))
-}
-
-/// The hook a CLI runs to ask the judge about one write. Resolved in
-/// the shell — every path below it takes the value, never the process.
-pub fn rail_command() -> RailCommand {
-    RailCommand::new(own_binary())
-}
-
-/// The wall clock of this process, built only here; `init` takes it from here.
-pub(crate) fn process_clock() -> &'static SystemClock {
-    static CLOCK: SystemClock = SystemClock;
-    &CLOCK
-}
-
-/// How long until `at` by the system clock: zero once it has passed. The
-/// one reading of the clock a command takes before it has a run's clock.
-pub fn time_until(at: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
-    (at - process_clock().now()).to_std().unwrap_or_default()
+/// How long until `at` by `clock`: zero once it has passed. The one reading
+/// of the clock a command takes before it has a run's clock.
+pub fn time_until(clock: &dyn Clock, at: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
+    (at - clock.now()).to_std().unwrap_or_default()
 }

@@ -38,6 +38,7 @@ mod case;
 use std::path::{Path, PathBuf};
 
 use crate::error::CliError;
+use crate::shell::Shell;
 
 use crate::output::show;
 use crate::output::Outcome;
@@ -46,13 +47,11 @@ use yunta_render::page::{CaseRun, RanCase, Tested, TestedCase};
 
 pub(crate) use case::run_case;
 
-pub async fn test(dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> {
-    let root = project_root(dir).map_err(CliError::msg)?;
+pub async fn test(shell: &Shell, dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> {
+    let root = project_root(dir.unwrap_or(&shell.workspace().dir)).map_err(CliError::msg)?;
     // One interruption for the whole suite: every case's sandbox shares
-    // its two stages, so a Ctrl-C stops the case that is running and
-    // the ones after it never start.
-    let interrupt = crate::interrupt::Interrupt::ctrl_c()
-        .map_err(|source| CliError::io("install the interrupt handler for", "test", source))?;
+    // the shell's two stages, so a Ctrl-C stops the case that is running
+    // and the ones after it never start.
 
     let case_paths = cases_under(&root)?;
 
@@ -61,7 +60,7 @@ pub async fn test(dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> 
     let names: Vec<String> = case_paths.iter().map(|path| case_name(path)).collect();
     let mut failures = 0usize;
     for case_path in &case_paths {
-        if !report(&root, case_path, interrupt.shared(), (&names, look)).await {
+        if !report(shell, &root, case_path, (&names, look)).await {
             failures += 1;
         }
     }
@@ -98,16 +97,12 @@ fn cases_under(root: &Path) -> Result<Vec<std::path::PathBuf>, CliError> {
     Ok(case_paths)
 }
 
-/// The project whose `.yunta/` holds the cases: `dir` when given, the
-/// current directory otherwise. Always absolute, so every case's sandbox
+/// The project whose `.yunta/` holds the cases: `dir`, the one given or the
+/// shell's. Always absolute, so every case's sandbox
 /// and fixture resolve from one fixed root regardless of where the
 /// command was invoked.
-fn project_root(dir: Option<&Path>) -> Result<PathBuf, String> {
-    let root = match dir {
-        Some(dir) => dir.to_path_buf(),
-        None => std::env::current_dir()
-            .map_err(|e| format!("cannot determine the current directory: {e}"))?,
-    };
+fn project_root(dir: &Path) -> Result<PathBuf, String> {
+    let root = dir.to_path_buf();
     std::path::absolute(&root).map_err(|e| format!("cannot resolve `{}`: {e}", root.display()))
 }
 
@@ -210,14 +205,14 @@ pub(crate) fn case_name(case_path: &Path) -> String {
 /// row says which kind of failure it was, and the lines under it list
 /// what went wrong.
 async fn report(
+    shell: &Shell,
     root: &Path,
     case_path: &Path,
-    interrupt: crate::interrupt::Interrupt,
     (names, look): (&[String], &surco::look::Look),
 ) -> bool {
     let case = RanCase {
         name: case_name(case_path),
-        run: case_run(run_case(root, case_path, interrupt).await),
+        run: case_run(run_case(shell, root, case_path).await),
     };
     let held = case.run.held();
     // The cases run one at a time and each row is drawn as its case ends:

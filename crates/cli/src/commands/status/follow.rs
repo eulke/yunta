@@ -22,26 +22,26 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use surco::look::Look;
 use surco::words::Standing;
 use tokio_util::sync::CancellationToken;
+use yunta_api::{EventLog, RunRegistry};
 use yunta_core::events::{EventPayload, RunEvent, StoredEvent};
-use yunta_core::{Clock, Manifest, RunId, Seq};
-use yunta_engine::pace::Pace;
+use yunta_core::pace::Pace;
+use yunta_core::{Manifest, RunId, Seq};
 use yunta_render::page::LeftRunning;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::registry::Engine;
 use yunta_replay::RunState;
-use yunta_storage::AsyncStorage;
 
 use crate::commands::drive::{report_closing, Closed};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
+use crate::shell::Shell;
 use crate::surface::{Delivery, EngineReading, Surface, SurfaceEnv, TerminalEnv};
 
 mod listen;
@@ -63,12 +63,17 @@ const SUCCESSOR_WAIT: Duration = Duration::from_secs(30);
 const REGISTRY_EVERY: Duration = Duration::from_secs(1);
 
 /// Follows `run_id`, and answers with the code its stop gives.
-pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
-    let open = ctx.open_run(run_id).await?;
+pub(crate) async fn follow(
+    shell: &Shell,
+    run_id: &RunId,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let ctx = Context::of(shell)?;
+    let open = ctx.project.run(run_id).await?;
     let now = ctx.clock.now();
     let state = RunState::replay(&open.events);
-    let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
+    let registry = open.registry();
+    let engine = registry.engine();
     let manifest = open.manifest.doc;
     let frame = RunFrame::of(run_id, &manifest.workflow, &state, None, &engine, now);
     if ending(frame.standing, &frame.phase).is_some() {
@@ -76,12 +81,16 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
         return Ok(crate::output::exit(standing));
     }
     let started = open.events.first().map(|event| event.timestamp);
-    let sample = crate::commands::stats::budget_sample(&ctx, &manifest, &frame.mode, started).await;
+    let prior = ctx
+        .project
+        .prior_estimation(&manifest, &frame.mode, started)
+        .await;
     let mut followed = Followed {
         run_id: run_id.clone(),
-        run_dir: open.run_dir,
+        run_dir: open.dir,
+        registry,
         manifest,
-        prior: yunta_replay::history::PriorEstimation::of(&sample),
+        prior,
         events: open.events,
         state,
         engine,
@@ -89,24 +98,30 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
         seen: HashSet::new(),
         listening: listen::Listening::default(),
     };
-    let storage = ctx.async_storage().await?;
-    followed.seen = storage
-        .heads()
-        .await?
-        .into_iter()
-        .map(|head| head.run_id)
-        .collect();
-    let surface = followed.surface(&ctx, &storage);
-    let ended = followed
-        .read_until_it_stops(&ctx, &storage, &surface)
-        .await?;
+    let log = ctx.project.event_log().await?;
+    followed.seen = log.runs().await?.into_iter().collect();
+    let surface = followed.surface(&ctx, &log);
+    let ended = followed.read_until_it_stops(&ctx, &log, &surface).await?;
     surface.close().await;
+    answer(ended, &followed, (&ctx, &log), run_id, look).await
+}
+
+/// What following `run_id` answers once it ended `ended`: the block that
+/// closes out the run it followed last, the page of a run whose engine is
+/// gone, or that the run goes on.
+async fn answer(
+    ended: Ended,
+    followed: &Followed,
+    (ctx, log): (&Context, &EventLog),
+    run_id: &RunId,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     match ended {
-        Ended::Stopped => followed.closing(&ctx, &storage, look).await,
+        Ended::Stopped => followed.closing(ctx, log, look).await,
         // What drove the run is gone, so no block closes it out: the page says
         // what holds it.
         Ended::Stalled => {
-            let standing = super::print_page(&ctx, run_id, look).await?;
+            let standing = super::print_page(ctx, run_id, look).await?;
             Ok(crate::output::exit(standing))
         }
         Ended::Interrupted => {
@@ -149,6 +164,8 @@ fn ending(standing: Standing, phase: &RunPhase) -> Option<Ended> {
 struct Followed {
     run_id: RunId,
     run_dir: PathBuf,
+    /// Where the process driving the run is read from.
+    registry: RunRegistry,
     manifest: Manifest,
     /// What this workflow's runs cost before this one was created: the history
     /// `yunta run` compared it with, so its region and its close compare alike.
@@ -172,17 +189,17 @@ struct Followed {
 impl Followed {
     /// The surface `yunta run` draws, seeded with what was read, and reading the
     /// process driving the run from its registry.
-    fn surface(&self, ctx: &Context, storage: &AsyncStorage) -> Surface {
+    fn surface(&self, ctx: &Context, log: &EventLog) -> Surface {
         Surface::open(
             SurfaceEnv {
                 run_id: &self.run_id,
                 manifest: &self.manifest,
                 prior: self.prior.as_ref(),
-                storage,
-                clock: Arc::new(ctx.clock),
+                log,
+                clock: std::sync::Arc::clone(&ctx.clock),
                 delivery: Delivery::choose(false, TerminalEnv::settled()),
                 glyphs: crate::output::glyphs(),
-                engine: EngineReading::Registry(self.run_dir.clone()),
+                engine: EngineReading::Registry(self.registry.clone()),
             },
             self.events.clone(),
         )
@@ -194,7 +211,7 @@ impl Followed {
     async fn read_until_it_stops(
         &mut self,
         ctx: &Context,
-        storage: &AsyncStorage,
+        log: &EventLog,
         surface: &Surface,
     ) -> Result<Ended, CliError> {
         let pace = Pace::every(READ_EVERY);
@@ -202,9 +219,7 @@ impl Followed {
             if paced(&pace, ctx.cancellation()).await {
                 return Ok(Ended::Interrupted);
             }
-            let past = storage
-                .events_after(self.run_id.clone(), self.last())
-                .await?;
+            let past = log.events_after(&self.run_id, self.last()).await?;
             for event in past {
                 self.take(&event);
                 surface.deliver(event).await;
@@ -214,7 +229,7 @@ impl Followed {
             match ending(frame.standing, &frame.phase) {
                 None => {}
                 Some(Ended::Stopped) if matches!(frame.phase, RunPhase::Promoted { .. }) => {
-                    if let Some(ended) = self.onto_successor(ctx, storage, surface).await? {
+                    if let Some(ended) = self.onto_successor(ctx, log, surface).await? {
                         return Ok(ended);
                     }
                 }
@@ -228,14 +243,14 @@ impl Followed {
     async fn onto_successor(
         &mut self,
         ctx: &Context,
-        storage: &AsyncStorage,
+        log: &EventLog,
         surface: &Surface,
     ) -> Result<Option<Ended>, CliError> {
         let pace = Pace::every(READ_EVERY);
         let since = ctx.clock.now();
         let waited = || (ctx.clock.now() - since).to_std().unwrap_or_default();
         while waited() < SUCCESSOR_WAIT {
-            if let Some(successor) = self.successor(storage).await? {
+            if let Some(successor) = self.successor(log).await? {
                 self.go_on_with(ctx, successor, surface).await?;
                 return Ok(None);
             }
@@ -248,12 +263,12 @@ impl Followed {
 
     /// The run promoted from this one, among the runs whose heads the follower
     /// had not seen, or `None` while there is none yet.
-    async fn successor(&mut self, storage: &AsyncStorage) -> Result<Option<RunId>, CliError> {
-        for head in storage.heads().await? {
-            if !self.seen.insert(head.run_id.clone()) {
+    async fn successor(&mut self, log: &EventLog) -> Result<Option<RunId>, CliError> {
+        for run in log.runs().await? {
+            if !self.seen.insert(run.clone()) {
                 continue;
             }
-            let events = storage.events_for_run(head.run_id.clone()).await?;
+            let events = log.events(&run).await?;
             let promoted_from = events.first().and_then(|first| match first.payload() {
                 Some(EventPayload::Run(RunEvent::Created(created))) => {
                     created.promoted_from.clone()
@@ -261,7 +276,7 @@ impl Followed {
                 _ => None,
             });
             if promoted_from.as_ref() == Some(&self.run_id) {
-                return Ok(Some(head.run_id));
+                return Ok(Some(run));
             }
         }
         Ok(None)
@@ -275,17 +290,18 @@ impl Followed {
         successor: RunId,
         surface: &Surface,
     ) -> Result<(), CliError> {
-        let open = ctx.open_run(&successor).await?;
+        let open = ctx.project.run(&successor).await?;
         for event in &open.events {
             surface.deliver(event.clone()).await;
         }
         let now = ctx.clock.now();
+        self.registry = open.registry();
+        self.engine = self.registry.engine();
         self.run_id = successor;
-        self.run_dir = open.run_dir;
+        self.run_dir = open.dir;
         self.manifest = open.manifest.doc;
         self.state = RunState::replay(&open.events);
         self.events = open.events;
-        self.engine = yunta_engine::read_engine(&self.run_dir, &yunta_engine::lock::SystemProbe);
         self.registry_read_at = now;
         Ok(())
     }
@@ -312,8 +328,7 @@ impl Followed {
             .to_std()
             .is_ok_and(|age| age >= REGISTRY_EVERY);
         if stale {
-            self.engine =
-                yunta_engine::read_engine(&self.run_dir, &yunta_engine::lock::SystemProbe);
+            self.engine = self.registry.engine();
             self.registry_read_at = now;
         }
         RunFrame::of(
@@ -331,10 +346,10 @@ impl Followed {
     async fn closing(
         &self,
         ctx: &Context,
-        storage: &AsyncStorage,
+        log: &EventLog,
         look: &Look,
     ) -> Result<Outcome, CliError> {
-        let bound = crate::project::bound_checkout(&self.state);
+        let bound = self.state.run.checkout().map(std::path::Path::to_path_buf);
         let worktree =
             ctx.project
                 .run_tree(&self.manifest, bound.as_deref(), &self.run_id, &ctx.cwd);
@@ -343,8 +358,8 @@ impl Followed {
             manifest: &self.manifest,
             run_dir: &self.run_dir,
             worktree: &worktree,
-            storage,
-            clock: &ctx.clock,
+            log,
+            clock: ctx.clock.as_ref(),
             prior: self.prior.as_ref(),
             look,
             cwd: &ctx.cwd,

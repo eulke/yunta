@@ -19,7 +19,7 @@ use crate::ask::{choose, Choice, Console, Escape, NoAnswer};
 use crate::error::CliError;
 use crate::output::show;
 use crate::output::Outcome;
-use crate::project;
+use crate::shell::Shell;
 use crate::surface::Diagnostics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +218,7 @@ async fn choose_shape(shape: Option<&str>, interactive: bool) -> Result<Shape, C
 }
 
 pub async fn new_workflow(
+    shell: &Shell,
     name: &str,
     shape: Option<&str>,
     interactive: bool,
@@ -228,13 +229,13 @@ pub async fn new_workflow(
 
     let shape = choose_shape(shape, interactive).await?;
 
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let cwd = shell.workspace().dir.clone();
     // Same layered config `yunta check` resolves without an explicit
     // `--config` — an empty/default layer set (no `.yunta/config.yaml`
     // yet, e.g. `new` run before `init`) is a legal, empty `ConfigLayer`,
     // not an error.
     let config = ConfigLayer::merge_layers(
-        project::load_named_layers(&cwd)?
+        yunta_api::config_layers(&cwd, &shell.workspace().env)?
             .into_iter()
             .map(|(_, l)| l),
     );
@@ -255,7 +256,7 @@ pub async fn new_workflow(
         workflow: &workflow,
         path: &path,
     };
-    written.report(&cwd, &config, look).await
+    written.report(shell, &cwd, &config, look).await
 }
 
 /// The workflow a `shape` skeleton parses to, or why it does not parse.
@@ -308,6 +309,7 @@ impl Written<'_> {
     /// so too.
     async fn report(
         &self,
+        shell: &Shell,
         cwd: &Path,
         config: &ConfigLayer,
         look: &Look,
@@ -322,7 +324,7 @@ impl Written<'_> {
         };
         // The file is on disk whatever stopped the check of it.
         let diagnosis = self
-            .diagnosis(cwd, config)
+            .diagnosis(shell, cwd, config)
             .await
             .inspect_err(|_| show(look, &page(None)))?;
         show(look, &page(Some(&diagnosis)));
@@ -333,14 +335,19 @@ impl Written<'_> {
     }
 
     /// The verdict `yunta check` reaches on the written file.
-    async fn diagnosis(&self, cwd: &Path, config: &ConfigLayer) -> Result<Diagnosis, CliError> {
-        let ctx = crate::context::Context::load()?;
+    async fn diagnosis(
+        &self,
+        shell: &Shell,
+        cwd: &Path,
+        config: &ConfigLayer,
+    ) -> Result<Diagnosis, CliError> {
+        let ctx = crate::context::Context::of(shell)?;
         let verdict = super::verdict::verdict(
             &ctx,
             self.workflow,
             self.path,
             config,
-            super::verdict::layer_conflicts(cwd)?,
+            super::verdict::layer_conflicts(cwd, &shell.workspace().env)?,
             super::verdict::Reach::Workflow,
         )
         .await?;

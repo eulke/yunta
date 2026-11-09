@@ -15,28 +15,30 @@ use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
+use crate::shell::Shell;
 use yunta_render::document::SCHEMA_VERSION;
 
 pub async fn close(
+    shell: &Shell,
     run_id: &RunId,
     by: Option<&Responder>,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+    let ctx = Context::of(shell)?;
     let storage = ctx.async_storage().await?;
-    let open = ctx.open_run(run_id).await?;
+    let open = ctx.project.run(run_id).await?;
     // Resolved before anything is written: a short declared secret refuses
     // the close here, and the run stays as it is.
     let redactor = yunta_engine::run_redactor(&open.manifest.doc, &yunta_core::ProcessSecrets)?;
-    let run_dir = open.run_dir.clone();
+    let run_dir = open.dir.clone();
     let engine = settled_engine(&ctx, &storage, run_id, &run_dir, &redactor).await?;
     let by = crate::identity::responder(by, ctx.env.user.as_deref());
     yunta_engine::close_run(
         &storage,
         run_id,
         &run_dir,
-        &ctx.clock,
+        ctx.clock.as_ref(),
         &engine,
         by.clone(),
         &redactor,
@@ -100,21 +102,16 @@ async fn settled_engine(
 /// Gives a run's checkouts back to the project's pool, as `close` does for a
 /// closed run and `cancel` does once a stopped run's groups are gone. A
 /// checkout that cannot be given back stays the run's until `gc` collects it.
-pub(crate) async fn give_back(ctx: &Context, open: &crate::context::Opened, run_id: &RunId) {
+pub(crate) async fn give_back(ctx: &Context, open: &yunta_api::OpenedRun<'_>, run_id: &RunId) {
     let manifest = &open.manifest.doc;
-    let bound = crate::project::bound_checkout(&yunta_replay::RunState::replay(&open.events));
+    let state = yunta_replay::RunState::replay(&open.events);
+    let bound = state.run.checkout().map(std::path::Path::to_path_buf);
     let tree = ctx
         .project
         .run_tree(manifest, bound.as_deref(), run_id, &ctx.cwd);
-    let pool = ctx.project.pool_of(
-        manifest,
-        &ctx.cwd,
-        &open.run_dir,
-        std::sync::Arc::new(ctx.clock),
-    );
+    let pool = ctx.pool_of(manifest, &open.dir);
     let supervision = ctx.supervision();
-    let units =
-        yunta_engine::release_unit_checkouts(&pool, &tree, &open.run_dir, run_id, supervision);
+    let units = yunta_engine::release_unit_checkouts(&pool, &tree, &open.dir, run_id, supervision);
     if let Err(e) = units.await {
         crate::output::warn(format!("run {}: {e}", run_id.handle()));
     }

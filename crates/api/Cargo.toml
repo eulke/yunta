@@ -1,0 +1,47 @@
+[package]
+name = "yunta-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "What can be asked of Yunta: each operation an interface asks for, handed a workspace, returning data."
+
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+yunta-core.workspace = true
+# How a run runs and where it keeps what it holds: what the API does its work with.
+yunta-engine.workspace = true
+# The log a project's runs are facts in, and every reading replay derives
+# from it.
+yunta-storage.workspace = true
+yunta-replay.workspace = true
+# The instant a reading reads a run's age at.
+chrono.workspace = true
+# The agent CLIs this binary builds: what a run can execute its sessions on.
+yunta-adapters.workspace = true
+# What Yunta refuses, said once for every interface: a refusal the API
+# returns is render's value.
+yunta-render.workspace = true
+# The two stages a caller stops an operation in.
+tokio-util.workspace = true
+# What this binary can run on, listed the way a sentence lists things.
+yunta-surco.workspace = true
+thiserror.workspace = true
+# A workflow file the catalog reads without holding a thread.
+tokio = { workspace = true, features = ["fs"] }
+# A package manifest detection reads for the commands its ecosystem runs.
+serde_json.workspace = true
+
+[dev-dependencies]
+# Ids a test writes as text, which core opens to tests only.
+yunta-core = { workspace = true, features = ["testkit"] }
+# A repository detection reads, made in a temporary directory.
+tempfile.workspace = true

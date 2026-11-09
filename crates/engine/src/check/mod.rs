@@ -52,12 +52,11 @@ mod scopes;
 mod sources;
 mod unset;
 
-pub use capabilities::AdapterFacts;
 pub use context_files::{check_context_files, ContextFilesCheck, RunTreeOrigin};
 pub(crate) use programs::leading_programs;
 pub use programs::programs_named;
 pub use refs::{check_workflow_refs, RefsCheck};
-use yunta_core::check::{CheckError, Composition, Unanswerable, UntakenRoute};
+use yunta_core::check::{AdapterFacts, CheckError, Composition, Unanswerable, UntakenRoute};
 
 // One home for what every family reads: the workspace types, the
 // shared helpers (the glob heuristic the tasks document's own scope rule uses,

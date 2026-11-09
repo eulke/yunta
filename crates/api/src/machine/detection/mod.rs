@@ -21,13 +21,14 @@ use std::path::Path;
 
 use surco::components::Fix;
 use yunta_core::{CommandName, ConfigKey, Detected, Ecosystem, MachineAdapters, RunnerName};
-use yunta_engine::process::Supervision;
 use yunta_render::declare;
 
-pub(crate) use adapters::probe_known_adapters;
+use crate::{Error, Stop, Workspace};
+
+pub use adapters::probe_known_adapters;
 
 /// What `repo`'s own files say — everything but its remote.
-pub(crate) fn in_files(repo: &Path) -> Detected {
+pub fn in_files(repo: &Path) -> Detected {
     let found = ecosystems::rust(repo)
         .or_else(|| js::node(repo))
         .or_else(|| ecosystems::go(repo))
@@ -44,14 +45,15 @@ pub(crate) fn in_files(repo: &Path) -> Detected {
     }
 }
 
-/// What `repo` says, the forge its `origin` is on included. A stop while
-/// git read the remote is the caller's stop, not a Detected without one.
-pub(crate) async fn in_repo(
-    repo: &Path,
-    supervision: Supervision<'_>,
-) -> Result<Detected, yunta_engine::GitError> {
+/// What `repo` says, the forge its `origin` is on included, read under the
+/// workspace's boundaries. A stop while git read the remote is the caller's
+/// stop, not a `Detected` without one.
+pub async fn in_repo(workspace: &Workspace, repo: &Path, stop: &Stop) -> Result<Detected, Error> {
+    let forge = remote::github_repo(repo, workspace.supervision(stop))
+        .await
+        .map_err(|_stopped| Error::Stopped)?;
     Ok(Detected {
-        forge: remote::github_repo(repo, supervision).await?,
+        forge,
         ..in_files(repo)
     })
 }
@@ -59,7 +61,7 @@ pub(crate) async fn in_repo(
 /// The adapters this machine answers for when `errors` name a runner the
 /// config lacks — the one suggestion that needs them — and none asked for
 /// otherwise.
-pub(crate) async fn adapters_for(errors: &[yunta_core::check::CheckError]) -> MachineAdapters {
+pub async fn adapters_for(errors: &[yunta_core::check::CheckError]) -> MachineAdapters {
     match wants_runner(errors) {
         true => MachineAdapters::probed(&probe_known_adapters().await),
         false => MachineAdapters::default(),
@@ -68,10 +70,7 @@ pub(crate) async fn adapters_for(errors: &[yunta_core::check::CheckError]) -> Ma
 
 /// What this repository answers for each key `errors` says a workflow
 /// needs and the config lacks, each once, in the order they are named.
-pub(crate) fn suggestions(
-    errors: &[yunta_core::check::CheckError],
-    detected: &Detected,
-) -> Vec<Fix> {
+pub fn suggestions(errors: &[yunta_core::check::CheckError], detected: &Detected) -> Vec<Fix> {
     let mut said: Vec<Fix> = Vec::new();
     for fix in errors.iter().filter_map(|error| answered(error, detected)) {
         if !said.contains(&fix) {
@@ -85,7 +84,7 @@ pub(crate) fn suggestions(
 /// What fixes `error` on its own: what this repository answers for the
 /// key it says a workflow lacks, or the runner to declare for it; `None`
 /// when nothing here does.
-pub(crate) fn fix_for(error: &yunta_core::check::CheckError, detected: &Detected) -> Option<Fix> {
+pub fn fix_for(error: &yunta_core::check::CheckError, detected: &Detected) -> Option<Fix> {
     answered(error, detected).or_else(|| runner_fix(std::slice::from_ref(error), detected))
 }
 

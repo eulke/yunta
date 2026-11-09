@@ -9,11 +9,12 @@ use clap::{Args, Parser, Subcommand};
 use surco::look::Look;
 use yunta_core::{AdapterId, ModeName, OptionId, Responder};
 
-use crate::commands::run_ref::{RunArg, RunRef};
+use crate::commands::run_ref::RunArg;
 use crate::error::CliError;
 use crate::graph;
 use crate::output::Mode;
 use crate::output::Outcome;
+use yunta_api::RunRef;
 
 /// Yunta: a deterministic workflow engine for code agents.
 #[derive(Parser)]
@@ -61,11 +62,12 @@ impl Cli {
     /// decided them.
     pub async fn run(
         self,
+        env: yunta_core::Env,
         started: Instant,
         output: Mode,
         look: &Look,
     ) -> Result<Outcome, CliError> {
-        dispatch(self.command, started, output, look).await
+        dispatch(self.command, env, started, output, look).await
     }
 }
 

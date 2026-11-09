@@ -6,17 +6,20 @@
 //! [`CheckError`] is what refuses a workflow; [`Composition`], [`Unanswerable`]
 //! and [`UntakenRoute`] are the kinds of it a rule of its own finds.
 //!
-//! Each knows where in the workflow file it points, for a surface that
+//! [`AdapterFacts`] is what a check knows of an adapter it judges against.
+//! Each finding knows where in the workflow file it points, for a surface that
 //! quotes the file.
 //!
 //! Not the checking: which rule runs where, and over what, is the engine's.
 
+mod adapter_facts;
 mod composition;
 mod error;
 mod pointer;
 mod unanswerable;
 mod untaken_route;
 
+pub use adapter_facts::AdapterFacts;
 pub use composition::Composition;
 pub use error::CheckError;
 pub use unanswerable::Unanswerable;

@@ -15,17 +15,23 @@ use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
+use crate::shell::Shell;
 
 /// The file a run's page is written to, in the run's folder.
 const PAGE: &str = "page.html";
 
 /// Writes the run's page into its folder, and opens it when a person at a
 /// terminal asks for a page to read; any other reader only hears where it is.
-pub async fn open(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+pub async fn open(
+    shell: &Shell,
+    run_id: &RunId,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let ctx = Context::of(shell)?;
     let (doc, run_dir) = page_for_a_browser(&ctx, run_id).await?;
     let path = run_dir.join(PAGE);
-    super::receipt::save(&path, &Html.draw(&doc))?;
+    save(&path, &Html.draw(&doc))?;
     let opened = match output {
         Mode::Human if std::io::stdout().is_terminal() => Some(browser(&path).is_ok()),
         _ => None,
@@ -38,6 +44,11 @@ pub async fn open(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, 
         },
         look,
     )
+}
+
+/// Writes the page a browser reads, naming the file it could not write.
+fn save(path: &Path, contents: &str) -> Result<(), CliError> {
+    std::fs::write(path, contents).map_err(|source| CliError::io("write", path.display(), source))
 }
 
 /// Asks the system's own opener for `page`. The opener hands the page to the

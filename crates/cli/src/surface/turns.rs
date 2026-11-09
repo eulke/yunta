@@ -129,9 +129,9 @@ impl Curtain {
 
 #[cfg(test)]
 mod tests {
+    use yunta_api::EventLog;
     use yunta_core::events::{EventPayload, NodeStartedPayload};
     use yunta_core::{CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, RunId};
-    use yunta_storage::AsyncStorage;
     use yunta_testkit::wait_until_async;
     use yunta_testkit_core::{Captured, FixedClock, Log};
 
@@ -219,7 +219,7 @@ mod tests {
         async fn open(delivery: Delivery, at: &std::path::Path) -> Self {
             let screen = Watched::sized(24, 80);
             let scrollback = Captured::default();
-            let storage = AsyncStorage::open(at.join("events.db"))
+            let log = EventLog::open(&at.join("events.db"))
                 .await
                 .expect("a store opens under the test's own directory");
             let manifest = manifest();
@@ -227,7 +227,7 @@ mod tests {
                 run_id: &RUN,
                 manifest: &manifest,
                 prior: None,
-                storage: &storage,
+                log: &log,
                 clock: Arc::new(FixedClock),
                 delivery,
                 glyphs: Glyphs::Ascii,

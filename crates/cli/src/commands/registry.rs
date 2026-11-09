@@ -17,9 +17,9 @@ use yunta_core::{
 use yunta_engine::{CreateRunParams, FrozenRun, RunEnv, RunError, RunReport};
 use yunta_storage::AsyncStorage;
 
-use super::Adapters;
 use crate::context::Context;
 use crate::error::CliError;
+use yunta_api::machine::Adapters;
 use yunta_render::refusal::Refused;
 
 /// What `servable` refuses. Each variant names the node, runner or adapter
@@ -102,7 +102,7 @@ pub(crate) async fn servable(
     // A mock run's sessions are scripted: no real adapter is built, named or
     // probed for it.
     if !matches!(manifest.adapter, Some(RunAdapter::Mock { .. })) {
-        let adapters = super::real_adapters(&manifest.config);
+        let adapters = yunta_api::machine::real_adapters(&manifest.config);
         if let Some(pin) = pin.filter(|pin| !adapters.contains_key(*pin)) {
             let mut runnable: Vec<AdapterId> = adapters.keys().cloned().collect();
             runnable.sort();
@@ -253,7 +253,7 @@ fn refuse_unchecked(
     reach: &Reach<'_>,
     workflow: Arg<String>,
 ) -> Result<(), CliError> {
-    let declared = super::declared_facts(&manifest.config);
+    let declared = yunta_api::machine::declared_facts(&manifest.config);
     let mut errors = yunta_engine::check(&manifest.workflow, &manifest.config, &declared);
     for (name, child) in &reach.children {
         let mounts = mounts_into(name, &reach.nodes);
@@ -322,7 +322,7 @@ pub(crate) fn adapters_and_script(
             let adapters = yunta_adapters::registry(&manifest.config, Arc::clone(&mock));
             Ok((adapters, Some(mock)))
         }
-        _ => Ok((super::real_adapters(&manifest.config), None)),
+        _ => Ok((yunta_api::machine::real_adapters(&manifest.config), None)),
     }
 }
 
@@ -408,7 +408,7 @@ pub(crate) async fn claim(
     let hold = yunta_engine::hold_run(
         run_dir,
         yunta_engine::lock::Contention::Refuse,
-        &ctx.clock,
+        ctx.clock.as_ref(),
         ctx.cancellation(),
     )
     .await?;

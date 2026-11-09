@@ -98,10 +98,10 @@ pub(super) async fn check_workflows(
 ) -> Result<(), CliError> {
     let config = &ctx.project.config;
     let isolation = config.resolved_isolation();
-    let facts = super::super::declared_facts(config);
+    let facts = yunta_api::machine::declared_facts(config);
     let detected = Detected {
         adapters: answered.clone(),
-        ..crate::detect::in_repo(&ctx.cwd, ctx.supervision()).await?
+        ..yunta_api::machine::in_repo(&ctx.project.workspace, &ctx.cwd, &ctx.stop()).await?
     };
     for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
         for (pack_dir, manifest) in
@@ -147,7 +147,7 @@ fn broken(error: &yunta_core::check::CheckError, pack: &str, detected: &Detected
         None => (yunta_render::refusal::check::line(error), None),
     };
     Check {
-        fix: crate::detect::fix_for(error, detected).or(remedy),
+        fix: yunta_api::machine::fix_for(error, detected).or(remedy),
         ..Check::new(Found::Problem, pack, said)
     }
 }

@@ -21,7 +21,8 @@
 //!   finds in a workflow, and `refusal`, a decision, a reply or a close a run
 //!   will not take.
 //! - Boundaries a decision is handed rather than reaching for: `clock`,
-//!   `id_source`, `process`, `disk`, `durable` and `secret`.
+//!   `id_source`, `process`, `disk`, `durable` and `secret`; and `pace`, how
+//!   long a poll over state another process owns waits between looks.
 //! - Values every crate shares: `ids`, `nonempty`, `graph`, `units`, `shell`,
 //!   `commit_message` and `error`.
 
@@ -66,6 +67,7 @@ mod ids;
 pub mod inputs;
 mod manifest;
 mod nonempty;
+pub mod pace;
 mod pack;
 mod pack_audit;
 pub mod persisted;
@@ -95,7 +97,7 @@ pub mod workflow;
 pub mod yaml;
 
 pub use capabilities::{Capabilities, Capability, FenceLevel, ToolNaming};
-pub use clock::{Clock, SystemClock};
+pub use clock::{Clock, SystemClock, SETTLE_AFTER_SUSPENSION};
 pub use config::{
     network_asked, permission_layer_conflicts, user_knowledge_dir, user_state_root,
     AdapterSettings, BaselineConfig, CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig,

@@ -24,22 +24,24 @@ use std::time::Duration;
 
 use surco::look::Look;
 use yunta_core::events::RunPhaseRaw;
+use yunta_core::pace::Pace;
 use yunta_core::process::group::force_kill_group;
 use yunta_core::process::mark::{close_marked, SessionMark};
 use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
 use yunta_core::process::tree::close_groups_under;
 use yunta_core::step::NextStep;
-use yunta_core::{describe, Clock, Pid, RunId};
-use yunta_engine::pace::Pace;
+use yunta_core::{describe, Pid, RunId};
 use yunta_render::command;
 use yunta_render::page::{CancelState, Cancelled, Page};
 
 use crate::commands::close::give_back;
-use crate::context::{Context, Opened};
+use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, progress, Answer, Mode};
 use crate::output::{note, warn};
+use crate::shell::Shell;
+use yunta_api::OpenedRun;
 use yunta_render::document::SCHEMA_VERSION;
 
 /// How long the engine gets to react to the SIGINT before the escalation
@@ -54,10 +56,15 @@ const ENGINE_SHUTDOWN_POLL: Duration = Duration::from_millis(200);
 
 mod registered;
 
-pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+pub async fn cancel(
+    shell: &Shell,
+    run_id: &RunId,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let ctx = Context::of(shell)?;
     let storage = ctx.async_storage().await?;
-    let open = ctx.open_run(run_id).await?;
+    let open = ctx.project.run(run_id).await?;
 
     let state = yunta_replay::RunState::replay(&open.events);
     // Where the log leaves the run now: a pause a later wake resumed
@@ -68,7 +75,7 @@ pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
     let end = if state.broken.is_some() || stopped {
         let killed = settle_stopped(&ctx, &open, run_id).await;
         let now = ctx.clock.now();
-        let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
+        let engine = yunta_engine::read_engine(&open.dir, &yunta_engine::lock::SystemProbe);
         let workflow = &open.manifest.doc.workflow;
         let standing =
             yunta_replay::frame::RunFrame::of(run_id, workflow, &state, None, &engine, now)
@@ -90,7 +97,7 @@ pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
 async fn stop_engine(
     ctx: &Context,
     storage: &yunta_storage::AsyncStorage,
-    open: &Opened,
+    open: &OpenedRun<'_>,
     run_id: &RunId,
     state: &yunta_replay::RunState,
     output: Mode,
@@ -109,7 +116,7 @@ async fn stop_engine(
     }
 
     // Case 2 — the engine crashed; its leftovers are ours to clean.
-    settle_crash(ctx, storage, run_id, &open.run_dir, &registry, &redactor).await?;
+    settle_crash(ctx, storage, run_id, &open.dir, &registry, &redactor).await?;
     Ok(CancelState::Crashed {
         engine_pid: registry.engine_pid,
         killed: registry.process_groups.len(),
@@ -205,8 +212,8 @@ async fn await_engine(
 /// [`may_signal`] refuses it. When any of them is alive, the checkouts go
 /// back to the pool, as `close` gives them back; the run's own state is left
 /// as it is. Answers how many of the named groups are alive as it looks.
-async fn settle_stopped(ctx: &Context, open: &Opened, run_id: &RunId) -> usize {
-    let killed = kill_unstopped_groups(&open.run_dir, run_id).await;
+async fn settle_stopped(ctx: &Context, open: &OpenedRun<'_>, run_id: &RunId) -> usize {
+    let killed = kill_unstopped_groups(&open.dir, run_id).await;
     if killed > 0 {
         give_back(ctx, open, run_id).await;
     }
@@ -232,7 +239,7 @@ pub(crate) async fn settle_crash(
         storage,
         run_id,
         &yunta_core::events::PauseReason::CancelledAfterCrash,
-        &ctx.clock,
+        ctx.clock.as_ref(),
         redactor,
     )
     .await?;

@@ -35,15 +35,16 @@ use crate::error::CliError;
 use crate::output::show;
 use crate::output::warn;
 use crate::output::Outcome;
-use crate::project::Project;
+use crate::shell::Shell;
+use yunta_api::Project;
 
 use yunta_render::page::Collected;
 
 mod pool;
 use pool::{adopt, tidy, would_adopt};
 
-pub async fn gc(dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+pub async fn gc(shell: &Shell, dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
+    let ctx = Context::of(shell)?;
     let limits = ctx
         .project
         .config
@@ -54,7 +55,7 @@ pub async fn gc(dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
         &ctx.project.worktrees_root,
         &ctx.cwd,
         limits,
-        std::sync::Arc::new(ctx.clock),
+        std::sync::Arc::clone(&ctx.clock),
     );
     let mut collected = Collected::new(dry_run);
     let Reclaimed {
@@ -190,7 +191,7 @@ async fn reclaim(
         .list_runs()
         .map(|runs| runs.into_iter().map(|run| run.run_id).collect::<Vec<_>>())?;
 
-    let now = yunta_core::Clock::now(&ctx.clock);
+    let now = ctx.clock.now();
     let mut reclaimed = Reclaimed::default();
     for run_id in run_ids {
         let events = match storage.events_for_run(&run_id) {

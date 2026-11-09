@@ -4,17 +4,17 @@
 //!
 //! - Commands: `cli` parses and routes, `commands` holds one module per
 //!   subcommand, `context` opens each one, `help` prints the help, `graph`
-//!   draws a workflow's graph, `pack` installs and lists packs, `project`
-//!   resolves the project and its config, and `detect` reads what a repository
-//!   says about itself and which adapters this machine answers for.
+//!   draws a workflow's graph, `pack` installs and lists packs, and `detect`
+//!   reads what a repository says about itself and which adapters this machine
+//!   answers for.
 //! - What a person sees and answers: every page a command shows is render's,
 //!   filled with what the command read; `output` owns what a command writes,
 //!   the streams it is drawn to and the code it exits with, `surface` draws a
 //!   run as it happens, `ask` and `human_interaction` take a person's answers,
 //!   and `identity` names who decided.
-//! - For machines and the process: `json` is the versioned JSON the CLI emits,
-//!   `error` is the one error a command hands back, and `interrupt` is what
-//!   trips cancellation.
+//! - The process: `shell` reads it once, into the workspace every command
+//!   takes; `error` is the one error a command hands back, and `interrupt` is
+//!   what trips cancellation.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.
@@ -35,7 +35,6 @@ mod ask;
 mod cli;
 mod commands;
 mod context;
-mod detect;
 mod error;
 mod graph;
 mod help;
@@ -44,7 +43,7 @@ mod identity;
 mod interrupt;
 mod output;
 mod pack;
-mod project;
+mod shell;
 mod surface;
 
 use std::ffi::OsString;
@@ -67,12 +66,12 @@ fn main() -> ExitCode {
 
     // The process environment, read once here at the shell's edge: every
     // color, glyph, width, terminal and log decision below reads this value.
-    let env = project::process_env();
+    let env = shell::environment();
     // The arguments, read once. The help and the usage errors clap refuses
     // are painted before clap parses them, each rendered by a command built
     // in the paint of the stream it goes to; `help::exit` writes what that
     // command rendered.
-    let args: Vec<OsString> = std::env::args_os().collect();
+    let args: Vec<OsString> = shell::arguments();
     let policy = policy_from_args(&env, &args);
     let stdout_paint = policy.paint(std::io::stdout().is_terminal());
     let stderr_paint = policy.paint(std::io::stderr().is_terminal());
@@ -93,7 +92,7 @@ fn main() -> ExitCode {
     let mode = cli.mode();
     tracing::debug!("starting");
 
-    let outcome = drive(cli, started, mode, &look);
+    let outcome = drive(cli, env, started, mode, &look);
     // Last, because a prompt this run abandoned mid-key left a thread
     // that is still reading the terminal and still turning raw mode on
     // between its own reads. Nothing runs after this, so nothing takes
@@ -254,6 +253,7 @@ fn columns(env: &Env) -> Option<usize> {
 /// and handed to whichever command runs.
 fn drive(
     cli: cli::Cli,
+    env: Env,
     started: Instant,
     mode: output::Mode,
     look: &surco::look::Look,
@@ -262,7 +262,7 @@ fn drive(
         .enable_all()
         .build()
         .map_err(|source| CliError::io("build the runtime for", "this command", source))?;
-    let outcome = runtime.block_on(cli.run(started, mode, look));
+    let outcome = runtime.block_on(cli.run(env, started, mode, look));
     runtime.shutdown_background();
     outcome
 }

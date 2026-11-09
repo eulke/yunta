@@ -7,11 +7,11 @@
 use std::path::Path;
 
 use serde_json::Value;
-use yunta_core::{AdapterId, Clock, ModeName, RunId};
+use yunta_core::{AdapterId, ModeName, RunId};
 
 use crate::context::Context;
 use crate::error::CliError;
-use crate::interrupt::Interrupt;
+use crate::shell::Shell;
 
 fn required_str<'a>(
     args: &'a serde_json::Map<String, Value>,
@@ -41,58 +41,42 @@ fn required_run_id(args: &serde_json::Map<String, Value>) -> Result<RunId, CliEr
     Ok(required_str(args, "run_id")?.parse()?)
 }
 
-pub(super) async fn tool_list_workflows(
-    cwd: &Path,
-    interrupt: Interrupt,
-) -> Result<String, CliError> {
-    // The same catalog `yunta list` renders, built in-process: shelling
+pub(super) async fn tool_list_workflows(shell: &Shell) -> Result<String, CliError> {
+    // The same catalog `yunta list` renders, read in-process: shelling
     // out to a subprocess would print onto this server's own stdout — the
-    // very stream its JSON-RPC replies travel on. Best-effort storage, so
-    // a repo with no state root yet still lists, just without estimates.
-    let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt).ok();
+    // very stream its JSON-RPC replies travel on.
+    let catalog = shell.workspace().catalog().await;
     // An agent reads the catalog as Markdown: no terminal's width or
     // locale decides what it is told.
     use surco::surface::{Markdown, Surface};
     use yunta_render::page::Page;
-    let catalog = super::super::list::read_catalog(cwd, ctx.as_ref()).await;
     Ok(Markdown.draw(&catalog.document(&Markdown.look())))
 }
 
 pub(super) async fn tool_workflow_status(
-    cwd: &Path,
+    shell: &Shell,
     args: &serde_json::Map<String, Value>,
-    interrupt: Interrupt,
 ) -> Result<String, CliError> {
     let run_id = required_run_id(args)?;
-    let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
-    let open = ctx.open_run(&run_id).await?;
-    let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
-    let (events, manifest) = (open.events, open.manifest.doc);
-    let state = yunta_replay::RunState::replay(&events);
-    let decision =
-        crate::commands::status::decision::decision_of(&manifest, &open.run_dir, &state).await?;
-    let mut frame = yunta_replay::frame::RunFrame::of(
-        &run_id,
-        &manifest.workflow,
-        &state,
-        None,
-        &engine,
-        ctx.clock.now(),
-    );
-    frame.prior = crate::commands::stats::budget_prior(&ctx, &manifest, &frame, &events).await;
+    let ctx = Context::of(shell)?;
+    let reading = ctx.project.run(&run_id).await?.reading().await?;
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.
     yunta_render::document::to_json_string(&yunta_render::document::RunDocument::of(
-        &run_id, &events, &state, &manifest, &frame, decision,
+        &reading.run.id,
+        &reading.run.events,
+        &reading.state,
+        &reading.run.manifest.doc,
+        &reading.frame,
+        reading.decision.clone(),
     ))
     .map_err(CliError::msg)
 }
 
 pub(super) async fn tool_run_workflow(
-    cwd: &Path,
+    shell: &Shell,
     args: &serde_json::Map<String, Value>,
-    interrupt: Interrupt,
 ) -> Result<String, CliError> {
     let name = required_str(args, "workflow")?;
     let mut inputs: Vec<String> = Vec::new();
@@ -121,7 +105,7 @@ pub(super) async fn tool_run_workflow(
     // (`acme/review`) — then creates the run and hands it off, all
     // in-process through the same `start_detached` `yunta run --detach`
     // calls.
-    let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
+    let ctx = Context::of(shell)?;
     let storage = ctx.async_storage().await?;
     let started = super::super::run::start_detached(
         &ctx,
@@ -143,20 +127,20 @@ pub(super) async fn tool_run_workflow(
 }
 
 pub(super) async fn tool_resume_run(
-    cwd: &std::path::Path,
+    shell: &Shell,
     args: &serde_json::Map<String, Value>,
-    interrupt: Interrupt,
 ) -> Result<String, CliError> {
+    let cwd = shell.workspace().dir.as_path();
     let run_id = required_run_id(args)?;
-    let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
-    let open = ctx.open_run(&run_id).await?;
+    let ctx = Context::of(shell)?;
+    let open = ctx.project.run(&run_id).await?;
     // Said here because the process below would say it only to `detached.log`,
     // which no caller of this tool reads.
     let state = yunta_replay::RunState::replay(&open.events);
-    super::super::resume::refuse_if_driven(&ctx, &run_id, &open.run_dir, &state).await?;
+    super::super::resume::refuse_if_driven(&ctx, &run_id, &open.dir, &state).await?;
     // A run paused on a limit's reset is handed to a resume that waits for
     // the reset first, so it does not spend the limit before it lifts.
-    super::super::spawn_detached_resume(&open.run_dir, run_id.as_str(), cwd)
+    super::super::spawn_detached_resume(&open.dir, run_id.as_str(), cwd, &shell.workspace().binary)
         .await
         .map_err(|source| super::super::DetachedResumeError::new(&run_id, source))?;
     Ok(format!(
@@ -165,9 +149,8 @@ pub(super) async fn tool_resume_run(
 }
 
 pub(super) async fn tool_resolve_gate(
-    cwd: &std::path::Path,
+    shell: &Shell,
     args: &serde_json::Map<String, Value>,
-    interrupt: Interrupt,
 ) -> Result<String, CliError> {
     let run_id = required_run_id(args)?;
     let option = required_str(args, "option")?.parse::<yunta_core::OptionId>()?;
@@ -180,15 +163,15 @@ pub(super) async fn tool_resolve_gate(
     // answers a gate records exactly what a person answering it records,
     // under this server's own injected clock, and reads back the same
     // sentence.
-    let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
+    let ctx = Context::of(shell)?;
     super::super::resolve_gate::resolve(&ctx, &run_id, &option, by.as_ref(), text.as_deref()).await
 }
 
 pub(super) async fn tool_answer_questions(
-    cwd: &std::path::Path,
+    shell: &Shell,
     args: &serde_json::Map<String, Value>,
-    interrupt: Interrupt,
 ) -> Result<String, CliError> {
+    let cwd = shell.workspace().dir.as_path();
     let run_id = required_run_id(args)?;
     let node = required_str(args, "node")?.parse::<yunta_core::NodeId>()?;
     let by = optional_str(args, "by")?
@@ -196,13 +179,13 @@ pub(super) async fn tool_answer_questions(
         .transpose()?;
     let answers = answers_from(args)?;
 
-    let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
-    let open = ctx.open_run(&run_id).await?;
+    let ctx = Context::of(shell)?;
+    let open = ctx.project.run(&run_id).await?;
     // Said here because the resume below would say it only to `detached.log`, with
     // the answers already on the log.
     let state = yunta_replay::RunState::replay(&open.events);
-    super::super::resume::refuse_if_driven(&ctx, &run_id, &open.run_dir, &state).await?;
-    let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
+    super::super::resume::refuse_if_driven(&ctx, &run_id, &open.dir, &state).await?;
+    let (run_dir, manifest) = (open.dir, open.manifest.doc);
     let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
     let storage = ctx.async_storage().await?;
 
@@ -215,7 +198,7 @@ pub(super) async fn tool_answer_questions(
         &storage,
         &run_id,
         &run_dir,
-        &ctx.clock,
+        ctx.clock.as_ref(),
         &node,
         yunta_engine::AnswersReply {
             answers,
@@ -230,7 +213,7 @@ pub(super) async fn tool_answer_questions(
 
     // The answers are on the log; a detached process carries the node
     // on from there, exactly as it does after a gate is resolved.
-    super::super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd)
+    super::super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd, &shell.workspace().binary)
         .await
         .map_err(|source| CliError::AnswersRecordedNotResumed {
             source: super::super::DetachedResumeError::new(&run_id, source),

@@ -20,13 +20,13 @@ use yunta_render::page::RanCase;
 
 use crate::commands::test::{case_name, case_run, discover_case_paths, run_case};
 use crate::error::CliError;
-use crate::interrupt::Interrupt;
 use crate::output::show;
 use crate::output::Outcome;
 use crate::pack::{packs_root, read_manifest, vendor_dir};
+use crate::shell::Shell;
 
-pub async fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
-    let ctx = crate::context::Context::load()?;
+pub async fn audit(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
+    let ctx = crate::context::Context::of(shell)?;
     let cwd = ctx.cwd.clone();
     let pack_dir = vendor_dir(&cwd, pack);
     if !pack_dir.is_dir() {
@@ -38,7 +38,7 @@ pub async fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let manifest = read_manifest(&pack_dir)?;
 
     let report = audit_pack(&pack_dir, manifest);
-    let cases = run_cases(&pack_dir, ctx.interrupt()).await;
+    let cases = run_cases(shell, &pack_dir).await;
     let inventory = Inventory::Audited {
         audit: &report,
         pack,
@@ -60,7 +60,7 @@ pub fn count_cases(pack_dir: &Path) -> Cases {
 /// The pack's cases, each run on its vendored copy the way `yunta test`
 /// runs a project's own: none shipped where it has no `.yunta/tests/`, or
 /// an empty one.
-pub async fn run_cases(pack_dir: &Path, interrupt: Interrupt) -> Cases {
+pub async fn run_cases(shell: &Shell, pack_dir: &Path) -> Cases {
     let case_paths = discover_case_paths(pack_dir).unwrap_or_default();
     if case_paths.is_empty() {
         return Cases::NoneShipped;
@@ -69,7 +69,7 @@ pub async fn run_cases(pack_dir: &Path, interrupt: Interrupt) -> Cases {
     for case_path in &case_paths {
         cases.push(RanCase {
             name: case_name(case_path),
-            run: case_run(run_case(pack_dir, case_path, interrupt.shared()).await),
+            run: case_run(run_case(shell, pack_dir, case_path).await),
         });
     }
     Cases::Ran(cases)

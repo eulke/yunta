@@ -40,8 +40,9 @@ pub enum CliError {
         source: std::io::Error,
     },
 
+    /// What failed below the API, said in its own words and its causes'.
     #[error(transparent)]
-    Project(#[from] crate::project::ProjectError),
+    Failed(#[from] yunta_api::Failure),
 
     #[error(transparent)]
     Pack(#[from] crate::pack::PackError),
@@ -246,6 +247,18 @@ impl From<yunta_engine::AnswerQuestionsError> for CliError {
                 Refused::Answers(refusal).into()
             }
             failed => CliError::AnswerQuestions(failed),
+        }
+    }
+}
+
+/// What the API did not do: a refusal render says, a failure below it, or
+/// this invocation's own stop.
+impl From<yunta_api::Error> for CliError {
+    fn from(error: yunta_api::Error) -> Self {
+        match error {
+            yunta_api::Error::Refused(refused) => CliError::Refused(refused),
+            yunta_api::Error::Failed(failure) => CliError::Failed(failure),
+            yunta_api::Error::Stopped => CliError::Run(yunta_engine::RunError::Cancelled),
         }
     }
 }

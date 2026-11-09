@@ -7,9 +7,9 @@ use yunta_core::{AdapterSettings, ProbedAdapter};
 /// Probes every adapter this binary builds, in the order the composition
 /// root declares them — the id each reports about itself, never one
 /// re-spelled here.
-pub(crate) async fn probe_known_adapters() -> Vec<ProbedAdapter> {
+pub async fn probe_known_adapters() -> Vec<ProbedAdapter> {
     let mut probed = Vec::new();
-    for adapter in crate::commands::built_adapters(|_| AdapterSettings::default()) {
+    for adapter in crate::machine::built_adapters(|_| AdapterSettings::default()) {
         let id = adapter.id().clone();
         probed.push(match adapter.probe().await {
             Ok(ProbeReport::Healthy { version }) => ProbedAdapter {

@@ -1,4 +1,5 @@
-//! Project/config resolution for the CLI.
+//! See [`crate`]. A project: the config layers it is read from and the roots
+//! its runs, checkouts and log live under, resolved from a workspace.
 //!
 //! Layers, most specific first: `.yunta/config.yaml` in the current
 //! repo, then the user root's `config.yaml`, then the org layer
@@ -11,11 +12,22 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::{ConfigLayer, Isolation, Manifest, RunId};
 
+use crate::{Error, Failure, Workspace};
+
+/// A project: the config layers it is read from, the roots its runs,
+/// checkouts and log live under, and the workspace it was resolved from,
+/// which everything asked of it reads where it works, its clock and its
+/// environment from.
 pub struct Project {
     pub config: ConfigLayer,
     pub runs_root: PathBuf,
     pub worktrees_root: PathBuf,
     pub storage_path: PathBuf,
+    /// The user state root it was resolved under, where the built-in default
+    /// runs root lies.
+    pub user_root: PathBuf,
+    /// The workspace it was resolved from, working where it is rooted.
+    pub workspace: Workspace,
 }
 
 impl Project {
@@ -31,9 +43,7 @@ impl Project {
     /// this design avoids.
     pub fn run_dir(&self, run_id: &str) -> Option<PathBuf> {
         let mut candidates = vec![self.runs_root.clone()];
-        if let Ok(user_root) = user_root() {
-            candidates.push(user_root.join("runs"));
-        }
+        candidates.push(self.user_root.join("runs"));
         candidates
             .into_iter()
             .map(|root| root.join(run_id))
@@ -51,26 +61,6 @@ impl Project {
             .as_ref()
             .map(|paths| paths.worktrees_root().to_path_buf())
             .unwrap_or_else(|| self.worktrees_root.clone())
-    }
-
-    /// The pool of checkouts run `manifest` takes its trees from, for the
-    /// run whose directory is `run_dir`, reached from the checkout `repo`.
-    /// `clock` is the invocation's own, so the pool reads time as the
-    /// command does.
-    pub fn pool_of(
-        &self,
-        manifest: &Manifest,
-        repo: &Path,
-        run_dir: &Path,
-        clock: std::sync::Arc<dyn yunta_core::Clock>,
-    ) -> std::sync::Arc<yunta_engine::CheckoutPool> {
-        yunta_engine::CheckoutPool::of_run(
-            &self.worktrees_root_for(manifest),
-            repo,
-            run_dir,
-            manifest,
-            clock,
-        )
     }
 
     /// The tree run `run_id` works in: the checkout of its own its log
@@ -93,8 +83,9 @@ impl Project {
     }
 }
 
+/// Why a project could not be resolved; the API hands it on as a failure.
 #[derive(Debug, thiserror::Error)]
-pub enum ProjectError {
+pub(crate) enum ProjectError {
     #[error("failed to read config layer `{path}`: {source}")]
     Read {
         path: PathBuf,
@@ -125,18 +116,8 @@ pub enum ProjectError {
     },
 }
 
-/// The process environment as the CLI's boundary captures it, with every
-/// variable a built adapter reaches its service by, so no code below
-/// reads it live and everything downstream (core's `user_state_root`, a
-/// run's ambient, a service probe) takes the resulting
-/// [`Env`](yunta_core::Env). A run leaves `subprocess_vars` empty: its
-/// nodes inherit this process's environment unchanged.
-pub(crate) fn process_env() -> yunta_core::Env {
-    yunta_core::Env::of_process(&crate::commands::service_vars())
-}
-
-pub(crate) fn user_root() -> Result<PathBuf, ProjectError> {
-    yunta_core::user_state_root(&process_env()).ok_or(ProjectError::NoStateRoot)
+fn user_root(env: &yunta_core::Env) -> Result<PathBuf, ProjectError> {
+    yunta_core::user_state_root(env).ok_or(ProjectError::NoStateRoot)
 }
 
 fn load_layer(path: &Path, home: Option<&Path>) -> Result<Option<ConfigLayer>, ProjectError> {
@@ -174,9 +155,11 @@ fn load_layer(path: &Path, home: Option<&Path>) -> Result<Option<ConfigLayer>, P
 /// The project's config layers as actually present on disk, org first —
 /// named so `permissions` conflicts can cite which layer tried to loosen
 /// which. Shared by [`resolve`] and by `yunta check`'s layered path.
-pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
-    let env = process_env();
-    let user_root = yunta_core::user_state_root(&env).ok_or(ProjectError::NoStateRoot)?;
+pub(crate) fn load_named_layers(
+    cwd: &Path,
+    env: &yunta_core::Env,
+) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
+    let user_root = user_root(env)?;
     let org = env
         .org_config
         .clone()
@@ -199,14 +182,16 @@ pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>,
 /// `version:` a layer may declare — the one this binary reads.
 const CONFIG_VERSION: u32 = 1;
 
-/// Resolves the merged config and state paths for a project rooted at
-/// `cwd`. Missing layers are simply absent — an empty config is valid;
-/// a malformed one is an error, never silently skipped.
-pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
-    let user_root = user_root()?;
+/// Resolves the merged config and state paths for a project rooted where
+/// `workspace` works. Missing layers are simply absent — an empty config is
+/// valid; a malformed one is an error, never silently skipped.
+pub(crate) fn resolve(workspace: Workspace) -> Result<Project, ProjectError> {
+    let user_root = user_root(&workspace.env)?;
 
     // merge_layers folds most-specific-last, so feed org → user → repo.
-    let layers = load_named_layers(cwd)?.into_iter().map(|(_, layer)| layer);
+    let layers = load_named_layers(&workspace.dir, &workspace.env)?
+        .into_iter()
+        .map(|(_, layer)| layer);
     let config = ConfigLayer::merge_layers(layers);
 
     let runs_root = config
@@ -239,10 +224,17 @@ pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
         runs_root,
         worktrees_root,
         storage_path,
+        user_root,
+        workspace,
     })
 }
 
-/// The checkout of its own a run's state names, when it names one.
-pub fn bound_checkout(state: &yunta_replay::RunState) -> Option<PathBuf> {
-    state.run.checkout().map(Path::to_path_buf)
+/// The config layers present on disk for a project at `dir`, org first, each
+/// named so a `permissions` conflict can cite which layer tried to loosen
+/// which: what `yunta check` reads layer by layer.
+pub fn config_layers(
+    dir: &Path,
+    env: &yunta_core::Env,
+) -> Result<Vec<(&'static str, ConfigLayer)>, Error> {
+    load_named_layers(dir, env).map_err(|failed| Error::Failed(Failure::new(failed)))
 }

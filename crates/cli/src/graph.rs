@@ -14,13 +14,14 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use yunta_core::{Clock, NodeId, RunId, Workflow};
+use yunta_core::{NodeId, RunId, Workflow};
 use yunta_replay::frame::RunFrame;
 
 use crate::commands::{resolve_workflow_ref, verdict};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
+use crate::shell::Shell;
 
 type Labels = HashMap<NodeId, String>;
 
@@ -32,12 +33,13 @@ pub enum GraphFormat {
 }
 
 pub async fn graph(
+    shell: &Shell,
     workflow_path: Option<&Path>,
     run_id: Option<&RunId>,
     format: GraphFormat,
     look: &surco::look::Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+    let ctx = Context::of(shell)?;
 
     let (workflow, labels, outcome) = match (workflow_path, run_id) {
         (Some(path), None) => {
@@ -54,7 +56,7 @@ pub async fn graph(
                 &workflow,
                 &path,
                 &ctx.project.config,
-                verdict::layer_conflicts(&ctx.cwd)?,
+                verdict::layer_conflicts(&ctx.cwd, &ctx.env)?,
                 verdict::Reach::Workflow,
             )
             .await?;
@@ -69,18 +71,10 @@ pub async fn graph(
             (workflow, None, outcome)
         }
         (None, Some(run_id)) => {
-            let open = ctx.open_run(run_id).await?;
-            let manifest = open.manifest.doc;
-            let now = ctx.clock.now();
-            let frame = RunFrame::of(
-                run_id,
-                &manifest.workflow,
-                &yunta_replay::RunState::replay(&open.events),
-                None,
-                &yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe),
-                now,
-            );
-            (manifest.workflow, derived_labels(&frame), Outcome::Success)
+            let open = ctx.project.run(run_id).await?;
+            let frame = open.frame();
+            let labels = derived_labels(&frame);
+            (open.manifest.doc.workflow, labels, Outcome::Success)
         }
         (Some(_), Some(_)) => {
             return Err(CliError::msg(

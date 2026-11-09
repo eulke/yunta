@@ -6,16 +6,17 @@
 use std::time::Duration;
 
 use yunta_core::events::{NodeState, RunPhaseRaw};
+use yunta_core::pace::Pace;
 use yunta_core::step::NextStep;
 use yunta_core::{describe, RunId};
-use yunta_engine::pace::Pace;
 use yunta_engine::{EngineProcessFile, Registry};
 use yunta_render::command;
 use yunta_replay::RunState;
 
 use super::ENGINE_SHUTDOWN_POLL;
-use crate::context::{Context, Opened};
+use crate::context::Context;
 use crate::error::CliError;
+use yunta_api::OpenedRun;
 
 /// How long a cancel waits for a moving run's engine to register: an engine
 /// registers once it has probed the adapters its run reaches, moments after
@@ -30,7 +31,7 @@ const REGISTRATION_WAIT: Duration = Duration::from_secs(15);
 pub(super) async fn engine_registry(
     ctx: &Context,
     storage: &yunta_storage::AsyncStorage,
-    open: &Opened,
+    open: &OpenedRun<'_>,
     run_id: &RunId,
     state: &RunState,
 ) -> Result<Option<EngineProcessFile>, CliError> {
@@ -58,12 +59,12 @@ pub(super) async fn engine_registry(
 /// a node in progress has no channel to reach it, which is an error; with
 /// no node in progress, the engine has not registered yet.
 fn registered(
-    open: &Opened,
+    open: &OpenedRun<'_>,
     run_id: &RunId,
     state: &RunState,
 ) -> Result<Option<EngineProcessFile>, CliError> {
     let called = run_id.handle();
-    match yunta_engine::read_registry(&open.run_dir) {
+    match yunta_engine::read_registry(&open.dir) {
         Registry::Read(registry) => Ok(Some(registry.doc)),
         // A registry that will not read is not a registry that was
         // never written: the person is told which of the two it is,

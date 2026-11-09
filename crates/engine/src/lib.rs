@@ -27,7 +27,7 @@
 //!   process and through the run's socket, and never on the log.
 //! - Checkouts: `worktree` isolates and pools them; `wakefulness` notices a
 //!   host that slept.
-//! - Boundaries: `git`, `process`, `process_registry`, `lock`, `run_hold` and `pace`.
+//! - Boundaries: `git`, `process`, `process_registry`, `lock` and `run_hold`.
 //! - Packs: `pack_audit` and `pack_requires`.
 
 // A panic is a bug, never a fallible path: production returns a typed
@@ -70,7 +70,6 @@ pub mod git;
 mod inputs;
 pub mod lock;
 mod manifest;
-pub mod pace;
 mod pack_audit;
 mod pack_requires;
 mod permissions;
@@ -109,7 +108,7 @@ pub use catalog::{
 };
 pub use check::{
     check, check_context_files, check_mode_start, check_mounted, check_warnings,
-    check_workflow_refs, programs_named, AdapterFacts, ContextFilesCheck, RefsCheck, RunTreeOrigin,
+    check_workflow_refs, programs_named, ContextFilesCheck, RefsCheck, RunTreeOrigin,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
@@ -147,7 +146,6 @@ pub use task_cycle::{
     Surprise, TaskCause, TaskCycleError, TaskCycleReport, TaskOutcome,
 };
 pub use tasks::{held_of, judged_task, measured};
-pub use wakefulness::SETTLE_AFTER_SUSPENSION;
 pub use worktree::{
     adopt_unit_branches, adoptable_unit_branches, capture_tree, carry_work, cleanup_worktree,
     commit_tree, commit_work, forget_run_units, hand_over_run_checkout, hand_over_worktree,

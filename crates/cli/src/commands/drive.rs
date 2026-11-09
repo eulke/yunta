@@ -55,7 +55,7 @@ pub(crate) struct Driving<'a> {
     pub(crate) storage: &'a AsyncStorage,
     pub(crate) manifest: &'a Manifest,
     pub(crate) prepared: &'a Prepared,
-    pub(crate) adapters: super::Adapters,
+    pub(crate) adapters: yunta_api::machine::Adapters,
     pub(crate) prior: Option<PriorEstimation>,
     /// What was said before the first token, carried so the document
     /// this invocation prints says it too — stderr reaches the person
@@ -105,8 +105,8 @@ pub(crate) async fn drive(
         worktree: &env.prepared.worktree,
         adapters: &env.adapters,
         storage: env.storage,
-        clock: std::sync::Arc::new(env.ctx.clock),
-        ids: &env.ctx.ids,
+        clock: std::sync::Arc::clone(&env.ctx.clock),
+        ids: env.ctx.ids.as_ref(),
         human_interaction: &watching.asking,
         forge: forge.as_deref(),
         cancel: &root_cancel,
@@ -218,13 +218,14 @@ async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
     released(&settling).await?;
     resumes_after_reset(&settling).await?;
     let run_dir = run_dir_of(settling.ctx, &settling.run_id);
+    let log = settling.ctx.project.event_log().await?;
     let closed = Closed {
         run_id: &settling.run_id,
         manifest: &settling.manifest,
         run_dir: &run_dir,
         worktree: &settling.worktree,
-        storage: settling.storage,
-        clock: &settling.ctx.clock,
+        log: &log,
+        clock: settling.ctx.clock.as_ref(),
         prior: settling.prior,
         look: settling.look,
         cwd: &settling.ctx.cwd,
@@ -282,9 +283,14 @@ async fn resumes_after_reset(settling: &Settling<'_>) -> Result<(), CliError> {
         return Ok(());
     }
     let run_dir = run_dir_of(settling.ctx, &settling.run_id);
-    spawn_detached_resume(&run_dir, settling.run_id.as_str(), &settling.ctx.cwd)
-        .await
-        .map_err(|source| DetachedResumeError::new(&settling.run_id, source))?;
+    spawn_detached_resume(
+        &run_dir,
+        settling.run_id.as_str(),
+        &settling.ctx.cwd,
+        &settling.ctx.binary,
+    )
+    .await
+    .map_err(|source| DetachedResumeError::new(&settling.run_id, source))?;
     Ok(())
 }
 
@@ -309,7 +315,8 @@ pub(crate) struct Closed<'a> {
     pub(crate) manifest: &'a Manifest,
     pub(crate) run_dir: &'a Path,
     pub(crate) worktree: &'a Path,
-    pub(crate) storage: &'a AsyncStorage,
+    /// Where the run's log is read one last time.
+    pub(crate) log: &'a yunta_api::EventLog,
     pub(crate) clock: &'a dyn Clock,
     /// What this workflow's past runs cost, for the block's own
     /// comparison; `None` below the history floor.
@@ -328,21 +335,16 @@ pub(crate) struct Closed<'a> {
 /// derived from its own events, so the last word on what happened comes
 /// off the same source every other surface reads.
 async fn closing_of(closed: &Closed<'_>) -> Result<Closing, CliError> {
-    let events = closed.storage.events_for_run(closed.run_id.clone()).await?;
+    let events = closed.log.events(closed.run_id).await?;
     let state = yunta_replay::RunState::replay(&events);
-    let decision =
-        crate::commands::status::decision::decision_of(closed.manifest, closed.run_dir, &state)
-            .await?
-            .map(|(node, escalation)| (node, escalation.into_payload()));
+    let decision = yunta_engine::current_escalation(closed.manifest, closed.run_dir, &state)
+        .await?
+        .map(|(node, escalation)| (node, escalation.into_payload()));
     let shown = match &decision {
         Some((_, escalation)) => {
-            crate::commands::status::decision::shown_of(
-                closed.manifest,
-                closed.run_dir,
-                escalation,
-                &state,
-            )
-            .await?
+            let shows = escalation.shows();
+            let asked = closed.manifest.request();
+            yunta_engine::shown_documents(closed.run_dir, shows, &state, asked).await?
         }
         None => Vec::new(),
     };
@@ -403,9 +405,7 @@ async fn documented(
     // This invocation is the engine that drove the run.
     let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
     let decision = match ctx.project.run_dir(run_id.as_str()) {
-        Some(run_dir) => {
-            crate::commands::status::decision::decision_of(manifest, &run_dir, &state).await?
-        }
+        Some(run_dir) => yunta_engine::current_escalation(manifest, &run_dir, &state).await?,
         None => None,
     };
     let mut frame = yunta_replay::frame::RunFrame::of(
@@ -416,7 +416,7 @@ async fn documented(
         &engine,
         ctx.clock.now(),
     );
-    frame.prior = crate::commands::stats::budget_prior(ctx, manifest, &frame, &events).await;
+    frame.prior = ctx.project.budget_prior(manifest, &frame, &events).await;
     Ok(
         yunta_render::document::RunDocument::of(
             run_id, &events, &state, manifest, &frame, decision,

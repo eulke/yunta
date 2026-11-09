@@ -12,12 +12,14 @@ use yunta_core::ConfigLayer;
 
 use crate::context::Context;
 use crate::error::CliError;
+use crate::load_yaml;
 use crate::output::Outcome;
 use crate::output::{blank, show};
-use crate::{load_yaml, project};
+use crate::shell::Shell;
 use yunta_render::refusal::Refused;
 
 pub async fn check(
+    shell: &Shell,
     workflow_path: &Path,
     config_path: Option<&Path>,
     look: &Look,
@@ -26,7 +28,7 @@ pub async fn check(
     // against — the catalog reference, the config layers, the
     // composition graph — comes from the same `Context` its history
     // reading does, so a project resolved twice cannot be two projects.
-    let ctx = Context::load()?;
+    let ctx = Context::of(shell)?;
     let cwd = ctx.cwd.clone();
     let workflow_path = super::resolve_workflow_ref(&cwd, workflow_path)?;
     let (workflow, in_file, text) = crate::audit_workflow(&workflow_path)?;
@@ -38,7 +40,7 @@ pub async fn check(
         .into());
     };
 
-    let (config, conflicts) = config_for(&cwd, config_path)?;
+    let (config, conflicts) = config_for(&shell.workspace().env, &cwd, config_path)?;
     let verdict = super::verdict::verdict(
         &ctx,
         &workflow,
@@ -55,10 +57,11 @@ pub async fn check(
     // --workflow`. Best effort: a project with no state root yet (nothing
     // ever ran) or an unnamed workflow simply shows nothing, the same
     // stance `list_workflows` takes on missing history.
-    let opened = super::stats::history(&ctx, &workflow.name).await;
-    let (history, _) = super::stats::raw_history(&opened);
-    let findings =
-        yunta_replay::verification_effectiveness::VerificationFindings::of(&workflow, &history);
+    let findings = ctx
+        .project
+        .history(&workflow.name)
+        .await
+        .findings(&workflow);
     let outcome = verdict.report(&ctx, &workflow_path, look).await?;
     // Advice after the verdict, which is what was asked for.
     if !findings.is_empty() {
@@ -74,6 +77,7 @@ pub async fn check(
 /// citing both — or one already-merged file named with `--config`, which
 /// has nothing layered to conflict.
 fn config_for(
+    env: &yunta_core::Env,
     cwd: &Path,
     config_path: Option<&Path>,
 ) -> Result<(ConfigLayer, Vec<String>), CliError> {
@@ -81,11 +85,11 @@ fn config_for(
         Some(path) => (load_yaml(path, "config")?, Vec::new()),
         None => (
             ConfigLayer::merge_layers(
-                project::load_named_layers(cwd)?
+                yunta_api::config_layers(cwd, env)?
                     .into_iter()
                     .map(|(_, layer)| layer),
             ),
-            super::verdict::layer_conflicts(cwd)?,
+            super::verdict::layer_conflicts(cwd, env)?,
         ),
     })
 }

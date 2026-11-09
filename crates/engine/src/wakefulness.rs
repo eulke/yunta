@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use tokio_util::sync::CancellationToken;
-use yunta_core::Clock;
+use yunta_core::{Clock, SETTLE_AFTER_SUSPENSION};
 use yunta_storage::StorageError;
 
 use crate::run_log::RunLog;
@@ -30,11 +30,6 @@ const SUSPENDED_AFTER: Duration = Duration::from_secs(10);
 
 /// How often a run reads its clock while nothing else happens.
 const LOOK: Duration = Duration::from_secs(1);
-
-/// How long a host that slept has to stay awake before a session opens on
-/// it: longer than the wakes a laptop makes for maintenance, short next
-/// to the sleep it follows.
-pub const SETTLE_AFTER_SUSPENSION: Duration = Duration::from_secs(120);
 
 /// One reading of both clocks.
 #[derive(Debug, Clone, Copy)]

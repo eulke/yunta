@@ -27,12 +27,15 @@ pub mod decision;
 mod diagnostics;
 mod error;
 mod facts;
-pub mod field;
+mod field;
 mod node;
 pub mod stats;
+mod verification;
 mod waiting;
 
 pub use error::{ErrorDocument, NextCommand};
+pub use field::FieldDocument;
+pub use verification::VerificationDocument;
 
 use diagnostics::{node_diagnostics, ArtifactProblems};
 use facts::{BranchJson, CountsJson, PullRequestJson};

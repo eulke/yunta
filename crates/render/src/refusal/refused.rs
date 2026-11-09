@@ -15,7 +15,8 @@ use yunta_core::events::{Claim, FailureMenu, ObjectProblem, Refusal};
 use yunta_core::inputs::InputsProblem;
 use yunta_core::refusal::{AnswersRefusal, CloseRefusal, GateRefusal};
 use yunta_core::step::{Arg, NextStep, Reach};
-use yunta_core::{Pid, RunId, UnknownDocument};
+use yunta_core::{InvalidId, Pid, RunId, UnknownDocument};
+use yunta_replay::receipt::ReceiptError;
 use yunta_replay::registry::Asking;
 
 use crate::blocks::diagnostic::{counted_under, document_problems, plain};
@@ -41,6 +42,17 @@ pub enum Refused {
         said: String,
         candidates: Vec<Candidate>,
     },
+    /// `last`, where the repository it is asked in has no run.
+    NoRunHere,
+    /// `needs`, where no run of the repository it is asked in waits on a
+    /// person.
+    NoneNeedsYou,
+    /// A text given where a run's id goes that no id can be, and the rule it
+    /// breaks.
+    InvalidId(InvalidId),
+    /// A receipt asked of a run that has not finished, which has no closing
+    /// figures to certify.
+    NoReceipt(ReceiptError),
     /// A decision the run will not record.
     Gate { run: RunId, refusal: GateRefusal },
     /// A close the run will not make.
@@ -83,36 +95,41 @@ pub enum Refused {
 }
 
 /// A run a reference could mean, and what tells it apart from the others it
-/// could mean: in words, and as the field's row a person reads, when the run
-/// reads back.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// could mean: the field's row a person reads, when the run reads back.
+#[derive(Debug, Clone)]
 pub struct Candidate {
     pub run_id: RunId,
-    pub about: Option<String>,
-    pub line: Option<RunLine>,
+    pub row: Option<FieldRow>,
 }
 
 impl Candidate {
-    /// The run `row` is, its row drawn with `glyphs` and ending with the
-    /// command that opens it.
-    pub fn of(row: &FieldRow, glyphs: Glyphs) -> Self {
-        let frame = &row.frame;
-        let handle = frame.run_id.handle().to_string();
-        let opens = Edge::Command(command::line(&NextStep::status(&frame.run_id)));
+    /// The run `row` is.
+    pub fn of(row: FieldRow) -> Self {
         Candidate {
-            run_id: frame.run_id.clone(),
-            about: Some(format!("{} ({})", frame.workflow, frame.mode)),
-            line: Some(row.line(handle, opens, glyphs)),
+            run_id: row.frame.run_id.clone(),
+            row: Some(row),
         }
     }
 
     /// A run that does not read back, known by its id alone.
     pub fn unread(run_id: RunId) -> Self {
-        Candidate {
-            run_id,
-            about: None,
-            line: None,
-        }
+        Candidate { run_id, row: None }
+    }
+
+    /// What tells the run apart in words: the workflow it runs, and the mode
+    /// it runs in.
+    fn about(&self) -> Option<String> {
+        let frame = &self.row.as_ref()?.frame;
+        Some(format!("{} ({})", frame.workflow, frame.mode))
+    }
+
+    /// The run's row as the field draws it with `glyphs`, ending with the
+    /// command that opens it.
+    fn line(&self, glyphs: Glyphs) -> Option<RunLine> {
+        let row = self.row.as_ref()?;
+        let handle = self.run_id.handle().to_string();
+        let opens = Edge::Command(command::line(&NextStep::status(&self.run_id)));
+        Some(row.line(handle, opens, glyphs))
     }
 }
 
@@ -167,13 +184,13 @@ impl Refused {
         }
     }
 
-    /// The blocks a person's page draws under the refusal: each problem it
-    /// found in a text, pointed at in its line, and what to declare for the
-    /// ones a declaration fixes; or the runs a reference could mean. Empty
-    /// for a refusal its sentence says whole.
-    pub fn blocks(&self) -> Vec<Block> {
+    /// The blocks a person's page draws under the refusal, with `glyphs`:
+    /// each problem it found in a text, pointed at in its line, and what to
+    /// declare for the ones a declaration fixes; or the runs a reference
+    /// could mean. Empty for a refusal its sentence says whole.
+    pub fn blocks(&self, glyphs: Glyphs) -> Vec<Block> {
         match self {
-            Refused::AmbiguousRun { candidates, .. } => choice(candidates),
+            Refused::AmbiguousRun { candidates, .. } => choice(candidates, glyphs),
             Refused::Document { report, text } => document_problems(report, text.as_deref())
                 .into_iter()
                 .map(Block::from)
@@ -212,21 +229,15 @@ impl Refused {
             Refused::AmbiguousRun { said, candidates } => {
                 format!("{}:{}", name_one(said), one_per_line(candidates))
             }
-            Refused::Gate { run, refusal } => match refusal {
-                GateRefusal::NotPaused => format!(
-                    "{}; `{}` shows where it is",
-                    super::gate(refusal),
-                    command::line_for(&NextStep::status(run), reader)
-                ),
-                GateRefusal::NothingToResolve => format!(
-                    "{}; settle it where it was raised, then `{}`",
-                    super::gate(refusal),
-                    command::line_for(&NextStep::Resume { run: run.clone() }, reader)
-                ),
-                GateRefusal::UnknownOption { .. }
-                | GateRefusal::Unsaid { .. }
-                | GateRefusal::Withheld { .. } => super::gate(refusal),
-            },
+            Refused::NoRunHere => super::words::no_run_here(),
+            Refused::NoneNeedsYou => super::words::none_needs_you(),
+            Refused::InvalidId(invalid) => invalid.to_string(),
+            Refused::NoReceipt(error) => super::words::no_receipt(error),
+            Refused::Gate { run, refusal } => format!(
+                "{}{}",
+                super::gate(refusal),
+                gate_advice(run, reader, refusal)
+            ),
             Refused::Close { run, refusal } => format!(
                 "{}{}",
                 super::close(refusal),
@@ -266,14 +277,14 @@ impl std::error::Error for Refused {}
 /// looked, each problem it found pointed at in its line, and the commands
 /// that go on from here.
 impl Page for Refused {
-    fn document(&self, _look: &Look) -> Doc {
+    fn document(&self, look: &Look) -> Doc {
         let (detail, steps) = self.advice(Reader::Person);
         Doc::new()
             .with(components::Refusal {
                 said: self.said(Reader::Person),
                 detail,
             })
-            .with_all(self.blocks())
+            .with_all(self.blocks(look.glyphs))
             .with(Next { steps })
     }
 }
@@ -288,7 +299,7 @@ fn name_one(said: &str) -> String {
 fn one_per_line(candidates: &[Candidate]) -> String {
     candidates
         .iter()
-        .map(|candidate| match &candidate.about {
+        .map(|candidate| match candidate.about() {
             Some(about) => format!("\n  {}  {about}", candidate.run_id),
             None => format!("\n  {}", candidate.run_id),
         })
@@ -296,20 +307,39 @@ fn one_per_line(candidates: &[Candidate]) -> String {
 }
 
 /// The runs a reference could mean, as the rows a person chooses among: each
-/// as the field shows it, and one that does not read back by its id.
-fn choice(candidates: &[Candidate]) -> Vec<Block> {
+/// as the field shows it with `glyphs`, and one that does not read back by
+/// its id.
+fn choice(candidates: &[Candidate], glyphs: Glyphs) -> Vec<Block> {
     let rows: Vec<RunLine> = candidates
         .iter()
-        .filter_map(|candidate| candidate.line.clone())
+        .filter_map(|candidate| candidate.line(glyphs))
         .collect();
     let unread: Vec<String> = candidates
         .iter()
-        .filter(|candidate| candidate.line.is_none())
+        .filter(|candidate| candidate.row.is_none())
         .map(|candidate| candidate.run_id.to_string())
         .collect();
     let rows = (!rows.is_empty()).then(|| Runs { rows }.into());
     let unread = (!unread.is_empty()).then(|| Said(unread).into());
     rows.into_iter().chain(unread).collect()
+}
+
+/// What to do instead of the decision a run refused, the run named the way
+/// `reader` copies it: nothing beside a decision the refusal says whole.
+fn gate_advice(run: &RunId, reader: Reader, refusal: &GateRefusal) -> String {
+    match refusal {
+        GateRefusal::NotPaused => format!(
+            "; `{}` shows where it is",
+            command::line_for(&NextStep::status(run), reader)
+        ),
+        GateRefusal::NothingToResolve => format!(
+            "; settle it where it was raised, then `{}`",
+            command::line_for(&NextStep::Resume { run: run.clone() }, reader)
+        ),
+        GateRefusal::UnknownOption { .. }
+        | GateRefusal::Unsaid { .. }
+        | GateRefusal::Withheld { .. } => String::new(),
+    }
 }
 
 /// What to do instead of closing a run that refused it, the run named the way

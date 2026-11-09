@@ -1,5 +1,6 @@
 use super::check::line;
-use super::{close, gate, hold_unclear, inputs, moving, refused_answer};
+use super::{close, gate, hold_unclear, inputs, moving, refused_answer, Refused};
+use crate::command::Reader;
 use yunta_core::check::{CheckError, Composition, Unanswerable, UntakenRoute};
 use yunta_core::events::{Claim, Refusal, WhyWithheld, Withheld};
 use yunta_core::inputs::InputsProblem;
@@ -351,4 +352,21 @@ fn a_hold_nobody_can_check_is_said_with_its_file_and_what_a_person_does() {
          (`/runs/Q78GRR/scratch/engine.lock`): if nothing drives this run, delete that file by \
          hand and resume it again"
     );
+}
+
+/// A word that names a run of this repository, where the repository has none
+/// it answers to, says so and points at the listing that shows what there is,
+/// to a person and to an agent alike.
+#[test]
+fn a_word_no_run_answers_to_points_at_the_listing() {
+    for reader in [Reader::Person, Reader::Agent] {
+        assert_eq!(
+            Refused::NoRunHere.said(reader),
+            "no run in this repository; `yunta list --runs --all` lists every run"
+        );
+        assert_eq!(
+            Refused::NoneNeedsYou.said(reader),
+            "no run of this repository needs you; `yunta list --runs` lists them"
+        );
+    }
 }

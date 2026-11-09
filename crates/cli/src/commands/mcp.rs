@@ -35,6 +35,7 @@ use serde_json::{json, Value};
 use yunta_core::DocumentKind;
 
 use crate::error::CliError;
+use crate::shell::Shell;
 
 use crate::output::Outcome;
 
@@ -47,21 +48,14 @@ use tools::{
     tool_run_workflow, tool_workflow_status,
 };
 
-pub async fn mcp() -> Result<Outcome, CliError> {
-    // One interruption per process, installed before the first request
+pub async fn mcp(shell: &Shell) -> Result<Outcome, CliError> {
+    // The shell's one interruption, installed before the first request
     // can arrive: every `Context` a tool builds shares its two stages,
     // so a SIGINT stops what the server is doing and closes the server.
-    let interrupt =
-        std::sync::Arc::new(crate::interrupt::Interrupt::ctrl_c().map_err(|source| {
-            CliError::io(
-                "install the interrupt handler for",
-                "the MCP server",
-                source,
-            )
-        })?);
-    let stopping = interrupt.stop().clone();
+    let shell = std::sync::Arc::new(shell.shared());
+    let stopping = shell.interrupt().stop().clone();
     let transport = rmcp::transport::io::stdio();
-    let server = YuntaMcpServer { interrupt }
+    let server = YuntaMcpServer { shell }
         .serve(transport)
         .await
         .map_err(|e| CliError::msg(format!("cannot start the MCP server: {e}")))?;
@@ -78,7 +72,9 @@ pub async fn mcp() -> Result<Outcome, CliError> {
 
 #[derive(Clone)]
 struct YuntaMcpServer {
-    interrupt: std::sync::Arc<crate::interrupt::Interrupt>,
+    /// What every tool reads: the directory the server was started in, its
+    /// boundaries and its interrupt, read once for the server's life.
+    shell: std::sync::Arc<Shell>,
 }
 
 impl ServerHandler for YuntaMcpServer {
@@ -100,17 +96,13 @@ impl ServerHandler for YuntaMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args = request.arguments.unwrap_or_default();
-        let cwd = match std::env::current_dir() {
-            Ok(cwd) => cwd,
-            Err(source) => return Ok(tool_result(Err(CliError::Cwd { source }))),
-        };
         let outcome = match request.name.as_ref() {
-            "list_workflows" => tool_list_workflows(&cwd, self.interrupt.shared()).await,
-            "workflow_status" => tool_workflow_status(&cwd, &args, self.interrupt.shared()).await,
-            "run_workflow" => tool_run_workflow(&cwd, &args, self.interrupt.shared()).await,
-            "resume_run" => tool_resume_run(&cwd, &args, self.interrupt.shared()).await,
-            "resolve_gate" => tool_resolve_gate(&cwd, &args, self.interrupt.shared()).await,
-            "answer_questions" => tool_answer_questions(&cwd, &args, self.interrupt.shared()).await,
+            "list_workflows" => tool_list_workflows(&self.shell).await,
+            "workflow_status" => tool_workflow_status(&self.shell, &args).await,
+            "run_workflow" => tool_run_workflow(&self.shell, &args).await,
+            "resume_run" => tool_resume_run(&self.shell, &args).await,
+            "resolve_gate" => tool_resolve_gate(&self.shell, &args).await,
+            "answer_questions" => tool_answer_questions(&self.shell, &args).await,
             "document_shape" => tool_document_shape(&args),
             // An unknown tool is a protocol error, not a tool that ran
             // and failed — the client asked for something this server

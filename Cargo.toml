@@ -9,6 +9,7 @@ members = [
     "crates/mcp-protocol",
     "crates/engine",
     "crates/render",
+    "crates/api",
     "crates/cli",
     "crates/testkit",
     "crates/testkit-core",
@@ -35,6 +36,7 @@ yunta-adapters = { path = "crates/adapters", version = "0.0.5" }
 yunta-mcp-protocol = { path = "crates/mcp-protocol", version = "0.0.5" }
 yunta-engine = { path = "crates/engine", version = "0.0.5" }
 yunta-render = { path = "crates/render", version = "0.0.5" }
+yunta-api = { path = "crates/api", version = "0.0.5" }
 # Test-support crate: a dev-dependency only (never published), but it
 # carries a version like the other internal crates so it is not a wildcard
 # path dependency.

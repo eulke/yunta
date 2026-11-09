@@ -23,8 +23,8 @@ use yunta_render::page::Initialized;
 
 use crate::ask::{ask_line, Console, Escape};
 use crate::error::CliError;
-use crate::interrupt::Interrupt;
 use crate::output::Outcome;
+use crate::shell::Shell;
 use crate::surface::Diagnostics;
 
 /// The base branch a project starts from: the remote's default, else the
@@ -108,7 +108,7 @@ fn render_config_yaml(
     } else {
         out.push_str(&format!(
             "#     - {{ adapter: {}, model: <model-name> }}\n",
-            super::first_built_adapter()
+            yunta_api::machine::first_built_adapter()
         ));
     }
     out
@@ -244,24 +244,35 @@ async fn open_console(interactive: bool) -> Option<Console> {
     console
 }
 
-pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome, CliError> {
-    let repo = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    // `init` is the command that makes a project, so there is no
-    // `Context` to resolve yet — and its probes still spawn git, so it
-    // owns the interruption itself, like any other invocation.
-    let interrupt = Interrupt::ctrl_c()
-        .map_err(|source| CliError::io("install the interrupt handler for", "init", source))?;
-    let clock = crate::context::process_clock();
-    let env = crate::project::process_env();
-    let supervision = Supervision::outside_any_run(interrupt.stop(), clock).with_path(&env.path);
-
-    let config_path = repo.join(".yunta/config.yaml");
+/// Refuses a project config that is already there, unless `force` says to
+/// write it again.
+fn refuse_overwrite(config_path: &Path, force: bool) -> Result<(), CliError> {
     if config_path.exists() && !force {
         return Err(CliError::msg(format!(
             "{} already exists; pass --force to overwrite",
             config_path.display()
         )));
     }
+    Ok(())
+}
+
+pub async fn init(
+    shell: &Shell,
+    interactive: bool,
+    force: bool,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let repo = shell.workspace().dir.clone();
+    // `init` is the command that makes a project, so there is no
+    // `Context` to resolve yet; its probes still spawn git, under the
+    // shell's interruption, like any other invocation.
+    let interrupt = shell.interrupt();
+    let clock = shell.workspace().clock.as_ref();
+    let env = shell.workspace().env.clone();
+    let supervision = Supervision::outside_any_run(interrupt.stop(), clock).with_path(&env.path);
+
+    let config_path = repo.join(".yunta/config.yaml");
+    refuse_overwrite(&config_path, force)?;
 
     let console = open_console(interactive).await;
 
@@ -270,7 +281,7 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "workflow-project".to_string());
     let default_branch = detect_base_branch(&repo, supervision).await?;
-    let detected = crate::detect::in_repo(&repo, supervision).await?;
+    let detected = yunta_api::machine::in_repo(shell.workspace(), &repo, &shell.stop()).await?;
 
     let Some((project_name, base_branch)) =
         project_answers(console.as_ref(), default_name, default_branch)
@@ -278,7 +289,7 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
         return Ok(crate::output::Outcome::interrupted());
     };
 
-    let probed = crate::detect::probe_known_adapters().await;
+    let probed = yunta_api::machine::probe_known_adapters().await;
     let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);
     let (wrote, skipped) = write_project(&repo, &config_path, config_yaml, force).await?;
 

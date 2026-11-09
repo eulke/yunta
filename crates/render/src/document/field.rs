@@ -1,21 +1,55 @@
-//! The field as `list --runs --json` carries it: each row's facts, and the
-//! words render says them in, in the order a reader has always read them.
+//! The field as `list --runs --json` carries it: where the project keeps its
+//! runs, each run's facts and the words render says them in, in the order a
+//! reader has always read them. A document reads the same whichever terminal
+//! asked for it: its words take Unicode, as a run's document does.
 
+use std::path::Path;
 use std::time::Duration;
 
-use crate::page::{FieldGroup, FieldRow};
+use crate::page::{FieldGroup, FieldRow, UnreadableRun};
 use surco::glyphs::Glyphs;
 use surco::words::Standing;
 use yunta_core::{ModeName, RunId, WorkflowName};
 
-/// Every row of a field, each as the document a program reads, its words
-/// drawn with `glyphs`.
-pub fn rows<S: serde::Serializer>(
-    rows: &[FieldRow],
-    glyphs: Glyphs,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(rows.iter().map(|row| Row::of(row, glyphs)))
+use super::SCHEMA_VERSION;
+
+/// The field as a program reads it: where the project keeps its runs, the
+/// runs it lists, the ones it can name but not read, and how many it leaves
+/// to other projects.
+///
+/// Not the field page, which a person reads drawn from the same runs.
+pub struct FieldDocument<'a> {
+    /// Where the project keeps its runs, which a field with none names.
+    pub storage: &'a Path,
+    pub rows: &'a [FieldRow],
+    /// The runs it can name but not read.
+    pub unreadable: &'a [UnreadableRun],
+    /// How many runs it leaves to other projects.
+    pub elsewhere: usize,
+}
+
+impl serde::Serialize for FieldDocument<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Written {
+            schema_version: SCHEMA_VERSION,
+            storage: self.storage,
+            rows: self.rows.iter().map(Row::of).collect(),
+            unreadable: self.unreadable,
+            elsewhere: self.elsewhere,
+        }
+        .serialize(serializer)
+    }
+}
+
+/// The document as it is written, under the schema version every document
+/// shares.
+#[derive(serde::Serialize)]
+struct Written<'a> {
+    schema_version: u32,
+    storage: &'a Path,
+    rows: Vec<Row<'a>>,
+    unreadable: &'a [UnreadableRun],
+    elsewhere: usize,
 }
 
 /// One run of a field, as a program reads it: what the run is, the group it
@@ -38,7 +72,7 @@ struct Row<'a> {
 }
 
 impl<'a> Row<'a> {
-    fn of(row: &'a FieldRow, glyphs: Glyphs) -> Self {
+    fn of(row: &'a FieldRow) -> Self {
         let frame = &row.frame;
         Row {
             run_id: &frame.run_id,
@@ -47,9 +81,9 @@ impl<'a> Row<'a> {
             workflow: &frame.workflow,
             mode: &frame.mode,
             age: row.stood(),
-            reason: row.reason(glyphs),
+            reason: row.reason(Glyphs::Unicode),
             command: row.command(),
-            said: row.said(glyphs),
+            said: row.said(Glyphs::Unicode),
             furrow: frame.nodes.iter().map(|node| node.standing).collect(),
             asking: row.asking(),
         }

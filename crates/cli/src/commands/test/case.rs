@@ -20,10 +20,11 @@ use yunta_engine::RunTerminal;
 
 use super::{copy_dir_all, init_git, sandboxed_checkout};
 use crate::commands::registry::{adapters_and_script, execute, Executing, ScriptedPaths};
-use crate::commands::Adapters;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::load_yaml;
+use crate::shell::Shell;
+use yunta_api::machine::Adapters;
 
 mod problems;
 
@@ -166,9 +167,9 @@ pub(super) fn retired(word: &str) -> Option<String> {
 /// that could not run at all says why in exactly the words the command
 /// it stands in for would have used.
 pub(crate) async fn run_case(
+    shell: &Shell,
     cwd: &Path,
     case_path: &Path,
-    interrupt: crate::interrupt::Interrupt,
 ) -> Result<Vec<String>, CliError> {
     let case: TestCase = load_yaml(case_path, "test case").map_err(|_| {
         CliError::msg(format!(
@@ -189,7 +190,7 @@ pub(crate) async fn run_case(
         copy_dir_all(&seed, sandbox.worktree())
             .map_err(|e| CliError::io("seed the sandbox from", seed.display(), e))?;
     }
-    let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
+    let ctx = Context::in_dir(shell, cwd.to_path_buf())?;
     init_git(sandbox.worktree(), ctx.supervision()).await?;
     let ctx = ctx.sandboxed(sandbox.worktree().to_path_buf(), sandbox.root());
     let storage = ctx.async_storage().await?;
@@ -272,8 +273,8 @@ async fn drive_case_run(
         worktree: &prepared.worktree,
         adapters: &adapters,
         storage,
-        clock: Arc::new(ctx.clock),
-        ids: &ctx.ids,
+        clock: std::sync::Arc::clone(&ctx.clock),
+        ids: ctx.ids.as_ref(),
         // A test case's every session comes from a scripted fixture — a
         // gate here has no human to ask, same as it has no LLM to call.
         human_interaction: &yunta_core::port::NoInteraction,
@@ -376,7 +377,7 @@ async fn answered(
             &prepared.run_dir,
             storage,
             &prepared.run_id,
-            &ctx.clock,
+            ctx.clock.as_ref(),
             yunta_core::events::HumanChoice {
                 option,
                 by: crate::identity::responder(None, ctx.env.user.as_deref()),
@@ -393,8 +394,8 @@ async fn answered(
             worktree: &prepared.worktree,
             adapters,
             storage,
-            clock: Arc::new(ctx.clock),
-            ids: &ctx.ids,
+            clock: std::sync::Arc::clone(&ctx.clock),
+            ids: ctx.ids.as_ref(),
             human_interaction: &yunta_core::port::NoInteraction,
             forge,
             cancel: ctx.cancellation(),

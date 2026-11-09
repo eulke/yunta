@@ -1,33 +1,34 @@
 # Architecture
 
-How Yunta's crates fit and what every run guarantees; a crate's own map is its root `//!`.
+How Yunta's crates fit and what every run guarantees; a crate's map is its root `//!`.
 
 ## A run
 
-`yunta` reads the config layers and the workflow, and `check` refuses what cannot run. The run loop schedules
-nodes, and a task's cycle opens sessions through the port on an adapter, each session in a pooled checkout. The
+`yunta` reads the config layers and the workflow; `check` refuses what cannot run. The run loop schedules
+nodes, and a task's cycle opens sessions through the port on an adapter, each in a pooled checkout. The
 fence and the rail judge each write at the tool call, and the close judges the diff. Declared criteria the
 engine runs decide a task; an agent's word is never evidence. Every fact is an event in the log, replay derives
-every state from it, and what a person reads is drawn from that data in Surco.
+every state from it, and what a person reads is drawn from it in Surco.
 
 ## Crates
 
 | Crate | Owns | Depends on (`[dependencies]`) |
 |---|---|---|
-| `yunta-surco` | Surco, the language: its words, marks and figures, a `Doc` that a `Surface` draws, one lexer for code | nothing in the workspace |
+| `yunta-surco` | Surco: its words, marks and figures, the `Doc` a `Surface` draws, one code lexer | nothing in the workspace |
 | `yunta-core` | domain types, the port, shapes, protection | surco |
-| `yunta-storage` | the append-only log; SQLite stays behind its interface | core |
-| `yunta-replay` | replay and every reading of a run, with no IO | core, surco |
-| `yunta-render` | Yunta's own facts and documents, said in Surco | core, replay, surco |
+| `yunta-storage` | the append-only log, SQLite behind its interface | core |
+| `yunta-replay` | replay, every reading of a run, no IO | core, surco |
+| `yunta-render` | Yunta's facts and documents, said in Surco | core, replay, surco |
 | `yunta-adapters` | `claude-code`, `codex` and `mock` behind the port | core, render, surco |
 | `yunta-mcp-protocol` | MCP as Yunta speaks it | nothing in the workspace |
 | `yunta-engine` | scheduling, the task cycle | core, storage, replay, mcp-protocol, surco |
-| `yunta` | the commands | core, storage, replay, mcp-protocol, engine, adapters, render, surco |
+| `yunta-api` | what interfaces ask of Yunta | core, storage, replay, engine, adapters, render, surco |
+| `yunta` | the commands | core, storage, replay, mcp-protocol, engine, adapters, render, api, surco |
 | `yunta-testkit-core` | test scaffolding for crates below the engine | core |
-| `yunta-testkit` | the whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
+| `yunta-testkit` | whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
 | `xtask` | smells, the docs checker, schemas | core, surco |
 
-`cargo xtask docs --check` holds this table to every member's manifest.
+`cargo xtask docs --check` holds it to the manifests.
 
 ## Product rules
 
@@ -60,7 +61,7 @@ every state from it, and what a person reads is drawn from that data in Surco.
   holder replaced. [test engine/run_guard]
 - One answer pays for one engine: `continue` lifts the token cap only in the engine that took it, and the next
   one stands under the cap again. [test engine/parked_answers]
-- A follower only reads: it takes no lock, writes no event and never signals the engine it follows.
+- A follower only reads: it takes no lock, writes no event, signals no engine.
   [test cli/status_follow]
 - What a session says while it works reaches another process only through its run's socket, redacted: the
   log keeps each note's digest, nothing writes the words to disk, and only a terminal draws them. The summary
@@ -72,7 +73,7 @@ every state from it, and what a person reads is drawn from that data in Surco.
 ## Cross-cutting
 
 - Engine decisions are deterministic and each effect has one owner: the clock, the environment, the filesystem
-  and git are reached through their boundary modules. [smell system_clock_outside_boundary]
+  and git are reached through their boundaries. [smell system_clock_outside_boundary]
   [smell env_read_outside_boundary] [smell engine_fs_outside_runtime] [smell git_command_outside_git_rs]
 - Replay is a pure fold of the log: two logs with the same facts derive the same state. [test replay/properties]
 - A log an earlier binary wrote still replays. [test replay/logs_from_runs] [test render/older_words]
