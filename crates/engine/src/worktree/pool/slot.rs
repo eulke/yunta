@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::WorktreeError;
 use super::Lease;
+use crate::git::{self, Effect};
 use crate::lock::{self, Acquired, Contention, LockError, LockOwner, SystemProbe};
 use crate::process::Supervision;
 use crate::process_registry;
@@ -238,7 +239,10 @@ pub(super) fn groups_at_work(run_dir: &Path) -> bool {
 }
 
 /// Whether checkout `number`, at `checkout`, may be cleared: no unit keeps
-/// it, and its `.git` is missing or names an admin directory that is gone.
+/// it, and it is no checkout git can open — its `.git` is missing, names an
+/// admin directory that is gone, or names one git still marks as being
+/// added. The caller holds the number, so no add of it is running: one git
+/// still marks was cut off.
 pub(super) async fn clearable(home: &Path, number: u32, checkout: &Path) -> bool {
     if last_held(home, number)
         .await
@@ -250,24 +254,49 @@ pub(super) async fn clearable(home: &Path, number: u32, checkout: &Path) -> bool
         Err(error) => error.kind() == std::io::ErrorKind::NotFound,
         Ok(pointer) => match pointer.strip_prefix("gitdir:") {
             Some(admin) => {
-                matches!(
-                    tokio::fs::try_exists(checkout.join(admin.trim())).await,
-                    Ok(false)
-                )
+                let admin = checkout.join(admin.trim());
+                matches!(tokio::fs::try_exists(&admin).await, Ok(false))
+                    || being_added(&admin).await
             }
             None => false,
         },
     }
 }
 
+/// Whether the admin directory `admin` is locked for an add, the lock
+/// `git worktree add` takes while it makes a checkout and leaves behind
+/// when it is cut off.
+async fn being_added(admin: &Path) -> bool {
+    tokio::fs::read_to_string(admin.join("locked"))
+        .await
+        .is_ok_and(|reason| reason.trim() == "initializing")
+}
+
 /// Takes away what is left at `checkout` of a checkout a crash left half
-/// added, so its number can be used again, then prunes the git records of
-/// the checkouts that are gone. The caller checked `clearable` first.
+/// added, or whose add was cut off, so its number can be used again, then
+/// prunes the git records of the checkouts that are gone. A record git
+/// still marks as being added is unlocked first: `prune` keeps a locked
+/// record, and git refuses to remove a checkout whose record was never
+/// finished. The caller checked `clearable` first.
 pub(super) async fn clear(
     repo: &Path,
     checkout: &Path,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
+    if let Ok(pointer) = tokio::fs::read_to_string(checkout.join(".git")).await {
+        if let Some(admin) = pointer.strip_prefix("gitdir:") {
+            if being_added(&checkout.join(admin.trim())).await {
+                let shown = checkout.display().to_string();
+                git::change(
+                    repo,
+                    Effect::Metadata,
+                    &["worktree", "unlock", &shown],
+                    supervision,
+                )
+                .await?;
+            }
+        }
+    }
     match tokio::fs::remove_dir_all(checkout).await {
         Err(source) if source.kind() != std::io::ErrorKind::NotFound => {
             return Err(WorktreeError::Io {

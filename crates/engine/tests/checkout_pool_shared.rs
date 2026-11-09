@@ -149,6 +149,38 @@ async fn a_half_added_slot_is_rebuilt() {
     assert_eq!(world.slots().await, vec!["slot-1"]);
 }
 
+/// A checkout whose add was cut off — git still marks it as being added,
+/// and the record of where it stands was never finished — is no checkout:
+/// nothing asks git where it stands, and the next unit to need one makes
+/// it again under the same number.
+#[tokio::test]
+async fn a_checkout_whose_add_was_cut_off_is_made_again() {
+    let world = World::new();
+    let (first, held) = world.open("T001").await;
+    world.land(&first, &held).await;
+    drop(held);
+    cut_off_the_add_of(&world.repo, &first.worktree);
+
+    let (unit, _held) = world.open("T002").await;
+
+    assert_eq!(unit.worktree, first.worktree);
+    assert_eq!(world.head_of(&unit.worktree), world.head());
+    assert_eq!(world.slots().await, vec!["slot-1"]);
+}
+
+/// Leaves `checkout` as a `git worktree add` killed half way leaves it:
+/// git marks it as being added, and its `HEAD` was never written.
+fn cut_off_the_add_of(repo: &Path, checkout: &Path) {
+    let shown = checkout.display().to_string();
+    yunta_testkit::git(
+        repo,
+        &["worktree", "lock", "--reason", "initializing", &shown],
+    );
+    let pointer = std::fs::read_to_string(checkout.join(".git")).unwrap();
+    let admin = Path::new(pointer.trim().strip_prefix("gitdir: ").unwrap());
+    std::fs::rename(admin.join("HEAD"), admin.join("HEAD.lock")).unwrap();
+}
+
 /// A second run's unit takes the checkout the first run's unit worked in,
 /// at its path, and finds the build that unit left there.
 #[tokio::test]

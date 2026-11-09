@@ -41,17 +41,14 @@ impl CheckoutPool {
                 continue;
             };
             if tokio::fs::try_exists(&path).await.unwrap_or(false) {
-                // Added by another process since the survey, or left half
-                // added by one that crashed.
-                match git::tree_state(&path, &[], supervision).await {
-                    Ok(_) => continue, // another process added it after the survey
-                    Err(error) if error.cancelled() => return Err(error.into()),
-                    // Cleared only when no unit keeps it and its `.git` is
-                    // missing or names an admin directory that is gone.
-                    Err(_) if clearable(&home, number, &path).await => {
-                        slot::clear(repo, &path, supervision).await?
-                    }
-                    Err(error) => return Err(error.into()),
+                // Left half added by a process that crashed, or cut off half
+                // way, it is no checkout, and goes before it is made again;
+                // otherwise another process added it since the survey.
+                if clearable(&home, number, &path).await {
+                    slot::clear(repo, &path, supervision).await?;
+                } else {
+                    git::tree_state(&path, &[], supervision).await?;
+                    continue;
                 }
             }
             make(repo, common_dir, &path, fresh, supervision).await?;
@@ -76,9 +73,9 @@ async fn create_home(home: &Path) -> Result<(), WorktreeError> {
 
 /// Makes the checkout of `repo` at `path` that `fresh` says, every other
 /// change to the project's checkouts — whose common git directory is
-/// `common_dir` — held off while it is added, and while a cut stopped half
-/// way is undone. One cut on a new branch that is stopped half way leaves
-/// neither the checkout nor the branch.
+/// `common_dir` — held off while it is added, and while an add stopped half
+/// way is undone. An add stopped half way leaves neither the checkout nor
+/// git's record of it, nor the branch a cut made.
 async fn make(
     repo: &Path,
     common_dir: &Path,
@@ -89,22 +86,17 @@ async fn make(
     let held = git::mutation_lock(common_dir, supervision)
         .await
         .map_err(WorktreeError::Lock)?;
-    match fresh {
-        Fresh::Cut { branch, base } => {
-            let cut = ["-b", branch, base.as_str()];
-            match add(repo, &held, path, &cut, supervision).await {
-                Err(stopped) if stopped.cancelled() => {
-                    crate::worktree::undo_half_added(&held, repo, path, branch, supervision).await;
-                    Err(stopped)
-                }
-                added => added,
-            }
+    let (on, made) = match fresh {
+        Fresh::Cut { branch, base } => (vec!["-b", branch, base.as_str()], Some(branch)),
+        Fresh::On { branch } => (vec![branch], None),
+        Fresh::Detached { base } => (vec!["--detach", base.as_str()], None),
+    };
+    match add(repo, &held, path, &on, supervision).await {
+        Err(stopped) if stopped.cancelled() => {
+            crate::worktree::undo_half_added(&held, repo, path, made, supervision).await;
+            Err(stopped)
         }
-        Fresh::On { branch } => add(repo, &held, path, &[branch], supervision).await,
-        Fresh::Detached { base } => {
-            let detached = ["--detach", base.as_str()];
-            add(repo, &held, path, &detached, supervision).await
-        }
+        added => added,
     }
 }
 
