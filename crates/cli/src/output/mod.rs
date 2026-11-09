@@ -11,7 +11,7 @@
 //! The code the process exits with is here ([`Outcome`], [`exit()`]), and what
 //! drawing depends on in this process is here too: the streams and the
 //! policy `main` settles once ([`stream`]), and a document laid out or drawn
-//! for a stream's look ([`draw`], [`surface_lines`], [`blocks_lines`]).
+//! for a stream's look ([`draw`], [`blocks_lines`]).
 //!
 //! Warnings and notes reach stderr through [`warn`] and [`note`], and a JSON
 //! document reaches stdout through [`print_json`]. A shell's completion
@@ -254,12 +254,6 @@ pub(crate) fn show_on_stderr(look: &Look, page: &impl Page) {
         ..*look
     };
     eprint!("{}", draw(page.document(&stderr), &stderr));
-}
-
-/// `doc` laid out for a terminal stream whose lines look like `look`,
-/// unpainted.
-pub(crate) fn surface_lines(doc: Doc, look: &Look) -> Vec<Line> {
-    surco::surface::Terminal::on(*look).lines(&doc)
 }
 
 /// `blocks`, in order, laid out the same way.

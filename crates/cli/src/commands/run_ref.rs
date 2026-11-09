@@ -14,9 +14,10 @@ use yunta_core::step::{NextStep, Reach};
 use yunta_core::RunId;
 use yunta_render::command;
 
-use super::list::inbox::{Inbox, RunRow};
+use super::list::inbox::Inbox;
 use crate::context::Context;
 use crate::error::CliError;
+use yunta_render::page::FieldRow;
 
 /// What a person typed where a command takes a run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,13 +56,14 @@ pub(crate) struct Candidate {
 
 impl Candidate {
     /// The run `row` is, its row ending with the command that opens it.
-    fn of(row: &RunRow) -> Self {
-        let handle = row.run_id.handle().to_string();
-        let opens = Edge::Command(command::line(&NextStep::status(&row.run_id)));
+    fn of(row: &FieldRow) -> Self {
+        let frame = &row.frame;
+        let handle = frame.run_id.handle().to_string();
+        let opens = Edge::Command(command::line(&NextStep::status(&frame.run_id)));
         Candidate {
-            run_id: row.run_id.clone(),
-            about: Some(format!("{} ({})", row.workflow, row.mode)),
-            line: Some(row.line(handle, opens)),
+            run_id: frame.run_id.clone(),
+            about: Some(format!("{} ({})", frame.workflow, frame.mode)),
+            line: Some(row.line(handle, opens, crate::output::glyphs())),
         }
     }
 }
@@ -133,7 +135,7 @@ async fn typed_run(ctx: &Context, typed: &str) -> Result<RunId, CliError> {
             let candidates = several
                 .into_iter()
                 .map(
-                    |run_id| match inbox.rows.iter().find(|row| row.run_id == run_id) {
+                    |run_id| match inbox.rows.iter().find(|row| row.frame.run_id == run_id) {
                         Some(row) => Candidate::of(row),
                         None => Candidate {
                             run_id,
@@ -162,7 +164,7 @@ async fn waiting_run(ctx: &Context) -> Result<RunId, CliError> {
                 reach: Reach::Repository
             })
         ))),
-        [one] => Ok(one.run_id.clone()),
+        [one] => Ok(one.frame.run_id.clone()),
         several => Err(CliError::AmbiguousRun {
             said: format!(
                 "{} of this repository need you",

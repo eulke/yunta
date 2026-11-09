@@ -29,21 +29,18 @@ mod tests;
 
 use std::collections::BTreeSet;
 
-use super::verify::{checklist, tallied, CheckRow};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::json::SCHEMA_VERSION;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
-use surco::components::{Check, Checklist, Fix, Found, Furrow, Headline, Next};
-use surco::doc::Doc;
-use surco::glyphs::Mark;
+use surco::components::{Check, Checklist, Fix, Found};
 use surco::look::Look;
 use yunta_core::port::ProbeReport;
 use yunta_core::step::NextStep;
 use yunta_core::AdapterId;
 use yunta_render::command;
-use yunta_render::page::Page;
+use yunta_render::page::{Doctor, Page};
 
 pub async fn doctor(
     session: bool,
@@ -82,47 +79,12 @@ pub(crate) struct DoctorAnswer {
     holds: bool,
     /// The word the headline says: `ready` when every check holds, `not ready` otherwise.
     word: &'static str,
-    checks: Vec<CheckRow>,
+    #[serde(serialize_with = "crate::json::check::rows")]
+    checks: Vec<Check>,
     /// Whether the page lists every check on its own row: a glance folds
     /// the ones that hold into one.
     #[serde(skip)]
     full: bool,
-}
-
-/// What `doctor` found, as a person reads it: whether this machine is
-/// ready, each check — those that hold folded on a glance — and what to
-/// run for more.
-struct Doctor<'a> {
-    /// Whether `--session` opened a session per binding.
-    session: bool,
-    holds: bool,
-    /// The word the headline says.
-    word: &'static str,
-    checks: &'a [CheckRow],
-    /// Whether every check stands on its own row.
-    full: bool,
-}
-
-impl Doctor<'_> {
-    /// Whether this machine is ready to run, and how many checks stop a
-    /// run or are worth a look.
-    fn headline(&self) -> Headline {
-        let mark = match self.holds {
-            true => Mark::Done,
-            false => Mark::Failed,
-        };
-        tallied(
-            Headline::new(
-                mark,
-                command::line(&NextStep::Doctor {
-                    sessions: false,
-                    full: false,
-                }),
-                self.word,
-            ),
-            self.checks,
-        )
-    }
 }
 
 impl DoctorAnswer {
@@ -132,52 +94,10 @@ impl DoctorAnswer {
             schema_version: SCHEMA_VERSION,
             session,
             holds,
-            word: word_of(holds),
-            checks: checks.checks().map(CheckRow::of).collect(),
+            word: Doctor::word(holds),
+            checks: checks.checks().cloned().collect(),
             full,
         }
-    }
-}
-
-/// The word a doctor verdict says: `ready` when every check holds, `not ready` when one does not.
-fn word_of(holds: bool) -> &'static str {
-    match holds {
-        true => "ready",
-        false => "not ready",
-    }
-}
-
-impl Page for Doctor<'_> {
-    fn document(&self, _look: &Look) -> Doc {
-        let checks = match self.full {
-            true => checklist(self.checks),
-            false => checklist(self.checks).folded("healthy"),
-        };
-        let mut next = Vec::new();
-        if !self.session {
-            next.push((
-                command::line(&NextStep::Doctor {
-                    sessions: true,
-                    full: false,
-                }),
-                "opens a session per binding, a prompt each",
-            ));
-        }
-        // A glance that folds leaves out what each check that holds found.
-        if checks.folds() {
-            next.push((
-                command::line(&NextStep::Doctor {
-                    sessions: false,
-                    full: true,
-                }),
-                "every check on its own row, with what it found",
-            ));
-        }
-        Doc::new()
-            .with(self.headline())
-            .with(Furrow(Vec::new()))
-            .with(checks)
-            .with(Next { steps: next })
     }
 }
 
@@ -186,7 +106,6 @@ impl Answer for DoctorAnswer {
         Doctor {
             session: self.session,
             holds: self.holds,
-            word: self.word,
             checks: &self.checks,
             full: self.full,
         }

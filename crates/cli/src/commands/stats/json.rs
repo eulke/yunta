@@ -7,8 +7,6 @@ use yunta_render::spend::SpendJson;
 use yunta_replay::history::{PriorEstimation, RunSummary};
 use yunta_replay::stats::{NodeStat, RunStats};
 
-use super::currency_line;
-
 #[derive(Serialize)]
 struct NodeStatJson {
     node_id: String,
@@ -154,7 +152,7 @@ impl RunStatsJson {
             wall_clock_secs: stats.wall_clock.map(|d| d.as_secs_f64()),
             asleep_secs: stats.asleep.as_secs_f64(),
             time: TimeJson::of(&stats.time),
-            currency_estimate: currency_line(total, pricing),
+            currency_estimate: yunta_render::spend::cost(total, pricing),
             nodes: stats
                 .nodes
                 .iter()

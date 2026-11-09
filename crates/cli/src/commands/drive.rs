@@ -23,9 +23,10 @@ use crate::error::CliError;
 use crate::json::PreRunWarnings;
 use crate::output::Mode;
 use crate::output::Outcome;
-use crate::surface::{Closing, ClosingEnv, Delivery, Outline, TerminalEnv};
+use crate::surface::{Closing, ClosingEnv, Delivery, TerminalEnv};
 use surco::glyphs::Glyphs;
 use surco::look::Look;
+use yunta_render::page::Places;
 
 // The one call into the engine is `registry::execute`; this module keeps the
 // path its callers already name.
@@ -344,9 +345,10 @@ async fn closing_of(closed: &Closed<'_>) -> Result<Closing, CliError> {
         now: closed.clock.now(),
         decision,
         shown,
-        outline: Outline {
+        places: Places {
             run_dir: closed.run_dir,
             worktree: closed.worktree,
+            branch: &yunta_engine::run_branch(closed.run_id),
             base_branch: &closed.manifest.base_branch,
             isolation: closed.manifest.isolation,
             cwd: closed.cwd,

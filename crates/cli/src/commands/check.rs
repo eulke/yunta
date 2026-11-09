@@ -61,12 +61,7 @@ pub async fn check(
     // Advice after the verdict, which is what was asked for.
     if !findings.is_empty() {
         blank();
-        show(
-            look,
-            &super::stats::VerificationEffectiveness {
-                findings: &findings,
-            },
-        );
+        show(look, &findings);
     }
     Ok(outcome)
 }

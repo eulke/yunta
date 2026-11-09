@@ -1,5 +1,5 @@
 //! What a run leaves on the terminal once it stops: the run's page in its
-//! harvest form, drawn by [`RunPage`].
+//! harvest form, render's `page::Run` in its closing scope.
 //!
 //! The page says how the run ended and what holds it, the evidence of
 //! what failed, the facts of the harvest — what it took, where its work
@@ -28,22 +28,7 @@ use yunta_replay::history::PriorEstimation;
 use yunta_replay::RunState;
 
 use crate::output::Outcome;
-use crate::run_page::{RunPage, Scope};
-
-/// Where the run lived and what it took — what the closing block reports
-/// that the run's own log does not carry.
-#[derive(Clone, Copy)]
-pub(crate) struct Outline<'a> {
-    pub(crate) run_dir: &'a Path,
-    pub(crate) worktree: &'a Path,
-    /// The branch the run started from, as its manifest froze it.
-    pub(crate) base_branch: &'a str,
-    pub(crate) isolation: Isolation,
-    /// Where paths are shown from: the directory this was run in, and
-    /// the home `~` stands for.
-    pub(crate) cwd: &'a Path,
-    pub(crate) home: Option<&'a Path>,
-}
+use yunta_render::page::{Places, Run, RunScope};
 
 /// Everything the block needs, gathered from the log as it finally stands.
 pub(crate) struct ClosingEnv<'a> {
@@ -59,7 +44,7 @@ pub(crate) struct ClosingEnv<'a> {
     pub(crate) decision: Option<(DecisionOn, GateWaitingPayload)>,
     /// The documents that decision shows, as the run holds them.
     pub(crate) shown: Vec<ShownDocument>,
-    pub(crate) outline: Outline<'a>,
+    pub(crate) places: Places<'a>,
 }
 
 /// A stopped run as a person reads it. It owns what its page is drawn from,
@@ -72,6 +57,7 @@ pub(crate) struct Closing {
     shown: Vec<ShownDocument>,
     run_dir: PathBuf,
     worktree: PathBuf,
+    branch: String,
     base_branch: String,
     isolation: Isolation,
     cwd: PathBuf,
@@ -97,7 +83,7 @@ impl Closing {
             frame,
             env.state.clone(),
             (env.decision, env.shown),
-            &env.outline,
+            &env.places,
         )
     }
 
@@ -107,7 +93,7 @@ impl Closing {
         frame: RunFrame,
         state: RunState,
         (decision, shown): (Option<(DecisionOn, GateWaitingPayload)>, Vec<ShownDocument>),
-        outline: &Outline<'_>,
+        places: &Places<'_>,
     ) -> Self {
         Self {
             run_id: run_id.clone(),
@@ -115,12 +101,13 @@ impl Closing {
             frame,
             decision,
             shown,
-            run_dir: outline.run_dir.to_path_buf(),
-            worktree: outline.worktree.to_path_buf(),
-            base_branch: outline.base_branch.to_string(),
-            isolation: outline.isolation,
-            cwd: outline.cwd.to_path_buf(),
-            home: outline.home.map(Path::to_path_buf),
+            run_dir: places.run_dir.to_path_buf(),
+            worktree: places.worktree.to_path_buf(),
+            branch: places.branch.to_string(),
+            base_branch: places.base_branch.to_string(),
+            isolation: places.isolation,
+            cwd: places.cwd.to_path_buf(),
+            home: places.home.map(Path::to_path_buf),
         }
     }
 
@@ -132,16 +119,19 @@ impl Closing {
     }
 
     /// The page this block is drawn from.
-    pub(crate) fn page(&self) -> RunPage<'_> {
-        RunPage {
-            scope: Scope::Closing,
+    pub(crate) fn page(&self) -> Run<'_> {
+        Run {
+            scope: RunScope::Closing {
+                exit_code: self.outcome().code(),
+            },
             depth: Depth::Glance,
             run_id: &self.run_id,
             frame: &self.frame,
             state: &self.state,
-            paths: Outline {
+            places: Places {
                 run_dir: &self.run_dir,
                 worktree: &self.worktree,
+                branch: &self.branch,
                 base_branch: &self.base_branch,
                 isolation: self.isolation,
                 cwd: &self.cwd,
@@ -156,6 +146,3 @@ impl Closing {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

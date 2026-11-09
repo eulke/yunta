@@ -34,8 +34,10 @@ use crate::modes;
 use crate::registry::{Asking, Engine};
 use crate::stats::RunStats;
 use crate::RunState;
+use yunta_core::caution::Caution;
 use yunta_core::events::{
-    ChildLink, Degradation, FindingSeverity, TaskStatus, TokenUsage, UnknownKindCount,
+    ChildLink, Degradation, EngineFact, Failure, FindingSeverity, NodeOutcome, NodeState,
+    PauseReason, TaskStatus, TokenUsage, UnknownKindCount,
 };
 use yunta_core::{ModeName, NodeId, RunId, Workflow, WorkflowName};
 
@@ -244,6 +246,66 @@ impl RunFrame {
             blocking_findings,
         }
     }
+
+    /// The nodes that stand failed, each with its failure, in declaration
+    /// order. A node whose log says it failed can stand otherwise: one a
+    /// reset holds is `waiting`, and the pause says what holds it; one a
+    /// reroute corrects is `rerouted`. Neither is listed.
+    pub fn failed(&self) -> impl Iterator<Item = (&NodeFrame, &Failure)> {
+        self.nodes.iter().filter_map(|node| match &node.state {
+            NodeStanding::Reached(NodeState::Failed { failure, .. })
+                if node.standing == Standing::Failed =>
+            {
+                Some((node, failure))
+            }
+            _ => None,
+        })
+    }
+
+    /// Each pull request the run opened, in the order its nodes are
+    /// declared: a page and the run's document read them here, so both say
+    /// the same.
+    pub fn pull_requests(&self) -> impl Iterator<Item = PullRequest<'_>> {
+        self.nodes.iter().filter_map(|node| match &node.state {
+            NodeStanding::Reached(NodeState::Finished {
+                outcome: NodeOutcome::Fact(EngineFact::PullRequestOpened { number, url }),
+                ..
+            }) => Some(PullRequest {
+                number: *number,
+                url,
+            }),
+            _ => None,
+        })
+    }
+
+    /// How many artifacts the run's nodes wrote, across every node.
+    pub fn artifacts_written(&self) -> usize {
+        self.nodes.iter().map(|node| node.artifacts.len()).sum()
+    }
+
+    /// The cautions the run raises: a run parked on its token budget says
+    /// what the declared cap means against what this workflow's past runs
+    /// spent; a run parked on anything else raises none.
+    pub fn cautions(&self) -> Vec<Caution> {
+        match &self.phase {
+            RunPhase::Waiting {
+                on:
+                    WaitingOn::Run {
+                        reason: PauseReason::BudgetExhausted { cap, .. },
+                    },
+            } => crate::history::budget_caution(Some(*cap), self.prior.as_ref())
+                .into_iter()
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// A pull request a run opened: its number on the forge, and where it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PullRequest<'a> {
+    pub number: u64,
+    pub url: &'a str,
 }
 
 /// Every `node_rerouted` on the log, over all the run's nodes.

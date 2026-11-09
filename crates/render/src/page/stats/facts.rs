@@ -2,9 +2,9 @@
 //! what a verified task cost, what retries took, what the cache served,
 //! what the run spent, handed over, found and settled.
 
+use crate::spend::Breakdown;
 use surco::figures::{Ratio, Tokens};
 use surco::glyphs::Glyphs;
-use yunta_render::spend::Breakdown;
 use yunta_replay::stats::RunStats;
 
 /// What a verified task cost — the rate a run is read by first, and the

@@ -14,7 +14,6 @@
 
 pub(crate) mod decision_json;
 pub(crate) mod follow;
-mod node;
 
 use std::path::PathBuf;
 
@@ -25,8 +24,8 @@ use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, NodeId, RunId};
 use yunta_render::command;
 use yunta_render::escalation::Decision;
-use yunta_render::page::{Form, Page, Shown};
-use yunta_replay::frame::{NodeStanding, RunFrame};
+use yunta_render::page::{Form, Node, Page, Places, Run, RunScope, Shown};
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 use yunta_replay::RunState;
 
 use crate::commands::stats;
@@ -35,9 +34,6 @@ use crate::error::{note, CliError};
 use crate::json::RunDocument;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
-use crate::run_page::{RunPage, Scope};
-use crate::surface::Outline;
-use node::NodePage;
 use surco::components::Note;
 use surco::doc::{Depth, Doc};
 use surco::look::Look;
@@ -93,6 +89,8 @@ struct Reading {
     frame: RunFrame,
     decision: Option<(DecisionOn, Escalation)>,
     tree: PathBuf,
+    /// The run's own branch, which its tree works on.
+    branch: String,
     now: DateTime<Utc>,
 }
 
@@ -132,6 +130,7 @@ impl Reading {
             frame,
             decision,
             tree,
+            branch: yunta_engine::run_branch(run_id),
             now,
         })
     }
@@ -172,8 +171,8 @@ impl Reading {
 
 /// What a person reads: the run's page, or one node of it.
 enum Body<'a> {
-    Run(Box<RunPage<'a>>),
-    Node(NodePage<'a>),
+    Run(Box<Run<'a>>),
+    Node(Node<'a>),
 }
 
 /// The body a person reads when `output` is a person's, with the `documents`
@@ -187,9 +186,9 @@ async fn page_body<'a>(
     (output, node, depth): (Mode, Option<&NodeId>, Depth),
 ) -> Result<Body<'a>, CliError> {
     match (output, node) {
-        (Mode::Human, Some(id)) => Ok(Body::Node(NodePage {
+        (Mode::Human, Some(id)) => Ok(Body::Node(Node {
             run_id,
-            node: node::find(run_id, &reading.frame, id)?,
+            node: find(run_id, &reading.frame, id)?,
             run_dir: &reading.run_dir,
             cwd: &ctx.cwd,
             home: ctx.env.home.as_deref(),
@@ -202,6 +201,23 @@ async fn page_body<'a>(
     }
 }
 
+/// The node `id` names in `frame`. A name the run does not declare is
+/// refused with what the run calls the node it meant, when it has one.
+fn find<'a>(run_id: &RunId, frame: &'a RunFrame, id: &NodeId) -> Result<&'a NodeFrame, CliError> {
+    frame
+        .nodes
+        .iter()
+        .find(|node| node.id == *id)
+        .ok_or_else(|| {
+            let declared = frame.nodes.iter().map(|node| node.id.as_str());
+            CliError::msg(format!(
+                "run {} has no node `{id}`{}",
+                run_id.handle(),
+                surco::text::did_you_mean(id.as_str(), declared)
+            ))
+        })
+}
+
 /// The run's own page, as deep as `depth` asks. A person reading it also
 /// gets the decision the run waits on, showing `documents`.
 async fn run_page_for<'a>(
@@ -210,7 +226,7 @@ async fn run_page_for<'a>(
     reading: &'a Reading,
     documents: &'a [ShownDocument],
     (output, depth): (Mode, Depth),
-) -> Result<RunPage<'a>, CliError> {
+) -> Result<Run<'a>, CliError> {
     let decision = match output {
         Mode::Human => reading.waits_on().map(|(on, escalation)| Decision {
             on,
@@ -223,15 +239,16 @@ async fn run_page_for<'a>(
         Mode::Human => plans(reading, depth).await,
         _ => Vec::new(),
     };
-    Ok(RunPage {
-        scope: Scope::Status,
+    Ok(Run {
+        scope: RunScope::Status,
         depth,
         run_id,
         frame: &reading.frame,
         state: &reading.state,
-        paths: Outline {
+        places: Places {
             run_dir: &reading.run_dir,
             worktree: &reading.tree,
+            branch: &reading.branch,
             base_branch: &reading.manifest.base_branch,
             isolation: reading.manifest.isolation,
             cwd: &ctx.cwd,
@@ -253,7 +270,7 @@ pub(crate) async fn page_for_a_browser(
     let documents = reading.documents(Mode::Human, None).await?;
     let page = (Mode::Human, Depth::Full);
     let mut page = run_page_for(ctx, run_id, &reading, &documents, page).await?;
-    page.scope = Scope::Browser;
+    page.scope = RunScope::Browser;
     let look = surco::surface::Html.look();
     let doc = page.document(&look);
     let at = doc.decision_at();

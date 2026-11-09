@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::escalation::Decision;
 use chrono::{DateTime, Utc};
 use surco::doc::Depth;
 use surco::words::Standing;
@@ -19,15 +20,13 @@ use yunta_core::reserved::ReservedOption;
 use yunta_core::{
     AdapterId, CommitSha, ContentHash, Isolation, NodeId, NonEmpty, RunId, Seq, TaskId,
 };
-use yunta_render::escalation::Decision;
 use yunta_replay::frame::{
     Counter, NodeFrame, NodeStanding, RunFrame, RunPhase, TaskCounter, WaitingOn,
 };
 use yunta_replay::RunState;
 use yunta_testkit_core::{fixed_now, Log};
 
-use super::{RunPage, Scope};
-use crate::surface::Outline;
+use super::{Places, Run, RunScope};
 
 pub(crate) const RUN: RunId = RunId::from_static("01K3W48MFW7H0ZZA5PZ07E5PH4");
 
@@ -35,11 +34,27 @@ pub(crate) const RUN: RunId = RunId::from_static("01K3W48MFW7H0ZZA5PZ07E5PH4");
 /// wait to read as one.
 const READ_AFTER: Duration = Duration::from_secs(32 * 60 + 10);
 
+/// The closing of the run `frame` stands for, with the code the CLI exits with
+/// for its word: 0 when it finished, 3 when it needs a person, 4 when it
+/// finished with work nobody accepted, 5 when it waits, and 1 for any other
+/// stop. The closing goldens hold what the CLI printed for each.
+pub(crate) fn closing(frame: &RunFrame) -> RunScope {
+    let exit_code = match frame.standing {
+        Standing::Finished => 0,
+        Standing::NeedsYou => 3,
+        Standing::Reported => 4,
+        Standing::Waiting => 5,
+        _ => 1,
+    };
+    RunScope::Closing { exit_code }
+}
+
 /// Where the run lives, as every fixture page names it.
-pub(crate) fn outline() -> Outline<'static> {
-    Outline {
+pub(crate) fn places() -> Places<'static> {
+    Places {
         run_dir: Path::new("/home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4"),
         worktree: Path::new("/home/me/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4"),
+        branch: "yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4",
         base_branch: "main",
         isolation: Isolation::Worktree,
         cwd: Path::new("/home/me/project"),
@@ -310,14 +325,19 @@ impl Case {
     }
 
     /// The page this run is drawn as, read `READ_AFTER` its last event.
-    pub(crate) fn page(&self, scope: Scope, depth: Depth) -> RunPage<'_> {
-        RunPage {
+    /// The closing this case's run leaves.
+    pub(crate) fn closing(&self) -> RunScope {
+        closing(&self.frame)
+    }
+
+    pub(crate) fn page(&self, scope: RunScope, depth: Depth) -> Run<'_> {
+        Run {
             scope,
             depth,
             run_id: &self.run_id,
             frame: &self.frame,
             state: &self.state,
-            paths: outline(),
+            places: places(),
             decision: self.decision.as_ref().map(|(on, escalation)| Decision {
                 on,
                 escalation,

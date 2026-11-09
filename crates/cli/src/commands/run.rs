@@ -320,7 +320,7 @@ async fn estimate(
         crate::output::progress(
             output,
             look,
-            super::stats::format_estimation_line(estimation, look.glyphs),
+            yunta_render::spend::estimation(estimation, look.glyphs),
         );
     }
     let budget = yunta_replay::history::budget_caution(

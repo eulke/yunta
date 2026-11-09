@@ -9,6 +9,8 @@
 
 use std::time::Duration;
 
+use crate::children;
+use crate::progress;
 use surco::components::{Diffstat, Fields, Said, Section};
 use surco::doc::{Block, Depth};
 use surco::figures::duration;
@@ -17,21 +19,18 @@ use surco::line::{Line, Tone};
 use surco::paths;
 use surco::text::{counted, counted_as};
 use surco::words::{AT_WORK, WAITING_ON_YOU};
-use yunta_core::events::{EngineFact, NodeOutcome, NodeState};
 use yunta_core::Isolation;
-use yunta_render::children;
-use yunta_render::progress;
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
+use yunta_replay::frame::{NodeFrame, NodeStanding};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::TimeSpent;
 
-use super::{caution_row, RunPage, Scope};
+use super::{caution_row, Run, RunScope};
 
 /// How many of the run's longest nodes the `slowest` row names. Enough to
 /// point at where the time went, few enough that the row stays one row.
 const SLOWEST: usize = 3;
 
-impl RunPage<'_> {
+impl Run<'_> {
     /// The facts with something to say on this page, in the order a reader
     /// checks them. A fact with nothing to say is not a row.
     pub(super) fn facts(&self, glyphs: Glyphs) -> Fields {
@@ -63,12 +62,12 @@ impl RunPage<'_> {
         }
         fields = fields.push_if(
             "unread",
-            yunta_render::state::unknown_kinds(&self.frame.unknown_kinds).unwrap_or_default(),
+            crate::state::unknown_kinds(&self.frame.unknown_kinds).unwrap_or_default(),
         );
         if self.depth.reaches(Depth::Dig) {
             fields = fields.push_if("id", self.run_id.to_string()).push_if(
                 "kept in",
-                paths::shown(self.paths.run_dir, self.paths.cwd, self.paths.home),
+                paths::shown(self.places.run_dir, self.places.cwd, self.places.home),
             );
         }
         fields
@@ -95,7 +94,7 @@ impl RunPage<'_> {
         match &self.frame.prior {
             Some(prior) => format!(
                 "{} {} {}",
-                yunta_render::spend::Breakdown(&self.frame.tokens),
+                crate::spend::Breakdown(&self.frame.tokens),
                 glyphs.sep(),
                 history(prior, glyphs)
             ),
@@ -109,25 +108,25 @@ impl RunPage<'_> {
     pub(super) fn changed(&self, glyphs: Glyphs) -> String {
         self.state
             .current_change()
-            .and_then(|change| yunta_render::changes::of(change, glyphs))
+            .and_then(|change| crate::changes::of(change, glyphs))
             .unwrap_or_default()
     }
 
     /// Whether this page holds what a run gathered: a closing does, and a
     /// status page as deep as the whole story.
     fn holds_harvest(&self) -> bool {
-        self.scope == Scope::Closing || self.depth.reaches(Depth::Full)
+        matches!(self.scope, RunScope::Closing { .. }) || self.depth.reaches(Depth::Full)
     }
 
     /// What the run came to: the pull requests it opened, what it spent and
     /// what it changed.
     fn came_to(&self, fields: Fields, glyphs: Glyphs) -> Fields {
-        pull_requests_of(self.frame)
-            .into_iter()
-            .fold(fields, |fields, (number, url)| {
+        self.frame
+            .pull_requests()
+            .fold(fields, |fields, pull| {
                 fields.push_if(
                     "pull request",
-                    yunta_render::outcome::pull_request(number, url),
+                    crate::outcome::pull_request(pull.number, pull.url),
                 )
             })
             .push_if("tokens", self.spent(glyphs))
@@ -156,7 +155,7 @@ impl RunPage<'_> {
         }
         self.state
             .current_change()
-            .and_then(yunta_render::changes::by_file)
+            .and_then(crate::changes::by_file)
     }
 
     /// The run's longest nodes, longest first. `None` for a run where no
@@ -184,16 +183,15 @@ impl RunPage<'_> {
 
     /// The branch the run worked on and where that work sits now.
     fn branch(&self) -> String {
-        let tree = paths::shown(self.paths.worktree, self.paths.cwd, self.paths.home);
-        match self.paths.isolation {
+        let tree = paths::shown(self.places.worktree, self.places.cwd, self.places.home);
+        match self.places.isolation {
             Isolation::Worktree => format!(
                 "{} off {}, in {tree}",
-                yunta_engine::run_branch(self.run_id),
-                self.paths.base_branch,
+                self.places.branch, self.places.base_branch,
             ),
             Isolation::None => match tree.as_str() {
-                "." => format!("{}, in this checkout", self.paths.base_branch),
-                _ => format!("{}, in the checkout at {tree}", self.paths.base_branch),
+                "." => format!("{}, in this checkout", self.places.base_branch),
+                _ => format!("{}, in the checkout at {tree}", self.places.base_branch),
             },
         }
     }
@@ -201,7 +199,7 @@ impl RunPage<'_> {
     /// How many artifacts the run's nodes wrote, and the one directory
     /// they are under. Nothing for a run that wrote none.
     fn artifacts(&self) -> String {
-        let written = artifacts_written(self.frame);
+        let written = self.frame.artifacts_written();
         if written == 0 {
             return String::new();
         }
@@ -209,9 +207,9 @@ impl RunPage<'_> {
             "{} under {}",
             counted(written, "artifact"),
             paths::shown(
-                &yunta_core::run_dir::artifacts(self.paths.run_dir),
-                self.paths.cwd,
-                self.paths.home
+                &yunta_core::run_dir::artifacts(self.places.run_dir),
+                self.places.cwd,
+                self.places.home
             )
         )
     }
@@ -234,7 +232,7 @@ impl RunPage<'_> {
         self.state
             .run
             .environment_drift()
-            .map(|drift| yunta_render::outcome::environment_drift(&drift))
+            .map(|drift| crate::outcome::environment_drift(&drift))
             .unwrap_or_default()
     }
 
@@ -286,28 +284,6 @@ impl RunPage<'_> {
     }
 }
 
-/// Each pull request the run opened, by its number and where it is. A page and the run's
-/// document read them here, so both say the same pull requests.
-pub(crate) fn pull_requests_of(frame: &RunFrame) -> Vec<(u64, &str)> {
-    frame
-        .nodes
-        .iter()
-        .filter_map(|node| match &node.state {
-            NodeStanding::Reached(NodeState::Finished {
-                outcome: NodeOutcome::Fact(EngineFact::PullRequestOpened { number, url }),
-                ..
-            }) => Some((*number, url.as_str())),
-            _ => None,
-        })
-        .collect()
-}
-
-/// How many artifacts the run's nodes wrote, across every node. A page and the run's
-/// document count them here, so both say the same number.
-pub(crate) fn artifacts_written(frame: &RunFrame) -> usize {
-    frame.nodes.iter().map(|node| node.artifacts.len()).sum()
-}
-
 /// Where a run's time went, where a person weighed in it: what was at work on it,
 /// and what waited on a person, a part under a second being no part. Nothing for
 /// a run no person held up: the row of its slowest nodes says where its time went.
@@ -329,5 +305,5 @@ pub(super) fn time_row(time: &TimeSpent, glyphs: Glyphs) -> Option<String> {
 /// What this workflow's past runs cost, in the one phrasing every surface
 /// that reports it uses.
 fn history(prior: &PriorEstimation, glyphs: Glyphs) -> String {
-    crate::commands::stats::format_estimation_line(prior, glyphs)
+    crate::spend::estimation(prior, glyphs)
 }

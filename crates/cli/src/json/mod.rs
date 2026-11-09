@@ -22,8 +22,10 @@ use yunta_render::spend::SpendJson;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::RunState;
 
+pub(crate) mod check;
 mod diagnostics;
 mod facts;
+pub(crate) mod field;
 mod node;
 mod waiting;
 
@@ -37,7 +39,6 @@ use crate::commands::status::decision_json::DecisionJson;
 pub use crate::output::print_json;
 use crate::output::NextCommand;
 use crate::output::Outcome;
-use crate::run_page::{self, artifacts_written};
 use surco::words::Standing;
 use yunta_render::command::{self, Reader};
 
@@ -234,11 +235,11 @@ impl RunDocument {
             outcome: frame.standing,
             // A document reads the same whichever terminal asked for it.
             summary: yunta_render::progress::summary(frame, surco::glyphs::Glyphs::Unicode),
-            said: run_page::gist(frame),
+            said: yunta_render::state::gist(frame),
             counts: CountsJson::of(frame),
             exit_code: crate::output::exit(frame.standing).code(),
             reason: reason(&frame.phase),
-            cautions: run_page::cautions(frame),
+            cautions: frame.cautions(),
             budget_warning: None,
             context_warnings: Vec::new(),
             blocking_findings: frame.blocking_findings,
@@ -255,7 +256,7 @@ impl RunDocument {
             changed: state.current_change().cloned(),
             branch: BranchJson::of(manifest, run_id),
             pull_requests: PullRequestJson::all_of(frame),
-            artifacts: artifacts_written(frame),
+            artifacts: frame.artifacts_written(),
             next: next_of(frame, escalation.as_ref()),
         }
         .with_sentences()

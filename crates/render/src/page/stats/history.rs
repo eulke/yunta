@@ -2,6 +2,7 @@
 //! verified task over time, its modes side by side, and what its checks
 //! never caught.
 
+use crate::page::Page;
 use surco::bars::sparkline;
 use surco::components::{Checklist, Found};
 use surco::doc::{Block, Doc};
@@ -10,20 +11,18 @@ use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::width::{cell_width, truncate, INDENT, LABEL_WIDTH};
 use yunta_core::{ModeName, WorkflowName};
-use yunta_render::page::Page;
 use yunta_replay::history::{PriorEstimation, RunSummary};
-
-use super::format_estimation_line;
+use yunta_replay::verification_effectiveness::VerificationFindings;
 
 /// What the `yunta stats --workflow <name>` page is drawn from: a
 /// workflow's past runs, and what their logs say about its checks.
-pub(super) struct WorkflowPage<'a> {
-    pub(super) name: &'a WorkflowName,
-    pub(super) history: &'a [RunSummary],
-    pub(super) findings: Option<yunta_replay::verification_effectiveness::VerificationFindings>,
+pub struct History<'a> {
+    pub name: &'a WorkflowName,
+    pub history: &'a [RunSummary],
+    pub findings: Option<VerificationFindings>,
 }
 
-impl Page for WorkflowPage<'_> {
+impl Page for History<'_> {
     /// The page as one document: the history, then what the checks say
     /// when there is anything to say. A workflow nobody has run is told so
     /// in a line of its own.
@@ -39,10 +38,9 @@ impl Page for WorkflowPage<'_> {
             .as_ref()
             .filter(|findings| !findings.is_empty())
         {
-            let advice = VerificationEffectiveness { findings }.document(look);
             doc = doc
                 .with(Block::Lines(vec![Line::new()]))
-                .with(Block::Lines(crate::output::surface_lines(advice, look)));
+                .with_all(findings.document(look).into_blocks());
         }
         doc
     }
@@ -80,7 +78,7 @@ fn history_lines(workflow_name: &WorkflowName, history: &[RunSummary], look: Loo
 
     lines.push(Line::new());
     lines.push(Line::new().plain(match PriorEstimation::of(history) {
-        Some(estimation) => format_estimation_line(&estimation, look.glyphs),
+        Some(estimation) => crate::spend::estimation(&estimation, look.glyphs),
         None => format!(
             "estimation: not enough runs yet (need {}, have {})",
             yunta_replay::history::MIN_SAMPLES,
@@ -114,13 +112,8 @@ fn cptv_line(history: &[RunSummary], Look { glyphs, width, .. }: Look) -> String
 /// How effective a workflow's checks were across its runs, as its history
 /// says — advisory only, never a reason `stats` or `check` exits non-zero:
 /// suggestions for a person to weigh, not errors, each a caution row. A caller
-/// with no findings to say says nothing at all. The page of
-/// `VerificationFindings`, which the CLI cannot give a trait of render's.
-pub(crate) struct VerificationEffectiveness<'a> {
-    pub(crate) findings: &'a yunta_replay::verification_effectiveness::VerificationFindings,
-}
-
-impl Page for VerificationEffectiveness<'_> {
+/// with no findings to say says nothing at all.
+impl Page for VerificationFindings {
     fn document(&self, _look: &Look) -> Doc {
         Doc::new()
             .with(Block::Title(surco::components::Title::named(
@@ -128,12 +121,12 @@ impl Page for VerificationEffectiveness<'_> {
                     .push(Tone::Strong, "how its checks performed")
                     .push(Tone::Muted, ": advice, nothing here is acted on"),
             )))
-            .with(advice(self.findings))
+            .with(advice(self))
     }
 }
 
 /// One caution row per thing a workflow's history says about its checks.
-fn advice(findings: &yunta_replay::verification_effectiveness::VerificationFindings) -> Checklist {
+fn advice(findings: &VerificationFindings) -> Checklist {
     let runs = |n| surco::text::counted(n, "run");
     let mut checks = Checklist::default();
     for c in &findings.never_red_criteria {

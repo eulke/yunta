@@ -221,7 +221,7 @@ impl Offered {
         if let Some(estimation) = &readable.usually {
             fields = fields.push_if(
                 "usually",
-                super::stats::format_estimation_line(estimation, glyphs),
+                yunta_render::spend::estimation(estimation, glyphs),
             );
         }
         fields = fields.push_command(

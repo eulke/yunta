@@ -14,8 +14,8 @@ use yunta_replay::TimeSpent;
 use yunta_testkit_core::{fixed_now, Log};
 
 use super::super::facts::time_row;
-use super::super::Scope;
-use super::{draw, page_of, RUN};
+use super::super::RunScope;
+use super::{closing_of, draw, page_of, RUN};
 
 /// The row of `drawn` that opens on `start`, trimmed.
 fn row(drawn: &str, start: &str) -> Option<String> {
@@ -58,10 +58,7 @@ fn two_files() -> Vec<FileChange> {
 
 #[test]
 fn a_closing_lists_the_files_that_moved_most_and_what_the_rest_come_to() {
-    let drawn = draw(
-        &page_of(counted(two_files()), Scope::Closing),
-        &Look::plain(),
-    );
+    let drawn = draw(&closing_of(counted(two_files())), &Look::plain());
     let pack = row(&drawn, "crates/cli/src/pack.rs").unwrap_or_default();
     assert!(pack.contains("+142 -38"), "{drawn}");
     let docs = row(&drawn, "docs/notes.md").unwrap_or_default();
@@ -78,7 +75,7 @@ fn a_closing_lists_the_files_that_moved_most_and_what_the_rest_come_to() {
 /// and `--full` does.
 #[test]
 fn the_status_page_holds_the_files_only_as_deep_as_it_holds_the_change() {
-    let mut page = page_of(counted(two_files()), Scope::Status);
+    let mut page = page_of(counted(two_files()), RunScope::Status);
     assert!(!draw(&page, &Look::plain()).contains("pack.rs"));
     page.depth = Depth::Full;
     assert!(draw(&page, &Look::plain()).contains("pack.rs"));
@@ -87,10 +84,7 @@ fn the_status_page_holds_the_files_only_as_deep_as_it_holds_the_change() {
 /// A log older than the files says the total, and names none.
 #[test]
 fn a_count_with_no_files_says_its_total_and_no_more() {
-    let drawn = draw(
-        &page_of(counted(Vec::new()), Scope::Closing),
-        &Look::plain(),
-    );
+    let drawn = draw(&closing_of(counted(Vec::new())), &Look::plain());
     assert!(row(&drawn, "changed").is_some(), "{drawn}");
     assert!(!drawn.contains("more files"), "{drawn}");
 }
@@ -113,7 +107,7 @@ fn opened() -> Vec<yunta_core::events::StoredEvent> {
 
 #[test]
 fn a_closing_says_the_pull_request_the_run_opened() {
-    let drawn = draw(&page_of(opened(), Scope::Closing), &Look::plain());
+    let drawn = draw(&closing_of(opened()), &Look::plain());
     let said = row(&drawn, "pull request").unwrap_or_default();
     assert!(
         said.ends_with("#43: https://github.com/acme/web/pull/43"),
@@ -153,7 +147,7 @@ fn a_wait_still_open_runs_to_the_instant_the_page_is_read_at() {
         .at(fixed_now() - chrono::Duration::seconds(90))
         .node("plan", EventPayload::Gates(asked))
         .build();
-    let mut page = page_of(events, Scope::Status);
+    let mut page = page_of(events, RunScope::Status);
     page.depth = Depth::Full;
     let drawn = draw(&page, &Look::plain());
     let time = row(&drawn, "time").unwrap_or_default();

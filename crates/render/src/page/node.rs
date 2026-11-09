@@ -5,6 +5,10 @@
 
 use std::path::Path;
 
+use super::{Form, Page, Shown};
+use crate::blocks::FailureDetail;
+use crate::command;
+use crate::spend::Breakdown;
 use surco::components::{Fields, Headline, Next, Prose, Whole};
 use surco::doc::{Block, Doc};
 use surco::figures::duration;
@@ -12,58 +16,33 @@ use surco::look::Look;
 use surco::paths;
 use yunta_core::events::NodeState;
 use yunta_core::step::NextStep;
-use yunta_core::{NodeId, RunId};
-use yunta_render::blocks::FailureDetail;
-use yunta_render::command;
-use yunta_render::page::{Form, Page, Shown};
-use yunta_render::spend::Breakdown;
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
+use yunta_core::RunId;
+use yunta_replay::frame::{NodeFrame, NodeStanding};
 use yunta_replay::RunState;
 
-use crate::error::CliError;
-
-/// What the page is drawn from.
-pub(super) struct NodePage<'a> {
-    pub(super) run_id: &'a RunId,
+/// A node of a run, as `status --node` shows it: where it stands, what it
+/// said or what failed it, what it took, the documents it produced, and what
+/// to type next.
+pub struct Node<'a> {
+    pub run_id: &'a RunId,
     /// The node the page is about, as the run's frame derives it.
-    pub(super) node: &'a NodeFrame,
-    pub(super) run_dir: &'a Path,
+    pub node: &'a NodeFrame,
+    pub run_dir: &'a Path,
     /// Where paths are shown from: the directory this was run in, and
     /// the home `~` stands for.
-    pub(super) cwd: &'a Path,
-    pub(super) home: Option<&'a Path>,
+    pub cwd: &'a Path,
+    pub home: Option<&'a Path>,
     /// The documents the node produced, each read whole here.
-    pub(super) documents: &'a [yunta_core::shown::ShownDocument],
-    pub(super) state: &'a RunState,
+    pub documents: &'a [yunta_core::shown::ShownDocument],
+    pub state: &'a RunState,
 }
 
-/// The node `id` names in `frame`. A name the run does not declare is
-/// refused with what the run calls the node it meant, when it has one.
-pub(super) fn find<'a>(
-    run_id: &RunId,
-    frame: &'a RunFrame,
-    id: &NodeId,
-) -> Result<&'a NodeFrame, CliError> {
-    frame
-        .nodes
-        .iter()
-        .find(|node| node.id == *id)
-        .ok_or_else(|| {
-            let declared = frame.nodes.iter().map(|node| node.id.as_str());
-            CliError::msg(format!(
-                "run {} has no node `{id}`{}",
-                run_id.handle(),
-                surco::text::did_you_mean(id.as_str(), declared)
-            ))
-        })
-}
-
-impl Page for NodePage<'_> {
+impl Page for Node<'_> {
     /// The page for the node, as one document: where it stands, what it
     /// said or what failed it, its failure whole, what it took, the
     /// documents it produced, and what to type next.
     fn document(&self, look: &Look) -> Doc {
-        let display = yunta_render::state::NodeDisplay::from(self.node);
+        let display = crate::state::NodeDisplay::from(self.node);
         let headline = Headline::new(
             display.standing.mark(),
             format!("node {} of run {}", self.node.id, self.run_id.handle()),
@@ -87,16 +66,16 @@ impl Page for NodePage<'_> {
     }
 }
 
-impl NodePage<'_> {
+impl Node<'_> {
     /// The whole of what the node's state says: its failure, every line
     /// of it, or what its agent said when it finished, as it wrote it.
     fn said(&self) -> Vec<Block> {
         match &self.node.state {
             NodeStanding::Reached(NodeState::Failed { failure, .. }) => {
-                vec![Prose(yunta_render::failure::headline(failure)).into()]
+                vec![Prose(crate::failure::headline(failure)).into()]
             }
             NodeStanding::Reached(NodeState::Finished { outcome, .. }) => {
-                vec![Block::Markdown(yunta_render::outcome::sentence(outcome))]
+                vec![Block::Markdown(crate::outcome::sentence(outcome))]
             }
             _ => Vec::new(),
         }
@@ -161,7 +140,7 @@ impl NodePage<'_> {
             .push_if("took", node.elapsed.map(duration).unwrap_or_default())
             .push_if(
                 "handed over",
-                crate::run_page::handed(self.state, &node.id).unwrap_or_default(),
+                crate::state::handed(self.state, &node.id).unwrap_or_default(),
             )
             .push_if("produced", produced.join(", "))
     }

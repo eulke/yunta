@@ -6,8 +6,6 @@ use std::collections::BTreeMap;
 use yunta_core::{Isolation, Manifest, RunId};
 use yunta_replay::frame::{RunFrame, TaskCounter};
 
-use crate::run_page::pull_requests_of;
-
 /// How far a run has come, in numbers.
 #[derive(serde::Serialize)]
 pub(crate) struct CountsJson {
@@ -107,11 +105,11 @@ pub(crate) struct PullRequestJson {
 impl PullRequestJson {
     /// Every pull request the run's nodes opened, in the order the nodes declare them.
     pub(crate) fn all_of(frame: &RunFrame) -> Vec<Self> {
-        pull_requests_of(frame)
-            .into_iter()
-            .map(|(number, url)| Self {
-                number,
-                url: url.to_string(),
+        frame
+            .pull_requests()
+            .map(|pull| Self {
+                number: pull.number,
+                url: pull.url.to_string(),
             })
             .collect()
     }

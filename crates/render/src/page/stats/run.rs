@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use crate::page::Page;
+use crate::state::NodeDisplay;
 use surco::bars::{bar_cells, fine_bar, FineBar, BAR_LEAST};
 use surco::components::{Fields, Furrow, Gist, Headline};
 use surco::doc::{Block, Depth, Doc};
@@ -15,8 +17,6 @@ use surco::text::counted;
 use surco::width::{cell_width, id_column, middle_cut, truncate, INDENT, INDENT_WIDTH};
 use surco::words::{Standing, WAITING_ON_YOU};
 use yunta_core::NodeId;
-use yunta_render::page::Page;
-use yunta_render::state::NodeDisplay;
 use yunta_replay::frame::{NodeFrame, RunFrame, RunPhase};
 use yunta_replay::stats::{NodeStat, RunStats};
 
@@ -25,18 +25,18 @@ use super::facts::{answers, cache, cptv, findings, rework, spent, submissions};
 /// What the `yunta stats <run_id>` block is drawn from: one run's stats,
 /// the run as its frame stands it, what its model is priced at, and how
 /// much of it the reader asked for.
-pub(super) struct RunStatsPage<'a> {
+pub struct Stats<'a> {
     /// The run's word, workflow, mode and nodes: the word a node's row
     /// says here is the one `status` says.
-    pub(super) frame: &'a RunFrame,
-    pub(super) stats: &'a RunStats,
-    pub(super) pricing: Option<&'a BTreeMap<String, yunta_core::PricingEntry>>,
+    pub frame: &'a RunFrame,
+    pub stats: &'a RunStats,
+    pub pricing: Option<&'a BTreeMap<String, yunta_core::PricingEntry>>,
     /// `--full` adds what is the run's own business: its rails, and each
     /// node's blocked share and models.
-    pub(super) depth: Depth,
+    pub depth: Depth,
 }
 
-impl Page for RunStatsPage<'_> {
+impl Page for Stats<'_> {
     /// The whole `yunta stats <run_id>` block: the run's headline and
     /// furrow, where most of its time went, its facts — a row each that
     /// has something to say — then its time, at `--full` its rails, its
@@ -58,7 +58,7 @@ impl Page for RunStatsPage<'_> {
             .push_if("tokens", spent(stats))
             .push_if(
                 "cost",
-                super::currency_line(stats.total_tokens.total(), self.pricing).unwrap_or_default(),
+                crate::spend::cost(stats.total_tokens.total(), self.pricing).unwrap_or_default(),
             )
             .push_if("host asleep", asleep)
             .push_if("documents", submissions(&stats.artifact_submissions))
@@ -69,7 +69,7 @@ impl Page for RunStatsPage<'_> {
             .push_if("answers", answers(&stats.findings, stats.findings_settled))
             .push_if(
                 "unread",
-                yunta_render::state::unknown_kinds(&stats.unknown_kinds).unwrap_or_default(),
+                crate::state::unknown_kinds(&stats.unknown_kinds).unwrap_or_default(),
             );
         let furrow = self.frame.nodes.iter().map(|node| node.standing).collect();
         let gist = super::time::gist(&stats.time, self.person());
@@ -87,7 +87,7 @@ impl Page for RunStatsPage<'_> {
     }
 }
 
-impl RunStatsPage<'_> {
+impl Stats<'_> {
     /// The node a person was asked about longest, when it holds most of a
     /// person's part of the run: where the gist says that part went. A part
     /// spread over nodes, or held by asks of the run itself, names none.
@@ -101,7 +101,7 @@ impl RunStatsPage<'_> {
     }
 }
 
-impl RunStatsPage<'_> {
+impl Stats<'_> {
     /// The run's headline: its mark, workflow and mode, its word, how long
     /// it has run — so far, or in all once it closed — and its handle.
     fn headline(&self) -> Headline {

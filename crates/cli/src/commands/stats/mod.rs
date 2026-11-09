@@ -10,15 +10,9 @@
 //! width and the glyphs are settled once in `crate::output`, where both
 //! rules live.
 
-mod facts;
 pub(crate) mod json;
-mod run;
-mod time;
-mod workflow;
 
-use std::collections::BTreeMap;
-use std::time::Duration;
-use yunta_render::page::Page;
+use yunta_render::page::{History, Page, Stats};
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{PauseReason, StoredEvent};
@@ -33,38 +27,8 @@ use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use json::{RunStatsJson, WorkflowHistoryJson};
-use run::RunStatsPage;
 use surco::doc::Depth;
-use surco::figures::{duration, Tokens};
 use surco::look::Look;
-pub(crate) use workflow::VerificationEffectiveness;
-use workflow::WorkflowPage;
-
-/// What the run's spend costs at its model's price: one blended line when
-/// several models are priced, and none when no price is known.
-fn currency_line(
-    tokens: u64,
-    pricing: Option<&BTreeMap<String, yunta_core::PricingEntry>>,
-) -> Option<String> {
-    // A currency estimate needs a *model* to price against; with more
-    // than one model priced and no per-node attribution surfaced here,
-    // showing one blended-average line beats showing none — never
-    // silently picking the first entry a HashMap happens to iterate.
-    let pricing = pricing?;
-    if pricing.is_empty() {
-        return None;
-    }
-    let avg_per_1k: f64 = pricing
-        .values()
-        .map(|entry| entry.cost_per_1k_tokens)
-        .sum::<f64>()
-        / pricing.len() as f64;
-    let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
-    Some(format!(
-        "~{estimate:.2} (avg of {}, never authoritative)",
-        surco::text::counted(pricing.len(), "priced model")
-    ))
-}
 
 /// What `yunta stats <run_id>` answers: the run's document for a program,
 /// and its block for a person.
@@ -73,7 +37,7 @@ struct RunStatsAnswer<'a> {
     #[serde(flatten)]
     json: RunStatsJson,
     #[serde(skip)]
-    page: RunStatsPage<'a>,
+    page: Stats<'a>,
 }
 
 impl Answer for RunStatsAnswer<'_> {
@@ -115,7 +79,7 @@ pub(crate) async fn of_run(
     );
     let answer = RunStatsAnswer {
         json: RunStatsJson::from(run_id, mode, &run_stats, pricing.as_ref()),
-        page: RunStatsPage {
+        page: Stats {
             frame: &frame,
             stats: &run_stats,
             pricing: pricing.as_ref(),
@@ -132,7 +96,7 @@ struct WorkflowAnswer<'a> {
     #[serde(flatten)]
     json: WorkflowHistoryJson,
     #[serde(skip)]
-    page: WorkflowPage<'a>,
+    page: History<'a>,
 }
 
 impl Answer for WorkflowAnswer<'_> {
@@ -164,7 +128,7 @@ pub(crate) async fn of_workflow(
     };
     let answer = WorkflowAnswer {
         json: WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref()),
-        page: WorkflowPage {
+        page: History {
             name: workflow_name,
             history: &history,
             findings,
@@ -304,25 +268,5 @@ pub(crate) fn raw_history(history: &[Opened]) -> (Vec<Vec<StoredEvent>>, Option<
     (
         history.iter().map(|open| open.events.clone()).collect(),
         latest,
-    )
-}
-
-/// Shared by `yunta stats --workflow` and `yunta run`/`list_workflows`
-/// so the three surfaces never phrase the same numbers differently.
-pub(crate) fn format_estimation_line(
-    estimation: &yunta_replay::history::PriorEstimation,
-    glyphs: surco::glyphs::Glyphs,
-) -> String {
-    let sep = glyphs.sep();
-    let wall_clock = match estimation.wall_clock_secs {
-        Some(p) => duration(Duration::from_secs_f64(p.median)),
-        None => "n/a".to_string(),
-    };
-    format!(
-        "{} {sep} median {}, p90 {} {sep} median wall-clock {}",
-        surco::text::counted(estimation.sample_count, "past run"),
-        Tokens::rounded(estimation.tokens.median),
-        Tokens::rounded(estimation.tokens.p90).figure(),
-        wall_clock,
     )
 }

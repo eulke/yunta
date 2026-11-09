@@ -1154,7 +1154,7 @@ Added at the user's request, after the measurement of Checkpoint F.
 
 ### Checkpoint G: after Tasks 24–29
 - [x] The suites (275 binaries, 4,552 tests, none failed); render's 21 goldens and the CLI's 78 by digest; the captures. In `.plans/yunta-tui/proof/run-pages/checkpoint-g.txt`.
-- [ ] The user reviews the phase. Then every step of the `ci` job, commit 6, `cargo clean`.
+- [x] The user reviewed the phase, and asked for the names it chose to say what each thing is. Every step of the `ci` job passed (the suite in its batches), commit 6 is 86115929, and `cargo clean` freed 40.4 GiB.
 
 ## Phase 7: the run's pages
 
@@ -1167,12 +1167,17 @@ Added at the user's request, after the measurement of Checkpoint F.
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] A search for `yunta_engine` in `run_page/` and `status/node.rs` finds nothing, and every golden is the same.
+- [x] A search for `yunta_engine` in `run_page/` and `status/node.rs` finds nothing, and every golden is the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta --bins` (339), the 99 digests
 
 **Dependencies:** Checkpoint G
+
+**Found while doing it:**
+- What holds the places is called by them: `RunPage::places` and `ClosingEnv::places`, where they were `paths` and `outline`, and the fixture is `places()`.
+- The branch is read where the run's other places are. `status` reads it into its `Reading` with the run's tree, since its page borrows from the reading. `drive` reads it for the closing it gathers, and `Closing` keeps it with the places it owns.
+- The fixture names the branch of its run as a literal, as it names the run's directories.
 
 **Files likely touched:** `crates/cli/src/{surface/closing/mod.rs,surface/mod.rs,run_page/{mod,facts,evidence,fixtures}.rs,run_page/tests/words.rs,commands/status/{mod,node}.rs,commands/drive.rs}`
 
@@ -1189,13 +1194,26 @@ Added at the user's request, after the measurement of Checkpoint F.
 **Fails first:** none: a move. The guard is the 60 goldens, now read from render.
 
 **Acceptance criteria:**
-- [ ] `crates/cli/src/run_page/` is gone, and the 60 goldens' digests equal the base's.
-- [ ] `crates/render/tests/pure.rs` passes.
+- [x] `crates/cli/src/run_page/` is gone, and the 60 goldens' digests equal the base's.
+- [x] `crates/render/tests/pure.rs` passes.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`, `cargo test -p yunta --test status_cmd --test status_page_cmd --test open_cmd`
+- [x] `cargo test -p yunta-render` (297 in its library), `cargo test -p yunta --bins` (314), `cargo test -p yunta --test status_cmd --test status_page_cmd --test open_cmd`, the 99 digests, `smells --check`, `docs --check`
 
 **Dependencies:** Task 30
+
+**Found while doing it:**
+- **`page::Run`, `page::RunScope` and `page::Places`.** The scope at `page`'s root says whose it is.
+- **The closing's exit code comes in its scope:** `RunScope::Closing { exit_code }`. The CLI's `Closing` fills it with its outcome's code, and the page says the number it is given, naming no exit table.
+- **What a page and a document both read is where it belongs, not the page's.**
+  - Off the frame, it is replay's: `RunFrame::{failed, pull_requests, artifacts_written, cautions}`, each pull request a `frame::PullRequest { number, url }`, where the page's helper gave an unnamed pair.
+  - The words, it is render's state's: `state::gist` and `state::handed`, which the module's `//!` names among what it says.
+
+  So `page`'s modules stay the crate's own, and each item has one path. This departs from the description, which had the JSON read them from the page.
+- **The estimation line is render's:** `spend::estimation`, where the CLI's stats held `format_estimation_line`. The history, the catalog, a run's page and `run` say it.
+- `RunPage::gist` only called the free function, so it is gone; its callers call `state::gist`.
+- Render's tests take `chrono` as a dev-dependency, to build the fixtures' times as the CLI's did; `Cargo.lock` gains that one line.
+- 25 tests moved with the page: the CLI's bins went from 339 to 314, and render's library from 272 to 297.
 
 **Files likely touched:** `crates/cli/src/run_page/*` to `crates/render/src/page/run/*`, `crates/cli/goldens/{status,open}/` to `crates/render/goldens/`, `crates/render/{Cargo.toml,src/page.rs}`, `crates/cli/src/{commands/status/mod.rs,surface/closing/mod.rs,json/{mod,facts}.rs,commands/drive.rs,main.rs}`
 
@@ -1211,12 +1229,17 @@ Added at the user's request, after the measurement of Checkpoint F.
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] The 12 closing goldens' digests equal the base's.
+- [x] The 12 closing goldens' digests equal the base's.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta-render`, `cargo test -p yunta --bins`, with Task 31's
 
 **Dependencies:** Task 31
+
+**Found while doing it:**
+- **Done in Task 31's step.** The run page's fixtures are a test module of render's, which the CLI's closing tests could not reach once they moved.
+- **The closing's tests build `page::Run` from a `Stopped` run** (its frame, its state, the decision it stopped on). Its scope is `fixtures::closing(frame)`, the exit code the CLI gives each word, which the closing goldens hold (`exit 0`, `1`, `3`, `4`).
+- **The CLI's `Closing` keeps no test of its own:** the file held page tests only. Its outcome is `output::exit`'s, which `exit.rs`'s tests hold.
 
 **Files likely touched:** `crates/cli/src/surface/closing/{mod,tests}.rs`, `crates/render/src/page/run/tests/closing.rs`, `crates/cli/goldens/closing/`
 
@@ -1229,12 +1252,15 @@ Added at the user's request, after the measurement of Checkpoint F.
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `status --node`'s captures are byte for byte the same, and `status_node_cmd` and `status_nodes_cmd` pass.
+- [x] `status --node`'s captures are byte for byte the same (Checkpoint H), and `status_node_cmd` and `status_nodes_cmd` pass.
 
 **Verification:**
-- [ ] `cargo test -p yunta --test status_node_cmd --test status_nodes_cmd`, `cargo test -p yunta-render`
+- [x] `cargo test -p yunta --test status_node_cmd --test status_nodes_cmd`, `cargo test -p yunta-render`
 
 **Dependencies:** Task 31
+
+**Found while doing it:**
+- `status/node.rs` moved whole with `git mv`, so the page keeps its history. `find`, which refuses a node the run does not declare with a `CliError`, went back to `status/mod.rs`: the command reads the node, and the page draws it.
 
 **Files likely touched:** `crates/cli/src/commands/status/{node,mod}.rs`, `crates/render/src/{page.rs,page/node.rs}`
 
@@ -1251,13 +1277,21 @@ Added at the user's request, after the measurement of Checkpoint F.
 **Fails first:** none: a move. The guard is the `list-json` capture, byte for byte.
 
 **Acceptance criteria:**
-- [ ] The 3 field goldens' digests and the `list` and `list-json` captures equal the base's.
-- [ ] `RunRow` holds no `String` a person reads.
+- [x] The 3 field goldens' digests and the `list` and `list-json` captures (Checkpoint H) equal the base's.
+- [x] The row holds no `String` a person reads: `FieldRow` is the run's frame and whether it stopped on a decision with a menu.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --bins`, `pages.sh` against the base
+- [x] `cargo test -p yunta-render` (307), `cargo test -p yunta --bins` (304), `run_inbox_cmd`, `run_ref_cmd`, `stalled_runs`, `parked_runs`, `close_cmd`, the 99 digests
 
 **Dependencies:** Task 31
+
+**Found while doing it:**
+- **A row is the run as replay framed it, and render words it.** `page::FieldRow { frame, menu }`, with `group()`, `asking()`, `stood()`, `reason(glyphs)`, `command()` and `said(glyphs)`. The frame already holds every fact the plan named: what holds the run (`WaitingOn`, `Asking`), how far a moving run has come, how long it has stood. A smaller row would copy the frame's counters out only to hand them back.
+- **The page's companions stand at `page`'s root:** `page::FieldGroup` and `page::UnreadableRun`, as `RunScope` and `Places` stand beside `Run`, rather than a public `page::field` module that would give the page two paths.
+- **One order, written once.** "The one that has waited longest first, ties by id" is `FieldRow::by_wait`, read by the page's groups and by the inbox's `needing_a_person`, which `needs` resolves through.
+- `list --runs --json` serializes each row through `json/field.rs`, in the fields and the order the CLI's row had, its words from render with the process's glyphs, as before.
+- The field's tests build each row from the run page's fixture frames. A run that needs a person waits on the failed `lint`; one a person stopped was interrupted; one asking was asked by an engine about `implement`. Their words are the ones the goldens held, so the goldens did not change. The groups' tests moved from `inbox/tests.rs` with `FieldGroup`.
+- 10 tests moved: the CLI's bins went from 314 to 304, and render's library from 297 to 307.
 
 **Files likely touched:** `crates/cli/src/commands/list/{runs,inbox}.rs`, `crates/cli/src/commands/list/runs/tests.rs`, `crates/cli/src/json/field.rs`, `crates/render/src/page/field.rs`, `crates/cli/goldens/field/`
 
@@ -1273,12 +1307,18 @@ Added at the user's request, after the measurement of Checkpoint F.
 **Fails first:** none: a move. If composing the findings changes a golden, the work stops and asks.
 
 **Acceptance criteria:**
-- [ ] The 3 stats goldens and the `stats` captures, text and JSON, equal the base's.
+- [x] The 3 stats goldens and the `stats` captures, text and JSON (Checkpoint H), equal the base's.
 
 **Verification:**
-- [ ] `cargo test -p yunta-render`, `cargo test -p yunta --test stats_cmd`, `pages.sh` against the base
+- [x] `cargo test -p yunta-render` (329), `cargo test -p yunta --test stats_cmd`, `cargo test -p yunta --bins` (282), the 99 digests
 
 **Dependencies:** Task 31
+
+**Found while doing it:**
+- **`page::Stats` and `page::History`,** in `page/stats/` with the run's facts and its time. `workflow.rs` is `history.rs`, named by the page it holds.
+- **What a workflow's checks were worth is `impl Page for VerificationFindings`,** replay's own type, now that its page is render's. `check` shows the findings themselves, and the history appends their blocks after a blank line instead of drawing them to terminal lines. The CLI's `VerificationEffectiveness` and `output::surface_lines`, which nothing else called, are gone.
+- **The cost line is render's spend's:** `spend::cost`, beside `spend::estimation`. The stats page and the run's JSON both say it.
+- 22 tests moved: the CLI's bins went from 304 to 282, and render's library from 307 to 329. `crates/cli/goldens/` is gone.
 
 **Files likely touched:** `crates/cli/src/commands/stats/{mod,run,workflow,facts,time}.rs`, `crates/cli/src/commands/stats/run/tests.rs`, `crates/render/src/page/stats/*`, `crates/cli/goldens/stats/`, `crates/cli/src/run_page/facts.rs` (`format_estimation_line`, now render's)
 
@@ -1294,20 +1334,26 @@ Added at the user's request, after the measurement of Checkpoint F.
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] The `doctor` and `verify` captures and `verify_cmd` are byte for byte the same.
+- [x] The `doctor` and `verify` captures (Checkpoint H) and `verify_cmd` are byte for byte the same.
 
 **Verification:**
-- [ ] `cargo test -p yunta --test verify_cmd --test pack_requires_doctor_cmd`, `cargo test -p yunta --bins`
+- [x] `cargo test -p yunta --test verify_cmd --test pack_requires_doctor_cmd`, `cargo test -p yunta --bins` (281), `cargo test -p yunta-render` (330), the 99 digests
 
 **Dependencies:** Task 31
+
+**Found while doing it:**
+- **The answers keep Surco's checks, and the pages and the JSON both read them.** `DoctorAnswer` and `VerifyAnswer` hold `Vec<Check>`. `json/check.rs` serializes each one, its found word, subject, what it said, what it means and its fix, but not the lines under its row nor what names it in a fold, as `CheckRow` did; `CheckRow` is gone.
+- **A page says its own word:** `Doctor::word(holds)` and `Verified::word(holds)`, which the answers' JSON reads too, so the pages hold no `word` of their own.
+- No check of `doctor`'s or `verify`'s has lines under its row (only a pack's audit and `test` write them, outside these pages), so handing the pages whole checks draws what the rebuilt rows drew.
+- `verify.rs`'s two tests went with what they hold: the checklist's to `page/checklist.rs`, and the found word's to `json/check.rs`.
 
 **Files likely touched:** `crates/cli/src/commands/{verify,doctor/mod}.rs`, `crates/cli/src/json/check.rs`, `crates/render/src/page/{checklist,doctor,verified}.rs`
 
 **Estimated scope:** M
 
 ### Checkpoint H: after Tasks 30–36
-- [ ] The 78 goldens, now under `crates/render/goldens/`, by digest; the captures; `pure.rs`.
-- [ ] `crates/cli/goldens/` is gone.
+- [x] The 78 goldens, now under `crates/render/goldens/`, by digest; the captures (104 views, none differing from Checkpoint F's); `pure.rs`. The suite: 275 binaries, 4,552 tests, none failed. In `.plans/yunta-tui/proof/run-pages/checkpoint-h.txt`.
+- [x] `crates/cli/goldens/` is gone.
 - [ ] The user reviews the phase. Then every step of the `ci` job, commit 7, `cargo clean`.
 
 ## Phase 8: every other command's page
@@ -1388,7 +1434,7 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 
 ### Task 41: `test`'s report, a verdict, and how a driven run stopped
 
-**Description:** `page::Tested` and `page::TestedCase`, `page::Checked` with `Diagnosis` (the verdict's page; what reads it stays with `Verdict`), and `impl Page for VerificationFindings`, which takes the place of the CLI's `VerificationEffectiveness`. `drive` has no page of its own (Task 29): its closing is `page::Run`, and a quiet run's verdict is that page's headline on stderr.
+**Description:** `page::Tested` and `page::TestedCase`, `page::Checked` with `Diagnosis` (the verdict's page; what reads it stays with `Verdict`), and `VerificationFindings`, a page since Task 35. `drive` has no page of its own (Task 29): its closing is `page::Run`, and a quiet run's verdict is that page's headline on stderr.
 
 **Fails first:** none.
 

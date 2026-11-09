@@ -6,10 +6,9 @@ use surco::doc::Depth;
 use surco::look::Look;
 use yunta_core::Isolation;
 
-use super::super::fixtures::{cases, outline, Case, RUN};
-use super::super::Scope;
+use super::super::fixtures::{cases, places, Case, RUN};
+use super::super::{Places, RunScope};
 use super::draw;
-use crate::surface::Outline;
 
 /// The first case whose page ends on a decision, and the first whose page does not.
 fn decided_and_not() -> (Case, Case) {
@@ -28,12 +27,12 @@ fn decided_and_not() -> (Case, Case) {
 /// The row a run that worked in this checkout says it did, read from `cwd`.
 fn branch_read_from(cwd: &'static Path) -> String {
     let case = decided_and_not().1;
-    let mut page = case.page(Scope::Closing, Depth::Glance);
-    page.paths = Outline {
+    let mut page = case.page(case.closing(), Depth::Glance);
+    page.places = Places {
         worktree: Path::new("/home/me/project"),
         isolation: Isolation::None,
         cwd,
-        ..outline()
+        ..places()
     };
     draw(&page, &Look::plain())
         .lines()
@@ -59,12 +58,12 @@ fn a_run_in_this_checkout_says_so_without_naming_the_directory_it_stands_in() {
 /// The page at a glance, for a run that worked in this checkout, read from `cwd`.
 fn glance_read_from(cwd: &'static Path) -> String {
     let case = decided_and_not().0;
-    let mut page = case.page(Scope::Status, Depth::Glance);
-    page.paths = Outline {
+    let mut page = case.page(RunScope::Status, Depth::Glance);
+    page.places = Places {
         worktree: Path::new("/home/me/project"),
         isolation: Isolation::None,
         cwd,
-        ..outline()
+        ..places()
     };
     draw(&page, &Look::plain())
 }
@@ -88,11 +87,11 @@ fn the_whole_page_offers_a_browser_and_a_glance_offers_the_whole_page() {
     let open = format!("yunta open {}", RUN.handle());
     let case = decided_and_not().1;
     let said = |scope, depth| draw(&case.page(scope, depth), &Look::plain());
-    assert!(said(Scope::Status, Depth::Full).contains(&open));
-    assert!(said(Scope::Status, Depth::Dig).contains(&open));
-    assert!(!said(Scope::Status, Depth::Glance).contains(&open));
-    assert!(!said(Scope::Closing, Depth::Glance).contains(&open));
-    assert!(!said(Scope::Browser, Depth::Full).contains(&open));
+    assert!(said(RunScope::Status, Depth::Full).contains(&open));
+    assert!(said(RunScope::Status, Depth::Dig).contains(&open));
+    assert!(!said(RunScope::Status, Depth::Glance).contains(&open));
+    assert!(!said(case.closing(), Depth::Glance).contains(&open));
+    assert!(!said(RunScope::Browser, Depth::Full).contains(&open));
 }
 
 /// A decision is what is most worth reading whole: at every depth `status` draws it, it
@@ -103,10 +102,10 @@ fn a_decision_offers_a_browser_beside_what_else_moves_the_run() {
     let case = decided_and_not().0;
     let said = |scope, depth| draw(&case.page(scope, depth), &Look::plain());
     for depth in [Depth::Glance, Depth::Full, Depth::Dig] {
-        let drawn = said(Scope::Status, depth);
+        let drawn = said(RunScope::Status, depth);
         assert!(drawn.contains(&open), "{drawn}");
         assert!(drawn.contains("the whole page, in a browser"), "{drawn}");
     }
-    assert!(!said(Scope::Closing, Depth::Glance).contains(&open));
-    assert!(!said(Scope::Browser, Depth::Full).contains(&open));
+    assert!(!said(case.closing(), Depth::Glance).contains(&open));
+    assert!(!said(RunScope::Browser, Depth::Full).contains(&open));
 }

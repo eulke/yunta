@@ -13,14 +13,12 @@
 //! alone — so each answers on its own line, and either one failing is a
 //! failing verdict.
 
-use surco::components::{Check, Checklist, Fix, Found, Headline};
-use surco::doc::Doc;
-use surco::glyphs::Mark;
+use surco::components::{Check, Checklist, Found};
 use surco::look::Look;
 use yunta_core::events::FindingCause;
 use yunta_core::RunId;
 use yunta_engine::{ArtifactIntegrity, StoreError};
-use yunta_render::page::Page;
+use yunta_render::page::{Page, Verified};
 use yunta_storage::{ChainVerification, Storage};
 
 use crate::context::Context;
@@ -50,7 +48,8 @@ pub(crate) struct VerifyAnswer {
     holds: bool,
     /// The word the headline says: `intact` when every check holds, `broken` otherwise.
     word: &'static str,
-    checks: Vec<CheckRow>,
+    #[serde(serialize_with = "crate::json::check::rows")]
+    checks: Vec<Check>,
 }
 
 impl VerifyAnswer {
@@ -60,41 +59,9 @@ impl VerifyAnswer {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.clone(),
             holds,
-            word: word_of(holds),
-            checks: checks.checks().map(CheckRow::of).collect(),
+            word: Verified::word(holds),
+            checks: checks.checks().cloned().collect(),
         }
-    }
-}
-
-/// The word a verdict says: `intact` when every check holds, `broken` when one does not.
-fn word_of(holds: bool) -> &'static str {
-    match holds {
-        true => "intact",
-        false => "broken",
-    }
-}
-
-/// The verdict on a run's evidence, as a person reads it: whether it is
-/// intact, and each check in the order it ran.
-struct Verified<'a> {
-    run_id: &'a RunId,
-    holds: bool,
-    /// The word the headline says.
-    word: &'static str,
-    checks: &'a [CheckRow],
-}
-
-impl Page for Verified<'_> {
-    fn document(&self, _look: &Look) -> Doc {
-        let mark = match self.holds {
-            true => Mark::Done,
-            false => Mark::Failed,
-        };
-        let headline = tallied(
-            Headline::new(mark, format!("run {}", self.run_id.handle()), self.word),
-            self.checks,
-        );
-        Doc::new().with(headline).with(checklist(self.checks))
     }
 }
 
@@ -103,7 +70,6 @@ impl Answer for VerifyAnswer {
         Verified {
             run_id: &self.run_id,
             holds: self.holds,
-            word: self.word,
             checks: &self.checks,
         }
     }
@@ -114,70 +80,6 @@ impl Answer for VerifyAnswer {
             false => Outcome::Reported,
         }
     }
-}
-
-/// `headline` with how many of `checks` are problems and how many are
-/// worth a look.
-pub(crate) fn tallied(headline: Headline, checks: &[CheckRow]) -> Headline {
-    let count = |found: Found| checks.iter().filter(|check| check.found == found).count();
-    headline.tally(count(Found::Problem), count(Found::Caution))
-}
-
-/// One check as a document carries it: everything a [`Check`] holds but
-/// the lines under its row, what names it in a fold only for the page.
-#[derive(serde::Serialize)]
-pub(crate) struct CheckRow {
-    #[serde(serialize_with = "found_word")]
-    pub(crate) found: Found,
-    pub(crate) subject: String,
-    pub(crate) said: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) so: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) fix: Option<Fix>,
-    /// What names the check where the checks that hold fold into one row.
-    #[serde(skip)]
-    pub(crate) brief: Option<String>,
-}
-
-impl CheckRow {
-    pub(crate) fn of(check: &Check) -> Self {
-        Self {
-            found: check.found,
-            subject: check.subject.clone(),
-            said: check.said.clone(),
-            so: check.so.clone(),
-            fix: check.fix.clone(),
-            brief: check.brief.clone(),
-        }
-    }
-
-    /// The check this row carries.
-    fn check(&self) -> Check {
-        Check {
-            so: self.so.clone(),
-            fix: self.fix.clone(),
-            brief: self.brief.clone(),
-            ..Check::new(self.found, self.subject.as_str(), self.said.as_str())
-        }
-    }
-}
-
-/// The rows a document carries, drawn as the checklist a reader sees.
-pub(crate) fn checklist(rows: &[CheckRow]) -> Checklist {
-    let mut checklist = Checklist::default();
-    checklist.extend(rows.iter().map(CheckRow::check));
-    checklist
-}
-
-/// What a check found, named as a document names it.
-fn found_word<S: serde::Serializer>(found: &Found, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(match found {
-        Found::Holds => "holds",
-        Found::Caution => "caution",
-        Found::Problem => "problem",
-        Found::NotApplicable => "not_applicable",
-    })
 }
 
 /// Recomputes the run's event hash chain, a check on `checks`.
@@ -290,42 +192,5 @@ fn fault_said(error: &StoreError) -> String {
     match error {
         StoreError::Object(problem) => yunta_render::failure::object(problem),
         StoreError::Io { context, .. } => format!("failed to {context}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{checklist, CheckRow};
-    use crate::output::draw;
-    use surco::components::{Checklist, Found};
-    use surco::doc::Doc;
-    use surco::look::Look;
-
-    #[test]
-    fn a_rebuilt_checklist_draws_as_the_one_it_came_from() {
-        let mut checks = Checklist::default();
-        checks.push(Found::Holds, "chain", "intact: 3 events verified");
-        checks.push(
-            Found::Problem,
-            "objects",
-            "broken: 1 of 2 are not the bytes the run accepted",
-        );
-        let rows: Vec<CheckRow> = checks.checks().map(CheckRow::of).collect();
-        let look = Look::plain();
-        assert_eq!(
-            draw(Doc::new().with(checklist(&rows)), &look),
-            draw(Doc::new().with(checks), &look)
-        );
-    }
-
-    #[test]
-    fn a_check_names_what_it_found_as_a_word() {
-        let row = CheckRow::of(&surco::components::Check::new(
-            Found::NotApplicable,
-            "chain",
-            "nothing to check",
-        ));
-        let json = serde_json::to_value(&row).expect("a check serializes");
-        assert_eq!(json["found"], "not_applicable");
     }
 }

@@ -22,34 +22,46 @@ mod evidence;
 mod facts;
 mod story;
 
-pub(crate) use facts::{artifacts_written, pull_requests_of};
-pub(crate) use story::handed;
+use std::path::Path;
 
+use super::Page;
+use crate::command::{self, Reader};
+use crate::escalation::{self, Beside, Decision};
+use crate::spend::Breakdown;
 use surco::components::{Furrow, Gist, Headline, Next, Note, Prose};
 use surco::doc::{Block, Depth, Doc};
 use surco::figures::duration;
 use surco::look::Look;
-use surco::words::{Standing, NOTHING_NEEDS_YOU};
-use yunta_core::caution::Caution;
-use yunta_core::events::{Failure, GateWaitingPayload, NodeState, PauseReason};
+use surco::words::Standing;
+use yunta_core::events::GateWaitingPayload;
 use yunta_core::step::NextStep;
-use yunta_core::{NodeId, RunId};
-use yunta_render::command::{self, Reader};
-use yunta_render::engine;
-use yunta_render::escalation::{self, Beside, Decision};
-use yunta_render::page::Page;
-use yunta_render::pause;
-use yunta_render::spend::Breakdown;
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, WaitingOn};
+use yunta_core::{Isolation, NodeId, RunId};
+use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::RunState;
 
-use crate::surface::Outline;
+/// Where a run lives and where its paths are shown from, as the caller found
+/// them: what a page names that the run's own log does not carry.
+#[derive(Debug, Clone, Copy)]
+pub struct Places<'a> {
+    pub run_dir: &'a Path,
+    pub worktree: &'a Path,
+    /// The run's own branch.
+    pub branch: &'a str,
+    /// The branch it started from, as its manifest froze it.
+    pub base_branch: &'a str,
+    pub isolation: Isolation,
+    /// Where paths are shown from: the directory this was run in, and
+    /// the home `~` stands for.
+    pub cwd: &'a Path,
+    pub home: Option<&'a Path>,
+}
 
 /// Which page a run is drawn as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Scope {
-    /// What a run leaves on the terminal once it has stopped.
-    Closing,
+pub enum RunScope {
+    /// What a run leaves on the terminal once it has stopped, with the code
+    /// the process that drove it exits with.
+    Closing { exit_code: u8 },
     /// The page `yunta status` prints for a run.
     Status,
     /// The page `yunta open` writes: a status, drawn where a browser reads it, so it offers
@@ -63,32 +75,32 @@ const IN_A_BROWSER: &str = "the whole page, in a browser";
 /// What a page is drawn from: one run as its log derives it, the places
 /// its page names, the decision it waits on, and how much of it a reader
 /// asked for.
-pub(crate) struct RunPage<'a> {
-    pub(crate) scope: Scope,
-    pub(crate) depth: Depth,
-    pub(crate) run_id: &'a RunId,
+pub struct Run<'a> {
+    pub scope: RunScope,
+    pub depth: Depth,
+    pub run_id: &'a RunId,
     /// The run at the instant the page is read at: what drives it, and how
     /// long it has stood where it is, measured there.
-    pub(crate) frame: &'a RunFrame,
+    pub frame: &'a RunFrame,
     /// The run as its log derives it; the frame is read from the same log.
-    pub(crate) state: &'a RunState,
+    pub state: &'a RunState,
     /// Where the page's paths are shown from, and the tree the run works in.
-    pub(crate) paths: Outline<'a>,
-    pub(crate) decision: Option<Decision<'a>>,
+    pub places: Places<'a>,
+    pub decision: Option<Decision<'a>>,
     /// The change each finished node's accepted plan says it makes, by that
     /// node: the story says it in the node's row, in place of what the node
     /// said last. Empty where the page draws no story.
-    pub(crate) plans: Vec<(NodeId, String)>,
+    pub plans: Vec<(NodeId, String)>,
 }
 
-impl Page for RunPage<'_> {
+impl Page for Run<'_> {
     /// The page as one document, in the order a person reads it for.
-    /// Nothing here paints: `output::draw` does.
+    /// Nothing here paints: the surface it is drawn on does.
     fn document(&self, look: &Look) -> Doc {
         let mut doc = Doc::new().with(self.headline()).with(Furrow(
             self.frame.nodes.iter().map(|node| node.standing).collect(),
         ));
-        if let Some(gist) = self.gist() {
+        if let Some(gist) = crate::state::gist(self.frame) {
             doc = doc.with(Gist::new(gist));
         }
         let doc = doc
@@ -108,7 +120,7 @@ impl Page for RunPage<'_> {
     }
 }
 
-impl RunPage<'_> {
+impl Run<'_> {
     /// What a run parked on a person says when its pause rebuilds no menu
     /// — a scope, an answers file, a review on a forge, a child: that no
     /// option answers it here, so a reader who knows the menus other stops
@@ -128,19 +140,18 @@ impl RunPage<'_> {
     /// The headline: the run's mark, its workflow and mode, its word, how
     /// long it has stood there, and — in a closing — the exit code its
     /// invocation leaves; the handle that names it at the far edge.
-    pub(crate) fn headline(&self) -> Headline {
+    pub fn headline(&self) -> Headline {
         let word = self.frame.standing;
         let mut headline = Headline::new(
             word.mark(),
-            yunta_render::state::called(&self.frame.workflow, &self.frame.mode),
+            crate::state::called(&self.frame.workflow, &self.frame.mode),
             word.word(),
         );
         for fact in self.stood() {
             headline = headline.fact(fact);
         }
-        if self.scope == Scope::Closing {
-            let code = crate::output::exit(word).code();
-            headline = headline.fact(format!("exit {code}"));
+        if let RunScope::Closing { exit_code } = self.scope {
+            headline = headline.fact(format!("exit {exit_code}"));
         }
         headline.edge(self.run_id.handle())
     }
@@ -153,7 +164,7 @@ impl RunPage<'_> {
             self.frame.phase,
             RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
         );
-        if self.scope != Scope::Closing && open {
+        if !matches!(self.scope, RunScope::Closing { .. }) && open {
             return self.open_for().into_iter().collect();
         }
         let Some(took) = self.frame.elapsed else {
@@ -164,7 +175,7 @@ impl RunPage<'_> {
             _ => format!("after {}", duration(took)),
         }];
         if let (true, false, Some(ago)) = (
-            self.scope != Scope::Closing,
+            !matches!(self.scope, RunScope::Closing { .. }),
             open,
             self.frame.since_last_event,
         ) {
@@ -191,12 +202,6 @@ impl RunPage<'_> {
         }
     }
 
-    /// The page's gist: what it asks of its reader, or what holds the run,
-    /// as one sentence. `None` when the run's word already says it.
-    pub(crate) fn gist(&self) -> Option<String> {
-        gist(self.frame)
-    }
-
     /// The decision the run waits on, as the section the page ends on, and
     /// above it where the run works — said whole, it is copied into another
     /// terminal — on a page whose facts do not say it, to a reader who does
@@ -208,18 +213,24 @@ impl RunPage<'_> {
         };
         let mut blocks: Vec<Block> = Vec::new();
         // The closing's branch row says where the run works.
-        let shown = surco::paths::shown(self.paths.worktree, self.paths.cwd, self.paths.home);
-        if self.scope != Scope::Closing && !self.depth.reaches(Depth::Full) && shown != "." {
-            let tree = escalation::run_tree_line(self.paths.worktree);
+        let shown = surco::paths::shown(self.places.worktree, self.places.cwd, self.places.home);
+        if !matches!(self.scope, RunScope::Closing { .. })
+            && !self.depth.reaches(Depth::Full)
+            && shown != "."
+        {
+            let tree = escalation::run_tree_line(self.places.worktree);
             blocks.push(Prose(tree).into());
         }
         // A failed node's evidence is quoted above the decision, so the
         // decision does not repeat it.
         let beside = Beside {
-            evidence: failed(self.frame).any(|(node, _)| decision.on.node() == Some(&node.id)),
+            evidence: self
+                .frame
+                .failed()
+                .any(|(node, _)| decision.on.node() == Some(&node.id)),
         };
         let mut section = decision.section(self.run_id, beside, self.otherwise());
-        if self.scope == Scope::Closing {
+        if matches!(self.scope, RunScope::Closing { .. }) {
             section.blocks.push(
                 Note(
                     "the run holds its own state on disk, so close this terminal whenever you \
@@ -247,7 +258,7 @@ impl RunPage<'_> {
     /// its options, and, for a person reading `status`, where to read all of it.
     fn otherwise(&self) -> Vec<(String, &'static str)> {
         let mut steps = self.offered();
-        if self.scope == Scope::Status {
+        if self.scope == RunScope::Status {
             steps.push((
                 command::line(&NextStep::Open {
                     run: self.run_id.clone(),
@@ -263,11 +274,11 @@ impl RunPage<'_> {
     fn next(&self) -> Next {
         let mut steps = self.offered();
         match (self.scope, self.depth) {
-            (Scope::Closing, _) => steps.push((
+            (RunScope::Closing { .. }, _) => steps.push((
                 command::line(&NextStep::status(self.run_id)),
                 "shows the whole run",
             )),
-            (Scope::Status, Depth::Glance) => steps.push((
+            (RunScope::Status, Depth::Glance) => steps.push((
                 command::line(&NextStep::Status {
                     run: self.run_id.clone(),
                     node: None,
@@ -275,7 +286,7 @@ impl RunPage<'_> {
                 }),
                 "the whole story, node by node",
             )),
-            (Scope::Status, Depth::Full | Depth::Dig) => {
+            (RunScope::Status, Depth::Full | Depth::Dig) => {
                 steps.push((
                     command::line(&NextStep::Open {
                         run: self.run_id.clone(),
@@ -283,7 +294,7 @@ impl RunPage<'_> {
                     IN_A_BROWSER,
                 ));
             }
-            (Scope::Browser, _) => {}
+            (RunScope::Browser, _) => {}
         }
         Next { steps }
     }
@@ -302,89 +313,12 @@ impl RunPage<'_> {
     }
 }
 
-/// The sentence under a page's headline: what the run comes to, as a person reads it. `None`
-/// for a run whose word says it all.
-pub(crate) fn gist(frame: &RunFrame) -> Option<String> {
-    let blocking = frame.blocking_findings;
-    Some(match (frame.standing, &frame.phase) {
-        (Standing::Stalled, _) => engine::STALLED.to_string(),
-        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => match &frame.asking {
-            Some(asking) => engine::asking_claim(asking),
-            None => format!("it {}", Standing::NeedsYou.word()),
-        },
-        (_, RunPhase::Waiting { on }) => pause::parked_claim(on),
-        (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
-        (
-            _,
-            RunPhase::Failed {
-                failure: Some(failure),
-            },
-        ) => failed_claim(frame, failure),
-        // The work is done and nobody has accepted it.
-        (_, RunPhase::Finished) if blocking > 0 => format!(
-            "finished holding {}",
-            surco::text::counted(blocking, "blocking finding")
-        ),
-        (_, RunPhase::Promoted { to: Some(mode) }) => format!("promoted to `{mode}`"),
-        (_, RunPhase::Created | RunPhase::Running) => {
-            format!("{NOTHING_NEEDS_YOU}: it is moving")
-        }
-        (
-            _,
-            RunPhase::Finished
-            | RunPhase::Failed { failure: None }
-            | RunPhase::Cancelled
-            | RunPhase::Promoted { to: None },
-        ) => return None,
-    })
-}
-
-/// The failure that closed the run, said as the node it happened to.
-fn failed_claim(frame: &RunFrame, failure: &Failure) -> String {
-    let headline = yunta_render::failure::headline(failure);
-    match failed(frame).find(|(_, found)| *found == failure) {
-        Some((node, _)) => format!("node `{}` failed: {headline}", node.id),
-        None => headline,
-    }
-}
-
-/// The nodes that stand failed, each with its failure, in declaration order.
-/// A node whose log says it failed can stand otherwise: one a reset holds is
-/// `waiting`, and the pause says what holds it; one a reroute corrects is
-/// `rerouted`. Neither is listed.
-pub(crate) fn failed(frame: &RunFrame) -> impl Iterator<Item = (&NodeFrame, &Failure)> {
-    frame.nodes.iter().filter_map(|node| match &node.state {
-        NodeStanding::Reached(NodeState::Failed { failure, .. })
-            if node.standing == Standing::Failed =>
-        {
-            Some((node, failure))
-        }
-        _ => None,
-    })
-}
-
-/// The cautions a page says beside its facts. A run parked on its token
-/// budget says what the declared cap means against what this workflow's
-/// past runs spent; a run parked on anything else says none of it.
-pub(crate) fn cautions(frame: &RunFrame) -> Vec<Caution> {
-    match &frame.phase {
-        RunPhase::Waiting {
-            on:
-                WaitingOn::Run {
-                    reason: PauseReason::BudgetExhausted { cap, .. },
-                },
-        } => yunta_replay::history::budget_caution(Some(*cap), frame.prior.as_ref())
-            .into_iter()
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
 /// The cautions of a run, each in the words render gives it, as one row.
 pub(crate) fn caution_row(frame: &RunFrame) -> String {
-    cautions(frame)
+    frame
+        .cautions()
         .iter()
-        .map(yunta_render::caution::line)
+        .map(crate::caution::line)
         .collect::<Vec<_>>()
         .join("; ")
 }

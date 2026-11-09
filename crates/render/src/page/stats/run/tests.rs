@@ -10,7 +10,7 @@ use yunta_core::events::{
 use yunta_replay::frame::{Declares, GateAsks, NodeFrame};
 
 use super::*;
-use crate::output::surface_lines;
+use surco::surface::Terminal;
 
 const RUN: yunta_core::RunId = yunta_core::RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
@@ -85,13 +85,13 @@ fn render_run_stats(
         elapsed: stats.wall_clock,
         ..yunta_replay::frame::RunFrame::sample(&RUN)
     };
-    let page = RunStatsPage {
+    let page = Stats {
         frame: &frame,
         stats,
         pricing,
         depth: Depth::Glance,
     };
-    crate::output::draw(page.document(look), look)
+    surco::surface::Surface::draw(&Terminal::on(*look), &page.document(look))
 }
 
 fn render(stats: &RunStats, look: &Look) -> String {
@@ -107,13 +107,14 @@ fn stats_renders_to_a_string_a_test_can_read() {
     let look = Look::plain();
     let run_stats = stats(Vec::new());
     let frame = yunta_replay::frame::RunFrame::sample(&RUN);
-    let page = RunStatsPage {
+    let page = Stats {
         frame: &frame,
         stats: &run_stats,
         pricing: None,
         depth: Depth::Glance,
     };
-    let rows: Vec<String> = surface_lines(page.document(&look), &look)
+    let rows: Vec<String> = Terminal::on(look)
+        .lines(&page.document(&look))
         .iter()
         .map(Line::text)
         .collect();
@@ -303,13 +304,14 @@ fn lines_at(run: &RunStats, nodes: &[NodeFrame], depth: Depth, look: &Look) -> V
         elapsed: run.wall_clock,
         ..yunta_replay::frame::RunFrame::sample(&RUN)
     };
-    let page = RunStatsPage {
+    let page = Stats {
         frame: &view,
         stats: run,
         pricing: None,
         depth,
     };
-    surface_lines(page.document(look), look)
+    Terminal::on(*look)
+        .lines(&page.document(look))
         .iter()
         .map(Line::text)
         .collect()

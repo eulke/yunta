@@ -22,6 +22,7 @@ serde = { workspace = true, features = ["derive"] }
 yunta-replay.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 yunta-core = { workspace = true, features = ["testkit"] }
 yunta-replay = { workspace = true, features = ["testkit"] }
 yunta-testkit-core.workspace = true

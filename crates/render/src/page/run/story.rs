@@ -3,6 +3,8 @@
 //! plan it accepted, how long it worked or a person took on it and what it
 //! spent; the calls that failed on the way; and every task.
 
+use crate::command;
+use crate::state::NodeDisplay;
 use surco::components::{Branch, Cell, Column, Fields, Holds, NodeRow, NodeTable, Row, Table};
 use surco::doc::{Block, Depth};
 use surco::figures::{duration, Tokens};
@@ -14,15 +16,11 @@ use surco::words::{Standing, WAITED_ON_YOU};
 use yunta_core::events::{NodeState, TaskStatus};
 use yunta_core::shown::ShownContent;
 use yunta_core::step::NextStep;
-use yunta_core::NodeId;
-use yunta_render::command;
-use yunta_render::state::NodeDisplay;
 use yunta_replay::frame::{NodeFrame, NodeStanding};
-use yunta_replay::RunState;
 
-use super::RunPage;
+use super::Run;
 
-impl RunPage<'_> {
+impl Run<'_> {
     /// The story's blocks, at `--full` and deeper; nothing at a glance.
     pub(super) fn story(&self, glyphs: Glyphs) -> Vec<Block> {
         if !self.depth.reaches(Depth::Full) {
@@ -121,7 +119,7 @@ impl RunPage<'_> {
         });
         [
             said,
-            handed(self.state, &node.id)
+            crate::state::handed(self.state, &node.id)
                 .filter(|_| !self.decision_says_how_its_plan_got_accepted()),
             attempts(node),
             rerouted,
@@ -314,22 +312,4 @@ fn task_mark(status: TaskStatus) -> Mark {
         TaskStatus::Running => Mark::Running,
         TaskStatus::Pending | TaskStatus::Ready => Mark::Absent,
     }
-}
-
-/// How node `id` got its documents accepted once it finished, when that
-/// took more than one handover: what it took is part of what it did.
-pub(crate) fn handed(state: &RunState, id: &NodeId) -> Option<String> {
-    if !matches!(state.nodes.state(id), Some(NodeState::Finished { .. })) {
-        return None;
-    }
-    let refused = state
-        .artifacts
-        .handed_over_by(id)
-        .filter(|handed| handed.refusals > 0)
-        .max_by_key(|handed| handed.submissions)?;
-    Some(format!(
-        "accepted on its {} handover ({} refused)",
-        surco::text::ordinal(refused.submissions),
-        refused.refusals
-    ))
 }

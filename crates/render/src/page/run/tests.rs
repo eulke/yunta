@@ -15,9 +15,9 @@ use yunta_replay::frame::{Declares, GateAsks, NodeFrame, NodeStanding, RunFrame}
 use yunta_replay::RunState;
 use yunta_testkit_core::{fixed_now, Log};
 
-use super::fixtures::{blocked_log, cases, outline, Case, RUN};
-use super::{RunPage, Scope};
-use yunta_render::page::Page;
+use super::fixtures::{blocked_log, cases, closing, places, Case, RUN};
+use super::{Run, RunScope};
+use crate::page::Page;
 
 /// Every depth a page is read at, by the name its golden carries.
 const DEPTHS: [(Depth, &str); 3] = [
@@ -31,8 +31,8 @@ fn goldens() -> PathBuf {
 }
 
 /// The page as a terminal draws it for `look`.
-fn draw(page: &RunPage<'_>, look: &Look) -> String {
-    crate::output::draw(page.document(look), look)
+fn draw(page: &Run<'_>, look: &Look) -> String {
+    surco::surface::Surface::draw(&surco::surface::Terminal::on(*look), &page.document(look))
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn the_status_page_matches_its_goldens_at_every_depth() {
                 let look = Look::of(environment);
                 assert_golden(
                     &environment.golden(&goldens(), &format!("{}.{named}", case.name)),
-                    &draw(&case.page(Scope::Status, depth), &look),
+                    &draw(&case.page(RunScope::Status, depth), &look),
                 );
             }
         }
@@ -60,7 +60,7 @@ fn the_status_page_reads_in_a_browser() {
     for case in &cases() {
         assert_golden(
             &goldens.join(format!("{}.html", case.name)),
-            &Html.body(&case.page(Scope::Browser, Depth::Full).document(&look)),
+            &Html.body(&case.page(RunScope::Browser, Depth::Full).document(&look)),
         );
     }
 }
@@ -68,7 +68,7 @@ fn the_status_page_reads_in_a_browser() {
 #[test]
 fn a_page_opens_on_its_headline() {
     for case in &cases() {
-        for scope in [Scope::Status, Scope::Closing] {
+        for scope in [RunScope::Status, case.closing()] {
             let drawn = draw(&case.page(scope, Depth::Glance), &Look::plain());
             let first = drawn.lines().next().unwrap_or_default();
             assert!(
@@ -84,7 +84,7 @@ fn a_page_opens_on_its_headline() {
 fn a_decision_that_waits_is_the_last_thing_on_the_page() {
     for case in cases().iter().filter(|case| case.decision.is_some()) {
         for (depth, _) in DEPTHS {
-            let page = case.page(Scope::Status, depth);
+            let page = case.page(RunScope::Status, depth);
             let doc = page.document(&Look::plain());
             let Some(Block::Section(last)) = doc.blocks().last() else {
                 panic!("{}: the page ends on something else", case.name);
@@ -106,7 +106,10 @@ fn a_glance_at_sixty_columns_fits_twenty_rows_beside_its_decision() {
         .find(|environment| environment.width == 60)
         .expect("an environment sixty columns wide");
     for case in &cases() {
-        let drawn = draw(&case.page(Scope::Status, Depth::Glance), &Look::of(narrow));
+        let drawn = draw(
+            &case.page(RunScope::Status, Depth::Glance),
+            &Look::of(narrow),
+        );
         // A decision is as long as its menu: what the glance owes is the
         // run above it.
         let above = drawn
@@ -119,7 +122,7 @@ fn a_glance_at_sixty_columns_fits_twenty_rows_beside_its_decision() {
 
 /// What a page says at `depth`, laid out wide enough that no row wraps.
 fn said(case: &Case, depth: Depth) -> String {
-    draw(&case.page(Scope::Status, depth), &Look::plain())
+    draw(&case.page(RunScope::Status, depth), &Look::plain())
 }
 
 #[test]
@@ -200,14 +203,24 @@ fn spend_log() -> Vec<StoredEvent> {
 /// the command that shows it.
 #[test]
 fn a_blocked_task_says_where_its_work_is() {
-    let mut page = page_of(blocked_log(), Scope::Status);
+    let mut page = page_of(blocked_log(), RunScope::Status);
     page.depth = Depth::Full;
     let drawn = draw(&page, &Look::plain());
     assert!(drawn.contains("its work is at git show deadbee"), "{drawn}");
 }
 
 /// The page of the run `events` write, in `scope`.
-fn page_of(events: Vec<StoredEvent>, scope: Scope) -> RunPage<'static> {
+fn page_of(events: Vec<StoredEvent>, scope: RunScope) -> Run<'static> {
+    framed(events, |_| scope)
+}
+
+/// The closing the run `events` write leaves, with the exit its word gives.
+fn closing_of(events: Vec<StoredEvent>) -> Run<'static> {
+    framed(events, closing)
+}
+
+/// The page of the run `events` write, in the scope its frame gives.
+fn framed(events: Vec<StoredEvent>, scope: impl FnOnce(&RunFrame) -> RunScope) -> Run<'static> {
     let state: &'static RunState = Box::leak(Box::new(RunState::replay(&events)));
     let frame: &'static RunFrame = Box::leak(Box::new(RunFrame::of(
         &RUN,
@@ -218,40 +231,33 @@ fn page_of(events: Vec<StoredEvent>, scope: Scope) -> RunPage<'static> {
         fixed_now(),
     )));
     let run_id: &'static RunId = Box::leak(Box::new(RUN));
-    RunPage {
-        scope,
+    Run {
+        scope: scope(frame),
         depth: Depth::Glance,
         run_id,
         frame,
         state,
-        paths: outline(),
+        places: places(),
         decision: None,
         plans: Vec::new(),
     }
 }
 
-/// The page of the run `spend_log` writes. Both scopes are drawn from the
-/// same frame.
-fn running_page(scope: Scope) -> RunPage<'static> {
-    page_of(spend_log(), scope)
+/// The status page of the run `spend_log` writes.
+fn running_page() -> Run<'static> {
+    page_of(spend_log(), RunScope::Status)
 }
 
 #[test]
 fn the_closing_and_the_status_page_show_one_tokens_figure() {
-    assert_eq!(
-        running_page(Scope::Status).tokens().as_deref(),
-        Some("100 in / 0 out")
-    );
-    assert_eq!(
-        running_page(Scope::Closing).tokens(),
-        running_page(Scope::Status).tokens()
-    );
+    assert_eq!(running_page().tokens().as_deref(), Some("100 in / 0 out"));
+    assert_eq!(closing_of(spend_log()).tokens(), running_page().tokens());
 }
 
 /// A plan node's row says the plan it accepted, not what its agent said last.
 #[test]
 fn a_plan_node_says_the_plan_it_had_accepted() {
-    let mut accepted = running_page(Scope::Status);
+    let mut accepted = running_page();
     accepted.depth = Depth::Full;
     accepted.plans = vec![(
         NodeId::from_static("plan"),
@@ -264,7 +270,7 @@ fn a_plan_node_says_the_plan_it_had_accepted() {
     );
     assert!(!drawn.contains("exit 0"), "{drawn}");
 
-    let mut said = running_page(Scope::Status);
+    let mut said = running_page();
     said.depth = Depth::Full;
     assert!(draw(&said, &Look::plain()).contains("exit 0"));
 }
@@ -290,16 +296,16 @@ fn counted(files: u32, added: u64, removed: u64) -> Vec<StoredEvent> {
 /// says nothing of it.
 #[test]
 fn a_closing_says_what_the_run_changed() {
-    let row = |page: &RunPage<'_>| {
+    let row = |page: &Run<'_>| {
         draw(page, &Look::plain())
             .lines()
             .find(|line| line.trim_start().starts_with("changed"))
             .map(|line| line.trim().to_string())
     };
-    let changed = row(&page_of(counted(9, 412, 87), Scope::Closing)).unwrap_or_default();
+    let changed = row(&closing_of(counted(9, 412, 87))).unwrap_or_default();
     assert!(changed.ends_with("9 files, +412 -87"), "{changed}");
-    assert_eq!(row(&running_page(Scope::Closing)), None);
-    assert_eq!(row(&page_of(counted(0, 0, 0), Scope::Closing)), None);
+    assert_eq!(row(&closing_of(spend_log())), None);
+    assert_eq!(row(&closing_of(counted(0, 0, 0))), None);
 }
 
 /// A node the run finished with the outcome `exit 0`, and no tokens spent.
@@ -407,8 +413,8 @@ fn corrected_nodes() -> Vec<NodeFrame> {
 
 /// The status page of a run whose frame holds `nodes`, read at `Depth::Full`
 /// where its trace is drawn.
-fn trace_page(nodes: Vec<NodeFrame>) -> RunPage<'static> {
-    let mut page = page_of(Vec::new(), Scope::Status);
+fn trace_page(nodes: Vec<NodeFrame>) -> Run<'static> {
+    let mut page = page_of(Vec::new(), RunScope::Status);
     page.depth = Depth::Full;
     page.frame = Box::leak(Box::new(RunFrame {
         nodes,
@@ -488,5 +494,6 @@ fn the_trace_says_each_nodes_rounds_returns_and_waits() {
     }
 }
 
+mod closing;
 mod harvest;
 mod words;

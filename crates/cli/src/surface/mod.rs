@@ -57,7 +57,7 @@ use lines::Lines;
 use painter::{Draw, Painter};
 use region::Region;
 
-pub(crate) use closing::{Closing, ClosingEnv, Outline};
+pub(crate) use closing::{Closing, ClosingEnv};
 pub(crate) use feed::Diagnostics;
 pub(crate) use screen::Screen;
 pub(crate) use terminal::TerminalEnv;

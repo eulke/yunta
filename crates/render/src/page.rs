@@ -10,6 +10,15 @@
 //! Each page this crate holds is a module of this one, named by what it
 //! shows:
 //!
+//! - [`Run`]: a run, as `status`, its closing or a browser reads it ([`RunScope`]),
+//!   from where it lives ([`Places`]).
+//! - [`Node`]: one of a run's nodes, as `status --node` shows it.
+//! - [`Field`]: the runs of a repository or a machine, each a [`FieldRow`] in
+//!   its [`FieldGroup`], and those that do not read back ([`UnreadableRun`]).
+//! - [`Stats`]: what a run spent and where its time went; [`History`]: what a
+//!   workflow's past runs say.
+//! - [`Doctor`]: whether this machine is ready; [`Verified`]: whether a run's
+//!   evidence is intact.
 //! - [`Receipt`]: a run's receipt, in a file, a pull request or a terminal.
 //! - [`Findings`]: what a review found, or the run's findings.
 //! - [`Gate`]: a gate's decision, above what answers it, as the place it
@@ -24,20 +33,33 @@
 use surco::doc::Doc;
 use surco::look::Look;
 
+mod checklist;
 pub mod desk;
+mod doctor;
+mod field;
 pub(crate) mod findings;
 mod gate;
+mod node;
 pub(crate) mod plan;
 mod receipt;
+mod run;
 pub(crate) mod shown;
 pub(crate) mod spec;
+mod stats;
+mod verified;
 
+pub use doctor::Doctor;
+pub use field::{Field, FieldGroup, FieldRow, UnreadableRun};
 pub use findings::Findings;
 pub use gate::Gate;
+pub use node::Node;
 pub use plan::{Form, Plan};
 pub use receipt::Receipt;
+pub use run::{Places, Run, RunScope};
 pub use shown::Shown;
 pub use spec::Spec;
+pub use stats::{History, Stats};
+pub use verified::Verified;
 
 /// A page a person reads: a value its caller fills with what it read, drawn
 /// into one document for a surface that looks like `look`.

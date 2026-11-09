@@ -1,9 +1,11 @@
 //! What a count of tokens reads as in a line that says what was spent, and
 //! the same figures as a JSON document.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::time::Duration;
 
-use surco::figures::Tokens;
+use surco::figures::{duration, Tokens};
 use yunta_core::events::{Spend, TokenUsage};
 
 /// A count read as its breakdown: `1.86M in / 20.2k out (9k cached)`. A cache
@@ -50,6 +52,54 @@ impl SpendJson {
             in_flight: spend.in_flight.total(),
         }
     }
+}
+
+/// What a workflow's past runs usually spent, as one line: how many there
+/// are, the median and p90 of their tokens, and their median wall-clock. The
+/// history, the catalog and a run's page say it here, so none phrases the
+/// same numbers differently.
+pub fn estimation(
+    estimation: &yunta_replay::history::PriorEstimation,
+    glyphs: surco::glyphs::Glyphs,
+) -> String {
+    let sep = glyphs.sep();
+    let wall_clock = match estimation.wall_clock_secs {
+        Some(p) => duration(Duration::from_secs_f64(p.median)),
+        None => "n/a".to_string(),
+    };
+    format!(
+        "{} {sep} median {}, p90 {} {sep} median wall-clock {}",
+        surco::text::counted(estimation.sample_count, "past run"),
+        Tokens::rounded(estimation.tokens.median),
+        Tokens::rounded(estimation.tokens.p90).figure(),
+        wall_clock,
+    )
+}
+
+/// What the run's spend costs at its model's price: one blended line when
+/// several models are priced, and none when no price is known.
+pub fn cost(
+    tokens: u64,
+    pricing: Option<&BTreeMap<String, yunta_core::PricingEntry>>,
+) -> Option<String> {
+    // A currency estimate needs a *model* to price against; with more
+    // than one model priced and no per-node attribution surfaced here,
+    // showing one blended-average line beats showing none — never
+    // silently picking the first entry a HashMap happens to iterate.
+    let pricing = pricing?;
+    if pricing.is_empty() {
+        return None;
+    }
+    let avg_per_1k: f64 = pricing
+        .values()
+        .map(|entry| entry.cost_per_1k_tokens)
+        .sum::<f64>()
+        / pricing.len() as f64;
+    let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
+    Some(format!(
+        "~{estimate:.2} (avg of {}, never authoritative)",
+        surco::text::counted(pricing.len(), "priced model")
+    ))
 }
 
 #[cfg(test)]

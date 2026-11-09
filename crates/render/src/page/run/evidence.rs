@@ -1,18 +1,18 @@
 //! The evidence of what failed: a section to each failed node.
 
+use crate::blocks::FailureDetail;
+use crate::command;
 use surco::components::{Said, Section, Whole};
 use surco::doc::{Block, Depth};
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use yunta_core::events::Failure;
 use yunta_core::step::NextStep;
-use yunta_render::blocks::FailureDetail;
-use yunta_render::command;
 use yunta_replay::frame::NodeFrame;
 
-use super::{failed, RunPage};
+use super::Run;
 
-impl RunPage<'_> {
+impl Run<'_> {
     /// Every failed node, under its id, with what its failure says: its
     /// claim beside the id — unless the page's gist made it word for word —
     /// then the end of what a command printed and where the rest is, each
@@ -20,10 +20,11 @@ impl RunPage<'_> {
     /// whose failure has nothing more to quote, and whose claim the gist
     /// made, is not listed again.
     pub(super) fn evidence(&self, glyphs: Glyphs) -> Vec<Block> {
-        let asked = self.gist().unwrap_or_default();
-        failed(self.frame)
+        let asked = crate::state::gist(self.frame).unwrap_or_default();
+        self.frame
+            .failed()
             .filter_map(|(node, failure)| {
-                let claim = yunta_render::failure::headline(failure);
+                let claim = crate::failure::headline(failure);
                 let said = asked.contains(&format!("`{}` failed: {claim}", node.id));
                 let mut title = Line::new().push(Tone::Strong, node.id.as_str());
                 let mut blocks: Vec<Block> = Vec::new();
@@ -57,9 +58,9 @@ impl RunPage<'_> {
         let output = failure.output()?;
         Some(match self.depth.reaches(Depth::Dig) {
             true => Whole::file(
-                yunta_core::run_dir::object(self.paths.run_dir, output),
-                self.paths.cwd,
-                self.paths.home,
+                yunta_core::run_dir::object(self.places.run_dir, output),
+                self.places.cwd,
+                self.places.home,
             ),
             false => Whole::Command(command::line(&NextStep::Status {
                 run: self.run_id.clone(),
