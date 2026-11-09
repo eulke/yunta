@@ -1,77 +1,42 @@
-//! Driving a run to its stop and reporting how it stopped.
+//! Driving a run here, as this invocation shows it.
 //!
-//! One path, taken by both commands that execute a run: `yunta run` after
-//! it creates one, `yunta resume` after it opens one off the log. What
-//! differs between them is over by the time this starts — the run exists,
-//! its manifest is frozen, and its tree is ready — so a stop reported
-//! here reads the same whichever command reached it.
+//! One path, taken by both commands that execute a run: `yunta run` after it
+//! creates one, `yunta resume` after it takes one back. The API drives the
+//! run; what this adds is how the invocation shows it — the live surface and
+//! the console a gate asks at while the run moves, and the block, the verdict
+//! line or the document that closes it out — so a stop reported here reads
+//! the same whichever command reached it.
 
 mod watch;
 
-use watch::{watch, Watching};
+use std::path::Path;
 
-use std::path::{Path, PathBuf};
-
-use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{RunReport, RunTerminal};
+use surco::glyphs::Glyphs;
+use surco::look::Look;
+use yunta_api::{ClosingReading, Driven, HeldRun, Ports, Remark};
+use yunta_core::{Manifest, RunId};
+use yunta_render::page::Places;
 use yunta_replay::history::PriorEstimation;
-use yunta_storage::AsyncStorage;
 
-use crate::commands::{reset_at, spawn_detached_resume, DetachedResumeError};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Mode;
 use crate::output::Outcome;
 use crate::surface::{Closing, ClosingEnv, Delivery, TerminalEnv};
-use surco::glyphs::Glyphs;
-use surco::look::Look;
-use yunta_render::document::PreRunWarnings;
-use yunta_render::page::Places;
+use watch::watch;
 
-// The one call into the engine is `registry::execute`; this module keeps the
-// path its callers already name.
-pub(crate) use super::registry::{execute, Executing};
-
-/// A run's identity and the paths it lives at — what the executing path,
-/// the detaching path and a resume all name it by.
-pub(crate) struct Prepared {
-    pub(crate) run_id: RunId,
-    pub(crate) run_dir: PathBuf,
-    pub(crate) worktree: PathBuf,
-}
-
-/// What the invocation holds once the run exists and can be driven —
-/// the same shape whether the run was just created or picked back up,
-/// which is what makes `run` and `resume` report identically rather than
-/// merely try to.
-///
-/// One field is asymmetric on purpose. The distribution of this
-/// workflow's past runs belongs to the invocation that chose to start
-/// one, so `prior` is what `run` derived before spending anything and
-/// nothing at all on a `resume`, which is picking up a run whose cost is
-/// already partly spent.
+/// What the invocation that drives a run here reports with: where it runs,
+/// how it reports — a live surface for `Human`, the run id and one verdict
+/// line for `Quiet`, one versioned document with no live surface at all for
+/// `Json` — and the stdout look everything it draws is drawn with.
 pub(crate) struct Driving<'a> {
     pub(crate) ctx: &'a Context,
-    pub(crate) storage: &'a AsyncStorage,
-    pub(crate) manifest: &'a Manifest,
-    pub(crate) prepared: &'a Prepared,
-    pub(crate) adapters: yunta_api::machine::Adapters,
-    pub(crate) prior: Option<PriorEstimation>,
-    /// What was said before the first token, carried so the document
-    /// this invocation prints says it too — stderr reaches the person
-    /// watching, and a `--json` reader is watching nothing.
-    pub(crate) warnings: PreRunWarnings,
-    /// How this invocation reports: a live surface for `Human`, the run id
-    /// and one verdict line for `Quiet`, and one versioned document with
-    /// no live surface at all for `Json`.
     pub(crate) output: Mode,
-    /// The stdout look `main` built, which everything this invocation
-    /// draws is drawn with.
     pub(crate) look: &'a Look,
 }
 
-/// How this invocation shows the run — derived here rather than handed
-/// in, so no caller can present the same stop a different way.
+/// How this invocation shows the run — derived here rather than handed in,
+/// so no caller can present the same stop a different way.
 struct Presentation {
     delivery: Delivery,
     glyphs: Glyphs,
@@ -87,227 +52,59 @@ impl Presentation {
     }
 }
 
-/// Executes the run under a live surface, chases any promotion to its
-/// end, and closes the invocation out — the one path `yunta run` and
-/// `yunta resume` both take once the run they drive is open and claimed.
-pub(crate) async fn drive(
-    env: Driving<'_>,
-    hold: yunta_engine::RunHold,
-) -> Result<Outcome, CliError> {
+/// Drives `held` here under a live surface and closes the invocation out:
+/// the one path `yunta run` and `yunta resume` both take once the run they
+/// drive is held.
+pub(crate) async fn drive(env: Driving<'_>, held: HeldRun<'_>) -> Result<Outcome, CliError> {
     let shown = Presentation::of(env.output);
-    let forge = super::forge::forge_for(&env.manifest.config, &yunta_core::ProcessSecrets);
-    let watching = watch(&env, &shown).await?;
-    let root_cancel = watching.cancel.clone();
-    let report = match execute(Executing {
-        run_id: &env.prepared.run_id,
-        manifest: env.manifest,
-        hold,
-        worktree: &env.prepared.worktree,
-        adapters: &env.adapters,
-        storage: env.storage,
-        clock: std::sync::Arc::clone(&env.ctx.clock),
-        ids: env.ctx.ids.as_ref(),
-        human_interaction: &watching.asking,
-        forge: forge.as_deref(),
-        cancel: &root_cancel,
+    let watching = watch(&env, &held, &shown).await?;
+    let stop = env.ctx.stop();
+    let (output, look) = (env.output, env.look);
+    let say = |remark: Remark| crate::remarks::say(remark, output, look);
+    let ports = Ports {
+        person: &watching.asking,
         observer: watching.observer.clone(),
-        rail_command: env.ctx.rail_command.clone(),
-        ambient: &env.ctx.env,
-    })
-    .await
-    {
-        Ok(report) => report,
-        Err(e) => {
-            watching.close().await;
-            return Err(e.into());
-        }
     };
-    finish(&env, forge.as_deref(), &root_cancel, watching, report).await
-}
-
-/// Chases a promotion to its end, takes the surface down, and reports
-/// the run that actually closed.
-///
-/// The chase happens before anything downstream looks at the report:
-/// `execute_run` closes exactly one run, and creating the successor needs
-/// the original checkout it is never given — see `promote.rs` for why. A
-/// successor is the same invocation carrying on, so it draws on the same
-/// surface and asks on the same console.
-async fn finish(
-    env: &Driving<'_>,
-    forge: Option<&dyn yunta_core::port::Forge>,
-    cancel: &tokio_util::sync::CancellationToken,
-    watching: Watching,
-    report: RunReport,
-) -> Result<Outcome, CliError> {
-    let (run_id, manifest, worktree, report) = super::promote::drive_promotions(
-        &super::promote::PromotionEnv {
-            ctx: env.ctx,
-            storage: env.storage,
-            adapters: &env.adapters,
-            forge,
-            human_interaction: &watching.asking,
-            observer: watching.observer.clone(),
-        },
-        env.prepared.run_id.clone(),
-        env.manifest.clone(),
-        report.tree(&env.prepared.worktree),
-        report,
-    )
-    .await?;
+    let driven = held.drive(ports, &say, &stop).await;
     watching.close().await;
-
-    settle(Settling {
-        ctx: env.ctx,
-        storage: env.storage,
-        run_id,
-        manifest,
-        worktree,
-        report,
-        cancelled: cancel.is_cancelled(),
-        prior: env.prior.as_ref(),
-        warnings: env.warnings.clone(),
-        output: env.output,
-        look: env.look,
-    })
-    .await
-}
-
-/// How an invocation that drove a run to its stop was asked to report
-/// it, and everything the report is made of.
-pub(crate) struct Settling<'a> {
-    pub(crate) ctx: &'a Context,
-    pub(crate) storage: &'a AsyncStorage,
-    /// The last run of the chain: a promotion successor when the run
-    /// promoted, the run itself otherwise.
-    pub(crate) run_id: RunId,
-    pub(crate) manifest: Manifest,
-    pub(crate) worktree: PathBuf,
-    pub(crate) report: RunReport,
-    /// Whether a person interrupted this invocation.
-    pub(crate) cancelled: bool,
-    pub(crate) prior: Option<&'a PriorEstimation>,
-    /// The pre-run warnings, for the document this invocation prints.
-    /// Empty on a `resume`: they are said to whoever *creates* a run,
-    /// and a resume picks one up.
-    pub(crate) warnings: PreRunWarnings,
-    /// How the report is written: the closing block, one verdict line, or
-    /// the document.
-    pub(crate) output: Mode,
-    /// The stdout look the closing block is drawn with.
-    pub(crate) look: &'a Look,
-}
-
-/// Releases what the run held and reports how it ended — the tail every
-/// command that executes a run shares, so `run` and `resume` cannot
-/// report the same stop differently.
-pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> {
-    let interrupted = settling.cancelled;
-    let outcome = reported(settling).await?;
-    // A person who interrupted the invocation is told so by its exit
-    // code, as a shell tells it of any process SIGINT ended, whatever
-    // the run reached on its way out.
-    Ok(match interrupted {
-        true => crate::output::Outcome::interrupted(),
+    let outcome = reported(&env, &driven?).await?;
+    // A person who interrupted the invocation is told so by its exit code,
+    // as a shell tells it of any process SIGINT ended, whatever the run
+    // reached on its way out.
+    Ok(match stop.is_stopped() {
+        true => Outcome::interrupted(),
         false => outcome,
     })
 }
 
-/// How the run ended, said the way this invocation was asked to say it.
-async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
-    released(&settling).await?;
-    resumes_after_reset(&settling).await?;
-    let run_dir = run_dir_of(settling.ctx, &settling.run_id);
-    let log = settling.ctx.project.event_log().await?;
+/// How the run ended, said the way this invocation was asked to say it: the
+/// document, one verdict line, or the block that closes the run out.
+async fn reported(env: &Driving<'_>, driven: &Driven<'_>) -> Result<Outcome, CliError> {
+    if env.output == Mode::Json {
+        let document = driven.document().await?;
+        crate::output::print_json(&document)?;
+        return Ok(crate::output::exit(document.outcome()));
+    }
     let closed = Closed {
-        run_id: &settling.run_id,
-        manifest: &settling.manifest,
-        run_dir: &run_dir,
-        worktree: &settling.worktree,
-        log: &log,
-        clock: settling.ctx.clock.as_ref(),
-        prior: settling.prior,
-        look: settling.look,
-        cwd: &settling.ctx.cwd,
-        home: settling.ctx.env.home.as_deref(),
+        run_id: &driven.id,
+        manifest: &driven.manifest,
+        run_dir: &driven.dir,
+        worktree: &driven.worktree,
+        prior: driven.prior.as_ref(),
+        cwd: &env.ctx.cwd,
+        home: env.ctx.env.home.as_deref(),
     };
-    match settling.output {
-        Mode::Json => Ok(crate::output::exit(
-            report_run_json(
-                settling.ctx,
-                settling.storage,
-                &settling.run_id,
-                &settling.manifest,
-                settling.warnings,
-            )
-            .await?
-            .outcome(),
-        )),
-        // The run id already went out when the invocation opened. The
-        // verdict line and the exit code come from the one reading the closing
-        // block takes.
-        Mode::Quiet => report_verdict(closed).await,
-        Mode::Human => report_closing(closed).await,
-    }
+    let closing = closed.closing(driven.closing().await?);
+    // The run id already went out when the invocation opened. The verdict
+    // line and the exit code come from the one reading the closing block
+    // takes.
+    Ok(match env.output {
+        Mode::Quiet => report_verdict(&closing),
+        _ => report_closing(&closing, env.look),
+    })
 }
 
-/// Hands back what the run held, when the run is done holding it.
-///
-/// Only a *finished* run releases isolation `none`'s lock — a paused
-/// run waits for its `resume` on the same checkout, which is the
-/// same logical run, not a second concurrent one. A user cancellation
-/// also releases it: the engine process is exiting, and a Ctrl-C is
-/// designed to leave nothing held.
-async fn released(settling: &Settling<'_>) -> Result<(), CliError> {
-    let done = matches!(
-        settling.report.terminal,
-        RunTerminal::Finished | RunTerminal::Failed { .. }
-    ) || settling.cancelled;
-    if done {
-        yunta_engine::release_worktree(
-            &settling.ctx.cwd,
-            settling.manifest.isolation,
-            settling.ctx.teardown(),
-        )
-        .await?;
-    }
-    Ok(())
-}
-
-/// A run paused on a limit's reset is taken on again by a detached resume
-/// that waits for the reset before it touches anything, so this invocation
-/// may leave now: nothing else would resume the run. An invocation a person
-/// interrupted starts nothing more.
-async fn resumes_after_reset(settling: &Settling<'_>) -> Result<(), CliError> {
-    if reset_at(&settling.report.state).is_none() || settling.cancelled {
-        return Ok(());
-    }
-    let run_dir = run_dir_of(settling.ctx, &settling.run_id);
-    spawn_detached_resume(
-        &run_dir,
-        settling.run_id.as_str(),
-        &settling.ctx.cwd,
-        &settling.ctx.binary,
-    )
-    .await
-    .map_err(|source| DetachedResumeError::new(&settling.run_id, source))?;
-    Ok(())
-}
-
-/// Where the run this invocation drove lives, by the same search order
-/// `yunta status` follows: a run may sit under the default state root
-/// rather than under this project's. A run whose directory nothing
-/// found is named under this project's root, because the block that
-/// closes it out prints a path a reader goes looking in, and no path at
-/// all sends them nowhere.
-fn run_dir_of(ctx: &Context, run_id: &RunId) -> PathBuf {
-    ctx.project
-        .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
-}
-
-/// Everything the closing block reads about a run that has stopped, as
-/// the invocation that drove it holds it.
+/// A run that stopped, as the block that closes it names it.
 pub(crate) struct Closed<'a> {
     pub(crate) run_id: &'a RunId,
     /// The run's own frozen manifest — what says which workflow it ran,
@@ -315,133 +112,52 @@ pub(crate) struct Closed<'a> {
     pub(crate) manifest: &'a Manifest,
     pub(crate) run_dir: &'a Path,
     pub(crate) worktree: &'a Path,
-    /// Where the run's log is read one last time.
-    pub(crate) log: &'a yunta_api::EventLog,
-    pub(crate) clock: &'a dyn Clock,
-    /// What this workflow's past runs cost, for the block's own
-    /// comparison; `None` below the history floor.
+    /// What this workflow's past runs cost, for the block's own comparison;
+    /// `None` below the history floor.
     pub(crate) prior: Option<&'a PriorEstimation>,
-    /// The stdout look the block is drawn with.
-    pub(crate) look: &'a Look,
-    /// Where paths are shown from: the directory this was run in, and
-    /// the home `~` stands for.
+    /// Where paths are shown from: the directory this was run in, and the
+    /// home `~` stands for.
     pub(crate) cwd: &'a Path,
     pub(crate) home: Option<&'a Path>,
 }
 
-/// What closes a run out, read from its log.
-///
-/// The log, not the report the engine handed back: a run's state is
-/// derived from its own events, so the last word on what happened comes
-/// off the same source every other surface reads.
-async fn closing_of(closed: &Closed<'_>) -> Result<Closing, CliError> {
-    let events = closed.log.events(closed.run_id).await?;
-    let state = yunta_replay::RunState::replay(&events);
-    let decision = yunta_engine::current_escalation(closed.manifest, closed.run_dir, &state)
-        .await?
-        .map(|(node, escalation)| (node, escalation.into_payload()));
-    let shown = match &decision {
-        Some((_, escalation)) => {
-            let shows = escalation.shows();
-            let asked = closed.manifest.request();
-            yunta_engine::shown_documents(closed.run_dir, shows, &state, asked).await?
-        }
-        None => Vec::new(),
-    };
-    Ok(Closing::of(ClosingEnv {
-        run_id: closed.run_id,
-        workflow: &closed.manifest.workflow,
-        state: &state,
-        prior: closed.prior,
-        now: closed.clock.now(),
-        decision,
-        shown,
-        places: Places {
-            run_dir: closed.run_dir,
-            worktree: closed.worktree,
-            branch: &closed.run_id.branch(),
-            base_branch: &closed.manifest.base_branch,
-            isolation: closed.manifest.isolation,
-            cwd: closed.cwd,
-            home: closed.home,
-        },
-    }))
+impl Closed<'_> {
+    /// The block that closes the run out, from what its log says once it
+    /// stopped.
+    pub(crate) fn closing(&self, reading: ClosingReading) -> Closing {
+        Closing::of(ClosingEnv {
+            run_id: self.run_id,
+            workflow: &self.manifest.workflow,
+            state: &reading.state,
+            prior: self.prior,
+            now: reading.now,
+            decision: reading.decision,
+            shown: reading.shown,
+            places: Places {
+                run_dir: self.run_dir,
+                worktree: self.worktree,
+                branch: &self.run_id.branch(),
+                base_branch: &self.manifest.base_branch,
+                isolation: self.manifest.isolation,
+                cwd: self.cwd,
+                home: self.home,
+            },
+        })
+    }
 }
 
-/// The one line a quiet run says on stderr: what its closing page opens with.
-pub(crate) async fn report_verdict(closed: Closed<'_>) -> Result<Outcome, CliError> {
-    let closing = closing_of(&closed).await?;
+/// The one line a quiet run says on stderr: what its closing page opens
+/// with, and the verdict the exit code carries.
+pub(crate) fn report_verdict(closing: &Closing) -> Outcome {
     let verdict = surco::doc::Doc::new().with(closing.page().headline());
     let look = crate::output::stderr_look();
     crate::output::note(crate::output::draw(verdict, &look).trim_end());
-    Ok(closing.outcome())
+    closing.outcome()
 }
 
-/// Reads the run's log one last time and prints the block that closes it
-/// out, handing back the verdict the exit code carries.
-pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliError> {
-    let closing = closing_of(&closed).await?;
-    crate::output::show(closed.look, &closing.page());
-    Ok(closing.outcome())
-}
-
-/// The run as its own log describes it, carrying the pre-run warning
-/// this invocation holds — the one reading every way of reporting a run
-/// takes, printed or not.
-///
-/// It is derived from the log, exactly as `yunta status --json` derives
-/// it later: the invocation that drove a run and the command that reads
-/// that run an hour afterwards publish one answer, rather than two
-/// shapes that happen to agree.
-async fn documented(
-    ctx: &Context,
-    storage: &AsyncStorage,
-    run_id: &RunId,
-    manifest: &Manifest,
-    warnings: PreRunWarnings,
-) -> Result<yunta_render::document::RunDocument, CliError> {
-    let events = storage.events_for_run(run_id.clone()).await?;
-    let state = yunta_replay::RunState::replay(&events);
-    // This invocation is the engine that drove the run.
-    let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
-    let decision = match ctx.project.run_dir(run_id.as_str()) {
-        Some(run_dir) => yunta_engine::current_escalation(manifest, &run_dir, &state).await?,
-        None => None,
-    };
-    let mut frame = yunta_replay::frame::RunFrame::of(
-        run_id,
-        &manifest.workflow,
-        &state,
-        None,
-        &engine,
-        ctx.clock.now(),
-    );
-    frame.prior = ctx.project.budget_prior(manifest, &frame, &events).await;
-    Ok(
-        yunta_render::document::RunDocument::of(
-            run_id, &events, &state, manifest, &frame, decision,
-        )
-        .warnings(warnings),
-    )
-}
-
-/// Prints the run as the one versioned document `run --json`,
-/// `resume --json` and `run --detach --json` all emit, and hands the
-/// document back.
-///
-/// The document, not a verdict: whether the invocation succeeded is the
-/// caller's to say. An invocation that drove the run answers for where
-/// the run got to; one that handed it off answers for the handoff, and
-/// a run still moving is exactly what that command set out to leave
-/// behind.
-pub(crate) async fn report_run_json(
-    ctx: &Context,
-    storage: &AsyncStorage,
-    run_id: &RunId,
-    manifest: &Manifest,
-    warnings: PreRunWarnings,
-) -> Result<yunta_render::document::RunDocument, CliError> {
-    let document = documented(ctx, storage, run_id, manifest, warnings).await?;
-    crate::output::print_json(&document)?;
-    Ok(document)
+/// Prints the block that closes the run out, and hands back the verdict the
+/// exit code carries.
+pub(crate) fn report_closing(closing: &Closing, look: &Look) -> Outcome {
+    crate::output::show(look, &closing.page());
+    closing.outcome()
 }

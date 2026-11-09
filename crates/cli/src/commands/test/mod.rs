@@ -34,6 +34,7 @@
 //! `tasks`.
 
 mod case;
+mod scripted;
 
 use std::path::{Path, PathBuf};
 

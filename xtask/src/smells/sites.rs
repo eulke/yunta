@@ -222,8 +222,9 @@ pub(super) fn owned(path: &Path, owners: &[&str]) -> bool {
 ///
 /// Driving the engine by hand repeats the setup the owners perform — the
 /// store, the clock, the process registry — and a repeat drifts from it.
-/// The engine's run module owns the run's own steps, and the command
-/// registry owns the call from a command.
+/// The engine's run module owns the run's own steps, the API's drive owns the
+/// call for every interface, and the test runner owns its scripted runs' until
+/// they move into the API.
 fn count_execute_run_outside_testkit(root: &Path) -> usize {
     outside(
         root,
@@ -231,7 +232,8 @@ fn count_execute_run_outside_testkit(root: &Path) -> usize {
         &[
             "crates/testkit/",
             "crates/engine/src/run/",
-            "crates/cli/src/commands/registry.rs",
+            "crates/api/src/drive.rs",
+            "crates/cli/src/commands/test/scripted.rs",
         ],
     )
 }
@@ -240,8 +242,8 @@ fn count_execute_run_outside_testkit(root: &Path) -> usize {
 ///
 /// Creating a run is where the plan is frozen and the baseline taken; a
 /// second site that does it by hand freezes a different one. The engine's
-/// run module creates a run, and the command registry is the one command
-/// path that does it for a person.
+/// run module creates a run, and the API's creation is the one path that does
+/// it for every interface.
 fn count_create_run_outside_testkit(root: &Path) -> usize {
     outside(
         root,
@@ -249,7 +251,7 @@ fn count_create_run_outside_testkit(root: &Path) -> usize {
         &[
             "crates/testkit/",
             "crates/engine/src/run/",
-            "crates/cli/src/commands/registry.rs",
+            "crates/api/src/creation.rs",
         ],
     )
 }

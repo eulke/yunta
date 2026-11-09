@@ -1,12 +1,12 @@
 //! The sentences for what still reaches a command as an engine error: a
-//! decision or a close that failed below the refusal, and an artifact view
-//! the store could not write. A refusal is said by `yunta_render::refusal`.
+//! decision that failed below the refusal, and an artifact view the store
+//! could not write. A refusal is said by `yunta_render::refusal`.
 
 #[cfg(test)]
 mod tests;
 
 use yunta_core::run_dir::ARTIFACTS_DIR;
-use yunta_engine::{CloseRunError, ResolveGateError, RunError, StoreError};
+use yunta_engine::{ResolveGateError, RunError, StoreError};
 
 /// What an artifact view that cannot be written says: the artifact it is of,
 /// and the object or the store's failed step that stopped it.
@@ -42,16 +42,4 @@ fn documents(run: &RunError) -> String {
         format!("the documents the decision shows cannot be read: {why}"),
         run,
     )
-}
-
-/// Why a run cannot be closed, in the words of the command that closes it:
-/// what the run refuses, or what failed below.
-pub(crate) fn close(error: &CloseRunError) -> String {
-    match error {
-        CloseRunError::Refused(refusal) => yunta_render::refusal::close(refusal),
-        CloseRunError::Storage(error) => error.to_string(),
-        CloseRunError::Export(detail) => {
-            format!("could not write the run's events.jsonl: {detail}")
-        }
-    }
 }

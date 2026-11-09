@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use yunta_core::rail::RailCommand;
 
-use yunta_core::{Clock, IdSource, Manifest};
+use yunta_core::{Clock, IdSource};
 use yunta_storage::{AsyncStorage, Storage};
 
 use crate::error::CliError;
@@ -87,37 +87,6 @@ impl Context {
         .with_path(&self.env.path)
     }
 
-    /// What gives a take back once the work stopped — `released`, a
-    /// hand-over — runs under: the second stage. Something that runs
-    /// *because* the first interrupt fired cannot answer to it.
-    pub fn teardown(&self) -> yunta_engine::process::Supervision<'_> {
-        yunta_engine::process::Supervision::outside_any_run(
-            self.interrupt.abort(),
-            self.clock.as_ref(),
-        )
-        .with_path(&self.env.path)
-    }
-
-    /// A context over a project a test built by hand, with nothing to
-    /// interrupt it: what a unit test of a command needs, since the
-    /// project it drives is a temp directory rather than one
-    /// `project::resolve` would find.
-    #[cfg(test)]
-    pub(crate) fn for_test(cwd: PathBuf, project: Project) -> Self {
-        let shell = Shell::for_test(cwd.clone());
-        let workspace = shell.workspace();
-        Self {
-            cwd,
-            project,
-            clock: Arc::clone(&workspace.clock),
-            ids: Arc::clone(&workspace.ids),
-            env: workspace.env.clone(),
-            interrupt: shell.interrupt(),
-            rail_command: shell.rail_command(),
-            binary: workspace.binary.clone(),
-        }
-    }
-
     /// The same project with its state roots moved under `sandbox` and
     /// its work happening in `worktree` — what `yunta test` runs a case
     /// in.
@@ -153,23 +122,6 @@ impl Context {
         }
     }
 
-    /// The pool of checkouts run `manifest` takes its trees from, for the run
-    /// whose directory is `run_dir`, reached from this checkout and reading
-    /// time as this command does.
-    pub fn pool_of(
-        &self,
-        manifest: &Manifest,
-        run_dir: &std::path::Path,
-    ) -> Arc<yunta_engine::CheckoutPool> {
-        yunta_engine::CheckoutPool::of_run(
-            &self.project.worktrees_root_for(manifest),
-            &self.cwd,
-            run_dir,
-            manifest,
-            Arc::clone(&self.clock),
-        )
-    }
-
     /// The two stages this context stops in, as the API is handed them.
     pub fn stop(&self) -> yunta_api::Stop {
         self.interrupt.stages()
@@ -192,10 +144,4 @@ impl Context {
     pub fn adapters(&self) -> yunta_api::machine::Adapters {
         yunta_api::machine::real_adapters(&self.project.config)
     }
-}
-
-/// How long until `at` by `clock`: zero once it has passed. The one reading
-/// of the clock a command takes before it has a run's clock.
-pub fn time_until(clock: &dyn Clock, at: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
-    (at - clock.now()).to_std().unwrap_or_default()
 }

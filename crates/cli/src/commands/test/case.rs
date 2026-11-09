@@ -18,8 +18,8 @@ use yunta_core::events::PauseReason;
 use yunta_core::{ModeName, NodeId, OptionId, WorkflowName};
 use yunta_engine::RunTerminal;
 
+use super::scripted::{adapters_and_script, execute, Executing, ScriptedPaths};
 use super::{copy_dir_all, init_git, sandboxed_checkout};
-use crate::commands::registry::{adapters_and_script, execute, Executing, ScriptedPaths};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::load_yaml;
@@ -203,7 +203,7 @@ pub(crate) async fn run_case(
 /// preparation, its report, and the scripts its sessions may not all claim.
 struct Played {
     manifest: yunta_core::Manifest,
-    prepared: crate::commands::drive::Prepared,
+    prepared: super::scripted::Prepared,
     report: yunta_engine::RunReport,
     script: Option<Arc<yunta_adapters::MockAdapter>>,
 }
@@ -213,10 +213,9 @@ struct Played {
 /// *is* — every session scripted, nobody to ask.
 async fn create_case_run(
     ctx: &Context,
-    storage: &yunta_storage::AsyncStorage,
     case: &TestCase,
     fixture_path: &Path,
-) -> Result<(yunta_core::Manifest, crate::commands::drive::Prepared), CliError> {
+) -> Result<(yunta_core::Manifest, super::scripted::Prepared), CliError> {
     let raw_inputs: Vec<String> = case
         .inputs
         .iter()
@@ -224,19 +223,20 @@ async fn create_case_run(
         .collect();
     // A case is hermetic at birth too: its manifest freezes no user
     // knowledge, as its sessions read none.
-    let frozen = crate::commands::run::runnable(
-        ctx,
-        Path::new(case.workflow.as_str()),
-        &raw_inputs,
-        None,
-        Some(fixture_path),
-        case.mode.as_ref(),
-        &yunta_core::Env::default(),
-    )
-    .await?;
-    let prepared =
-        crate::commands::run::create_run_from(ctx, storage, &frozen, case.mode.as_ref()).await?;
-    Ok((frozen.manifest, prepared))
+    let asked = crate::commands::run::Asked {
+        workflow_path: Path::new(case.workflow.as_str()),
+        raw_inputs: &raw_inputs,
+        adapter: None,
+        mock_fixture: Some(fixture_path),
+        mode: case.mode.as_ref(),
+        hermetic: true,
+    };
+    let look = crate::output::stdout_look();
+    let quiet = crate::output::Mode::Quiet;
+    let admission = crate::commands::run::admitted(ctx, asked, quiet, &look).await?;
+    let created = crate::commands::run::create_run_from(ctx, admission, quiet, &look).await?;
+    let prepared = super::scripted::Prepared::of(&created);
+    Ok((created.manifest, prepared))
 }
 
 /// Drives the case's run under its scripted sessions, answering each gate
@@ -247,7 +247,7 @@ async fn drive_case_run(
     storage: &yunta_storage::AsyncStorage,
     case: &TestCase,
     manifest: &yunta_core::Manifest,
-    prepared: &crate::commands::drive::Prepared,
+    prepared: &super::scripted::Prepared,
 ) -> Result<
     (
         yunta_engine::RunReport,
@@ -269,7 +269,7 @@ async fn drive_case_run(
     let report = execute(Executing {
         run_id: &prepared.run_id,
         manifest,
-        hold: crate::commands::registry::claim(ctx, &prepared.run_dir).await?,
+        hold: super::scripted::claim(ctx, &prepared.run_dir).await?,
         worktree: &prepared.worktree,
         adapters: &adapters,
         storage,
@@ -311,7 +311,7 @@ async fn play(
     case: &TestCase,
     fixture_path: &Path,
 ) -> Result<Played, CliError> {
-    let (manifest, prepared) = create_case_run(ctx, storage, case, fixture_path).await?;
+    let (manifest, prepared) = create_case_run(ctx, case, fixture_path).await?;
     let (report, script) = drive_case_run(ctx, storage, case, &manifest, &prepared).await?;
     Ok(Played {
         manifest,
@@ -354,7 +354,7 @@ fn verdict(case: &TestCase, fixture_path: &Path, played: &Played) -> Vec<String>
 async fn answered(
     ctx: &Context,
     storage: &yunta_storage::AsyncStorage,
-    prepared: &crate::commands::drive::Prepared,
+    prepared: &super::scripted::Prepared,
     manifest: &yunta_core::Manifest,
     adapters: &Adapters,
     forge: Option<&dyn yunta_core::port::Forge>,
@@ -380,7 +380,7 @@ async fn answered(
             ctx.clock.as_ref(),
             yunta_core::events::HumanChoice {
                 option,
-                by: crate::identity::responder(None, ctx.env.user.as_deref()),
+                by: yunta_core::Responder::answering(None, ctx.env.user.as_deref()),
                 free_text: None,
             },
             &redactor,
@@ -390,7 +390,7 @@ async fn answered(
         report = execute(Executing {
             run_id: &prepared.run_id,
             manifest,
-            hold: crate::commands::registry::claim(ctx, &prepared.run_dir).await?,
+            hold: super::scripted::claim(ctx, &prepared.run_dir).await?,
             worktree: &prepared.worktree,
             adapters,
             storage,

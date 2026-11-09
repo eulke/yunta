@@ -74,7 +74,7 @@ fn check_gap(
     for program in gap
         .required_programs
         .iter()
-        .filter(|program| !super::super::refusals::command_on_path(env, program))
+        .filter(|program| !env.finds(program))
     {
         checks.push(
             Found::Problem,
@@ -123,14 +123,17 @@ pub(super) async fn check_workflows(
                         )
                         .errors,
                     );
-                let found = super::super::context_files_at_head(ctx, &workflow, isolation).await?;
+                let found = ctx
+                    .project
+                    .context_files_at_head(&workflow, isolation, &ctx.stop())
+                    .await?;
                 let errors: Vec<yunta_core::check::CheckError> =
                     refused.chain(found.errors).collect();
                 let pack = format!("pack {}", manifest.reference());
                 for error in &errors {
                     push_once(checks, broken(error, pack.as_str(), &detected));
                 }
-                for warning in &found.warnings {
+                for warning in &found.cautions {
                     checks.push(Found::Caution, pack.as_str(), caution::line(warning));
                 }
             }

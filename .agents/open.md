@@ -33,7 +33,7 @@ or a limit tied to the stack rather than the depth) or the default depth is the 
 
 ### Writes with no engine race a resume
 Paths: `crates/engine/src/run/escalation.rs`, `crates/engine/src/answers.rs`, `crates/engine/src/run/close.rs`,
-`crates/cli/src/commands/cancel.rs`
+`crates/api/src/ending.rs`
 Four commands append to a run's log without its `engine.lock`: `resolve_gate`, `answer_questions`, `close` and the
 closing step of `cancel`. Each first reads that the run stopped, and a `resume` that starts right after that read
 can write beside them. The window is narrow and SQLite serializes the rows, so nothing has come of it yet. Closing

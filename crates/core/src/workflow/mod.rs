@@ -73,7 +73,7 @@ pub use node_kind::{
     NodeKind, PromptSource,
 };
 pub use node_policy::{Ask, CliConfig, Effort, LoopUntil, NodePermissions, OnInterrupt};
-pub use optional::{followers, left_out, reroute_sources, Because, LeftOut};
+pub use optional::{followers, left_out, opens_a_pull_request, reroute_sources, Because, LeftOut};
 pub(crate) use place::declared_node;
 pub use place::Place;
 pub use scope::NodeScope;

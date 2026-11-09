@@ -15,32 +15,22 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_adapters::MOCK_ID;
-use yunta_core::caution::Caution;
-use yunta_core::check::CheckError;
-use yunta_core::step::{Arg, NextStep};
-use yunta_core::{AdapterId, InputName, Manifest, ModeName, RunAdapter, Workflow};
-use yunta_engine::FrozenRun;
+use yunta_api::{Admission, CreatedRun, Remark, RunRequest};
+use yunta_core::step::NextStep;
+use yunta_core::{AdapterId, InputName, ModeName, RunAdapter};
 use yunta_render::command;
-use yunta_replay::history::PriorEstimation;
-use yunta_storage::AsyncStorage;
 
 mod attached;
 mod detach;
-mod mode;
 
 pub(crate) use detach::start_detached;
 
-use super::drive::Prepared;
-use super::registry::{create_frozen_run, read_fixture, servable};
 use crate::context::Context;
 use crate::error::CliError;
-use crate::output::warn;
 use crate::output::Mode;
 use crate::output::Outcome;
 use crate::shell::Shell;
-use mode::resolve_mode;
 use surco::look::Look;
-use yunta_render::document::PreRunWarnings;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
@@ -65,22 +55,6 @@ fn parse_inputs(raw: &[String]) -> Result<HashMap<InputName, String>, String> {
     Ok(inputs)
 }
 
-/// Every run in storage that has events and has neither closed nor broken:
-/// paused runs hold a slot (they expect a `resume`), finished and broken
-/// runs never do.
-async fn count_non_terminal_runs(
-    storage: &AsyncStorage,
-) -> Result<usize, yunta_storage::StorageError> {
-    let mut active = 0;
-    for run_id in storage.list_runs().await?.into_iter().map(|run| run.run_id) {
-        let events = storage.events_for_run(run_id).await?;
-        if !events.is_empty() && !yunta_replay::RunState::replay(&events).ended() {
-            active += 1;
-        }
-    }
-    Ok(active)
-}
-
 /// Creates a run from a workflow and takes one of the two shapes a run
 /// reaches a person in: driven here, with this invocation watching it to
 /// its end, or handed to a detached child that outlives this process.
@@ -97,13 +71,11 @@ pub async fn run(
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::of(shell)?;
-    let storage = ctx.async_storage().await?;
     let mock_fixture = mock_fixture(adapter, fixture, detach)?;
 
     if detach {
         return detach::detached(detach::Detaching {
             ctx: &ctx,
-            storage: &storage,
             workflow_path,
             raw_inputs,
             adapter,
@@ -116,7 +88,6 @@ pub async fn run(
 
     attached::attached(attached::Attaching {
         ctx: &ctx,
-        storage: &storage,
         workflow_path,
         raw_inputs,
         adapter,
@@ -165,307 +136,56 @@ fn mock_fixture<'a>(
     }
 }
 
-/// Everything a run settles before it exists: the workflow resolved and
-/// checked, git able to commit its work, the manifest frozen with the
-/// adapter it runs on pinned into it, and every adapter it names present
-/// and healthy — so what this refuses costs nothing, and what it returns is
-/// the very run the caller is about to create.
-///
-/// The pin is what `--adapter` names: a real adapter by its id, or a mock
-/// fixture's text, read here so the run keeps it. Both shapes of a run come
-/// through here, which is what makes them refuse the same workflow in the
-/// same words. What the adapters step refuses is [`servable`]'s.
-///
-/// `ambient` is the environment the run is born in: the user knowledge it
-/// freezes is read from there, the way its sessions read it at their nodes.
-pub(super) async fn runnable(
-    ctx: &Context,
-    workflow_path: &Path,
-    raw_inputs: &[String],
-    adapter: Option<&AdapterId>,
-    mock_fixture: Option<&Path>,
-    mode: Option<&ModeName>,
-    ambient: &yunta_core::Env,
-) -> Result<FrozenRun, CliError> {
-    let (workflow_path, workflow) = super::verdict::resolve_runnable(ctx, workflow_path).await?;
-    super::committer::refuse_without_committer(ctx).await?;
-    if mock_fixture.is_none() {
-        super::forge::refuse_unreachable_forge(
-            &ctx.project.config,
-            &workflow,
-            &yunta_core::ProcessSecrets,
-        )?;
-    }
-    let pinned = match mock_fixture {
+/// The run `workflow_path` asks for here, admitted by the API: its inputs read
+/// off their flags, its sessions pinned to `adapter` or scripted by
+/// `mock_fixture`, each caution and the estimate said the way `output` asks
+/// as the API says them.
+pub(crate) async fn admitted<'p>(
+    ctx: &'p Context,
+    asked: Asked<'_>,
+    output: Mode,
+    look: &Look,
+) -> Result<Admission<'p>, CliError> {
+    let inputs = parse_inputs(asked.raw_inputs).map_err(CliError::msg)?;
+    let adapter = match asked.mock_fixture {
         Some(path) => Some(RunAdapter::Mock {
-            fixture: read_fixture(path).await?,
+            fixture: yunta_api::machine::read_fixture(path).await?,
         }),
-        None => adapter.map(|id| RunAdapter::Named(id.clone())),
+        None => asked.adapter.map(|id| RunAdapter::Named(id.clone())),
     };
-    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs, ambient)
-        .await?
-        .with_adapter(pinned);
-    let checked = Arg::Given(super::verdict::shown(ctx, &workflow_path));
-    servable(
-        &frozen.manifest,
-        &resolve_mode(&frozen.manifest, mode),
-        checked,
-    )
-    .await?;
-    Ok(frozen)
+    let request = RunRequest {
+        workflow: asked.workflow_path,
+        inputs,
+        mode: asked.mode,
+        adapter,
+        hermetic: asked.hermetic,
+    };
+    let say = |remark: Remark| crate::remarks::say(remark, output, look);
+    Ok(ctx.project.admit(request, &say, &ctx.stop()).await?)
 }
 
-/// What an invocation says about a run before it creates it: what this
-/// workflow's history cost, and every warning a person can still act on
-/// for free.
-///
-/// The warnings are kept rather than only printed: stderr reaches the
-/// person watching, and they also have to reach the reader who has only
-/// a document, which is the reader most likely to be automating the
-/// spend.
-pub(super) struct Preflight {
-    pub(super) prior: Option<PriorEstimation>,
-    pub(super) warnings: PreRunWarnings,
+/// What a run is asked for with on the command line: the workflow reference,
+/// the `--input` flags, the adapter or the fixture its sessions run on, and
+/// the mode it starts in.
+pub(crate) struct Asked<'a> {
+    pub(crate) workflow_path: &'a Path,
+    pub(crate) raw_inputs: &'a [String],
+    pub(crate) adapter: Option<&'a AdapterId>,
+    pub(crate) mock_fixture: Option<&'a Path>,
+    pub(crate) mode: Option<&'a ModeName>,
+    /// Whether the run freezes none of the person's own knowledge.
+    pub(crate) hermetic: bool,
 }
 
-/// Everything said before the first token: the estimation, and the
-/// `files:` paths the run would not find in the tree it starts from.
-pub(super) async fn preflight(
+/// The admitted run, created by the API, what it says while it does said the
+/// way `output` asks: the shared create step of an executed run and a detached
+/// one. Prints nothing of its own: the caller reports what it made.
+pub(crate) async fn create_run_from<'p>(
     ctx: &Context,
-    manifest: &Manifest,
-    workflow_path: &Path,
-    mode: Option<&ModeName>,
+    admission: Admission<'p>,
     output: Mode,
     look: &Look,
-) -> Result<Preflight, CliError> {
-    // A run started here is started fresh in its mode: what only a run
-    // promoted into that mode would hold, it does not.
-    let started_in = resolve_mode(manifest, mode);
-    let refused = yunta_engine::check_mode_start(&manifest.workflow, &started_in);
-    if !refused.is_empty() {
-        return Err(check_refusal(&refused, ctx, workflow_path));
-    }
-    let context_files = context_files(ctx, manifest, workflow_path, mode).await?;
-    let (prior, budget) = estimate(ctx, manifest, &started_in, output, look).await;
-    // The document lists the budget first, then the files a node reads.
-    let cautions = budget.into_iter().chain(context_files).collect();
-    Ok(Preflight {
-        prior,
-        warnings: PreRunWarnings { cautions },
-    })
-}
-
-/// The refusal a workflow's own check makes, each error in the words a
-/// person reads, under the check to run again on `workflow_path`.
-fn check_refusal(errors: &[CheckError], ctx: &Context, workflow_path: &Path) -> CliError {
-    let words: Vec<String> = errors
-        .iter()
-        .map(yunta_render::refusal::check::line)
-        .collect();
-    let workflow = Arg::Given(super::verdict::shown(ctx, workflow_path));
-    CliError::msg(surco::text::problems(
-        yunta_render::refusal::unrunnable(workflow),
-        &words,
-    ))
-}
-
-/// The literal `files:` paths the nodes of this run's mode read that the
-/// commit it starts from does not hold — said now, before the nodes
-/// ahead of them spend, which is when the run itself would find out. One
-/// nothing before its reader can write refuses the run; one a node that
-/// runs earlier might write is warned about.
-async fn context_files(
-    ctx: &Context,
-    manifest: &Manifest,
-    workflow_path: &Path,
-    mode: Option<&ModeName>,
-) -> Result<Vec<Caution>, CliError> {
-    let mode = resolve_mode(manifest, mode);
-    let left_out = yunta_core::left_out(&manifest.workflow, &manifest.config);
-    let included = yunta_replay::modes::scheduled(&manifest.workflow, &mode, &left_out);
-    let found = super::context_files(
-        ctx,
-        &manifest.workflow,
-        included.as_ref(),
-        manifest.isolation,
-        &manifest.base_commit,
-    )
-    .await?;
-    if !found.errors.is_empty() {
-        return Err(check_refusal(&found.errors, ctx, workflow_path));
-    }
-    for warning in &found.warnings {
-        warn(yunta_render::caution::line(warning));
-    }
-    Ok(found.warnings)
-}
-
-/// What this workflow's past runs cost, shown in advance of anything being
-/// spent and returned for the closing block's own comparison when the
-/// invocation stays to draw one.
-///
-/// The distribution is informative, so only a person's terminal in
-/// `Human` mode is given it: whoever asked for the run id alone or for a
-/// JSON document did not ask for context. The budget caution survives
-/// every mode — it asks for a decision in advance of spending tokens, and
-/// a run that stops halfway on a badly chosen cap is the most expensive
-/// waste there is.
-///
-/// Only the runs that started in `mode` and carry this workflow's hash
-/// are a sample of what this run costs: a run in another mode, or of
-/// another shape of the workflow, would read as this run's own cost.
-async fn estimate(
-    ctx: &Context,
-    manifest: &Manifest,
-    mode: &ModeName,
-    output: Mode,
-    look: &Look,
-) -> (Option<PriorEstimation>, Option<Caution>) {
-    let estimation = ctx.project.prior_estimation(manifest, mode, None).await;
-    if let Some(estimation) = &estimation {
-        crate::output::progress(
-            output,
-            look,
-            yunta_render::spend::estimation(estimation, look.glyphs),
-        );
-    }
-    let budget = yunta_replay::history::budget_caution(
-        manifest
-            .config
-            .limits
-            .as_ref()
-            .and_then(|limits| limits.max_tokens_per_run),
-        estimation.as_ref(),
-    );
-    if let Some(caution) = &budget {
-        warn(yunta_render::caution::line(caution));
-    }
-    (estimation, budget)
-}
-
-/// Freezes the run: its manifest, every input its nodes read, the
-/// documents its `inputs:` named, and its state roots, which
-/// [`FrozenPaths::new`](yunta_core::FrozenPaths::new) requires to be
-/// absolute — `resume`/`status`/`gc` read these back from any directory,
-/// so a relative root (a relative `paths.*` or `YUNTA_HOME`) is refused
-/// here, naming it, rather than silently rooted at the invocation's cwd.
-async fn build_frozen_manifest(
-    ctx: &Context,
-    workflow: &Workflow,
-    workflow_path: &Path,
-    raw_inputs: &[String],
-    ambient: &yunta_core::Env,
-) -> Result<FrozenRun, CliError> {
-    let provided_inputs = parse_inputs(raw_inputs).map_err(CliError::msg)?;
-    let workflow_dir = workflow_path.parent().unwrap_or(Path::new("."));
-    // The user layer's knowledge, where the environment keeps it.
-    let user_knowledge = yunta_core::user_knowledge_dir(ambient);
-    let mut frozen = yunta_engine::build_manifest(
-        workflow,
-        &ctx.project.config,
-        workflow_dir,
-        &ctx.cwd,
-        &provided_inputs,
-        ctx.supervision(),
-        user_knowledge.as_deref(),
-    )
-    .await?;
-    frozen.manifest.paths = Some(yunta_core::FrozenPaths::new(
-        ctx.project.runs_root.clone(),
-        ctx.project.worktrees_root.clone(),
-    )?);
-    Ok(frozen)
-}
-
-/// Enforces the soft concurrency cap, mints the run id from the injected
-/// clock, prepares the isolation worktree and creates the run — the
-/// shared create step of an executed run and a detached one. Prints
-/// nothing of its own: the caller reports what it made.
-pub(super) async fn create_run_from(
-    ctx: &Context,
-    storage: &AsyncStorage,
-    frozen: &FrozenRun,
-    mode: Option<&ModeName>,
-) -> Result<Prepared, CliError> {
-    let manifest = &frozen.manifest;
-    // A soft budget, not a safety limit — best-effort by design (two
-    // simultaneous `yunta run` invocations can both pass the count),
-    // checked before anything is created so the refusal costs nothing.
-    if let Some(cap) = manifest
-        .config
-        .limits
-        .as_ref()
-        .and_then(|limits| limits.max_concurrent_runs)
-    {
-        let active = count_non_terminal_runs(storage).await?;
-        if active >= cap as usize {
-            return Err(CliError::msg(format!(
-                "{} still active and `limits.max_concurrent_runs` is {cap}; resume or \
-                 cancel one (`{list}` names them) before starting another",
-                surco::text::counted(active, "run"),
-                list = command::line(&NextStep::List)
-            )));
-        }
-    }
-
-    // Resolved before anything is made: a short declared secret refuses the
-    // run here, before its identifier is minted, a checkout is taken or a
-    // branch is made.
-    let redactor = yunta_engine::run_redactor(manifest, &yunta_core::ProcessSecrets)?;
-    let run_id = ctx.ids.mint_run_id(ctx.clock.now());
-    let worktree = match manifest.isolation {
-        // A run of its own works in a checkout of the project's pool, on a
-        // branch of its own: warm with whatever the last run there built,
-        // or — for a run whose units build — the one holding the least.
-        yunta_core::Isolation::Worktree => {
-            let run_dir = ctx.project.runs_root.join(run_id.as_str());
-            let pool = ctx.pool_of(manifest, &run_dir);
-            let birth = yunta_engine::Birth::of(&manifest.workflow);
-            let (checkout, _held) = pool
-                .open_run(&run_id, &manifest.base_commit, birth, ctx.supervision())
-                .await?;
-            checkout
-        }
-        yunta_core::Isolation::None => {
-            let worktree = ctx.project.run_tree(manifest, None, &run_id, &ctx.cwd);
-            match yunta_engine::prepare_worktree(
-                &ctx.cwd,
-                &worktree,
-                &manifest.base_commit,
-                &run_id.branch(),
-                manifest.isolation,
-                ctx.supervision(),
-            )
-            .await?
-            {
-                yunta_engine::WorktreePrepared::Ready => {}
-                yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid } => {
-                    warn(format!(
-                        "this checkout's isolation lock belonged to a dead process \
-                         (pid {dead_pid}): taking it over"
-                    ));
-                }
-            }
-            worktree
-        }
-    };
-
-    let resolved_mode = resolve_mode(manifest, mode);
-
-    let run_dir = create_frozen_run(
-        ctx,
-        storage,
-        frozen,
-        &run_id,
-        &resolved_mode,
-        &worktree,
-        &redactor,
-    )
-    .await?;
-
-    Ok(Prepared {
-        run_id,
-        run_dir,
-        worktree,
-    })
+) -> Result<CreatedRun<'p>, CliError> {
+    let say = |remark: Remark| crate::remarks::say(remark, output, look);
+    Ok(admission.create(&say, &ctx.stop()).await?)
 }

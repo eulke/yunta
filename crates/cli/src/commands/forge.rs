@@ -6,7 +6,7 @@ use std::sync::Arc;
 use surco::components::{Check, Fix, Found};
 use yunta_adapters::GitHubForge;
 use yunta_core::port::Forge;
-use yunta_core::{describe, ConfigLayer, NodeKind, SecretSource, Workflow};
+use yunta_core::{describe, ConfigLayer, SecretSource};
 
 use crate::error::CliError;
 use crate::output::warn;
@@ -37,33 +37,6 @@ pub(crate) fn forge_for(
     }
 }
 
-/// Refuses a run that would open a pull request through a forge this
-/// machine cannot reach: the config declares one, and the variable its
-/// token is in is not set here. The node would fail when the run reaches
-/// it, after every node before it spent; a `pull_request` node the run
-/// leaves out asks nothing.
-pub(crate) fn refuse_unreachable_forge(
-    config: &ConfigLayer,
-    workflow: &Workflow,
-    secrets: &dyn SecretSource,
-) -> Result<(), CliError> {
-    let Some(github) = config
-        .forge
-        .as_ref()
-        .and_then(|forge| forge.github.as_ref())
-    else {
-        return Ok(());
-    };
-    if !opens_a_pull_request(workflow, config) || secrets.get(&github.token_env).is_some() {
-        return Ok(());
-    }
-    Err(CliError::msg(format!(
-        "this workflow opens a pull request through `forge.github` ({}), and `{}`, the \
-         variable its token is in, is not set here; set it, then run again",
-        github.repo, github.token_env
-    )))
-}
-
 /// What `doctor` finds of a forge whose token variable, `token_env`, is
 /// not set here. Without the token a gate published to the forge falls
 /// back to the console; only a `pull_request` node stops. So the missing
@@ -76,7 +49,7 @@ fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> C
         .workspace
         .catalog_workflows()
         .into_iter()
-        .filter(|(_, workflow)| opens_a_pull_request(workflow, config))
+        .filter(|(_, workflow)| yunta_core::opens_a_pull_request(workflow, config))
         .map(|(name, _)| name)
         .collect();
     let unset = format!("{named}: `{token_env}`, the variable its token is in, is not set");
@@ -103,19 +76,6 @@ fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> C
 /// One finding about the forge.
 fn check(found: Found, said: String) -> Check {
     Check::new(found, "forge", said)
-}
-
-/// Whether a run of `workflow` under `config` reaches a `pull_request`
-/// node: one the project leaves out never asks the forge for anything.
-fn opens_a_pull_request(workflow: &Workflow, config: &ConfigLayer) -> bool {
-    let left_out: Vec<yunta_core::NodeId> = yunta_core::left_out(workflow, config)
-        .into_iter()
-        .map(|left| left.node)
-        .collect();
-    workflow.iter_nodes_with_group().any(|(node, group)| {
-        matches!(node.kind, NodeKind::PullRequest { .. })
-            && !left_out.contains(group.map_or(&node.id, |group| &group.id))
-    })
 }
 
 /// What `doctor` finds of the forge the config declares: whether it

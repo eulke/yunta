@@ -13,7 +13,6 @@ use yunta_core::RunId;
 use yunta_render::command::Reader;
 use yunta_render::refusal::Refused;
 
-mod hold;
 pub(crate) mod page;
 pub(crate) mod words;
 
@@ -71,56 +70,16 @@ pub enum CliError {
     #[error(transparent)]
     Manifest(yunta_engine::ManifestError),
 
-    #[error(transparent)]
-    DetachedResume(#[from] crate::commands::DetachedResumeError),
-
     /// What recording a decision failed with below its refusal: the store,
     /// or the documents the gate shows. A refusal is
     /// [`CliError::Refused`], through [`CliError::from_gate`].
     #[error(transparent)]
     ResolveGate(yunta_engine::ResolveGateError),
 
-    /// A mock fixture a `yunta test` case or `yunta run --fixture`
-    /// named does not parse. The path leads the sentence, because a
-    /// person running several cases needs to know which fixture broke
-    /// before they need to know how.
-    #[error("fixture `{}`: {source}", .path.display())]
-    FixtureRefused {
-        path: std::path::PathBuf,
-        #[source]
-        source: yunta_adapters::FixtureError,
-    },
-
-    /// A decision was recorded and the run could not be handed back to
-    /// a detached `yunta resume`. The sentence leads with what did
-    /// happen, because a reader who takes this for a refusal answers
-    /// the same gate twice.
-    #[error("decision recorded, but {source}")]
-    GateRecordedNotResumed {
-        #[source]
-        source: crate::commands::DetachedResumeError,
-    },
-
-    /// What closing a run failed with below its refusal: the store, or the
-    /// run's exported log. A refusal is [`CliError::Refused`], through
-    /// [`CliError::from_close`].
-    #[error("{}", words::close(.0))]
-    Close(yunta_engine::CloseRunError),
-
     /// What recording a reply to a node's questions failed with below its
     /// refusal. A refusal is [`CliError::Refused`]: see the conversion below.
     #[error(transparent)]
     AnswerQuestions(yunta_engine::AnswerQuestionsError),
-
-    /// The answers were recorded and the run could not be handed back
-    /// to a detached `yunta resume`. They are on the log either way,
-    /// which is what the sentence leads with: a reader who takes this
-    /// for a refusal answers the same questions twice.
-    #[error("answers recorded, but {source}")]
-    AnswersRecordedNotResumed {
-        #[source]
-        source: crate::commands::DetachedResumeError,
-    },
 
     /// A value that has to be an identifier and is not — a run id, an
     /// adapter, a mode, a gate option, a responder — wherever one is
@@ -176,19 +135,6 @@ impl CliError {
             }
             .into(),
             failed => CliError::ResolveGate(failed),
-        }
-    }
-
-    /// What closing `run_id` met: the run's refusal, which names the run for
-    /// the command that moves it instead, or a failure below it.
-    pub fn from_close(run_id: &RunId, error: yunta_engine::CloseRunError) -> Self {
-        match error {
-            yunta_engine::CloseRunError::Refused(refusal) => Refused::Close {
-                run: run_id.clone(),
-                refusal,
-            }
-            .into(),
-            failed => CliError::Close(failed),
         }
     }
 }

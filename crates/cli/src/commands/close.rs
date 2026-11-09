@@ -1,22 +1,20 @@
 //! `yunta close <run_id>`: closes a stopped run nobody is going to
-//! continue, as `cancelled` and by who closed it, so it stops waiting on a
-//! person. A run whose engine died is settled first, the way `cancel`
-//! settles one. Its checkouts go back to the project's pool; its branches
-//! stay for a person to read and for `gc` to remove.
+//! continue, through the API, as `cancelled` and by who closed it, so it
+//! stops waiting on a person; this command says what the close says while it
+//! works, and answers who closed it.
 
 use surco::look::Look;
 use surco::words::Standing;
-use yunta_core::{Redactor, Responder, RunId};
+use yunta_api::Remark;
+use yunta_core::{Responder, RunId};
+use yunta_render::document::CloseDocument;
 use yunta_render::page::{Closed, Page};
-use yunta_replay::registry::Engine;
 
-use super::cancel::settle_crash;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use crate::shell::Shell;
-use yunta_render::document::SCHEMA_VERSION;
 
 pub async fn close(
     shell: &Shell,
@@ -26,28 +24,10 @@ pub async fn close(
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::of(shell)?;
-    let storage = ctx.async_storage().await?;
     let open = ctx.project.run(run_id).await?;
-    // Resolved before anything is written: a short declared secret refuses
-    // the close here, and the run stays as it is.
-    let redactor = yunta_engine::run_redactor(&open.manifest.doc, &yunta_core::ProcessSecrets)?;
-    let run_dir = open.dir.clone();
-    let engine = settled_engine(&ctx, &storage, run_id, &run_dir, &redactor).await?;
-    let by = crate::identity::responder(by, ctx.env.user.as_deref());
-    yunta_engine::close_run(
-        &storage,
-        run_id,
-        &run_dir,
-        ctx.clock.as_ref(),
-        &engine,
-        by.clone(),
-        &redactor,
-    )
-    .await
-    .map_err(|refusal| CliError::from_close(run_id, refusal))?;
-    give_back(&ctx, &open, run_id).await;
+    let say = |remark: Remark| crate::remarks::say(remark, output, look);
+    let by = open.close(by, &say, &ctx.stop()).await?;
     let answer = CloseAnswer {
-        schema_version: SCHEMA_VERSION,
         run_id: run_id.clone(),
         word: Standing::Stopped,
         by,
@@ -55,14 +35,22 @@ pub async fn close(
     emit(output, &answer, look)
 }
 
-/// The close of a run as a document carries it: the word the run
-/// stands in, and who closed it.
-#[derive(serde::Serialize)]
+/// The close of a run: the word the run stands in, and who closed it.
 pub(crate) struct CloseAnswer {
-    schema_version: u32,
     run_id: RunId,
     word: Standing,
     by: Responder,
+}
+
+impl serde::Serialize for CloseAnswer {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let document = CloseDocument {
+            run_id: &self.run_id,
+            word: self.word,
+            by: &self.by,
+        };
+        serde::Serialize::serialize(&document, serializer)
+    }
 }
 
 impl Answer for CloseAnswer {
@@ -76,49 +64,5 @@ impl Answer for CloseAnswer {
 
     fn outcome(&self) -> Outcome {
         Outcome::Success
-    }
-}
-
-/// What drives the run, as `close` judges it. A dead engine whose registry
-/// reads is settled first, so what it left behind is recorded before the
-/// close is written, and the run reads as no registry names it.
-async fn settled_engine(
-    ctx: &Context,
-    storage: &yunta_storage::AsyncStorage,
-    run_id: &RunId,
-    run_dir: &std::path::Path,
-    redactor: &Redactor,
-) -> Result<Engine, CliError> {
-    let mut engine = yunta_engine::read_engine(run_dir, &yunta_engine::lock::SystemProbe);
-    if engine == Engine::Dead {
-        if let yunta_engine::Registry::Read(registry) = yunta_engine::read_registry(run_dir) {
-            settle_crash(ctx, storage, run_id, run_dir, &registry.doc, redactor).await?;
-            engine = Engine::Unrecorded;
-        }
-    }
-    Ok(engine)
-}
-
-/// Gives a run's checkouts back to the project's pool, as `close` does for a
-/// closed run and `cancel` does once a stopped run's groups are gone. A
-/// checkout that cannot be given back stays the run's until `gc` collects it.
-pub(crate) async fn give_back(ctx: &Context, open: &yunta_api::OpenedRun<'_>, run_id: &RunId) {
-    let manifest = &open.manifest.doc;
-    let state = yunta_replay::RunState::replay(&open.events);
-    let bound = state.run.checkout().map(std::path::Path::to_path_buf);
-    let tree = ctx
-        .project
-        .run_tree(manifest, bound.as_deref(), run_id, &ctx.cwd);
-    let pool = ctx.pool_of(manifest, &open.dir);
-    let supervision = ctx.supervision();
-    let units = yunta_engine::release_unit_checkouts(&pool, &tree, &open.dir, run_id, supervision);
-    if let Err(e) = units.await {
-        crate::output::warn(format!("run {}: {e}", run_id.handle()));
-    }
-    if manifest.isolation == yunta_core::Isolation::Worktree {
-        let own = yunta_engine::release_run_checkout(&pool, &tree, run_id, supervision);
-        if let Err(e) = own.await {
-            crate::output::warn(format!("run {}: {e}", run_id.handle()));
-        }
     }
 }

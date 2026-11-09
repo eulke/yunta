@@ -602,7 +602,7 @@ Its groups, each green before the next: the crate and its workspace; reading thr
 ### Checkpoint B: the workspace and reading
 - [x] The CLI resolves every project and reads every run through the API; the environment is read once.
 - [x] The captures, the documents and the follow tests equal the base's.
-- [ ] The user reviews; the phase commits.
+- [x] The user reviews; the phase commits.
 
 ## Phase 3: running a run, answering it and ending it, through the API
 
@@ -615,14 +615,15 @@ Its groups, each green before the next: admission and running; answers and a run
 - An estimate's caution reaches the caller as a `Remark`.
 - `yunta check`, `new`'s verdict and `run`'s preflight ask it.
 - Found in Phase 1: the engine names core's `InputsProblem` a second time, `pub use yunta_core::inputs::InputsProblem as InputsError`. The alias goes, and every caller names `InputsProblem`: one path to each item.
+- Found in Task 25's turn: `check`, `new` and `graph` ask `Project::verdict(Judged { workflow, path, config, conflicts }, VerdictReach, &stop)`; its `Verdict` answers `passes`, `cautions`, `checked`, `diagnosis` and `refusal`, and the CLI says it. `Project::admit(RunRequest, &remarks, &stop)` takes the inputs read and the adapter pinned (`--input` and `--fixture` are the CLI's flags; a request is `hermetic` for a test case, which freezes none of the person's knowledge), and says each caution and the estimate as a `Remark` in the order the CLI printed them. What a run front refuses is render's value: `NoCommitter`, `ForgeUnreachable`, `Unservable` (core's data: a pin no runner reaches, an unbuilt pin, a mock run with no fixture, no adapter, unhealthy adapters) and `Unchecked` (said with `check::line`, which names the near miss everywhere now). `machine::servable` is the API's, for a run and a resume; `Workspace::committer` answers `Committer::Named | Unnamed`, and a stop while git answers is the caller's stop in `doctor` too. Whether a run reaches a pull request is core's `opens_a_pull_request`; whether a program is on `PATH` is `Env::finds`. `doctor`'s probe and the test runner are admitted like any run. The admission hands the CLI its frozen run (`Admission::frozen`) until Task 26 creates the run in the API.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `check.rs`, `verdict.rs` and `refusals.rs` hold no engine call; a refused run's text equals the base's.
+- [x] `check.rs`, `verdict.rs` and `refusals.rs` hold no engine call; a refused run's text equals the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, the CLI's `check`, `check_keys_cmd`, `context_files_cmd`, `forge_cmd`, `git_identity_cmd`, `run_flow` and `init_new_cmd` targets.
+- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `check`, `check_keys_cmd`, `context_files_cmd`, `forge_cmd`, `git_identity_cmd`, `run_flow` and `init_new_cmd` targets.
 
 **Dependencies:** Checkpoint B
 
@@ -634,14 +635,15 @@ Its groups, each green before the next: admission and running; answers and a run
 
 **Description:**
 - `Admission::create()` returns a `CreatedRun`: the run born on the log, its checkout prepared and its hold taken. It takes from `run.rs` (`build_frozen_manifest`, `prepare_worktree`) and `registry.rs`'s creation.
+- Found in Task 26's turn: `Admission::create(&remarks, &stop)` returns a `CreatedRun` (its id, directory, tree, manifest, estimate and cautions); the run's hold is taken by whoever drives it, here or in a detached process, so it is the drive's (Task 27) and the hand-off's (Task 28), not the creation's. A run past `limits.max_concurrent_runs` is render's `Refused::TooManyRuns`, and a dead process's lock this checkout takes over is a `Remark`. Until the drive moves, the CLI takes the created run as its `Prepared`.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `run.rs` creates no run itself; the run tests and captures equal the base's.
+- [x] `run.rs` creates no run itself; the run tests and captures equal the base's.
 
 **Verification:**
-- [ ] Tests pass: the CLI's `run_flow`, `run_checkouts` and `environment_cmd` targets.
+- [x] Tests pass: the CLI's `run_flow`, `run_checkouts` and `environment_cmd` targets.
 
 **Dependencies:** Task 25
 
@@ -654,14 +656,15 @@ Its groups, each green before the next: admission and running; answers and a run
 **Description:**
 - `CreatedRun::drive(person, observer, &stop)` and `OpenedRun::drive(...)` run it here with the ports a surface passes, follow its promotions, and return how it ended. They take from `drive.rs`, `registry.rs`'s execution, `promote.rs` and `run/attached.rs`.
 - The CLI passes its console and its live region; the test runner and doctor pass the engine's surface with nobody to ask, through the API.
+- Found in Task 27's turn, done with Task 28 so no hand-off has two paths meanwhile: a run is driven once this process holds it, so `CreatedRun::hold(&stop)` and `OpenedRun::take_back(&remarks, &stop)` (a parked run: refusals, the reset waited out, the claim, its checkout) both give a `HeldRun`, and `HeldRun::drive(Ports { person, observer }, &remarks, &stop)` executes it, follows its promotions, gives back what it held, hands a run paused on a reset to a detached resume, and returns a `Driven` (its last run, state and `Ending`, which never ends promoted) whose `closing()` and `document()` the CLI draws; `Project::closing` is the follower's too. What a lock on a run refuses, the forge that does not take its token and a wait for a reset are the API's (`Remark::ForgeUnavailable`, `Remark::WaitingForReset`), and `crate::remarks` says every remark for the CLI. The test runner drives its scripted runs and answers their gates its own way, so the registry moves with it, as `commands/test/scripted.rs`, until the cases move into the API; `doctor`'s probe drives through the API. A mock fixture is read by `machine::read_fixture`. `Pace` and the promotion's test are the API's; the test is one test per promise.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `drive.rs`, `registry.rs` and `promote.rs` hold no engine call; the run, promotion and live tests equal the base's.
+- [x] `drive.rs`, `registry.rs` and `promote.rs` hold no engine call; the run, promotion and live tests equal the base's.
 
 **Verification:**
-- [ ] Tests pass: `suite.py cli-1..5`.
+- [x] Tests pass: `suite.py cli-1..5`.
 
 **Dependencies:** Task 26
 
@@ -674,14 +677,15 @@ Its groups, each green before the next: admission and running; answers and a run
 **Description:**
 - `CreatedRun::start_detached()` and `OpenedRun::resume_detached()` start Yunta's own binary from the workspace; `DetachedResumeError` becomes the API's failure.
 - `yunta run --detach`, `yunta resume` and the MCP tools `run_workflow` and `resume_run` call the same functions.
+- Found in Task 28's turn: `resolve-gate` and the MCP answer tool hand the run on through `OpenedRun::resume_detached()` too, and a hand-on that fails after the decision or the answers are recorded is still said as recorded-but-not-resumed. `OpenedRun::refuse_if_driven()` is the API's, for every caller that is about to write on a run.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] One function starts a run detached and one hands a resume on, for the CLI and the tools; `run_workflow`'s and `resume_run`'s answers equal the base's.
+- [x] One function starts a run detached and one hands a resume on, for the CLI and the tools; `run_workflow`'s and `resume_run`'s answers equal the base's.
 
 **Verification:**
-- [ ] Tests pass: the CLI's `run_flow`, `parked_runs`, `status_follow` and `mcp_flow` targets.
+- [x] Tests pass: the CLI's `run_flow`, `parked_runs`, `status_follow` and `mcp_flow` targets.
 
 **Dependencies:** Task 27
 
@@ -697,10 +701,10 @@ Its groups, each green before the next: admission and running; answers and a run
 **Fails first:** none: a measurement.
 
 **Acceptance criteria:**
-- [ ] It reaches the node before `pr`; its `between_secs` sits inside the base's spread.
+- [x] It reaches the node before `pr`; its `between_secs` sits inside the base's spread. (Run 01M7147YP06CJVD759QRDF5P1Q: the base's path, at `ship` after 211 s, 2.03M tokens, `between_secs` 0.550052 against the base's 0.550108.)
 
 **Verification:**
-- [ ] Manual check: `yunta stats <run>` beside `baseline.txt`.
+- [x] Manual check: `yunta stats <run>` beside `baseline.txt`.
 
 **Dependencies:** Task 28
 
@@ -709,7 +713,7 @@ Its groups, each green before the next: admission and running; answers and a run
 **Estimated scope:** S
 
 ### Group check: the run path
-- [ ] The run path's tests and captures equal the base's; the real run sits beside the base's.
+- [x] The run path's tests and captures equal the base's; the real run sits beside the base's. (147 captures and 99 goldens equal; 4,567 tests, 59 moved, none lost: three renamed with their code.)
 
 ### Task 30: a gate's decision
 
@@ -718,14 +722,15 @@ Its groups, each green before the next: admission and running; answers and a run
 - Who answered is stamped from the workspace's `Env` when the caller claims nobody: `identity.rs` moves to the API, and the console's questions take the responder from there.
 - `yunta resolve-gate`, `yunta review` and the MCP tool `resolve_gate` call it.
 - Its answer document moves to `render::document` with it, its fields read off what the API returns.
+- Found in Task 30's turn: who answered is a rule on core's `Responder`, `Responder::answering(claimed, user)`, which the console, `close` and the API stamp alike, so `identity.rs` goes rather than moving to the API. `OpenedRun::waiting_decision()` reads the decision with what it shows (a run that waits on none is render's `Refused::NoDecision`), and `OpenedRun::decide(choice)` records it and hands the run on; a hand-on that fails after the decision is recorded is said by the API as `decision recorded, but …`, and the engine's gate failures keep their words. `GateAnswerDocument` is render's.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `resolve_gate.rs` and `review.rs` hold no engine call; their tests and `resolve_gate`'s answers equal the base's.
+- [x] `resolve_gate.rs` and `review.rs` hold no engine call; their tests and `resolve_gate`'s answers equal the base's.
 
 **Verification:**
-- [ ] Tests pass: the CLI's `gate_review_cmd`, `gate_withheld_cmd`, `plan_desk`, `parked_runs`, `git_identity_cmd` and `mcp_flow` targets.
+- [x] Tests pass: the CLI's `gate_review_cmd`, `gate_withheld_cmd`, `plan_desk`, `parked_runs`, `git_identity_cmd` and `mcp_flow` targets.
 
 **Dependencies:** Task 29
 
@@ -738,14 +743,15 @@ Its groups, each green before the next: admission and running; answers and a run
 **Description:**
 - `OpenedRun::answer(&node, answers)` records them, then hands the resume on.
 - The MCP tool `answer_questions` calls it; a person at the terminal answers through the person port, as now.
+- Found in Task 31's turn: the reply is core's `port::QuestionsReply`, the same shape the person port answers with; the API stamps who answered and says a failed hand-on as `answers recorded, but …`.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `mcp/answers.rs` and `mcp/tools.rs` hold no engine call; `answer_questions`' answers, a refused one among them, equal the base's.
+- [x] `mcp/answers.rs` and `mcp/tools.rs` hold no engine call; `answer_questions`' answers, a refused one among them, equal the base's.
 
 **Verification:**
-- [ ] Tests pass: the CLI's `three_questions`, `parked_runs`, `console_interaction` and `mcp_flow` targets.
+- [x] Tests pass: the CLI's `three_questions`, `parked_runs`, `console_interaction` and `mcp_flow` targets.
 
 **Dependencies:** Task 30
 
@@ -758,14 +764,15 @@ Its groups, each green before the next: admission and running; answers and a run
 **Description:**
 - `OpenedRun::cancel(&stop)` signals the engine that drives it, waits, and records the pause after a crash; what it waits on reaches the caller as a `Remark`. It takes from `cancel.rs` and `cancel/registered.rs`.
 - Its answer document moves to `render::document` with it, its fields read off what the API returns.
+- Found in Task 32's turn: `OpenedRun::cancel(&remarks, &stop)` lives in `api/src/ending.rs`, the registration wait in `ending/registered.rs`, and the process groups with init's guard in `ending/groups.rs`. What it says while it works is a `Remark` each (`SignallingEngine`, `StoppedWaiting`, `Escalating`, `GroupRefused`, `Unstopped`, `RegistryKept`, `CheckoutKept`), whose sentences are render's `ending`, so the application says them in the same words; a registry it cannot read, a node with no registry and an interrupt that does not reach the engine are failures that say what goes on, as before. `CancelDocument` is render's. `Project::storage()` opens the store for every API operation, in place of seven copies.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `cancel.rs` holds no engine call; the cancel tests equal the base's.
+- [x] `cancel.rs` holds no engine call; the cancel tests equal the base's.
 
 **Verification:**
-- [ ] Tests pass: the CLI's `parked_runs`, `run_flow` and `run_words` targets.
+- [x] Tests pass: the CLI's `parked_runs`, `run_flow` and `run_words` targets.
 
 **Dependencies:** Task 29
 
@@ -778,14 +785,15 @@ Its groups, each green before the next: admission and running; answers and a run
 **Description:**
 - `OpenedRun::close()` closes it, releases its checkouts, and returns what close answers; who closed it is stamped as Task 30 stamps a decision.
 - Its answer document moves to `render::document` with it, its fields read off what the API returns.
+- Found in Task 33's turn: `OpenedRun::close(by, &remarks, &stop)` answers who closed it, stamped in the API from the caller's claim or the workspace's user, and `decide(option, by, free_text)` now stamps the same way: `resolve-gate --option` hands the claim on as given, and only the menu, which asks the person at its terminal, names who answered there. A close's failures are the API's, so the CLI's close error, `from_close` and its words go, the export's sentence to render's `ending`; `CloseDocument` is render's, and the context's `pool_of` goes with its last caller.
 
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `close.rs` holds no engine call; the close tests equal the base's.
+- [x] `close.rs` holds no engine call; the close tests equal the base's.
 
 **Verification:**
-- [ ] Tests pass: the CLI's `close_cmd` target.
+- [x] Tests pass: the CLI's `close_cmd` target.
 
 **Dependencies:** Task 32
 
@@ -794,8 +802,8 @@ Its groups, each green before the next: admission and running; answers and a run
 **Estimated scope:** S
 
 ### Checkpoint C: the run's path, its answers and its end
-- [ ] The run path's tests and captures equal the base's; the real run sits beside the base's.
-- [ ] `resolve-gate`, `review`, `cancel` and `close`, their tests and the parked runs' flows equal the base's.
+- [x] The run path's tests and captures equal the base's; the real run sits beside the base's.
+- [x] `resolve-gate`, `review`, `cancel` and `close`, their tests and the parked runs' flows equal the base's.
 - [ ] The user reviews; the phase commits.
 
 ## Phase 4: upkeep, the MCP server, the frontier and the proof
@@ -1073,7 +1081,7 @@ Its groups, each green before the next: the project's upkeep through the API; th
 **Estimated scope:** M
 
 ### Checkpoint D: the module
-- [ ] The release binary's code against Checkpoint A's, by crate and by copy (`tools/size_by_crate.py`, `tools/copies.py`, both built with symbols): found at Checkpoint B, the code grew 2.49 MB, nearly all of it serde's deserializers instantiated once more in each crate that reads the same documents (a release build shares no generics: `ConfigLayer`'s visitor 1 → 2 copies, `Workflow`'s 9 → 13), while the CLI and the API both read them. Once the CLI reads nothing itself, what is left duplicated is read through one concrete reader in core per document, so one crate instantiates it.
+- [ ] The release binary's code against Checkpoint A's, by crate and by copy (`tools/size_by_crate.py`, `tools/duplicates.py`, both built with symbols): found after Phase 2, when the static Linux binary passed its 40 MiB ceiling, that a release build shares no generics, so each crate that named the generic YAML reader on a manifest or a config layer built its own copy of everything that reads them; since then core reads each through one concrete reader (`Manifest::read_frozen`, `ConfigLayer::read`), and the binary went from 32.16 MB to 28.95 MB. Every document more than one crate reads is read through one such reader, and the binary stays at or under that size.
 - [ ] The user reviews the proof and the review.
 - [ ] The phase commits and is pushed; Task 47 follows, then `cargo clean`.
 

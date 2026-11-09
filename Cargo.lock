@@ -3129,12 +3129,14 @@ dependencies = [
 name = "yunta-api"
 version = "0.0.5"
 dependencies = [
+ "async-trait",
  "chrono",
  "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
  "yunta-adapters",
  "yunta-core",
  "yunta-engine",
@@ -3142,6 +3144,8 @@ dependencies = [
  "yunta-replay",
  "yunta-storage",
  "yunta-surco",
+ "yunta-testkit",
+ "yunta-testkit-core",
 ]
 
 [[package]]

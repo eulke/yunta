@@ -9,9 +9,9 @@
 //!   answers for.
 //! - What a person sees and answers: every page a command shows is render's,
 //!   filled with what the command read; `output` owns what a command writes,
-//!   the streams it is drawn to and the code it exits with, `surface` draws a
-//!   run as it happens, `ask` and `human_interaction` take a person's answers,
-//!   and `identity` names who decided.
+//!   the streams it is drawn to and the code it exits with, `remarks` says what
+//!   the API says while it works, `surface` draws a run as it happens, and
+//!   `ask` and `human_interaction` take a person's answers.
 //! - The process: `shell` reads it once, into the workspace every command
 //!   takes; `error` is the one error a command hands back, and `interrupt` is
 //!   what trips cancellation.
@@ -39,10 +39,10 @@ mod error;
 mod graph;
 mod help;
 mod human_interaction;
-mod identity;
 mod interrupt;
 mod output;
 mod pack;
+mod remarks;
 mod shell;
 mod surface;
 

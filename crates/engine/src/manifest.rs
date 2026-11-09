@@ -18,8 +18,9 @@ use crate::frozen::prompt::{file_prompt, read_prompts, PromptRoot};
 use crate::frozen::provenance::pack_provenance;
 use crate::frozen::FrozenError;
 use crate::git::GitError;
-use crate::inputs::{resolve_inputs, InputsError};
+use crate::inputs::resolve_inputs;
 use crate::run::BirthArtifact;
+use yunta_core::inputs::InputsProblem;
 
 #[derive(Debug, Error)]
 pub enum ManifestError {
@@ -34,7 +35,7 @@ pub enum ManifestError {
         source: InvalidId,
     },
     #[error(transparent)]
-    Inputs(#[from] InputsError),
+    Inputs(#[from] InputsProblem),
     /// A frozen input could not be read or written; the error names it.
     #[error(transparent)]
     Frozen(#[from] FrozenError),

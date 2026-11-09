@@ -25,28 +25,57 @@
 //!   [`Words`] its sessions say; `event_log`, the [`EventLog`] a follower
 //!   reads a moving run's log through; and `history`, a
 //!   workflow's past runs as a [`WorkflowHistory`].
+//! - What a workflow gets here: `verdict`, the [`Verdict`] on whether it can
+//!   run, as deep as [`VerdictReach`] asks; and `admission`, a run's
+//!   [`Admission`] of a [`RunRequest`], made a [`CreatedRun`] (`creation`),
+//!   held as a [`HeldRun`] (`hold`, a parked run taken back too), driven
+//!   here with the [`Ports`] a surface lends to a [`Driven`] run (`drive`),
+//!   or handed to a detached Yunta (`detach`); and `answers`, the
+//!   [`WaitingDecision`] a run waits on, decided or its questions answered;
+//!   and `ending`, a run cancelled, its engine and process groups stopped,
+//!   or closed for good; every caution said through the
+//!   [`Remarks`] the caller passes (`remark`), git's [`Committer`] among
+//!   what it asks (`committer`).
 //! - What this machine answers for: `machine`, the adapters this binary
-//!   builds.
+//!   builds and what it refuses to serve a run with.
 //! - What it hands back when it does not do what it was asked: `error`, an
 //!   [`Error`] that is a refusal render says, a [`Failure`] below it, or the
 //!   caller's stop.
 
+mod admission;
+mod answers;
 mod catalog;
+mod committer;
+mod creation;
+mod detach;
+mod drive;
+mod ending;
 mod error;
 mod event_log;
 mod field;
 mod history;
+mod hold;
 pub mod machine;
 mod project;
+mod remark;
 mod run;
 mod stop;
+mod verdict;
 mod workspace;
 
+pub use admission::{Admission, RunRequest};
+pub use answers::WaitingDecision;
+pub use committer::Committer;
+pub use creation::CreatedRun;
+pub use drive::{ClosingReading, Driven, Ending, Ports};
 pub use error::{Error, Failure};
 pub use event_log::EventLog;
 pub use field::{offers_a_menu, FieldReach, FieldReading};
 pub use history::WorkflowHistory;
+pub use hold::HeldRun;
 pub use project::{config_layers, Project};
+pub use remark::{Remark, Remarks};
 pub use run::{OpenedRun, RunReading, RunRef, RunRegistry, StatsReading, Words};
 pub use stop::Stop;
+pub use verdict::{ContextFiles, Judged, Verdict, VerdictReach};
 pub use workspace::Workspace;

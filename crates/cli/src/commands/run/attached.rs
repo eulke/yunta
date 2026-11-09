@@ -8,11 +8,9 @@ use std::path::Path;
 use surco::look::Look;
 use surco::words::Standing;
 use yunta_core::{AdapterId, ModeName};
-use yunta_storage::AsyncStorage;
 
-use super::{create_run_from, preflight, runnable};
-use crate::commands::drive::{drive, Driving, Prepared};
-use crate::commands::registry::{adapters_for, ScriptedPaths};
+use super::{admitted, create_run_from, Asked};
+use crate::commands::drive::{drive, Driving};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Mode;
@@ -23,7 +21,6 @@ use crate::output::Outcome;
 /// sessions when there is one and how this invocation reports progress.
 pub(super) struct Attaching<'a> {
     pub(super) ctx: &'a Context,
-    pub(super) storage: &'a AsyncStorage,
     pub(super) workflow_path: &'a Path,
     pub(super) raw_inputs: &'a [String],
     pub(super) adapter: Option<&'a AdapterId>,
@@ -38,12 +35,11 @@ pub(super) struct Attaching<'a> {
     pub(super) look: &'a Look,
 }
 
-/// Resolves the workflow, freezes its manifest, creates the run and
-/// drives it to its verdict, which this function hands back.
+/// Admits the run, creates it, holds it and drives it to its verdict, which
+/// this function hands back.
 pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliError> {
     let Attaching {
         ctx,
-        storage,
         workflow_path,
         raw_inputs,
         adapter,
@@ -52,56 +48,17 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         output,
         look,
     } = attaching;
-
-    let frozen = runnable(
-        ctx,
+    let asked = Asked {
         workflow_path,
         raw_inputs,
         adapter,
         mock_fixture,
         mode,
-        &ctx.env,
-    )
-    .await?;
-    let preflight = preflight(ctx, &frozen.manifest, workflow_path, mode, output, look).await?;
-
-    let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
-    // The documents the run was born with are on its log now; what the
-    // rest of the run needs is the manifest.
-    let manifest = frozen.manifest;
-    super::super::started(&prepared.run_id, Standing::Created.word(), output, look);
-
-    let (adapters, hold) = ready(ctx, &manifest, &prepared).await?;
-    drive(
-        Driving {
-            ctx,
-            storage,
-            manifest: &manifest,
-            prepared: &prepared,
-            adapters,
-            prior: preflight.prior,
-            warnings: preflight.warnings,
-            output,
-            look,
-        },
-        hold,
-    )
-    .await
-}
-
-/// What driving a created run here takes: the adapters it froze, and its claim.
-async fn ready(
-    ctx: &Context,
-    manifest: &yunta_core::Manifest,
-    prepared: &Prepared,
-) -> Result<(yunta_api::machine::Adapters, yunta_engine::RunHold), CliError> {
-    let adapters = adapters_for(
-        manifest,
-        &ScriptedPaths {
-            run_dir: &prepared.run_dir,
-            worktree: &prepared.worktree,
-        },
-    )?;
-    let hold = crate::commands::registry::claim(ctx, &prepared.run_dir).await?;
-    Ok((adapters, hold))
+        hermetic: false,
+    };
+    let admission = admitted(ctx, asked, output, look).await?;
+    let created = create_run_from(ctx, admission, output, look).await?;
+    super::super::started(&created.id, Standing::Created.word(), output, look);
+    let held = created.hold(&ctx.stop()).await?;
+    drive(Driving { ctx, output, look }, held).await
 }

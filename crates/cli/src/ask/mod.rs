@@ -439,7 +439,7 @@ async fn handed_mode(diagnostics: &Diagnostics) -> Option<Termios> {
 /// in the identity it records, marked `unverified:`, so a console whose
 /// run keeps one leaves it to that.
 fn attributed(console: &Console, env: &Env) -> std::io::Result<Responder> {
-    let responder = crate::identity::responder(None, env.user.as_deref());
+    let responder = yunta_core::Responder::answering(None, env.user.as_deref());
     console.say_unless_chronicled(&format!(
         "attributed to `{responder}`: unsigned, nothing here authenticates who typed"
     ))?;

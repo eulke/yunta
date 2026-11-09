@@ -35,6 +35,8 @@ tokio-util.workspace = true
 # What this binary can run on, listed the way a sentence lists things.
 yunta-surco.workspace = true
 thiserror.workspace = true
+# What a failed hand-over leaves behind, for whoever reads the process's log.
+tracing.workspace = true
 # A workflow file the catalog reads without holding a thread.
 tokio = { workspace = true, features = ["fs"] }
 # A package manifest detection reads for the commands its ecosystem runs.
@@ -45,3 +47,8 @@ serde_json.workspace = true
 yunta-core = { workspace = true, features = ["testkit"] }
 # A repository detection reads, made in a temporary directory.
 tempfile.workspace = true
+# A person a test answers for, through the port's own async trait.
+async-trait.workspace = true
+# A clock that stands still, and waiting on a condition rather than sleeping.
+yunta-testkit-core.workspace = true
+yunta-testkit.workspace = true

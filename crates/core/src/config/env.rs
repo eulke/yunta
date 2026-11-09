@@ -101,6 +101,12 @@ pub struct Env {
 }
 
 impl Env {
+    /// Whether `command` names a file in a directory of this environment's
+    /// `PATH`: the one a run started in it inherits.
+    pub fn finds(&self, command: &str) -> bool {
+        self.path.iter().any(|dir| dir.join(command).is_file())
+    }
+
     /// The process environment, read once here, at the shell's edge, so
     /// nothing below reads it live: what core and the engine resolve
     /// against, the value of every name in `service` that is set, and the

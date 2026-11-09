@@ -40,11 +40,9 @@ fn run_failed() -> EventPayload {
 }
 
 /// A finished run's report over `events`, as the run left its log.
-fn finished_report(events: &[StoredEvent]) -> yunta_engine::RunReport {
-    yunta_engine::RunReport {
-        terminal: yunta_engine::RunTerminal::Finished,
-        state: yunta_replay::RunState::replay(events),
-    }
+fn finished_verdict(events: &[StoredEvent]) -> Outcome {
+    let state = yunta_replay::RunState::replay(events);
+    verdict(&state, &yunta_api::Ending::Finished)
 }
 
 #[test]
@@ -80,7 +78,7 @@ fn accepted_questions_and_both_terminals_are_required_for_success() {
         .node("probe", opened.clone())
         .build();
     assert!(matches!(
-        verdict(&finished_report(&only_reply)),
+        finished_verdict(&only_reply),
         Outcome::NoDelivery(_)
     ));
     let delivered = Log::for_run("doctor-test")
@@ -90,10 +88,7 @@ fn accepted_questions_and_both_terminals_are_required_for_success() {
         .node("probe", finished)
         .event(closed)
         .build();
-    assert!(matches!(
-        verdict(&finished_report(&delivered)),
-        Outcome::Ok { .. }
-    ));
+    assert!(matches!(finished_verdict(&delivered), Outcome::Ok { .. }));
 }
 
 #[test]

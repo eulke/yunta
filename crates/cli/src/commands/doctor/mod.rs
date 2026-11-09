@@ -53,9 +53,15 @@ pub async fn doctor(
     let ctx = Context::of(shell)?;
     let mut checks = Checklist::default();
     let (healthy, answered) = probe_adapters(&ctx, &mut checks).await;
-    match super::committer::committer(&ctx).await {
-        Ok(who) => checks.push(Found::Holds, "git", format!("commits as {who}")),
-        Err(why) => checks.push(Found::Problem, "git", why.to_string()),
+    match ctx.project.workspace.committer(&ctx.stop()).await? {
+        yunta_api::Committer::Named(who) => {
+            checks.push(Found::Holds, "git", format!("commits as {who}"))
+        }
+        yunta_api::Committer::Unnamed { git_said } => checks.push(
+            Found::Problem,
+            "git",
+            yunta_render::refusal::unnamed_committer(&git_said),
+        ),
     }
     checks.extend(super::forge::forge_checks(&ctx).await?);
     checkouts(&ctx, &mut checks).await;

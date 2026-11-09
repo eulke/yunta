@@ -177,6 +177,24 @@ fn label(candidate: &RunnerCandidate) -> String {
     }
 }
 
+/// The probe's run of `workflow`, admitted as any run is, saying nothing but
+/// its cautions: a probe has no estimate worth a line.
+async fn admitted<'p>(
+    ctx: &'p Context,
+    workflow: &std::path::Path,
+) -> Result<yunta_api::Admission<'p>, CliError> {
+    let asked = crate::commands::run::Asked {
+        workflow_path: workflow,
+        raw_inputs: &[],
+        adapter: None,
+        mock_fixture: None,
+        mode: None,
+        hermetic: false,
+    };
+    let look = crate::output::stdout_look();
+    crate::commands::run::admitted(ctx, asked, crate::output::Mode::Quiet, &look).await
+}
+
 /// The whole run, from sandbox to verdict.
 async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outcome, CliError> {
     let sandbox = sandboxed_checkout(&ctx.cwd)?;
@@ -191,44 +209,27 @@ async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outco
     init_git(sandbox.worktree(), ctx.supervision()).await?;
     let ctx = probe_context(ctx, &sandbox, candidate);
 
-    let storage = ctx.async_storage().await?;
-    let frozen =
-        crate::commands::run::runnable(&ctx, &workflow, &[], None, None, None, &ctx.env).await?;
-    let manifest = frozen.manifest.clone();
-    let prepared = crate::commands::run::create_run_from(&ctx, &storage, &frozen, None).await?;
-    let adapters = crate::commands::registry::adapters_for(
-        &manifest,
-        &crate::commands::registry::ScriptedPaths {
-            run_dir: &prepared.run_dir,
-            worktree: &prepared.worktree,
-        },
-    )?;
-    let report = crate::commands::drive::execute(crate::commands::drive::Executing {
-        run_id: &prepared.run_id,
-        manifest: &manifest,
-        hold: crate::commands::registry::claim(&ctx, &prepared.run_dir).await?,
-        worktree: &prepared.worktree,
-        adapters: &adapters,
-        storage: &storage,
-        clock: std::sync::Arc::clone(&ctx.clock),
-        ids: ctx.ids.as_ref(),
+    let admission = admitted(&ctx, &workflow).await?;
+    let look = crate::output::stdout_look();
+    let created =
+        crate::commands::run::create_run_from(&ctx, admission, crate::output::Mode::Quiet, &look)
+            .await?;
+    let stop = ctx.stop();
+    let held = created.hold(&stop).await?;
+    let ports = yunta_api::Ports {
         // An empty questions document needs no human response.
-        human_interaction: &yunta_core::port::NoInteraction,
-        forge: None,
-        cancel: ctx.cancellation(),
+        person: &yunta_core::port::NoInteraction,
         observer: None,
-        rail_command: ctx.rail_command.clone(),
-        ambient: &ctx.env,
-    })
-    .await?;
-
-    Ok(verdict(&report))
+    };
+    let say = |remark| crate::remarks::say(remark, crate::output::Mode::Quiet, &look);
+    let driven = held.drive(ports, &say, &stop).await?;
+    Ok(verdict(&driven.state, &driven.ending))
 }
 
-/// What the run's own log says happened to the one node: the state the
-/// report carries is that log as the run left it.
-fn verdict(report: &yunta_engine::RunReport) -> Outcome {
-    let facts = ProbeFacts::of(&report.state);
+/// What the run's own log says happened to the one node: `state` is that log
+/// as the run left it, and `ending` how it stopped.
+fn verdict(state: &yunta_replay::RunState, ending: &yunta_api::Ending) -> Outcome {
+    let facts = ProbeFacts::of(state);
     match facts.failure {
         Some(Failure::SessionDied { died }) => Outcome::Died(Box::new(died)),
         other if facts.opened && !facts.accepted => Outcome::NoDelivery(other.map_or_else(
@@ -236,12 +237,12 @@ fn verdict(report: &yunta_engine::RunReport) -> Outcome {
             |failure| yunta_render::failure::sentence(&failure),
         )),
         Some(other) => Outcome::Refused(yunta_render::failure::sentence(&other)),
-        None => match &report.terminal {
-            yunta_engine::RunTerminal::Finished
+        None => match ending {
+            yunta_api::Ending::Finished
                 if facts.accepted && facts.node_finished && facts.run_finished =>
             {
                 Outcome::Ok {
-                    tokens: report.state.metrics().tokens.total(),
+                    tokens: state.metrics().tokens.total(),
                 }
             }
             other => Outcome::Refused(format!(
@@ -311,15 +312,15 @@ fn probe_context(
 }
 
 /// How a run ended, said the way the rest of a refusal reads.
-fn ended(terminal: &yunta_engine::RunTerminal) -> String {
-    match terminal {
-        yunta_engine::RunTerminal::Finished => Standing::Finished.word().to_string(),
-        yunta_engine::RunTerminal::Paused { reason } => format!(
+fn ended(ending: &yunta_api::Ending) -> String {
+    match ending {
+        yunta_api::Ending::Finished => Standing::Finished.word().to_string(),
+        yunta_api::Ending::Paused { reason } => format!(
             "{} ({})",
             yunta_render::pause::standing(reason),
             yunta_render::pause::sentence(reason)
         ),
-        yunta_engine::RunTerminal::Failed { node, failure } => {
+        yunta_api::Ending::Failed { node, failure } => {
             let said = PauseReason::NodeFailed {
                 node: node.clone(),
                 failure: failure.clone(),
@@ -329,9 +330,6 @@ fn ended(terminal: &yunta_engine::RunTerminal) -> String {
                 Standing::Failed,
                 yunta_render::pause::sentence(&said)
             )
-        }
-        yunta_engine::RunTerminal::Promoted { suggested_mode } => {
-            format!("{} to mode `{suggested_mode}`", Standing::Promoted)
         }
     }
 }

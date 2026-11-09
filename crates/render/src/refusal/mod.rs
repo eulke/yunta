@@ -23,5 +23,5 @@ mod tests;
 pub use refused::{Candidate, Refused};
 pub use words::{
     already_installed, answers, close, gate, hold_unclear, inputs, moving, not_installed,
-    refused_answer, unrunnable,
+    refused_answer, stale_lock_taken, unnamed_committer, unrunnable,
 };

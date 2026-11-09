@@ -65,12 +65,6 @@ impl Interrupt {
         self.stages.work()
     }
 
-    /// The token what gives a take back answers to: it survives the
-    /// first interrupt and falls to the second.
-    pub(crate) fn abort(&self) -> &CancellationToken {
-        self.stages.teardown()
-    }
-
     /// The two stages, as an operation of the API is handed them.
     pub(crate) fn stages(&self) -> Stop {
         self.stages.clone()
@@ -136,24 +130,24 @@ mod tests {
         let (source, receiver) = mpsc::channel(2);
         let interrupt = Interrupt::driven_by(receiver);
         assert!(!interrupt.stop().is_cancelled());
-        assert!(!interrupt.abort().is_cancelled());
+        assert!(!interrupt.stages().teardown().is_cancelled());
 
         source.send(()).await.expect("the listener is waiting");
         interrupt.stop().cancelled().await;
         assert!(
-            !interrupt.abort().is_cancelled(),
+            !interrupt.stages().teardown().is_cancelled(),
             "the first interrupt stops the work and leaves the cleanup alone"
         );
 
         source.send(()).await.expect("the listener is waiting");
-        interrupt.abort().cancelled().await;
+        interrupt.stages().teardown().cancelled().await;
     }
 
     #[tokio::test]
     async fn an_interrupt_nothing_drives_never_trips() {
         let interrupt = Interrupt::never();
         assert!(!interrupt.stop().is_cancelled());
-        assert!(!interrupt.abort().is_cancelled());
+        assert!(!interrupt.stages().teardown().is_cancelled());
     }
 
     /// A derived `Interrupt` is the same interruption seen from a

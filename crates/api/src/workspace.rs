@@ -61,4 +61,11 @@ impl Workspace {
             .with_env(&self.env.subprocess_vars)
             .with_path(&self.env.path)
     }
+
+    /// What gives back what a stopped operation held runs under: the
+    /// caller's second stage, since something that runs *because* the first
+    /// stage fired cannot answer to it.
+    pub(crate) fn teardown<'a>(&'a self, stop: &'a Stop) -> Supervision<'a> {
+        Supervision::outside_any_run(stop.teardown(), self.clock.as_ref()).with_path(&self.env.path)
+    }
 }

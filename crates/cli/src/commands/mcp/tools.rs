@@ -106,10 +106,8 @@ pub(super) async fn tool_run_workflow(
     // in-process through the same `start_detached` `yunta run --detach`
     // calls.
     let ctx = Context::of(shell)?;
-    let storage = ctx.async_storage().await?;
     let started = super::super::run::start_detached(
         &ctx,
-        &storage,
         Path::new(name),
         &inputs,
         adapter.as_ref(),
@@ -130,19 +128,15 @@ pub(super) async fn tool_resume_run(
     shell: &Shell,
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, CliError> {
-    let cwd = shell.workspace().dir.as_path();
     let run_id = required_run_id(args)?;
     let ctx = Context::of(shell)?;
     let open = ctx.project.run(&run_id).await?;
     // Said here because the process below would say it only to `detached.log`,
     // which no caller of this tool reads.
-    let state = yunta_replay::RunState::replay(&open.events);
-    super::super::resume::refuse_if_driven(&ctx, &run_id, &open.dir, &state).await?;
+    open.refuse_if_driven().await?;
     // A run paused on a limit's reset is handed to a resume that waits for
     // the reset first, so it does not spend the limit before it lifts.
-    super::super::spawn_detached_resume(&open.dir, run_id.as_str(), cwd, &shell.workspace().binary)
-        .await
-        .map_err(|source| super::super::DetachedResumeError::new(&run_id, source))?;
+    open.resume_detached().await?;
     Ok(format!(
         "run {run_id}: resumed, driving forward independently"
     ))
@@ -171,7 +165,6 @@ pub(super) async fn tool_answer_questions(
     shell: &Shell,
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, CliError> {
-    let cwd = shell.workspace().dir.as_path();
     let run_id = required_run_id(args)?;
     let node = required_str(args, "node")?.parse::<yunta_core::NodeId>()?;
     let by = optional_str(args, "by")?
@@ -181,43 +174,12 @@ pub(super) async fn tool_answer_questions(
 
     let ctx = Context::of(shell)?;
     let open = ctx.project.run(&run_id).await?;
-    // Said here because the resume below would say it only to `detached.log`, with
-    // the answers already on the log.
-    let state = yunta_replay::RunState::replay(&open.events);
-    super::super::resume::refuse_if_driven(&ctx, &run_id, &open.dir, &state).await?;
-    let (run_dir, manifest) = (open.dir, open.manifest.doc);
-    let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
-    let storage = ctx.async_storage().await?;
-
-    // The engine's own door, under this server's injected clock: the
-    // round is re-read from the document the node asked from, the reply
-    // is judged against it, and either both the acceptance and the
-    // `questions_answered` land or neither does.
-    yunta_engine::answer_questions(
-        &redactor,
-        &storage,
-        &run_id,
-        &run_dir,
-        ctx.clock.as_ref(),
-        &node,
-        yunta_engine::AnswersReply {
-            answers,
-            channel: yunta_core::events::Channel::Mcp,
-            responder: Some(crate::identity::responder(
-                by.as_ref(),
-                ctx.env.user.as_deref(),
-            )),
-        },
-    )
-    .await?;
-
-    // The answers are on the log; a detached process carries the node
-    // on from there, exactly as it does after a gate is resolved.
-    super::super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd, &shell.workspace().binary)
-        .await
-        .map_err(|source| CliError::AnswersRecordedNotResumed {
-            source: super::super::DetachedResumeError::new(&run_id, source),
-        })?;
+    let reply = yunta_core::port::QuestionsReply {
+        answers,
+        channel: yunta_core::events::Channel::Mcp,
+        responder: by,
+    };
+    open.answer(&node, reply).await?;
     Ok(format!(
         "run {run_id}: node `{node}` answered, driving forward independently"
     ))

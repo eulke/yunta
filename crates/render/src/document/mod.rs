@@ -22,19 +22,25 @@ use yunta_core::{Manifest, RunId};
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::RunState;
 
+mod cancel;
 pub mod check;
+mod close;
 pub mod decision;
 mod diagnostics;
 mod error;
 mod facts;
 mod field;
+mod gate_answer;
 mod node;
 pub mod stats;
 mod verification;
 mod waiting;
 
+pub use cancel::CancelDocument;
+pub use close::CloseDocument;
 pub use error::{ErrorDocument, NextCommand};
 pub use field::FieldDocument;
+pub use gate_answer::GateAnswerDocument;
 pub use verification::VerificationDocument;
 
 use diagnostics::{node_diagnostics, ArtifactProblems};

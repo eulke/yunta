@@ -1,11 +1,10 @@
 //! `yunta resolve-gate <run> [<option>]`: answers a run's waiting gate
 //! decision from a separate process — no live surface attached to the
 //! run itself, exactly the shape `yunta mcp`'s own `resolve_gate` tool
-//! needs. Appends **only the decision** to the log
-//! (`yunta_engine::resolve_gate` — decision and consequence are a
-//! separate pair, and this only ever writes the former) and hands the
-//! run off to a detached `yunta resume`, which consumes the pre-seeded
-//! decision through the engine's one existing consequence path —
+//! needs. The API appends **only the decision** to the log (decision and
+//! consequence are a separate pair, and this only ever writes the former)
+//! and hands the run off to a detached `yunta resume`, which consumes the
+//! pre-seeded decision through the engine's one existing consequence path —
 //! retry, abort, promote and internal gates alike. Same detach
 //! mechanism as `run --detach`: a control-plane operation never blocks
 //! for the run's own duration.
@@ -21,7 +20,6 @@ use yunta_render::command;
 use yunta_render::command::Reader;
 use yunta_render::escalation::Route;
 use yunta_render::page::{GateAnswered, Page, Resolution};
-use yunta_replay::RunState;
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
 use crate::context::Context;
@@ -30,8 +28,8 @@ use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use crate::shell::Shell;
 use crate::surface::Diagnostics;
-use yunta_api::OpenedRun;
-use yunta_render::document::SCHEMA_VERSION;
+use yunta_api::WaitingDecision;
+use yunta_render::document::GateAnswerDocument;
 
 /// Records the decision and hands the run back, returning the sentence
 /// that says so.
@@ -53,7 +51,7 @@ pub(crate) async fn resolve(
 }
 
 /// Records the decision on the run's log and hands the run to a detached
-/// resume that applies it.
+/// resume that applies it, through the API.
 async fn record(
     ctx: &Context,
     run_id: &RunId,
@@ -62,36 +60,8 @@ async fn record(
     free_text: Option<&str>,
 ) -> Result<(), CliError> {
     let open = ctx.project.run(run_id).await?;
-    // Said here because the resume below would say it only to `detached.log`, with
-    // the answer already on the log and the run reading as moving.
-    let state = yunta_replay::RunState::replay(&open.events);
-    super::resume::refuse_if_driven(ctx, run_id, &open.dir, &state).await?;
-    let (run_dir, manifest) = (open.dir, open.manifest.doc);
-    let storage = ctx.async_storage().await?;
-    let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
-
-    yunta_engine::resolve_gate(
-        &manifest,
-        &run_dir,
-        &storage,
-        run_id,
-        ctx.clock.as_ref(),
-        HumanChoice {
-            option: option.clone(),
-            by: crate::identity::responder(resolved_by, ctx.env.user.as_deref()),
-            free_text: free_text.map(str::to_string),
-        },
-        &redactor,
-    )
-    .await
-    .map_err(|refusal| CliError::from_gate(run_id, refusal))?;
-
-    super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd, &ctx.binary)
-        .await
-        .map_err(|source| CliError::GateRecordedNotResumed {
-            source: super::DetachedResumeError::new(run_id, source),
-        })?;
-    Ok(())
+    let free_text = free_text.map(str::to_string);
+    Ok(open.decide(option.clone(), resolved_by, free_text).await?)
 }
 
 /// Refuses a `--json` answer that names no option. The menu a decision
@@ -131,19 +101,16 @@ pub async fn resolve_gate(
 ) -> Result<Outcome, CliError> {
     needs_an_option(run_id, option, output)?;
     let ctx = Context::of(shell)?;
-    let picked = match option {
-        Some(option) => Chosen::Answered(HumanChoice {
-            option: option.clone(),
-            by: crate::identity::responder(resolved_by, ctx.env.user.as_deref()),
-            free_text: free_text.map(str::to_string),
-        }),
-        None => chosen(&ctx, run_id).await?,
+    let Some(option) = option else {
+        let chosen = chosen(&ctx, run_id).await?;
+        return settled(&ctx, run_id, chosen, resolved_by, free_text, output, look).await;
     };
-    settled(&ctx, run_id, picked, resolved_by, free_text, output, look).await
+    recorded(&ctx, run_id, option, resolved_by, free_text, output, look).await
 }
 
 /// What a person at the menu did, carried through: recorded and handed back, or the page
-/// that says nothing was.
+/// that says nothing was. Who the command line names stands over who answered at the
+/// menu, and the words typed at the menu over the command line's.
 pub(super) async fn settled(
     ctx: &Context,
     run_id: &RunId,
@@ -154,31 +121,40 @@ pub(super) async fn settled(
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let choice = match chosen {
-        Chosen::Answered(choice) => HumanChoice {
-            by: by.cloned().unwrap_or(choice.by),
-            free_text: choice.free_text.or_else(|| free_text.map(str::to_string)),
-            ..choice
-        },
+        Chosen::Answered(choice) => choice,
         Chosen::Not(state) => return emit(output, &answer(run_id, state), look),
     };
-    record(
+    let by = by.unwrap_or(&choice.by);
+    let free_text = choice.free_text.as_deref().or(free_text);
+    recorded(
         ctx,
         run_id,
         &choice.option,
-        Some(&choice.by),
-        choice.free_text.as_deref(),
-    )
-    .await?;
-    emit(
+        Some(by),
+        free_text,
         output,
-        &answer(
-            run_id,
-            Resolution::Resolved {
-                option: choice.option,
-            },
-        ),
         look,
     )
+    .await
+}
+
+/// Records `option` on the decision `run_id` waits on, hands the run back, and
+/// answers that the decision is resolved. Who decided is `by`, or whom the API
+/// stamps when it names nobody.
+async fn recorded(
+    ctx: &Context,
+    run_id: &RunId,
+    option: &OptionId,
+    by: Option<&Responder>,
+    free_text: Option<&str>,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    record(ctx, run_id, option, by, free_text).await?;
+    let resolution = Resolution::Resolved {
+        option: option.clone(),
+    };
+    emit(output, &answer(run_id, resolution), look)
 }
 
 /// What the person at the menu did.
@@ -198,78 +174,51 @@ pub(super) struct Waiting {
     called: String,
 }
 
-/// The decision `run_id` waits on, before anything it shows is read; a refusal that says
-/// what serves when it waits on none.
-pub(super) async fn asked_of<'p>(ctx: &'p Context, run_id: &RunId) -> Result<Asked<'p>, CliError> {
+/// The decision `run_id` waits on, with what it shows and what the run
+/// changed, as the menu a person picks from is drawn: refused, by the API,
+/// when the run waits on none.
+pub(super) async fn waiting_of(ctx: &Context, run_id: &RunId) -> Result<Waiting, CliError> {
     let open = ctx.project.run(run_id).await?;
-    let state = yunta_replay::RunState::replay(&open.events);
-    let handle = run_id.handle();
-    let decision = yunta_engine::current_escalation(&open.manifest.doc, &open.dir, &state).await?;
-    let Some((on, escalation)) = decision else {
-        return Err(CliError::msg(format!(
-            "run {handle} waits on no decision; `{}` says where it stands",
-            command::line(&NextStep::status(run_id))
-        )));
-    };
-    Ok(Asked {
-        open,
-        state,
+    let WaitingDecision {
         on,
-        escalation: escalation.into_payload(),
+        escalation,
+        shown,
+        state,
+    } = open.waiting_decision().await?;
+    let workflow = &open.manifest.doc.workflow;
+    let routes =
+        yunta_render::escalation::routes(&escalation, workflow, state.run.left_out(), on.node());
+    Ok(Waiting {
+        on,
+        escalation,
+        shown,
+        routes,
+        changed: state.current_change().cloned(),
+        called: yunta_render::state::called(&workflow.name, state.run.mode()),
     })
 }
 
-/// A decision a run waits on, before what it shows is read.
-pub(super) struct Asked<'p> {
-    open: OpenedRun<'p>,
-    state: RunState,
-    on: DecisionOn,
-    pub(super) escalation: GateWaitingPayload,
-}
-
-impl Asked<'_> {
-    /// The decision with the documents it shows and what the run changed.
-    pub(super) async fn read(self) -> Result<Waiting, CliError> {
-        let Asked {
-            open,
-            state,
-            on,
-            escalation,
-        } = self;
-        let asked = open.manifest.doc.request();
-        let shown =
-            yunta_engine::shown_documents(&open.dir, escalation.shows(), &state, asked).await?;
-        let routes = yunta_render::escalation::routes(
-            &escalation,
-            &open.manifest.doc.workflow,
-            state.run.left_out(),
-            on.node(),
-        );
-        Ok(Waiting {
-            on,
-            escalation,
-            shown,
-            routes,
-            changed: state.current_change().cloned(),
-            called: yunta_render::state::called(&open.manifest.doc.workflow.name, state.run.mode()),
-        })
-    }
-}
-
-/// What a gate answer did, as a document carries it.
-#[derive(serde::Serialize)]
+/// What a gate answer did: the document a program reads, and the page a
+/// person reads.
 pub(crate) struct ResolveGateAnswer {
-    schema_version: u32,
     run_id: RunId,
-    #[serde(flatten)]
     resolution: Resolution,
 }
 
 fn answer(run_id: &RunId, resolution: Resolution) -> ResolveGateAnswer {
     ResolveGateAnswer {
-        schema_version: SCHEMA_VERSION,
         run_id: run_id.clone(),
         resolution,
+    }
+}
+
+impl serde::Serialize for ResolveGateAnswer {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let document = GateAnswerDocument {
+            run_id: &self.run_id,
+            resolution: &self.resolution,
+        };
+        serde::Serialize::serialize(&document, serializer)
     }
 }
 
@@ -296,11 +245,10 @@ impl Answer for ResolveGateAnswer {
 /// lists the command that chooses each option, so the next invocation
 /// is one copied line.
 async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
-    let asked = asked_of(ctx, run_id).await?;
+    let waiting = waiting_of(ctx, run_id).await?;
     let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
-        return Err(off_terminal(run_id, &asked.escalation));
+        return Err(off_terminal(run_id, &waiting.escalation));
     };
-    let waiting = asked.read().await?;
     chosen_on(&console, ctx, run_id, &waiting, Opens::TheCard)
 }
 

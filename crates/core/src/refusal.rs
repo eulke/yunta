@@ -9,7 +9,7 @@
 
 use crate::diagnostic::Report;
 use crate::events::{Asks, Withheld};
-use crate::{NodeId, OptionId};
+use crate::{AdapterId, NodeId, OptionId, RunnerName};
 
 /// Why a decision put to a run is not recorded. Each variant's display is
 /// its code; the words a person reads are render's.
@@ -65,4 +65,40 @@ pub enum AnswersRefusal {
     /// fails named. Nothing was written: a surface corrects and replies again.
     #[error("rejected")]
     Rejected(Report),
+}
+
+/// What this binary cannot serve for a run, said before the run exists or a
+/// resume takes anything: each names the node, runner or adapter a reader
+/// changes. Each variant's display is its code; the words a person reads are
+/// render's.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Unservable {
+    /// The run is pinned to an adapter that a runner the node uses does not
+    /// reach: none of that runner's candidates is on it.
+    #[error("no_candidate_on_pin")]
+    NoCandidateOnPin {
+        node: NodeId,
+        runner: RunnerName,
+        pin: AdapterId,
+        candidates: Vec<AdapterId>,
+    },
+    /// The pinned adapter is not one `runners:` names that this binary
+    /// builds; `runnable` lists those it does, sorted.
+    #[error("unbuilt_pin")]
+    UnbuiltPin {
+        pin: AdapterId,
+        runnable: Vec<AdapterId>,
+    },
+    /// A mock run written before runs froze their adapter: its log shows it
+    /// was scripted, and nothing kept the fixture it was scripted from.
+    #[error("mock_before_frozen_adapter")]
+    MockBeforeFrozenAdapter,
+    /// Nodes that open sessions, and no adapter `runners:` names that this
+    /// binary builds; `built` names the ones it builds.
+    #[error("no_adapter")]
+    NoAdapter { built: String },
+    /// Adapters the run reaches that answered their health check unhealthy,
+    /// each by its name and what it said.
+    #[error("unhealthy")]
+    Unhealthy { adapters: Vec<(String, String)> },
 }

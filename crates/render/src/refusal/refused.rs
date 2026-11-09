@@ -10,10 +10,11 @@ use surco::doc::{Block, Doc};
 use surco::glyphs::Glyphs;
 use surco::look::Look;
 use surco::words::RUNS_THAT_NEED_YOU_FIRST;
+use yunta_core::check::CheckError;
 use yunta_core::diagnostic::Report;
 use yunta_core::events::{Claim, FailureMenu, ObjectProblem, Refusal};
 use yunta_core::inputs::InputsProblem;
-use yunta_core::refusal::{AnswersRefusal, CloseRefusal, GateRefusal};
+use yunta_core::refusal::{AnswersRefusal, CloseRefusal, GateRefusal, Unservable};
 use yunta_core::step::{Arg, NextStep, Reach};
 use yunta_core::{InvalidId, Pid, RunId, UnknownDocument};
 use yunta_replay::receipt::ReceiptError;
@@ -53,6 +54,25 @@ pub enum Refused {
     /// A receipt asked of a run that has not finished, which has no closing
     /// figures to certify.
     NoReceipt(ReceiptError),
+    /// A run in a repository git cannot commit in, which would fail at its
+    /// first node's commit after spending on it: what git said.
+    NoCommitter { git_said: String },
+    /// A run that opens a pull request through a forge this machine cannot
+    /// reach: the repository, and the variable its token is in, not set here.
+    ForgeUnreachable { repo: String, token_env: String },
+    /// What this binary cannot serve for the run.
+    Unservable(Unservable),
+    /// A run past `limits.max_concurrent_runs`: how many are still going, and
+    /// the cap.
+    TooManyRuns { active: usize, cap: u32 },
+    /// A decision asked of a run that waits on none.
+    NoDecision { run: RunId },
+    /// What the workflow's own check refuses once a run's mode or the
+    /// adapters this binary builds are known, under the workflow it judged.
+    Unchecked {
+        workflow: Arg<String>,
+        errors: Vec<CheckError>,
+    },
     /// A decision the run will not record.
     Gate { run: RunId, refusal: GateRefusal },
     /// A close the run will not make.
@@ -233,6 +253,21 @@ impl Refused {
             Refused::NoneNeedsYou => super::words::none_needs_you(),
             Refused::InvalidId(invalid) => invalid.to_string(),
             Refused::NoReceipt(error) => super::words::no_receipt(error),
+            Refused::NoCommitter { git_said } => format!(
+                "a run commits every node's work, and git {}",
+                super::unnamed_committer(git_said)
+            ),
+            Refused::ForgeUnreachable { repo, token_env } => {
+                super::words::forge_unreachable(repo, token_env)
+            }
+            Refused::Unservable(unservable) => super::words::unservable(unservable),
+            Refused::TooManyRuns { active, cap } => super::words::too_many_runs(*active, *cap),
+            Refused::NoDecision { run } => format!(
+                "run {} waits on no decision; `{}` says where it stands",
+                run.handle(),
+                command::line(&NextStep::status(run))
+            ),
+            Refused::Unchecked { workflow, errors } => super::words::unchecked(workflow, errors),
             Refused::Gate { run, refusal } => format!(
                 "{}{}",
                 super::gate(refusal),

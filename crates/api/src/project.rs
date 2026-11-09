@@ -11,6 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::{ConfigLayer, Isolation, Manifest, RunId};
+use yunta_storage::AsyncStorage;
 
 use crate::{Error, Failure, Workspace};
 
@@ -31,6 +32,13 @@ pub struct Project {
 }
 
 impl Project {
+    /// The store this project's runs log their events in, opened.
+    pub(crate) async fn storage(&self) -> Result<AsyncStorage, Error> {
+        AsyncStorage::open(&self.storage_path)
+            .await
+            .map_err(|failed| Failure::new(failed).into())
+    }
+
     /// Finds an existing run's directory, in search order: (a) this
     /// project's current runs root, (b) the built-in default under the
     /// user state root. The single rule `status`, `stats`, `receipt`,

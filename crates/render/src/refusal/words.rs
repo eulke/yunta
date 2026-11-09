@@ -6,11 +6,13 @@ use std::path::Path;
 
 use crate::command;
 use surco::words::Standing;
+use yunta_core::check::CheckError;
 use yunta_core::events::{Claim, FailureMenu, Refusal};
 use yunta_core::inputs::InputsProblem;
+use yunta_core::refusal::Unservable;
 use yunta_core::refusal::{AnswersRefusal, CloseRefusal, GateRefusal};
 use yunta_core::step::{Arg, NextStep, Reach};
-use yunta_core::{PackRef, Pid};
+use yunta_core::{AdapterId, PackRef, Pid};
 use yunta_replay::receipt::ReceiptError;
 
 /// What `last` says where the repository it is asked in has no run, and the
@@ -45,6 +47,114 @@ pub(super) fn no_receipt(error: &ReceiptError) -> String {
         "{error}; `{}` shows where it is",
         command::line(&NextStep::status(run))
     )
+}
+
+/// Why git cannot name who commits in a repository, and what sets it: the
+/// last line of what git said is the reason it gave.
+pub fn unnamed_committer(git_said: &str) -> String {
+    format!(
+        "cannot name who commits here: set `git config --global user.name \"Your Name\"` \
+         and `git config --global user.email you@example.com` (without `--global`, for \
+         this repository alone); git said: {}",
+        git_said.lines().last().unwrap_or_default()
+    )
+}
+
+/// What a run that would open a pull request through a forge it cannot reach
+/// says: the repository, and the variable its token is in.
+pub(super) fn forge_unreachable(repo: &str, token_env: &str) -> String {
+    format!(
+        "this workflow opens a pull request through `forge.github` ({repo}), and `{token_env}`, \
+         the variable its token is in, is not set here; set it, then run again"
+    )
+}
+
+/// What a run past the project's cap on concurrent runs says: how many are
+/// still going, and the command that names them.
+pub(super) fn too_many_runs(active: usize, cap: u32) -> String {
+    format!(
+        "{} still active and `limits.max_concurrent_runs` is {cap}; resume or cancel one \
+         (`{list}` names them) before starting another",
+        surco::text::counted(active, "run"),
+        list = command::line(&NextStep::List)
+    )
+}
+
+/// What a run that took over a dead process's lock on this checkout says:
+/// whose it was.
+pub fn stale_lock_taken(pid: Pid) -> String {
+    format!("this checkout's isolation lock belonged to a dead process (pid {pid}): taking it over")
+}
+
+/// What this binary cannot serve for a run, naming what a reader changes.
+pub(super) fn unservable(unservable: &Unservable) -> String {
+    match unservable {
+        Unservable::NoCandidateOnPin {
+            node,
+            runner,
+            pin,
+            candidates,
+        } => format!(
+            "node `{node}` runs on runner `{runner}`, which has no candidate on `--adapter \
+             {pin}`; its candidates are on: {}; add one on `{pin}` to `runners.{runner}`, or \
+             drop the flag",
+            listed(candidates)
+        ),
+        Unservable::UnbuiltPin { pin, runnable } => {
+            let runnable = match runnable.is_empty() {
+                true => {
+                    "(none configured: `runners:` names no adapter this build supports)".to_string()
+                }
+                false => listed(runnable),
+            };
+            format!("unknown adapter `{pin}`; this binary can run: {runnable}")
+        }
+        Unservable::MockBeforeFrozenAdapter => "this run used the mock before runs froze their \
+            adapter, and its fixture was not kept; it cannot resume"
+            .to_string(),
+        Unservable::NoAdapter { built } => format!(
+            "this workflow has prompt/loop nodes but `runners:` in the merged config\n\
+             names no adapter this binary can run (built: {built}). To exercise this\n\
+             workflow with the `mock` adapter instead, declare a test case under\n\
+             .yunta/tests/ and run `{}`.",
+            command::line(&NextStep::Test { dir: None })
+        ),
+        Unservable::Unhealthy { adapters } => {
+            let unhealthy: Vec<String> = adapters
+                .iter()
+                .map(|(name, said)| surco::text::detailed(name, said))
+                .collect();
+            surco::text::problems(
+                format!(
+                    "adapter health check failed (run `{}` for detail)",
+                    command::line(&NextStep::Doctor {
+                        sessions: false,
+                        full: false
+                    })
+                ),
+                &unhealthy,
+            )
+        }
+    }
+}
+
+/// The adapters a runner's candidates are on, comma-separated, or `none` for
+/// a runner with no candidate at all.
+fn listed(adapters: &[AdapterId]) -> String {
+    if adapters.is_empty() {
+        return "none".to_string();
+    }
+    adapters
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// What a workflow's own check refuses of a run, under the workflow it judged.
+pub(super) fn unchecked(workflow: &Arg<String>, errors: &[CheckError]) -> String {
+    let words: Vec<String> = errors.iter().map(super::check::line).collect();
+    surco::text::problems(super::unrunnable(workflow.clone()), &words)
 }
 
 /// What a run another engine drives says: whose it is.

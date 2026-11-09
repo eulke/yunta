@@ -15,6 +15,7 @@ use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{blank, show};
 use crate::shell::Shell;
+use yunta_api::{Judged, Project, Verdict, VerdictReach};
 use yunta_render::refusal::Refused;
 
 pub async fn check(
@@ -28,8 +29,7 @@ pub async fn check(
     // composition graph — comes from the same `Context` its history
     // reading does, so a project resolved twice cannot be two projects.
     let ctx = Context::of(shell)?;
-    let cwd = ctx.cwd.clone();
-    let workflow_path = super::resolve_workflow_ref(&cwd, workflow_path)?;
+    let workflow_path = shell.workspace().workflow_file(workflow_path)?;
     let (workflow, in_file, text) = crate::audit_workflow(&workflow_path)?;
     let Some(workflow) = workflow else {
         return Err(Refused::Document {
@@ -39,17 +39,18 @@ pub async fn check(
         .into());
     };
 
-    let (config, conflicts) = config_for(&shell.workspace().env, &cwd, config_path)?;
-    let verdict = super::verdict::verdict(
-        &ctx,
-        &workflow,
-        &workflow_path,
-        &config,
+    let (config, conflicts) = config_for(&ctx.project, config_path)?;
+    let judged = Judged {
+        workflow: &workflow,
+        path: &workflow_path,
+        config: &config,
         conflicts,
-        super::verdict::Reach::Workflow,
-    )
-    .await?
-    .with_file_problems(in_file.diagnostics);
+    };
+    let verdict = ctx
+        .project
+        .verdict(judged, VerdictReach::Workflow, &ctx.stop())
+        .await?
+        .with_file_problems(in_file.diagnostics);
 
     // Verification-effectiveness findings, surfaced here too — right when
     // someone is already looking at this workflow — not only via `stats
@@ -61,7 +62,7 @@ pub async fn check(
         .history(&workflow.name)
         .await
         .findings(&workflow);
-    let outcome = verdict.report(&ctx, &workflow_path, look).await?;
+    let outcome = report(&verdict, &ctx, look).await?;
     // Advice after the verdict, which is what was asked for.
     if !findings.is_empty() {
         blank();
@@ -76,21 +77,26 @@ pub async fn check(
 /// citing both — or one already-merged file named with `--config`, which
 /// has nothing layered to conflict.
 fn config_for(
-    env: &yunta_core::Env,
-    cwd: &Path,
+    project: &Project,
     config_path: Option<&Path>,
 ) -> Result<(ConfigLayer, Vec<String>), CliError> {
     Ok(match config_path {
         Some(path) => (read_config(path)?, Vec::new()),
-        None => (
-            ConfigLayer::merge_layers(
-                yunta_api::config_layers(cwd, env)?
-                    .into_iter()
-                    .map(|(_, layer)| layer),
-            ),
-            super::verdict::layer_conflicts(cwd, env)?,
-        ),
+        None => (project.config.clone(), project.layer_conflicts()?),
     })
+}
+
+/// The verdict as `check` reports it: its page on stdout when the workflow
+/// can run here, and on stderr, each problem pointed at in its line, when it
+/// cannot.
+async fn report(verdict: &Verdict<'_>, ctx: &Context, look: &Look) -> Result<Outcome, CliError> {
+    let checked = verdict.checked(&ctx.stop()).await?;
+    if verdict.passes() {
+        show(look, &checked);
+        return Ok(Outcome::Success);
+    }
+    crate::output::show_on_stderr(look, &checked);
+    Ok(Outcome::Reported)
 }
 
 /// The one merged config file `--config` names, read through core's reader of

@@ -66,7 +66,7 @@ impl<'p> OpenedRun<'p> {
 
     /// The frame `state` derives at `now`, beside the engine the run's lock
     /// names.
-    pub(super) fn frame_of(&self, state: &RunState, now: DateTime<Utc>) -> RunFrame {
+    pub(crate) fn frame_of(&self, state: &RunState, now: DateTime<Utc>) -> RunFrame {
         let engine = self.registry().engine();
         let workflow = &self.manifest.doc.workflow;
         RunFrame::of(&self.id, workflow, state, None, &engine, now)

@@ -17,7 +17,6 @@ use std::path::Path;
 use yunta_core::{NodeId, RunId, Workflow};
 use yunta_replay::frame::RunFrame;
 
-use crate::commands::{resolve_workflow_ref, verdict};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
@@ -46,23 +45,22 @@ pub async fn graph(
             // A bare catalog name resolves the same way `check` and
             // `run` resolve it — `graph review` works without spelling
             // out the path.
-            let path = resolve_workflow_ref(&ctx.cwd, path)?;
+            let path = ctx.project.workspace.workflow_file(path)?;
             let workflow = crate::load_workflow(&path)?;
             // A file that reads is drawn whatever the project's config
             // makes of it, with the verdict beside the drawing, on
             // stderr, and in the exit code: the graph is the file's.
-            let verdict = verdict::verdict(
-                &ctx,
-                &workflow,
-                &path,
-                &ctx.project.config,
-                verdict::layer_conflicts(&ctx.cwd, &ctx.env)?,
-                verdict::Reach::Workflow,
-            )
-            .await?;
+            let judged = yunta_api::Judged {
+                workflow: &workflow,
+                path: &path,
+                config: &ctx.project.config,
+                conflicts: ctx.project.layer_conflicts()?,
+            };
+            let reach = yunta_api::VerdictReach::Workflow;
+            let verdict = ctx.project.verdict(judged, reach, &ctx.stop()).await?;
             // A verdict with nothing to say stays off the drawing's way.
-            if !verdict.passes() || verdict.warns() {
-                crate::output::show_on_stderr(look, &verdict.checked(&ctx, &path).await?);
+            if !verdict.passes() || !verdict.cautions().is_empty() {
+                crate::output::show_on_stderr(look, &verdict.checked(&ctx.stop()).await?);
             }
             let outcome = match verdict.passes() {
                 true => Outcome::Success,

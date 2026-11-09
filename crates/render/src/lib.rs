@@ -28,6 +28,8 @@
 //! - A decision a person meets: `escalation`, `claim`, `evidence`, `offers`
 //!   and `found`.
 //! - What Yunta refuses: `refusal`, the sentences of every refusal over its data.
+//! - How a run ends: `ending`, what a cancel or a close says while it stops
+//!   a run's engine and gives its checkouts back, and what stops it.
 //! - What leaves the terminal: `blocks` and `published`.
 //! - What a reader is told to type: `command`, every command written once,
 //!   and `declare`, what to declare in a project's config.
@@ -47,6 +49,7 @@ pub mod claim;
 pub mod command;
 pub mod declare;
 pub mod document;
+pub mod ending;
 pub mod engine;
 pub mod escalation;
 pub mod evidence;

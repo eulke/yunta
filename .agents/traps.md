@@ -16,3 +16,11 @@ Wrong: a `///` on each variant of a unit enum a schema publishes: schemars then 
 variant instead of the enum's `enum` list, a new shape for every reader of the schema.
 Right: explain the variants in the enum's own `///`, and compare a regenerated schema with its descriptions
 taken out before keeping it.
+
+### A generic reader named in a second crate
+Paths: `crates/*/src/**`
+Wrong: `yaml::parse::<T>` or `PersistedDoc::read` on a manifest or a config layer outside core: a release
+build shares no generics, so each crate that names one builds its own copy of every deserializer `T` holds,
+and the static binary passed its size ceiling that way.
+Right: read it through core's concrete reader (`Manifest::read_frozen`, `ConfigLayer::read`), and give a
+document a second crate reads one of its own.

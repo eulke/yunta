@@ -103,7 +103,7 @@ pub(crate) async fn follow(
     let surface = followed.surface(&ctx, &log);
     let ended = followed.read_until_it_stops(&ctx, &log, &surface).await?;
     surface.close().await;
-    answer(ended, &followed, (&ctx, &log), run_id, look).await
+    answer(ended, &followed, &ctx, run_id, look).await
 }
 
 /// What following `run_id` answers once it ended `ended`: the block that
@@ -112,12 +112,12 @@ pub(crate) async fn follow(
 async fn answer(
     ended: Ended,
     followed: &Followed,
-    (ctx, log): (&Context, &EventLog),
+    ctx: &Context,
     run_id: &RunId,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     match ended {
-        Ended::Stopped => followed.closing(ctx, log, look).await,
+        Ended::Stopped => followed.closing(ctx, look).await,
         // What drove the run is gone, so no block closes it out: the page says
         // what holds it.
         Ended::Stalled => {
@@ -343,29 +343,25 @@ impl Followed {
 
     /// The block `yunta run` leaves when the run stops, read from the log, and
     /// the code it gives.
-    async fn closing(
-        &self,
-        ctx: &Context,
-        log: &EventLog,
-        look: &Look,
-    ) -> Result<Outcome, CliError> {
+    async fn closing(&self, ctx: &Context, look: &Look) -> Result<Outcome, CliError> {
         let bound = self.state.run.checkout().map(std::path::Path::to_path_buf);
         let worktree =
             ctx.project
                 .run_tree(&self.manifest, bound.as_deref(), &self.run_id, &ctx.cwd);
-        report_closing(Closed {
+        let reading = ctx
+            .project
+            .closing(&self.run_id, &self.run_dir, &self.manifest)
+            .await?;
+        let closed = Closed {
             run_id: &self.run_id,
             manifest: &self.manifest,
             run_dir: &self.run_dir,
             worktree: &worktree,
-            log,
-            clock: ctx.clock.as_ref(),
             prior: self.prior.as_ref(),
-            look,
             cwd: &ctx.cwd,
             home: ctx.env.home.as_deref(),
-        })
-        .await
+        };
+        Ok(report_closing(&closed.closing(reading), look))
     }
 }
 

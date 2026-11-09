@@ -26,10 +26,7 @@ pub async fn review(
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::of(shell)?;
-    let waiting = super::resolve_gate::asked_of(&ctx, run_id)
-        .await?
-        .read()
-        .await?;
+    let waiting = super::resolve_gate::waiting_of(&ctx, run_id).await?;
     let Some((plan, _)) = desk::plan_among(&waiting.shown) else {
         return Err(CliError::msg(format!(
             "run {} waits on a decision that shows no plan; `{}` says what it does show",

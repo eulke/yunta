@@ -113,7 +113,7 @@ pub use check::{
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
-pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
+pub use inputs::{resolve_inputs, ResolvedInputs};
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
 pub use pack_audit::audit_pack;
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};

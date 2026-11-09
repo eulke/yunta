@@ -66,3 +66,26 @@ fn debug_names_the_type_around_the_value() {
     let id: NodeId = "plan".parse().unwrap();
     assert_eq!(format!("{id:?}"), "NodeId(\"plan\")");
 }
+
+#[test]
+fn an_explicit_claim_is_recorded_verbatim() {
+    let alice: Responder = "alice".parse().unwrap();
+    assert_eq!(Responder::answering(Some(&alice), None), "alice");
+    assert_eq!(Responder::answering(Some(&alice), Some("ada")), "alice");
+}
+
+/// A decision made without a claim carries the `unverified:` mark, so the log
+/// never presents an ambient identity as a claimed one.
+#[test]
+fn an_ambient_user_is_marked_unverified() {
+    assert_eq!(Responder::answering(None, Some("ada")), "unverified:ada");
+}
+
+#[test]
+fn an_unset_or_multi_line_user_degrades_to_unknown() {
+    assert_eq!(Responder::answering(None, None), "unverified:unknown");
+    assert_eq!(
+        Responder::answering(None, Some("ada\nlovelace")),
+        "unverified:unknown"
+    );
+}

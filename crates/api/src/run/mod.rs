@@ -18,7 +18,7 @@ use yunta_core::events::StoredEvent;
 use yunta_core::persisted::PersistedDoc;
 use yunta_core::{Manifest, RunId};
 use yunta_render::refusal::Refused;
-use yunta_storage::{AsyncStorage, Storage};
+use yunta_storage::Storage;
 
 use crate::{Error, Failure, Project};
 
@@ -33,7 +33,7 @@ pub use stats::StatsReading;
 /// Not render's run page, which a person reads drawn from it.
 pub struct OpenedRun<'p> {
     /// The project it was opened in, whose clock, store and tree it reads.
-    project: &'p Project,
+    pub(crate) project: &'p Project,
     pub id: RunId,
     /// The directory the run keeps its manifest, its lock and its documents
     /// in.
@@ -46,9 +46,7 @@ impl Project {
     /// The run `id`, opened: refused, naming where it was looked for and the
     /// run it is one slip away from, when this machine has no record of it.
     pub async fn run(&self, id: &RunId) -> Result<OpenedRun<'_>, Error> {
-        let storage = AsyncStorage::open(&self.storage_path)
-            .await
-            .map_err(Failure::new)?;
+        let storage = self.storage().await?;
         let events = storage
             .events_for_run(id.clone())
             .await

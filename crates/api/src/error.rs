@@ -55,6 +55,30 @@ impl From<yunta_engine::RunError> for Error {
     }
 }
 
+/// A manifest that could not be frozen: inputs the workflow does not take are
+/// refused, a stop while git answers is the stop, and anything else failed
+/// below the API.
+impl From<yunta_engine::ManifestError> for Error {
+    fn from(error: yunta_engine::ManifestError) -> Self {
+        match error {
+            yunta_engine::ManifestError::Inputs(problem) => Refused::Inputs(problem).into(),
+            error if error.cancelled() => Error::Stopped,
+            error => Failure::new(error).into(),
+        }
+    }
+}
+
+/// A tree a run works in that could not be prepared: a stop while git
+/// answers is the stop, and anything else failed below the API.
+impl From<yunta_engine::WorktreeError> for Error {
+    fn from(error: yunta_engine::WorktreeError) -> Self {
+        match error.cancelled() {
+            true => Error::Stopped,
+            false => Failure::new(error).into(),
+        }
+    }
+}
+
 /// What failed below the API, held as the error it was, so no interface
 /// names an engine, store or adapter type and none branches on one: a
 /// failure is said, in its own words and its causes'.

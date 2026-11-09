@@ -9,6 +9,7 @@ use crate::output::Mode;
 use crate::surface::{Curtain, Diagnostics, EngineReading, Surface, SurfaceEnv};
 
 use super::{Driving, Presentation};
+use yunta_api::HeldRun;
 
 /// Everything this invocation holds while the run is being drawn: the
 /// surface the progress goes on, the observer the engine feeds it
@@ -23,8 +24,6 @@ pub(super) struct Watching {
     pub(super) surface: Option<Surface>,
     pub(super) observer: Option<std::sync::Arc<dyn yunta_core::port::RunObserver>>,
     pub(super) asking: crate::human_interaction::ConsoleInteraction,
-    /// The invocation's first stage, which this run answers to.
-    pub(super) cancel: CancellationToken,
     /// The task that tells the person their interrupt arrived. Kept so
     /// it dies with the arrangement it belongs to.
     announcing: Option<JoinHandle<()>>,
@@ -58,19 +57,23 @@ impl Drop for Watching {
 /// The order is the arrangement's own: what announces the interrupt is
 /// armed once there is a surface for it to say so through, because the
 /// line it raises belongs above the region rather than around it.
-pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Watching, CliError> {
+pub(super) async fn watch(
+    env: &Driving<'_>,
+    held: &HeldRun<'_>,
+    shown: &Presentation,
+) -> Result<Watching, CliError> {
     let surface = if env.output == Mode::Json {
         None
     } else {
         // The run's creation is written before any observer exists, so the
         // first thing the surface knows is read once, here.
         let log = env.ctx.project.event_log().await?;
-        let seed = log.events(&env.prepared.run_id).await?;
+        let seed = log.events(&held.id).await?;
         Some(Surface::open(
             SurfaceEnv {
-                run_id: &env.prepared.run_id,
-                manifest: env.manifest,
-                prior: env.prior.as_ref(),
+                run_id: &held.id,
+                manifest: &held.manifest,
+                prior: held.prior.as_ref(),
                 log: &log,
                 clock: std::sync::Arc::clone(&env.ctx.clock),
                 delivery: shown.delivery,
@@ -101,9 +104,8 @@ pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Wat
             surface
                 .as_ref()
                 .map_or_else(Diagnostics::none, Surface::diagnostics),
-            cancel.clone(),
+            cancel,
         )),
-        cancel,
         surface,
     })
 }

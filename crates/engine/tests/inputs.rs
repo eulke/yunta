@@ -10,8 +10,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use yunta_core::events::ArtifactId;
+use yunta_core::inputs::InputsProblem;
 use yunta_core::{ArtifactKind, InputName, InputSpec};
-use yunta_engine::{resolve_inputs, BirthOrigin, InputsError};
+use yunta_engine::{resolve_inputs, BirthOrigin};
 
 fn specs(yaml: &str) -> BTreeMap<InputName, InputSpec> {
     #[derive(serde::Deserialize)]
@@ -49,7 +50,7 @@ async fn a_required_input_with_no_value_fails_naming_it() {
         .unwrap_err();
     assert_eq!(
         err,
-        InputsError::Missing {
+        InputsProblem::Missing {
             name: "idea".into()
         }
     );
@@ -64,7 +65,7 @@ async fn an_undeclared_provided_input_is_an_error() {
         .unwrap_err();
     assert_eq!(
         err,
-        InputsError::Unknown {
+        InputsProblem::Unknown {
             names: vec!["ghost".into()],
             declared: vec![]
         }
@@ -79,7 +80,7 @@ async fn nan_is_rejected() {
         assert!(
             matches!(
                 resolve_inputs(&specs, &provided, std::path::Path::new(".")).await,
-                Err(InputsError::InvalidNumber { .. })
+                Err(InputsProblem::InvalidNumber { .. })
             ),
             "`{raw}` is not a finite number"
         );
@@ -99,7 +100,7 @@ async fn every_unknown_input_is_named_in_order() {
         .unwrap_err();
     assert_eq!(
         err,
-        InputsError::Unknown {
+        InputsProblem::Unknown {
             names: vec!["alpha".into(), "zeta".into()],
             declared: vec!["idea".into()]
         }
@@ -113,19 +114,19 @@ async fn a_number_input_parses_and_enforces_min_and_max() {
     let low = HashMap::from([("n".into(), "0".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &low, std::path::Path::new(".")).await,
-        Err(InputsError::BelowMin { .. })
+        Err(InputsProblem::BelowMin { .. })
     ));
 
     let high = HashMap::from([("n".into(), "11".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &high, std::path::Path::new(".")).await,
-        Err(InputsError::AboveMax { .. })
+        Err(InputsProblem::AboveMax { .. })
     ));
 
     let not_a_number = HashMap::from([("n".into(), "banana".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &not_a_number, std::path::Path::new(".")).await,
-        Err(InputsError::InvalidNumber { .. })
+        Err(InputsProblem::InvalidNumber { .. })
     ));
 
     let ok = HashMap::from([("n".into(), "5".to_string())]);
@@ -163,7 +164,7 @@ async fn a_boolean_input_only_accepts_true_or_false() {
     let bad = HashMap::from([("dry_run".into(), "yes".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &bad, std::path::Path::new(".")).await,
-        Err(InputsError::InvalidBoolean { .. })
+        Err(InputsProblem::InvalidBoolean { .. })
     ));
 }
 
@@ -185,7 +186,7 @@ async fn an_enum_input_only_accepts_a_declared_value() {
     let bad = HashMap::from([("severity_floor".into(), "catastrophic".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &bad, std::path::Path::new(".")).await,
-        Err(InputsError::NotInEnum { .. })
+        Err(InputsProblem::NotInEnum { .. })
     ));
 }
 
@@ -198,13 +199,13 @@ async fn a_string_input_enforces_min_length_and_pattern() {
     let too_short = HashMap::from([("branch".into(), "ab".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &too_short, std::path::Path::new(".")).await,
-        Err(InputsError::TooShort { .. })
+        Err(InputsProblem::TooShort { .. })
     ));
 
     let bad_pattern = HashMap::from([("branch".into(), "Not-Valid".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &bad_pattern, std::path::Path::new(".")).await,
-        Err(InputsError::PatternMismatch { .. })
+        Err(InputsProblem::PatternMismatch { .. })
     ));
 
     let ok = HashMap::from([("branch".into(), "feature-x".to_string())]);
@@ -227,7 +228,7 @@ async fn a_path_input_validates_existence_against_the_given_base_dir() {
     let missing = HashMap::from([("changelog".into(), "NOPE.md".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &missing, dir.path()).await,
-        Err(InputsError::PathNotFound { .. })
+        Err(InputsProblem::PathNotFound { .. })
     ));
 
     let present = HashMap::from([("changelog".into(), "CHANGELOG.md".to_string())]);
@@ -250,7 +251,7 @@ async fn a_document_input_validates_existence_against_the_given_base_dir() {
     let missing = HashMap::from([("plan".into(), "NOPE.yaml".to_string())]);
     assert!(matches!(
         resolve_inputs(&specs, &missing, dir.path()).await,
-        Err(InputsError::PathNotFound { .. })
+        Err(InputsProblem::PathNotFound { .. })
     ));
 
     assert!(resolve_inputs(
@@ -366,7 +367,7 @@ tasks:
         .await
         .unwrap_err();
 
-    let InputsError::DocumentRefused { name, report } = &error else {
+    let InputsProblem::DocumentRefused { name, report } = &error else {
         panic!("a document that breaks its rules is refused as one: {error:?}");
     };
     assert_eq!(name, "tasks");
@@ -391,7 +392,7 @@ async fn a_document_input_that_is_not_its_kind_at_all_is_refused_naming_the_path
         .await
         .unwrap_err();
 
-    let InputsError::DocumentRefused { name, report } = &error else {
+    let InputsProblem::DocumentRefused { name, report } = &error else {
         panic!("a document whose shape is wrong is refused as one: {error:?}");
     };
     assert_eq!(name, "tasks");
@@ -413,7 +414,7 @@ async fn a_document_input_that_cannot_be_read_as_a_file_says_so() {
         .unwrap_err();
 
     assert!(
-        matches!(&error, InputsError::DocumentUnreadable { name, .. } if name == "tasks"),
+        matches!(&error, InputsProblem::DocumentUnreadable { name, .. } if name == "tasks"),
         "a path that is not a readable file is a file problem, not a document one: {error:?}"
     );
 }

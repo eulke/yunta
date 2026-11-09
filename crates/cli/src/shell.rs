@@ -64,23 +64,6 @@ impl Shell {
         })
     }
 
-    /// A shell over `dir` with nothing to interrupt it and no process read:
-    /// what a unit test of a command hands it.
-    #[cfg(test)]
-    pub(crate) fn for_test(dir: PathBuf) -> Self {
-        Shell {
-            workspace: Workspace {
-                dir,
-                env: Env::default(),
-                clock: Arc::new(SystemClock),
-                ids: Arc::new(SystemIdSource),
-                secrets: Arc::new(ProcessSecrets),
-                binary: PathBuf::from("yunta"),
-            },
-            interrupt: Interrupt::never(),
-        }
-    }
-
     /// The same workspace and the same two stages, owned: what a server that
     /// answers for the life of the process holds.
     pub(crate) fn shared(&self) -> Self {

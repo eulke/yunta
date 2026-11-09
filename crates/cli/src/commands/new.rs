@@ -341,16 +341,17 @@ impl Written<'_> {
         cwd: &Path,
         config: &ConfigLayer,
     ) -> Result<Diagnosis, CliError> {
-        let ctx = crate::context::Context::of(shell)?;
-        let verdict = super::verdict::verdict(
-            &ctx,
-            self.workflow,
-            self.path,
+        let project = shell.workspace().project_at(cwd)?;
+        let judged = yunta_api::Judged {
+            workflow: self.workflow,
+            path: self.path,
             config,
-            super::verdict::layer_conflicts(cwd, &shell.workspace().env)?,
-            super::verdict::Reach::Workflow,
-        )
-        .await?;
-        verdict.diagnosis(&ctx).await
+            conflicts: project.layer_conflicts()?,
+        };
+        let stop = shell.stop();
+        let verdict = project
+            .verdict(judged, yunta_api::VerdictReach::Workflow, &stop)
+            .await?;
+        Ok(verdict.diagnosis(&stop).await?)
     }
 }
