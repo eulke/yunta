@@ -1684,11 +1684,13 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 - A checkout git still marks as being added may be cleared, and clearing unlocks it before its directory goes and its record is pruned; the pool's `add` clears it before asking git anything, and makes it again under its number (`checkout_pool_shared::a_checkout_whose_add_was_cut_off_is_made_again`, which failed with the CI's own `status` invocation).
 - Every add a cancellation stops is undone, a detached one and one on a branch included, and the undo unlocks the checkout, tries `remove --force`, removes its directory, prunes, and deletes the branch only when the cut made one (`worktree::tests::the_undo_of_a_cut_add_takes_away_a_checkout_git_still_marks_as_being_added`; with the unlock taken out, git still records it).
 
+**Then, the gate's `deny`:** four advisories published meanwhile refused the tree: three in `rmcp` 3.5.1, fixed by 3.9.0 (`1b34ddc4`), and one in the SQLite `libsqlite3-sys` 0.38 bundles, fixed by `rusqlite` 0.41.1 with SQLite 3.54.1 (`de2b50f9`). Each changelog was read; the suite passed unchanged, 275 binaries and 4,557 tests, the pool fix's three among them, and every step of the gate.
+
 **Acceptance criteria:**
-- [ ] `gh pr checks 30` passes on Linux and macOS.
+- [x] `gh pr checks 30` passes on Linux and macOS: run 42625212493 on `de2b50f9`, `ci`, `test-macos`, `test-release` and `musl-build`.
 
 **Verification:**
-- [ ] Manual check: `gh pr view 30`, `gh pr checks 30`, `git status`.
+- [x] Manual check: `gh pr view 30`, `gh pr checks 30`, `git status`.
 
 **Dependencies:** Task 45
 
@@ -1697,4 +1699,4 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Estimated scope:** S
 
 ### Checkpoint J: after Tasks 43–46
-- [ ] The user reviews the measurements, the review and the pull request.
+- [x] The user reviews the measurements, the review and the pull request: approved on 2026-11-09.
