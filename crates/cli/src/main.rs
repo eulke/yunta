@@ -276,7 +276,7 @@ pub(crate) fn load_manifest(
 ) -> Result<yunta_core::persisted::PersistedDoc<yunta_core::Manifest>, CliError> {
     let bytes = std::fs::read(path)
         .map_err(|source| CliError::io("read run manifest at", path.display(), source))?;
-    yunta_core::persisted::PersistedDoc::read(&bytes)
+    yunta_core::Manifest::read_frozen(&bytes)
         .map_err(|error| CliError::msg(yunta_core::describe(&error)))
 }
 

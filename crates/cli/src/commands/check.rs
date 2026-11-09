@@ -12,7 +12,6 @@ use yunta_core::ConfigLayer;
 
 use crate::context::Context;
 use crate::error::CliError;
-use crate::load_yaml;
 use crate::output::Outcome;
 use crate::output::{blank, show};
 use crate::shell::Shell;
@@ -82,7 +81,7 @@ fn config_for(
     config_path: Option<&Path>,
 ) -> Result<(ConfigLayer, Vec<String>), CliError> {
     Ok(match config_path {
-        Some(path) => (load_yaml(path, "config")?, Vec::new()),
+        Some(path) => (read_config(path)?, Vec::new()),
         None => (
             ConfigLayer::merge_layers(
                 yunta_api::config_layers(cwd, env)?
@@ -92,4 +91,13 @@ fn config_for(
             super::verdict::layer_conflicts(cwd, env)?,
         ),
     })
+}
+
+/// The one merged config file `--config` names, read through core's reader of
+/// a config layer.
+fn read_config(path: &Path) -> Result<ConfigLayer, CliError> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|source| CliError::io("read config at", path.display(), source))?;
+    ConfigLayer::read(&contents)
+        .map_err(|e| CliError::msg(format!("failed to parse config at {}: {e}", path.display())))
 }

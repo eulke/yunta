@@ -138,7 +138,7 @@ pub async fn read_manifest(
             path: path.to_path_buf(),
             source,
         })?;
-    yunta_core::persisted::PersistedDoc::read(&bytes).map_err(|source| ManifestReadError::Parse {
+    Manifest::read_frozen(&bytes).map_err(|source| ManifestReadError::Parse {
         path: path.to_path_buf(),
         source,
     })

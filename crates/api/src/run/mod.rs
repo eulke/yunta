@@ -125,5 +125,5 @@ fn read_manifest(path: &Path) -> Result<PersistedDoc<Manifest>, Failure> {
             source,
         })
     })?;
-    PersistedDoc::read(&bytes).map_err(Failure::new)
+    Manifest::read_frozen(&bytes).map_err(Failure::new)
 }

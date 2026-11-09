@@ -326,7 +326,7 @@ async fn write_project(
     // fails here instead of leaving an unreadable file — the more so under
     // `--force`, which would otherwise overwrite a good config with a bad
     // one.
-    yunta_core::yaml::parse::<yunta_core::ConfigLayer>(&config_yaml)
+    yunta_core::ConfigLayer::read(&config_yaml)
         .map_err(|e| CliError::msg(format!("the generated config is not valid: {e}")))?;
     tokio::fs::write(config_path, config_yaml)
         .await

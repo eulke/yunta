@@ -131,11 +131,10 @@ fn load_layer(path: &Path, home: Option<&Path>) -> Result<Option<ConfigLayer>, P
             })
         }
     };
-    let mut layer: ConfigLayer =
-        yunta_core::yaml::parse(&contents).map_err(|e| ProjectError::Parse {
-            path: path.to_path_buf(),
-            detail: e.to_string(),
-        })?;
+    let mut layer: ConfigLayer = ConfigLayer::read(&contents).map_err(|e| ProjectError::Parse {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
+    })?;
     layer.expand_home(home).map_err(|e| ProjectError::Parse {
         path: path.to_path_buf(),
         detail: e.to_string(),

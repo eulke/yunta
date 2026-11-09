@@ -194,9 +194,10 @@ fn run_row(
         )
     })?;
     let manifest_path = yunta_engine::run_dir::manifest_path(&run_dir);
-    let manifest: Manifest = std::fs::read_to_string(&manifest_path)
+    let manifest: Manifest = std::fs::read(&manifest_path)
         .ok()
-        .and_then(|text| yunta_core::yaml::parse(&text).ok())
+        .and_then(|bytes| Manifest::read_frozen(&bytes).ok())
+        .map(|frozen| frozen.doc)
         .ok_or_else(|| {
             UnreadableRun::new(
                 &run_id,

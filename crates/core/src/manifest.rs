@@ -284,6 +284,19 @@ fn rename_isolation(value: &mut crate::yaml::Value, retired: &str, replacement: 
 }
 
 impl Manifest {
+    /// A run's manifest as its file holds it, with what this binary does not
+    /// read kept aside.
+    ///
+    /// Every crate that opens a run reads its manifest through here: the
+    /// generic reader is built in each crate that names it, and a manifest
+    /// carries its whole workflow, so one concrete reader keeps one copy of
+    /// what reads it in the binary.
+    pub fn read_frozen(
+        bytes: &[u8],
+    ) -> Result<crate::persisted::PersistedDoc<Manifest>, crate::persisted::PersistedError> {
+        crate::persisted::PersistedDoc::read(bytes)
+    }
+
     /// What the person asked the run for, as they wrote it: the value of
     /// the input the workflow declares as its request.
     pub fn request(&self) -> Option<&str> {
