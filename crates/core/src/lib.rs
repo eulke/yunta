@@ -104,8 +104,8 @@ pub use config::{
 pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
 pub use detected::{Detected, Ecosystem, MachineAdapters, ProbedAdapter};
 pub use diagnostic::{
-    ArtifactFailure, Diagnostic, DocumentRef, Fault, FileProblem, Named, Problem, Report, Rule,
-    RuleCode, RuleWords, RunFault, Subject,
+    ArtifactFailure, Diagnostic, DocumentKind, DocumentRef, Fault, FileProblem, Named, Problem,
+    Report, Rule, RuleCode, RuleWords, RunFault, Subject, UnknownDocument,
 };
 pub use error::{describe, with_causes, AdapterError, Result, Unbuildable};
 pub use events::Unredactable;
@@ -135,9 +135,7 @@ pub use pack::{
     stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
     PackManifestError, PackRequires, RequiredRunner,
 };
-pub use pack_audit::{
-    NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit, WorkflowUnread,
-};
+pub use pack_audit::{NodeAudit, PackAudit, PromptText, UnreadFile, WorkflowAudit, WorkflowUnread};
 pub use policy::{ScopeCeiling, ScopeExpansionMode};
 pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionFault, QuestionsFile};
 pub use run_tool::RunTool;
@@ -151,13 +149,13 @@ pub use tasks::{
 pub use workflow::{
     followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
     ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Ask, Because, CheckBuiltin,
-    CleanupTarget, CliConfig, ContextFile, ContextSpec, Coordination, DistillArtifact,
-    DocumentKind, Effort, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy,
-    KnowledgeLayer, KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec,
-    MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
-    NodePermissions, NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource,
-    ReservedIdentity, Resolved, RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion,
-    TasksParams, UnknownDocument, Workflow, WorkflowFault,
+    CleanupTarget, CliConfig, ContextFile, ContextSpec, Coordination, DistillArtifact, Effort,
+    ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer,
+    KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact,
+    MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
+    NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
+    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, Workflow,
+    WorkflowFault,
 };
 
 /// The schema major this binary speaks — what a

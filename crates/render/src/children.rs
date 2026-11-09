@@ -4,8 +4,7 @@
 
 use surco::glyphs::{Glyphs, Mark};
 use surco::words::Standing;
-use yunta_core::events::ChildLink;
-use yunta_core::events::TerminalState;
+use yunta_core::events::{ChildLink, TerminalState};
 use yunta_core::NodeId;
 use yunta_replay::frame::RunFrame;
 
@@ -31,8 +30,8 @@ pub fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
     let standing = child_standing(child.terminal);
     format!(
         "{} {} {} child run {}",
-        glyphs.mark(standing.0),
-        standing.1,
+        glyphs.mark(standing.mark),
+        standing.word,
         glyphs.sep(),
         child.run_id.handle()
     )
@@ -71,14 +70,28 @@ pub fn children_of<'a>(frame: &'a RunFrame, node: &NodeId) -> Vec<&'a ChildLink>
 /// A child the parent's log has no close for is open and nothing more:
 /// how far it has got is on the child's own log, which this run never
 /// opens.
-pub fn child_standing(terminal: Option<TerminalState>) -> (Mark, &'static str) {
+pub fn child_standing(terminal: Option<TerminalState>) -> ChildStanding {
     match terminal {
-        None => (Mark::Running, "still open"),
+        None => ChildStanding {
+            mark: Mark::Running,
+            word: "still open",
+        },
         Some(terminal) => {
             let standing = closed_as(terminal);
-            (standing.mark(), standing.word())
+            ChildStanding {
+                mark: standing.mark(),
+                word: standing.word(),
+            }
         }
     }
+}
+
+/// Where a child stands: the mark that carries it for the eye, and the
+/// word that carries it for everybody.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChildStanding {
+    pub mark: Mark,
+    pub word: &'static str,
 }
 
 /// The word a run's close is named by, wherever a surface names one:

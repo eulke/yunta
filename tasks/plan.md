@@ -545,7 +545,7 @@ Into `page/`, with their tests, fixtures and goldens:
 | 3. Actions | `RunFrame::actions`'s tests, moved from `advice`; a search for `after_for` finds nothing |
 | 4. One spelling | The clap parse test over every kind; `smells --check` with `command_outside_command_rs` at 0; a search for `Spell` finds nothing |
 | 5. Names | A search for each old name in the spec's table finds nothing in `crates/` |
-| 6. Nothing printed changes | 99 goldens' digests against Phase 0's; the Phase 0 outputs byte for byte, but for the seven texts of decision 1; the CLI's integration tests unchanged but for those texts; the suite's count explained |
+| 6. Nothing printed changes | 99 goldens' digests against Phase 0's; the Phase 0 outputs byte for byte, but for the seven texts of decision 1 and a decision's record where nothing else on the page says it; the CLI's integration tests unchanged but for those texts; the suite's count explained |
 | 7. Docs, gate | `docs --check`, `smells --check`, `schema --check`, `cargo deny check`, every step of the `ci` job, at each commit |
 
 ## Risks and Mitigations
@@ -573,4 +573,4 @@ Phase 8's 16 pages are independent of each other: each is a command's own file a
 
 ## Open Questions
 
-None. The seven texts of decision 1 change by this plan's approval, the three of `yunta pack` by the user's choice during Phase 2.
+None. The seven texts of decision 1 change by this plan's approval, the three of `yunta pack` by the user's choice during Phase 2. A decision's record, said in the decision where the page quotes a failed node's evidence nowhere else, by the user's choice in Phase 9.

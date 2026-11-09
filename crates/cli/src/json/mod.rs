@@ -36,7 +36,6 @@ use waiting::WaitingOnJson;
 
 use crate::commands::stats::json::TimeJson;
 use crate::commands::status::decision_json::DecisionJson;
-pub use crate::output::print_json;
 use crate::output::NextCommand;
 use crate::output::Outcome;
 use surco::words::Standing;

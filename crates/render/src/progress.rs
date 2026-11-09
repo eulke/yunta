@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use surco::glyphs::{Glyphs, Mark};
+use surco::glyphs::Glyphs;
 use surco::text::counted;
 use surco::words::Standing;
 use yunta_core::events::{TaskLedger, TaskStatus};
@@ -42,7 +42,7 @@ pub fn row(frame: &RunFrame, glyphs: Glyphs) -> String {
 /// names. In the furrow's order: what the run left behind, where it is
 /// now, what is ahead of it. Nothing when every node finished, which the
 /// progress row already says.
-pub fn places(frame: &RunFrame) -> Vec<(Mark, String)> {
+pub fn places(frame: &RunFrame) -> Vec<NodesStanding> {
     let mut places: BTreeMap<(u8, Standing), Vec<&str>> = BTreeMap::new();
     // What the run's mode or project leaves out is not work this run will
     // do: the progress row counts it apart.
@@ -69,13 +69,19 @@ pub fn places(frame: &RunFrame) -> Vec<(Mark, String)> {
     }
     places
         .into_iter()
-        .map(|((_, standing), names)| {
-            (
-                standing.mark(),
-                format!("{} {standing}: {}", names.len(), named(&names)),
-            )
+        .map(|((_, standing), names)| NodesStanding {
+            standing,
+            said: format!("{} {standing}: {}", names.len(), named(&names)),
         })
         .collect()
+}
+
+/// The nodes that stand at one place, as a page's `nodes` row says them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodesStanding {
+    pub standing: Standing,
+    /// How many stand there, the word, and the first of their names.
+    pub said: String,
 }
 
 /// The run's tasks, as a page's `tasks` row says them: done of the total,

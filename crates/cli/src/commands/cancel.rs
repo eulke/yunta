@@ -36,10 +36,11 @@ use yunta_render::page::{CancelState, Cancelled, Page};
 
 use crate::commands::close::give_back;
 use crate::context::{Context, Opened};
-use crate::error::{note, warn, CliError};
+use crate::error::CliError;
 use crate::json::SCHEMA_VERSION;
 use crate::output::Outcome;
 use crate::output::{emit, progress, Answer, Mode};
+use crate::output::{note, warn};
 
 /// How long the engine gets to react to the SIGINT before the escalation
 /// — generous next to the engine's own interrupt grace of at most 200ms,

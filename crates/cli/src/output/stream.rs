@@ -28,7 +28,7 @@ pub(crate) fn settle_color(policy: ColorPolicy, look: Option<&str>) {
     POLICY.get_or_init(|| policy);
     // Said once the policy is settled, because the word `warning` takes its paint.
     if let Some(sentence) = unknown_look(look) {
-        crate::error::warn(sentence);
+        crate::output::warn(sentence);
     }
 }
 
@@ -66,7 +66,7 @@ pub(crate) fn settle_glyphs(env: &GlyphEnv) {
     let chosen = Glyphs::select(env);
     if let Some(value) = &env.explicit {
         if parse_choice(value).is_none() {
-            crate::error::warn(format!(
+            crate::output::warn(format!(
                 "{OVERRIDE_VAR}=`{value}` is neither `unicode` nor `ascii`; drawing with \
                  {chosen}, which is what this environment names"
             ));

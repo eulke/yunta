@@ -87,7 +87,7 @@ What moves:
 
 **How each module is built:** spec, plan, tasks, implementation, in that order and each with its own approval. The next module starts when this one is closed.
 
-**Delivery:** one branch, `feature/yunta-tui`, in the worktree `/Users/eulke/development/yunta-tui`; one commit per module, with the suite green; one pull request against `main`, when the last module ends.
+**Delivery:** one branch, `feature/yunta-tui`, in the worktree `/Users/eulke/development/yunta-tui`; one commit per module, or one per phase where its plan is committed in phases, each with the suite green; one pull request against `main`, when the last module ends.
 
 `tui` does not wait for `run-words`: the words appear when the socket exists, with no change to the screen. Only the "decide" slice needs `parked-answers`.
 

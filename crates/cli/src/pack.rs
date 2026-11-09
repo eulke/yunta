@@ -10,7 +10,7 @@ use yunta_core::CommitSha;
 use yunta_engine::process::Supervision;
 use yunta_engine::GitError;
 
-use crate::error::warn;
+use crate::output::warn;
 use yunta_core::durable::{self, Durability};
 use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 

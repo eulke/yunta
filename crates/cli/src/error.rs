@@ -15,8 +15,6 @@ use yunta_core::step::{NextStep, Reach};
 use yunta_core::{Pid, RunId};
 use yunta_render::command::{self, Reader};
 
-pub use crate::output::{note, warn};
-
 mod hold;
 pub(crate) mod page;
 pub(crate) mod words;

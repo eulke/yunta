@@ -495,5 +495,6 @@ fn the_trace_says_each_nodes_rounds_returns_and_waits() {
 }
 
 mod closing;
+mod decision;
 mod harvest;
 mod words;

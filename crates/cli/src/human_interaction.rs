@@ -31,7 +31,7 @@ use yunta_core::{Env, QuestionsFile};
 use yunta_engine::{HumanInteraction, QuestionsReply};
 
 use crate::ask::{answer, decide, Answered, Ask, Console, Escape, NoAnswer, Opens};
-use crate::error::{note, warn};
+use crate::output::{note, warn};
 use crate::surface::{Curtain, Diagnostics};
 
 /// The console surface of one invocation, holding what a prompt has to

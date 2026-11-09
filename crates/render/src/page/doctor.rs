@@ -18,13 +18,17 @@ use crate::command;
 pub struct Doctor<'a> {
     /// Whether `--session` opened a session per binding.
     pub session: bool,
-    pub holds: bool,
     pub checks: &'a [Check],
     /// Whether every check stands on its own row.
     pub full: bool,
 }
 
 impl Doctor<'_> {
+    /// Whether every check holds.
+    fn holds(&self) -> bool {
+        self.checks.iter().all(Check::holds)
+    }
+
     /// The word a doctor verdict says: `ready` when every check holds, `not ready` when one does not.
     pub fn word(holds: bool) -> &'static str {
         match holds {
@@ -36,7 +40,7 @@ impl Doctor<'_> {
     /// Whether this machine is ready to run, and how many checks stop a
     /// run or are worth a look.
     fn headline(&self) -> Headline {
-        let mark = match self.holds {
+        let mark = match self.holds() {
             true => Mark::Done,
             false => Mark::Failed,
         };
@@ -47,7 +51,7 @@ impl Doctor<'_> {
                     sessions: false,
                     full: false,
                 }),
-                Doctor::word(self.holds),
+                Doctor::word(self.holds()),
             ),
             self.checks,
         )

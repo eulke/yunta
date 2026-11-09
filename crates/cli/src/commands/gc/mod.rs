@@ -31,8 +31,9 @@ use yunta_core::{Isolation, Manifest, RunId};
 use yunta_storage::Storage;
 
 use crate::context::Context;
-use crate::error::{warn, CliError};
+use crate::error::CliError;
 use crate::output::show;
+use crate::output::warn;
 use crate::output::Outcome;
 use crate::project::Project;
 

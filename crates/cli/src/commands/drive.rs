@@ -429,6 +429,6 @@ pub(crate) async fn report_run_json(
     warnings: PreRunWarnings,
 ) -> Result<crate::json::RunDocument, CliError> {
     let document = documented(ctx, storage, run_id, manifest, warnings).await?;
-    crate::json::print_json(&document)?;
+    crate::output::print_json(&document)?;
     Ok(document)
 }

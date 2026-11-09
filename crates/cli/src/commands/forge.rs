@@ -8,7 +8,8 @@ use yunta_adapters::GitHubForge;
 use yunta_core::port::Forge;
 use yunta_core::{describe, ConfigLayer, NodeKind, SecretSource, Workflow};
 
-use crate::error::{warn, CliError};
+use crate::error::CliError;
+use crate::output::warn;
 
 /// The forge a real invocation can offer — `None` when either
 /// `forge.github` isn't configured, or the named `token_env` isn't

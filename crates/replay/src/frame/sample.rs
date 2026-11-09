@@ -18,7 +18,7 @@ use yunta_core::events::TokenUsage;
 use yunta_core::{ModeName, NodeId, RunId};
 
 use super::{Counter, Declares, Happening, Moment, NodeFrame, NodeStanding, RunFrame, RunPhase};
-use crate::TimeSpent;
+use crate::clock::TimeSpent;
 
 /// How long a built node has been working, and how long ago it last
 /// said anything — a node alive and speaking, which is what a surface

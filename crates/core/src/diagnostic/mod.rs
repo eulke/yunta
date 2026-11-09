@@ -16,23 +16,23 @@
 
 use std::fmt;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 mod artifact;
+mod document;
 mod fault;
 mod problem;
 mod run_fault;
 mod subject;
 
 pub use artifact::{ArtifactCode, ArtifactFailure, FileCode, FileProblem};
+pub use document::{DocumentKind, UnknownDocument};
 pub use fault::Fault;
 pub use problem::{DiagnosticCode, ParseCode, Problem, Rule, RuleCode, RuleWords};
 pub use run_fault::RunFault;
 pub use subject::{Named, Subject};
 
 use crate::yaml::{Location, Pointer, SourceMap};
-use crate::ArtifactKind;
 
 /// Which document a report is about: the kind that fixes its shape, and
 /// where a reader opens it.
@@ -59,51 +59,6 @@ impl DocumentRef {
     /// How the document names itself to a reader.
     pub fn label(&self) -> &'static str {
         self.kind.label()
-    }
-}
-
-/// What kind of document a report is about.
-///
-/// Every document this system reads is held to a shape and to rules,
-/// and reports what it found the same way — so a workflow that breaks
-/// its own rules reaches a reader in the shape a tasks document already
-/// does. The two are separate arms because they are read at different
-/// moments by different doors: a workflow before any run, an artifact
-/// at a node's close.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "kebab-case")]
-pub enum DocumentKind {
-    /// The workflow file a run is created from.
-    Workflow,
-    /// A document a node produces and the engine reads.
-    #[serde(untagged)]
-    Artifact(ArtifactKind),
-}
-
-impl DocumentKind {
-    /// How the kind names itself to a reader.
-    pub fn label(self) -> &'static str {
-        match self {
-            DocumentKind::Workflow => "workflow",
-            DocumentKind::Artifact(kind) => kind.label(),
-        }
-    }
-}
-
-impl From<ArtifactKind> for DocumentKind {
-    fn from(kind: ArtifactKind) -> Self {
-        DocumentKind::Artifact(kind)
-    }
-}
-
-impl fmt::Display for DocumentKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DocumentKind::Workflow => f.write_str("workflow"),
-            DocumentKind::Artifact(kind) => fmt::Display::fmt(kind, f),
-        }
     }
 }
 

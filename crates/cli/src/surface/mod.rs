@@ -294,7 +294,7 @@ impl Surface {
                 // The painter only ever draws, so a run is unaffected by
                 // one that stopped early — but a reader who saw progress
                 // freeze deserves to know it was not the run.
-                crate::error::warn(format!("the task drawing this run stopped early: {e}"));
+                crate::output::warn(format!("the task drawing this run stopped early: {e}"));
             }
         }
     }

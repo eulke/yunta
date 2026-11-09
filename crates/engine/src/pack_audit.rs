@@ -10,12 +10,15 @@
 //! anything; whether the pack's own tests pass is a separate,
 //! IO-heavy step the CLI layer owns (it needs an adapter and a sandbox,
 //! neither of which this module touches).
+//!
+//! The inventory is core's `PackAudit`, which a page says; this builds one
+//! from a pack's files.
 
 use std::path::Path;
 
 use yunta_core::{
-    ContextSpec, Hooks, Node, NodeAudit, NodeKind, PackAudit, PackManifest, PromptReadError,
-    PromptSource, PromptText, WorkflowAudit, WorkflowUnread,
+    ContextSpec, Hooks, Node, NodeAudit, NodeKind, PackAudit, PackManifest, PromptSource,
+    PromptText, UnreadFile, WorkflowAudit, WorkflowUnread,
 };
 
 /// Audits every workflow the manifest declares under `contents.workflows`,
@@ -42,10 +45,10 @@ fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
         Err(e) => {
             return WorkflowAudit {
                 declared_path: declared.to_string(),
-                error: Some(WorkflowUnread::Missing(format!(
-                    "cannot read `{}`: {e}",
-                    path.display()
-                ))),
+                error: Some(WorkflowUnread::Unreadable(UnreadFile {
+                    path: path.clone(),
+                    source: e,
+                })),
                 nodes: Vec::new(),
             }
         }
@@ -154,7 +157,7 @@ fn resolve_prompt(prompt: &PromptSource, workflow_dir: &Path) -> PromptText {
         PromptSource::Inline(text) => Ok(text.clone()),
         PromptSource::File(path) => {
             let full_path = workflow_dir.join(path);
-            std::fs::read_to_string(&full_path).map_err(|source| PromptReadError {
+            std::fs::read_to_string(&full_path).map_err(|source| UnreadFile {
                 path: full_path.clone(),
                 source,
             })

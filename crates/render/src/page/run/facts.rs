@@ -39,8 +39,8 @@ impl Run<'_> {
         let mut fields = Fields::new().push_if("progress", progress::row(self.frame, glyphs));
         // The whole story names every node and task in a table of its own.
         if !full {
-            for (mark, place) in progress::places(self.frame) {
-                fields = fields.push_marked("nodes", mark, place);
+            for place in progress::places(self.frame) {
+                fields = fields.push_marked("nodes", place.standing.mark(), place.said);
             }
             let tasks = progress::tasks_row(self.frame, &self.state.tasks, glyphs);
             fields = fields.push_if("tasks", tasks.unwrap_or_default());

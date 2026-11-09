@@ -20,7 +20,7 @@ use yunta_core::{OptionId, Responder, RunId};
 use yunta_render::command;
 use yunta_render::command::Reader;
 use yunta_render::escalation::Route;
-use yunta_render::page::{Answered, Page, Resolution};
+use yunta_render::page::{GateAnswered, Page, Resolution};
 use yunta_replay::RunState;
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
@@ -48,7 +48,7 @@ pub(crate) async fn resolve(
     free_text: Option<&str>,
 ) -> Result<String, CliError> {
     record(ctx, run_id, option, resolved_by, free_text).await?;
-    Ok(Answered::sentence(run_id, option))
+    Ok(GateAnswered::sentence(run_id, option))
 }
 
 /// Records the decision on the run's log and hands the run to a detached
@@ -274,7 +274,7 @@ fn answer(run_id: &RunId, resolution: Resolution) -> ResolveGateAnswer {
 
 impl Answer for ResolveGateAnswer {
     fn page(&self) -> impl Page + '_ {
-        Answered {
+        GateAnswered {
             run_id: &self.run_id,
             resolution: &self.resolution,
         }

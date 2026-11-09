@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_render::page::{FieldGroup, FieldRow, UnreadableRun};
+use yunta_render::page::{FieldGroup, FieldRow, RunUnread, UnreadableRun};
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_storage::Storage;
 
@@ -150,18 +150,17 @@ fn run_row(
     run_id: RunId,
     now: DateTime<Utc>,
 ) -> Result<(FieldRow, Option<PathBuf>), UnreadableRun> {
-    let events = storage.events_for_run(&run_id).map_err(|e| {
-        UnreadableRun::new(&run_id, format!("its event log does not read back: {e}"))
-    })?;
+    let events = storage
+        .events_for_run(&run_id)
+        .map_err(|e| UnreadableRun::new(&run_id, RunUnread::EventLog(e.to_string())))?;
     // The same frozen-path-aware search `status` uses, so a run created
     // under a since-changed `paths.runs` still lists.
     let run_dir = project.run_dir(run_id.as_str()).ok_or_else(|| {
         UnreadableRun::new(
             &run_id,
-            format!(
-                "manifest missing or unreadable under {}",
-                project.runs_root.display()
-            ),
+            RunUnread::NoDirectory {
+                runs_root: project.runs_root.clone(),
+            },
         )
     })?;
     let manifest_path = yunta_engine::run_dir::manifest_path(&run_dir);
@@ -171,10 +170,9 @@ fn run_row(
         .ok_or_else(|| {
             UnreadableRun::new(
                 &run_id,
-                format!(
-                    "manifest missing or unreadable at {}",
-                    manifest_path.display()
-                ),
+                RunUnread::Manifest {
+                    path: manifest_path.clone(),
+                },
             )
         })?;
     let state = yunta_replay::RunState::replay(&events);

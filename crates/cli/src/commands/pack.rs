@@ -313,11 +313,11 @@ pub async fn add(
         false => count_cases(&dest),
     };
     let needs = needs::unmet(&ctx, &dest, &manifest).await;
+    let at = surco::paths::shown(&dest, &cwd, None);
     let installed = |needs| Installed {
         manifest: &manifest,
         commit: &commit,
-        at: &dest,
-        cwd: &cwd,
+        at: &at,
         cases: &cases,
         needs,
     };

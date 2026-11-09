@@ -1,23 +1,45 @@
-//! The kinds of document Yunta reads and validates, and how a name is read
-//! as one: a kind of artifact, or a workflow file. `yunta schema`, the
-//! control plane's `document_shape` tool and a workflow's own keys read a
-//! name the same way, so one mistake gets one sentence.
+//! The kinds of document Yunta reads and validates — a workflow file, or a
+//! kind of artifact a node produces — and how a name is read as one.
+//! `yunta schema`, the control plane's `document_shape` tool, a workflow's
+//! own keys and every report a document gets read the same kinds, so one
+//! mistake gets one sentence.
 
-use serde::Deserialize;
+use std::fmt;
 
-use super::ArtifactKind;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-/// A kind of document Yunta reads and validates: what an artifact of a kind
-/// carries, or a workflow file. `yunta schema`, the control plane's
-/// `document_shape` tool and the page that lists them read these, and no
-/// other name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use crate::ArtifactKind;
+
+/// What kind of document a report is about.
+///
+/// Every document this system reads is held to a shape and to rules,
+/// and reports what it found the same way — so a workflow that breaks
+/// its own rules reaches a reader in the shape a tasks document already
+/// does. The two are separate arms because they are read at different
+/// moments by different doors: a workflow before any run, an artifact
+/// at a node's close.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum DocumentKind {
-    Artifact(ArtifactKind),
+    /// The workflow file a run is created from.
     Workflow,
+    /// A document a node produces and the engine reads.
+    #[serde(untagged)]
+    Artifact(ArtifactKind),
 }
 
 impl DocumentKind {
+    /// How the kind names itself to a reader.
+    pub fn label(self) -> &'static str {
+        match self {
+            DocumentKind::Workflow => "workflow",
+            DocumentKind::Artifact(kind) => kind.label(),
+        }
+    }
+
     /// Every document shown, in the order the catalog lists them.
     pub fn all() -> impl Iterator<Item = DocumentKind> {
         ArtifactKind::ALL
@@ -39,6 +61,21 @@ impl DocumentKind {
         match self {
             DocumentKind::Artifact(kind) => kind.purpose(),
             DocumentKind::Workflow => "the nodes a run executes, and how they connect",
+        }
+    }
+}
+
+impl From<ArtifactKind> for DocumentKind {
+    fn from(kind: ArtifactKind) -> Self {
+        DocumentKind::Artifact(kind)
+    }
+}
+
+impl fmt::Display for DocumentKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DocumentKind::Workflow => f.write_str("workflow"),
+            DocumentKind::Artifact(kind) => fmt::Display::fmt(kind, f),
         }
     }
 }

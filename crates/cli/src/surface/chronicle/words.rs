@@ -424,10 +424,10 @@ fn child_words(happening: &children::happening::Happening) -> (Option<Mark>, Str
             format!("child run {} opened", run_id.handle()),
         ),
         H::Closed { run_id, terminal } => {
-            let (mark, closed) = child_standing(Some(*terminal));
+            let standing = child_standing(Some(*terminal));
             (
-                Some(mark),
-                format!("child run {} {closed}", run_id.handle()),
+                Some(standing.mark),
+                format!("child run {} {}", run_id.handle(), standing.word),
             )
         }
         H::Iteration { iteration } => (None, format!("iteration {iteration}")),

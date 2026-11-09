@@ -28,8 +28,10 @@ use crate::command;
 pub struct Catalog {
     /// Each installed pack that does not read, as its error says it.
     pub broken_packs: Vec<String>,
-    /// Where the catalog looked: the repo's workflows, then its packs.
-    pub looked_in: [PathBuf; 2],
+    /// Where the catalog looked for the repository's own workflows.
+    pub workflows_dir: PathBuf,
+    /// Where it looked for the packs installed in it.
+    pub packs_dir: PathBuf,
     pub offered: Vec<OfferedWorkflow>,
 }
 
@@ -69,11 +71,10 @@ impl Page for Catalog {
         }
         if self.offered.is_empty() {
             if self.broken_packs.is_empty() {
-                let [workflows, packs] = &self.looked_in;
                 doc = doc.with(Prose(format!(
                     "no workflows under {} or {}",
-                    workflows.display(),
-                    packs.display()
+                    self.workflows_dir.display(),
+                    self.packs_dir.display()
                 )));
             }
             return doc;

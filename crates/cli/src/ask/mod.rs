@@ -28,7 +28,7 @@ use surco::paint::{
 use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::{Env, Pid, Responder};
 
-use crate::error::warn;
+use crate::output::warn;
 use crate::surface::{Diagnostics, TerminalEnv};
 
 /// What `--interactive` says when there is no terminal to ask on, before

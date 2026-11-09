@@ -17,7 +17,8 @@ use yunta_render::blocks::diagnostic::{hinted, located, Pointed};
 use yunta_render::page::{Checked, Diagnosis, Unrunnable};
 
 use crate::context::Context;
-use crate::error::{page, warn, CliError};
+use crate::error::{page, CliError};
+use crate::output::warn;
 use crate::output::Outcome;
 use crate::output::{show, show_on_stderr};
 

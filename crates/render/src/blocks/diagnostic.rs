@@ -58,10 +58,27 @@ pub fn counted_under(heading: &str, problems: usize) -> String {
 }
 
 /// A problem a page says, and what it names that nothing in a workflow
-/// reads, when that is what it is about: a `key` or a `kind`.
+/// reads, when that is what it is about.
 pub struct Pointed {
     problem: Problem,
-    unread: Option<&'static str>,
+    unread: Option<Unread>,
+}
+
+/// What a problem can name that nothing in a workflow reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unread {
+    Key,
+    Kind,
+}
+
+impl Unread {
+    /// The word the hint lists it by.
+    fn word(self) -> &'static str {
+        match self {
+            Unread::Key => "key",
+            Unread::Kind => "kind",
+        }
+    }
 }
 
 impl From<Problem> for Pointed {
@@ -78,8 +95,8 @@ impl Pointed {
     /// place when it was read from text, with what helps fix it.
     pub fn found(diagnostic: &Diagnostic, path: &str, text: Option<&str>) -> Self {
         let unread = match diagnostic.rule() {
-            Some(RuleCode::UnknownKey) => Some("key"),
-            Some(RuleCode::UnknownKind) => Some("kind"),
+            Some(RuleCode::UnknownKey) => Some(Unread::Key),
+            Some(RuleCode::UnknownKind) => Some(Unread::Kind),
             _ => None,
         };
         Pointed {
@@ -103,7 +120,11 @@ impl Pointed {
 /// a kind nothing reads, with what every one of them needs listed.
 pub fn hinted(problems: Vec<Pointed>) -> Vec<Problem> {
     let mut unread: Vec<&str> = Vec::new();
-    for what in problems.iter().filter_map(|pointed| pointed.unread) {
+    for what in problems
+        .iter()
+        .filter_map(|pointed| pointed.unread)
+        .map(Unread::word)
+    {
         if !unread.contains(&what) {
             unread.push(what);
         }

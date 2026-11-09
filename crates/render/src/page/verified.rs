@@ -14,13 +14,12 @@ use super::Page;
 /// intact, and each check in the order it ran.
 pub struct Verified<'a> {
     pub run_id: &'a RunId,
-    pub holds: bool,
     pub checks: &'a [Check],
 }
 
 impl Page for Verified<'_> {
     fn document(&self, _look: &Look) -> Doc {
-        let mark = match self.holds {
+        let mark = match self.holds() {
             true => Mark::Done,
             false => Mark::Failed,
         };
@@ -28,7 +27,7 @@ impl Page for Verified<'_> {
             Headline::new(
                 mark,
                 format!("run {}", self.run_id.handle()),
-                Verified::word(self.holds),
+                Verified::word(self.holds()),
             ),
             self.checks,
         );
@@ -37,6 +36,11 @@ impl Page for Verified<'_> {
 }
 
 impl Verified<'_> {
+    /// Whether every check holds.
+    fn holds(&self) -> bool {
+        self.checks.iter().all(Check::holds)
+    }
+
     /// The word a verdict says: `intact` when every check holds, `broken` when one does not.
     pub fn word(holds: bool) -> &'static str {
         match holds {

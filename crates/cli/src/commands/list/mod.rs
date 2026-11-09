@@ -77,7 +77,8 @@ pub(crate) async fn read_catalog(cwd: &Path, history_source: Option<&Context>) -
     }
     Catalog {
         broken_packs: broken_packs.iter().map(ToString::to_string).collect(),
-        looked_in: [cwd.join(".yunta/workflows"), cwd.join(".yunta/packs")],
+        workflows_dir: cwd.join(".yunta/workflows"),
+        packs_dir: cwd.join(".yunta/packs"),
         offered: workflows,
     }
 }

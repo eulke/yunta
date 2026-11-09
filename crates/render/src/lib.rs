@@ -1,7 +1,7 @@
 //! What Yunta says in Surco: the sentences a log's typed facts are read as (why
 //! a run paused, how a node ended, what a failure says, which fallback the engine
-//! took), and the documents a person reads a run by: a gate's page, a plan, a
-//! pull request's body, the receipt.
+//! took), and every page a person reads: a run's, a gate's, a plan, a pull
+//! request's body, the receipt, and what each command answers.
 //!
 //! One crate, because two readers told the same fact in two words — a person at
 //! a terminal, a file a run leaves, a pull request — read it side by side. It
@@ -30,9 +30,10 @@
 //! - What leaves the terminal: `blocks` and `published`.
 //! - What a reader is told to type: `command`, every command written once,
 //!   and `declare`, what to declare in a project's config.
-//! - Every page, in the one form it takes: `page`, with the receipt, the
-//!   findings, a gate's page, and what a decision shows: a plan, read at its
-//!   desk, a spec, or any document.
+//! - Every page a command shows, in the one form it takes: `page`, with a
+//!   run's and its nodes', what each command answers, a pack's, the receipt,
+//!   the findings, a gate's page, and what a decision shows: a plan, read at
+//!   its desk, a spec, or any document.
 
 pub mod blocks;
 pub mod caution;

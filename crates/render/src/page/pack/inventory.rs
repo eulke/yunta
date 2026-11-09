@@ -117,9 +117,9 @@ fn inventory(report: &PackAudit, headline: Headline) -> Doc {
 
 fn workflow_section(workflow: &WorkflowAudit) -> Section {
     let blocks = match &workflow.error {
-        Some(WorkflowUnread::Missing(error)) => vec![Marked {
+        Some(WorkflowUnread::Unreadable(error)) => vec![Marked {
             mark: Mark::Failed,
-            items: vec![format!("does not read: {error}")],
+            items: vec![format!("does not read: {}", yunta_core::describe(error))],
         }
         .into()],
         Some(WorkflowUnread::Refused { report, text }) => hinted(

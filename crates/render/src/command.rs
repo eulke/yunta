@@ -167,9 +167,6 @@ fn given<'a>(argument: &'a Arg<String>, name: &'a str) -> &'a str {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
 /// The command that chooses each option `escalation` offers for `run_id`, in the menu's
 /// order, with the option it chooses.
 pub fn answering(run_id: &RunId, escalation: &GateWaitingPayload) -> Vec<(OptionId, String)> {
@@ -188,3 +185,6 @@ pub fn answering(run_id: &RunId, escalation: &GateWaitingPayload) -> Vec<(Option
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

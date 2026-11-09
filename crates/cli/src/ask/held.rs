@@ -14,7 +14,7 @@ use surco::width::cell_width;
 
 use super::keys::{Stroke, Strokes};
 use super::{Answered, Console, NoAnswer};
-use crate::error::warn;
+use crate::output::warn;
 
 /// A prompt the loop can hold.
 pub(crate) trait Held {

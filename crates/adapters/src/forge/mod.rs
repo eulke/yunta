@@ -160,11 +160,11 @@ pub(crate) fn gate_title(req: &PublishRequest) -> String {
 /// drawn longer than the forge keeps is refused, so the forge is never asked
 /// for it.
 pub(crate) fn gate_body(req: &PublishRequest) -> Result<String, ForgeError> {
-    let page = PUBLICATION;
-    let body = published::body(req, &page, &run_marker(req.run_id.as_str()));
-    match body.len() > page.body_limit {
+    let publication = PUBLICATION;
+    let body = published::body(req, &publication, &run_marker(req.run_id.as_str()));
+    match body.len() > publication.body_limit {
         true => Err(ForgeError::BodyTooLong {
-            limit: page.body_limit,
+            limit: publication.body_limit,
             len: body.len(),
         }),
         false => Ok(body),

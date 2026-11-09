@@ -91,6 +91,12 @@ pub(crate) struct Fold<'a> {
 }
 
 impl Check {
+    /// Whether it holds: nothing it found stops what it checks. A caution
+    /// is worth a look and still holds.
+    pub fn holds(&self) -> bool {
+        self.found != Found::Problem
+    }
+
     /// A check that found `found` of `subject`, saying `said`, with nothing
     /// more to say.
     pub fn new(found: Found, subject: impl Into<String>, said: impl Into<String>) -> Self {
@@ -219,8 +225,6 @@ impl Checklist {
 
     /// Whether nothing on the list stops a run.
     pub fn holds(&self) -> bool {
-        self.checks
-            .iter()
-            .all(|check| check.found != Found::Problem)
+        self.checks.iter().all(Check::holds)
     }
 }

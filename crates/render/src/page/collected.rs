@@ -80,10 +80,7 @@ impl Page for Collected {
             })
             .push_if("now", self.now.clone().unwrap_or_default());
         let steps = match self.dry_run && !self.rows.is_empty() {
-            true => vec![(
-                crate::command::line(&NextStep::Gc),
-                "does what this pass would",
-            )],
+            true => vec![(command::line(&NextStep::Gc), "does what this pass would")],
             false => Vec::new(),
         };
         Doc::new()

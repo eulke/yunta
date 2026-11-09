@@ -65,7 +65,7 @@ fn field_page<'a>(
         unreadable,
         elsewhere: 0,
         here: true,
-        storage: "/home/me/.yunta",
+        storage: std::path::Path::new("/home/me/.yunta"),
         depth,
     }
 }
@@ -165,8 +165,14 @@ fn a_glance_counts_the_closed_runs_and_the_whole_story_lists_them_newest_first()
 fn a_run_that_does_not_read_back_is_counted_and_listed_in_the_whole_story_by_id() {
     let unreadable = || {
         vec![
-            UnreadableRun::new(&RunId::from_static(NEWEST), "gone".to_string()),
-            UnreadableRun::new(&RunId::from_static(TIED_A), "gone".to_string()),
+            UnreadableRun::new(
+                &RunId::from_static(NEWEST),
+                RunUnread::EventLog("gone".to_string()),
+            ),
+            UnreadableRun::new(
+                &RunId::from_static(TIED_A),
+                RunUnread::EventLog("gone".to_string()),
+            ),
         ]
     };
     let glance = render_at(

@@ -1563,10 +1563,17 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `docs --check` and `smells --check` pass, and no doc names a module that moved under its old path.
+- [x] `docs --check` and `smells --check` pass, and no doc names a module that moved under its old path.
 
 **Verification:**
-- [ ] `cargo xtask docs --check`, `cargo xtask smells --check`
+- [x] `cargo xtask docs --check`, `cargo xtask smells --check`
+
+**What the reading found:**
+- `docs --about` on the module's 295 live files prints the rules this module is (what a person reads is a `Doc`, said in render), the traps of concurrency claims and of a unit variant's doc in a schema (no test of either kind is new; the `schema` step passes), and the tests that hold a rule a path can break, each in the suite. None is broken.
+- Render's `//!` said it held a run's documents; it holds every page a command shows, and says so, in its opening and its map.
+- The engine's `pack_audit` says it builds core's `PackAudit`.
+- `CAPABILITY-MAP.md`'s delivery said one commit per module; a module whose plan is committed in phases commits each phase.
+- No `//!`, doc or comment names a moved module under its old path. `SPEC-run-pages.md` names them as the base had them, which is what it measured.
 
 **Dependencies:** Checkpoint I
 
@@ -1585,10 +1592,10 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Fails first:** none: a measurement.
 
 **Acceptance criteria:**
-- [ ] Each difference in count, size and capture is explained in `.plans/yunta-tui/proof/run-pages/after.txt`.
+- [x] Each difference in count, size and capture is explained in `.plans/yunta-tui/proof/run-pages/after.txt`.
 
 **Verification:**
-- [ ] Manual check: `after.txt`.
+- [x] Manual check: `after.txt`: 275 binaries and 4,553 tests against the base's 274 and 4,528 in the same groups, every difference named (101 moved, 12 renamed, 25 new); the release binary 16,544 bytes larger; four captures differ, four of the seven texts; every golden's digest the base's.
 
 **Dependencies:** Task 43
 
@@ -1604,11 +1611,51 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 
 **Fails first:** per finding.
 
+**How it is read:** the module's 216 live source files in four parts, the data layer (core, replay, engine), render's run pages, the rest of render, and the CLI, each read whole by a reviewer of its own against the base, with the module's rules and none of the lead's conclusions; each finding checked by the lead against the code before it gets a decision.
+
+**Fixed** (each output byte for byte the same; the suite, the goldens' digests and the captures run again on the tree):
+- [x] **One kind of document.** Core had `diagnostic::DocumentKind` (a report's document, serialized, in the schema) and Task 39 added `workflow::DocumentKind` for the same kinds. The one is the diagnostic's, in `diagnostic/document.rs`, with what Task 39 gave the other: `all`, `as_str`, `purpose`, `FromStr` and `UnknownDocument`. The schemas do not change.
+- [x] **What the audit could not read is data.** `WorkflowUnread::Missing(String)` held a sentence and was built for any read failure; it is `Unreadable(UnreadFile)`, the error a prompt that does not read already had (`PromptReadError`, now `UnreadFile` for both), and the inventory says it.
+- [x] **What stops a run from reading back is `page::RunUnread`** (`EventLog`, `NoDirectory`, `Manifest`), which the page says; `UnreadableRun` held the CLI's sentence. Its JSON carries the same sentence.
+- [x] **A doctor's and a verdict's `holds` come from their checks.** The pages held both, which could disagree; Surco's `Check::holds` is the one rule, which `Checklist::holds` reads too.
+- [x] **Named fields for tuples:** `children::ChildStanding` (`child_standing`), `progress::NodesStanding` (`places`), the cancel page's `Said`, and the catalog's `workflows_dir` and `packs_dir` (`looked_in: [PathBuf; 2]`, read by position).
+- [x] **What a pointed problem names that nothing reads is an enum** (`Unread::{Key, Kind}`), where it was a `&'static str` of two values.
+- [x] **The gate's answer page is `page::GateAnswered`:** render had two `Answered`, the page and core's `shown::Answered`.
+- [x] **One path for what a command writes to its streams:** `error` re-exported `output::{note, warn}` and `json` re-exported `output::print_json`, and callers used both; every caller reaches them at `output`.
+- [x] `Field::storage` is a path; `page::pack::Installed::at` is the shown path its caller names, as its sibling `NewPack`'s and every other page's; `escalation::section` is the crate's; the forge's `page` local, which hid the module, is `publication`; replay reads `TimeSpent` at one path; `page_for_a_browser` binds `page` once; `command.rs` declares its tests last; `collected.rs` names `command` as it imports it.
+- [x] Docs: `spend` says it holds the estimation and the cost; the page list names `VerificationFindings`; `Findings::Held`'s `of`, `file_named` and `test`'s `report` say what they hold and return.
+
+**Kept, with the reason:**
+- `Engine` (replay's registry reading): it is the project's term, and its `///` carries the "Not" sentence that says what it is not.
+- The registry's `asking` field: it is the key on disk; naming the field otherwise takes a serde rename, an alias.
+- `DocumentKind` at `diagnostic::` and at core's root: core re-exports its modules' items at its root, every one of them.
+- The engine's `view_path` and `describe`: each is one line over core's `run_dir::view`, the owner; a third helper would wrap a wrapper.
+- The command smell exempting core and surco: the module widened it from the CLI to every crate; the two below render cannot name its module, and its doc says so.
+- `error::page::unrunnable` and `unrunnable_said`: the refusal's sentence and its plain text are `CliError`'s, which stays the CLI's; drawing its fixes through `Fix::blocks` would change what an agent reads.
+- `error::page::choice`: `CliError`'s page.
+- `refused_hold`'s instant: every sentence about an asking process takes one `Asking`, measured where it is read; a second type for the unmeasured one would be two ways to say one fact.
+- `output::exit`, `error::page::refused`, `run_page_for`, `progress::row`, `history::advice`, `page::Node`, and the stats arm clap refuses first: each says what it is, or was named so at the base.
+- `use crate::output::Outcome;` beside a braced group, in many files at the base: import style rustfmt leaves.
+- `RunScope::Browser` beside `RunInABrowser`: the scope is the run as a browser draws it, which the `open` goldens hold; the wrapper adds what only the written page has.
+- `impl Page for VerificationFindings`: the data is the page; it is now in the page list.
+- `page`'s `pub(crate)` modules (`findings`, `plan`, `shown`, `spec`): they lend render's other modules the words a decision says of a shown document; outside render each page has one path.
+- `Problem` and `Fix` in `Unrunnable`, `Diagnosis`, `NewPackCheck` and `UnreadableWorkflow`: what a check error says is the CLI's words over the engine's errors, which render cannot name; a `Problem` carries what a page draws.
+- The shown paths pages take as text (`Checked::at`, `NewWorkflow`, `NewPack`, `Listed`): a path is shown by the caller that knows where its reader stands; the run's page, with many, takes its `Places`.
+- Render's gate, findings and spec shapes (`of`, `waits`, the documents' tuple): render's own, at the base, filled by render.
+- `Opened::opened: Option<bool>`: whether a person asked, and whether it opened, which the JSON carries as such.
+- `spec::CODE_SHOWN`: its `///` says why it is 60, the length of a test that checks one behavior.
+- `Receipt { receipt }` and `Collected`'s public fields: a page holds what its caller filled.
+- `receipt.md` drawn with the Markdown look: chosen in Task 29, with the test that failed first.
+
+**Chosen by the user:** a decision's record is said once. Since `f81661f9`, a decision leaves out its record when the node stands failed in the frame, which is when the page quotes its evidence above. The base left it out whenever the log said the node failed, so a node a live engine asks a person about at its terminal, which stands `needs you` and is not quoted above, had its record said nowhere; now the decision says it. The user kept it, and the spec and the plan name it beside the seven texts. `page::run::tests::decision::what_a_failed_node_said_is_quoted_once_whether_it_stands_failed_or_needs_a_person` holds it, and fails on the base's predicate, which says it nowhere.
+
+- `field.rs` passed 500 lines with `RunUnread`, and split along what it holds: a run a field cannot read back is `field/unreadable.rs`.
+
 **Acceptance criteria:**
-- [ ] Every finding has a decision and a reason.
+- [x] Every finding has a decision and a reason.
 
 **Verification:**
-- [ ] Manual check: the findings and their decisions, written into this task.
+- [x] Manual check: the findings and their decisions, written into this task; the suite, the goldens' digests and the captures on the tree with the fixes.
 
 **Dependencies:** Task 44
 

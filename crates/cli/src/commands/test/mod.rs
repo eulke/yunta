@@ -204,8 +204,7 @@ pub(crate) fn case_name(case_path: &Path) -> String {
 
 /// Runs one case and prints its row — its mark, its name in the column
 /// every one of `names` fits, and what it found — with each problem under
-/// it.
-/// `true` when it passed.
+/// it, and answers whether it held.
 ///
 /// A case that could not run at all is one problem like any other: the
 /// row says which kind of failure it was, and the lines under it list

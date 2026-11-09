@@ -3,14 +3,14 @@ use yunta_core::{OptionId, RunId};
 use surco::look::Look;
 use surco::surface::{Surface, Terminal};
 
-use super::{Answered, Resolution};
+use super::{GateAnswered, Resolution};
 use crate::page::Page;
 
 #[test]
 fn each_gate_answer_says_how_it_ended_and_what_to_type_next() {
     let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
     let said = |resolution: Resolution| {
-        let page = Answered {
+        let page = GateAnswered {
             run_id: &run,
             resolution: &resolution,
         };
@@ -47,7 +47,7 @@ fn every_answer_says_a_resume_applies_it() {
     let resolution = Resolution::Resolved {
         option: abort.clone(),
     };
-    let answered = Answered {
+    let answered = GateAnswered {
         run_id: &run,
         resolution: &resolution,
     };
@@ -60,12 +60,12 @@ fn every_answer_says_a_resume_applies_it() {
     assert!(!said.contains("stays open"), "{page}");
     assert!(!said.contains("drives the run on"), "{page}");
     assert_eq!(
-        Answered::sentence(&run, &abort),
+        GateAnswered::sentence(&run, &abort),
         "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `abort`; a resume in the background \
          applies it"
     );
     assert_eq!(
-        Answered::sentence(&run, &OptionId::from_static("approve")),
+        GateAnswered::sentence(&run, &OptionId::from_static("approve")),
         "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `approve`; a resume in the background \
          applies it"
     );

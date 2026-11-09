@@ -51,13 +51,19 @@ pub struct Cancelled<'a> {
 impl Page for Cancelled<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let called = self.run_id.handle();
-        let Some((mark, said, gist, steps)) = self.said() else {
+        let Some(Said {
+            mark,
+            word,
+            gist,
+            steps,
+        }) = self.said()
+        else {
             // A stop the engine answers to has no line of its own: its
             // notes went to stderr while it ran.
             return Doc::new();
         };
         Doc::new()
-            .with(Headline::new(mark, format!("run {called}"), said))
+            .with(Headline::new(mark, format!("run {called}"), word))
             .with(Gist::new(gist))
             .with(Next { steps })
     }
@@ -65,14 +71,25 @@ impl Page for Cancelled<'_> {
 
 /// What a cancel's page says: the mark and the word of its headline, the
 /// sentence under it and the commands that go on from here.
-type Said = (Mark, &'static str, String, Vec<(String, &'static str)>);
+struct Said {
+    mark: Mark,
+    word: &'static str,
+    gist: String,
+    steps: Vec<(String, &'static str)>,
+}
 
 impl Cancelled<'_> {
     /// What the page says of the run, or `None` for a stop the
     /// engine answers to itself.
     fn said(&self) -> Option<Said> {
-        let stopped =
-            |said, gist: String, steps| Some((Standing::Stopped.mark(), said, gist, steps));
+        let stopped = |word, gist: String, steps| {
+            Some(Said {
+                mark: Standing::Stopped.mark(),
+                word,
+                gist,
+                steps,
+            })
+        };
         match self.state {
             CancelState::AlreadyStopped {
                 killed,
@@ -83,21 +100,21 @@ impl Cancelled<'_> {
                 *killed,
                 parked.then(|| self.closes()),
             )),
-            CancelState::NothingRunning => Some((
-                Mark::Absent,
-                "nothing to cancel",
-                "no node is in progress".to_string(),
-                Vec::new(),
-            )),
-            CancelState::Cancelled { closed: true, .. } => Some((
-                Mark::Absent,
-                "nothing to cancel",
-                "it closed before the interrupt reached it".to_string(),
-                vec![(
+            CancelState::NothingRunning => Some(Said {
+                mark: Mark::Absent,
+                word: "nothing to cancel",
+                gist: "no node is in progress".to_string(),
+                steps: Vec::new(),
+            }),
+            CancelState::Cancelled { closed: true, .. } => Some(Said {
+                mark: Mark::Absent,
+                word: "nothing to cancel",
+                gist: "it closed before the interrupt reached it".to_string(),
+                steps: vec![(
                     command::line(&NextStep::status(self.run_id)),
                     "shows how it ended",
                 )],
-            )),
+            }),
             CancelState::Cancelled { .. } => stopped(
                 Standing::Stopped.word(),
                 "its engine stopped every session and recorded the pause".to_string(),
@@ -159,7 +176,12 @@ fn already_stopped(
             Vec::new(),
         ),
     };
-    (standing.mark(), standing.word(), gist, steps)
+    Said {
+        mark: standing.mark(),
+        word: standing.word(),
+        gist,
+        steps,
+    }
 }
 
 #[cfg(test)]

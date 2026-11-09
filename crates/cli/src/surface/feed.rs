@@ -162,7 +162,7 @@ impl Diagnostics {
             None => false,
         };
         if !taken {
-            crate::error::note(line);
+            crate::output::note(line);
         }
     }
 }

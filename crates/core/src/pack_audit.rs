@@ -33,7 +33,7 @@ pub struct WorkflowAudit {
 #[derive(Debug)]
 pub enum WorkflowUnread {
     /// The file could not be read.
-    Missing(String),
+    Unreadable(UnreadFile),
     /// The language refuses what the file says: every problem, and the text they are in.
     Refused {
         report: Box<crate::diagnostic::Report>,
@@ -41,10 +41,11 @@ pub enum WorkflowUnread {
     },
 }
 
-/// A `{file: ...}` prompt naming something the pack does not ship.
+/// A file of the pack the audit could not read: a workflow it declares, or
+/// a `{file: ...}` prompt naming something it does not ship.
 #[derive(Debug, thiserror::Error)]
 #[error("cannot read `{path}`")]
-pub struct PromptReadError {
+pub struct UnreadFile {
     pub path: PathBuf,
     #[source]
     pub source: std::io::Error,
@@ -54,7 +55,7 @@ pub struct PromptReadError {
 /// it at manifest-freeze time — `Ok` for both inline text and a
 /// successfully read `{file: ...}`; `Err` when a `{file: ...}` prompt
 /// names something the pack doesn't actually ship.
-pub type PromptText = Result<String, PromptReadError>;
+pub type PromptText = Result<String, UnreadFile>;
 
 #[derive(Debug)]
 pub struct NodeAudit {

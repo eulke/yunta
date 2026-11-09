@@ -18,11 +18,12 @@
 //! - [`Field`]: the runs of a repository or a machine, each a [`FieldRow`] in
 //!   its [`FieldGroup`], and those that do not read back ([`UnreadableRun`]).
 //! - [`Stats`]: what a run spent and where its time went; [`History`]: what a
-//!   workflow's past runs say.
+//!   workflow's past runs say, and replay's `VerificationFindings`, how its
+//!   checks performed, a page of its own.
 //! - [`Doctor`]: whether this machine is ready; [`Verified`]: whether a run's
 //!   evidence is intact.
 //! - [`Cancelled`] ([`CancelState`]), [`Closed`], [`Opened`]: what `cancel`,
-//!   `close` and `open` answer; [`Answered`] ([`Resolution`]), [`Collected`] and
+//!   `close` and `open` answer; [`GateAnswered`] ([`Resolution`]), [`Collected`] and
 //!   [`Review`]: what `resolve-gate`, `gc` and `review` answer.
 //! - [`Catalog`]: the workflows a repository offers, each an [`OfferedWorkflow`];
 //!   [`Signpost`]: what `yunta` alone shows where it has no field to show.
@@ -79,14 +80,14 @@ mod stats;
 mod tested;
 mod verified;
 
-pub use answered::{Answered, Resolution};
+pub use answered::{GateAnswered, Resolution};
 pub use cancelled::{CancelState, Cancelled};
 pub use catalog::{Catalog, OfferedWorkflow, ReadableWorkflow, UnreadableWorkflow};
 pub use checked::{Checked, Diagnosis, Unrunnable};
 pub use closed::Closed;
 pub use collected::Collected;
 pub use doctor::Doctor;
-pub use field::{Field, FieldGroup, FieldRow, UnreadableRun};
+pub use field::{Field, FieldGroup, FieldRow, RunUnread, UnreadableRun};
 pub use findings::Findings;
 pub use gate::Gate;
 pub use initialized::Initialized;

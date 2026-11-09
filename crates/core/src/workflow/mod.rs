@@ -29,7 +29,6 @@ mod artifacts;
 mod audit;
 mod command;
 mod context;
-mod documents;
 mod expand;
 mod fault;
 mod hooks;
@@ -65,7 +64,6 @@ pub use context::{
     ArtifactContextRef, ContextFile, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
     NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
 };
-pub use documents::{DocumentKind, UnknownDocument};
 pub use fault::WorkflowFault;
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
 pub use keys::{NODE_KEYS, WORKFLOW_KEYS};

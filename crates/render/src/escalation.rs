@@ -200,7 +200,7 @@ pub fn claim_words(escalation: &GateWaitingPayload) -> String {
 
 /// A decision as the section a page ends on: led by the mark of what
 /// needs a person, and titled `title`.
-pub fn section(title: impl Into<String>, blocks: Vec<Block>) -> Section {
+pub(crate) fn section(title: impl Into<String>, blocks: Vec<Block>) -> Section {
     let title: String = title.into();
     Section {
         lead: Some(Lead::Mark(Standing::NeedsYou.mark())),

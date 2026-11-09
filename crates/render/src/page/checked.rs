@@ -106,8 +106,8 @@ impl Page for Checked {
     }
 }
 
-/// A workflow file as a headline names it: its name, the folder it is in
-/// being what the lines its problems point at say.
+/// A workflow file as a headline names it: its file name alone, since the
+/// lines its problems point at say the folder.
 pub(super) fn file_named(path: &Path) -> String {
     path.file_name().map_or_else(
         || path.display().to_string(),

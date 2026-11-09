@@ -28,8 +28,9 @@ use yunta_replay::RunState;
 
 use crate::commands::stats;
 use crate::context::Context;
-use crate::error::{note, CliError};
+use crate::error::CliError;
 use crate::json::RunDocument;
+use crate::output::note;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use surco::doc::{Depth, Doc};
@@ -265,10 +266,15 @@ pub(crate) async fn page_for_a_browser(
 ) -> Result<(Doc, PathBuf), CliError> {
     let reading = Reading::of(ctx, run_id).await?;
     let documents = reading.documents(Mode::Human, None).await?;
-    let page = (Mode::Human, Depth::Full);
-    let page = run_page_for(ctx, run_id, &reading, &documents, page)
-        .await?
-        .in_a_browser(reading.now);
+    let page = run_page_for(
+        ctx,
+        run_id,
+        &reading,
+        &documents,
+        (Mode::Human, Depth::Full),
+    )
+    .await?
+    .in_a_browser(reading.now);
     let doc = page.document(&surco::surface::Html.look());
     Ok((doc, reading.run_dir.clone()))
 }

@@ -116,12 +116,12 @@ pub(crate) async fn give_back(ctx: &Context, open: &crate::context::Opened, run_
     let units =
         yunta_engine::release_unit_checkouts(&pool, &tree, &open.run_dir, run_id, supervision);
     if let Err(e) = units.await {
-        crate::error::warn(format!("run {}: {e}", run_id.handle()));
+        crate::output::warn(format!("run {}: {e}", run_id.handle()));
     }
     if manifest.isolation == yunta_core::Isolation::Worktree {
         let own = yunta_engine::release_run_checkout(&pool, &tree, run_id, supervision);
         if let Err(e) = own.await {
-            crate::error::warn(format!("run {}: {e}", run_id.handle()));
+            crate::output::warn(format!("run {}: {e}", run_id.handle()));
         }
     }
 }

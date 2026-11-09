@@ -1,5 +1,7 @@
 //! What a count of tokens reads as in a line that says what was spent, and
-//! the same figures as a JSON document.
+//! the same figures as a JSON document; and what a workflow's past runs say
+//! a run is likely to take, its tokens and time ([`estimation`]) and their
+//! price ([`cost`]).
 
 use std::collections::BTreeMap;
 use std::fmt;

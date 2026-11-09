@@ -12,6 +12,7 @@
 //! framed it, and this module says it and lays it out.
 
 use std::cmp::Ordering;
+use std::path::Path;
 use std::time::Duration;
 
 use surco::components::{Edge, Fields, Furrow, Gist, Headline, Next, Note, RunLine, Runs, Said};
@@ -22,8 +23,10 @@ use surco::look::Look;
 use surco::text::counted;
 use surco::words::{Standing, NEED_YOU, NOTHING_NEEDS_YOU};
 use yunta_core::step::{NextStep, Reach};
-use yunta_core::RunId;
 use yunta_replay::frame::{RunFrame, RunPhase};
+
+mod unreadable;
+pub use unreadable::{RunUnread, UnreadableRun};
 
 use super::Page;
 use crate::{command, engine, pause};
@@ -221,25 +224,6 @@ impl FieldRow {
     }
 }
 
-/// A run a field can name but not derive: its log or the manifest it froze
-/// does not read back. It is listed as itself, never dropped — a run missing
-/// from a listing is a run nobody goes looking for.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct UnreadableRun {
-    pub run_id: RunId,
-    /// What stops it from reading back, as its reader said it.
-    pub problem: String,
-}
-
-impl UnreadableRun {
-    pub fn new(run_id: &RunId, problem: String) -> Self {
-        UnreadableRun {
-            run_id: run_id.clone(),
-            problem,
-        }
-    }
-}
-
 /// How many unreadable runs a glance names before it counts the rest:
 /// enough to recognise them by, few enough that the line stays a line.
 const UNREADABLE_NAMED: usize = 3;
@@ -257,7 +241,7 @@ pub struct Field<'a> {
     /// rather than every run on the machine.
     pub here: bool,
     /// Where this project keeps its runs, which a field with none names.
-    pub storage: &'a str,
+    pub storage: &'a Path,
     pub depth: Depth,
 }
 
@@ -270,7 +254,7 @@ impl Page for Field<'_> {
                 _ => "no runs in this repository yet",
             };
             // Where the runs would be: a reader who expected some checks it.
-            let kept = Fields::new().push_if("kept in", self.storage);
+            let kept = Fields::new().push_if("kept in", self.storage.display().to_string());
             return doc
                 .with(Gist::new(gist))
                 .with(kept)

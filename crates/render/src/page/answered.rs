@@ -28,12 +28,12 @@ pub enum Resolution {
 
 /// A gate's answer, as the person who gave it reads it: what was recorded,
 /// or that nothing was and the run still waits.
-pub struct Answered<'a> {
+pub struct GateAnswered<'a> {
     pub run_id: &'a RunId,
     pub resolution: &'a Resolution,
 }
 
-impl Page for Answered<'_> {
+impl Page for GateAnswered<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let handle = self.run_id.handle();
         match self.resolution {
@@ -61,7 +61,7 @@ impl Page for Answered<'_> {
     }
 }
 
-impl Answered<'_> {
+impl GateAnswered<'_> {
     /// The sentence a recorded decision is answered with, at either door:
     /// the command draws the page, and the control plane's `resolve_gate`
     /// tool returns this.

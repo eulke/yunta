@@ -3,8 +3,6 @@
 //! workflows need from the project, with what the repository was detected
 //! to answer for each.
 
-use std::path::Path;
-
 use surco::components::{Fields, Furrow, Headline, Said};
 use surco::doc::{Block, Doc};
 use surco::look::Look;
@@ -19,10 +17,8 @@ use crate::page::Page;
 pub struct Installed<'a> {
     pub manifest: &'a PackManifest,
     pub commit: &'a CommitSha,
-    /// Where the pack is vendored.
-    pub at: &'a Path,
-    /// The directory a reader names `at` from.
-    pub cwd: &'a Path,
+    /// Where the pack is vendored, as a reader in this directory names it.
+    pub at: &'a str,
     pub cases: &'a Cases,
     pub needs: Needs,
 }
@@ -35,11 +31,10 @@ impl Page for Installed<'_> {
         let headline = Headline::new(self.cases.mark(), pack, "installed")
             .fact(self.manifest.version.to_string())
             .fact(self.commit.abbreviated());
-        let at = surco::paths::shown(self.at, self.cwd, None);
         Doc::new()
             .with(headline)
             .with(Furrow(Vec::new()))
-            .with(Fields::new().push_if("at", at))
+            .with(Fields::new().push_if("at", self.at))
             .with_all(self.cases.blocks())
             .with_all(self.needs.blocks())
     }

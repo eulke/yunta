@@ -69,7 +69,6 @@ impl Answer for VerifyAnswer {
     fn page(&self) -> impl Page + '_ {
         Verified {
             run_id: &self.run_id,
-            holds: self.holds,
             checks: &self.checks,
         }
     }

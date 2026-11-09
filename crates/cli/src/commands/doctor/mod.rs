@@ -105,7 +105,6 @@ impl Answer for DoctorAnswer {
     fn page(&self) -> impl Page + '_ {
         Doctor {
             session: self.session,
-            holds: self.holds,
             checks: &self.checks,
             full: self.full,
         }

@@ -26,7 +26,7 @@ pub async fn list_runs(
     let inbox = Inbox::gather(&ctx, all).await?;
     let answer = ListRunsAnswer {
         schema_version: SCHEMA_VERSION,
-        storage: ctx.project.storage_path.display().to_string(),
+        storage: ctx.project.storage_path.clone(),
         inbox,
         depth,
     };
@@ -39,7 +39,7 @@ pub async fn list_runs(
 #[derive(serde::Serialize)]
 pub(crate) struct ListRunsAnswer {
     schema_version: u32,
-    storage: String,
+    storage: std::path::PathBuf,
     #[serde(flatten)]
     inbox: Inbox,
     #[serde(skip)]

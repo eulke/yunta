@@ -20,8 +20,8 @@ use crate::page::Page;
 /// one document holds, or the run's findings with what was answered.
 #[derive(Debug, Clone, Copy)]
 pub enum Findings<'a> {
-    /// The findings `held`, of the node or document `of` names (` of
-    /// `review``, or nothing).
+    /// The findings `held`, with `of` after the title: the node or document
+    /// they are of (` of `review``), or nothing.
     Held { held: &'a HeldFindings, of: &'a str },
     /// The run's findings, each with the node that found it and what other
     /// nodes answered.

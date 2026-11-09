@@ -201,7 +201,8 @@ The CLI's integration tests print the commands whole: `status_cmd`, `status_page
    - the live region and `--follow`.
    
    The work of each command stays where it is until `control` takes it.
-8. **Nothing printed changes but the seven texts of point 5:**
+8. **Nothing printed changes but the seven texts of point 5, and a decision's record where nothing else on the page says it:**
+   - a decision's record, chosen by the user in Phase 9: a decision leaves out the record of a failed node's evidence when the page quotes that evidence above it, so it is said once. At the base the decision left it out whenever the log said the node failed, and a node a live engine asks a person about at its terminal, which stands `needs you` and is not quoted above, had its record said nowhere; now the decision says it.
    - the 78 goldens move with the tests that read them, by `git mv`, byte for byte;
    - render's 21 stay;
    - every CLI integration test passes unchanged, and the JSON documents print the same.
@@ -271,7 +272,7 @@ Each item gets the one path and the name it should always have had, where it mov
 
 ### Out of scope
 
-- Any change to what a page says or how it is laid out, but the seven texts of point 5.
+- Any change to what a page says or how it is laid out, but the seven texts of point 5 and a decision's record of point 8.
 - The live region, the prompts, `--follow` and the JSON documents' shape.
 - Each command's work, which is `control`'s.
 - `third-party-notices`, dropped from the map.
@@ -402,7 +403,7 @@ emit(mode, &StatusAnswer { page, json }, look)
    - `EngineLiveness`, `engine_liveness`, `engine_prompt`, `engine_words`, `Engine::at` and the engine's `process_registry::Asked` are gone, and so are `time_in_state` and the run page's `since`; `read_engine` reads the registry once;
    - `engine.json` reads and writes the same bytes;
    - `DecisionOn` and `ShownDocument` come from core, and the engine re-exports neither.
-6. **Nothing printed changes but the seven texts of point 5:**
+6. **Nothing printed changes but the seven texts of point 5, and a decision's record where nothing else on the page says it:**
    - the 78 goldens are byte for byte the same, in `crates/render/goldens/`;
    - every CLI integration test passes unchanged but where it prints one of those texts;
    - the JSON documents print the same;
