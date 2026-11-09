@@ -6,11 +6,10 @@
 //! nothing, for a refusal about what the file does not hold: a config
 //! key, a pack, another workflow.
 
-use yunta_core::yaml::Pointer;
-use yunta_core::{ConfigKey, NodeId};
-
-use super::site::node;
 use super::{CheckError, Composition, Unanswerable};
+use crate::workflow::declared_node;
+use crate::yaml::Pointer;
+use crate::{ConfigKey, NodeId};
 
 impl CheckError {
     /// Where in the workflow file this is about, from its root, or
@@ -23,16 +22,16 @@ impl CheckError {
     /// that the refusal is about. `None` for a refusal that names no node.
     fn node_pointer(&self) -> Option<Pointer> {
         Some(match self {
-            CheckError::DependsOnCycle { cycle } => node(cycle.first()?).key("depends_on"),
+            CheckError::DependsOnCycle { cycle } => declared_node(cycle.first()?).key("depends_on"),
             CheckError::CapabilityUnsupported {
                 node: id, field, ..
-            } => node(id).key(field.as_str()),
+            } => declared_node(id).key(field.as_str()),
             CheckError::UnknownRunner { node: id, .. }
-            | CheckError::RunnerHasNoCandidates { node: id, .. } => node(id).key("runner"),
+            | CheckError::RunnerHasNoCandidates { node: id, .. } => declared_node(id).key("runner"),
             CheckError::Unset { node: id, key, .. } => unset(id, key),
             CheckError::ContextFileUnreachable { node: id, .. }
-            | CheckError::ContextOnUnsupportedNode { node: id } => node(id).key("context"),
-            CheckError::BothRunnerAndRunners { node: id } => node(id).key("runners"),
+            | CheckError::ContextOnUnsupportedNode { node: id } => declared_node(id).key("context"),
+            CheckError::BothRunnerAndRunners { node: id } => declared_node(id).key("runners"),
             CheckError::FanOutTarget { node: id, .. }
             | CheckError::UndeclaredInput { node: id, .. }
             | CheckError::GateInsideParallel { node: id, .. }
@@ -40,31 +39,47 @@ impl CheckError {
             | CheckError::QuestionsInsideParallel { node: id, .. }
             | CheckError::GateRouteNeverTaken { node: id, .. }
             | CheckError::InheritChildWithoutScope { node: id, .. }
-            | CheckError::ScopeExpansionModeOverCeiling { node: id, .. } => node(id),
-            CheckError::OverlappingFanOutScope { a, .. } => node(a).key("scope"),
-            CheckError::CommandDenied { node: id, .. } => node(id).key("run"),
-            CheckError::ExternalGateWithoutForge { node: id } => node(id).key("external"),
-            CheckError::ExternalGatesShareBranch { second: id, .. }
-            | CheckError::GateFilesCollide { node: id, .. } => node(id).key("external"),
+            | CheckError::ScopeExpansionModeOverCeiling { node: id, .. } => declared_node(id),
+            CheckError::OverlappingFanOutScope { a, .. } => declared_node(a).key("scope"),
+            CheckError::CommandDenied { node: id, .. } => declared_node(id).key("run"),
             CheckError::ChildDeclaresWhatNothingReads {
                 node: id, field, ..
-            } => node(id).key(*field),
-            CheckError::ShowsOnExternalGate { node: id } => node(id).key("shows"),
-            CheckError::WorkflowNodeRunnerBinding { node: id, field } => node(id).key(*field),
-            CheckError::MountOnSelf { node: id }
-            | CheckError::MountOnFanOut { node: id, .. }
-            | CheckError::MountInsideParallel { node: id, .. } => node(id).key("mounts"),
-            CheckError::ResumeSessionOnSessionlessNode { node: id } => node(id).key("on_interrupt"),
-            CheckError::AskOnANodeThatAsksNothing { node: id } => node(id).key("ask"),
-            CheckError::NetworkOpenUnderReadOnly { node: id }
-            | CheckError::ClosedNetworkUnconfined { node: id }
-            | CheckError::PackNetworkCeilingExceeded { node: id, .. } => node(id).key("network"),
-            CheckError::ScopeExpansionWithinRetired { node: id } => {
-                node(id).key("scope_expansion").key("within")
+            } => declared_node(id).key(*field),
+            CheckError::WorkflowNodeRunnerBinding { node: id, field } => {
+                declared_node(id).key(*field)
             }
             CheckError::Composition(composition) => composition.pointer()?,
+            _ => return self.setting_pointer(),
+        })
+    }
+
+    /// The place of a refusal about one of a node's settings: what it hands
+    /// an external gate, what it shows, mounts, asks or reaches on the
+    /// network, how it resumes, how its scope grows, what a pack lets it do.
+    /// `None` for a refusal about none of them.
+    fn setting_pointer(&self) -> Option<Pointer> {
+        Some(match self {
+            CheckError::ExternalGateWithoutForge { node: id } => declared_node(id).key("external"),
+            CheckError::ExternalGatesShareBranch { second: id, .. }
+            | CheckError::GateFilesCollide { node: id, .. } => declared_node(id).key("external"),
+            CheckError::ShowsOnExternalGate { node: id } => declared_node(id).key("shows"),
+            CheckError::MountOnSelf { node: id }
+            | CheckError::MountOnFanOut { node: id, .. }
+            | CheckError::MountInsideParallel { node: id, .. } => declared_node(id).key("mounts"),
+            CheckError::ResumeSessionOnSessionlessNode { node: id } => {
+                declared_node(id).key("on_interrupt")
+            }
+            CheckError::AskOnANodeThatAsksNothing { node: id } => declared_node(id).key("ask"),
+            CheckError::NetworkOpenUnderReadOnly { node: id }
+            | CheckError::ClosedNetworkUnconfined { node: id }
+            | CheckError::PackNetworkCeilingExceeded { node: id, .. } => {
+                declared_node(id).key("network")
+            }
+            CheckError::ScopeExpansionWithinRetired { node: id } => {
+                declared_node(id).key("scope_expansion").key("within")
+            }
             CheckError::PackPermissionsCeilingExceeded { node: id, .. } => {
-                node(id).key("permissions")
+                declared_node(id).key("permissions")
             }
             _ => return None,
         })
@@ -74,9 +89,8 @@ impl CheckError {
     /// the document, or an input. `None` for a refusal that names none of
     /// these.
     fn document_pointer(&self) -> Option<Pointer> {
-        let inputs =
-            |name: &yunta_core::InputName| Pointer::root().key("inputs").key(name.as_str());
-        let produces = |id: &NodeId| node(id).key("artifacts").key("produces");
+        let inputs = |name: &crate::InputName| Pointer::root().key("inputs").key(name.as_str());
+        let produces = |id: &NodeId| declared_node(id).key("artifacts").key("produces");
         Some(match self {
             CheckError::DistillUnknownArtifact { .. } => Pointer::root().key("on_finish"),
             CheckError::DuplicateArtifactKind { node: id, .. }
@@ -102,13 +116,13 @@ impl CheckError {
 /// that sets it, or the node itself for a key the project configures.
 fn unset(id: &NodeId, key: &ConfigKey) -> Pointer {
     match key {
-        ConfigKey::Command { .. } => node(id).key("run").key("command"),
-        ConfigKey::Executor { .. } => node(id).key("executor"),
-        ConfigKey::Runner => node(id).key("runner"),
+        ConfigKey::Command { .. } => declared_node(id).key("run").key("command"),
+        ConfigKey::Executor { .. } => declared_node(id).key("executor"),
+        ConfigKey::Runner => declared_node(id).key("runner"),
         ConfigKey::BaselineSuite
         | ConfigKey::Coverage
         | ConfigKey::Forge
-        | ConfigKey::RunBranch => node(id),
+        | ConfigKey::RunBranch => declared_node(id),
     }
 }
 
@@ -121,7 +135,7 @@ impl Composition {
             Composition::Missing { node: id, .. }
             | Composition::Ambiguous { node: id, .. }
             | Composition::CrossPack { node: id, .. }
-            | Composition::Fails { node: id, .. } => Some(node(id).key("use")),
+            | Composition::Fails { node: id, .. } => Some(declared_node(id).key("use")),
             Composition::Unparseable { .. }
             | Composition::Cycle { .. }
             | Composition::TooDeep { .. } => None,
@@ -133,11 +147,11 @@ impl Unanswerable {
     /// Where in the workflow file the read nothing answers is written.
     pub fn pointer(&self) -> Pointer {
         match self {
-            Unanswerable::LoopWithoutTasks { node: id, .. } => node(id),
+            Unanswerable::LoopWithoutTasks { node: id, .. } => declared_node(id),
             Unanswerable::ArtifactNotDeclared { place, .. }
             | Unanswerable::ArtifactFromNowhere { place, .. }
             | Unanswerable::SourceLeftOut { place, .. } => place.pointer(),
-            Unanswerable::NodeOutputOfNonBash { node: id, .. } => node(id).key("context"),
+            Unanswerable::NodeOutputOfNonBash { node: id, .. } => declared_node(id).key("context"),
         }
     }
 }

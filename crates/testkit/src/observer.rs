@@ -4,9 +4,8 @@
 use std::sync::{Arc, Mutex};
 
 use yunta_core::events::EventPayload;
+use yunta_core::port::{Observed, RunObserver, Said};
 use yunta_core::{NodeId, RunId, Seq};
-use yunta_engine::said::Said;
-use yunta_engine::{Observed, RunObserver};
 
 /// One frame as it arrived, owned: the engine lends an
 /// [`Observed`] only for the duration of the call, and a test asserts

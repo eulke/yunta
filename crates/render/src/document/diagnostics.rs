@@ -57,7 +57,7 @@ impl From<&Diagnostic> for DiagnosticJson {
 /// file to open and no content that was read, and a file that was never
 /// written has no kind its content could have met.
 #[derive(Default, serde::Serialize)]
-pub(crate) struct ArtifactProblems {
+pub struct ArtifactProblems {
     /// The stable name of what is wrong with the artifact itself —
     /// `artifact-missing`, `artifact-empty`, `artifact-oversized`,
     /// `artifact-unreadable`, `artifact-undelivered`, `artifact-unheld`.

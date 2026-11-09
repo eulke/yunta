@@ -174,8 +174,8 @@ async fn run_branches_lists_every_run_branch_in_one_call() {
     let first = yunta_core::RunId::from("01JQ0000000000000000000001");
     let second = yunta_core::RunId::from("01JQ0000000000000000000002");
     for branch in [
-        yunta_engine::run_branch(&first),
-        yunta_engine::run_branch(&second),
+        first.branch(),
+        second.branch(),
         "yunta/unit/01JQ0000000000000000000001/task/t1/1".to_string(),
         "feature/unrelated".to_string(),
     ] {

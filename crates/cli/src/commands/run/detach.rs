@@ -156,7 +156,7 @@ pub(crate) struct Started {
     /// that the run would not find. A client that starts runs is the one
     /// deciding whether the run is worth starting, and it never sees
     /// stderr.
-    pub(crate) warnings: crate::json::PreRunWarnings,
+    pub(crate) warnings: yunta_render::document::PreRunWarnings,
 }
 
 /// Creates the run and hands it to a detached `yunta resume`, returning

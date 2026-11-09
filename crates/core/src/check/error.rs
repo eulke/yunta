@@ -1,9 +1,12 @@
-//! See [`super`]. One family of workflow-check rules.
+//! See [`super`]. What refuses a workflow, and the code each refusal is known by.
 
-use super::*;
 use thiserror::Error;
-use yunta_core::events::{DeniedCommand, NameProblem};
-use yunta_core::{InputName, SchemaRange, ScopeGlob};
+
+use super::{Composition, Unanswerable, UntakenRoute};
+use crate::caution::MissingContextFile;
+use crate::events::{DeniedCommand, NameProblem};
+use crate::workflow::{ArtifactSpec, Place};
+use crate::{InputName, NodeId, RunnerName, SchemaRange, ScopeGlob};
 
 /// What refuses a workflow: something its frozen inputs make certain to
 /// stop the run, found ahead of any spend. Its `Display` is the
@@ -22,7 +25,7 @@ pub enum CheckError {
     CapabilityUnsupported {
         node: NodeId,
         field: String,
-        capability: yunta_core::Capability,
+        capability: crate::Capability,
         adapters: String,
     },
     #[error("unknown_runner")]
@@ -42,7 +45,7 @@ pub enum CheckError {
     #[error("unset")]
     Unset {
         node: NodeId,
-        key: yunta_core::ConfigKey,
+        key: crate::ConfigKey,
         /// The name the config does declare that is one slip away from
         /// the one the node asks for.
         near: Option<String>,
@@ -78,16 +81,14 @@ pub enum CheckError {
     /// producing — statically wrong (the runtime "declared but not
     /// produced this run" case degrades to a finding instead).
     #[error("distill_unknown_artifact")]
-    DistillUnknownArtifact {
-        artifact: yunta_core::DistillArtifact,
-    },
+    DistillUnknownArtifact { artifact: crate::DistillArtifact },
 
     /// A node produces at most one document of each kind: the identity
     /// is `(node, kind)`, so a second declaration names the first.
     #[error("duplicate_artifact_kind")]
     DuplicateArtifactKind {
         node: NodeId,
-        kind: yunta_core::ArtifactKind,
+        kind: crate::ArtifactKind,
     },
 
     /// An input document and a node producing the same kind are two
@@ -96,7 +97,7 @@ pub enum CheckError {
     InputDocumentAlsoProduced {
         input: InputName,
         node: NodeId,
-        kind: yunta_core::ArtifactKind,
+        kind: crate::ArtifactKind,
     },
 
     /// The three kind names are how a document the engine reads is
@@ -379,7 +380,7 @@ pub enum CheckError {
 
     /// A `use:` reference to another workflow, refused.
     #[error(transparent)]
-    Composition(#[from] super::refs::Composition),
+    Composition(#[from] Composition),
 
     /// A comparison against a baseline nothing measures: the lineage
     /// measures once, before its first node, and only the suite the
@@ -393,7 +394,7 @@ pub enum CheckError {
     #[error("command_unset_in")]
     CommandUnsetIn {
         field: &'static str,
-        command: yunta_core::CommandName,
+        command: crate::CommandName,
         near: Option<String>,
     },
 

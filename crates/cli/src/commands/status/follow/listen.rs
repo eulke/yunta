@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
-use yunta_engine::RunObserver;
+use yunta_core::port::RunObserver;
 
 /// The follower's one reader of a run's socket, if it has one.
 #[derive(Default)]

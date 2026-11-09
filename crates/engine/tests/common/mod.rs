@@ -67,7 +67,7 @@ pub struct ScriptedAnswers {
 }
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for ScriptedAnswers {
+impl yunta_core::port::HumanInteraction for ScriptedAnswers {
     async fn resolve(
         &self,
         _escalation: &yunta_core::events::GateWaitingPayload,
@@ -78,8 +78,8 @@ impl yunta_engine::HumanInteraction for ScriptedAnswers {
         &self,
         _node: &yunta_core::NodeId,
         _questions: &yunta_core::QuestionsFile,
-    ) -> Option<yunta_engine::QuestionsReply> {
-        Some(yunta_engine::QuestionsReply {
+    ) -> Option<yunta_core::port::QuestionsReply> {
+        Some(yunta_core::port::QuestionsReply {
             answers: self.answers.clone(),
             channel: yunta_core::events::Channel::Tty,
             responder: Some("eulke".into()),
@@ -565,7 +565,7 @@ impl SequencedInteraction {
 }
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for SequencedInteraction {
+impl yunta_core::port::HumanInteraction for SequencedInteraction {
     async fn resolve(
         &self,
         _escalation: &yunta_core::events::GateWaitingPayload,
@@ -576,7 +576,7 @@ impl yunta_engine::HumanInteraction for SequencedInteraction {
     async fn resolve_in(
         &self,
         escalation: &yunta_core::events::GateWaitingPayload,
-        asking: &yunta_engine::Asking<'_>,
+        asking: &yunta_core::port::DecisionAsked<'_>,
     ) -> Option<yunta_core::events::HumanChoice> {
         self.shown.lock().unwrap().push(asking.shown.to_vec());
         self.resolve(escalation).await

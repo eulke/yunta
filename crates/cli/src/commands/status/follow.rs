@@ -111,7 +111,7 @@ pub(crate) async fn follow(run_id: &RunId, look: &Look) -> Result<Outcome, CliEr
         }
         Ended::Interrupted => {
             crate::output::show(look, &LeftRunning { run_id });
-            Ok(crate::output::RunExit::Interrupted.outcome())
+            Ok(crate::output::Outcome::interrupted())
         }
     }
 }

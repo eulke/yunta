@@ -359,10 +359,7 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<TemplateV
         // run id, not necessarily the worktree's own local checkout
         // branch (which `isolation: none` never creates one of at all,
         // `worktree.rs`'s own doc comment).
-        (
-            TemplateVar::RunBranch,
-            crate::worktree::run_branch(ctx.run_id),
-        ),
+        (TemplateVar::RunBranch, ctx.run_id.branch()),
         (TemplateVar::RunBase, ctx.manifest.base_commit.to_string()),
         (
             TemplateVar::Staging,

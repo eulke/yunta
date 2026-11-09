@@ -2,11 +2,12 @@
 //! pure comparison, no filesystem/PATH involved.
 
 use std::collections::BTreeMap;
+use yunta_core::check::CheckError;
 use yunta_core::{
     ConfigLayer, PackDeclares, PackManifest, PackRequires, RequiredRunner, RunnerCandidate,
     RunnerName,
 };
-use yunta_engine::{check_pack_requires, CheckError};
+use yunta_engine::check_pack_requires;
 
 fn manifest(
     runners: Vec<RequiredRunner>,

@@ -3,7 +3,8 @@
 //! for the `node_finished` its close deferred.
 
 use yunta_core::events::{EventPayload, NodeState, StoredEvent};
-use yunta_engine::{NoInteraction, RunReport, RunTerminal};
+use yunta_core::port::NoInteraction;
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_replay::RunState;
 use yunta_testkit::Bench;
 use yunta_testkit_core::Log;

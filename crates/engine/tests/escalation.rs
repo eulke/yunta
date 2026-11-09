@@ -5,7 +5,7 @@
 //! process that paused the run) know what it's answering.
 
 use yunta_core::events::{EngineFact, GateEvent, NodeEvent, NodeOutcome, PauseReason, RunEvent};
-use yunta_engine::{ResolveGateError, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_replay::RunState;
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
@@ -13,6 +13,9 @@ use yunta_testkit_core::FixedClock;
 mod common;
 use common::menu::rebuilt_menu;
 use common::*;
+
+#[path = "escalation/refused.rs"]
+mod refused;
 
 /// A claude-code fixture that scripts no session, so a run reaches only its gates.
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
@@ -347,7 +350,7 @@ async fn live_and_pre_seeded_retry_reach_the_same_final_state() {
     // process must land the run in the identical derived state.
     struct RetryOnce;
     #[async_trait::async_trait]
-    impl yunta_engine::HumanInteraction for RetryOnce {
+    impl yunta_core::port::HumanInteraction for RetryOnce {
         async fn resolve(
             &self,
             _escalation: &yunta_core::events::GateWaitingPayload,
@@ -405,96 +408,4 @@ sessions:
             .collect()
     };
     assert_eq!(project(&live_state), project(&seeded_state));
-}
-
-#[tokio::test]
-async fn resolve_gate_refuses_a_run_that_is_not_parked() {
-    let bench = Bench::new();
-    let RunReport { terminal, .. } = bench
-        .run(
-            r#"
-name: fine
-nodes:
-  - id: ok
-    kind: bash
-    run: "true"
-"#,
-            NO_SESSIONS,
-        )
-        .await;
-    assert_eq!(terminal, RunTerminal::Finished);
-
-    let err = answer_parked(&bench, "retry").await.unwrap_err();
-    assert!(matches!(err, ResolveGateError::NotPaused));
-}
-
-#[tokio::test]
-async fn resolve_gate_rejects_an_option_not_on_the_menu() {
-    let bench = parked(
-        HOPELESS_UNTIL_RETRIED_WORKFLOW,
-        HOPELESS_UNTIL_RETRIED_FIXTURE,
-    )
-    .await;
-    let err = answer_parked(&bench, "nonexistent-option")
-        .await
-        .unwrap_err();
-    match err {
-        ResolveGateError::UnknownOption { chosen, declared } => {
-            assert_eq!(chosen, "nonexistent-option");
-            assert_eq!(declared, "retry, abort");
-        }
-        other => panic!("expected UnknownOption, got {other:?}"),
-    }
-    // A refusal is a no-op on the log.
-    assert_eq!(
-        events_matching(&bench, |p| matches!(
-            p,
-            yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
-        )),
-        0
-    );
-}
-
-#[tokio::test]
-async fn resolve_gate_on_a_run_paused_without_a_menu_errors() {
-    // A node interrupted mid-attempt under `fail_if_uncertain`: the run
-    // parks for a person to look at the tree, and there is no option to
-    // choose — only the tree to inspect.
-    let bench = Bench::new();
-    bench
-        .create(
-            r#"
-name: uncertain
-nodes:
-  - id: only
-    kind: bash
-    on_interrupt: fail_if_uncertain
-    run: "true"
-"#,
-            NO_SESSIONS,
-            yunta_testkit::MOCK_CONFIG,
-        )
-        .await;
-    bench
-        .storage
-        .append(
-            &yunta_core::events::EventDraft::new(
-                bench.run_id.clone(),
-                Some("only".into()),
-                yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                    yunta_core::events::NodeStartedPayload::attempt(1),
-                )),
-            )
-            .expect("a draft names its subject"),
-            &FixedClock,
-        )
-        .unwrap();
-    let RunReport { terminal, .. } = bench.wake().await;
-    assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "{terminal:?}"
-    );
-
-    let err = answer_parked(&bench, "anything").await.unwrap_err();
-    assert!(matches!(err, ResolveGateError::NothingToResolve));
 }

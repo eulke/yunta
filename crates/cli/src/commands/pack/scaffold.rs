@@ -208,7 +208,7 @@ async fn check_pack(dir: &Path, workflow: &Workflow) -> Result<NewPackCheck, Cli
     if !errors.is_empty() {
         let problems = errors
             .iter()
-            .map(|error| crate::error::page::refused(error, None, EXAMPLE, None))
+            .map(|error| yunta_render::refusal::check::problem(error, None, EXAMPLE, None))
             .collect();
         return Ok(NewPackCheck::Refused {
             workflow: EXAMPLE.to_string(),

@@ -18,6 +18,8 @@ path = "src/main.rs"
 yunta-core.workspace = true
 yunta-engine.workspace = true
 yunta-replay.workspace = true
+# The shape every MCP result of Yunta takes, which the control plane answers in.
+yunta-mcp-protocol.workspace = true
 yunta-render.workspace = true
 yunta-surco = { workspace = true, features = ["clap"] }
 yunta-adapters.workspace = true
@@ -51,7 +53,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 indicatif.workspace = true
 # Reads a key at a time, for the prompts a gate and a questions artifact need. Already in the tree through indicatif.
 console.workspace = true
-# `ConsoleInteraction` implements `yunta_engine::HumanInteraction`, whose
+# `ConsoleInteraction` implements `yunta_core::port::HumanInteraction`, whose
 # method is dyn-safe async — same reason yunta-engine/yunta-adapters
 # already depend on this.
 async-trait.workspace = true

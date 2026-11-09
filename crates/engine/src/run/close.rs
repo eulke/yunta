@@ -8,24 +8,19 @@
 use std::path::Path;
 
 use yunta_core::events::{EventPayload, RunEvent, RunFinishedPayload, TerminalState};
+use yunta_core::refusal::CloseRefusal;
 use yunta_core::{Clock, Redactor, Responder, RunId};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::run_log::RunLog;
 use yunta_replay::registry::Engine;
 
-/// Why a run cannot be closed. Each variant's display is its code; the
-/// words a reader sees are the caller's to write.
+/// Why a run is not closed: a refusal, or what failed below.
 #[derive(Debug, thiserror::Error)]
 pub enum CloseRunError {
-    #[error("already_closed")]
-    AlreadyClosed,
-    #[error("driven")]
-    Driven,
-    /// Its log says it is moving and nothing says the engine that drove
-    /// it is gone: it may be between two processes.
-    #[error("moving")]
-    Moving,
+    /// What the run makes Yunta refuse.
+    #[error(transparent)]
+    Refused(#[from] CloseRefusal),
     #[error("storage")]
     Storage(#[from] StorageError),
     /// The run's exported log could not be written; `0` says why.
@@ -56,12 +51,14 @@ pub async fn close_run(
 ) -> Result<(), CloseRunError> {
     let state = crate::run_log::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
     if state.run.finished().is_some() {
-        return Err(CloseRunError::AlreadyClosed);
+        return Err(CloseRunError::Refused(CloseRefusal::AlreadyClosed));
     }
     if !state.tail_paused() {
         return Err(match engine {
-            Engine::Alive { .. } => CloseRunError::Driven,
-            Engine::Dead | Engine::Unrecorded | Engine::Unknown => CloseRunError::Moving,
+            Engine::Alive { .. } => CloseRunError::Refused(CloseRefusal::Driven),
+            Engine::Dead | Engine::Unrecorded | Engine::Unknown => {
+                CloseRunError::Refused(CloseRefusal::Moving)
+            }
         });
     }
     let closed =

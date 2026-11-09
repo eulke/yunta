@@ -31,7 +31,6 @@ use std::collections::BTreeSet;
 
 use crate::context::Context;
 use crate::error::CliError;
-use crate::json::SCHEMA_VERSION;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use surco::components::{Check, Checklist, Fix, Found};
@@ -39,6 +38,7 @@ use surco::look::Look;
 use yunta_core::port::ProbeReport;
 use yunta_core::step::NextStep;
 use yunta_core::{AdapterId, Detected, MachineAdapters};
+use yunta_render::document::SCHEMA_VERSION;
 use yunta_render::page::{Doctor, Page};
 use yunta_render::{command, declare};
 
@@ -79,7 +79,7 @@ pub(crate) struct DoctorAnswer {
     holds: bool,
     /// The word the headline says: `ready` when every check holds, `not ready` otherwise.
     word: &'static str,
-    #[serde(serialize_with = "crate::json::check::rows")]
+    #[serde(serialize_with = "yunta_render::document::check::rows")]
     checks: Vec<Check>,
     /// Whether the page lists every check on its own row: a glance folds
     /// the ones that hold into one.
@@ -235,7 +235,7 @@ fn versioned(name: &AdapterId, version: Option<&str>) -> String {
 /// otherwise.
 async fn no_runner_declared(ctx: &Context, checks: &mut Checklist) -> MachineAdapters {
     let needing = needing_a_runner(ctx);
-    let errors: Vec<yunta_engine::CheckError> = needing
+    let errors: Vec<yunta_core::check::CheckError> = needing
         .iter()
         .flat_map(|(_, errors)| errors.iter().cloned())
         .collect();
@@ -272,7 +272,7 @@ async fn no_runner_declared(ctx: &Context, checks: &mut Checklist) -> MachineAda
 
 /// Every catalog workflow that names a runner the config lacks, with
 /// what `check` says about each.
-fn needing_a_runner(ctx: &Context) -> Vec<(String, Vec<yunta_engine::CheckError>)> {
+fn needing_a_runner(ctx: &Context) -> Vec<(String, Vec<yunta_core::check::CheckError>)> {
     let facts = super::declared_facts(&ctx.project.config);
     super::list::catalog_workflows(&ctx.cwd)
         .into_iter()
@@ -288,12 +288,12 @@ fn needing_a_runner(ctx: &Context) -> Vec<(String, Vec<yunta_engine::CheckError>
 }
 
 /// Whether `error` is about a runner the config lacks.
-fn names_a_runner(error: &yunta_engine::CheckError) -> bool {
+fn names_a_runner(error: &yunta_core::check::CheckError) -> bool {
     matches!(
         error,
-        yunta_engine::CheckError::UnknownRunner { .. }
-            | yunta_engine::CheckError::RunnerHasNoCandidates { .. }
-            | yunta_engine::CheckError::Unset {
+        yunta_core::check::CheckError::UnknownRunner { .. }
+            | yunta_core::check::CheckError::RunnerHasNoCandidates { .. }
+            | yunta_core::check::CheckError::Unset {
                 key: yunta_core::ConfigKey::Runner,
                 ..
             }

@@ -26,14 +26,15 @@ use surco::line::Line;
 use surco::look::Look;
 
 use crate::error::{warning_word, CliError};
-use crate::json::to_json_string;
 use yunta_render::command::Reader;
+use yunta_render::document::to_json_string;
+use yunta_render::document::ErrorDocument;
 use yunta_render::page::Page;
 
 mod exit;
 mod stream;
 
-pub(crate) use exit::{exit, Outcome, RunExit};
+pub(crate) use exit::{exit, Outcome};
 
 pub(crate) use stream::{
     glyphs, row_width, settle_color, settle_columns, settle_glyphs, stderr_look, stderr_paint,
@@ -174,58 +175,6 @@ pub fn note(message: impl Display) {
     eprintln!("{message}");
 }
 
-/// A refusal as a program reads it under `--json`: one document, and the
-/// version of the schema it was written under.
-#[derive(serde::Serialize)]
-pub(crate) struct ErrorDocument {
-    schema_version: u32,
-    error: ErrorBody,
-}
-
-/// What a refusal says, where it looked, and the commands that go on from
-/// here.
-#[derive(serde::Serialize)]
-pub(crate) struct ErrorBody {
-    said: String,
-    detail: Option<String>,
-    next: Vec<NextCommand>,
-}
-
-/// A command a person or a program can type next, and what it is for.
-#[derive(serde::Serialize)]
-pub(crate) struct NextCommand {
-    command: String,
-    why: String,
-}
-
-impl NextCommand {
-    /// A command a reader can type next, with the one line that says what it does.
-    pub(crate) fn new(command: String, why: &str) -> Self {
-        Self {
-            command,
-            why: why.to_string(),
-        }
-    }
-}
-
-impl ErrorDocument {
-    /// The refusal `error` is, as `reader` is told it.
-    pub(crate) fn of(error: &CliError, reader: Reader) -> Self {
-        let (detail, next) = error.advice(reader);
-        Self {
-            schema_version: crate::json::SCHEMA_VERSION,
-            error: ErrorBody {
-                said: error.said_to(reader),
-                detail,
-                next: next
-                    .into_iter()
-                    .map(|(command, why)| NextCommand::new(command, why))
-                    .collect(),
-            },
-        }
-    }
-}
-
 /// Writes the refusal `error` for a command run in `mode`. Under `--json`
 /// it is the one document on stdout, and stderr stays empty. Otherwise a
 /// person reads it on stderr as a page: the sentence and where it looked,
@@ -234,7 +183,8 @@ impl ErrorDocument {
 pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
     if mode == Mode::Json {
         // The whole id, which is what a program copies from a refusal.
-        let refusal = ErrorDocument::of(error, Reader::Agent);
+        let (detail, next) = error.advice(Reader::Agent);
+        let refusal = ErrorDocument::new(error.said_to(Reader::Agent), detail, next);
         if let Err(problem) = print_json(&refusal) {
             note(problem);
         }

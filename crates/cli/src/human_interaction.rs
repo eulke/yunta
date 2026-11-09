@@ -1,5 +1,5 @@
 //! `ConsoleInteraction` — the terminal implementation of
-//! `yunta_engine::HumanInteraction`, and the border where a prompt that
+//! `yunta_core::port::HumanInteraction`, and the border where a prompt that
 //! produced no answer becomes a line a person reads.
 //!
 //! It never auto-decides. Without a console to prompt on (piped,
@@ -27,8 +27,8 @@ use async_trait::async_trait;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
+use yunta_core::port::{HumanInteraction, QuestionsReply};
 use yunta_core::{Env, QuestionsFile};
-use yunta_engine::{HumanInteraction, QuestionsReply};
 
 use crate::ask::{answer, decide, Answered, Ask, Console, Escape, NoAnswer, Opens};
 use crate::output::{note, warn};
@@ -153,7 +153,7 @@ impl HumanInteraction for ConsoleInteraction {
     async fn resolve_in(
         &self,
         escalation: &GateWaitingPayload,
-        asking: &yunta_engine::Asking<'_>,
+        asking: &yunta_core::port::DecisionAsked<'_>,
     ) -> Option<HumanChoice> {
         let routes = yunta_render::escalation::routes(
             escalation,

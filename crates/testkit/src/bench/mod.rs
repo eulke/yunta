@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 use yunta_adapters::MockAdapter;
-use yunta_core::port::Adapter;
+use yunta_core::port::{Adapter, RunObserver};
 use yunta_core::{AdapterId, Capabilities, Clock, RunAdapter, RunId};
-use yunta_engine::{BirthArtifact, RunObserver};
+use yunta_engine::BirthArtifact;
 use yunta_storage::Storage;
 use yunta_testkit_core::{FixedClock, SeqIdSource};
 

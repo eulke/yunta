@@ -4,10 +4,7 @@
 use surco::components::{Check, Fix, Found};
 
 /// Every check of a checklist, each as the document a program reads.
-pub(crate) fn rows<S: serde::Serializer>(
-    checks: &[Check],
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
+pub fn rows<S: serde::Serializer>(checks: &[Check], serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_seq(checks.iter().map(Row::of))
 }
 

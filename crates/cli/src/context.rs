@@ -18,6 +18,7 @@ use yunta_storage::{AsyncStorage, Storage};
 use crate::error::CliError;
 use crate::interrupt::Interrupt;
 use crate::project::{self, Project};
+use yunta_render::refusal::Refused;
 
 /// Everything a subcommand resolves before it can act: the current
 /// directory, the project rooted there, and the injected clock and id
@@ -182,15 +183,16 @@ impl Context {
             .await?;
         let run_dir = self.project.run_dir(id.as_str());
         if events.is_empty() && run_dir.is_none() {
-            return Err(CliError::RunNotFound {
-                id: id.clone(),
+            return Err(Refused::UnknownRun {
+                run: id.clone(),
                 roots: self
                     .run_roots()
                     .iter()
                     .map(|root| surco::paths::shown(root, &self.cwd, self.env.home.as_deref()))
                     .collect(),
                 near: self.near_run(id),
-            });
+            }
+            .into());
         }
         let run_dir = run_dir.unwrap_or_else(|| self.project.runs_root.join(id.as_str()));
         let manifest = crate::load_manifest(&yunta_engine::run_dir::manifest_path(&run_dir))?;

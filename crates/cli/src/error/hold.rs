@@ -10,6 +10,7 @@ use yunta_core::RunId;
 use yunta_engine::lock::{LockError, SystemProbe};
 
 use super::CliError;
+use yunta_render::refusal::Refused;
 
 impl CliError {
     /// Who drives the run when that can be told, and the lock's file when only a
@@ -21,17 +22,19 @@ impl CliError {
         refusal: LockError,
         at: DateTime<Utc>,
     ) -> Self {
-        let unclear = |lock_path, pid| CliError::RunHoldUnclear {
-            run_id: run_id.clone(),
-            lock_path,
-            pid,
+        let unclear = |lock, pid| {
+            CliError::from(Refused::HoldUnclear {
+                run: run_id.clone(),
+                lock,
+                pid,
+            })
         };
         let driven = |pid| match yunta_engine::read_engine(run_dir, &SystemProbe).asking(at) {
-            Some(asking) => CliError::RunAsking { asking },
-            None => CliError::RunMoving {
-                run_id: run_id.clone(),
+            Some(asking) => CliError::from(Refused::Asking(asking)),
+            None => CliError::from(Refused::Moving {
+                run: run_id.clone(),
                 pid,
-            },
+            }),
         };
         match refusal {
             LockError::Held {
@@ -117,7 +120,10 @@ mod tests {
             owner: Some(owner()),
         });
         assert!(
-            matches!(error, CliError::RunMoving { .. }),
+            matches!(
+                error,
+                CliError::Refused(yunta_render::refusal::Refused::Moving { .. })
+            ),
             "{}",
             error.said_to(Reader::Person)
         );

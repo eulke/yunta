@@ -9,9 +9,9 @@ use yunta_render::page::{Field, Page};
 use super::inbox::Inbox;
 use crate::context::Context;
 use crate::error::CliError;
-use crate::json::SCHEMA_VERSION;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
+use yunta_render::document::SCHEMA_VERSION;
 
 /// The runs of the repository this is run in — every run on the machine
 /// with `all`, or when this is run outside a repository — as the field,

@@ -6,6 +6,7 @@ use yunta_core::events::{
     EventDraft, EventPayload, GateEvent, GateResolvedPayload, HumanChoice, NodeEvent, PauseReason,
     RunEvent, RunPausedPayload, RunResumedPayload,
 };
+use yunta_core::refusal::GateRefusal;
 use yunta_engine::{awaits_decision, current_escalation, RunTerminal};
 use yunta_replay::RunState;
 use yunta_testkit::Bench;
@@ -132,7 +133,9 @@ async fn an_option_off_the_menu_is_refused() {
     let bench = parked_on_the_cap().await;
     assert!(matches!(
         answer_parked(&bench, "retry").await,
-        Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+        Err(yunta_engine::ResolveGateError::Refused(
+            GateRefusal::UnknownOption { .. }
+        ))
     ));
 }
 

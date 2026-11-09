@@ -1,9 +1,9 @@
 //! The versioned documents `yunta stats --json` prints for a run and for
 //! a workflow's history.
 
+use crate::spend::SpendJson;
 use serde::Serialize;
 use yunta_core::{ContentHash, RunId, WorkflowName};
-use yunta_render::spend::SpendJson;
 use yunta_replay::history::{PriorEstimation, RunSummary};
 use yunta_replay::stats::{NodeStat, RunStats};
 
@@ -66,7 +66,7 @@ impl NodeStatJson {
 }
 
 #[derive(Serialize)]
-pub(super) struct RunStatsJson {
+pub struct RunStatsJson {
     schema_version: u32,
     run_id: String,
     mode: String,
@@ -102,7 +102,7 @@ pub(super) struct RunStatsJson {
 
 /// A run's wall-clock by share, in seconds.
 #[derive(Serialize)]
-pub(crate) struct TimeJson {
+pub struct TimeJson {
     working_secs: f64,
     rails_secs: f64,
     checks_secs: f64,
@@ -116,7 +116,7 @@ pub(crate) struct TimeJson {
 
 impl TimeJson {
     /// A run's time by share, read off the time the engine measured for it.
-    pub(crate) fn of(time: &yunta_replay::TimeSpent) -> Self {
+    pub fn of(time: &yunta_replay::TimeSpent) -> Self {
         TimeJson {
             working_secs: time.working.as_secs_f64(),
             rails_secs: time.rails.as_secs_f64(),
@@ -132,7 +132,7 @@ impl TimeJson {
 }
 
 impl RunStatsJson {
-    pub(super) fn from(
+    pub fn from(
         run_id: &RunId,
         mode: &str,
         stats: &RunStats,
@@ -140,7 +140,7 @@ impl RunStatsJson {
     ) -> Self {
         let total = stats.total_tokens.total();
         Self {
-            schema_version: crate::json::SCHEMA_VERSION,
+            schema_version: super::SCHEMA_VERSION,
             run_id: run_id.to_string(),
             mode: mode.to_string(),
             cptv: stats.cptv,
@@ -152,7 +152,7 @@ impl RunStatsJson {
             wall_clock_secs: stats.wall_clock.map(|d| d.as_secs_f64()),
             asleep_secs: stats.asleep.as_secs_f64(),
             time: TimeJson::of(&stats.time),
-            currency_estimate: yunta_render::spend::cost(total, pricing),
+            currency_estimate: crate::spend::cost(total, pricing),
             nodes: stats
                 .nodes
                 .iter()
@@ -219,7 +219,7 @@ impl From<&yunta_replay::history::PriorEstimation> for EstimationJson {
 }
 
 #[derive(Serialize)]
-pub(super) struct WorkflowHistoryJson {
+pub struct WorkflowHistoryJson {
     schema_version: u32,
     workflow: WorkflowName,
     runs: Vec<RunSummaryJson>,
@@ -228,13 +228,13 @@ pub(super) struct WorkflowHistoryJson {
 }
 
 impl WorkflowHistoryJson {
-    pub(super) fn from(
+    pub fn from(
         workflow: &WorkflowName,
         history: &[RunSummary],
         findings: Option<&yunta_replay::verification_effectiveness::VerificationFindings>,
     ) -> Self {
         Self {
-            schema_version: crate::json::SCHEMA_VERSION,
+            schema_version: super::SCHEMA_VERSION,
             workflow: workflow.clone(),
             runs: history.iter().map(RunSummaryJson::from).collect(),
             estimation: PriorEstimation::of(history)
@@ -280,9 +280,7 @@ struct AlwaysApprovedGateJson {
 }
 
 impl VerificationFindingsJson {
-    pub(super) fn from(
-        findings: &yunta_replay::verification_effectiveness::VerificationFindings,
-    ) -> Self {
+    pub fn from(findings: &yunta_replay::verification_effectiveness::VerificationFindings) -> Self {
         Self {
             never_red_criteria: findings
                 .never_red_criteria

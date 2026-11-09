@@ -1,8 +1,8 @@
 use surco::components::Fix;
+use yunta_core::check::CheckError;
 use yunta_core::{
     AdapterId, CommandName, ConfigKey, Detected, MachineAdapters, NodeId, RunnerName,
 };
-use yunta_engine::CheckError;
 
 use super::fix_for;
 

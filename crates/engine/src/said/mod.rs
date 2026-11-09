@@ -29,6 +29,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
+use yunta_core::port::Said;
 use yunta_core::{NodeId, RunId, Seq, SessionId, TaskId};
 
 /// The version of the line this engine writes. A reader skips a line of any
@@ -55,42 +56,18 @@ pub const TEXT_MOST: usize = 16 * 1024;
 /// burst. A power of two, which is what the broadcast rounds its room up to.
 const READER_QUEUE: usize = 4 * KEPT_FRAMES;
 
-/// What one session said, as a run hands it to whoever listens: redacted
-/// before it leaves the engine, never on disk and never evidence. Not the
-/// note's digest, which is what the log keeps of the same words.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Said {
-    pub run_id: RunId,
-    pub node_id: NodeId,
-    pub session_id: SessionId,
-    /// The task the session works, when a loop opened it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<TaskId>,
-    /// The seq of the note's digest on the log: where this sits among the
-    /// run's events.
-    pub seq: Seq,
-    /// When it was said, by the run's clock.
-    pub at: DateTime<Utc>,
-    pub text: String,
-    /// Whether `text` was cut to [`TEXT_MOST`].
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub cut: bool,
-}
-
-impl Said {
-    /// This frame with its text cut at the last character boundary at or
-    /// under [`TEXT_MOST`], saying so when it was.
-    fn bounded(mut self) -> Self {
-        if self.text.len() > TEXT_MOST {
-            let mut end = TEXT_MOST;
-            while !self.text.is_char_boundary(end) {
-                end -= 1;
-            }
-            self.text.truncate(end);
-            self.cut = true;
+/// `said` with its text cut at the last character boundary at or under
+/// [`TEXT_MOST`], saying so when it was.
+fn bounded(mut said: Said) -> Said {
+    if said.text.len() > TEXT_MOST {
+        let mut end = TEXT_MOST;
+        while !said.text.is_char_boundary(end) {
+            end -= 1;
         }
-        self
+        said.text.truncate(end);
+        said.cut = true;
     }
+    said
 }
 
 /// What a session said as its stream hands it over, already redacted, before
@@ -202,7 +179,7 @@ impl Voices {
     /// Keeps `said` in the recent past and hands it to every reader. Never
     /// waits: a reader with no room loses it, and is told so with its next.
     pub fn hand(&self, said: Said) {
-        let said = Arc::new(said.bounded());
+        let said = Arc::new(bounded(said));
         let mut past = self.lock();
         past.bytes += said.text.len();
         past.frames.push_back(Arc::clone(&said));

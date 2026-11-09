@@ -214,7 +214,7 @@ async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outco
         clock: Arc::new(ctx.clock),
         ids: &ctx.ids,
         // An empty questions document needs no human response.
-        human_interaction: &yunta_engine::NoInteraction,
+        human_interaction: &yunta_core::port::NoInteraction,
         forge: None,
         cancel: ctx.cancellation(),
         observer: None,

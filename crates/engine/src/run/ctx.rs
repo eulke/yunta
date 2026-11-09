@@ -20,11 +20,11 @@ use yunta_core::protected::Protected;
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Location, Manifest, NodeId, RunId, Seq};
 use yunta_storage::AsyncStorage;
 
-use crate::human_interaction::HumanInteraction;
-use crate::observer::RunObserver;
 use crate::run_log::RunLog;
 use crate::run_log::RunView;
 use crate::task_cycle::Memo;
+use yunta_core::port::HumanInteraction;
+use yunta_core::port::RunObserver;
 
 use super::RunError;
 

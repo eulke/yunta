@@ -15,8 +15,8 @@ use surco::look::Look;
 use surco::surface::{said_whole, Placed};
 use surco::text::counted;
 use yunta_core::events::Channel;
+use yunta_core::port::QuestionsReply;
 use yunta_core::{Answer, AnswerType, Env, NodeId, Question, QuestionsFile};
-use yunta_engine::QuestionsReply;
 
 use super::field::{Edit, Field, Typed, FOLDED};
 use super::held::{hold, Held, Press};

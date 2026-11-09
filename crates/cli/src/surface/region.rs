@@ -33,8 +33,8 @@ use surco::glyphs::Glyphs;
 use surco::line::Line;
 use surco::motion::Motion;
 use surco::paint::Paint;
+use yunta_core::port::Said;
 use yunta_core::{NodeId, RunId};
-use yunta_engine::said::Said;
 use yunta_replay::frame::{NodeStanding, RunFrame};
 
 use super::scrollback::Scrollback;

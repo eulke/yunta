@@ -2,9 +2,10 @@
 //! node only it leads to — the way a mode leaves a node out, and says
 //! why.
 
+use yunta_core::check::CheckError;
 use yunta_core::events::{EventPayload, NodeEvent, StoredEvent};
 use yunta_core::{Because, CommandName, ConfigKey, ConfigLayer, Workflow};
-use yunta_engine::{CheckError, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_replay::frame::NodeStanding;
 use yunta_replay::RunState;
 use yunta_testkit::{Bench, MOCK_CONFIG};

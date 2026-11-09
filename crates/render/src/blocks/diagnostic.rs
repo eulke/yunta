@@ -9,7 +9,7 @@ use surco::components::{Place, Problem};
 use surco::doc::Doc;
 use surco::look::Look;
 use surco::surface::{Surface, Terminal};
-use yunta_core::diagnostic::{Diagnostic, RuleCode};
+use yunta_core::diagnostic::{Diagnostic, Report, RuleCode};
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::yaml::Location;
 
@@ -146,6 +146,18 @@ pub fn hinted(problems: Vec<Pointed>) -> Vec<Problem> {
             None => pointed.problem,
         })
         .collect()
+}
+
+/// Every problem of a refused document, each quoted from its text, in the
+/// order the report has them.
+pub fn document_problems(report: &Report, text: Option<&str>) -> Vec<Problem> {
+    hinted(
+        report
+            .diagnostics
+            .iter()
+            .map(|diagnostic| Pointed::found(diagnostic, &report.document.path, text))
+            .collect(),
+    )
 }
 
 #[cfg(test)]

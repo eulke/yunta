@@ -8,18 +8,14 @@
 //! banner belongs on top of it.
 
 use std::fmt::Display;
-use std::path::PathBuf;
 
-use surco::words::RUNS_THAT_NEED_YOU_FIRST;
-use yunta_core::step::{NextStep, Reach};
-use yunta_core::{Pid, RunId};
-use yunta_render::command::{self, Reader};
+use yunta_core::RunId;
+use yunta_render::command::Reader;
+use yunta_render::refusal::Refused;
 
 mod hold;
 pub(crate) mod page;
 pub(crate) mod words;
-
-use page::{document_problems, unrunnable_said};
 
 /// Everything a subcommand can fail with, phrased so its `Display` names
 /// what went wrong and what to do. `main` turns it into one line on
@@ -44,18 +40,6 @@ pub enum CliError {
         source: std::io::Error,
     },
 
-    /// A run this binary has no record of, wherever it looked. One
-    /// sentence, because a person who mistyped an id gets the same
-    /// answer whichever command they typed it into — with the run it
-    /// was one slip away from, when there is one.
-    #[error("no run is called `{id}`{}", surco::text::near_miss(.near.as_deref()))]
-    RunNotFound {
-        id: RunId,
-        /// Where it looked, as a person reads a path.
-        roots: Vec<String>,
-        near: Option<String>,
-    },
-
     #[error(transparent)]
     Project(#[from] crate::project::ProjectError),
 
@@ -68,8 +52,11 @@ pub enum CliError {
     #[error(transparent)]
     Catalog(#[from] yunta_engine::CatalogError),
 
+    /// What the run failed with. The refusals it carries (an object its
+    /// store lacks, an answer no decision takes) reach a command as
+    /// [`CliError::Refused`]: see the conversion below.
     #[error(transparent)]
-    Run(#[from] yunta_engine::RunError),
+    Run(yunta_engine::RunError),
 
     /// A git call the command made that did not answer. A stop the token
     /// made is the command's cancellation, not a failed git: see the
@@ -86,29 +73,11 @@ pub enum CliError {
     #[error(transparent)]
     DetachedResume(#[from] crate::commands::DetachedResumeError),
 
+    /// What recording a decision failed with below its refusal: the store,
+    /// or the documents the gate shows. A refusal is
+    /// [`CliError::Refused`], through [`CliError::from_gate`].
     #[error(transparent)]
-    ResolveGate(#[from] yunta_engine::ResolveGateError),
-
-    /// A decision was put to a run that is not parked at one. The words of
-    /// the refusal say what is true of the run; which command shows a
-    /// reader where it actually is is this border's word, so it
-    /// is added here — named by its handle for a person, and by its whole
-    /// id for an agent ([`CliError::said_to`]).
-    #[error("{}; `{}` shows where it is", words::resolve_gate(.refusal), command::line(&NextStep::status(.run_id)))]
-    NotPaused {
-        run_id: RunId,
-        refusal: yunta_engine::ResolveGateError,
-    },
-
-    /// A decision was put to a run whose pause reconstructs no menu.
-    /// Those pauses are settled where they were raised — a scope, an
-    /// answers file, a review on a forge, a child — and the run handed
-    /// back, which is what the advice names.
-    #[error("{}; settle it where it was raised, then `{}`", words::resolve_gate(.refusal), command::line(&NextStep::Resume { run: RunId::clone(.run_id) }))]
-    NoMenu {
-        run_id: RunId,
-        refusal: yunta_engine::ResolveGateError,
-    },
+    ResolveGate(yunta_engine::ResolveGateError),
 
     /// A mock fixture a `yunta test` case or `yunta run --fixture`
     /// named does not parse. The path leads the sentence, because a
@@ -131,69 +100,16 @@ pub enum CliError {
         source: crate::commands::DetachedResumeError,
     },
 
-    /// A run that cannot be closed. The words of the refusal say what is
-    /// true of the run; which command moves it instead is this border's
-    /// word.
-    #[error("{}{}", words::close(.refusal), close_advice(.run_id, Reader::Person, .refusal))]
-    CloseRefused {
-        run_id: RunId,
-        refusal: yunta_engine::CloseRunError,
-    },
+    /// What closing a run failed with below its refusal: the store, or the
+    /// run's exported log. A refusal is [`CliError::Refused`], through
+    /// [`CliError::from_close`].
+    #[error("{}", words::close(.0))]
+    Close(yunta_engine::CloseRunError),
 
-    /// A run another engine drives. The sentence says whose it is;
-    /// [`CliError::advice`] the commands that follow it and stop it.
-    #[error("{}", words::moving(.run_id.handle(), *.pid))]
-    RunMoving { run_id: RunId, pid: Pid },
-
-    /// A run whose engine is asking a person at its terminal, the one place
-    /// that moves it.
-    #[error("{}", yunta_render::engine::asking_claim(.asking))]
-    RunAsking {
-        asking: yunta_replay::registry::Asking,
-    },
-
-    /// A claim whose holder cannot be told from a leftover: a pid this user
-    /// cannot signal, or a file that names nobody. Taking it could put two engines
-    /// on one run, so the sentence names the file for a person to decide.
-    #[error("{}", words::hold_unclear(.run_id.handle(), .lock_path, *.pid))]
-    RunHoldUnclear {
-        run_id: RunId,
-        lock_path: PathBuf,
-        pid: Option<Pid>,
-    },
-
-    /// A run named by something more than one run answers to. Every
-    /// run it could be is listed whole, so the next command can name one.
-    #[error("{}:{}", page::name_one(.said), one_per_line(.candidates))]
-    AmbiguousRun {
-        said: String,
-        candidates: Vec<crate::commands::run_ref::Candidate>,
-    },
-
-    /// A document that does not read, or breaks its own rules: every
-    /// problem it has, each quoted from the text it was read from.
-    #[error("{}", yunta_render::blocks::diagnostic::plain(&.report.document.path, document_problems(.report, .text.as_deref())))]
-    Document {
-        report: yunta_core::diagnostic::Report,
-        text: Option<String>,
-    },
-
-    /// A workflow that cannot run here: every problem `yunta check` finds
-    /// in it, each pointed at in its line, and what this project could
-    /// declare for the ones a declaration fixes.
-    #[error("{}", unrunnable_said(.0))]
-    Unrunnable(yunta_render::page::Unrunnable),
-
-    /// A document this binary does not show. The sentence lists the ones
-    /// it does, and the one a slip most likely meant.
+    /// What recording a reply to a node's questions failed with below its
+    /// refusal. A refusal is [`CliError::Refused`]: see the conversion below.
     #[error(transparent)]
-    UnknownDocument(#[from] yunta_core::UnknownDocument),
-
-    /// A reply that does not answer the questions it claims to, or a
-    /// round that could not be read back — the engine's own verdict,
-    /// which is the same one a person at a console gets.
-    #[error(transparent)]
-    AnswerQuestions(#[from] yunta_engine::AnswerQuestionsError),
+    AnswerQuestions(yunta_engine::AnswerQuestionsError),
 
     /// The answers were recorded and the run could not be handed back
     /// to a detached `yunta resume`. They are on the log either way,
@@ -216,6 +132,11 @@ pub enum CliError {
 
     #[error(transparent)]
     FrozenPaths(#[from] yunta_core::RelativeRootError),
+
+    /// What Yunta refused: render says it, to a person and to an agent,
+    /// with the commands that go on from it.
+    #[error(transparent)]
+    Refused(#[from] Refused),
 
     /// A condition specific to one command, already phrased as an
     /// actionable message at the point it is detected — the CLI's own
@@ -244,28 +165,29 @@ impl CliError {
         CliError::Message(message.into())
     }
 
-    /// An engine refusal to record a decision, in this border's
-    /// vocabulary.
-    ///
-    /// Two of them describe the state the run is in rather than
-    /// anything about the request, and a reader told the run cannot be
-    /// answered wants to know what to do instead. Which command does
-    /// that is the CLI's word, not the engine's, so it is said here —
-    /// and every other refusal already names what to change (an option
-    /// off the menu lists the ones that are on it) and passes through
-    /// untouched.
-    pub fn gate_refused(run_id: &RunId, refusal: yunta_engine::ResolveGateError) -> Self {
-        let run_id = run_id.clone();
-        match refusal {
-            yunta_engine::ResolveGateError::NotPaused => CliError::NotPaused { run_id, refusal },
-            yunta_engine::ResolveGateError::NothingToResolve => {
-                CliError::NoMenu { run_id, refusal }
+    /// What recording a decision on `run_id` met: the run's refusal, which
+    /// names the run for the command that goes on, or a failure below it.
+    pub fn from_gate(run_id: &RunId, error: yunta_engine::ResolveGateError) -> Self {
+        match error {
+            yunta_engine::ResolveGateError::Refused(refusal) => Refused::Gate {
+                run: run_id.clone(),
+                refusal,
             }
-            yunta_engine::ResolveGateError::UnknownOption { .. }
-            | yunta_engine::ResolveGateError::Unsaid { .. }
-            | yunta_engine::ResolveGateError::Withheld { .. }
-            | yunta_engine::ResolveGateError::Storage(_)
-            | yunta_engine::ResolveGateError::Documents(_) => refusal.into(),
+            .into(),
+            failed => CliError::ResolveGate(failed),
+        }
+    }
+
+    /// What closing `run_id` met: the run's refusal, which names the run for
+    /// the command that moves it instead, or a failure below it.
+    pub fn from_close(run_id: &RunId, error: yunta_engine::CloseRunError) -> Self {
+        match error {
+            yunta_engine::CloseRunError::Refused(refusal) => Refused::Close {
+                run: run_id.clone(),
+                refusal,
+            }
+            .into(),
+            failed => CliError::Close(failed),
         }
     }
 }
@@ -282,44 +204,56 @@ impl From<yunta_engine::GitError> for CliError {
 }
 
 /// A manifest the token stopped while git answered it is the run's
-/// cancellation, the same one a run's own git reaches; any other manifest
-/// failure stays a manifest failure.
+/// cancellation, the same one a run's own git reaches; inputs it does not take
+/// are refused; any other manifest failure stays a manifest failure.
 impl From<yunta_engine::ManifestError> for CliError {
     fn from(error: yunta_engine::ManifestError) -> Self {
-        match error.cancelled() {
-            true => CliError::Run(yunta_engine::RunError::Cancelled),
-            false => CliError::Manifest(error),
+        match error {
+            yunta_engine::ManifestError::Inputs(problem) => Refused::Inputs(problem).into(),
+            error if error.cancelled() => CliError::Run(yunta_engine::RunError::Cancelled),
+            error => CliError::Manifest(error),
         }
     }
 }
 
-/// Every run a reference could mean, one to a line under the sentence:
-/// the id whole, and what tells it apart when there is something to say.
-fn one_per_line(candidates: &[crate::commands::run_ref::Candidate]) -> String {
-    candidates
-        .iter()
-        .map(|candidate| match &candidate.about {
-            Some(about) => format!("\n  {}  {about}", candidate.run_id),
-            None => format!("\n  {}", candidate.run_id),
-        })
-        .collect()
+/// What a run met: an object its store lacks and an answer no decision takes
+/// are refusals; anything else it failed with is the run's failure.
+impl From<yunta_engine::RunError> for CliError {
+    fn from(error: yunta_engine::RunError) -> Self {
+        match error {
+            yunta_engine::RunError::Object(problem) => Refused::Object(problem).into(),
+            yunta_engine::RunError::RefusedAnswer {
+                refused,
+                summary,
+                failure,
+            } => Refused::SurfaceAnswer {
+                refused,
+                claim: summary,
+                menu: failure,
+            }
+            .into(),
+            failed => CliError::Run(failed),
+        }
+    }
 }
 
-/// What to do instead of closing a run the engine would not close, the
-/// run named the way `reader` copies it.
-fn close_advice(run: &RunId, reader: Reader, refusal: &yunta_engine::CloseRunError) -> String {
-    match refusal {
-        yunta_engine::CloseRunError::Driven => format!(
-            "; `{}` stops it, and then it can be closed",
-            command::line_for(&NextStep::Cancel { run: run.clone() }, reader)
-        ),
-        yunta_engine::CloseRunError::Moving => format!(
-            "; `{}` shows where it is",
-            command::line_for(&NextStep::status(run), reader)
-        ),
-        yunta_engine::CloseRunError::AlreadyClosed
-        | yunta_engine::CloseRunError::Storage(_)
-        | yunta_engine::CloseRunError::Export(_) => String::new(),
+/// A reply the run does not take is refused; anything else recording it met
+/// failed below.
+impl From<yunta_engine::AnswerQuestionsError> for CliError {
+    fn from(error: yunta_engine::AnswerQuestionsError) -> Self {
+        match error {
+            yunta_engine::AnswerQuestionsError::Refused(refusal) => {
+                Refused::Answers(refusal).into()
+            }
+            failed => CliError::AnswerQuestions(failed),
+        }
+    }
+}
+
+/// A document this binary does not show is refused, naming the ones it does.
+impl From<yunta_core::UnknownDocument> for CliError {
+    fn from(unknown: yunta_core::UnknownDocument) -> Self {
+        Refused::UnknownDocument(unknown).into()
     }
 }
 
@@ -347,64 +281,14 @@ impl CliError {
         if let Some(said) = self.carried_words() {
             return said;
         }
-        if let Some(headline) = self
-            .headline_for_a_person()
-            .filter(|_| reader == Reader::Person)
-        {
-            return headline;
-        }
-        let said = self.sentence(reader);
+        let said = match self {
+            CliError::Refused(refused) => refused.said(reader),
+            CliError::ResolveGate(error) => words::resolve_gate(error),
+            failed => failed.to_string(),
+        };
         // What caused it goes with it, to a person and an agent alike: a
         // refusal that stops at its own sentence hides why.
         yunta_core::with_causes(said, self)
-    }
-
-    /// The refusal's own sentence, any run it names named the way `reader`
-    /// copies it: the words of a refusal its type says, and its display for
-    /// any other.
-    fn sentence(&self, reader: Reader) -> String {
-        let id = |run_id: &RunId| reader.name_of(run_id).to_string();
-        match self {
-            CliError::ResolveGate(refusal) => words::resolve_gate(refusal),
-            CliError::NotPaused { run_id, refusal } => format!(
-                "{}; `{}` shows where it is",
-                words::resolve_gate(refusal),
-                command::line_for(&NextStep::status(run_id), reader)
-            ),
-            CliError::NoMenu { run_id, refusal } => format!(
-                "{}; settle it where it was raised, then `{}`",
-                words::resolve_gate(refusal),
-                command::line_for(
-                    &NextStep::Resume {
-                        run: run_id.clone()
-                    },
-                    reader
-                )
-            ),
-            CliError::CloseRefused { run_id, refusal } => format!(
-                "{}{}",
-                words::close(refusal),
-                close_advice(run_id, reader, refusal)
-            ),
-            CliError::RunMoving { run_id, pid } => words::moving(&id(run_id), *pid),
-            CliError::RunHoldUnclear {
-                run_id,
-                lock_path,
-                pid,
-            } => words::hold_unclear(&id(run_id), lock_path, *pid),
-            CliError::Manifest(yunta_engine::ManifestError::Inputs(inputs)) => {
-                words::inputs(inputs)
-            }
-            CliError::Run(yunta_engine::RunError::Object(problem)) => {
-                yunta_render::failure::object(problem)
-            }
-            CliError::Run(yunta_engine::RunError::RefusedAnswer {
-                refused,
-                summary,
-                failure,
-            }) => words::refused_answer(refused, summary, failure.as_deref()),
-            other => other.to_string(),
-        }
     }
 
     /// What `reader` is told beside the refusal: where it looked, and the
@@ -412,55 +296,8 @@ impl CliError {
     /// all in its sentence.
     pub fn advice(&self, reader: Reader) -> (Option<String>, Vec<(String, &'static str)>) {
         match self {
-            CliError::RunMoving { run_id, .. } => (
-                None,
-                vec![
-                    (
-                        command::line_for(
-                            &NextStep::Follow {
-                                run: run_id.clone(),
-                            },
-                            reader,
-                        ),
-                        "follows it",
-                    ),
-                    (
-                        command::line_for(
-                            &NextStep::Cancel {
-                                run: run_id.clone(),
-                            },
-                            reader,
-                        ),
-                        "stops it",
-                    ),
-                ],
-            ),
-            CliError::RunNotFound { roots, .. } => (
-                Some(format!("looked in {}", roots.join(" and "))),
-                vec![
-                    (
-                        command::line(&NextStep::ListRuns {
-                            reach: Reach::Repository,
-                        }),
-                        RUNS_THAT_NEED_YOU_FIRST,
-                    ),
-                    (
-                        command::line(&NextStep::ListRuns {
-                            reach: Reach::Machine,
-                        }),
-                        "every run on this machine",
-                    ),
-                ],
-            ),
+            CliError::Refused(refused) => refused.advice(reader),
             _ => (None, Vec::new()),
-        }
-    }
-
-    /// An engine refusal to close a run, in this border's vocabulary.
-    pub fn close_refused(run_id: &RunId, refusal: yunta_engine::CloseRunError) -> Self {
-        CliError::CloseRefused {
-            run_id: run_id.clone(),
-            refusal,
         }
     }
 }

@@ -27,7 +27,7 @@ use yunta_render::page::pack::{
 };
 
 use crate::context::Context;
-use crate::error::{words, CliError};
+use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{blank, show};
 use crate::pack::{
@@ -263,7 +263,9 @@ pub async fn add(
     let pack = manifest.reference();
     let dest = vendor_dir(&cwd, &pack);
     if dest.exists() {
-        return Err(CliError::msg(words::already_installed(&pack, &dest)));
+        return Err(CliError::msg(yunta_render::refusal::already_installed(
+            &pack, &dest,
+        )));
     }
 
     // Policy first: a refused publisher or a denied executor leaves no
@@ -337,7 +339,7 @@ pub async fn update(
     let cwd = ctx.cwd.clone();
     let lock = load_lock(&cwd)?;
     let Some(entry) = lock.packs.get(pack).cloned() else {
-        return Err(CliError::msg(words::not_installed(pack)));
+        return Err(CliError::msg(yunta_render::refusal::not_installed(pack)));
     };
 
     let clone_dir = tempfile::tempdir().map_err(|source| CliError::Io {

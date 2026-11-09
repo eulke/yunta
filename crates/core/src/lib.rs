@@ -17,6 +17,9 @@
 //!   machine it is on answer for.
 //! - What a person is shown and may answer: `shown`, `reserved`, `step` and
 //!   `caution`; `best_effort` names a step a run carries on past.
+//! - What Yunta refuses, as data a surface says: `check`, what `yunta check`
+//!   finds in a workflow, and `refusal`, a decision, a reply or a close a run
+//!   will not take.
 //! - Boundaries a decision is handed rather than reaching for: `clock`,
 //!   `id_source`, `process`, `disk`, `durable` and `secret`.
 //! - Values every crate shares: `ids`, `nonempty`, `graph`, `units`, `shell`,
@@ -41,6 +44,7 @@ pub mod agent;
 pub mod best_effort;
 mod capabilities;
 pub mod caution;
+pub mod check;
 mod clock;
 pub mod commit_message;
 mod config;
@@ -72,6 +76,7 @@ pub mod protected;
 mod questions;
 pub mod rail;
 pub mod receipt;
+pub mod refusal;
 pub mod reserved;
 pub mod run_dir;
 mod run_tool;

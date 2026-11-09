@@ -15,33 +15,33 @@
 //! concrete UI and never writes to the console itself); the MCP one is a
 //! `resolve_gate` tool, not built here.
 
+use crate::events::{Channel, GateWaitingPayload, HumanChoice};
+use crate::{Answer, QuestionsFile, Responder};
 use async_trait::async_trait;
-use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
-use yunta_core::{Answer, QuestionsFile, Responder};
 
 /// What a decision is asked with, beside the escalation the log records:
 /// the documents the escalation shows, read from the run for the person
 /// to see. The escalation names them by hash; this is their content. It
 /// carries the run's counted change, which a gate's page says.
-pub struct Asking<'a> {
+pub struct DecisionAsked<'a> {
     pub shown: &'a [ShownDocument],
     /// The run the decision is in, which a surface names a document by.
-    pub run: &'a yunta_core::RunId,
+    pub run: &'a crate::RunId,
     /// What the run changed from its base to its newest tree, as git last
     /// counted it while that count stands on the newest tree; `None` when no
     /// count stands on it.
-    pub changed: Option<&'a yunta_core::events::ChangesCountedPayload>,
+    pub changed: Option<&'a crate::events::ChangesCountedPayload>,
     /// The workflow the run follows, which says what follows each answer.
-    pub workflow: &'a yunta_core::Workflow,
+    pub workflow: &'a crate::Workflow,
     /// What the run leaves out of it, which does not follow.
-    pub left_out: &'a [yunta_core::LeftOut],
+    pub left_out: &'a [crate::LeftOut],
     /// The node the decision is on, when it is on one.
-    pub node: Option<&'a yunta_core::NodeId>,
+    pub node: Option<&'a crate::NodeId>,
     /// The mode the run follows.
-    pub mode: &'a yunta_core::ModeName,
+    pub mode: &'a crate::ModeName,
 }
 
-use yunta_core::shown::ShownDocument;
+use crate::shown::ShownDocument;
 
 /// One surface's reply to a `kind: questions` artifact:
 /// the answers plus which channel produced them and who answered — the
@@ -87,7 +87,7 @@ pub trait HumanInteraction: Send + Sync {
     async fn resolve_in(
         &self,
         escalation: &GateWaitingPayload,
-        _asking: &Asking<'_>,
+        _asking: &DecisionAsked<'_>,
     ) -> Option<HumanChoice> {
         self.resolve(escalation).await
     }
@@ -108,7 +108,7 @@ pub trait HumanInteraction: Send + Sync {
     /// questions these are.
     async fn ask(
         &self,
-        _node: &yunta_core::NodeId,
+        _node: &crate::NodeId,
         _questions: &QuestionsFile,
     ) -> Option<QuestionsReply> {
         None

@@ -22,6 +22,9 @@ serde = { workspace = true, features = ["derive"] }
 yunta-replay.workspace = true
 # The instant a page is drawn at, which its caller read from its clock.
 chrono.workspace = true
+# The versioned JSON documents a machine reads, written as text for a
+# stream or a tool's answer.
+serde_json.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
@@ -29,4 +32,3 @@ yunta-core = { workspace = true, features = ["testkit"] }
 yunta-replay = { workspace = true, features = ["testkit"] }
 yunta-testkit-core.workspace = true
 yunta-surco = { workspace = true, features = ["golden"] }
-serde_json.workspace = true

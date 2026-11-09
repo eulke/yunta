@@ -13,7 +13,7 @@ use yunta_replay::frame::{NodeFrame, NodeStanding};
 /// `waiting_on` uses, so the document says "waiting" one way.
 #[derive(serde::Serialize)]
 #[serde(tag = "on", rename_all = "snake_case")]
-pub(crate) enum NodeWaitJson {
+pub enum NodeWaitJson {
     Gate {
         #[serde(skip_serializing_if = "Option::is_none")]
         external_ref: Option<String>,
@@ -42,7 +42,7 @@ impl NodeWaitJson {
 /// reader of this document and a reader of `status` are told the same
 /// thing about the same node.
 #[derive(serde::Serialize)]
-pub(crate) struct NodeJson {
+pub struct NodeJson {
     id: String,
     state: Standing,
     /// What qualifies the word — the outcome, the failure, the attempt
@@ -78,7 +78,7 @@ pub(crate) struct NodeJson {
 }
 
 #[derive(serde::Serialize)]
-pub(crate) struct RunToolFailureJson {
+pub struct RunToolFailureJson {
     tool: String,
     cause: yunta_core::events::RunToolFailureCause,
     session_id: String,
@@ -86,7 +86,7 @@ pub(crate) struct RunToolFailureJson {
 
 impl NodeJson {
     pub(super) fn of(node: &NodeFrame, record: Option<&yunta_core::events::NodeRecord>) -> Self {
-        let display = yunta_render::state::NodeDisplay::from(node);
+        let display = crate::state::NodeDisplay::from(node);
         NodeJson {
             id: node.id.to_string(),
             state: display.standing,
@@ -130,7 +130,7 @@ impl NodeJson {
 
 /// A session that ended without ever reporting a terminal event.
 #[derive(serde::Serialize)]
-pub(crate) struct SessionDeathJson {
+pub struct SessionDeathJson {
     adapter: String,
     /// How its process went. Absent for a session with no process of
     /// its own, which has nothing to report about one.
@@ -141,7 +141,7 @@ pub(crate) struct SessionDeathJson {
 /// What the process left behind: how it ended, and the last lines it
 /// wrote to stderr, redacted of every declared secret and session token.
 #[derive(serde::Serialize)]
-pub(crate) struct SessionExitJson {
+pub struct SessionExitJson {
     #[serde(flatten)]
     end: SessionEndJson,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -152,7 +152,7 @@ pub(crate) struct SessionExitJson {
 /// shape rather than on which field is set.
 #[derive(serde::Serialize)]
 #[serde(tag = "end", rename_all = "snake_case")]
-pub(crate) enum SessionEndJson {
+pub enum SessionEndJson {
     Code {
         code: i32,
     },

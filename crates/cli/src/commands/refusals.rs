@@ -17,7 +17,7 @@ pub(crate) fn environment(
     workflow: &Workflow,
     config: &ConfigLayer,
     origin: &yunta_engine::WorkflowOrigin,
-) -> (Vec<yunta_engine::CheckError>, Vec<Caution>) {
+) -> (Vec<yunta_core::check::CheckError>, Vec<Caution>) {
     let on_path = |program: &str| command_on_path(env, program);
     let unprovided = match origin {
         yunta_engine::WorkflowOrigin::Pack {

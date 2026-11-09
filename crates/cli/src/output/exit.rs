@@ -30,50 +30,26 @@ impl Outcome {
     }
 }
 
-/// The exit codes a run's word maps to beyond success and failure — what
-/// a script that started the run reads instead of parsing its output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub(crate) enum RunExit {
-    /// The run stopped on a person.
-    NeedsYou = 3,
-    /// The run finished holding blocking findings.
-    Reported = 4,
-    /// The run paused until a limit resets and resumes on its own, so there
-    /// is nothing for a person to do.
-    Waiting = 5,
-    /// A person interrupted the invocation, as a shell reports a process
-    /// SIGINT ended.
-    Interrupted = 130,
-}
+/// The code a shell reports for a process SIGINT ended: 128 plus the
+/// signal's number, which a person's Ctrl-C reads as.
+const INTERRUPTED: u8 = 130;
 
-impl RunExit {
-    pub(crate) fn outcome(self) -> Outcome {
-        Outcome::Code(self as u8)
+impl Outcome {
+    /// How an invocation a person interrupted exits, as a shell reports a
+    /// process SIGINT ended.
+    pub(crate) fn interrupted() -> Self {
+        Outcome::Code(INTERRUPTED)
     }
 }
 
-/// How the invocation that drove a run to `standing` exits: 0 for a run
-/// that finished, 3 for one that stopped on a person, 4 for one that
-/// finished holding blocking findings, 5 for one parked until a limit
-/// resets, 1 for every other stop. One mapping, because "did the command
-/// succeed" is one question.
+/// How the invocation that drove a run to `standing` exits: the code the
+/// run's word maps to, which every document of the run carries
+/// ([`yunta_render::document::exit_code`]), as the outcome it is.
 pub(crate) fn exit(standing: Standing) -> Outcome {
-    match standing {
-        Standing::Finished => Outcome::Success,
-        Standing::NeedsYou => RunExit::NeedsYou.outcome(),
-        Standing::Reported => RunExit::Reported.outcome(),
-        Standing::Waiting => RunExit::Waiting.outcome(),
-        Standing::Created
-        | Standing::Running
-        | Standing::Stalled
-        | Standing::Failed
-        | Standing::Rerouted
-        | Standing::Stopped
-        | Standing::Promoted
-        | Standing::Broken
-        | Standing::Skipped
-        | Standing::NeverRan => Outcome::Reported,
+    match yunta_render::document::exit_code(standing) {
+        0 => Outcome::Success,
+        1 => Outcome::Reported,
+        code => Outcome::Code(code),
     }
 }
 

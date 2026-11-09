@@ -10,15 +10,14 @@
 use std::sync::Arc;
 
 use yunta_core::events::{
-    Asks, Claim, DecisionOn, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu,
+    Claim, DecisionOn, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu,
     GateOption, GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal,
-    Remedy, Withheld,
+    Remedy,
 };
 use yunta_core::protected::Protected;
+use yunta_core::refusal::GateRefusal;
 use yunta_core::reserved::ReservedOption;
-use yunta_core::{
-    Manifest, ModeName, NodeId, NonEmpty, OptionId, Redactor, RunId, Seq, TaskId, Workflow,
-};
+use yunta_core::{Manifest, ModeName, NodeId, NonEmpty, Redactor, RunId, Seq, TaskId, Workflow};
 use yunta_replay::RunState;
 
 use super::schedule::{self, Decision};
@@ -316,26 +315,30 @@ pub async fn resolve_gate(
 ) -> Result<(), ResolveGateError> {
     let state = crate::run_log::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
     if !state.tail_paused() {
-        return Err(ResolveGateError::NotPaused);
+        return Err(ResolveGateError::Refused(GateRefusal::NotPaused));
     }
     let Some((on, escalation)) = current_escalation(manifest, run_dir, &state)
         .await
         .map_err(Box::new)?
     else {
-        return Err(ResolveGateError::NothingToResolve);
+        return Err(ResolveGateError::Refused(GateRefusal::NothingToResolve));
     };
     escalation
         .accepts(&choice)
         .map_err(|refused| match refused {
-            Refusal::OffMenu { chosen, offered } => ResolveGateError::UnknownOption {
-                chosen,
-                declared: offered,
-            },
-            Refusal::Unsaid { chosen, asks } => ResolveGateError::Unsaid { chosen, asks },
-            Refusal::Withheld { withheld } => ResolveGateError::Withheld {
+            Refusal::OffMenu { chosen, offered } => {
+                ResolveGateError::Refused(GateRefusal::UnknownOption {
+                    chosen,
+                    declared: offered,
+                })
+            }
+            Refusal::Unsaid { chosen, asks } => {
+                ResolveGateError::Refused(GateRefusal::Unsaid { chosen, asks })
+            }
+            Refusal::Withheld { withheld } => ResolveGateError::Refused(GateRefusal::Withheld {
                 chosen: withheld.option.clone(),
                 withheld,
-            },
+            }),
         })?;
     let resolution = GateResolvedPayload::Chosen(choice);
     let log = RunLog::new(storage, run_id, clock, redactor);
@@ -420,30 +423,12 @@ pub(super) async fn decided(
     Ok(Some((choice, resolved)))
 }
 
-/// Why a run's decision cannot be answered. Each variant's display is its
-/// code; the words a reader sees are the caller's to write.
+/// Why a run's decision is not recorded: a refusal, or what failed below.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveGateError {
-    /// The run is not stopped at a pause: a live process may drive it,
-    /// or it already finished.
-    #[error("not_paused")]
-    NotPaused,
-    /// The run is paused for a reason with no menu of options to answer.
-    #[error("nothing_to_resolve")]
-    NothingToResolve,
-    /// The chosen option is not on the menu; `declared` lists the options it holds.
-    #[error("unknown_option")]
-    UnknownOption { chosen: OptionId, declared: String },
-    /// The option sends the run back to a session, and the words it asks for
-    /// are the one thing that session would get.
-    #[error("unsaid")]
-    Unsaid { chosen: OptionId, asks: Asks },
-    /// The gate does not offer the option, and `withheld` says why.
-    #[error("withheld")]
-    Withheld {
-        chosen: OptionId,
-        withheld: Withheld,
-    },
+    /// What the run, or the decision put to it, makes Yunta refuse.
+    #[error(transparent)]
+    Refused(#[from] GateRefusal),
     #[error("storage")]
     Storage(#[from] yunta_storage::StorageError),
     /// What the gate shows could not be read, so its menu cannot be

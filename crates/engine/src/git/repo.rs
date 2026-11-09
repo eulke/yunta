@@ -154,7 +154,7 @@ pub async fn remote_url(
 /// one listing: what places a run made before runs recorded the repository
 /// they were created in.
 pub async fn run_branches(repo: &Path, sup: Supervision<'_>) -> Result<BTreeSet<RunId>, GitError> {
-    let prefix = format!("{}/", crate::worktree::RUN_BRANCHES);
+    let prefix = format!("{}/", yunta_core::RunId::BRANCHES);
     let said = read(
         repo,
         &[

@@ -1,5 +1,5 @@
-//! The versioned JSON the CLI emits for machines: `stats --json`,
-//! `status --json`, `run --json`, and the same DTOs the `yunta mcp`
+//! The versioned JSON Yunta writes for machines: `stats --json`,
+//! `status --json`, `run --json`, and the same documents the `yunta mcp`
 //! control plane returns in a tool result. One schema version spans
 //! them, so a reader keys off a single number that changes only when a
 //! field's meaning does — the CLI's own text output is for people, this
@@ -14,51 +14,51 @@
 
 use std::collections::BTreeMap;
 
+use crate::spend::SpendJson;
 use chrono::{DateTime, Utc};
 use yunta_core::caution::Caution;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, StoredEvent};
 use yunta_core::{Manifest, RunId};
-use yunta_render::spend::SpendJson;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::RunState;
 
-pub(crate) mod check;
+pub mod check;
+pub mod decision;
 mod diagnostics;
+mod error;
 mod facts;
-pub(crate) mod field;
+pub mod field;
 mod node;
+pub mod stats;
 mod waiting;
+
+pub use error::{ErrorDocument, NextCommand};
 
 use diagnostics::{node_diagnostics, ArtifactProblems};
 use facts::{BranchJson, CountsJson, PullRequestJson};
 use node::NodeJson;
 use waiting::WaitingOnJson;
 
-use crate::commands::stats::json::TimeJson;
-use crate::commands::status::decision_json::DecisionJson;
-use crate::output::NextCommand;
-use crate::output::Outcome;
+use crate::command::{self, Reader};
+use decision::DecisionJson;
+use stats::TimeJson;
 use surco::words::Standing;
-use yunta_render::command::{self, Reader};
 
 /// What the invocation that creates a run says before the first token —
 /// on stderr for the person watching, and carried here so the document
 /// that invocation prints says it too: a `--json` reader, or a client of
 /// the control plane, is watching nothing else.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PreRunWarnings {
+pub struct PreRunWarnings {
     /// Every caution the invocation raised ahead of the first token, in the
     /// order it raised them.
-    pub(crate) cautions: Vec<Caution>,
+    pub cautions: Vec<Caution>,
 }
 
 impl PreRunWarnings {
     /// Every caution, one sentence each, in the order they were raised.
-    pub(crate) fn lines(&self) -> Vec<String> {
-        self.cautions
-            .iter()
-            .map(yunta_render::caution::line)
-            .collect()
+    pub fn lines(&self) -> Vec<String> {
+        self.cautions.iter().map(crate::caution::line).collect()
     }
 }
 
@@ -70,6 +70,31 @@ impl PreRunWarnings {
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
 pub const SCHEMA_VERSION: u32 = 9;
+
+/// The code a run's word maps to, which a script that started the run reads
+/// instead of parsing its output and every document of a run carries: 0 for a
+/// run that finished, 3 for one that stopped on a person, 4 for one that
+/// finished holding blocking findings, 5 for one parked until a limit resets,
+/// 1 for every other stop. One mapping, because "did the run succeed" is one
+/// question.
+pub fn exit_code(standing: Standing) -> u8 {
+    match standing {
+        Standing::Finished => 0,
+        Standing::NeedsYou => 3,
+        Standing::Reported => 4,
+        Standing::Waiting => 5,
+        Standing::Created
+        | Standing::Running
+        | Standing::Stalled
+        | Standing::Failed
+        | Standing::Rerouted
+        | Standing::Stopped
+        | Standing::Promoted
+        | Standing::Broken
+        | Standing::Skipped
+        | Standing::NeverRan => 1,
+    }
+}
 
 /// Serializes a DTO as pretty JSON to a string — what the control plane
 /// hands back in a tool result instead of printing, so a `println!` never
@@ -89,7 +114,7 @@ pub fn to_json_string<T: serde::Serialize>(value: &T) -> Result<String, String> 
 /// every text surface prints, spelled the same way here: a reader who
 /// saw `needs you` on a terminal finds `needs you` in the document.
 #[derive(serde::Serialize)]
-pub(crate) struct RunDocument {
+pub struct RunDocument {
     schema_version: u32,
     run_id: String,
     /// What every line a person reads calls the run by.
@@ -203,7 +228,7 @@ pub(crate) struct RunDocument {
 
 /// A run paused on a limit's reset, as the document carries it.
 #[derive(serde::Serialize)]
-pub(crate) struct AwaitingResetJson {
+pub struct AwaitingResetJson {
     node: String,
     at: DateTime<Utc>,
 }
@@ -213,7 +238,7 @@ impl RunDocument {
     /// instant, with the history it read and what the run's registry says about the process
     /// driving it. `state` is the run derived from `events`; the log is read again only for the
     /// failures each node's diagnostics name.
-    pub(crate) fn of(
+    pub fn of(
         run_id: &RunId,
         events: &[StoredEvent],
         state: &RunState,
@@ -233,10 +258,10 @@ impl RunDocument {
             mode: frame.mode.to_string(),
             outcome: frame.standing,
             // A document reads the same whichever terminal asked for it.
-            summary: yunta_render::progress::summary(frame, surco::glyphs::Glyphs::Unicode),
-            said: yunta_render::state::gist(frame),
+            summary: crate::progress::summary(frame, surco::glyphs::Glyphs::Unicode),
+            said: crate::state::gist(frame),
             counts: CountsJson::of(frame),
-            exit_code: crate::output::exit(frame.standing).code(),
+            exit_code: exit_code(frame.standing),
             reason: reason(&frame.phase),
             cautions: frame.cautions(),
             budget_warning: None,
@@ -263,7 +288,7 @@ impl RunDocument {
 
     /// The same document carrying what was said before the run's first
     /// token, added to the cautions the run's frame already holds.
-    pub(crate) fn warnings(mut self, pre_run: PreRunWarnings) -> Self {
+    pub fn warnings(mut self, pre_run: PreRunWarnings) -> Self {
         for caution in pre_run.cautions {
             if !self.cautions.contains(&caution) {
                 self.cautions.push(caution);
@@ -279,20 +304,20 @@ impl RunDocument {
             .cautions
             .iter()
             .find(|caution| matches!(caution, Caution::BudgetBelowHistory { .. }))
-            .map(yunta_render::caution::line);
+            .map(crate::caution::line);
         self.context_warnings = self
             .cautions
             .iter()
             .filter(|caution| matches!(caution, Caution::ContextFileMissing { .. }))
-            .map(yunta_render::caution::line)
+            .map(crate::caution::line)
             .collect();
         self
     }
 
-    /// What an invocation that drove this run to this word reports, by
-    /// the one mapping every surface uses.
-    pub(crate) fn verdict(&self) -> Outcome {
-        crate::output::exit(self.outcome)
+    /// The word the run stands at, which the code an invocation that drove
+    /// it exits with is read from ([`exit_code`]).
+    pub fn outcome(&self) -> Standing {
+        self.outcome
     }
 }
 
@@ -372,7 +397,7 @@ fn reason(phase: &RunPhase) -> Option<String> {
     match phase {
         RunPhase::Failed { failure } => failure
             .as_ref()
-            .map(|failure| surco::text::one_line(&yunta_render::failure::sentence(failure))),
+            .map(|failure| surco::text::one_line(&crate::failure::sentence(failure))),
         RunPhase::Broken { diagnostic } => Some(surco::text::one_line(diagnostic)),
         RunPhase::Created
         | RunPhase::Running
@@ -401,34 +426,4 @@ fn parked_decision(
     }
     let (on, escalation) = decision?;
     Some(DecisionJson::new(run_id, &on, escalation.into_payload()))
-}
-
-/// The decision a run waits on, rebuilt from the run's derived state and
-/// the documents its gate shows — the one reading every surface takes.
-pub(crate) async fn decision_of(
-    manifest: &Manifest,
-    run_dir: &std::path::Path,
-    state: &RunState,
-) -> Result<
-    Option<(
-        yunta_core::events::DecisionOn,
-        yunta_core::events::Escalation,
-    )>,
-    crate::error::CliError,
-> {
-    Ok(yunta_engine::current_escalation(manifest, run_dir, state).await?)
-}
-
-/// The documents `escalation` shows, as the run born with `manifest`,
-/// whose derived state is `state`, holds them.
-pub(crate) async fn shown_of(
-    manifest: &yunta_core::Manifest,
-    run_dir: &std::path::Path,
-    escalation: &yunta_core::events::GateWaitingPayload,
-    state: &RunState,
-) -> Result<Vec<yunta_core::shown::ShownDocument>, crate::error::CliError> {
-    Ok(
-        yunta_engine::shown_documents(run_dir, escalation.shows(), state, manifest.request())
-            .await?,
-    )
 }

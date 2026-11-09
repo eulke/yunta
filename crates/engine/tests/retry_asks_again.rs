@@ -6,6 +6,7 @@
 use yunta_core::events::{
     CriterionResult, Escalation, EventPayload, NodeEvent, Precondition, Remedy, TaskStatus,
 };
+use yunta_core::refusal::GateRefusal;
 use yunta_core::reserved::ReservedOption;
 use yunta_engine::{awaits_decision, current_escalation, ResolveGateError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
@@ -173,7 +174,10 @@ async fn a_decision_answered_is_on_offer_to_nobody_until_its_resume_acts_on_it()
     answer_parked(&bench, "go").await.unwrap();
 
     let second = answer_parked(&bench, "stop").await.unwrap_err();
-    assert!(matches!(second, ResolveGateError::NotPaused), "{second:?}");
+    assert!(
+        matches!(second, ResolveGateError::Refused(GateRefusal::NotPaused)),
+        "{second:?}"
+    );
     let state = state_of(&bench);
     assert_eq!(awaits_decision(&manifest, &state), None);
     let offered = current_escalation(&manifest, &bench.run_dir(), &state)

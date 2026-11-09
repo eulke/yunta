@@ -4,20 +4,20 @@
 
 use std::collections::BTreeMap;
 
+use crate::command;
 use yunta_core::events::{DecisionOn, Fact, GateWaitingPayload, Menu, Shown};
 use yunta_core::step::{Choice, NextStep};
 use yunta_core::RunId;
-use yunta_render::command;
 
-use yunta_render::command::Reader;
-use yunta_render::escalation::claim_words;
+use crate::command::Reader;
+use crate::escalation::claim_words;
 
 /// A parked run's decision as the versioned JSON carries it: the node it
 /// belongs to, the claim and the facts a person reads beside it, every option
 /// with the words it is read by, what the gate withholds and why, the menu's
 /// own data, and the commands that answer it.
 #[derive(serde::Serialize)]
-pub(crate) struct DecisionJson {
+pub struct DecisionJson {
     /// The node `resolve_gate` records the answer against. Absent for a decision
     /// that belongs to the run.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,11 +67,11 @@ struct WithheldJson {
 }
 
 impl DecisionJson {
-    pub(crate) fn new(run_id: &RunId, on: &DecisionOn, escalation: GateWaitingPayload) -> Self {
+    pub fn new(run_id: &RunId, on: &DecisionOn, escalation: GateWaitingPayload) -> Self {
         DecisionJson {
             node: on.node().map(ToString::to_string),
             summary: claim_words(&escalation),
-            evidence: yunta_render::escalation::facts(&escalation),
+            evidence: crate::escalation::facts(&escalation),
             options: options_of(&escalation),
             external_ref: escalation.external_ref().map(str::to_string),
             shows: escalation.shows().to_vec(),
@@ -91,7 +91,7 @@ impl DecisionJson {
 
 /// Every option the gate offers, with the words a person reads beside it.
 fn options_of(escalation: &GateWaitingPayload) -> Vec<OptionJson> {
-    yunta_render::offers::decision_options(escalation)
+    crate::offers::decision_options(escalation)
         .into_iter()
         .map(|option| OptionJson {
             id: option.id,
@@ -109,7 +109,7 @@ fn withheld_of(escalation: &GateWaitingPayload) -> Vec<WithheldJson> {
         .iter()
         .map(|withheld| WithheldJson {
             option: withheld.option.to_string(),
-            because: yunta_render::escalation::because(withheld),
+            because: crate::escalation::because(withheld),
         })
         .collect()
 }
@@ -131,7 +131,7 @@ fn commands_of(run_id: &RunId, escalation: &GateWaitingPayload) -> BTreeMap<Stri
             };
             (
                 option.id.to_string(),
-                yunta_render::command::line_for(&step, Reader::Agent),
+                crate::command::line_for(&step, Reader::Agent),
             )
         })
         .collect()

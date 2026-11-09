@@ -261,7 +261,7 @@ pub async fn resume(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
         hold,
     }) = parked(&ctx, run_id, output, look).await?
     else {
-        return Ok(crate::output::RunExit::Interrupted.outcome());
+        return Ok(crate::output::Outcome::interrupted());
     };
     let adapters = adapters_for(
         &manifest,

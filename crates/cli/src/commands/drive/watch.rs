@@ -21,7 +21,7 @@ use super::{Driving, Presentation};
 /// and a run with no surface has none of it.
 pub(super) struct Watching {
     pub(super) surface: Option<Surface>,
-    pub(super) observer: Option<std::sync::Arc<dyn yunta_engine::RunObserver>>,
+    pub(super) observer: Option<std::sync::Arc<dyn yunta_core::port::RunObserver>>,
     pub(super) asking: crate::human_interaction::ConsoleInteraction,
     /// The invocation's first stage, which this run answers to.
     pub(super) cancel: CancellationToken,

@@ -1,12 +1,12 @@
-//! The sentences for the refusals that wrap a sub-enum: a read nothing in the
+//! See [`super`]. The sentences for the refusals that wrap a sub-enum: a read nothing in the
 //! run can answer, a `use:` reference that refuses, and a gate route no
 //! answer follows.
 
 use surco::text::counted;
+use yunta_core::check::{Composition, Unanswerable, UntakenRoute};
 use yunta_core::ModeName;
-use yunta_engine::{Composition, Unanswerable, UntakenRoute};
 
-use super::refusals::check;
+use super::check::line;
 
 /// A read nothing in the run can answer, in the words of the reader it names.
 pub(super) fn unanswerable_words(error: &Unanswerable) -> String {
@@ -24,7 +24,7 @@ pub(super) fn unanswerable_words(error: &Unanswerable) -> String {
         } => format!(
             "{} reads the {} of node `{node}`, which does not declare it in `artifacts.produces`; \
              declare it on `{node}`, or read it from the node that produces it",
-            yunta_render::place::label(place),
+            crate::place::label(place),
             artifact.label()
         ),
         Unanswerable::ArtifactFromNowhere {
@@ -34,14 +34,14 @@ pub(super) fn unanswerable_words(error: &Unanswerable) -> String {
         } => format!(
             "{} reads the run's {}, and nothing{} can hold one: no node declares it, no input brings \
              it and no workflow composing this one mounts it; declare it on the node that writes it",
-            yunta_render::place::label(place),
+            crate::place::label(place),
             artifact.label(),
             in_mode(mode)
         ),
         Unanswerable::SourceLeftOut { place, from, mode } => format!(
             "{} reads from `{from}`, which mode `{mode}` leaves out, so a run started in `{mode}` holds \
              nothing of it; start an earlier mode and promote, or include `{from}`",
-            yunta_render::place::label(place)
+            crate::place::label(place)
         ),
         Unanswerable::NodeOutputOfNonBash {
             node,
@@ -82,7 +82,7 @@ pub(super) fn composition_words(error: &Composition) -> String {
             problems,
         } => format!(
             "node `{node}`: `use: {name}` fails check: {}",
-            problems.iter().map(check).collect::<Vec<_>>().join("; ")
+            problems.iter().map(line).collect::<Vec<_>>().join("; ")
         ),
         Composition::Missing { node, name, detail } => {
             format!("node `{node}`: `use: {name}` cannot be resolved: {detail}")
@@ -106,7 +106,7 @@ pub(super) fn composition_words(error: &Composition) -> String {
         Composition::TooDeep { chain, depth, max } => format!(
             "workflow composition {chain} nests {} deep {}",
             counted(*depth as usize, "level"),
-            yunta_render::failure::past_the_depth_limit(*max)
+            crate::failure::past_the_depth_limit(*max)
         ),
     }
 }

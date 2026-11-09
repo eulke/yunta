@@ -41,7 +41,7 @@ impl RunCtx<'_> {
                 .await?
             }
         };
-        let asking = crate::Asking {
+        let asking = yunta_core::port::DecisionAsked {
             shown: &shown,
             run: self.run_id,
             changed: state.current_change(),

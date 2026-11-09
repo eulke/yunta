@@ -36,7 +36,7 @@ fn following_through_a_pipe(talking: &Talking, logs: &std::path::Path) -> std::p
 /// of the run's socket heard.
 ///
 /// Reached by: `crates/cli/src/surface/painter.rs`,
-/// `crates/cli/src/commands/status/follow.rs`, `crates/cli/src/json/**`
+/// `crates/cli/src/commands/status/follow.rs`, `crates/render/src/document/**`
 #[test]
 fn nothing_said_reaches_a_pipe_or_a_document() {
     let logs = tempfile::tempdir().unwrap();

@@ -10,15 +10,13 @@
 use std::collections::BTreeMap;
 
 use yunta_core::caution::Caution;
+use yunta_core::check::{CheckError, Composition, Unanswerable, UntakenRoute};
 use yunta_core::workflow::{reads::ReadSite, Place};
 use yunta_core::{
     ArtifactSpec, ConfigLayer, JoinPolicy, Node, NodeKind, OnFailure, PromptSource,
     RunnerCandidate, Workflow,
 };
-use yunta_engine::{
-    check as check_against, check_warnings as warnings_against, AdapterFacts, CheckError,
-    Composition, Unanswerable, UntakenRoute,
-};
+use yunta_engine::{check as check_against, check_warnings as warnings_against, AdapterFacts};
 
 #[path = "check/confinement.rs"]
 mod confinement;

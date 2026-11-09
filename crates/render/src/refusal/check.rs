@@ -1,19 +1,30 @@
-//! The sentences for what `check` refuses about a workflow.
+//! See [`super`]. The sentences for what `check` refuses about a workflow.
 
+use surco::components::Problem;
+use yunta_core::check::CheckError;
 use yunta_core::events::DeniedRule;
+use yunta_core::yaml::Location;
 use yunta_core::{ArtifactKind, ArtifactSpec, ConfigKey, NodeId, ReservedIdentity};
-use yunta_engine::CheckError;
 
 use super::wrapped::{composition_words, unanswerable_words, untaken_words};
 
 /// What `check` refuses, on one line: what is wrong, then the name it is
 /// most likely a slip from.
-pub(crate) fn check(error: &CheckError) -> String {
-    format!(
-        "{}{}",
-        check_said(error),
-        surco::text::near_miss(error.near())
-    )
+pub fn line(error: &CheckError) -> String {
+    format!("{}{}", said(error), surco::text::near_miss(error.near()))
+}
+
+/// One refusal of `yunta check` as a problem a page draws: quoted from
+/// `text`, read from `path`, at `at` when it has a place, with the name it is
+/// most likely a slip from said under it.
+pub fn problem(
+    error: &CheckError,
+    at: Option<Location>,
+    path: &str,
+    text: Option<&str>,
+) -> Problem {
+    crate::blocks::diagnostic::located(said(error), at, path, text)
+        .help(error.near().map(surco::text::suggested))
 }
 
 /// What `check` refuses, in the words a person reads it as, the name a
@@ -23,7 +34,7 @@ pub(crate) fn check(error: &CheckError) -> String {
 /// so every variant is written by exactly one family. A variant no family
 /// names is written as its code, which shows the gap instead of an empty
 /// sentence.
-pub(crate) fn check_said(error: &CheckError) -> String {
+pub fn said(error: &CheckError) -> String {
     node_words(error)
         .or_else(|| session_words(error))
         .or_else(|| runner_words(error))
@@ -106,7 +117,7 @@ fn runner_words(error: &CheckError) -> Option<String> {
         ),
         CheckError::CommandDenied { node, denied } => format!(
             "node `{node}`: {}",
-            yunta_render::failure::denied(&DeniedRule::Command(denied.clone()))
+            crate::failure::denied(&DeniedRule::Command(denied.clone()))
         ),
         _ => return None,
     })
@@ -114,7 +125,7 @@ fn runner_words(error: &CheckError) -> Option<String> {
 
 /// What `error` says a node lacks and what to declare for it, apart: for
 /// a key the config leaves unset; `None` for every other refusal.
-pub(crate) fn lacking(error: &CheckError) -> Option<(String, String)> {
+pub fn lacking(error: &CheckError) -> Option<(String, String)> {
     match error {
         CheckError::Unset { node, key, near } => Some((
             format!(
@@ -160,12 +171,12 @@ fn artifact_words(error: &CheckError) -> Option<String> {
             path,
             base,
             missing,
-        } => yunta_render::caution::missing_sentence(
+        } => crate::caution::missing_sentence(
             node,
             path,
             base.as_deref(),
             missing,
-            yunta_render::caution::Reach::NothingEarlierCan,
+            crate::caution::Reach::NothingEarlierCan,
         ),
         CheckError::DistillUnknownArtifact { artifact } => format!(
             "`on_finish.distill` names {artifact} but that node's `artifacts.produces` does not \
@@ -186,7 +197,7 @@ fn artifact_words(error: &CheckError) -> Option<String> {
         CheckError::ReservedArtifactName { place, name } => format!(
             "{} names the artifact `{name}`, and `{name}` is a document Yunta reads: refer to it \
              with `kind: {name}` instead, since the names {} are not available as file names",
-            yunta_render::place::label(place),
+            crate::place::label(place),
             ArtifactKind::listed()
         ),
         CheckError::ArtifactNameRefused {
@@ -195,7 +206,7 @@ fn artifact_words(error: &CheckError) -> Option<String> {
             problem,
         } => format!(
             "node `{node}` produces a name that {}",
-            yunta_render::failure::name(name, problem)
+            crate::failure::name(name, problem)
         ),
         _ => return None,
     })
@@ -224,7 +235,7 @@ fn answer_words(error: &CheckError) -> Option<String> {
             "{} reads `kind: answers` from node `{node}`, and `{node}` asks nothing: only a node \
              that produces `questions` leaves answers; read them from the node that asks, or drop \
              the source",
-            yunta_render::place::label(place)
+            crate::place::label(place)
         ),
         CheckError::QuestionsOnKind { node, kind } => format!(
             "node `{node}` is `kind: {kind}` and produces `questions`, but only a `prompt` node asks; \

@@ -7,11 +7,12 @@ use std::time::Duration;
 
 use surco::golden::assert_golden;
 use yunta_adapters::{MockForge, MockForgeState};
+use yunta_core::check::CheckError;
 use yunta_core::events::{
     EngineError, EngineStep, EventPayload, Failure, NodeEvent, PauseReason, StoredEvent,
 };
 use yunta_core::{ConfigKey, ConfigLayer, Workflow};
-use yunta_engine::{CheckError, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_replay::RunState;
 use yunta_testkit::{bare_origin, git_output, Bench, INITIAL_BRANCH, MOCK_CONFIG};
 

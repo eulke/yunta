@@ -23,9 +23,9 @@ use yunta_storage::{ChainVerification, Storage};
 
 use crate::context::Context;
 use crate::error::CliError;
-use crate::json::SCHEMA_VERSION;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
+use yunta_render::document::SCHEMA_VERSION;
 
 pub async fn verify(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -48,7 +48,7 @@ pub(crate) struct VerifyAnswer {
     holds: bool,
     /// The word the headline says: `intact` when every check holds, `broken` otherwise.
     word: &'static str,
-    #[serde(serialize_with = "crate::json::check::rows")]
+    #[serde(serialize_with = "yunta_render::document::check::rows")]
     checks: Vec<Check>,
 }
 

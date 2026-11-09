@@ -1,5 +1,5 @@
-//! A run's id: the name of its directory under the runs root, and the short
-//! handle a person calls the run by.
+//! A run's id: the name of its directory under the runs root, the short
+//! handle a person calls the run by, and the branch its commits live on.
 
 use std::borrow::{Borrow, Cow};
 use std::fmt;
@@ -28,6 +28,9 @@ impl RunId {
     /// few enough to read off one line and type into the next.
     pub const HANDLE_CHARS: usize = 6;
 
+    /// Where every run's own branch lives, under `refs/heads`.
+    pub const BRANCHES: &'static str = "yunta/run";
+
     /// What a person calls the run by: the last [`RunId::HANDLE_CHARS`]
     /// characters of its id. A ULID opens with the time it was made,
     /// which every run of a day shares, and closes with its random part,
@@ -41,5 +44,14 @@ impl RunId {
             .nth(Self::HANDLE_CHARS - 1)
             .map_or(0, |(at, _)| at);
         id.get(start..).unwrap_or(id)
+    }
+
+    /// The branch the run's own commits live on: the branch its worktree is
+    /// created on, what `{{run.branch}}` renders, what the run's cleanup
+    /// deletes, and what a diagnostic names when the checkout has to be
+    /// brought back. One name, composed here, so every one of those is the
+    /// same string.
+    pub fn branch(&self) -> String {
+        format!("{}/{self}", Self::BRANCHES)
     }
 }

@@ -21,7 +21,7 @@ struct Watching {
 }
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for Watching {
+impl yunta_core::port::HumanInteraction for Watching {
     async fn resolve(&self, _escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         let engine = yunta_engine::read_engine(&self.run_dir, &yunta_engine::lock::SystemProbe);
         self.seen.lock().unwrap().push(engine);

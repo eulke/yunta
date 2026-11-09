@@ -10,8 +10,6 @@
 //! width and the glyphs are settled once in `crate::output`, where both
 //! rules live.
 
-pub(crate) mod json;
-
 use yunta_render::page::{History, Page, Stats};
 
 use chrono::{DateTime, Utc};
@@ -26,9 +24,9 @@ use crate::context::{Context, Opened};
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
-use json::{RunStatsJson, WorkflowHistoryJson};
 use surco::doc::Depth;
 use surco::look::Look;
+use yunta_render::document::stats::{RunStatsJson, WorkflowHistoryJson};
 
 /// What `yunta stats <run_id>` answers: the run's document for a program,
 /// and its block for a person.

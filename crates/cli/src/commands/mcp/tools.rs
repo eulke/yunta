@@ -69,7 +69,8 @@ pub(super) async fn tool_workflow_status(
     let engine = yunta_engine::read_engine(&open.run_dir, &yunta_engine::lock::SystemProbe);
     let (events, manifest) = (open.events, open.manifest.doc);
     let state = yunta_replay::RunState::replay(&events);
-    let decision = crate::json::decision_of(&manifest, &open.run_dir, &state).await?;
+    let decision =
+        crate::commands::status::decision::decision_of(&manifest, &open.run_dir, &state).await?;
     let mut frame = yunta_replay::frame::RunFrame::of(
         &run_id,
         &manifest.workflow,
@@ -82,7 +83,7 @@ pub(super) async fn tool_workflow_status(
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.
-    crate::json::to_json_string(&crate::json::RunDocument::of(
+    yunta_render::document::to_json_string(&yunta_render::document::RunDocument::of(
         &run_id, &events, &state, &manifest, &frame, decision,
     ))
     .map_err(CliError::msg)

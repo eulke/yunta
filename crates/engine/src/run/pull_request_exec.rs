@@ -165,7 +165,7 @@ async fn prepared<'a>(
         Step::Ended(end) => return Ok(Step::Ended(end)),
     };
     let request = PullRequestRequest {
-        head: crate::worktree::run_branch(ctx.run_id),
+        head: ctx.run_id.branch(),
         base: base_branch(ctx),
         title,
         body,

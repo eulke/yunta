@@ -19,13 +19,15 @@ crates/
   core      yunta-core      no change of responsibility
   storage   yunta-storage   adds reading from a sequence, and the head of each run
   replay    yunta-replay    NEW: what happened. Replay and the read model, pure, no IO
-  render    yunta-render    adds every page, since it can read yunta-replay
+  render    yunta-render    adds every page, since it can read yunta-replay, and the JSON documents a machine reads
+  mcp-protocol yunta-mcp-protocol NEW: how Yunta speaks MCP: the protocol revisions it announces, the shape of what it answers
   adapters  yunta-adapters  no change
   engine    yunta-engine    adds the resume guard, parked answers, the words socket
-  control   yunta-control   NEW: what can be asked of Yunta, with no terminal
+  api       yunta-api       NEW: what can be asked of Yunta, with no terminal
+  mcp       yunta-mcp       NEW: the MCP server an agent asks Yunta through, on the API, with no transport of its own
   app       yunta-app       NEW: the application as a value: state, stages, screens, effects
   tui       yunta-tui       NEW: the only crate that knows Ratatui and crossterm
-  cli       yunta           the binary: clap, output, attached view, inline prompts, json, mcp, rail
+  cli       yunta           the binary: clap, output, attached view, inline prompts, the control plane on stdio, rail
   desktop   (later)         Tauri over yunta-app, with Surco's Html surface
 ```
 
@@ -35,11 +37,13 @@ New or changed dependencies:
 |---|---|
 | `yunta-replay` | core, surco |
 | `yunta-render` | core, replay, surco |
-| `yunta-engine` | core, storage, replay, surco |
-| `yunta-control` | core, storage, replay, engine, adapters, render, surco |
-| `yunta-app` | core, replay, render, control, surco |
+| `yunta-mcp-protocol` | nothing in the workspace; `rmcp` |
+| `yunta-engine` | core, storage, replay, mcp-protocol, surco |
+| `yunta-api` | core, storage, replay, engine, adapters, render, surco |
+| `yunta-mcp` | core, replay, render, api, mcp-protocol, surco |
+| `yunta-app` | core, replay, render, api, surco |
 | `yunta-tui` | app, surco, ratatui, crossterm |
-| `yunta` | all of the above |
+| `yunta` | core, replay, render, api, mcp, surco, and the app and the TUI as they come; never the engine, the store or the adapters |
 | desktop | app, surco |
 
 What moves:
@@ -49,20 +53,22 @@ What moves:
 | `replay`, `view`, `live`, `stats`, `history`, `receipt`, `verification_effectiveness`, `modes`, the value types `Engine`, `Prompt`, `Asking` | `yunta-replay` | About 2,650 lines at the base, 4,143 at `8c833576`. They import only core, surco and each other. Reading `engine.json` stays in the engine |
 | Every page a command shows: `run_page`, the node, the field, stats and history, doctor, and the answer of every other command; and render's own gate, plan, spec, shown, findings and receipt documents | `yunta-render`, as values of one `Page` trait, in `page::` | They take data; reading, the exit code, the streams and the JSON stay in `yunta`. The decision block is one, in `escalation` |
 | The `after_for` table and the spelling of commands | `after_for` to `yunta-replay` as `RunFrame::actions`; every command a person is told to type a `NextStep`, spelled once in `yunta-render`'s `command`; both in `run-pages` | One table: the CLI spells it, the TUI binds keys, the desktop shows buttons. `advice` and `Spell` are gone |
-| Gathering the inbox, run admission, resolve, cancel, close, gc, packs, doctor's checks, detection, the test runner | `yunta-control` | They return data and never print |
+| Gathering the inbox, run admission, resolve, cancel, close, gc, packs, doctor's checks, detection, the test runner | `yunta-api` | They return data and never print |
 | The models of `card`, `menu`, `form`, `field`, `desk`, `Stroke`, `Press` | `yunta-app` | `hold`, `Console`, `keyboard` and the live region stay in `yunta` |
-| `json/` | stays in `yunta` | Only the CLI and MCP use it; the desktop links the library |
+| `json/` | `yunta-render`, as the documents a machine reads, beside the pages a person reads | The CLI's `--json`, the control plane's answers and a server read one versioned shape. Moved at the user's choice on 2026-11-09, when MCP left the binary |
+| The control plane's MCP server: its tools, their schemas and what each asks | `yunta-mcp`, on `yunta-api` | Transport-agnostic: `yunta mcp` serves it on stdio, and a server can serve it over HTTP |
+| What every MCP result Yunta serves is shaped like (`engine::mcp`) | `yunta-mcp-protocol` | The engine's per-run tools and the control plane announce the same protocol and answer in the same shape |
 
 ## Rules that prevent rework
 
 | Rule | What holds it |
 |---|---|
-| No interface calls the engine, only `yunta-control` | A test over the dependencies, like `no_adapter_crate_in_engine` |
+| No interface calls the engine, only `yunta-api` | A test over the dependencies, like `no_adapter_crate_in_engine` |
 | `yunta-app` does not know a terminal | The same kind of test |
 | `yunta-replay` is pure | Its manifest lists neither tokio nor rusqlite, and a test holds that |
 | `update` is pure and effects are data | A test walks every reachable state |
 | The desktop stays possible without building it | That walk also draws each screen with `Html` |
-| Nothing below the interface reads the process | `yunta-control` takes a `Workspace`: path, environment, clock and engine binary |
+| Nothing below the interface reads the process | `yunta-api` takes a `Workspace`: the directory, the environment, the clock, the id source, the secrets and Yunta's own binary |
 | A color has one table | `Paint` and the bridge to Ratatui read the same Surco function |
 | Moving code does not change what is printed | The existing goldens are not touched during a move |
 
@@ -78,7 +84,7 @@ What moves:
 | `surco-screen` | Public reading of styles; the ribbon, legend and attention blocks; a screen as data, drawn as Markdown and HTML; a pane's exact width; with their goldens | nothing |
 | `run-state` | The `yunta-replay` crate, cutting the cycle between `replay` and `stats`, each item with one path and a name that says what it is | nothing |
 | `run-pages` | Every page in `yunta-render`, in one form; what a run offers next as actions; every command spelled once; the CLI printing exactly the same | `run-state` |
-| `control` | `yunta-control`, with the CLI and MCP mounted on it | `log-follow`, `run-state` |
+| `control` | `yunta-api`, with the CLI and MCP mounted on it | `log-follow`, `run-state` |
 | `app-core` | `yunta-app`: stages, screens, effects and moved prompts | `control`, `run-pages`, `surco-screen` |
 | `tui` | `yunta-tui`, bare `yunta` and `deny.toml`, in slices: watch, decide, start. It lays a screen out with Ratatui's `Layout`, draws each pane through Surco's terminal at `Width::exact`, and draws the overlay's box in Surco's glyphs; `surco-screen`'s `tui-reference` frames are its reference | `app-core`, `parked-answers` |
 | `desktop` | Reserved only: no spec and no code yet | `app-core` |
@@ -112,8 +118,9 @@ The from-scratch reorganization does not enter: `core` with no IO, `yunta-policy
 
 ## Approved with the map
 
-- `yunta-control` and `yunta-app` are separate crates.
+- `yunta-api` and `yunta-app` are separate crates.
+- The control plane's MCP server is a crate of its own, `yunta-mcp`, an interface on `yunta-api` with no transport of its own, so a server can serve it where `yunta mcp` serves stdio; what every MCP server of Yunta speaks is `yunta-mcp-protocol`, below the engine, which serves the per-run tools; and the JSON documents are `yunta-render`'s. Chosen by the user on 2026-11-09, while planning `control`.
 - `yunta review` at a terminal opens the application at that decision, and the duplicated full-screen loop is deleted. Outside a terminal it prints as before.
 - `third-party-notices` was dropped on 2026-11-07, at the user's choice, when its spec was read: the license stands in each package's definition, and nowhere else.
-- The names `yunta-control`, `yunta-app` and `yunta-tui` are fixed, as are the module ids. `yunta-state` became `yunta-replay` on 2026-11-07, at the user's choice, when its spec was approved: "state" is `RunState` and `yunta-app`'s own state, and replay is what every module of the crate does.
+- The names `yunta-api`, `yunta-app` and `yunta-tui` are fixed, as are the module ids. `yunta-control` became `yunta-api` on 2026-11-09, at the user's choice, while planning `control`: the one API every interface calls, which reads, acts and keeps a project, wider than control; the module keeps its id. `yunta-state` became `yunta-replay` on 2026-11-07, at the user's choice, when its spec was approved: "state" is `RunState` and `yunta-app`'s own state, and replay is what every module of the crate does.
 - `session-ends` was added on 2026-11-05, after `run-words`: the two bugs the agent audit of 2026-11-03 confirmed, still present at `3456baea`.

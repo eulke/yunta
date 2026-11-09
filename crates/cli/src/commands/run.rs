@@ -16,9 +16,10 @@ use std::path::Path;
 
 use yunta_adapters::MOCK_ID;
 use yunta_core::caution::Caution;
+use yunta_core::check::CheckError;
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, RunAdapter, Workflow};
-use yunta_engine::{CheckError, FrozenRun};
+use yunta_engine::FrozenRun;
 use yunta_render::command;
 use yunta_replay::history::PriorEstimation;
 use yunta_storage::AsyncStorage;
@@ -33,12 +34,12 @@ use super::drive::Prepared;
 use super::registry::{create_frozen_run, read_fixture, servable};
 use crate::context::Context;
 use crate::error::CliError;
-use crate::json::PreRunWarnings;
 use crate::output::warn;
 use crate::output::Mode;
 use crate::output::Outcome;
 use mode::resolve_mode;
 use surco::look::Look;
+use yunta_render::document::PreRunWarnings;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
@@ -255,10 +256,13 @@ pub(super) async fn preflight(
 /// The refusal a workflow's own check makes, each error in the words a
 /// person reads, under the check to run again on `workflow_path`.
 fn check_refusal(errors: &[CheckError], ctx: &Context, workflow_path: &Path) -> CliError {
-    let words: Vec<String> = errors.iter().map(crate::error::words::check).collect();
+    let words: Vec<String> = errors
+        .iter()
+        .map(yunta_render::refusal::check::line)
+        .collect();
     let workflow = Arg::Given(super::verdict::shown(ctx, workflow_path));
     CliError::msg(surco::text::problems(
-        crate::error::page::unrunnable(workflow),
+        yunta_render::refusal::unrunnable(workflow),
         &words,
     ))
 }
@@ -429,7 +433,7 @@ pub(super) async fn create_run_from(
                 &ctx.cwd,
                 &worktree,
                 &manifest.base_commit,
-                &yunta_engine::run_branch(&run_id),
+                &run_id.branch(),
                 manifest.isolation,
                 ctx.supervision(),
             )

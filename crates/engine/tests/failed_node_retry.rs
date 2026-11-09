@@ -8,6 +8,7 @@ use yunta_core::events::{
     EventPayload, Failure, GateEvent, NodeEvent, PauseReason, Stuck, TaskCause, TaskEvent,
     TaskStatus, TaskStop,
 };
+use yunta_core::refusal::GateRefusal;
 use yunta_core::ConfigKey;
 use yunta_engine::{current_escalation, RunReport, RunTerminal};
 use yunta_testkit::{write, Bench, MOCK_CONFIG};
@@ -119,7 +120,9 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
     assert!(
         matches!(
             refused,
-            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+            Err(yunta_engine::ResolveGateError::Refused(
+                GateRefusal::UnknownOption { .. }
+            ))
         ),
         "{refused:?}"
     );
@@ -217,7 +220,7 @@ async fn a_person_who_fixes_the_cause_while_asked_retries_in_the_same_invocation
         fix: std::path::PathBuf,
     }
     #[async_trait::async_trait]
-    impl yunta_engine::HumanInteraction for FixThenRetry {
+    impl yunta_core::port::HumanInteraction for FixThenRetry {
         async fn resolve(
             &self,
             escalation: &yunta_core::events::GateWaitingPayload,

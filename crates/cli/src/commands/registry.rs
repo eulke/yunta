@@ -20,6 +20,7 @@ use yunta_storage::AsyncStorage;
 use super::Adapters;
 use crate::context::Context;
 use crate::error::CliError;
+use yunta_render::refusal::Refused;
 
 /// What `servable` refuses. Each variant names the node, runner or adapter
 /// that cannot be served, so the person reading it knows what to change.
@@ -168,9 +169,11 @@ fn frozen_children(manifest: &Manifest) -> Result<Vec<(&str, Workflow)>, CliErro
         .flat_map(|frozen| &frozen.workflows)
         .map(|(name, child)| {
             let workflow = yunta_core::workflow::read::read(&child.text, Path::new(name)).map_err(
-                |report| CliError::Document {
-                    report,
-                    text: Some(child.text.clone()),
+                |report| {
+                    CliError::from(Refused::Document {
+                        report: Box::new(report),
+                        text: Some(child.text.clone()),
+                    })
                 },
             )?;
             Ok((name.as_str(), workflow))
@@ -265,7 +268,7 @@ fn refuse_unchecked(
         return Ok(());
     }
     Err(CliError::msg(surco::text::problems(
-        crate::error::page::unrunnable(workflow),
+        yunta_render::refusal::unrunnable(workflow),
         &errors,
     )))
 }
@@ -388,10 +391,10 @@ pub(crate) struct Executing<'a> {
     pub(crate) storage: &'a AsyncStorage,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: &'a dyn yunta_core::IdSource,
-    pub(crate) human_interaction: &'a dyn yunta_engine::HumanInteraction,
+    pub(crate) human_interaction: &'a dyn yunta_core::port::HumanInteraction,
     pub(crate) forge: Option<&'a dyn yunta_core::port::Forge>,
     pub(crate) cancel: &'a tokio_util::sync::CancellationToken,
-    pub(crate) observer: Option<Arc<dyn yunta_engine::RunObserver>>,
+    pub(crate) observer: Option<Arc<dyn yunta_core::port::RunObserver>>,
     pub(crate) rail_command: yunta_core::rail::RailCommand,
     pub(crate) ambient: &'a yunta_core::Env,
 }

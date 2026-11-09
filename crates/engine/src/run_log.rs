@@ -12,7 +12,7 @@
 
 use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
 
-use crate::observer::{Observed, RunObserver};
+use yunta_core::port::{Observed, RunObserver};
 use yunta_core::{Clock, NodeId, RunId, Seq};
 use yunta_replay::RunState;
 use yunta_storage::{AsyncStorage, StorageError};

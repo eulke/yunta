@@ -49,9 +49,8 @@ use crate::git::{self, Effect, BRANCH_DELETED};
 use crate::lock::{self, Acquired, Contention, LockError, LockOwner, SystemProbe};
 
 use crate::process::Supervision;
-pub(crate) use branches::RUN_BRANCHES;
+pub use branches::UnitRef;
 pub(crate) use branches::{is_legacy_unit_branch, legacy_unit_branches_of, LEGACY_UNIT_BRANCHES};
-pub use branches::{run_branch, UnitRef};
 pub(crate) use capture::capture_for_commit;
 pub use capture::{capture_tree, head_tree};
 pub use commit::{commit_tree, restore, Captured};

@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, NodeEvent, SessionEvent, StoredEvent};
-use yunta_engine::{Observed, RunObserver, RunReport, RunTerminal};
+use yunta_core::port::{Observed, RunObserver};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 use yunta_testkit_core::RushingClock;
 

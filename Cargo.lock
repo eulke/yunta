@@ -3091,6 +3091,7 @@ dependencies = [
  "yunta-adapters",
  "yunta-core",
  "yunta-engine",
+ "yunta-mcp-protocol",
  "yunta-render",
  "yunta-replay",
  "yunta-storage",
@@ -3184,12 +3185,20 @@ dependencies = [
  "uuid",
  "yunta-adapters",
  "yunta-core",
+ "yunta-mcp-protocol",
  "yunta-render",
  "yunta-replay",
  "yunta-storage",
  "yunta-surco",
  "yunta-testkit",
  "yunta-testkit-core",
+]
+
+[[package]]
+name = "yunta-mcp-protocol"
+version = "0.0.5"
+dependencies = [
+ "rmcp",
 ]
 
 [[package]]

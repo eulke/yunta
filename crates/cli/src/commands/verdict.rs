@@ -9,18 +9,19 @@ use std::path::{Path, PathBuf};
 use surco::components::Problem;
 use surco::look::Look;
 use yunta_core::caution::Caution;
+use yunta_core::check::{CheckError, Composition};
 use yunta_core::diagnostic::Report;
 use yunta_core::yaml::SourceMap;
 use yunta_core::{ConfigLayer, Detected, Workflow};
-use yunta_engine::{CheckError, Composition};
 use yunta_render::blocks::diagnostic::{hinted, located, Pointed};
 use yunta_render::page::{Checked, Diagnosis, Unrunnable};
 
 use crate::context::Context;
-use crate::error::{page, CliError};
+use crate::error::CliError;
 use crate::output::warn;
 use crate::output::Outcome;
 use crate::output::{show, show_on_stderr};
+use yunta_render::refusal::Refused;
 
 /// How much of the project a verdict reads beyond the workflow itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,7 +203,7 @@ impl Verdict {
     /// The verdict as a run is refused with it. A stop while the project's
     /// remote is read is the outer `Err`, not a refusal.
     pub(crate) async fn refusal(&self, ctx: &Context) -> Result<CliError, CliError> {
-        Ok(CliError::Unrunnable(self.unrunnable(ctx).await?))
+        Ok(Refused::Unrunnable(Box::new(self.unrunnable(ctx).await?)).into())
     }
 
     /// Every problem, each about the workflow quoted from its file in the
@@ -225,7 +226,10 @@ impl Verdict {
                 }
                 error => {
                     let at = error.pointer().and_then(|pointer| map.place(&pointer));
-                    pointed.push(page::refused(error, at, &shown, text.as_deref()).into());
+                    pointed.push(
+                        yunta_render::refusal::check::problem(error, at, &shown, text.as_deref())
+                            .into(),
+                    );
                 }
             }
         }

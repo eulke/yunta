@@ -13,7 +13,7 @@ use super::node::NodeWaitJson;
 /// different thing from the run itself stopping, and only one of them has a node to name.
 #[derive(serde::Serialize)]
 #[serde(untagged)]
-pub(crate) enum WaitingOnJson {
+pub enum WaitingOnJson {
     /// A node is parked on a person. With several parked at once this
     /// is the first in the workflow's declaration order. `on` is the
     /// kind of wait the node is in, from the node's own shape.
@@ -63,11 +63,11 @@ impl WaitingOnJson {
             WaitingOn::Node { node, on, reason } => WaitingOnJson::Node {
                 node: node.to_string(),
                 waiting: NodeWaitJson::of(on),
-                reason: reason.as_ref().map(yunta_render::pause::sentence),
+                reason: reason.as_ref().map(crate::pause::sentence),
             },
             WaitingOn::Run { reason } => WaitingOnJson::Run {
                 on: "run",
-                reason: yunta_render::pause::sentence(reason),
+                reason: crate::pause::sentence(reason),
             },
         })
     }

@@ -23,6 +23,8 @@ yunta-surco.workspace = true
 yunta-storage.workspace = true
 # What a run is, as its log says: the engine schedules and resumes from it.
 yunta-replay.workspace = true
+# The shape every MCP result of Yunta takes, which the per-run tools answer in.
+yunta-mcp-protocol.workspace = true
 thiserror.workspace = true
 futures.workspace = true
 globset.workspace = true

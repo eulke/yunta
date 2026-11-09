@@ -20,13 +20,13 @@ every state from it, and what a person reads is drawn from that data in Surco.
 | `yunta-replay` | replay and every reading of a run, with no IO | core, surco |
 | `yunta-render` | Yunta's own facts and documents, said in Surco | core, replay, surco |
 | `yunta-adapters` | `claude-code`, `codex` and `mock` behind the port | core, render, surco |
-| `yunta-engine` | scheduling, the task cycle | core, storage, replay, surco |
-| `yunta` | the commands | core, storage, replay, engine, adapters, render, surco |
-| `yunta-testkit-core` | test scaffolding for the crates below the engine | core |
+| `yunta-mcp-protocol` | MCP as Yunta speaks it | nothing in the workspace |
+| `yunta-engine` | scheduling, the task cycle | core, storage, replay, mcp-protocol, surco |
+| `yunta` | the commands | core, storage, replay, mcp-protocol, engine, adapters, render, surco |
+| `yunta-testkit-core` | test scaffolding for crates below the engine | core |
 | `yunta-testkit` | the whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
 | `xtask` | smells, the docs checker, schemas | core, surco |
 
-`yunta-engine`'s `[dependencies]` never name `yunta-adapters` or `yunta-render`; its tests may.
 `cargo xtask docs --check` holds this table to every member's manifest.
 
 ## Product rules

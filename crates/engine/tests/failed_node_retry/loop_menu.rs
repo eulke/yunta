@@ -2,6 +2,7 @@
 //! offers, and the stop it records as data.
 
 use super::*;
+use yunta_core::refusal::GateRefusal;
 
 /// A loop whose one task needs `made.txt`: the plan writes the task, and
 /// only a session that creates the file meets its criterion.
@@ -93,7 +94,9 @@ async fn a_blocked_loop_offers_no_retry_on_the_tree_it_failed_on() {
     assert!(
         matches!(
             answer_parked(&bench, "retry").await,
-            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+            Err(yunta_engine::ResolveGateError::Refused(
+                GateRefusal::UnknownOption { .. }
+            ))
         ),
         "no retry is offered on the tree the loop blocked on"
     );

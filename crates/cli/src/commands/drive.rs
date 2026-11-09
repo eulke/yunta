@@ -20,12 +20,12 @@ use yunta_storage::AsyncStorage;
 use crate::commands::{reset_at, spawn_detached_resume, DetachedResumeError};
 use crate::context::Context;
 use crate::error::CliError;
-use crate::json::PreRunWarnings;
 use crate::output::Mode;
 use crate::output::Outcome;
 use crate::surface::{Closing, ClosingEnv, Delivery, TerminalEnv};
 use surco::glyphs::Glyphs;
 use surco::look::Look;
+use yunta_render::document::PreRunWarnings;
 use yunta_render::page::Places;
 
 // The one call into the engine is `registry::execute`; this module keeps the
@@ -208,7 +208,7 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
     // code, as a shell tells it of any process SIGINT ended, whatever
     // the run reached on its way out.
     Ok(match interrupted {
-        true => crate::output::RunExit::Interrupted.outcome(),
+        true => crate::output::Outcome::interrupted(),
         false => outcome,
     })
 }
@@ -231,15 +231,17 @@ async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
         home: settling.ctx.env.home.as_deref(),
     };
     match settling.output {
-        Mode::Json => Ok(report_run_json(
-            settling.ctx,
-            settling.storage,
-            &settling.run_id,
-            &settling.manifest,
-            settling.warnings,
-        )
-        .await?
-        .verdict()),
+        Mode::Json => Ok(crate::output::exit(
+            report_run_json(
+                settling.ctx,
+                settling.storage,
+                &settling.run_id,
+                &settling.manifest,
+                settling.warnings,
+            )
+            .await?
+            .outcome(),
+        )),
         // The run id already went out when the invocation opened. The
         // verdict line and the exit code come from the one reading the closing
         // block takes.
@@ -328,12 +330,19 @@ pub(crate) struct Closed<'a> {
 async fn closing_of(closed: &Closed<'_>) -> Result<Closing, CliError> {
     let events = closed.storage.events_for_run(closed.run_id.clone()).await?;
     let state = yunta_replay::RunState::replay(&events);
-    let decision = crate::json::decision_of(closed.manifest, closed.run_dir, &state)
-        .await?
-        .map(|(node, escalation)| (node, escalation.into_payload()));
+    let decision =
+        crate::commands::status::decision::decision_of(closed.manifest, closed.run_dir, &state)
+            .await?
+            .map(|(node, escalation)| (node, escalation.into_payload()));
     let shown = match &decision {
         Some((_, escalation)) => {
-            crate::json::shown_of(closed.manifest, closed.run_dir, escalation, &state).await?
+            crate::commands::status::decision::shown_of(
+                closed.manifest,
+                closed.run_dir,
+                escalation,
+                &state,
+            )
+            .await?
         }
         None => Vec::new(),
     };
@@ -348,7 +357,7 @@ async fn closing_of(closed: &Closed<'_>) -> Result<Closing, CliError> {
         places: Places {
             run_dir: closed.run_dir,
             worktree: closed.worktree,
-            branch: &yunta_engine::run_branch(closed.run_id),
+            branch: &closed.run_id.branch(),
             base_branch: &closed.manifest.base_branch,
             isolation: closed.manifest.isolation,
             cwd: closed.cwd,
@@ -388,13 +397,15 @@ async fn documented(
     run_id: &RunId,
     manifest: &Manifest,
     warnings: PreRunWarnings,
-) -> Result<crate::json::RunDocument, CliError> {
+) -> Result<yunta_render::document::RunDocument, CliError> {
     let events = storage.events_for_run(run_id.clone()).await?;
     let state = yunta_replay::RunState::replay(&events);
     // This invocation is the engine that drove the run.
     let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
     let decision = match ctx.project.run_dir(run_id.as_str()) {
-        Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &state).await?,
+        Some(run_dir) => {
+            crate::commands::status::decision::decision_of(manifest, &run_dir, &state).await?
+        }
         None => None,
     };
     let mut frame = yunta_replay::frame::RunFrame::of(
@@ -407,8 +418,10 @@ async fn documented(
     );
     frame.prior = crate::commands::stats::budget_prior(ctx, manifest, &frame, &events).await;
     Ok(
-        crate::json::RunDocument::of(run_id, &events, &state, manifest, &frame, decision)
-            .warnings(warnings),
+        yunta_render::document::RunDocument::of(
+            run_id, &events, &state, manifest, &frame, decision,
+        )
+        .warnings(warnings),
     )
 }
 
@@ -427,7 +440,7 @@ pub(crate) async fn report_run_json(
     run_id: &RunId,
     manifest: &Manifest,
     warnings: PreRunWarnings,
-) -> Result<crate::json::RunDocument, CliError> {
+) -> Result<yunta_render::document::RunDocument, CliError> {
     let document = documented(ctx, storage, run_id, manifest, warnings).await?;
     crate::output::print_json(&document)?;
     Ok(document)

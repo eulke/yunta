@@ -91,7 +91,7 @@ impl ServerHandler for YuntaMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        Ok(yunta_engine::mcp::tool_list(tool_definitions()))
+        Ok(yunta_mcp_protocol::tool_list(tool_definitions()))
     }
 
     async fn call_tool(

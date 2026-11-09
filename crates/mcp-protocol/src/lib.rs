@@ -1,13 +1,12 @@
-//! What every MCP result this workspace serves is shaped like.
+//! How Yunta speaks MCP: what every MCP result it serves is shaped like.
 //!
-//! Two servers answer MCP here: the per-run tool listener the engine
-//! starts for one session, and the control plane `yunta mcp` serves over
-//! stdio. Both announce the same set of protocol revisions, so both owe
-//! their clients the same result shape, and the decision lives above
-//! both rather than once per server — a second copy is a second chance
-//! for one of them to drift out of the era its own clients speak. It
-//! lives in this crate because this is the lowest one that already
-//! serves MCP, and the CLI depends on it.
+//! Two servers answer MCP: the per-run tool listener the engine starts for
+//! one session, and the control plane `yunta mcp` serves over stdio. Both
+//! announce the same set of protocol revisions, so both owe their clients
+//! the same result shape, and the decision lives below both rather than
+//! once per server: a second copy is a second chance for one of them to
+//! drift out of the era its own clients speak. A crate of its own, so a
+//! server reads the shape without reaching into the other's.
 
 use rmcp::model::{CacheScope, ListToolsResult, Tool};
 

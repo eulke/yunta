@@ -26,11 +26,10 @@ use yunta_replay::RunState;
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
 use crate::context::{Context, Opened};
 use crate::error::CliError;
-use crate::json::SCHEMA_VERSION;
 use crate::output::Outcome;
-use crate::output::RunExit;
 use crate::output::{emit, Answer, Mode};
 use crate::surface::Diagnostics;
+use yunta_render::document::SCHEMA_VERSION;
 
 /// Records the decision and hands the run back, returning the sentence
 /// that says so.
@@ -83,7 +82,7 @@ async fn record(
         &redactor,
     )
     .await
-    .map_err(|refusal| CliError::gate_refused(run_id, refusal))?;
+    .map_err(|refusal| CliError::from_gate(run_id, refusal))?;
 
     super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd)
         .await
@@ -282,7 +281,7 @@ impl Answer for ResolveGateAnswer {
 
     fn outcome(&self) -> Outcome {
         match &self.resolution {
-            Resolution::Interrupted => RunExit::Interrupted.outcome(),
+            Resolution::Interrupted => crate::output::Outcome::interrupted(),
             Resolution::Resolved { .. } | Resolution::Declined => Outcome::Success,
         }
     }

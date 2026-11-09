@@ -1,6 +1,7 @@
 //! Human-interaction gates, the generic internal gate, and run limits: token budget, loop-iteration cap, and inline-context threshold.
 
-use yunta_engine::{NoInteraction, RunError, RunReport, RunTerminal};
+use yunta_core::port::NoInteraction;
+use yunta_engine::{RunError, RunReport, RunTerminal};
 use yunta_render::offers::option_words;
 use yunta_testkit::{Bench, ScriptedInteraction};
 use yunta_testkit_core::FixedClock;

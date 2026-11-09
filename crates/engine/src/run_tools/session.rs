@@ -197,7 +197,7 @@ impl ServerHandler for SessionTools {
     ) -> Result<ListToolsResult, McpError> {
         self.listed
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        Ok(crate::mcp::tool_list(super::catalog::mounted(self)))
+        Ok(yunta_mcp_protocol::tool_list(super::catalog::mounted(self)))
     }
 
     async fn call_tool(

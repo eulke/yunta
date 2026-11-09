@@ -276,7 +276,7 @@ async fn drive_case_run(
         ids: &ctx.ids,
         // A test case's every session comes from a scripted fixture — a
         // gate here has no human to ask, same as it has no LLM to call.
-        human_interaction: &yunta_engine::NoInteraction,
+        human_interaction: &yunta_core::port::NoInteraction,
         forge,
         cancel: ctx.cancellation(),
         // A case's verdict is its report, compared against `expect:` —
@@ -385,7 +385,7 @@ async fn answered(
             &redactor,
         )
         .await
-        .map_err(|refusal| CliError::gate_refused(&prepared.run_id, refusal))?;
+        .map_err(|refusal| CliError::from_gate(&prepared.run_id, refusal))?;
         report = execute(Executing {
             run_id: &prepared.run_id,
             manifest,
@@ -395,7 +395,7 @@ async fn answered(
             storage,
             clock: Arc::new(ctx.clock),
             ids: &ctx.ids,
-            human_interaction: &yunta_engine::NoInteraction,
+            human_interaction: &yunta_core::port::NoInteraction,
             forge,
             cancel: ctx.cancellation(),
             observer: None,

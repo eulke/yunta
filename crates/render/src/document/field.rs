@@ -3,16 +3,19 @@
 
 use std::time::Duration;
 
+use crate::page::{FieldGroup, FieldRow};
+use surco::glyphs::Glyphs;
 use surco::words::Standing;
 use yunta_core::{ModeName, RunId, WorkflowName};
-use yunta_render::page::{FieldGroup, FieldRow};
 
-/// Every row of a field, each as the document a program reads.
-pub(crate) fn rows<S: serde::Serializer>(
+/// Every row of a field, each as the document a program reads, its words
+/// drawn with `glyphs`.
+pub fn rows<S: serde::Serializer>(
     rows: &[FieldRow],
+    glyphs: Glyphs,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(rows.iter().map(Row::of))
+    serializer.collect_seq(rows.iter().map(|row| Row::of(row, glyphs)))
 }
 
 /// One run of a field, as a program reads it: what the run is, the group it
@@ -35,9 +38,8 @@ struct Row<'a> {
 }
 
 impl<'a> Row<'a> {
-    fn of(row: &'a FieldRow) -> Self {
+    fn of(row: &'a FieldRow, glyphs: Glyphs) -> Self {
         let frame = &row.frame;
-        let glyphs = crate::output::glyphs();
         Row {
             run_id: &frame.run_id,
             group: row.group(),

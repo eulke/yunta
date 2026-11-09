@@ -199,7 +199,7 @@ pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
 pub(super) fn node_rows(
     frame: &RunFrame,
     node: &NodeFrame,
-    said: Option<&yunta_engine::said::Said>,
+    said: Option<&yunta_core::port::Said>,
     look: &Look,
     motion: Motion,
 ) -> Vec<Line> {

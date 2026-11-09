@@ -23,11 +23,11 @@ use yunta_core::{
 };
 use yunta_storage::AsyncStorage;
 
-use crate::observer::RunObserver;
 use crate::process::Supervision;
 use crate::process_registry::ProcessRegistry;
 use crate::task_cycle::Memo;
 use crate::worktree::Unit;
+use yunta_core::port::RunObserver;
 
 /// What every listener of one run shares: its own handle on the log
 /// (the listener outlives any borrow of the engine's), the run

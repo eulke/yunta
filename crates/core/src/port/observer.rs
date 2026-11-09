@@ -8,7 +8,7 @@
 //! holds is the cache of a single invocation, discarded with it.
 //!
 //! **What reaches an observer, and what cannot.** An event reaches a
-//! run's log through [`RunLog`](crate::run_log::RunLog) and nowhere else, so the
+//! run's log through the engine's `RunLog` and nowhere else, so the
 //! mirror sits there: a log built with an observer hands it every event
 //! it appends, in the order the log carries them. The scheduler's own
 //! events, a live session's audit trail, what an agent posts
@@ -35,14 +35,16 @@
 //!
 //! **What a session says is not an event.** The log keeps a note's digest
 //! and never its words, so the words reach an observer by another door,
-//! [`RunObserver::said`], from the run's voices ([`crate::said`]): redacted,
+//! [`RunObserver::said`], from the run's voices (the engine's `said`): redacted,
 //! right after the digest is appended, and the same frame a reader of the
 //! run's socket gets in another process. The list above does not count
 //! them, and nothing an observer derives from the log moves on them.
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::EventPayload;
-use yunta_core::{NodeId, RunId, Seq};
+use serde::{Deserialize, Serialize};
+
+use crate::events::EventPayload;
+use crate::{NodeId, RunId, Seq, SessionId, TaskId};
 
 /// A live view of a run's log, fed as the engine writes it.
 ///
@@ -65,7 +67,7 @@ pub trait RunObserver: Send + Sync {
     /// append helper is the exact stall this boundary exists to remove —
     /// while a plain `fn` is structurally incapable of making the run
     /// wait. It is also what makes shutdown race-free: by the time
-    /// [`execute_run`](crate::execute_run) returns, every frame is
+    /// the engine's `execute_run` returns, every frame is
     /// delivered, because each one ran inline before its append helper
     /// returned.
     ///
@@ -75,7 +77,7 @@ pub trait RunObserver: Send + Sync {
     /// repaint and costs the run nothing. A `Result` would hand every
     /// call site a display error whose only correct handling is to
     /// ignore it. Contrast
-    /// [`SessionObserver::record`](crate::SessionObserver::record),
+    /// the engine's `SessionObserver::record`,
     /// which does return one: a lost audit event thins the trail replay
     /// and `status` read, so its storage cause travels back and fails
     /// the node.
@@ -86,16 +88,16 @@ pub trait RunObserver: Send + Sync {
     /// is never evidence: it moves nothing a surface derives from the log.
     /// Synchronous and silent for the reasons [`observe`](RunObserver::observe)
     /// is. Default: an observer that draws no words ignores it.
-    fn said(&self, _said: &crate::said::Said) {}
+    fn said(&self, _said: &Said) {}
 }
 
 /// One appended event, borrowed for the duration of the call.
 ///
 /// The body is the [`EventPayload`] itself, not the
-/// [`StoredEvent`](yunta_core::events::StoredEvent) envelope a reader
+/// [`StoredEvent`](crate::events::StoredEvent) envelope a reader
 /// gets back off the log. That envelope's body is
-/// [`EventBody::Known`](yunta_core::events::EventBody::Known) or
-/// [`EventBody::Unknown`](yunta_core::events::EventBody::Unknown), and
+/// [`EventBody::Known`](crate::events::EventBody::Known) or
+/// [`EventBody::Unknown`](crate::events::EventBody::Unknown), and
 /// the unknown arm exists for a reader parsing a *newer* writer's log —
 /// a state this boundary cannot produce, because the event it carries
 /// was written by this binary a moment ago. Handing over the envelope
@@ -116,4 +118,27 @@ pub struct Observed<'a> {
     /// What happened, in the same shape the log row carries. Its
     /// `kind_name` is the discriminant a surface switches on.
     pub payload: &'a EventPayload,
+}
+
+/// What one session said, as a run hands it to whoever listens: redacted
+/// before it leaves the engine, never on disk and never evidence. Not the
+/// note's digest, which is what the log keeps of the same words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Said {
+    pub run_id: RunId,
+    pub node_id: NodeId,
+    pub session_id: SessionId,
+    /// The task the session works, when a loop opened it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    /// The seq of the note's digest on the log: where this sits among the
+    /// run's events.
+    pub seq: Seq,
+    /// When it was said, by the run's clock.
+    pub at: DateTime<Utc>,
+    pub text: String,
+    /// Whether `text` was cut to the most one frame carries, which the
+    /// engine's voices bound before they hand a frame on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut: bool,
 }

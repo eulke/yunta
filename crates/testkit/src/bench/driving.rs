@@ -8,11 +8,9 @@
 use std::sync::Arc;
 
 use yunta_adapters::{MockAdapter, MockFixture, RunPaths};
+use yunta_core::port::{HumanInteraction, NoInteraction};
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::{
-    create_run, execute_run, BirthArtifact, CreateRunParams, HumanInteraction, NoInteraction,
-    RunEnv, RunReport,
-};
+use yunta_engine::{create_run, execute_run, BirthArtifact, CreateRunParams, RunEnv, RunReport};
 
 use super::{Bench, Driven, KnownSecrets, MOCK_CONFIG};
 

@@ -6,7 +6,7 @@
 //! on the log, which hold only a digest of the same words.
 
 use surco::line::{Line, Tone};
-use yunta_engine::said::Said;
+use yunta_core::port::Said;
 
 /// What a session said last, as one row: whose it is, then its first
 /// sentence. Every control character the sentence carries is a space by the

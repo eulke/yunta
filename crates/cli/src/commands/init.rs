@@ -25,7 +25,6 @@ use crate::ask::{ask_line, Console, Escape};
 use crate::error::CliError;
 use crate::interrupt::Interrupt;
 use crate::output::Outcome;
-use crate::output::RunExit;
 use crate::surface::Diagnostics;
 
 /// The base branch a project starts from: the remote's default, else the
@@ -276,7 +275,7 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
     let Some((project_name, base_branch)) =
         project_answers(console.as_ref(), default_name, default_branch)
     else {
-        return Ok(RunExit::Interrupted.outcome());
+        return Ok(crate::output::Outcome::interrupted());
     };
 
     let probed = crate::detect::probe_known_adapters().await;

@@ -102,7 +102,7 @@ pub(super) async fn worktrees(ctx: &RunCtx<'_>) -> Result<(), RunError> {
         }
         match crate::worktree::cleanup_worktree(
             ctx.worktree,
-            &crate::worktree::run_branch(ctx.run_id),
+            &ctx.run_id.branch(),
             ctx.root_supervision(),
         )
         .await
@@ -139,7 +139,7 @@ pub(super) async fn worktrees(ctx: &RunCtx<'_>) -> Result<(), RunError> {
 /// Deletes the run's branch once its checkout went back to the pool with
 /// no branch: deleted only when its work is in what that checkout holds.
 async fn let_branch_go(ctx: &RunCtx<'_>) -> Result<(), RunError> {
-    let branch = crate::worktree::run_branch(ctx.run_id);
+    let branch = ctx.run_id.branch();
     let args = ["branch", "-d", branch.as_str()];
     let deleted = crate::git::change(
         ctx.worktree,

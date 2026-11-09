@@ -12,7 +12,7 @@
 //! options are. A run that moves is followed with
 //! `--follow` ([`follow`]): what `yunta run` draws, from another process.
 
-pub(crate) mod decision_json;
+pub(crate) mod decision;
 pub(crate) mod follow;
 
 use std::path::PathBuf;
@@ -29,12 +29,12 @@ use yunta_replay::RunState;
 use crate::commands::stats;
 use crate::context::Context;
 use crate::error::CliError;
-use crate::json::RunDocument;
 use crate::output::note;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use surco::doc::{Depth, Doc};
 use surco::look::Look;
+use yunta_render::document::RunDocument;
 
 /// Prints where `run_id` stands, as deep as `depth` asks — or, with
 /// `node`, that one node whole. A program reads the run's document under
@@ -112,7 +112,8 @@ impl Reading {
         let manifest = open.manifest.doc;
         let now = ctx.clock.now();
         let state = yunta_replay::RunState::replay(&events);
-        let decision = crate::json::decision_of(&manifest, &run_dir, &state).await?;
+        let decision =
+            crate::commands::status::decision::decision_of(&manifest, &run_dir, &state).await?;
         let engine = yunta_engine::read_engine(&run_dir, &yunta_engine::lock::SystemProbe);
         let mut frame = RunFrame::of(run_id, &manifest.workflow, &state, None, &engine, now);
         frame.prior = stats::budget_prior(ctx, &manifest, &frame, &events).await;
@@ -128,7 +129,7 @@ impl Reading {
             frame,
             decision,
             tree,
-            branch: yunta_engine::run_branch(run_id),
+            branch: run_id.branch(),
             now,
         })
     }
@@ -160,7 +161,13 @@ impl Reading {
             )
             .await?),
             (Mode::Human, None, Some((_, escalation))) => {
-                crate::json::shown_of(&self.manifest, &self.run_dir, escalation, &self.state).await
+                crate::commands::status::decision::shown_of(
+                    &self.manifest,
+                    &self.run_dir,
+                    escalation,
+                    &self.state,
+                )
+                .await
             }
             _ => Ok(Vec::new()),
         }

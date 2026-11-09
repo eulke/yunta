@@ -42,7 +42,7 @@ impl PackRequiresGap {
     /// Everything this gap leaves a run of the pack's workflows without,
     /// with `on_path` answering whether a required program is installed
     /// where the run would look.
-    pub fn unmet(&self, on_path: &dyn Fn(&str) -> bool) -> Vec<crate::CheckError> {
+    pub fn unmet(&self, on_path: &dyn Fn(&str) -> bool) -> Vec<yunta_core::check::CheckError> {
         let runners = self.missing_runners.iter().map(|runner| {
             format!(
                 "runner `{runner}`, which `runners:` does not define with a candidate: define it"
@@ -66,10 +66,12 @@ impl PackRequiresGap {
             .chain(retired)
             .chain(servers)
             .chain(programs)
-            .map(|requirement| crate::CheckError::PackRequirementUnmet {
-                pack: self.pack.to_string(),
-                requirement,
-            })
+            .map(
+                |requirement| yunta_core::check::CheckError::PackRequirementUnmet {
+                    pack: self.pack.to_string(),
+                    requirement,
+                },
+            )
             .collect()
     }
 }

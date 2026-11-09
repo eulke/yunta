@@ -13,9 +13,9 @@ use yunta_replay::registry::Engine;
 use super::cancel::settle_crash;
 use crate::context::Context;
 use crate::error::CliError;
-use crate::json::SCHEMA_VERSION;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
+use yunta_render::document::SCHEMA_VERSION;
 
 pub async fn close(
     run_id: &RunId,
@@ -42,7 +42,7 @@ pub async fn close(
         &redactor,
     )
     .await
-    .map_err(|refusal| CliError::close_refused(run_id, refusal))?;
+    .map_err(|refusal| CliError::from_close(run_id, refusal))?;
     give_back(&ctx, &open, run_id).await;
     let answer = CloseAnswer {
         schema_version: SCHEMA_VERSION,

@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::*;
-use crate::said::{Said, Voices, TEXT_MOST};
+use crate::said::{Voices, TEXT_MOST};
+use yunta_core::port::Said;
 use yunta_core::{NodeId, RunId, Seq, SessionId};
 
 const RUN: &str = "01M6Q6X3VA7E9X676XY7CDQRA0";

@@ -271,8 +271,8 @@ fn the_footer_stays_the_last_row_as_nodes_come_and_go() {
 }
 
 /// What a session of `node` in `run` said.
-fn said(run: &RunId, node: &'static str, text: &str) -> yunta_engine::said::Said {
-    yunta_engine::said::Said {
+fn said(run: &RunId, node: &'static str, text: &str) -> yunta_core::port::Said {
+    yunta_core::port::Said {
         run_id: run.clone(),
         node_id: NodeId::from_static(node),
         session_id: yunta_core::SessionId::from_static("session-1"),

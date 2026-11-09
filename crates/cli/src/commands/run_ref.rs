@@ -8,7 +8,6 @@
 
 use std::str::FromStr;
 
-use surco::components::{Edge, RunLine};
 use surco::words::Standing;
 use yunta_core::step::{NextStep, Reach};
 use yunta_core::RunId;
@@ -17,7 +16,7 @@ use yunta_render::command;
 use super::list::inbox::Inbox;
 use crate::context::Context;
 use crate::error::CliError;
-use yunta_render::page::FieldRow;
+use yunta_render::refusal::{Candidate, Refused};
 
 /// What a person typed where a command takes a run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,30 +39,6 @@ impl FromStr for RunRef {
             "last" => Ok(RunRef::Last),
             "needs" => Ok(RunRef::Needs),
             typed => Ok(RunRef::Typed(typed.to_string())),
-        }
-    }
-}
-
-/// A run a reference could mean, and what tells it apart from the
-/// others it could mean: in words, and as the field's row a person reads,
-/// when the run reads back.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Candidate {
-    pub(crate) run_id: RunId,
-    pub(crate) about: Option<String>,
-    pub(crate) line: Option<RunLine>,
-}
-
-impl Candidate {
-    /// The run `row` is, its row ending with the command that opens it.
-    fn of(row: &FieldRow) -> Self {
-        let frame = &row.frame;
-        let handle = frame.run_id.handle().to_string();
-        let opens = Edge::Command(command::line(&NextStep::status(&frame.run_id)));
-        Candidate {
-            run_id: frame.run_id.clone(),
-            about: Some(format!("{} ({})", frame.workflow, frame.mode)),
-            line: Some(row.line(handle, opens, crate::output::glyphs())),
         }
     }
 }
@@ -136,19 +111,16 @@ async fn typed_run(ctx: &Context, typed: &str) -> Result<RunId, CliError> {
                 .into_iter()
                 .map(
                     |run_id| match inbox.rows.iter().find(|row| row.frame.run_id == run_id) {
-                        Some(row) => Candidate::of(row),
-                        None => Candidate {
-                            run_id,
-                            about: None,
-                            line: None,
-                        },
+                        Some(row) => Candidate::of(row, crate::output::glyphs()),
+                        None => Candidate::unread(run_id),
                     },
                 )
                 .collect::<Vec<_>>();
-            Err(CliError::AmbiguousRun {
+            Err(Refused::AmbiguousRun {
                 said: format!("`{typed}` is part of {} ids", candidates.len()),
                 candidates,
-            })
+            }
+            .into())
         }
     }
 }
@@ -165,13 +137,17 @@ async fn waiting_run(ctx: &Context) -> Result<RunId, CliError> {
             })
         ))),
         [one] => Ok(one.frame.run_id.clone()),
-        several => Err(CliError::AmbiguousRun {
+        several => Err(Refused::AmbiguousRun {
             said: format!(
                 "{} of this repository need you",
                 surco::text::counted(several.len(), "run")
             ),
-            candidates: several.iter().map(|row| Candidate::of(row)).collect(),
-        }),
+            candidates: several
+                .iter()
+                .map(|row| Candidate::of(row, crate::output::glyphs()))
+                .collect(),
+        }
+        .into()),
     }
 }
 

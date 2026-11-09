@@ -59,7 +59,7 @@ pub(crate) async fn in_repo(
 /// The adapters this machine answers for when `errors` name a runner the
 /// config lacks — the one suggestion that needs them — and none asked for
 /// otherwise.
-pub(crate) async fn adapters_for(errors: &[yunta_engine::CheckError]) -> MachineAdapters {
+pub(crate) async fn adapters_for(errors: &[yunta_core::check::CheckError]) -> MachineAdapters {
     match wants_runner(errors) {
         true => MachineAdapters::probed(&probe_known_adapters().await),
         false => MachineAdapters::default(),
@@ -68,7 +68,10 @@ pub(crate) async fn adapters_for(errors: &[yunta_engine::CheckError]) -> Machine
 
 /// What this repository answers for each key `errors` says a workflow
 /// needs and the config lacks, each once, in the order they are named.
-pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detected) -> Vec<Fix> {
+pub(crate) fn suggestions(
+    errors: &[yunta_core::check::CheckError],
+    detected: &Detected,
+) -> Vec<Fix> {
     let mut said: Vec<Fix> = Vec::new();
     for fix in errors.iter().filter_map(|error| answered(error, detected)) {
         if !said.contains(&fix) {
@@ -82,19 +85,19 @@ pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detect
 /// What fixes `error` on its own: what this repository answers for the
 /// key it says a workflow lacks, or the runner to declare for it; `None`
 /// when nothing here does.
-pub(crate) fn fix_for(error: &yunta_engine::CheckError, detected: &Detected) -> Option<Fix> {
+pub(crate) fn fix_for(error: &yunta_core::check::CheckError, detected: &Detected) -> Option<Fix> {
     answered(error, detected).or_else(|| runner_fix(std::slice::from_ref(error), detected))
 }
 
 /// Whether `errors` say a node names a runner the config lacks, or needs
 /// the default runner it lacks.
-fn wants_runner(errors: &[yunta_engine::CheckError]) -> bool {
+fn wants_runner(errors: &[yunta_core::check::CheckError]) -> bool {
     !runners_wanted(errors).is_empty() || default_wanted(errors)
 }
 
 /// The runner to declare for `errors`, on the adapters this machine
 /// answers for, when they want one.
-fn runner_fix(errors: &[yunta_engine::CheckError], detected: &Detected) -> Option<Fix> {
+fn runner_fix(errors: &[yunta_core::check::CheckError], detected: &Detected) -> Option<Fix> {
     wants_runner(errors).then(|| {
         declare::runners(
             &runners_wanted(errors),
@@ -106,10 +109,10 @@ fn runner_fix(errors: &[yunta_engine::CheckError], detected: &Detected) -> Optio
 
 /// What this repository answers for the key `error` says a workflow needs
 /// and the config lacks, when it answers it.
-fn answered(error: &yunta_engine::CheckError, detected: &Detected) -> Option<Fix> {
+fn answered(error: &yunta_core::check::CheckError, detected: &Detected) -> Option<Fix> {
     let key = match error {
-        yunta_engine::CheckError::Unset { key, .. } => key.clone(),
-        yunta_engine::CheckError::BaselineWithoutSuite { .. } => ConfigKey::BaselineSuite,
+        yunta_core::check::CheckError::Unset { key, .. } => key.clone(),
+        yunta_core::check::CheckError::BaselineWithoutSuite { .. } => ConfigKey::BaselineSuite,
         _ => return None,
     };
     declare::as_detected(detected, &key).map(Fix::said)
@@ -119,13 +122,13 @@ fn answered(error: &yunta_engine::CheckError, detected: &Detected) -> Option<Fix
 /// declare, or declares with no candidate — each once, in order. A name
 /// one slip from a runner the config declares is a typo to fix, not a
 /// runner to declare.
-fn runners_wanted(errors: &[yunta_engine::CheckError]) -> Vec<RunnerName> {
+fn runners_wanted(errors: &[yunta_core::check::CheckError]) -> Vec<RunnerName> {
     let mut roles: Vec<RunnerName> = Vec::new();
     for error in errors {
-        if let yunta_engine::CheckError::UnknownRunner {
+        if let yunta_core::check::CheckError::UnknownRunner {
             runner, near: None, ..
         }
-        | yunta_engine::CheckError::RunnerHasNoCandidates { runner, .. } = error
+        | yunta_core::check::CheckError::RunnerHasNoCandidates { runner, .. } = error
         {
             if !roles.contains(runner) {
                 roles.push(runner.clone());
@@ -137,11 +140,11 @@ fn runners_wanted(errors: &[yunta_engine::CheckError]) -> Vec<RunnerName> {
 
 /// Whether `errors` say a node names no runner and the config declares no
 /// `defaults.runner` for it.
-fn default_wanted(errors: &[yunta_engine::CheckError]) -> bool {
+fn default_wanted(errors: &[yunta_core::check::CheckError]) -> bool {
     errors.iter().any(|error| {
         matches!(
             error,
-            yunta_engine::CheckError::Unset {
+            yunta_core::check::CheckError::Unset {
                 key: ConfigKey::Runner,
                 ..
             }

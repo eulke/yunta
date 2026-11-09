@@ -14,14 +14,15 @@
 //!   disk, beside what a reader resolves there (`yunta_core::run_dir`).
 //! - A node's work: `task_cycle` runs a task through its checks, over what
 //!   `tasks` means to the run; `scope`, `scope_expansion` and `permissions`
-//!   judge what it wrote; `answers`, `human_interaction` and `reserved` carry a
-//!   person's decisions; `findings` and `artifacts` keep what nodes report
+//!   judge what it wrote; `answers` and `reserved` carry a person's decisions,
+//!   asked through core's person port; `findings` and `artifacts` keep what nodes report
 //!   and hand over; `check` is `yunta check`.
 //! - The log and what reads it: `run_log` is the one way an event reaches it,
-//!   and a read of it, replayed, is its `RunView`; `observer` and
-//!   `events_export` read what the log says.
-//! - Sessions' tools: `run_tools` serves a node session's MCP server, shaped by
-//!   `mcp`.
+//!   and a read of it, replayed, is its `RunView`; each event reaches a
+//!   surface through core's observer port as it is appended, and
+//!   `events_export` reads what the log says.
+//! - Sessions' tools: `run_tools` serves a node session's MCP server, in the
+//!   shape `yunta-mcp-protocol` says every MCP result of Yunta takes.
 //! - What sessions say: `said` holds it for whoever watches the run, in this
 //!   process and through the run's socket, and never on the log.
 //! - Checkouts: `worktree` isolates and pools them; `wakefulness` notices a
@@ -66,12 +67,9 @@ mod events_export;
 mod findings;
 mod frozen;
 pub mod git;
-mod human_interaction;
 mod inputs;
 pub mod lock;
 mod manifest;
-pub mod mcp;
-mod observer;
 pub mod pace;
 mod pack_audit;
 mod pack_requires;
@@ -111,16 +109,13 @@ pub use catalog::{
 };
 pub use check::{
     check, check_context_files, check_mode_start, check_mounted, check_warnings,
-    check_workflow_refs, programs_named, AdapterFacts, CheckError, Composition, ContextFilesCheck,
-    RefsCheck, RunTreeOrigin, Unanswerable, UntakenRoute,
+    check_workflow_refs, programs_named, AdapterFacts, ContextFilesCheck, RefsCheck, RunTreeOrigin,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
-pub use human_interaction::{Asking, HumanInteraction, NoInteraction, QuestionsReply};
 pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
-pub use observer::{Observed, RunObserver};
 pub use pack_audit::audit_pack;
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
 pub use permissions::command_violation;
@@ -158,7 +153,7 @@ pub use worktree::{
     commit_tree, commit_work, forget_run_units, hand_over_run_checkout, hand_over_worktree,
     head_commit, head_tree, land, pool_home, prepare_worktree, prune_worktrees, rebase_onto,
     release_run_checkout, release_unit_checkouts, release_worktree, remove_checkout,
-    remove_old_checkouts, run_branch, snapshot_commit, still_the_runs, Birth, Carried,
-    CheckoutPool, Lease, OldCheckout, PoolReport, Rebase, RunWorktree, Tidied, Unit, UnitHome,
-    UnitId, UnitRef, WorktreeCleanup, WorktreeError, WorktreeIntegrity, WorktreePrepared,
+    remove_old_checkouts, snapshot_commit, still_the_runs, Birth, Carried, CheckoutPool, Lease,
+    OldCheckout, PoolReport, Rebase, RunWorktree, Tidied, Unit, UnitHome, UnitId, UnitRef,
+    WorktreeCleanup, WorktreeError, WorktreeIntegrity, WorktreePrepared,
 };

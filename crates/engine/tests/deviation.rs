@@ -282,7 +282,7 @@ async fn a_node_reading_the_departures_sees_each_one_and_its_answer_and_nothing_
 struct GrantsScopeOnly;
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for GrantsScopeOnly {
+impl yunta_core::port::HumanInteraction for GrantsScopeOnly {
     async fn resolve(
         &self,
         escalation: &yunta_core::events::GateWaitingPayload,

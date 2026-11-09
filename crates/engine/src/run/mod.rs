@@ -86,8 +86,6 @@ use yunta_core::{
 use yunta_replay::RunState;
 use yunta_storage::{AsyncStorage, StorageError};
 
-use crate::human_interaction::HumanInteraction;
-use crate::observer::RunObserver;
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
 pub use baseline::{BirthBaseline, Owed as OwedMeasurement};
@@ -103,6 +101,8 @@ pub use pause::record_pause_after_crash;
 pub use promote::{
     create_promotion_successor, CallerInfra, Predecessor, PromotionSuccessor, RunRoots,
 };
+use yunta_core::port::HumanInteraction;
+use yunta_core::port::RunObserver;
 
 /// A frozen `manifest.yaml` that cannot be read back.
 #[derive(Debug, Error)]

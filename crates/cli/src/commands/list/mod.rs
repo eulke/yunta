@@ -108,7 +108,7 @@ async fn read_entry(entry: &CatalogEntry) -> Result<Workflow, UnreadableWorkflow
         .await
         .map_err(|e| UnreadableWorkflow::File(e.to_string()))?;
     yunta_core::workflow::read::read(&contents, &entry.path).map_err(|report| {
-        UnreadableWorkflow::NotAWorkflow(crate::error::page::document_problems(
+        UnreadableWorkflow::NotAWorkflow(yunta_render::blocks::diagnostic::document_problems(
             &report,
             Some(&contents),
         ))

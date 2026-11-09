@@ -42,7 +42,6 @@ mod help;
 mod human_interaction;
 mod identity;
 mod interrupt;
-mod json;
 mod output;
 mod pack;
 mod project;
@@ -59,6 +58,7 @@ use surco::paint::ColorWhen;
 use yunta_core::Env;
 
 use crate::error::CliError;
+use yunta_render::refusal::Refused;
 
 use crate::output::Outcome;
 
@@ -286,9 +286,11 @@ pub(crate) fn load_manifest(
 pub(crate) fn load_workflow(path: &Path) -> Result<yunta_core::Workflow, CliError> {
     let contents = std::fs::read_to_string(path)
         .map_err(|source| CliError::io("read workflow at", path.display(), source))?;
-    yunta_core::workflow::read::read(&contents, path).map_err(|report| CliError::Document {
-        report,
-        text: Some(contents.clone()),
+    yunta_core::workflow::read::read(&contents, path).map_err(|report| {
+        CliError::from(Refused::Document {
+            report: Box::new(report),
+            text: Some(contents.clone()),
+        })
     })
 }
 

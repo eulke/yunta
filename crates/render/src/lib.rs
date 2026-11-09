@@ -27,9 +27,13 @@
 //!   it bore, under the nodes that bore them.
 //! - A decision a person meets: `escalation`, `claim`, `evidence`, `offers`
 //!   and `found`.
+//! - What Yunta refuses: `refusal`, the sentences of every refusal over its data.
 //! - What leaves the terminal: `blocks` and `published`.
 //! - What a reader is told to type: `command`, every command written once,
 //!   and `declare`, what to declare in a project's config.
+//! - What a machine reads: `document`, every versioned JSON document of a
+//!   run, its stats, a decision and a refusal, the same from every command
+//!   and tool.
 //! - Every page a command shows, in the one form it takes: `page`, with a
 //!   run's and its nodes', what each command answers, a pack's, the receipt,
 //!   the findings, a gate's page, and what a decision shows: a plan, read at
@@ -42,6 +46,7 @@ pub mod children;
 pub mod claim;
 pub mod command;
 pub mod declare;
+pub mod document;
 pub mod engine;
 pub mod escalation;
 pub mod evidence;
@@ -56,6 +61,7 @@ pub mod place;
 pub mod policy;
 pub mod progress;
 pub mod published;
+pub mod refusal;
 pub mod spend;
 pub mod state;
 pub mod target;

@@ -24,7 +24,7 @@ use crate::project::Project;
 /// that leaves to other projects.
 #[derive(serde::Serialize)]
 pub(crate) struct Inbox {
-    #[serde(serialize_with = "crate::json::field::rows")]
+    #[serde(serialize_with = "field_rows")]
     pub(crate) rows: Vec<FieldRow>,
     pub(crate) unreadable: Vec<UnreadableRun>,
     pub(crate) elsewhere: usize,
@@ -190,4 +190,10 @@ fn run_row(
 /// listing is that repository's runs.
 pub(crate) async fn in_a_repository(ctx: &Context) -> Result<bool, CliError> {
     Ok(Here::of(ctx).await?.is_some())
+}
+
+/// The field's rows as the document a program reads, their words drawn with
+/// this terminal's glyphs.
+fn field_rows<S: serde::Serializer>(rows: &[FieldRow], serializer: S) -> Result<S::Ok, S::Error> {
+    yunta_render::document::field::rows(rows, crate::output::glyphs(), serializer)
 }

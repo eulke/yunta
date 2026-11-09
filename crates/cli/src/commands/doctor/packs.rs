@@ -7,7 +7,7 @@ use yunta_core::{Detected, MachineAdapters};
 use yunta_render::{caution, declare};
 
 use crate::context::Context;
-use crate::error::{words, CliError};
+use crate::error::CliError;
 
 /// Checks every installed pack's own `requires:` against this
 /// project's merged config — roles resolvable, `mcp_servers:` defined,
@@ -124,7 +124,8 @@ pub(super) async fn check_workflows(
                         .errors,
                     );
                 let found = super::super::context_files_at_head(ctx, &workflow, isolation).await?;
-                let errors: Vec<yunta_engine::CheckError> = refused.chain(found.errors).collect();
+                let errors: Vec<yunta_core::check::CheckError> =
+                    refused.chain(found.errors).collect();
                 let pack = format!("pack {}", manifest.reference());
                 for error in &errors {
                     push_once(checks, broken(error, pack.as_str(), &detected));
@@ -140,10 +141,10 @@ pub(super) async fn check_workflows(
 
 /// The row a pack's workflow is refused for: the fact, and what fixes it,
 /// what this repository answers for it when it does, or what to declare.
-fn broken(error: &yunta_engine::CheckError, pack: &str, detected: &Detected) -> Check {
-    let (said, remedy) = match words::lacking(error) {
+fn broken(error: &yunta_core::check::CheckError, pack: &str, detected: &Detected) -> Check {
+    let (said, remedy) = match yunta_render::refusal::check::lacking(error) {
         Some((fact, remedy)) => (fact, Some(Fix::said(remedy))),
-        None => (words::check(error), None),
+        None => (yunta_render::refusal::check::line(error), None),
     };
     Check {
         fix: crate::detect::fix_for(error, detected).or(remedy),

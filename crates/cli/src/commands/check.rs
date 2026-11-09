@@ -15,6 +15,7 @@ use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{blank, show};
 use crate::{load_yaml, project};
+use yunta_render::refusal::Refused;
 
 pub async fn check(
     workflow_path: &Path,
@@ -30,10 +31,11 @@ pub async fn check(
     let workflow_path = super::resolve_workflow_ref(&cwd, workflow_path)?;
     let (workflow, in_file, text) = crate::audit_workflow(&workflow_path)?;
     let Some(workflow) = workflow else {
-        return Err(CliError::Document {
-            report: in_file,
+        return Err(Refused::Document {
+            report: Box::new(in_file),
             text: Some(text),
-        });
+        }
+        .into());
     };
 
     let (config, conflicts) = config_for(&cwd, config_path)?;
