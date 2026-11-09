@@ -326,38 +326,6 @@ impl fmt::Display for ArtifactKind {
     }
 }
 
-/// Names a document Yunta does not read, every name a door reads one by,
-/// and the one it is most likely a slip from.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "`{value}` is not a document Yunta reads; one of {}{}",
-    surco::text::listed(.names.iter().copied()),
-    surco::text::near_miss(surco::text::nearest(.value, .names.iter().copied()))
-)]
-pub struct UnknownDocument {
-    pub value: String,
-    pub names: Vec<&'static str>,
-}
-
-/// Reads a kind the way every other door does — through `Deserialize`,
-/// so the spellings `yunta schema` and the `document_shape` tool accept
-/// are exactly the ones a workflow or an event log accepts, alias
-/// included, with the derive as the one place that lists them.
-impl std::str::FromStr for ArtifactKind {
-    type Err = UnknownDocument;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        use serde::de::IntoDeserializer;
-
-        let deserializer: serde::de::value::StrDeserializer<'_, serde::de::value::Error> =
-            value.into_deserializer();
-        ArtifactKind::deserialize(deserializer).map_err(|_| UnknownDocument {
-            value: value.to_string(),
-            names: ArtifactKind::ALL.iter().map(|kind| kind.as_str()).collect(),
-        })
-    }
-}
-
 /// A name under a node's artifact view that the engine writes itself,
 /// so an opaque artifact may not claim it.
 ///

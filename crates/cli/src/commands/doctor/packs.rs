@@ -3,8 +3,8 @@
 //! be refused for, each with what to declare when that is known.
 
 use surco::components::{Check, Checklist, Fix, Found};
-use yunta_core::AdapterId;
-use yunta_render::caution;
+use yunta_core::{Detected, MachineAdapters};
+use yunta_render::{caution, declare};
 
 use crate::context::Context;
 use crate::error::{words, CliError};
@@ -15,7 +15,7 @@ use crate::error::{words, CliError};
 /// unresolvable role with the runner to declare on one of `answered`, the
 /// adapters that answered here. A project with no packs installed has
 /// nothing to check.
-pub(super) fn check_requires(ctx: &Context, answered: &[AdapterId], checks: &mut Checklist) {
+pub(super) fn check_requires(ctx: &Context, answered: &MachineAdapters, checks: &mut Checklist) {
     for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
         let packs = yunta_engine::packs_for_publisher(&ctx.cwd, &publisher);
         // A broken pack is a real gap: its manifest is the only place its
@@ -35,7 +35,7 @@ pub(super) fn check_requires(ctx: &Context, answered: &[AdapterId], checks: &mut
 fn check_gap(
     env: &yunta_core::Env,
     gap: &yunta_engine::PackRequiresGap,
-    answered: &[AdapterId],
+    answered: &MachineAdapters,
     checks: &mut Checklist,
 ) {
     let pack = format!("pack {}", gap.pack);
@@ -50,7 +50,7 @@ fn check_gap(
                      defines with zero candidates"
                 ),
             )
-            .fix(crate::detect::runner_step(
+            .fix(declare::runners(
                 std::slice::from_ref(runner),
                 false,
                 answered,
@@ -93,15 +93,15 @@ fn check_gap(
 /// `requires:` and a broken pack are [`check_requires`]'s to name.
 pub(super) async fn check_workflows(
     ctx: &Context,
-    answered: &[AdapterId],
+    answered: &MachineAdapters,
     checks: &mut Checklist,
 ) -> Result<(), CliError> {
     let config = &ctx.project.config;
     let isolation = config.resolved_isolation();
     let facts = super::super::declared_facts(config);
-    let detected = crate::detect::Detected {
-        adapters: answered.to_vec(),
-        ..crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision()).await?
+    let detected = Detected {
+        adapters: answered.clone(),
+        ..crate::detect::in_repo(&ctx.cwd, ctx.supervision()).await?
     };
     for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
         for (pack_dir, manifest) in
@@ -140,11 +140,7 @@ pub(super) async fn check_workflows(
 
 /// The row a pack's workflow is refused for: the fact, and what fixes it,
 /// what this repository answers for it when it does, or what to declare.
-fn broken(
-    error: &yunta_engine::CheckError,
-    pack: &str,
-    detected: &crate::detect::Detected,
-) -> Check {
+fn broken(error: &yunta_engine::CheckError, pack: &str, detected: &Detected) -> Check {
     let (said, remedy) = match words::lacking(error) {
         Some((fact, remedy)) => (fact, Some(Fix::said(remedy))),
         None => (words::check(error), None),

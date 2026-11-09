@@ -6,16 +6,17 @@
 use surco::components::{Next, Problem, Refusal, RunLine, Runs, Said};
 use surco::doc::{Block, Doc};
 use surco::look::Look;
-use yunta_core::diagnostic::{Diagnostic, Report};
+use yunta_core::diagnostic::Report;
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::yaml::Location;
 use yunta_engine::CheckError;
+use yunta_render::blocks::diagnostic::{hinted, Pointed};
 use yunta_render::command::Reader;
 use yunta_render::page::Page;
 
 use super::CliError;
 use crate::commands::run_ref::Candidate;
-use crate::commands::verdict::Unrunnable;
+use yunta_render::page::Unrunnable;
 
 /// What a refused workflow is refused for, said before its problems: the
 /// check to run on it again, on its file when the refusal knows one.
@@ -95,51 +96,9 @@ pub(crate) fn document_problems(report: &Report, text: Option<&str>) -> Vec<Prob
         report
             .diagnostics
             .iter()
-            .map(|diagnostic| found(diagnostic, &report.document.path, text))
+            .map(|diagnostic| Pointed::found(diagnostic, &report.document.path, text))
             .collect(),
     )
-}
-
-/// A problem a page says, and what it names that nothing in a workflow
-/// reads, when that is what it is about: a `key` or a `kind`.
-pub(crate) struct Pointed {
-    problem: Problem,
-    unread: Option<&'static str>,
-}
-
-impl From<Problem> for Pointed {
-    fn from(problem: Problem) -> Self {
-        Pointed {
-            problem,
-            unread: None,
-        }
-    }
-}
-
-impl Pointed {
-    /// Where in its file the problem is, as a page orders them: what has
-    /// no place comes after everything that has one.
-    pub(crate) fn order(&self) -> (usize, usize) {
-        self.problem
-            .at
-            .as_ref()
-            .map_or((usize::MAX, 0), |at| (at.line, at.col))
-    }
-}
-
-/// One problem of a document read from `path`, quoted from `text` at its
-/// place when it was read from text, with what helps fix it.
-pub(crate) fn found(diagnostic: &Diagnostic, path: &str, text: Option<&str>) -> Pointed {
-    use yunta_core::diagnostic::RuleCode;
-    let unread = match diagnostic.rule() {
-        Some(RuleCode::UnknownKey) => Some("key"),
-        Some(RuleCode::UnknownKind) => Some("kind"),
-        _ => None,
-    };
-    Pointed {
-        problem: yunta_render::blocks::diagnostic::found(diagnostic, path, text),
-        unread,
-    }
 }
 
 /// One refusal of `yunta check`, quoted from `text` read from `path` at
@@ -153,39 +112,6 @@ pub(crate) fn refused(
 ) -> Problem {
     yunta_render::blocks::diagnostic::located(super::words::check_said(error), at, path, text)
         .help(error.near().map(surco::text::suggested))
-}
-
-/// `problems` as a page says them, in their order: the command that lists
-/// what a workflow reads is said once, under the first that names a key or
-/// a kind nothing reads, with what every one of them needs listed.
-pub(crate) fn hinted(problems: Vec<Pointed>) -> Vec<Problem> {
-    let mut unread: Vec<&str> = Vec::new();
-    for what in problems.iter().filter_map(|pointed| pointed.unread) {
-        if !unread.contains(&what) {
-            unread.push(what);
-        }
-    }
-    let mut hint = (!unread.is_empty()).then(|| {
-        format!(
-            "`{}` lists every {}",
-            yunta_render::command::line(&NextStep::Schema {
-                document: Arg::Given(
-                    crate::commands::schema::Shown::Workflow
-                        .as_str()
-                        .to_string()
-                ),
-                json: false,
-            }),
-            unread.join(" and ")
-        )
-    });
-    problems
-        .into_iter()
-        .map(|pointed| match pointed.unread {
-            Some(_) => pointed.problem.help(hint.take()),
-            None => pointed.problem,
-        })
-        .collect()
 }
 
 /// A workflow that cannot run here, as plain text says it: its problems

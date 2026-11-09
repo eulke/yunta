@@ -22,10 +22,6 @@ use yunta_replay::frame::WaitingOn;
 
 use crate::escalation;
 
-/// How a limit's reset moment reads: the day and the minute, in UTC, as a
-/// person reads a log's clock.
-pub(crate) const RESET_FORMAT: &str = "%Y-%m-%d %H:%M UTC";
-
 /// What a run a person interrupted says of the stop: what the log knows,
 /// whoever reads it, a teammate or an agent among them.
 pub const INTERRUPTED: &str = "interrupted by a person";
@@ -99,7 +95,7 @@ pub fn sentence(pause: &PauseReason) -> String {
         PauseReason::AwaitingReset { node, at } => format!(
             "node `{node}` waits for its limit to reset at {}, and the run resumes on its own \
              then",
-            at.format(RESET_FORMAT)
+            at.format(crate::INSTANT_FORMAT)
         ),
         PauseReason::Blocked { node, on } => blocked(node, on),
         PauseReason::GateAborted { node, free_text } => gate_aborted(node, free_text.as_deref()),

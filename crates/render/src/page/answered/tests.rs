@@ -1,20 +1,22 @@
 use yunta_core::{OptionId, RunId};
 
-use super::{answer, sentence, GateState};
-use crate::output::draw;
-use crate::output::Answer;
 use surco::look::Look;
-use yunta_render::page::Page;
+use surco::surface::{Surface, Terminal};
+
+use super::{Answered, Resolution};
+use crate::page::Page;
 
 #[test]
 fn each_gate_answer_says_how_it_ended_and_what_to_type_next() {
     let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
-    let said = |state: GateState| {
-        let reply = answer(&run, state);
-        let page = reply.page().document(&Look::plain());
-        draw(page, &Look::plain())
+    let said = |resolution: Resolution| {
+        let page = Answered {
+            run_id: &run,
+            resolution: &resolution,
+        };
+        Terminal::on(Look::plain()).draw(&page.document(&Look::plain()))
     };
-    let resolved = said(GateState::Resolved {
+    let resolved = said(Resolution::Resolved {
         option: OptionId::from_static("retry"),
     });
     assert!(
@@ -23,7 +25,7 @@ fn each_gate_answer_says_how_it_ended_and_what_to_type_next() {
     );
     assert!(resolved.contains("applies it"), "{resolved}");
     assert!(resolved.contains("yunta status AAAAAA"), "{resolved}");
-    let declined = said(GateState::Declined);
+    let declined = said(Resolution::Declined);
     assert!(
         declined.starts_with("? run AAAAAA ; needs you\n"),
         "{declined}"
@@ -33,7 +35,7 @@ fn each_gate_answer_says_how_it_ended_and_what_to_type_next() {
         "{declined}"
     );
     assert!(declined.contains("yunta resolve-gate AAAAAA"), "{declined}");
-    assert_eq!(said(GateState::Interrupted), "");
+    assert_eq!(said(Resolution::Interrupted), "");
 }
 
 /// Every recorded decision is answered alike: a resume in the background
@@ -42,13 +44,14 @@ fn each_gate_answer_says_how_it_ended_and_what_to_type_next() {
 fn every_answer_says_a_resume_applies_it() {
     let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
     let abort = OptionId::from_static("abort");
-    let reply = answer(
-        &run,
-        GateState::Resolved {
-            option: abort.clone(),
-        },
-    );
-    let page = draw(reply.page().document(&Look::plain()), &Look::plain());
+    let resolution = Resolution::Resolved {
+        option: abort.clone(),
+    };
+    let answered = Answered {
+        run_id: &run,
+        resolution: &resolution,
+    };
+    let page = Terminal::on(Look::plain()).draw(&answered.document(&Look::plain()));
     let said = page.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         said.contains("a resume in the background applies it"),
@@ -57,12 +60,12 @@ fn every_answer_says_a_resume_applies_it() {
     assert!(!said.contains("stays open"), "{page}");
     assert!(!said.contains("drives the run on"), "{page}");
     assert_eq!(
-        sentence(&run, &abort),
+        Answered::sentence(&run, &abort),
         "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `abort`; a resume in the background \
          applies it"
     );
     assert_eq!(
-        sentence(&run, &OptionId::from_static("approve")),
+        Answered::sentence(&run, &OptionId::from_static("approve")),
         "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `approve`; a resume in the background \
          applies it"
     );

@@ -11,16 +11,10 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::components::{Fields, Furrow, Headline, Next};
-use surco::doc::Doc;
-use surco::glyphs::Mark;
 use surco::look::Look;
-use yunta_core::step::{Arg, NextStep};
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_render::command;
-use yunta_render::page::Page;
+use yunta_render::page::{Diagnosis, NewWorkflow};
 
-use super::verdict::{check_again, file_named, Diagnosis};
 use crate::ask::{choose, Choice, Console, Escape, NoAnswer};
 use crate::error::CliError;
 use crate::output::show;
@@ -299,52 +293,6 @@ async fn write_skeleton(
     Ok(path)
 }
 
-/// What `new` answers with: the file it wrote, and the verdict `yunta check`
-/// reaches on it, said under it; the file alone where something stopped the
-/// check.
-struct NewWorkflow<'a> {
-    /// The workflow's name, which the command that runs it takes.
-    name: &'a str,
-    shape: Shape,
-    path: &'a Path,
-    /// Where the file is, as a reader in this directory names it.
-    at: &'a str,
-    diagnosis: Option<&'a Diagnosis>,
-}
-
-impl Page for NewWorkflow<'_> {
-    fn document(&self, _look: &Look) -> Doc {
-        let written =
-            |mark| Headline::new(mark, file_named(self.path), "written").fact(self.shape.label());
-        let Some(diagnosis) = self.diagnosis else {
-            return Doc::new()
-                .with(written(Mark::Done))
-                .with(Furrow(Vec::new()))
-                .with(Fields::new().push_if("at", self.at));
-        };
-        let (mark, steps) = match diagnosis.errors() {
-            0 => (Mark::Done, vec![self.runs_it()]),
-            _ => (Mark::Caution, vec![check_again(self.at)]),
-        };
-        Doc::new()
-            .with(written(mark).fact(diagnosis.said()))
-            .with(Furrow(Vec::new()))
-            .with(Fields::new().push_if("at", self.at))
-            .with_all(diagnosis.blocks())
-            .with(Next { steps })
-    }
-}
-
-impl NewWorkflow<'_> {
-    /// The step that runs the workflow just written.
-    fn runs_it(&self) -> (String, &'static str) {
-        let run = NextStep::Run {
-            workflow: Arg::Given(self.name.to_string()),
-        };
-        (command::line(&run), "runs it")
-    }
-}
-
 /// A workflow `new` wrote: its name, the shape it took, and where.
 struct Written<'a> {
     name: &'a str,
@@ -367,7 +315,7 @@ impl Written<'_> {
         let at = surco::paths::shown(self.path, cwd, None);
         let page = |diagnosis| NewWorkflow {
             name: self.name,
-            shape: self.shape,
+            shape: self.shape.label(),
             path: self.path,
             at: &at,
             diagnosis,

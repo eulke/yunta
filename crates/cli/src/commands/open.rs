@@ -4,10 +4,8 @@
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use yunta_render::page::Page;
+use yunta_render::page::{Opened, Page};
 
-use surco::components::{Fields, Note};
-use surco::doc::Doc;
 use surco::look::Look;
 use surco::surface::{Html, Surface};
 use yunta_core::RunId;
@@ -65,25 +63,6 @@ struct OpenAnswer {
     page: String,
     #[serde(skip)]
     opened: Option<bool>,
-}
-
-/// Where a run's page was written, and, when nothing here could open it,
-/// that the person opens it themselves.
-struct Opened<'a> {
-    page: &'a str,
-    opened: Option<bool>,
-}
-
-impl Page for Opened<'_> {
-    fn document(&self, _look: &Look) -> Doc {
-        let doc = Doc::new().with(Fields::new().push_literal("page", self.page.to_string()));
-        match self.opened {
-            Some(false) => doc.with(Note(
-                "nothing here could open it: open that file in a browser.".to_string(),
-            )),
-            _ => doc,
-        }
-    }
 }
 
 impl Answer for OpenAnswer {

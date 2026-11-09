@@ -54,7 +54,7 @@ pub(super) async fn tool_list_workflows(
     // locale decides what it is told.
     use surco::surface::{Markdown, Surface};
     use yunta_render::page::Page;
-    let catalog = super::super::list::Catalog::read(cwd, ctx.as_ref()).await;
+    let catalog = super::super::list::read_catalog(cwd, ctx.as_ref()).await;
     Ok(Markdown.draw(&catalog.document(&Markdown.look())))
 }
 

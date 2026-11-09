@@ -224,11 +224,16 @@ pub(crate) fn built_adapter(id: &AdapterId) -> Option<std::sync::Arc<dyn Adapter
 /// adapter's own id, in order, comma-separated — the phrase a refusal
 /// ends with, derived rather than written.
 pub(crate) fn built_adapter_names() -> String {
-    let names: Vec<String> = built_adapters(|_| AdapterSettings::default())
+    surco::text::listed(built_adapter_ids().iter().map(AdapterId::as_str))
+}
+
+/// Every adapter this binary builds, by its own id, in the order the
+/// composition root declares them.
+pub(crate) fn built_adapter_ids() -> Vec<AdapterId> {
+    built_adapters(|_| AdapterSettings::default())
         .iter()
-        .map(|adapter| format!("`{}`", adapter.id()))
-        .collect();
-    names.join(", ")
+        .map(|adapter| adapter.id().clone())
+        .collect()
 }
 
 /// The id a surface names when it shows what a `runners:` entry looks

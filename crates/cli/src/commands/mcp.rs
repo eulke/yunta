@@ -25,7 +25,6 @@
 //! to describe — each names when reaching for a verified workflow
 //! beats implementing directly.
 
-use super::schema::Shown;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
     ServerCapabilities, ServerConfig, Tool,
@@ -33,6 +32,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
+use yunta_core::DocumentKind;
 
 use crate::error::CliError;
 
@@ -154,7 +154,7 @@ fn empty_schema() -> serde_json::Map<String, Value> {
 /// catalog is visible the moment a client connects, before it calls
 /// anything.
 fn document_kinds() -> Vec<&'static str> {
-    Shown::all().map(Shown::as_str).collect()
+    DocumentKind::all().map(DocumentKind::as_str).collect()
 }
 
 /// The shape of one document, verbatim from the constant every other
@@ -169,7 +169,7 @@ fn tool_document_shape(args: &serde_json::Map<String, Value>) -> Result<String, 
             surco::text::listed(document_kinds())
         )));
     };
-    Ok(name.parse::<Shown>()?.shape())
+    Ok(super::schema::shape(name.parse::<DocumentKind>()?))
 }
 
 /// The advertised tools, in the order a client is shown them: the reads

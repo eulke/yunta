@@ -38,9 +38,9 @@ use surco::components::{Check, Checklist, Fix, Found};
 use surco::look::Look;
 use yunta_core::port::ProbeReport;
 use yunta_core::step::NextStep;
-use yunta_core::AdapterId;
-use yunta_render::command;
+use yunta_core::{AdapterId, Detected, MachineAdapters};
 use yunta_render::page::{Doctor, Page};
+use yunta_render::{command, declare};
 
 pub async fn doctor(
     session: bool,
@@ -165,7 +165,7 @@ fn kept_check(kept: &yunta_engine::PoolReport) -> Check {
 async fn probe_adapters(
     ctx: &Context,
     checks: &mut Checklist,
-) -> (BTreeSet<AdapterId>, Vec<AdapterId>) {
+) -> (BTreeSet<AdapterId>, MachineAdapters) {
     let adapters = ctx.adapters();
     if adapters.is_empty() {
         let answered = no_runner_declared(ctx, checks).await;
@@ -185,8 +185,11 @@ async fn probe_adapters(
         checks.push_check(check);
     }
     let answered = match healthy.is_empty() {
-        true => crate::detect::healthy(&crate::detect::probe_known_adapters().await),
-        false => healthy.iter().cloned().collect(),
+        true => MachineAdapters::probed(&crate::detect::probe_known_adapters().await),
+        false => MachineAdapters {
+            healthy: healthy.iter().cloned().collect(),
+            known: super::built_adapter_ids(),
+        },
     };
     (healthy, answered)
 }
@@ -231,22 +234,22 @@ fn versioned(name: &AdapterId, version: Option<&str>) -> String {
 /// hands back. A problem when a workflow in the catalog needs one — it
 /// would stop the first time it reached an agent node — and a caution
 /// otherwise.
-async fn no_runner_declared(ctx: &Context, checks: &mut Checklist) -> Vec<AdapterId> {
+async fn no_runner_declared(ctx: &Context, checks: &mut Checklist) -> MachineAdapters {
     let needing = needing_a_runner(ctx);
     let errors: Vec<yunta_engine::CheckError> = needing
         .iter()
         .flat_map(|(_, errors)| errors.iter().cloned())
         .collect();
-    let answered = crate::detect::healthy(&crate::detect::probe_known_adapters().await);
-    let detected = crate::detect::Detected {
+    let answered = MachineAdapters::probed(&crate::detect::probe_known_adapters().await);
+    let detected = Detected {
         adapters: answered.clone(),
-        ..crate::detect::Detected::default()
+        ..Detected::default()
     };
     // The errors are all about runners, so what answers them is the one
     // runner to declare.
     let fix = crate::detect::suggestions(&errors, &detected)
         .pop()
-        .unwrap_or_else(|| crate::detect::runner_step(&[], true, &answered));
+        .unwrap_or_else(|| declare::runners(&[], true, &answered));
     let names: Vec<&str> = needing.iter().map(|(name, _)| name.as_str()).collect();
     let check = match names.is_empty() {
         true => Check::new(

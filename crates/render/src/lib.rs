@@ -28,7 +28,8 @@
 //! - A decision a person meets: `escalation`, `claim`, `evidence`, `offers`
 //!   and `found`.
 //! - What leaves the terminal: `blocks` and `published`.
-//! - What a reader is told to type: `command`, every command written once.
+//! - What a reader is told to type: `command`, every command written once,
+//!   and `declare`, what to declare in a project's config.
 //! - Every page, in the one form it takes: `page`, with the receipt, the
 //!   findings, a gate's page, and what a decision shows: a plan, read at its
 //!   desk, a spec, or any document.
@@ -39,6 +40,7 @@ pub mod changes;
 pub mod children;
 pub mod claim;
 pub mod command;
+pub mod declare;
 pub mod engine;
 pub mod escalation;
 pub mod evidence;
@@ -56,6 +58,10 @@ pub mod published;
 pub mod spend;
 pub mod state;
 pub mod target;
+
+/// How an instant reads to a person: the day and the minute, in UTC, as a
+/// log's clock keeps it — a limit's reset, when a page was drawn.
+pub(crate) const INSTANT_FORMAT: &str = "%Y-%m-%d %H:%M UTC";
 
 #[cfg(test)]
 mod tests {

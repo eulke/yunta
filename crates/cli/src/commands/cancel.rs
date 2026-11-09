@@ -32,12 +32,14 @@ use yunta_core::step::NextStep;
 use yunta_core::{describe, Clock, Pid, RunId};
 use yunta_engine::pace::Pace;
 use yunta_render::command;
+use yunta_render::page::{CancelState, Cancelled, Page};
 
 use crate::commands::close::give_back;
 use crate::context::{Context, Opened};
 use crate::error::{note, warn, CliError};
+use crate::json::SCHEMA_VERSION;
 use crate::output::Outcome;
-use crate::output::{emit, progress, Mode};
+use crate::output::{emit, progress, Answer, Mode};
 
 /// How long the engine gets to react to the SIGINT before the escalation
 /// — generous next to the engine's own interrupt grace of at most 200ms,
@@ -49,10 +51,7 @@ const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 /// register, and to record its terminal after the SIGINT.
 const ENGINE_SHUTDOWN_POLL: Duration = Duration::from_millis(200);
 
-mod page;
 mod registered;
-
-use page::{answer, CancelState};
 
 pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -344,10 +343,55 @@ fn signalable_group(pgid: Pid) -> bool {
     pgid.as_u32() > 1
 }
 
+/// What `cancel` found and did, as a document carries it.
+#[derive(serde::Serialize)]
+pub(crate) struct CancelAnswer {
+    schema_version: u32,
+    run_id: RunId,
+    #[serde(flatten)]
+    state: CancelState,
+}
+
+fn answer(run_id: &RunId, state: CancelState) -> CancelAnswer {
+    CancelAnswer {
+        schema_version: SCHEMA_VERSION,
+        run_id: run_id.clone(),
+        state,
+    }
+}
+
+impl Answer for CancelAnswer {
+    fn page(&self) -> impl Page + '_ {
+        Cancelled {
+            run_id: &self.run_id,
+            state: &self.state,
+        }
+    }
+
+    fn outcome(&self) -> Outcome {
+        match &self.state {
+            CancelState::Escalated { .. } => Outcome::Reported,
+            _ => Outcome::Success,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{signalable, signalable_group};
-    use yunta_core::Pid;
+    use super::{answer, signalable, signalable_group};
+    use crate::output::{Answer, Outcome};
+    use yunta_core::{Pid, RunId};
+    use yunta_render::page::CancelState;
+
+    /// A cancel that had to kill its engine's process groups reports it in
+    /// its exit: the run was not stopped the way it asks to be.
+    #[test]
+    fn a_cancel_that_kills_what_its_engine_left_reports_it() {
+        let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
+        let engine = Pid::try_from(4321u32).unwrap();
+        let reply = answer(&run, CancelState::Escalated { engine_pid: engine });
+        assert_eq!(reply.outcome(), Outcome::Reported);
+    }
 
     /// The groups a registry names are walked and signalled only once
     /// `signalable` admits them, so init's group is neither walked nor

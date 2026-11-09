@@ -522,6 +522,7 @@ Into `page/`, with their tests, fixtures and goldens:
 
 ### Phase 8: every other command's page
 - The 16 pages of decision 7's last five rows, each moved with its test.
+- What a repository says of itself (`detect`'s data) and what a pack's audit found (the engine's) are core's, the CLI and the engine keeping what reads them and render saying them: the user's choice in Phase 8, so `Initialized` and a pack's inventory can be render's pages.
 
 ### Checkpoint I
 - No CLI file builds a `Doc` but `output` and the live region, which a search confirms. Then the gate and commit 8.

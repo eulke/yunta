@@ -1354,7 +1354,7 @@ Added at the user's request, after the measurement of Checkpoint F.
 ### Checkpoint H: after Tasks 30–36
 - [x] The 78 goldens, now under `crates/render/goldens/`, by digest; the captures (104 views, none differing from Checkpoint F's); `pure.rs`. The suite: 275 binaries, 4,552 tests, none failed. In `.plans/yunta-tui/proof/run-pages/checkpoint-h.txt`.
 - [x] `crates/cli/goldens/` is gone.
-- [ ] The user reviews the phase. Then every step of the `ci` job, commit 7, `cargo clean`.
+- [x] The user reviewed the phase and asked for the frame's pull requests to have a name and `render::state`'s doc to say all it holds. Every step of the `ci` job passed (the suite in its batches; clippy and the doc step after two items were put before their tests and a stale doc link went), commit 7 is 01dea5d7, and `cargo clean` ran.
 
 ## Phase 8: every other command's page
 
@@ -1367,12 +1367,17 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] `close_cmd` and `open_cmd` pass unchanged, and the six `open/` goldens' digests are the base's.
+- [x] `close_cmd` and `open_cmd` pass unchanged, and the six `open/` goldens' digests are the base's.
 
 **Verification:**
-- [ ] `cargo test -p yunta --test close_cmd --test open_cmd`, `cargo test -p yunta-render`
+- [x] `cargo test -p yunta --test close_cmd --test open_cmd`, `cargo test -p yunta-render` (332), `cargo test -p yunta --bins` (280), the 99 digests
 
 **Dependencies:** Checkpoint H
+
+**Found while doing it:**
+- `cancel/page.rs` moved whole as `page/cancelled.rs`, with `git mv`. How a cancel ended, `CancelState`, moved with it, as `page::CancelState`, keeping the serde form the answer's JSON flattens. `CancelAnswer` went back to `cancel.rs`, the command that answers with it.
+- The page's tests moved with it. The answer's check, that a cancel which killed what its engine left reports it in its exit, stays with the answer as a test of its own.
+- `page::Closed` and `page::Opened`, each in its own module.
 
 **Files likely touched:** `crates/cli/src/commands/{cancel/page,close,open}.rs`, `crates/render/src/page/{cancelled,closed,opened}.rs`, `crates/render/src/page.rs`
 
@@ -1385,12 +1390,20 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] The resolve-gate, gc and review tests pass unchanged.
+- [x] The resolve-gate, gc and review tests pass unchanged.
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`, the CLI's batches
+- [x] `cargo test -p yunta --bins` (274), `gate_review_cmd`, `gc_cmd`, `gc_lock`, `mcp_flow`, `cargo test -p yunta-render` (338), the 99 digests
+- [ ] the CLI's batches, at Checkpoint I
 
 **Dependencies:** Task 37
+
+**Found while doing it:**
+- **`page::Answered` and `page::Resolution`.** How a gate's answer ended was `GateState`. Beside `page::Gate`, that would read as the state of a gate, so it is `Resolution`, keeping the serde form the answer's JSON flattens.
+- **The one sentence both doors say is the page's: `Answered::sentence`.** The command draws the page, and the control plane's `resolve_gate` tool returns this sentence, as `Doctor::word` is the doctor's.
+- **The commands that answer a decision are render's commands:** `command::answering`, which `resolve-gate` says off a terminal and `page::Review` ends on. So `Review` takes the escalation, not the CLI's `Waiting`.
+- **`page::Collected` is the record a pass of `gc` fills, and the warning is the command's.** Its `problem()` warned on stderr as it counted, which a page cannot. `gc`'s own `problem(collected, said)` warns and counts, and the record keeps `did()`.
+- `resolve_gate/tests.rs` moved whole as `page/answered/tests.rs`, and `gc/page.rs` as `page/collected.rs`, with `git mv`. 6 tests moved: the CLI's bins went from 280 to 274, and render's library from 332 to 338.
 
 **Files likely touched:** `crates/cli/src/commands/{resolve_gate,gc/page,review}.rs`, `crates/render/src/page/{answered,collected,review}.rs`, `crates/render/src/page.rs`
 
@@ -1412,7 +1425,44 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 
 **Files likely touched:** `crates/cli/src/commands/{list/mod,init,new,schema}.rs`, `crates/render/src/page/{catalog,initialized,new_workflow,schema}.rs`, `crates/render/src/page.rs`
 
+**Done so far:**
+- [x] **`page::Catalog`**, with `page::OfferedWorkflow`, `page::ReadableWorkflow` and `page::UnreadableWorkflow`: the CLI's `Offered`, `Readable` and `Unreadable` lose the catalog around them at `page`'s root, so each says it is a workflow, as `UnreadableRun` does. What reads the catalog stays the CLI's, as `list::read_catalog` and `list::offered`, since the CLI cannot give render's type a method.
+- [x] **`page::Signpost`**, what `yunta` alone shows where it has no field to show.
+- [x] **The kinds of document Yunta reads are core's `DocumentKind`** (an artifact's kind, or a workflow file), in `core/src/workflow/documents.rs` with `UnknownDocument`, the error a name no document has, and both `FromStr`s. Its `FromStr` is core's own, so `schema`, the control plane's `document_shape` tool and the page read one list. **`page::Schema`** (`Documents`, `WorkflowKeys`) draws it. A client's shape stays the CLI's `schema::shape`, which draws a workflow's keys as Markdown.
+- `gc/mod.rs` went past 500 lines with its `problem`, and split along what it holds: what a pass does to the project's pool is `gc/pool.rs`.
+- [x] **`page::NewWorkflow`**, from the verdict `check` reaches on the file `new` wrote. Its shape is the name `--shape` reads (`&str`): the shape's other words, what each does, are the chooser's, and stay with `new`.
+- [x] **`page::Initialized`**, from core's `Detected` and `ProbedAdapter`, with the runner to declare in render's `declare::runners`.
+
 **Estimated scope:** M
+
+### Task 39b: what a repository says of itself, and what a pack's audit found, are core's
+
+**Description:**
+- `Initialized` draws what `init` found in the repository, and a pack's inventory draws what its audit found. Their data are the CLI's `detect` types (`Detected`, `Ecosystem`, `ProbedAdapter`) and the engine's audit (`PackAudit`, `WorkflowAudit`, `NodeAudit`, `WorkflowUnread`), and render may hold neither. The user chose, in Phase 8, that their data go to core, the way `GitHubRepo` and `PackManifest` live there.
+- The CLI keeps what reads the repository (`Detected::in_repo`, `in_files` and `for_errors` become functions of `detect`), and the engine keeps what builds the audit (`audit_pack`).
+- What they say goes to render: `suggestion`, `suggestions`, `fix_for` and `runner_step`, the words `verdict`, `doctor`, a pack's needs and `init` say.
+
+**Fails first:** none: a move. The guard is every test that says what was detected, `detected_cmd` among them, and the pack audit's tests, unchanged.
+
+**Acceptance criteria:**
+- [x] The data of `detect` and of a pack's audit are core types, and render draws them.
+- [x] The tests are byte for byte the same; the captures at Checkpoint I.
+
+**Verification:**
+- [x] `cargo test -p yunta-core -p yunta-render --lib`, the engine's `pack_audit` and `pack_requires`, `cargo test -p yunta --bins` and `detected_cmd`, `init_new_cmd`, `pack_audit_cmd`, `pack_requires_doctor_cmd`, `pack_cmd`, `check`; the CLI's batches at Checkpoint I
+
+**Dependencies:** Task 39's catalog and `schema`
+
+**Files likely touched:** `crates/cli/src/detect/*`, `crates/engine/src/pack_audit.rs`, `crates/core/src/{lib,detected,pack_audit}.rs`, `crates/render/src/detected.rs`
+
+**Estimated scope:** L (a move)
+
+**Found while doing it:**
+- **What a pack's audit found is core's `pack_audit`**, beside `pack`, at the core root (`PackAudit`, `WorkflowAudit`, `WorkflowUnread`, `NodeAudit`, `PromptText`, `PromptReadError`); the engine's `pack_audit` keeps `audit_pack` and re-exports only it.
+- **What a repository and its machine answer for is core's `detected`**: `Detected`, `Ecosystem`, `ProbedAdapter`, and `MachineAdapters`, the adapters a machine answered for among every one its build knows. The runner words named the build's adapters through the CLI's composition root when none answered; that list is data now (`MachineAdapters::known`), so the words need no CLI. `healthy` is gone: `MachineAdapters::probed` derives both lists from a probe, and `doctor` hands one value down instead of a list of ids.
+- `Detected`'s readers are `detect`'s functions (`in_files`, `in_repo`, `adapters_for`); `for_errors` became `adapters_for`, which answers the adapters to set on a `Detected` rather than taking one and giving it back.
+- **What to declare is render's `declare`**: `declare::as_detected` (a key, as the repository answers it) and `declare::runners` (the runners a workflow names, on the adapters the machine answers for). `suggestions`, `fix_for` and their helpers stay in `detect`: they read the engine's `CheckError`, which render may not.
+- The plan named the module `render::detected`; `declare` says what its words are, what to declare, and one of them is about the machine, not the repository.
 
 ### Task 40: a pack's pages
 
@@ -1421,12 +1471,22 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] The pack tests pass unchanged.
+- [x] The pack tests pass unchanged.
 
 **Verification:**
-- [ ] `cargo test -p yunta --bins`, the CLI's batches
+- [x] `cargo test -p yunta --bins`, `pack_cmd`, `pack_audit_cmd`, `pack_policy_cmd`, `pack_requires_doctor_cmd`, `factory_packs_cmd`, `init_new_cmd`, `check`, `run_flow`; the CLI's batches at Checkpoint I
 
 **Dependencies:** Task 39
+
+**Found while doing it:**
+- **`page::pack::{Installed, Inventory, Updated, Removed, Listed, NewPack}`**, a file each under `page/pack/`, with their data: `Cases`, `Need` and `Needs`, `VendoredPack` and `VendoredTree`, `NewPackCheck` (`PackCheck`, named for the page it belongs to).
+- **What a pack's own cases say is `Cases`**: `NoneShipped`, `NotRun { shipped }` or `Ran(Vec<RanCase>)`. `PackTestSummary` held two flags and two counts that could disagree (`has_tests: false` beside a `total`, `failed` beside `failures`) and each failure as a tuple; how many failed is now counted from the cases that ran.
+- **How one case's run ended is `page::CaseRun`** (`Held`, `Failed(problems)`, `CouldNotRun(error)`), and a case with it is `page::RanCase`. `case_found` answered a `(Found, String, Vec<String>)` of words; `case_run` answers the data and render says it, so `yunta test`'s rows and a pack's failed cases are the same row from one place. `case_name` is `test`'s one, which the pack's audit named again.
+- **A vendored tree's row is data**: `VendoredTree` (`AsLocked`, `Modified`, `Missing`, `Unreadable`) beside the lock entry, where `VendoredPack` held a mark and its sentence. `vendored_verdict` became `vendored_tree`, which reads the disk and says nothing.
+- **What a pack's workflows need is `Needs`**, the needs and the repository's `Detected`: the page says what the repository answers for each with `declare::as_detected`, where each `Need` carried that sentence.
+- **A problem pointed at what nothing reads is render's `blocks::diagnostic::{Pointed, hinted}`**, from the CLI's `error::page`: the inventory says a refused workflow's problems with it, as `check` and a refused document do.
+- `already_installed` and `not_installed` are refusals, not pages: they are `error::words`'s, beside the others.
+- What reads a pack's cases answers `Cases`, and is named for it: `audit::count_cases` and `audit::run_cases`, where `count_pack_tests` and `run_pack_tests` answered a summary of tests.
 
 **Files likely touched:** `crates/cli/src/commands/{pack,pack/page,pack/scaffold}.rs`, `crates/render/src/page/pack.rs`, `crates/render/src/page/pack/{installed,inventory,updated,removed,listed,new_pack}.rs`, `crates/render/src/page.rs`
 
@@ -1439,14 +1499,23 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] The `check` captures, `run_flow` and the test command's tests pass unchanged.
+- [x] The `check` captures, `run_flow` and the test command's tests pass unchanged; the captures at Checkpoint I.
 
 **Verification:**
-- [ ] `cargo test -p yunta --test run_flow`, the CLI's batches, `pages.sh` against the base
+- [x] `cargo test -p yunta --test run_flow`; the CLI's batches and `pages.sh` against the base at Checkpoint I
 
 **Dependencies:** Task 40
 
 **Files likely touched:** `crates/cli/src/commands/{test/mod,verdict,drive}.rs`, `crates/render/src/page/{tested,verdict,stopped}.rs`, `crates/render/src/page.rs`
+
+**Done with Task 40:**
+- [x] **`page::Tested` and `page::TestedCase`**, in `page/tested.rs` beside `CaseRun` and `RanCase`: a row is a `RanCase` in the column every case's name sets.
+- [x] **`page::LeftRunning`**, what a terminal says when a person stops following a run that goes on.
+- [x] **`page::RunInABrowser`**, the page `open` writes: built only by `Run::in_a_browser(drawn_at)`, which draws the run in its browser scope and puts each document the decision is about before the decision, and when it was drawn under it. The CLI's `page_for_a_browser` spliced them into the run's blocks itself. The `open` goldens hold the run in its browser scope, unchanged; `open_cmd` holds the page a browser reads.
+- How an instant reads is said once, render's `INSTANT_FORMAT`, which a limit's reset and the browser's note read; render names the instant it is handed, so `chrono` is its dependency, as it is replay's.
+
+**Done ahead, with Task 39's new page:**
+- [x] **`page::Checked`, with `page::Diagnosis` and `page::Unrunnable`:** what `check` diagnosed is data both the verdict's page and `new`'s say, and `CliError::Unrunnable` carries. The page takes the file's path and names it itself, as `new`'s does. Reaching the verdict (`Verdict::checked`, `diagnosis`, `unrunnable`) stays the CLI's.
 
 **Estimated scope:** M
 
@@ -1460,19 +1529,27 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] The search's result is written into the task, with each hit's reason.
+- [x] The search's result is written into the task, with each hit's reason.
 
 **Verification:**
-- [ ] `cargo xtask docs --check`, `cargo test -p yunta --bins`
+- [x] `cargo xtask docs --check`, `cargo test -p yunta --bins`
 
 **Dependencies:** Task 41
+
+**The search** (`Doc::new`, `Section {`, `impl Page for` in `crates/cli/src`), after Tasks 37–41:
+- `error/page.rs`: `impl Page for CliError`, the CLI's one error, which stays its own.
+- `output/mod.rs`: `say`, a line written as it is decided, drawn the way a document draws one: no page.
+- `commands/drive.rs`: a quiet run's verdict on stderr is its closing page's headline alone, the block `page::Run::headline` hands (Task 29).
+- `commands/status/mod.rs`: `impl Page for Body`, what `status` answers, a run's page or a node's, chosen by the command; it draws whichever it holds and builds nothing.
+- `status/follow` holds no page now: `LeftRunning` is render's. `surface/` and `ask/` draw a run and a prompt as they happen, with no `Doc` of their own.
+- The CLI's map in `main.rs` says every page a command shows is render's, filled with what the command read.
 
 **Files likely touched:** `crates/render/src/page.rs`, `crates/cli/src/main.rs`
 
 **Estimated scope:** S
 
 ### Checkpoint I: after Tasks 37–42
-- [ ] The suites; every golden's digest; the captures but the seven texts.
+- [x] The suites; every golden's digest; the captures but the seven texts. In `.plans/yunta-tui/proof/run-pages/checkpoint-i.txt`: 275 binaries and 4,553 tests, none failed; 99 goldens, every digest the base's; 104 views, none differing from Checkpoint H, and against the base only the four texts Phase 2 changed.
 - [ ] The user reviews the phase. Then every step of the `ci` job, commit 8, `cargo clean`.
 
 ## Phase 9: the review

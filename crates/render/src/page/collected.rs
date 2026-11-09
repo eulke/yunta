@@ -2,36 +2,34 @@
 //! row for each thing it took away, emptied or kept, and what the
 //! project's checkouts hold after it.
 
+use super::Page;
+use crate::command;
 use surco::components::{Fields, Furrow, Gist, Headline, Next};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
 use surco::text::counted;
 use yunta_core::step::NextStep;
-use yunta_render::command;
-use yunta_render::page::Page;
-
-use crate::error::warn;
 
 /// What a pass did, row by row as it went, and how much it could not do: the
 /// page it says once it is over.
-pub(super) struct Collected {
+pub struct Collected {
     /// Whether the pass only says what it would do.
-    pub(super) dry_run: bool,
+    pub dry_run: bool,
     /// Whether no retention is configured, so no run is collected.
-    pub(super) unretained: bool,
+    pub unretained: bool,
     /// How many runs went whole, or would.
-    pub(super) reclaimed: usize,
+    pub reclaimed: usize,
     /// What was done, or would be, and to what, in the order it was.
     rows: Vec<(&'static str, String)>,
     /// What the project's checkouts keep after the pass.
-    pub(super) now: Option<String>,
+    pub now: Option<String>,
     /// How many things the pass could not do, each warned as it happened.
-    problems: usize,
+    pub problems: usize,
 }
 
 impl Collected {
-    pub(super) fn new(dry_run: bool) -> Self {
+    pub fn new(dry_run: bool) -> Self {
         Collected {
             dry_run,
             unretained: false,
@@ -43,15 +41,8 @@ impl Collected {
     }
 
     /// A row of the page: `done` to `what`.
-    pub(super) fn did(&mut self, done: &'static str, what: impl Into<String>) {
+    pub fn did(&mut self, done: &'static str, what: impl Into<String>) {
         self.rows.push((done, what.into()));
-    }
-
-    /// Something the pass could not do, warned as it happens and counted
-    /// on the page.
-    pub(super) fn problem(&mut self, said: impl std::fmt::Display) {
-        warn(said);
-        self.problems += 1;
     }
 }
 
@@ -90,7 +81,7 @@ impl Page for Collected {
             .push_if("now", self.now.clone().unwrap_or_default());
         let steps = match self.dry_run && !self.rows.is_empty() {
             true => vec![(
-                yunta_render::command::line(&NextStep::Gc),
+                crate::command::line(&NextStep::Gc),
                 "does what this pass would",
             )],
             false => Vec::new(),
@@ -106,10 +97,11 @@ impl Page for Collected {
 
 #[cfg(test)]
 mod tests {
-    use super::Collected;
-    use crate::output::draw;
     use surco::look::Look;
-    use yunta_render::page::Page;
+    use surco::surface::{Surface, Terminal};
+
+    use super::Collected;
+    use crate::page::Page;
 
     #[test]
     fn a_pass_says_what_it_reclaimed_then_a_row_for_each_thing_it_did() {
@@ -121,7 +113,7 @@ mod tests {
         collected.now = Some("1 checkout, builds 0 B of a 10 GB budget; 40 GB free".to_string());
         let furrow = ".".repeat(80);
         assert_eq!(
-            draw(collected.document(&Look::plain()), &Look::plain()),
+            Terminal::on(Look::plain()).draw(&collected.document(&Look::plain())),
             format!(
                 "+ yunta gc ; reclaimed 1 run\n{furrow}\n\n  \
                  removed      ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4\n               \
@@ -137,7 +129,7 @@ mod tests {
         let mut collected = Collected::new(true);
         collected.reclaimed = 1;
         collected.did("would remove", "~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4");
-        let page = draw(collected.document(&Look::plain()), &Look::plain());
+        let page = Terminal::on(Look::plain()).draw(&collected.document(&Look::plain()));
         assert!(
             page.starts_with(". yunta gc ; would reclaim 1 run\n"),
             "{page}"
@@ -152,7 +144,7 @@ mod tests {
     fn a_dry_run_that_finds_nothing_offers_no_pass() {
         let mut collected = Collected::new(true);
         collected.now = Some("1 checkout, builds 0 B of a 10 GB budget; 40 GB free".to_string());
-        let page = draw(collected.document(&Look::plain()), &Look::plain());
+        let page = Terminal::on(Look::plain()).draw(&collected.document(&Look::plain()));
         assert!(
             page.starts_with(". yunta gc ; would reclaim no run\n"),
             "{page}"
@@ -164,8 +156,9 @@ mod tests {
     fn a_pass_with_no_retention_says_why_it_collects_no_run() {
         let mut collected = Collected::new(false);
         collected.unretained = true;
-        collected.problem("the project's checkouts: no disk");
-        let page = draw(collected.document(&Look::plain()), &Look::plain());
+        // A problem is warned where the pass meets it; the page counts it.
+        collected.problems += 1;
+        let page = Terminal::on(Look::plain()).draw(&collected.document(&Look::plain()));
         assert!(
             page.starts_with("^ yunta gc ; no run to reclaim ; 1 problem above\n"),
             "{page}"

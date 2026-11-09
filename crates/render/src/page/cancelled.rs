@@ -1,6 +1,9 @@
-//! What `yunta cancel` answers with: what it found and did, as the JSON
-//! document carries it and as the page a person reads says it.
+//! What `yunta cancel` answers with, as a person reads it: how the cancel
+//! ended, what it did to the processes that were left, and what goes on
+//! from here.
 
+use super::Page;
+use crate::command;
 use surco::components::{Gist, Headline, Next};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
@@ -9,26 +12,11 @@ use surco::text::counted;
 use surco::words::Standing;
 use yunta_core::step::NextStep;
 use yunta_core::{Pid, RunId};
-use yunta_render::command;
-use yunta_render::page::Page;
-
-use crate::json::SCHEMA_VERSION;
-use crate::output::Answer;
-use crate::output::Outcome;
-
-/// What `cancel` found and did, as a document carries it.
-#[derive(serde::Serialize)]
-pub(crate) struct CancelAnswer {
-    schema_version: u32,
-    run_id: RunId,
-    #[serde(flatten)]
-    state: CancelState,
-}
 
 /// How a cancel ended, and what it did to the processes that were left.
-#[derive(serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub(crate) enum CancelState {
+pub enum CancelState {
     /// The run was stopped already: paused, closed or broken, as
     /// `standing` calls it. `killed` process groups its engine could not
     /// stop were killed by this call; `parked` says it waits on a person.
@@ -53,19 +41,11 @@ pub(crate) enum CancelState {
     Crashed { engine_pid: Pid, killed: usize },
 }
 
-pub(super) fn answer(run_id: &RunId, state: CancelState) -> CancelAnswer {
-    CancelAnswer {
-        schema_version: SCHEMA_VERSION,
-        run_id: run_id.clone(),
-        state,
-    }
-}
-
 /// A cancel, as the person who asked for it reads it: what it found the run
 /// doing, what it did to it, and what goes on from here.
-struct Cancelled<'a> {
-    run_id: &'a RunId,
-    state: &'a CancelState,
+pub struct Cancelled<'a> {
+    pub run_id: &'a RunId,
+    pub state: &'a CancelState,
 }
 
 impl Page for Cancelled<'_> {
@@ -80,22 +60,6 @@ impl Page for Cancelled<'_> {
             .with(Headline::new(mark, format!("run {called}"), said))
             .with(Gist::new(gist))
             .with(Next { steps })
-    }
-}
-
-impl Answer for CancelAnswer {
-    fn page(&self) -> impl Page + '_ {
-        Cancelled {
-            run_id: &self.run_id,
-            state: &self.state,
-        }
-    }
-
-    fn outcome(&self) -> Outcome {
-        match &self.state {
-            CancelState::Escalated { .. } => Outcome::Reported,
-            _ => Outcome::Success,
-        }
     }
 }
 
@@ -200,22 +164,23 @@ fn already_stopped(
 
 #[cfg(test)]
 mod tests {
-    use super::{answer, CancelState};
-    use crate::output::draw;
-    use crate::output::Answer;
-    use crate::output::Outcome;
     use surco::look::Look;
+    use surco::surface::{Surface, Terminal};
     use surco::words::Standing;
     use yunta_core::{Pid, RunId};
-    use yunta_render::page::Page;
+
+    use super::{CancelState, Cancelled};
+    use crate::page::Page;
 
     #[test]
     fn a_cancel_that_finds_nothing_to_stop_says_so_in_its_words() {
         let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
         let said = |state: CancelState| {
-            let reply = answer(&run, state);
-            let page = reply.page().document(&Look::plain());
-            draw(page, &Look::plain())
+            let page = Cancelled {
+                run_id: &run,
+                state: &state,
+            };
+            Terminal::on(Look::plain()).draw(&page.document(&Look::plain()))
         };
         assert_eq!(
             said(CancelState::NothingRunning),
@@ -252,9 +217,11 @@ mod tests {
         let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
         let engine = Pid::try_from(4321u32).unwrap();
         let said = |state: CancelState| {
-            let reply = answer(&run, state);
-            let page = reply.page().document(&Look::plain());
-            draw(page, &Look::plain())
+            let page = Cancelled {
+                run_id: &run,
+                state: &state,
+            };
+            Terminal::on(Look::plain()).draw(&page.document(&Look::plain()))
         };
         assert_eq!(
             said(CancelState::Cancelled {
@@ -287,9 +254,5 @@ mod tests {
         // A stop the engine answers to draws no line of its own.
         assert_eq!(said(CancelState::Escalated { engine_pid: engine }), "");
         assert_eq!(said(CancelState::Interrupted { engine_pid: engine }), "");
-        assert_eq!(
-            answer(&run, CancelState::Escalated { engine_pid: engine }).outcome(),
-            Outcome::Reported
-        );
     }
 }

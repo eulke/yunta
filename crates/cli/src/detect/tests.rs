@@ -1,13 +1,18 @@
 use surco::components::Fix;
-use yunta_core::{AdapterId, CommandName, ConfigKey, NodeId, RunnerName};
+use yunta_core::{
+    AdapterId, CommandName, ConfigKey, Detected, MachineAdapters, NodeId, RunnerName,
+};
 use yunta_engine::CheckError;
 
-use super::{fix_for, Detected};
+use super::fix_for;
 
 /// What this repository says, on a machine where codex answers.
 fn on_codex() -> Detected {
     Detected {
-        adapters: vec![AdapterId::from_static("codex")],
+        adapters: MachineAdapters {
+            healthy: vec![AdapterId::from_static("codex")],
+            ..MachineAdapters::default()
+        },
         ..Detected::default()
     }
 }

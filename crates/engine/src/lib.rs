@@ -121,9 +121,7 @@ pub use human_interaction::{Asking, HumanInteraction, NoInteraction, QuestionsRe
 pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
 pub use observer::{Observed, RunObserver};
-pub use pack_audit::{
-    audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit, WorkflowUnread,
-};
+pub use pack_audit::audit_pack;
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
 pub use permissions::command_violation;
 pub use process_registry::{

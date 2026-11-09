@@ -1,11 +1,13 @@
-//! What a repository says about itself before anyone configures Yunta
-//! for it: the commands its ecosystem answers for lint, tests and the
-//! rest, the suite a run can measure, and the forge its `origin` is on.
+//! Reads what a repository says about itself before anyone configures
+//! Yunta for it — the commands its ecosystem answers for lint, tests and
+//! the rest, the suite a run can measure, and the forge its `origin` is on
+//! — and the adapter CLIs this machine answers for, into core's
+//! [`Detected`].
 //!
 //! Detection only proposes. `yunta init` writes what it finds into the
 //! config a person commits, and `check`, `doctor` and `pack add` name it
-//! beside a key a workflow needs and the config lacks — no run reads a
-//! detected value.
+//! beside a key a workflow needs and the config lacks, in render's
+//! `declare` words — no run reads a detected value.
 
 mod adapters;
 mod ecosystems;
@@ -18,91 +20,49 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use surco::components::Fix;
-use yunta_core::{AdapterId, CommandName, ConfigKey, GitHubRepo, RunnerName};
+use yunta_core::{CommandName, ConfigKey, Detected, Ecosystem, MachineAdapters, RunnerName};
 use yunta_engine::process::Supervision;
+use yunta_render::declare;
 
-pub(crate) use adapters::{healthy, probe_known_adapters, runner_step, ProbedAdapter};
-pub(crate) use ecosystems::Ecosystem;
+pub(crate) use adapters::probe_known_adapters;
 
-/// What one repository was found to have.
-#[derive(Debug, Default, PartialEq)]
-pub(crate) struct Detected {
-    pub(crate) ecosystem: Option<Ecosystem>,
-    /// What the repository runs for each capability, by the name a
-    /// workflow asks for it with.
-    pub(crate) commands: BTreeMap<CommandName, String>,
-    /// The suite a run measures before its first node.
-    pub(crate) suite: Option<String>,
-    /// The GitHub repository `origin` names.
-    pub(crate) forge: Option<GitHubRepo>,
-    /// The adapter CLIs that answered healthy here, when something asked
-    /// — probing spawns each one, so only a caller with a runner to
-    /// propose does.
-    pub(crate) adapters: Vec<AdapterId>,
+/// What `repo`'s own files say — everything but its remote.
+pub(crate) fn in_files(repo: &Path) -> Detected {
+    let found = ecosystems::rust(repo)
+        .or_else(|| js::node(repo))
+        .or_else(|| ecosystems::go(repo))
+        .or_else(|| ecosystems::python(repo));
+    match found {
+        Some(found) => Detected {
+            ecosystem: Some(found.ecosystem),
+            commands: found.commands,
+            suite: found.suite,
+            forge: None,
+            adapters: MachineAdapters::default(),
+        },
+        None => Detected::default(),
+    }
 }
 
-impl Detected {
-    /// What `repo`'s own files say — everything but its remote.
-    pub(crate) fn in_files(repo: &Path) -> Self {
-        let found = ecosystems::rust(repo)
-            .or_else(|| js::node(repo))
-            .or_else(|| ecosystems::go(repo))
-            .or_else(|| ecosystems::python(repo));
-        match found {
-            Some(found) => Detected {
-                ecosystem: Some(found.ecosystem),
-                commands: found.commands,
-                suite: found.suite,
-                forge: None,
-                adapters: Vec::new(),
-            },
-            None => Detected::default(),
-        }
-    }
+/// What `repo` says, the forge its `origin` is on included. A stop while
+/// git read the remote is the caller's stop, not a Detected without one.
+pub(crate) async fn in_repo(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Detected, yunta_engine::GitError> {
+    Ok(Detected {
+        forge: remote::github_repo(repo, supervision).await?,
+        ..in_files(repo)
+    })
+}
 
-    /// What `repo` says, the forge its `origin` is on included. A stop while
-    /// git read the remote is the caller's stop, not a Detected without one.
-    pub(crate) async fn in_repo(
-        repo: &Path,
-        supervision: Supervision<'_>,
-    ) -> Result<Self, yunta_engine::GitError> {
-        Ok(Detected {
-            forge: remote::github_repo(repo, supervision).await?,
-            ..Detected::in_files(repo)
-        })
-    }
-
-    /// The same, with the adapters this machine answers for when
-    /// `errors` name a runner the config lacks — the one suggestion that
-    /// needs them.
-    pub(crate) async fn for_errors(mut self, errors: &[yunta_engine::CheckError]) -> Self {
-        if wants_runner(errors) {
-            self.adapters = healthy(&probe_known_adapters().await);
-        }
-        self
-    }
-
-    /// What to declare for `key`, as this repository answers it — `None`
-    /// when nothing here does.
-    pub(crate) fn suggestion(&self, key: &ConfigKey) -> Option<String> {
-        match key {
-            ConfigKey::Command { command } => self.commands.get(command).map(|text| {
-                format!("detected here: declare `commands: {{ {command}: \"{text}\" }}`")
-            }),
-            ConfigKey::BaselineSuite => self.suite.as_ref().map(|suite| {
-                format!("detected here: declare `baseline: {{ suite: \"{suite}\" }}`")
-            }),
-            ConfigKey::Forge => self.forge.as_ref().map(|repo| {
-                format!(
-                    "detected here: declare `forge: {{ github: {{ repo: {repo}, token_env: \
-                     GITHUB_TOKEN }} }}`"
-                )
-            }),
-            ConfigKey::Coverage
-            | ConfigKey::Executor { .. }
-            | ConfigKey::Runner
-            | ConfigKey::RunBranch => None,
-        }
+/// The adapters this machine answers for when `errors` name a runner the
+/// config lacks — the one suggestion that needs them — and none asked for
+/// otherwise.
+pub(crate) async fn adapters_for(errors: &[yunta_engine::CheckError]) -> MachineAdapters {
+    match wants_runner(errors) {
+        true => MachineAdapters::probed(&probe_known_adapters().await),
+        false => MachineAdapters::default(),
     }
 }
 
@@ -136,7 +96,7 @@ fn wants_runner(errors: &[yunta_engine::CheckError]) -> bool {
 /// answers for, when they want one.
 fn runner_fix(errors: &[yunta_engine::CheckError], detected: &Detected) -> Option<Fix> {
     wants_runner(errors).then(|| {
-        runner_step(
+        declare::runners(
             &runners_wanted(errors),
             default_wanted(errors),
             &detected.adapters,
@@ -152,7 +112,7 @@ fn answered(error: &yunta_engine::CheckError, detected: &Detected) -> Option<Fix
         yunta_engine::CheckError::BaselineWithoutSuite { .. } => ConfigKey::BaselineSuite,
         _ => return None,
     };
-    detected.suggestion(&key).map(Fix::said)
+    declare::as_detected(detected, &key).map(Fix::said)
 }
 
 /// The runners `errors` say a node names and the config does not

@@ -25,17 +25,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use surco::components::{Gist, Headline, Next};
-use surco::doc::Doc;
 use surco::look::Look;
 use surco::words::Standing;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, RunEvent, StoredEvent};
-use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, RunId, Seq};
 use yunta_engine::pace::Pace;
-use yunta_render::command;
-use yunta_render::page::Page;
+use yunta_render::page::LeftRunning;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::registry::Engine;
@@ -129,35 +125,6 @@ enum Ended {
     Stalled,
     /// A person stopped the follower, and the run goes on.
     Interrupted,
-}
-
-/// The run a person stopped following, left running without this terminal,
-/// and the command that follows it again.
-struct LeftRunning<'a> {
-    run_id: &'a RunId,
-}
-
-impl Page for LeftRunning<'_> {
-    fn document(&self, _look: &Look) -> Doc {
-        let handle = self.run_id.handle();
-        Doc::new()
-            .with(Headline::new(
-                Standing::Running.mark(),
-                format!("run {handle}"),
-                Standing::Running.word(),
-            ))
-            .with(Gist::new(
-                "this terminal stopped following it; the run goes on without it",
-            ))
-            .with(Next {
-                steps: vec![(
-                    command::line(&NextStep::Follow {
-                        run: self.run_id.clone(),
-                    }),
-                    "follows it again",
-                )],
-            })
-    }
 }
 
 /// Waits one look's interval, or until `stop` trips: whether it tripped.

@@ -6,11 +6,12 @@
 //!   subcommand, `context` opens each one, `help` prints the help, `graph`
 //!   draws a workflow's graph, `pack` installs and lists packs, `project`
 //!   resolves the project and its config, and `detect` reads what a repository
-//!   says about itself.
-//! - What a person sees and answers: `output` owns what a command writes,
+//!   says about itself and which adapters this machine answers for.
+//! - What a person sees and answers: every page a command shows is render's,
+//!   filled with what the command read; `output` owns what a command writes,
 //!   the streams it is drawn to and the code it exits with, `surface` draws a
 //!   run as it happens, `ask` and `human_interaction` take a person's answers,
-//!   and `identity` names who decided. Where a run stands is render's page.
+//!   and `identity` names who decided.
 //! - For machines and the process: `json` is the versioned JSON the CLI emits,
 //!   `error` is the one error a command hands back, and `interrupt` is what
 //!   trips cancellation.

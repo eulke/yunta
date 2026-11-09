@@ -12,6 +12,9 @@
 //!   reader finds what a run holds under its directory.
 //! - What a session may call and write: `port`, `capabilities`, `run_tool`,
 //!   `confinement`, `protected`, `glob`, `fence`, `rail` and `expansion`.
+//! - What Yunta found by reading, for a page to say: `pack_audit`, what a
+//!   pack's own workflows would do, and `detected`, what a repository and the
+//!   machine it is on answer for.
 //! - What a person is shown and may answer: `shown`, `reserved`, `step` and
 //!   `caution`; `best_effort` names a step a run carries on past.
 //! - Boundaries a decision is handed rather than reaching for: `clock`,
@@ -42,6 +45,7 @@ mod clock;
 pub mod commit_message;
 mod config;
 pub mod confinement;
+mod detected;
 pub mod diagnostic;
 pub mod disk;
 pub mod durable;
@@ -59,6 +63,7 @@ pub mod inputs;
 mod manifest;
 mod nonempty;
 mod pack;
+mod pack_audit;
 pub mod persisted;
 pub mod policy;
 pub mod port;
@@ -97,6 +102,7 @@ pub use config::{
     MIN_SECRET_CHARS, REDACTED,
 };
 pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
+pub use detected::{Detected, Ecosystem, MachineAdapters, ProbedAdapter};
 pub use diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, Fault, FileProblem, Named, Problem, Report, Rule,
     RuleCode, RuleWords, RunFault, Subject,
@@ -129,6 +135,9 @@ pub use pack::{
     stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
     PackManifestError, PackRequires, RequiredRunner,
 };
+pub use pack_audit::{
+    NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit, WorkflowUnread,
+};
 pub use policy::{ScopeCeiling, ScopeExpansionMode};
 pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionFault, QuestionsFile};
 pub use run_tool::RunTool;
@@ -142,13 +151,13 @@ pub use tasks::{
 pub use workflow::{
     followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
     ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Ask, Because, CheckBuiltin,
-    CleanupTarget, CliConfig, ContextFile, ContextSpec, Coordination, DistillArtifact, Effort,
-    ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer,
-    KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact,
-    MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
-    NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
-    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownDocument,
-    Workflow, WorkflowFault,
+    CleanupTarget, CliConfig, ContextFile, ContextSpec, Coordination, DistillArtifact,
+    DocumentKind, Effort, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy,
+    KnowledgeLayer, KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec,
+    MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
+    NodePermissions, NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource,
+    ReservedIdentity, Resolved, RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion,
+    TasksParams, UnknownDocument, Workflow, WorkflowFault,
 };
 
 /// The schema major this binary speaks — what a

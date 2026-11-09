@@ -3,17 +3,9 @@
 
 use std::path::Path;
 
-use super::{commands, Found};
+use yunta_core::Ecosystem;
 
-/// An ecosystem a repository is in, and what to know about building in
-/// one checkout per task there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Ecosystem {
-    pub(crate) name: &'static str,
-    /// A tip printed to the terminal, never written to config — no key
-    /// for it exists in the schema.
-    pub(crate) cache_tip: &'static str,
-}
+use super::{commands, Found};
 
 /// A repository with a `Cargo.toml` is primarily a Rust one, whatever
 /// small tool beside it carries a `package.json`.

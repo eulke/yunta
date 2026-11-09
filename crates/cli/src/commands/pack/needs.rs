@@ -1,55 +1,42 @@
 //! What an installed pack's workflows need from this project that its
-//! config does not declare, said once the pack is vendored — with what
-//! this repository was detected to answer for each — so a person learns
+//! config does not declare, read once the pack is vendored beside what this
+//! repository was detected to have, which may answer it — so a person learns
 //! it before a run is refused for it, or leaves out a node for it.
 
 use std::path::Path;
 
 use yunta_core::{ConfigKey, NodeId, PackManifest, Workflow};
+use yunta_render::page::pack::{Need, Needs};
 
 use crate::context::Context;
-use crate::detect::Detected;
 use crate::error::CliError;
 
-/// What a node of an installed pack needs from this project and its config
-/// does not declare.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Need {
-    pub(super) node: NodeId,
-    pub(super) key: ConfigKey,
-    /// Whether a run leaves the node out until the project declares it; a
-    /// run is refused for it otherwise.
-    pub(super) leaves_node_out: bool,
-    /// What this repository was detected to answer for it, when it was.
-    pub(super) detected: Option<String>,
-}
-
 /// What `manifest`'s workflows, vendored at `pack_dir`, need and the
-/// project lacks, each once; none when they need nothing.
+/// project lacks, each once — none when they need nothing — and what this
+/// repository was detected to have.
 pub(super) async fn unmet(
     ctx: &Context,
     pack_dir: &Path,
     manifest: &PackManifest,
-) -> Result<Vec<Need>, CliError> {
-    let detected = Detected::in_repo(&ctx.cwd, ctx.supervision()).await?;
+) -> Result<Needs, CliError> {
+    let detected = crate::detect::in_repo(&ctx.cwd, ctx.supervision()).await?;
     let mut unmet: Vec<Need> = Vec::new();
     for declared in &manifest.contents.workflows {
         let Ok(workflow) = crate::load_workflow(&pack_dir.join(declared)) else {
             continue;
         };
-        for need in needs(&workflow, &ctx.project.config, &detected) {
+        for need in workflow_needs(&workflow, &ctx.project.config) {
             if !unmet.contains(&need) {
                 unmet.push(need);
             }
         }
     }
-    Ok(unmet)
+    Ok(Needs { unmet, detected })
 }
 
 /// Each key a node of `workflow` needs and `config` leaves unset, with
-/// whether a run leaves the node out for it and what this repository
-/// answers for it.
-fn needs(workflow: &Workflow, config: &yunta_core::ConfigLayer, detected: &Detected) -> Vec<Need> {
+/// whether a run leaves the node out for it.
+fn workflow_needs(workflow: &Workflow, config: &yunta_core::ConfigLayer) -> Vec<Need> {
     let left_out: Vec<NodeId> = yunta_core::left_out(workflow, config)
         .into_iter()
         .map(|left| left.node)
@@ -58,7 +45,6 @@ fn needs(workflow: &Workflow, config: &yunta_core::ConfigLayer, detected: &Detec
     let mut need = |node: &NodeId, key: ConfigKey, leaves_node_out: bool| {
         needs.push(Need {
             node: node.clone(),
-            detected: detected.suggestion(&key),
             key,
             leaves_node_out,
         });

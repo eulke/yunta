@@ -6,19 +6,15 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::components::{Fields, Furrow, Headline, Next, Problem};
-use surco::doc::{Block, Doc};
-use surco::glyphs::Mark;
+use surco::components::Problem;
 use surco::look::Look;
-use surco::text::counted;
 use yunta_core::caution::Caution;
 use yunta_core::diagnostic::Report;
-use yunta_core::step::{Arg, NextStep};
 use yunta_core::yaml::SourceMap;
-use yunta_core::{ConfigLayer, Workflow};
+use yunta_core::{ConfigLayer, Detected, Workflow};
 use yunta_engine::{CheckError, Composition};
-use yunta_render::blocks::diagnostic::located;
-use yunta_render::page::Page;
+use yunta_render::blocks::diagnostic::{hinted, located, Pointed};
+use yunta_render::page::{Checked, Diagnosis, Unrunnable};
 
 use crate::context::Context;
 use crate::error::{page, warn, CliError};
@@ -182,7 +178,7 @@ impl Verdict {
     /// The verdict on the workflow read from `path`, as its page says it.
     pub(crate) async fn checked(&self, ctx: &Context, path: &Path) -> Result<Checked, CliError> {
         Ok(Checked {
-            file: file_named(path),
+            path: path.to_path_buf(),
             at: shown(ctx, path),
             diagnosis: self.diagnosis(ctx).await?,
         })
@@ -215,10 +211,10 @@ impl Verdict {
         let text = tokio::fs::read_to_string(&self.path).await.ok();
         let map = text.as_deref().map(SourceMap::read).unwrap_or_default();
         let shown = shown(ctx, &self.path);
-        let mut pointed: Vec<page::Pointed> = self
+        let mut pointed: Vec<Pointed> = self
             .in_file
             .iter()
-            .map(|diagnostic| page::found(diagnostic, &shown, text.as_deref()))
+            .map(|diagnostic| Pointed::found(diagnostic, &shown, text.as_deref()))
             .collect();
         let mut composed = Vec::new();
         for error in &self.errors {
@@ -234,10 +230,10 @@ impl Verdict {
         }
         // In the order the file has them; what has no place in it, a
         // config layer's conflict among them, after.
-        pointed.sort_by_key(page::Pointed::order);
+        pointed.sort_by_key(Pointed::order);
         // A file this one composes is another file: its problems follow, in its own order.
         pointed.extend(composed);
-        let mut problems = page::hinted(pointed);
+        let mut problems = hinted(pointed);
         problems.extend(
             self.conflicts
                 .iter()
@@ -246,10 +242,11 @@ impl Verdict {
         let declare = match self.errors.is_empty() {
             true => Vec::new(),
             false => {
-                let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision())
-                    .await?
-                    .for_errors(&self.errors)
-                    .await;
+                let in_repo = crate::detect::in_repo(&ctx.cwd, ctx.supervision()).await?;
+                let detected = Detected {
+                    adapters: crate::detect::adapters_for(&self.errors).await,
+                    ..in_repo
+                };
                 crate::detect::suggestions(&self.errors, &detected)
             }
         };
@@ -263,126 +260,15 @@ impl Verdict {
 
 /// Every problem of a workflow this one composes that does not read, each quoted from its
 /// own file.
-async fn composed_problems(ctx: &Context, report: &Report) -> Vec<page::Pointed> {
+async fn composed_problems(ctx: &Context, report: &Report) -> Vec<Pointed> {
     let path = Path::new(&report.document.path);
     let text = tokio::fs::read_to_string(path).await.ok();
     let shown = shown(ctx, path);
     report
         .diagnostics
         .iter()
-        .map(|diagnostic| page::found(diagnostic, &shown, text.as_deref()))
+        .map(|diagnostic| Pointed::found(diagnostic, &shown, text.as_deref()))
         .collect()
-}
-
-/// Why a workflow cannot run here: every problem, each pointed at in its
-/// line when it has one, and what this project could declare for the ones
-/// a declaration fixes.
-#[derive(Debug)]
-pub(crate) struct Unrunnable {
-    /// The workflow refused, as a reader in this directory names its file.
-    pub(crate) workflow: String,
-    pub(crate) problems: Vec<Problem>,
-    pub(crate) declare: Vec<surco::components::Fix>,
-}
-
-impl Unrunnable {
-    /// The blocks a page draws: each problem, then `warnings`, then what to
-    /// declare.
-    pub(crate) fn blocks(&self, warnings: &[Problem]) -> Vec<Block> {
-        self.problems
-            .iter()
-            .chain(warnings)
-            .cloned()
-            .map(Block::from)
-            .chain(self.declare.iter().flat_map(surco::components::Fix::blocks))
-            .collect()
-    }
-}
-
-/// What `check` diagnosed: why the workflow cannot run here, each problem
-/// quoted from its file, and what does not stop it but should be heard. Not
-/// surco's `Found`, the result of one check's row.
-pub(crate) struct Diagnosis {
-    unrunnable: Unrunnable,
-    /// Each warning, as the problem a page says it in.
-    warnings: Vec<Problem>,
-}
-
-impl Diagnosis {
-    /// How many problems stop the workflow.
-    pub(crate) fn errors(&self) -> usize {
-        self.unrunnable.problems.len()
-    }
-
-    /// The verdict in words: the workflow can run here, or how many
-    /// problems stop it.
-    pub(crate) fn said(&self) -> String {
-        match self.errors() {
-            0 => "can run here".to_string(),
-            errors => counted(errors, "error"),
-        }
-    }
-
-    /// What a page draws of it: each problem, each warning, and what this
-    /// project could declare.
-    pub(crate) fn blocks(&self) -> Vec<Block> {
-        self.unrunnable.blocks(&self.warnings)
-    }
-}
-
-/// The verdict on a workflow file, as `check` prints it and `graph` beside
-/// its drawing: whether it can run here, what was found, and the check to
-/// run again once it is fixed.
-pub(crate) struct Checked {
-    /// The file, as a headline names it.
-    file: String,
-    /// Where it is, as a reader in this directory names it.
-    at: String,
-    diagnosis: Diagnosis,
-}
-
-impl Page for Checked {
-    fn document(&self, _look: &Look) -> Doc {
-        let diagnosis = &self.diagnosis;
-        let mark = match diagnosis.errors() {
-            0 => Mark::Done,
-            _ => Mark::Failed,
-        };
-        let mut headline = Headline::new(mark, self.file.as_str(), diagnosis.said());
-        if !diagnosis.warnings.is_empty() {
-            headline = headline.fact(counted(diagnosis.warnings.len(), "warning"));
-        }
-        let steps = match diagnosis.errors() {
-            0 => Vec::new(),
-            _ => vec![check_again(&self.at)],
-        };
-        Doc::new()
-            .with(headline)
-            .with(Furrow(Vec::new()))
-            .with(Fields::new().push_if("at", self.at.as_str()))
-            .with_all(diagnosis.blocks())
-            .with(Next { steps })
-    }
-}
-
-/// A workflow file as a headline names it: its name, the folder it is in
-/// being what the lines its problems point at say.
-pub(crate) fn file_named(path: &Path) -> String {
-    path.file_name().map_or_else(
-        || path.display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    )
-}
-
-/// The check to run once what a verdict found in the file `shown` names
-/// is fixed.
-pub(crate) fn check_again(shown: &str) -> (String, &'static str) {
-    (
-        yunta_render::command::line(&NextStep::Check {
-            workflow: Arg::Given(shown.to_string()),
-        }),
-        "again, once they are fixed",
-    )
 }
 
 /// `path` as a reader in this directory names it.

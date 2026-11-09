@@ -13,8 +13,9 @@
 //! option id printed as an example gets pasted.
 
 use surco::doc::Depth;
+use yunta_core::events::GateWaitingPayload;
 use yunta_core::step::{Arg, Choice, NextStep, Reach};
-use yunta_core::{NodeId, RunId};
+use yunta_core::{NodeId, OptionId, RunId};
 use yunta_replay::frame::{Action, Effect};
 
 /// Who copies a command off a line: a person, who reads a run by its handle,
@@ -168,3 +169,22 @@ fn given<'a>(argument: &'a Arg<String>, name: &'a str) -> &'a str {
 
 #[cfg(test)]
 mod tests;
+
+/// The command that chooses each option `escalation` offers for `run_id`, in the menu's
+/// order, with the option it chooses.
+pub fn answering(run_id: &RunId, escalation: &GateWaitingPayload) -> Vec<(OptionId, String)> {
+    escalation
+        .options()
+        .iter()
+        .map(|option| {
+            let step = NextStep::ResolveGate {
+                run: run_id.clone(),
+                choice: Choice::Picked {
+                    option: option.id.clone(),
+                    words: option.asks().is_some(),
+                },
+            };
+            (option.id.clone(), line(&step))
+        })
+        .collect()
+}

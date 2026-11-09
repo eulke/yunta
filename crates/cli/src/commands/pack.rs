@@ -1,7 +1,8 @@
 //! `yunta pack add/new/remove/list/update/audit`: the command layer —
 //! argument handling and printing — over `crate::pack`'s git/filesystem
-//! mechanics. Its pages are `page`'s, the audit is `audit`, what a vendored
-//! pack needs from the project is `needs`, and `new` is `scaffold`. `add` and `update` also enforce `permissions.packs`: the
+//! mechanics. Its pages are render's `page::pack`, the audit is `audit`,
+//! what a vendored pack needs from the project is `needs`, and `new` is
+//! `scaffold`. `add` and `update` also enforce `permissions.packs`: the
 //! publisher allow-list refuses a source outside it, and the
 //! `executors: allow|prompt|deny` policy governs the confirmation
 //! gate — `prompt` (the default) requires `--yes` after the audit has
@@ -15,16 +16,18 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::components::Found;
 use surco::look::Look;
 use yunta_core::{
     ConfigLayer, ContentHash, PackExecutorPolicy, PackLock, PackLockEntry, PackManifest, PackRef,
     Publisher,
 };
 use yunta_engine::audit_pack;
+use yunta_render::page::pack::{
+    Installed, Inventory, Listed, Needs, Removed, Updated, VendoredPack, VendoredTree,
+};
 
 use crate::context::Context;
-use crate::error::CliError;
+use crate::error::{words, CliError};
 use crate::output::Outcome;
 use crate::output::{blank, show};
 use crate::pack::{
@@ -35,12 +38,10 @@ use crate::pack::{
 
 mod audit;
 mod needs;
-mod page;
 mod scaffold;
 
 pub use audit::audit;
-use audit::{count_pack_tests, run_pack_tests};
-use page::{Installed, Inventory, Listed, Removed, Updated, VendoredPack};
+use audit::{count_cases, run_cases};
 pub use scaffold::new_pack;
 
 /// The merged `permissions.packs` verdicts, with the layers that
@@ -262,7 +263,7 @@ pub async fn add(
     let pack = manifest.reference();
     let dest = vendor_dir(&cwd, &pack);
     if dest.exists() {
-        return Err(CliError::msg(page::already_installed(&pack, &dest)));
+        return Err(CliError::msg(words::already_installed(&pack, &dest)));
     }
 
     // Policy first: a refused publisher or a denied executor leaves no
@@ -307,9 +308,9 @@ pub async fn add(
 
     // The pack's own cases run last, on the vendored copy, and only on
     // request: after the confirmation, never as part of deciding it.
-    let tests = match run_tests {
-        true => run_pack_tests(&dest, ctx.interrupt()).await,
-        false => count_pack_tests(&dest),
+    let cases = match run_tests {
+        true => run_cases(&dest, ctx.interrupt()).await,
+        false => count_cases(&dest),
     };
     let needs = needs::unmet(&ctx, &dest, &manifest).await;
     let installed = |needs| Installed {
@@ -317,11 +318,11 @@ pub async fn add(
         commit: &commit,
         at: &dest,
         cwd: &cwd,
-        tests: &tests,
+        cases: &cases,
         needs,
     };
     // The pack is installed whatever stopped the reading of its needs.
-    let needs = needs.inspect_err(|_| show(look, &installed(Vec::new())))?;
+    let needs = needs.inspect_err(|_| show(look, &installed(Needs::default())))?;
     show(look, &installed(needs));
     Ok(Outcome::Success)
 }
@@ -336,7 +337,7 @@ pub async fn update(
     let cwd = ctx.cwd.clone();
     let lock = load_lock(&cwd)?;
     let Some(entry) = lock.packs.get(pack).cloned() else {
-        return Err(CliError::msg(page::not_installed(pack)));
+        return Err(CliError::msg(words::not_installed(pack)));
     };
 
     let clone_dir = tempfile::tempdir().map_err(|source| CliError::Io {
@@ -428,34 +429,17 @@ pub fn remove(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     Ok(Outcome::Success)
 }
 
-/// What a vendored tree says about its lock entry, as its `list` row states
-/// it: whether its files still hash to the recorded content, or why they
-/// cannot be read.
-fn vendored_verdict(
-    dest: &std::path::Path,
-    entry: &PackLockEntry,
-    installed: &str,
-) -> (Found, String) {
+/// How the vendored tree at `dest` stands against its lock `entry`: whether
+/// its files still hash to the recorded content, or why they cannot be read.
+fn vendored_tree(dest: &Path, entry: &PackLockEntry) -> VendoredTree {
     match hash_tree(dest) {
-        Ok(hash) if hash == entry.content_hash => {
-            (Found::Holds, format!("{installed}, as its lock records it"))
-        }
-        Ok(_) => (
-            Found::Caution,
-            format!("{installed}, modified: its files no longer match its lock"),
-        ),
+        Ok(hash) if hash == entry.content_hash => VendoredTree::AsLocked,
+        Ok(_) => VendoredTree::Modified,
         // Only a directory that is not there counts as missing.
-        Err(PackError::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => (
-            Found::Problem,
-            format!("{installed}, missing: its directory is not there"),
-        ),
-        Err(error) => (
-            Found::Problem,
-            format!(
-                "{installed}, cannot be read: {}",
-                yunta_core::describe(&error)
-            ),
-        ),
+        Err(PackError::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+            VendoredTree::Missing
+        }
+        Err(error) => VendoredTree::Unreadable(yunta_core::describe(&error)),
     }
 }
 
@@ -475,15 +459,10 @@ pub fn list(look: &Look) -> Result<Outcome, CliError> {
     let packs = lock
         .packs
         .iter()
-        .map(|(key, entry)| {
-            let dest = vendor_dir(&cwd, key);
-            let installed = format!("{} ({})", entry.r#ref, entry.commit.abbreviated());
-            let (found, said) = vendored_verdict(&dest, entry, &installed);
-            VendoredPack {
-                pack: key.to_string(),
-                found,
-                said,
-            }
+        .map(|(pack, entry)| VendoredPack {
+            pack: pack.clone(),
+            locked: entry.clone(),
+            tree: vendored_tree(&vendor_dir(&cwd, pack), entry),
         })
         .collect();
     let lock = surco::paths::shown(&lock_path(&cwd), &cwd, None);

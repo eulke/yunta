@@ -6,7 +6,8 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use super::ecosystems::Ecosystem;
+use yunta_core::Ecosystem;
+
 use super::{commands, Found};
 
 /// The scripts a workflow's capabilities are conventionally declared

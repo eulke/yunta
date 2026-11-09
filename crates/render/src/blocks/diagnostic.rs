@@ -1,12 +1,16 @@
 //! Problems found in a text, each placed in it: the blocks a refused
 //! document and a workflow that fails `yunta check` are drawn with, and
 //! the same problems said as plain text to a reader that reads no page.
+//! A problem that names a key or a kind nothing in a workflow reads is
+//! [`Pointed`] at it, so the command that lists what a workflow reads is
+//! said once, under the first of them ([`hinted`]).
 
 use surco::components::{Place, Problem};
 use surco::doc::Doc;
 use surco::look::Look;
 use surco::surface::{Surface, Terminal};
-use yunta_core::diagnostic::Diagnostic;
+use yunta_core::diagnostic::{Diagnostic, RuleCode};
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::yaml::Location;
 
 /// What is wrong at `at` in `text`, read from `path`, as an error: its line
@@ -51,6 +55,76 @@ pub fn plain(heading: &str, problems: Vec<Problem>) -> String {
 /// them opens with, for a person and an agent alike.
 pub fn counted_under(heading: &str, problems: usize) -> String {
     format!("{heading}: {}", surco::text::counted(problems, "error"))
+}
+
+/// A problem a page says, and what it names that nothing in a workflow
+/// reads, when that is what it is about: a `key` or a `kind`.
+pub struct Pointed {
+    problem: Problem,
+    unread: Option<&'static str>,
+}
+
+impl From<Problem> for Pointed {
+    fn from(problem: Problem) -> Self {
+        Pointed {
+            problem,
+            unread: None,
+        }
+    }
+}
+
+impl Pointed {
+    /// One problem of a document read from `path`, quoted from `text` at its
+    /// place when it was read from text, with what helps fix it.
+    pub fn found(diagnostic: &Diagnostic, path: &str, text: Option<&str>) -> Self {
+        let unread = match diagnostic.rule() {
+            Some(RuleCode::UnknownKey) => Some("key"),
+            Some(RuleCode::UnknownKind) => Some("kind"),
+            _ => None,
+        };
+        Pointed {
+            problem: found(diagnostic, path, text),
+            unread,
+        }
+    }
+
+    /// Where in its file the problem is, as a page orders them: what has
+    /// no place comes after everything that has one.
+    pub fn order(&self) -> (usize, usize) {
+        self.problem
+            .at
+            .as_ref()
+            .map_or((usize::MAX, 0), |at| (at.line, at.col))
+    }
+}
+
+/// `problems` as a page says them, in their order: the command that lists
+/// what a workflow reads is said once, under the first that names a key or
+/// a kind nothing reads, with what every one of them needs listed.
+pub fn hinted(problems: Vec<Pointed>) -> Vec<Problem> {
+    let mut unread: Vec<&str> = Vec::new();
+    for what in problems.iter().filter_map(|pointed| pointed.unread) {
+        if !unread.contains(&what) {
+            unread.push(what);
+        }
+    }
+    let mut hint = (!unread.is_empty()).then(|| {
+        format!(
+            "`{}` lists every {}",
+            crate::command::line(&NextStep::Schema {
+                document: Arg::Given(yunta_core::DocumentKind::Workflow.as_str().to_string()),
+                json: false,
+            }),
+            unread.join(" and ")
+        )
+    });
+    problems
+        .into_iter()
+        .map(|pointed| match pointed.unread {
+            Some(_) => pointed.problem.help(hint.take()),
+            None => pointed.problem,
+        })
+        .collect()
 }
 
 #[cfg(test)]

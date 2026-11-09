@@ -31,14 +31,15 @@ use yunta_core::{Isolation, Manifest, RunId};
 use yunta_storage::Storage;
 
 use crate::context::Context;
-use crate::error::CliError;
+use crate::error::{warn, CliError};
 use crate::output::show;
 use crate::output::Outcome;
 use crate::project::Project;
 
-mod page;
+use yunta_render::page::Collected;
 
-use page::Collected;
+mod pool;
+use pool::{adopt, tidy, would_adopt};
 
 pub async fn gc(dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -76,7 +77,7 @@ pub async fn gc(dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
         would_adopt(&ctx, &pool, &mut collected).await;
         match pool.report(ctx.supervision()).await {
             Ok(kept) => collected.now = Some(kept.to_string()),
-            Err(e) => collected.problem(format!("the project's checkouts: {e}")),
+            Err(e) => problem(&mut collected, format!("the project's checkouts: {e}")),
         }
     }
     show(look, &collected);
@@ -105,7 +106,7 @@ async fn give_back(
 ) {
     let released = yunta_engine::release_run_checkout(pool, tree, run_id, ctx.supervision());
     if let Err(e) = released.await {
-        collected.problem(format!("run {}: {e}", run_id.handle()));
+        problem(collected, format!("run {}: {e}", run_id.handle()));
     }
 }
 
@@ -121,75 +122,11 @@ async fn forget_units(
 ) {
     let supervision = ctx.supervision();
     if let Err(e) = yunta_engine::prune_worktrees(&ctx.cwd, supervision).await {
-        collected.problem(format!("run {}: {e}", run_id.handle()));
+        problem(collected, format!("run {}: {e}", run_id.handle()));
         return;
     }
     if let Err(e) = yunta_engine::forget_run_units(pool, &ctx.cwd, run_id, supervision).await {
-        collected.problem(format!("run {}: {e}", run_id.handle()));
-    }
-}
-
-/// Takes in the units' branches runs made before refs kept their work:
-/// what each unit committed stays, kept by its ref, and no list of the
-/// project's branches shows it.
-async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, collected: &mut Collected) {
-    match yunta_engine::adopt_unit_branches(pool, &ctx.cwd, None, ctx.supervision()).await {
-        Ok(taken) if !taken.is_empty() => {
-            let branches = surco::text::counted_as(taken.len(), "unit branch", "unit branches");
-            collected.did("kept", format!("the work of {branches} by refs"));
-        }
-        Ok(_) => {}
-        Err(e) => collected.problem(format!("the units' branches: {e}")),
-    }
-}
-
-/// Says which of the units' branches runs made before refs kept their work
-/// a pass would take in, taking none.
-async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, collected: &mut Collected) {
-    match yunta_engine::adoptable_unit_branches(pool, &ctx.cwd, ctx.supervision()).await {
-        Ok(branches) if !branches.is_empty() => {
-            let branches = surco::text::counted_as(branches.len(), "unit branch", "unit branches");
-            collected.did("would keep", format!("the work of {branches} by refs"));
-        }
-        Ok(_) => {}
-        Err(e) => collected.problem(format!("the units' branches: {e}")),
-    }
-}
-
-/// Tidies the project's pool — what its checkouts' builds take is
-/// measured where nobody did, a build unused within retention is emptied,
-/// the builds stay within the budget, and a free checkout holding no
-/// build goes — and says what the pool keeps.
-async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool, collected: &mut Collected) {
-    let unused = ctx
-        .project
-        .config
-        .storage
-        .as_ref()
-        .and_then(|storage| storage.retention_days)
-        .map(|days| chrono::Duration::days(i64::from(days)));
-    let shown = |dir: &Path| surco::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
-    match pool.tidy(unused, ctx.supervision()).await {
-        Ok(tidied) => {
-            for (checkout, bytes) in &tidied.emptied {
-                collected.did(
-                    "emptied",
-                    format!(
-                        "the build of {} ({})",
-                        shown(checkout),
-                        surco::figures::Bytes(*bytes)
-                    ),
-                );
-            }
-            for checkout in &tidied.removed {
-                collected.did(
-                    "removed",
-                    format!("the unused checkout {}", shown(checkout)),
-                );
-            }
-            collected.now = Some(tidied.kept.to_string());
-        }
-        Err(e) => collected.problem(format!("the project's checkouts: {e}")),
+        problem(collected, format!("run {}: {e}", run_id.handle()));
     }
 }
 
@@ -222,7 +159,7 @@ async fn take_old_layouts(
                     }
                 }
             }
-            Err(e) => collected.problem(format!("run {}: {e}", run_id.handle())),
+            Err(e) => problem(collected, format!("run {}: {e}", run_id.handle())),
         }
     }
 }
@@ -258,7 +195,7 @@ async fn reclaim(
         let events = match storage.events_for_run(&run_id) {
             Ok(events) => events,
             Err(e) => {
-                collected.problem(format!("run {}: {e}", run_id.handle()));
+                problem(collected, format!("run {}: {e}", run_id.handle()));
                 continue;
             }
         };
@@ -327,7 +264,7 @@ fn purge_rows(storage: &Storage, run: &RunId, events: usize, collected: &mut Col
             true
         }
         Err(e) => {
-            collected.problem(format!("run {}: {e}", run.handle()));
+            problem(collected, format!("run {}: {e}", run.handle()));
             false
         }
     }
@@ -374,7 +311,7 @@ async fn pool_owns(
         Ok(owned) => Some(owned),
         Err(e) => {
             let shown = surco::paths::shown(tree, &ctx.cwd, ctx.env.home.as_deref());
-            collected.problem(format!("left {shown} alone: {e}"));
+            problem(collected, format!("left {shown} alone: {e}"));
             None
         }
     }
@@ -438,7 +375,7 @@ async fn remove_run(
                     removed_any = true;
                 }
                 Err(e) => {
-                    collected.problem(format!("failed to remove {}: {e}", shown(&tree)));
+                    problem(collected, format!("failed to remove {}: {e}", shown(&tree)));
                     all_removed = false;
                 }
             },
@@ -449,7 +386,10 @@ async fn remove_run(
             collected.did("would remove", shown(run_dir));
             removed_any = true;
         } else if let Err(e) = tokio::fs::remove_dir_all(run_dir).await {
-            collected.problem(format!("failed to remove {}: {e}", shown(run_dir)));
+            problem(
+                collected,
+                format!("failed to remove {}: {e}", shown(run_dir)),
+            );
             all_removed = false;
         } else {
             collected.did("removed", shown(run_dir));
@@ -479,7 +419,7 @@ fn worktree_of(
         {
             Ok(manifest) => manifest,
             Err(e) => {
-                collected.problem(format!("run {}: {e}", run_id.handle()));
+                problem(collected, format!("run {}: {e}", run_id.handle()));
                 return None;
             }
         };
@@ -491,4 +431,11 @@ fn worktree_of(
         ),
         Isolation::None => None,
     }
+}
+
+/// Something the pass could not do: warned as it happens, and counted on
+/// the page the pass ends with.
+fn problem(collected: &mut Collected, said: impl std::fmt::Display) {
+    warn(said);
+    collected.problems += 1;
 }

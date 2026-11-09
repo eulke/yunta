@@ -20,11 +20,9 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use yunta_core::events::{DecisionOn, Escalation, NodeState, StoredEvent};
 use yunta_core::shown::ShownDocument;
-use yunta_core::step::NextStep;
 use yunta_core::{Clock, Manifest, NodeId, RunId};
-use yunta_render::command;
 use yunta_render::escalation::Decision;
-use yunta_render::page::{Form, Node, Page, Places, Run, RunScope, Shown};
+use yunta_render::page::{Node, Page, Places, Run, RunScope};
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 use yunta_replay::RunState;
 
@@ -34,7 +32,6 @@ use crate::error::{note, CliError};
 use crate::json::RunDocument;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
-use surco::components::Note;
 use surco::doc::{Depth, Doc};
 use surco::look::Look;
 
@@ -269,35 +266,11 @@ pub(crate) async fn page_for_a_browser(
     let reading = Reading::of(ctx, run_id).await?;
     let documents = reading.documents(Mode::Human, None).await?;
     let page = (Mode::Human, Depth::Full);
-    let mut page = run_page_for(ctx, run_id, &reading, &documents, page).await?;
-    page.scope = RunScope::Browser;
-    let look = surco::surface::Html.look();
-    let doc = page.document(&look);
-    let at = doc.decision_at();
-    let mut blocks = doc.into_blocks();
-    if let Some(decision) = page.decision {
-        let at = at.unwrap_or(blocks.len());
-        let shown = decision.shown.iter().flat_map(|document| {
-            let shown = Shown {
-                document,
-                run: run_id,
-                form: Form::Browser,
-            };
-            shown.document(&look).into_blocks()
-        });
-        blocks.splice(at..at, shown.collect::<Vec<_>>());
-    }
-    blocks.push(
-        Note(format!(
-            "drawn at {}; `{}` draws it again.",
-            reading.now.format("%Y-%m-%d %H:%M UTC"),
-            command::line(&NextStep::Open {
-                run: run_id.clone()
-            }),
-        ))
-        .into(),
-    );
-    Ok((Doc::new().with_all(blocks), reading.run_dir.clone()))
+    let page = run_page_for(ctx, run_id, &reading, &documents, page)
+        .await?
+        .in_a_browser(reading.now);
+    let doc = page.document(&surco::surface::Html.look());
+    Ok((doc, reading.run_dir.clone()))
 }
 
 /// The change each finished node's accepted plan says it makes, for the story

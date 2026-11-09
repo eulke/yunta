@@ -41,13 +41,8 @@ use crate::error::CliError;
 
 use crate::output::show;
 use crate::output::Outcome;
-use surco::components::{Check, Checklist, Found, Headline};
-use surco::doc::Doc;
-use surco::glyphs::Mark;
 use surco::look::Look;
-use yunta_core::step::NextStep;
-use yunta_render::command;
-use yunta_render::page::Page;
+use yunta_render::page::{CaseRun, RanCase, Tested, TestedCase};
 
 pub(crate) use case::run_case;
 
@@ -101,54 +96,6 @@ fn cases_under(root: &Path) -> Result<Vec<std::path::PathBuf>, CliError> {
         )));
     }
     Ok(case_paths)
-}
-
-/// The verdict under the rows it counts, as a run's closing comes under
-/// what it showed while it ran: how many cases ran, and how many failed.
-struct Tested {
-    cases: usize,
-    failures: usize,
-}
-
-impl Page for Tested {
-    fn document(&self, _look: &Look) -> Doc {
-        let tally = format!(
-            "{}, {} failed",
-            surco::text::counted(self.cases, "case"),
-            self.failures
-        );
-        let mark = match self.failures {
-            0 => Mark::Done,
-            _ => Mark::Failed,
-        };
-        Doc::new().with(Headline::new(
-            mark,
-            command::line(&NextStep::Test { dir: None }),
-            tally,
-        ))
-    }
-}
-
-/// A case tested, said as it ends: what it found, in the column every case's
-/// name lines up in, with what went wrong under it.
-struct TestedCase<'a> {
-    /// Every case's name, which sets the column the rows share.
-    names: &'a [String],
-    name: String,
-    found: Found,
-    said: String,
-    problems: Vec<String>,
-}
-
-impl Page for TestedCase<'_> {
-    fn document(&self, _look: &Look) -> Doc {
-        let mut row = Checklist::aligned(self.names.to_vec());
-        row.push_check(
-            Check::new(self.found, self.name.as_str(), self.said.as_str())
-                .details(self.problems.clone()),
-        );
-        Doc::new().with(row)
-    }
 }
 
 /// The project whose `.yunta/` holds the cases: `dir` when given, the
@@ -248,7 +195,7 @@ pub(crate) fn copy_dir_all(from: &Path, into: &Path) -> std::io::Result<()> {
 }
 
 /// What a case is called: its file's stem.
-fn case_name(case_path: &Path) -> String {
+pub(crate) fn case_name(case_path: &Path) -> String {
     case_path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -269,37 +216,24 @@ async fn report(
     interrupt: crate::interrupt::Interrupt,
     (names, look): (&[String], &surco::look::Look),
 ) -> bool {
-    let (found, said, problems) = case_found(run_case(root, case_path, interrupt).await);
-    let passed = problems.is_empty();
+    let case = RanCase {
+        name: case_name(case_path),
+        run: case_run(run_case(root, case_path, interrupt).await),
+    };
+    let held = case.run.held();
     // The cases run one at a time and each row is drawn as its case ends:
     // the column every row shares is the list's, not the row's.
-    let row = TestedCase {
-        names,
-        name: case_name(case_path),
-        found,
-        said,
-        problems,
-    };
-    show(look, &row);
-    passed
+    show(look, &TestedCase { names, case });
+    held
 }
 
-/// What a case's run found, as its row says it: whether it held, what its
-/// row says, and each problem, as written. A case that could not run at all
-/// is one problem like any other.
-pub(crate) fn case_found(ran: Result<Vec<String>, CliError>) -> (Found, String, Vec<String>) {
+/// How a case's run ended. A case that could not run at all is one
+/// problem like any other.
+pub(crate) fn case_run(ran: Result<Vec<String>, CliError>) -> CaseRun {
     match ran {
-        Ok(problems) if problems.is_empty() => (Found::Holds, "ok".to_string(), Vec::new()),
-        Ok(problems) => (
-            Found::Problem,
-            format!("failed: {}", surco::text::counted(problems.len(), "error")),
-            problems,
-        ),
-        Err(error) => (
-            Found::Problem,
-            "could not run: 1 error".to_string(),
-            vec![error.to_string()],
-        ),
+        Ok(problems) if problems.is_empty() => CaseRun::Held,
+        Ok(problems) => CaseRun::Failed(problems),
+        Err(error) => CaseRun::CouldNotRun(error.to_string()),
     }
 }
 

@@ -16,8 +16,10 @@ use std::path::Path;
 use yunta_core::events::{Claim, FailureMenu, Refusal};
 use yunta_core::inputs::InputsProblem;
 use yunta_core::run_dir::ARTIFACTS_DIR;
-use yunta_core::Pid;
+use yunta_core::step::{Arg, NextStep};
+use yunta_core::{PackRef, Pid};
 use yunta_engine::{CloseRunError, ResolveGateError, RunError, StoreError};
+use yunta_render::command;
 
 /// What a run another engine drives says: whose it is.
 pub(crate) fn moving(run: &str, pid: Pid) -> String {
@@ -150,4 +152,29 @@ pub(crate) fn close(error: &CloseRunError) -> String {
             format!("could not write the run's events.jsonl: {detail}")
         }
     }
+}
+
+/// Why `add` refuses `pack`, installed already at `dest`: the lines that
+/// change its ref, or take it out first.
+pub(crate) fn already_installed(pack: &PackRef, dest: &Path) -> String {
+    let update = NextStep::PackUpdate {
+        pack: pack.clone(),
+        reference: Arg::Blank,
+    };
+    let remove = NextStep::PackRemove { pack: pack.clone() };
+    format!(
+        "`{pack}` is already installed at {}; use `{}` to change its ref, or `{}` first",
+        dest.display(),
+        command::line(&update),
+        command::line(&remove)
+    )
+}
+
+/// Why `update` refuses `pack`, which is not installed: the line that adds it.
+pub(crate) fn not_installed(pack: &PackRef) -> String {
+    let add = NextStep::PackAdd { source: Arg::Blank };
+    format!(
+        "`{pack}` isn't installed; `{}` it first, not update",
+        command::line(&add)
+    )
 }

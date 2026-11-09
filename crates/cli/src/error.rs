@@ -184,7 +184,7 @@ pub enum CliError {
     /// in it, each pointed at in its line, and what this project could
     /// declare for the ones a declaration fixes.
     #[error("{}", unrunnable_said(.0))]
-    Unrunnable(crate::commands::verdict::Unrunnable),
+    Unrunnable(yunta_render::page::Unrunnable),
 
     /// A document this binary does not show. The sentence lists the ones
     /// it does, and the one a slip most likely meant.

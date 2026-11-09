@@ -18,9 +18,12 @@
 //! ended, what it took and where its work is. Nothing here paints: the
 //! caller draws the document once, with the look of its stream.
 
+mod browser;
 mod evidence;
 mod facts;
 mod story;
+
+pub use browser::RunInABrowser;
 
 use std::path::Path;
 

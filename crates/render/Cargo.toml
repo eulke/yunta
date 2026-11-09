@@ -20,6 +20,8 @@ yunta-surco.workspace = true
 serde = { workspace = true, features = ["derive"] }
 # What a run is, as its log says: the frame, the stats and the history a page draws.
 yunta-replay.workspace = true
+# The instant a page is drawn at, which its caller read from its clock.
+chrono.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true
