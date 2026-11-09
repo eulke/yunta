@@ -167,7 +167,7 @@ The CLI's integration tests print the commands whole: `status_cmd`, `status_page
      - how long the run has stood where it is (`since_last_event`);
      - where its time went (`time`).
      
-     A page says durations, and `yunta-render` names no clock type. The run page's headline and its gist read the same `waited`, and the field and the run page the same `since_last_event`.
+     A page says durations, and `yunta-render` measures none: the run page's headline and its gist read the same `waited`, and the field and the run page the same `since_last_event`. The one instant a page holds is the one its caller read and handed in: when the page `open` writes was drawn.
    - **What a run's registry says is one enum, `Engine`:** `Alive` with its process's pid, the `Prompt` it holds at its terminal and the socket it serves its words on, `Dead`, `Unrecorded` or `Unknown`, read off the registry with one read and one probe. It is an input of the frame, `close`, `gc`, the pool, the follower and the refusal of a command on a run that asks. No page takes it. Its name is the engine's because that process is the engine everywhere else (`engine.json`, its `engine_pid`, `engine.lock`, and what a reader reads: "its engine is asking"); `driver` is a word this repository retired, what an adapter is not, which the `banned_vocabulary` smell holds.
    - **The pid is the process's, and the question is the question.** `Prompt` is `{ node, since }`, one type for the record `engine.json` holds and the reading returns. A sentence about a process that asks takes `Asking`, which joins the two.
 3. **One home for how a decision reads.** The CLI's `status/decision.rs` and the decision `gate` builds become one block in render's `escalation`, which already holds the words a decision is met by. The decision a run waits on, its type and its block, live there, and the gate's page, the run page and the closing all draw it from there.
@@ -279,7 +279,7 @@ Each item gets the one path and the name it should always have had, where it mov
 
 ## Tech Stack
 
-Rust 1.98.0. `yunta-render` gains `yunta-replay` as a dependency; no crate outside the workspace is added. `yunta-render` names no clock type: every duration it says is measured in `yunta-replay`. Surco's `golden` feature holds the goldens, as it does now.
+Rust 1.98.0. `yunta-render` gains `yunta-replay` as a dependency, and `chrono`, already the workspace's, to name the instant its caller hands the page `open` writes. `yunta-render` reads no clock: every duration it says is measured in `yunta-replay`. Surco's `golden` feature holds the goldens, as it does now.
 
 ## Commands
 
@@ -392,7 +392,7 @@ emit(mode, &StatusAnswer { page, json }, look)
 ## Success Criteria
 
 1. **Every page is a value in `yunta_render::page`** and implements `Page`. No CLI file builds a `Doc` but `output` drawing one and the live region. Each command fills its page and emits it.
-2. **Render's manifest names core, replay and surco,** and neither the engine, the store nor a runtime, which `tests/pure.rs` holds. No page names a path function of the engine or a clock type, and none holds an `Engine`: a search for `DateTime` and `chrono` in `crates/render/src` finds nothing.
+2. **Render's manifest names core, replay and surco,** and neither the engine, the store nor a runtime, which `tests/pure.rs` holds. No page names a path function of the engine or reads a clock, and none holds an `Engine`: the one instant a page holds, the time `RunInABrowser` was drawn at, is its caller's, and render says every instant in one format.
 3. **What a person can do next is `RunFrame::actions`,** returning `Action`s. `after_for` and `after` are gone, and every surface that offered next steps reads the actions.
 4. **Every command a person is told to type is a `NextStep`,** spelled only by `yunta_render::command`, and a test parses every kind's line with the CLI's clap:
    - `Spell`, the copies in `yunta-testkit-core` and the engine's tests, and the agreement test are gone;

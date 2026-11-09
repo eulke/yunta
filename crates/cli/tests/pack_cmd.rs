@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::process::Output;
 
-use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in, INITIAL_BRANCH};
+use yunta_testkit::{git, init_repo, stderr, stdout, unwrapped, yunta_in, INITIAL_BRANCH};
 
 /// Builds a minimal, valid pack repo at `dir`: `pack.yaml` (declarative,
 /// no executors) plus one workflow file it lists in `contents`.
@@ -122,16 +122,14 @@ fn add_refuses_a_pack_already_installed() {
 
     let second = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(!second.status.success());
+    // The refusal is drawn at a page's width, which wraps it wherever the
+    // path it names happens to end.
+    let refusal = unwrapped(&stderr(&second));
+    assert!(refusal.contains("already installed"), "{refusal}");
     assert!(
-        stderr(&second).contains("already installed"),
-        "{}",
-        stderr(&second)
-    );
-    assert!(
-        stderr(&second).contains("`yunta pack update acme/review-pack <ref>`")
-            && stderr(&second).contains("`yunta pack remove acme/review-pack`"),
-        "the refusal names the lines that change the installed pack: {}",
-        stderr(&second)
+        refusal.contains("`yunta pack update acme/review-pack <ref>`")
+            && refusal.contains("`yunta pack remove acme/review-pack`"),
+        "the refusal names the lines that change the installed pack: {refusal}"
     );
 }
 
@@ -251,11 +249,11 @@ fn update_on_an_uninstalled_pack_is_refused() {
         &["pack", "update", "acme/review-pack", "v2.0.0"]
     );
     assert!(!out.status.success());
-    assert!(stderr(&out).contains("isn't installed"), "{}", stderr(&out));
+    let refusal = unwrapped(&stderr(&out));
+    assert!(refusal.contains("isn't installed"), "{refusal}");
     assert!(
-        stderr(&out).contains("`yunta pack add <source>` it first"),
-        "{}",
-        stderr(&out)
+        refusal.contains("`yunta pack add <source>` it first"),
+        "{refusal}"
     );
 }
 

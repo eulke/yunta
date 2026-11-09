@@ -1673,6 +1673,8 @@ Each task moves its pages to `crates/render/src/page/`, by `git mv` where the fi
 
 **Fails first:** none.
 
+**Found while doing it:** the first CI run failed on Linux in `pack_cmd::add_refuses_a_pack_already_installed`. The refusal is drawn at a page's width, so where the path it names ends decides where it wraps; Linux's short temp paths put the wrap inside the command the test looked for, and macOS's long ones did not. Reproduced on this Mac with `TMPDIR=/tmp/yt`. The test reads the refusal through the testkit's `unwrapped`, as `check`'s already do, and so does the refusal of `update` on a pack not installed.
+
 **Acceptance criteria:**
 - [ ] `gh pr checks 30` passes on Linux and macOS.
 
