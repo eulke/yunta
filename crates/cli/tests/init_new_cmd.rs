@@ -300,6 +300,27 @@ fn new_lint_fix_runs_the_projects_lint() {
     );
 }
 
+/// A skeleton names the runner the project's config declares, uncommented, as it
+/// runs the `lint` the config declares; a role it does not declare stays
+/// commented, to uncomment once it does.
+#[test]
+fn new_names_the_runner_the_config_declares() {
+    let (_root, repo, home) = runnable_setup();
+    let result = yunta_in!(&repo, &home, &["new", "planned", "--shape", "tasks"]);
+    assert!(result.status.success(), "{}", stderr(&result));
+    let written = std::fs::read_to_string(repo.join(".yunta/workflows/planned.yaml")).unwrap();
+    assert!(
+        written
+            .lines()
+            .any(|line| line.trim_start().starts_with("runner: implementer")),
+        "the declared runner is named: {written}"
+    );
+    assert!(
+        written.contains("# runner: planner  # uncomment once runners: defines this role"),
+        "a runner the config does not declare stays commented: {written}"
+    );
+}
+
 #[test]
 fn init_never_replaces_an_unreadable_gitignore() {
     let (_root, repo, home) = setup();

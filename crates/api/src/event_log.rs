@@ -71,7 +71,7 @@ impl EventLog {
 /// `run_created` names the run it was promoted from. So the chain reads the
 /// head of each run the log holds that it had not looked at, once, and every
 /// interface that follows a run goes on along the same chain.
-pub struct PromotionChain {
+pub(crate) struct PromotionChain {
     followed: RunId,
     seen: HashSet<RunId>,
 }
@@ -79,7 +79,7 @@ pub struct PromotionChain {
 impl PromotionChain {
     /// The chain from `run`, as `log` holds it now: no run already on it is
     /// a successor of `run`.
-    pub async fn starting_at(log: &EventLog, run: RunId) -> Result<PromotionChain, Error> {
+    pub(crate) async fn starting_at(log: &EventLog, run: RunId) -> Result<PromotionChain, Error> {
         Ok(PromotionChain {
             followed: run,
             seen: log.runs().await?.into_iter().collect(),
@@ -88,7 +88,7 @@ impl PromotionChain {
 
     /// The run promoted from the one followed, once `log` holds it, which the
     /// chain follows from then on; `None` while there is none yet.
-    pub async fn successor(&mut self, log: &EventLog) -> Result<Option<RunId>, Error> {
+    pub(crate) async fn successor(&mut self, log: &EventLog) -> Result<Option<RunId>, Error> {
         for run in log.runs().await? {
             if !self.seen.insert(run.clone()) {
                 continue;

@@ -66,7 +66,7 @@ impl<'w> Packs<'w> {
         source: &str,
         confirmed: bool,
         stop: &Stop,
-    ) -> Result<FetchedPack<'w>, Error> {
+    ) -> Result<FetchedPack, Error> {
         let (source, reference) = vendor::split_source_and_ref(source);
         let url = vendor::clone_url(source);
         let clone = clone_dir()?;
@@ -102,7 +102,7 @@ impl<'w> Packs<'w> {
         reference: &str,
         confirmed: bool,
         stop: &Stop,
-    ) -> Result<FetchedPack<'w>, Error> {
+    ) -> Result<FetchedPack, Error> {
         let lock = vendor::load_lock(&self.workspace.dir).map_err(failed)?;
         let Some(entry) = lock.packs.get(pack).cloned() else {
             let pack = pack.clone();
@@ -227,9 +227,9 @@ impl<'w> Packs<'w> {
         policy: PackPolicy,
         confirmed: bool,
         installing: Installing,
-    ) -> FetchedPack<'w> {
+    ) -> FetchedPack {
         FetchedPack {
-            workspace: self.workspace,
+            workspace: self.workspace.clone(),
             clone,
             manifest,
             policy,
@@ -244,8 +244,8 @@ impl<'w> Packs<'w> {
 ///
 /// Not an installed pack: nothing of it is in the repository until
 /// [`FetchedPack::install`].
-pub struct FetchedPack<'w> {
-    workspace: &'w Workspace,
+pub struct FetchedPack {
+    workspace: Workspace,
     clone: tempfile::TempDir,
     pub manifest: PackManifest,
     policy: PackPolicy,
@@ -303,7 +303,7 @@ fn refuse_vendored(dir: &Path, pack: &PackRef) -> Result<(), Error> {
     }
 }
 
-impl<'w> FetchedPack<'w> {
+impl FetchedPack {
     /// The pack's audit, read, never run: the inventory a person confirms
     /// against.
     pub fn audit(&self) -> PackAudit {
@@ -324,11 +324,7 @@ impl<'w> FetchedPack<'w> {
     /// again and written atomically. A failure leaves the installed tree and
     /// the lock as they were. A replaced tree that stays on disk is said
     /// through `remarks`.
-    pub async fn install(
-        self,
-        remarks: &dyn Remarks,
-        stop: &Stop,
-    ) -> Result<InstalledPack<'w>, Error> {
+    pub async fn install(self, remarks: &dyn Remarks, stop: &Stop) -> Result<InstalledPack, Error> {
         self.policy
             .admit_executors(&self.manifest, self.confirmed, self.installing.verb())?;
         let supervision = self.workspace.supervision(stop);
@@ -355,7 +351,7 @@ impl<'w> FetchedPack<'w> {
         // pack command writes meanwhile is read, never written over. Read
         // before anything is written: a lock that cannot be read stops the
         // install before it starts.
-        let _held = held(self.workspace, stop).await?;
+        let _held = held(&self.workspace, stop).await?;
         let lock = vendor::load_lock(dir).map_err(failed)?;
         let pack = self.manifest.reference();
         // The fetch judged the repository before the packs were held; another
@@ -382,8 +378,8 @@ impl<'w> FetchedPack<'w> {
 }
 
 /// A pack vendored in the repository and recorded in its lock.
-pub struct InstalledPack<'w> {
-    workspace: &'w Workspace,
+pub struct InstalledPack {
+    workspace: Workspace,
     pub pack: PackRef,
     pub manifest: PackManifest,
     /// The commit its tree was vendored from.
@@ -394,7 +390,7 @@ pub struct InstalledPack<'w> {
     pub dir: PathBuf,
 }
 
-impl InstalledPack<'_> {
+impl InstalledPack {
     /// The pack's own cases, counted, none of them run: what an install
     /// says when nothing of the pack is to run.
     pub fn shipped_cases(&self) -> Cases {

@@ -16,14 +16,14 @@ use crate::page::{Form, Page, Shown};
 /// A run's page as `yunta open` writes it for a browser, drawn at an
 /// instant. Built by [`Run::in_a_browser`], which draws the run in its
 /// browser scope.
-pub struct RunInABrowser<'a> {
-    run: Run<'a>,
+pub struct RunInABrowser {
+    run: Run,
     drawn_at: DateTime<Utc>,
 }
 
-impl<'a> Run<'a> {
+impl Run {
     /// The page as a browser reads it, drawn at `drawn_at`.
-    pub fn in_a_browser(mut self, drawn_at: DateTime<Utc>) -> RunInABrowser<'a> {
+    pub fn in_a_browser(mut self, drawn_at: DateTime<Utc>) -> RunInABrowser {
         self.scope = RunScope::Browser;
         RunInABrowser {
             run: self,
@@ -32,18 +32,18 @@ impl<'a> Run<'a> {
     }
 }
 
-impl Page for RunInABrowser<'_> {
+impl Page for RunInABrowser {
     fn document(&self, look: &Look) -> Doc {
         let run = &self.run;
         let doc = run.document(look);
         let at = doc.decision_at();
         let mut blocks = doc.into_blocks();
-        if let Some(decision) = run.decision {
+        if let Some(decision) = &run.decision {
             let at = at.unwrap_or(blocks.len());
             let shown = decision.shown.iter().flat_map(|document| {
                 let shown = Shown {
                     document,
-                    run: run.run_id,
+                    run: &run.run_id,
                     form: Form::Browser,
                 };
                 shown.document(look).into_blocks()

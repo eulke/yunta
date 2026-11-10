@@ -1,6 +1,9 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use surco::doc::Depth;
+use yunta_core::step::samples::every_step;
 use yunta_core::step::{Arg, Choice, NextStep};
-use yunta_core::{NodeId, OptionId, RunId};
+use yunta_core::{NodeId, OptionId, PackRef, RunId, WorkflowName, WorkflowShape};
 use yunta_replay::frame::{Action, Effect};
 
 use super::*;
@@ -33,7 +36,7 @@ fn a_line_names_a_run_by_its_handle_in_the_command_that_takes_it() {
             "yunta receipt AAAAAA",
         ),
         (NextStep::Verify { run: run.clone() }, "yunta verify AAAAAA"),
-        (NextStep::Gc, "yunta gc"),
+        (NextStep::Gc { dry_run: false }, "yunta gc"),
         (
             NextStep::Check {
                 workflow: Arg::Given("build-feature".to_string()),
@@ -153,4 +156,80 @@ fn an_action_is_said_as_its_line_and_what_it_does() {
         said(&action, Reader::Person),
         ("yunta close AAAAAA".to_string(), "closes it for good")
     );
+}
+
+/// The commands a person types that no run's action names: what a run and a
+/// workflow cost, their graphs, a new workflow, the packs listed and audited, and
+/// a reclaim that only says what it would do.
+#[test]
+fn every_command_a_person_types_has_its_line() {
+    let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
+    let pack = "acme/lint".parse::<PackRef>().expect("a pack reference");
+    let lines = [
+        (NextStep::Stats { run: run.clone() }, "yunta stats AAAAAA"),
+        (
+            NextStep::History {
+                workflow: WorkflowName::from("review"),
+            },
+            "yunta stats --workflow review",
+        ),
+        (
+            NextStep::Graph {
+                workflow: Arg::Given("review".to_string()),
+            },
+            "yunta graph review",
+        ),
+        (
+            NextStep::Graph {
+                workflow: Arg::Blank,
+            },
+            "yunta graph <workflow>",
+        ),
+        (NextStep::RunGraph { run }, "yunta graph --run AAAAAA"),
+        (
+            NextStep::NewWorkflow {
+                name: Arg::Given("review".to_string()),
+                shape: None,
+            },
+            "yunta new review",
+        ),
+        (
+            NextStep::NewWorkflow {
+                name: Arg::Blank,
+                shape: Some(WorkflowShape::Tasks),
+            },
+            "yunta new <name> --shape tasks",
+        ),
+        (NextStep::PackList, "yunta pack list"),
+        (NextStep::PackAudit { pack }, "yunta pack audit acme/lint"),
+        (NextStep::Gc { dry_run: true }, "yunta gc --dry-run"),
+    ];
+    for (step, written) in lines {
+        assert_eq!(line(&step), written);
+    }
+}
+
+/// Every step says what it does, beside its line on a palette and in help, and two
+/// kinds of step never say the same: a reader picks a step by what it does.
+#[test]
+fn every_step_says_what_it_does() {
+    let mut kinds_by_words: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+    for step in &every_step() {
+        let words = does(step);
+        assert!(!words.trim().is_empty(), "`{}` says nothing", line(step));
+        let kind = format!("{:?}", std::mem::discriminant(step));
+        kinds_by_words.entry(words).or_default().insert(kind);
+    }
+    for (words, kinds) in &kinds_by_words {
+        assert_eq!(
+            kinds.len(),
+            1,
+            "`{words}` is said of {} kinds of step",
+            kinds.len()
+        );
+    }
+    let follow = NextStep::Follow {
+        run: RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA"),
+    };
+    assert_eq!(does(&follow), "follows the run as it moves");
 }

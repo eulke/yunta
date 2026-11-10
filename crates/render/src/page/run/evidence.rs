@@ -12,7 +12,7 @@ use yunta_replay::frame::NodeFrame;
 
 use super::Run;
 
-impl Run<'_> {
+impl Run {
     /// Every failed node, under its id, with what its failure says: its
     /// claim beside the id — unless the page's gist made it word for word —
     /// then the end of what a command printed and where the rest is, each
@@ -20,7 +20,7 @@ impl Run<'_> {
     /// whose failure has nothing more to quote, and whose claim the gist
     /// made, is not listed again.
     pub(super) fn evidence(&self, glyphs: Glyphs) -> Vec<Block> {
-        let asked = crate::state::gist(self.frame).unwrap_or_default();
+        let asked = crate::state::gist(&self.frame).unwrap_or_default();
         self.frame
             .failed()
             .filter_map(|(node, failure)| {
@@ -58,9 +58,9 @@ impl Run<'_> {
         let output = failure.output()?;
         Some(match self.depth.reaches(Depth::Dig) {
             true => Whole::file(
-                yunta_core::run_dir::object(self.places.run_dir, output),
-                self.places.cwd,
-                self.places.home,
+                yunta_core::run_dir::object(&self.places.run_dir, output),
+                &self.places.cwd,
+                self.places.home.as_deref(),
             ),
             false => Whole::Command(command::line(&NextStep::Status {
                 run: self.run_id.clone(),

@@ -34,13 +34,13 @@ use yunta_core::RunId;
 
 /// The decision a parked run waits on, as its log rebuilds it: whose it is,
 /// the escalation, and the documents it shows.
-#[derive(Debug, Clone, Copy)]
-pub struct Decision<'a> {
+#[derive(Debug, Clone)]
+pub struct Decision {
     /// Whom the decision belongs to.
-    pub on: &'a DecisionOn,
-    pub escalation: &'a GateWaitingPayload,
+    pub on: DecisionOn,
+    pub escalation: GateWaitingPayload,
     /// The documents the decision shows, as the run holds them.
-    pub shown: &'a [ShownDocument],
+    pub shown: Vec<ShownDocument>,
 }
 
 /// What the page showing a decision says beside it already.
@@ -51,7 +51,7 @@ pub struct Beside {
     pub evidence: bool,
 }
 
-impl Decision<'_> {
+impl Decision {
     /// The section a page about `run` ends on: the record the engine
     /// attached to the decision and what it is about, less what the page says
     /// `beside` it. Then what weighs on it, every option with the command that
@@ -62,8 +62,8 @@ impl Decision<'_> {
         beside: Beside,
         otherwise: Vec<(String, &'static str)>,
     ) -> Section {
-        let escalation = self.escalation;
-        let mut blocks = account(escalation, beside, self.shown);
+        let escalation = &self.escalation;
+        let mut blocks = account(escalation, beside, &self.shown);
         for shown in escalation.shows() {
             let about = format!("about: {}", yunta_core::run_dir::view_of(shown).display());
             blocks.push(Prose(about).into());
@@ -72,7 +72,7 @@ impl Decision<'_> {
             blocks.push(Prose(format!("published at {external_ref}")).into());
         }
         if let Some(before) =
-            crate::page::shown::before_you_decide(escalation.withheld(), self.shown)
+            crate::page::shown::before_you_decide(escalation.withheld(), &self.shown)
         {
             blocks.push(before.into());
         }
@@ -84,7 +84,7 @@ impl Decision<'_> {
 
     /// Whose the decision is, as the section's title says it.
     fn heading(&self) -> String {
-        match self.on {
+        match &self.on {
             DecisionOn::Node(node) => format!("decision on node `{node}`"),
             DecisionOn::Run => "decision on the run".to_string(),
         }
@@ -196,12 +196,11 @@ mod tests {
 
     /// The lines of the section a page ends on for `escalation`, with nothing shown.
     fn drawn(escalation: &GateWaitingPayload, beside: Beside) -> Vec<String> {
-        let on = DecisionOn::Node(NODE);
         drawn_with(
             Decision {
-                on: &on,
-                escalation,
-                shown: &[],
+                on: DecisionOn::Node(NODE),
+                escalation: escalation.clone(),
+                shown: Vec::new(),
             },
             beside,
         )
@@ -212,9 +211,9 @@ mod tests {
     fn a_decision_the_run_owns_says_so() {
         let lines = drawn_with(
             Decision {
-                on: &DecisionOn::Run,
-                escalation: &escalation(),
-                shown: &[],
+                on: DecisionOn::Run,
+                escalation: escalation(),
+                shown: Vec::new(),
             },
             NOTHING_BESIDE,
         );
@@ -232,7 +231,7 @@ mod tests {
 
     /// The lines of the section a page ends on for `decision`, with what the
     /// page says `beside` it, drawn plain.
-    fn drawn_with(decision: Decision<'_>, beside: Beside) -> Vec<String> {
+    fn drawn_with(decision: Decision, beside: Beside) -> Vec<String> {
         let close = (
             crate::command::line(&NextStep::Close { run: RUN }),
             "closes it for good",
@@ -386,12 +385,10 @@ mod tests {
             "{drawn:#?}"
         );
         // The section a page ends on says the reason once, under its title.
-        let on = DecisionOn::Node(NODE);
-        let shown = [flawed_plan()];
         let decision = Decision {
-            on: &on,
-            escalation: &withheld,
-            shown: &shown,
+            on: DecisionOn::Node(NODE),
+            escalation: withheld.clone(),
+            shown: vec![flawed_plan()],
         };
         let lines = drawn_with(decision, NOTHING_BESIDE);
         let reason = "is not offered, because";

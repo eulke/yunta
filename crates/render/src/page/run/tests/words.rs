@@ -1,6 +1,6 @@
 //! The words a page says of where a run works and of where else to read it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use surco::doc::Depth;
 use surco::look::Look;
@@ -29,9 +29,9 @@ fn branch_read_from(cwd: &'static Path) -> String {
     let case = decided_and_not().1;
     let mut page = case.page(case.closing(), Depth::Glance);
     page.places = Places {
-        worktree: Path::new("/home/me/project"),
+        worktree: PathBuf::from("/home/me/project"),
         isolation: Isolation::None,
-        cwd,
+        cwd: cwd.to_path_buf(),
         ..places()
     };
     draw(&page, &Look::plain())
@@ -60,9 +60,9 @@ fn glance_read_from(cwd: &'static Path) -> String {
     let case = decided_and_not().0;
     let mut page = case.page(RunScope::Status, Depth::Glance);
     page.places = Places {
-        worktree: Path::new("/home/me/project"),
+        worktree: PathBuf::from("/home/me/project"),
         isolation: Isolation::None,
-        cwd,
+        cwd: cwd.to_path_buf(),
         ..places()
     };
     draw(&page, &Look::plain())

@@ -1,0 +1,17 @@
+◌ workflow checked · as written
+
+  diagram
+    a diagram this terminal does not draw; it is drawn where
+    Markdown is read
+    │ graph TD
+    │   build["build"]
+    │   subgraph checks["checks"]
+    │     lint["lint"]
+    │     test["test"]
+    │   end
+    │   fix["fix"]
+    │   ship["ship"]
+    │   build --> checks
+    │   checks --> ship
+    │   lint -.-> fix
+    11 lines

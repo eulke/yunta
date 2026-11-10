@@ -1,17 +1,26 @@
 //! `yunta init`: prepares a repo for Yunta once, through the API, which
-//! detects its ecosystem, test command, base branch and the adapter CLIs this
-//! machine answers for, and writes `.yunta/config.yaml`, defensive
-//! `.gitignore` entries and the mechanism skill. Non-interactive by default:
-//! every step picks the best answer it can detect and reports it;
-//! `-i/--interactive` only adds confirmation prompts here, and degrades to
-//! non-interactive with a warning when stdin isn't a TTY: `init` must never
-//! hang waiting for input that isn't coming.
+//! detects its ecosystem, test command, base branch, the adapter CLIs this
+//! machine answers for and the runners its workflows propose, and writes
+//! `.yunta/config.yaml`, defensive `.gitignore` entries and the mechanism
+//! skill. Non-interactive by default: every step picks the best answer it can
+//! detect and reports it, and the runners stay proposed, commented;
+//! `-i/--interactive` asks the name and base branch, and each runner's adapter
+//! and model, which writes it declared. It degrades to non-interactive with a
+//! warning when stdin isn't a TTY: `init` must never hang waiting for input
+//! that isn't coming.
+
+use std::collections::BTreeMap;
 
 use surco::look::Look;
+use yunta_api::{DetectedProject, ProjectSetup, RunnerDeclaration};
+use yunta_core::{AdapterId, ModelName, RunnerCandidate, RunnerName};
 use yunta_render::page::Initialized;
-use yunta_render::prompt::{keeping, Escape, BASE_BRANCH, PROJECT_NAME, USING_DETECTED_DEFAULTS};
+use yunta_render::prompt::{
+    keeping, model_of, runs_on, Escape, BASE_BRANCH, PROJECT_NAME, USING_DETECTED_DEFAULTS,
+};
+use yunta_ui::prompt::Alternative;
 
-use crate::ask::{ask_line, Console};
+use crate::ask::{ask_line, choose, Console, NoAnswer};
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::shell::Shell;
@@ -30,13 +39,27 @@ pub async fn init(
     let Some((name, base_branch)) = project_answers(console.as_ref(), defaults) else {
         return Ok(Outcome::interrupted());
     };
-    let initialized = detected.write(&name, &base_branch).await?;
+    let runners = match &console {
+        Some(console) => match runner_answers(console, &detected) {
+            Some(runners) => runners,
+            None => return Ok(Outcome::interrupted()),
+        },
+        None => RunnerDeclaration::Proposed,
+    };
+    let setup = ProjectSetup {
+        name,
+        base_branch,
+        runners,
+    };
+    let initialized = detected.write(setup).await?;
     let page = Initialized {
         repo: &workspace.dir,
         wrote: &initialized.wrote,
         skipped: &initialized.skipped,
         detected: &initialized.detected,
         probed: &initialized.probed,
+        declared: &initialized.declared,
+        undeclared: &initialized.undeclared,
     };
     crate::output::show(look, &page);
     Ok(Outcome::Success)
@@ -76,6 +99,79 @@ fn project_answers(
             ))
         }
         None => Some((default_name, default_branch)),
+    }
+}
+
+/// The runners a person declares on `console`: each one the repository proposes,
+/// on an adapter this machine answers for, the first standing, with the model
+/// typed. A runner whose model is left empty stays proposed, and with no adapter
+/// answering nothing is asked. `None` where a person stopped `init`.
+fn runner_answers(console: &Console, detected: &DetectedProject) -> Option<RunnerDeclaration> {
+    let answered: Vec<&AdapterId> = detected
+        .probed
+        .iter()
+        .filter(|adapter| adapter.healthy)
+        .map(|adapter| &adapter.id)
+        .collect();
+    let Some(first) = answered.first() else {
+        return Some(RunnerDeclaration::Proposed);
+    };
+    let mut declared = BTreeMap::new();
+    for runner in &detected.proposed.roles {
+        let adapter = adapter_of(console, runner, &answered)?.unwrap_or_else(|| (*first).clone());
+        if let Some(model) = model_of_runner(console, runner)? {
+            let candidate = RunnerCandidate {
+                adapter,
+                model,
+                agent: None,
+                effort: None,
+            };
+            declared.insert(runner.clone(), candidate);
+        }
+    }
+    Some(match declared.is_empty() {
+        true => RunnerDeclaration::Proposed,
+        false => RunnerDeclaration::Declared(declared),
+    })
+}
+
+/// The adapter `runner` runs on, picked among those that `answered`: `Some(None)`
+/// where nothing was picked and the first stands, `None` where a person stopped
+/// `init`.
+fn adapter_of(
+    console: &Console,
+    runner: &RunnerName,
+    answered: &[&AdapterId],
+) -> Option<Option<AdapterId>> {
+    let alternatives = answered
+        .iter()
+        .map(|adapter| Alternative::named(adapter.as_str(), (*adapter).clone()))
+        .collect();
+    // best-effort: the question informs only; the list is asked either way.
+    let _ = console.say(&runs_on(runner));
+    match choose(console, alternatives) {
+        Ok(adapter) => Some(Some(adapter)),
+        Err(NoAnswer::Interrupted) => None,
+        Err(_) => Some(None),
+    }
+}
+
+/// The model `runner` runs, as typed: `Some(None)` where the line was left empty,
+/// and asked again where what was typed is no model name; `None` where a person
+/// stopped `init`.
+fn model_of_runner(console: &Console, runner: &RunnerName) -> Option<Option<ModelName>> {
+    loop {
+        let typed = ask_line(console, &model_of(runner), "")?;
+        if typed.is_empty() {
+            return Some(None);
+        }
+        match typed.parse::<ModelName>() {
+            Ok(model) => return Some(Some(model)),
+            Err(refused) => {
+                // best-effort: the refusal informs only; the model is asked again.
+                let _ = console.say(&refused.to_string());
+            }
+        }
     }
 }
 

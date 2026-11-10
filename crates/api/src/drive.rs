@@ -78,6 +78,7 @@ pub enum Ending {
 /// What a run that stopped reads like to the block that closes it: its state
 /// off its log, the decision it stopped on with what that decision shows, and
 /// the instant it was read at.
+#[derive(Clone)]
 pub struct ClosingReading {
     pub state: RunState,
     pub decision: Option<(DecisionOn, GateWaitingPayload)>,

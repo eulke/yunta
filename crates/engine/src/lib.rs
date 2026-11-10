@@ -93,8 +93,8 @@ mod wakefulness;
 mod worktree;
 
 pub use answers::{
-    answer_questions, AnswerQuestionsError, AnswersError, Recorded as AnswersRecorded,
-    Reply as AnswersReply,
+    answer_questions, asked_questions, AnswerQuestionsError, AnswersError,
+    Recorded as AnswersRecorded, Reply as AnswersReply,
 };
 pub use artifacts::shown::{documents as shown_documents, produced as produced_documents};
 pub use artifacts::store::{ObjectStore, StoreError};

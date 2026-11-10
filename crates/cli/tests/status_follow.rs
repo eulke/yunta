@@ -181,7 +181,8 @@ fn closing_block(drawn: &str) -> String {
 /// One run, driven at one terminal and followed at another: what each is left
 /// with when it stops is the same block, and the same exit code.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/cli/src/surface/mod.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/cli/src/surface/mod.rs`,
+/// `crates/api/src/run/follow/following.rs`
 #[test]
 fn a_follower_leaves_the_block_and_the_code_the_attached_run_leaves() {
     let root = tempfile::tempdir().unwrap();
@@ -280,7 +281,7 @@ fn paused_or_resumed(home: &Path, id: &str) -> bool {
 /// goes on and how to follow it again, it exits 130, and the run, which another
 /// process drives, finishes when it is let go.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/run/follow/following.rs`
 #[test]
 fn ctrl_c_stops_following_and_the_run_goes_on() {
     let root = tempfile::tempdir().unwrap();
@@ -339,7 +340,7 @@ fn kill_the_engine_of(home: &Path, id: &str) {
 /// `yunta run` never meets because it is that engine. The follower ends with
 /// what `status` says of such a run, exit 1, within two seconds of the death.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/run/follow/following.rs`
 #[test]
 fn an_engine_killed_under_a_follower_ends_it_as_a_stall() {
     let root = tempfile::tempdir().unwrap();

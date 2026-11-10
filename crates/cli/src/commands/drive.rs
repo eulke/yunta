@@ -129,19 +129,19 @@ impl Closed<'_> {
         Closing::of(ClosingEnv {
             run_id: self.run_id,
             workflow: &self.manifest.workflow,
-            state: &reading.state,
+            state: reading.state,
             prior: self.prior,
             now: reading.now,
             decision: reading.decision,
             shown: reading.shown,
             places: Places {
-                run_dir: self.run_dir,
-                worktree: self.worktree,
-                branch: &self.run_id.branch(),
-                base_branch: &self.manifest.base_branch,
+                run_dir: self.run_dir.to_path_buf(),
+                worktree: self.worktree.to_path_buf(),
+                branch: self.run_id.branch(),
+                base_branch: self.manifest.base_branch.clone(),
                 isolation: self.manifest.isolation,
-                cwd: self.cwd,
-                home: self.home,
+                cwd: self.cwd.to_path_buf(),
+                home: self.home.map(std::path::Path::to_path_buf),
             },
         })
     }

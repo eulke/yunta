@@ -3,7 +3,7 @@
 //! it printed and where all of it is kept, and the documents it produced.
 //! What every other surface cuts to a line, this one does not.
 
-use std::path::Path;
+use std::path::PathBuf;
 
 use super::{Form, Page, Shown};
 use crate::blocks::FailureDetail;
@@ -23,26 +23,26 @@ use yunta_replay::RunState;
 /// A node of a run, as `status --node` shows it: where it stands, what it
 /// said or what failed it, what it took, the documents it produced, and what
 /// to type next.
-pub struct Node<'a> {
-    pub run_id: &'a RunId,
+pub struct Node {
+    pub run_id: RunId,
     /// The node the page is about, as the run's frame derives it.
-    pub node: &'a NodeFrame,
-    pub run_dir: &'a Path,
+    pub node: NodeFrame,
+    pub run_dir: PathBuf,
     /// Where paths are shown from: the directory this was run in, and
     /// the home `~` stands for.
-    pub cwd: &'a Path,
-    pub home: Option<&'a Path>,
+    pub cwd: PathBuf,
+    pub home: Option<PathBuf>,
     /// The documents the node produced, each read whole here.
-    pub documents: &'a [yunta_core::shown::ShownDocument],
-    pub state: &'a RunState,
+    pub documents: Vec<yunta_core::shown::ShownDocument>,
+    pub state: RunState,
 }
 
-impl Page for Node<'_> {
+impl Page for Node {
     /// The page for the node, as one document: where it stands, what it
     /// said or what failed it, its failure whole, what it took, the
     /// documents it produced, and what to type next.
     fn document(&self, look: &Look) -> Doc {
-        let display = crate::state::NodeDisplay::from(self.node);
+        let display = crate::state::NodeDisplay::from(&self.node);
         let headline = Headline::new(
             display.standing.mark(),
             format!("node {} of run {}", self.node.id, self.run_id.handle()),
@@ -51,7 +51,7 @@ impl Page for Node<'_> {
         let documents = self.documents.iter().flat_map(|document| {
             let shown = Shown {
                 document,
-                run: self.run_id,
+                run: &self.run_id,
                 form: Form::Whole,
             };
             shown.document(look).into_blocks()
@@ -66,7 +66,7 @@ impl Page for Node<'_> {
     }
 }
 
-impl Node<'_> {
+impl Node {
     /// The whole of what the node's state says: its failure, every line
     /// of it, or what its agent said when it finished, as it wrote it.
     fn said(&self) -> Vec<Block> {
@@ -90,9 +90,9 @@ impl Node<'_> {
         };
         let whole = failure.output().map(|output| {
             Whole::file(
-                yunta_core::run_dir::object(self.run_dir, output),
-                self.cwd,
-                self.home,
+                yunta_core::run_dir::object(&self.run_dir, output),
+                &self.cwd,
+                self.home.as_deref(),
             )
         });
         FailureDetail { failure, whole }.blocks()
@@ -100,7 +100,7 @@ impl Node<'_> {
 
     /// What the node is and what it took.
     fn fields(&self) -> Fields {
-        let node = self.node;
+        let node = &self.node;
         let runner = node
             .runner
             .as_ref()
@@ -124,8 +124,8 @@ impl Node<'_> {
                         Some(&node.id),
                         &artifact.view_name(),
                     )),
-                    self.cwd,
-                    self.home,
+                    &self.cwd,
+                    self.home.as_deref(),
                 )
             })
             .collect();
@@ -140,7 +140,7 @@ impl Node<'_> {
             .push_if("took", node.elapsed.map(duration).unwrap_or_default())
             .push_if(
                 "handed over",
-                crate::state::handed(self.state, &node.id).unwrap_or_default(),
+                crate::state::handed(&self.state, &node.id).unwrap_or_default(),
             )
             .push_if("produced", produced.join(", "))
     }
@@ -149,7 +149,7 @@ impl Node<'_> {
     fn next(&self) -> Next {
         Next {
             steps: vec![(
-                command::line(&NextStep::status(self.run_id)),
+                command::line(&NextStep::status(&self.run_id)),
                 "shows the whole run",
             )],
         }

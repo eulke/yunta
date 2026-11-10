@@ -386,7 +386,11 @@ stop on it; with none, it is a `▲`. The same holds for a forge whose
 token variable is not set: `doctor` fails for it only when a workflow in the
 catalog opens a pull request, since a gate published to the forge asks on the
 console without one. `yunta init` ends with the same runner step, and `yunta
-check` adds it under a workflow that names a runner the config lacks.
+check` adds it under a workflow that names a runner the config lacks. `yunta
+init -i` declares the runners instead: it asks each one the repository's
+workflows name, or `implementer` when they name none, on an adapter this
+machine answers for, with the model you type, and writes it uncommented, with
+`defaults.runner` where a node names no runner.
 
 It also validates every installed pack's own `requires:` against your merged
 config: a `runners:` entry the merged `runners:` doesn't define (or defines with zero

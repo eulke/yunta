@@ -1,0 +1,16 @@
+␛[2m◌␛[0m ␛[1mworkflow checked␛[0m␛[2m ·␛[0m␛[2m as written␛[0m
+
+  ␛[1mdiagram␛[0m
+    a diagram this terminal does not draw; it is drawn where Markdown is read
+    ␛[2m│ ␛[0mgraph TD
+    ␛[2m│ ␛[0m  build["build"]
+    ␛[2m│ ␛[0m  subgraph checks["checks"]
+    ␛[2m│ ␛[0m    lint["lint"]
+    ␛[2m│ ␛[0m    test["test"]
+    ␛[2m│ ␛[0m  end
+    ␛[2m│ ␛[0m  fix["fix"]
+    ␛[2m│ ␛[0m  ship["ship"]
+    ␛[2m│ ␛[0m  build --> checks
+    ␛[2m│ ␛[0m  checks --> ship
+    ␛[2m│ ␛[0m  lint -.-> fix
+    ␛[2m11 lines␛[0m

@@ -35,6 +35,7 @@ pub enum FieldReach {
 /// runs that leaves to other projects.
 ///
 /// Not render's field page, which a person reads drawn from it.
+#[derive(Clone)]
 pub struct FieldReading {
     pub rows: Vec<FieldRow>,
     /// The runs it can name but not read.

@@ -31,14 +31,14 @@ fn status_with(lint: NodeFrame) -> String {
     let page = Run {
         scope: RunScope::Status,
         depth: Depth::Glance,
-        run_id: &RUN,
-        frame: &frame,
-        state: &state,
+        run_id: RUN,
+        frame,
+        state,
         places: places(),
         decision: Some(Decision {
-            on: &on,
-            escalation: &escalation,
-            shown: &[],
+            on,
+            escalation,
+            shown: Vec::new(),
         }),
         plans: Vec::new(),
     };

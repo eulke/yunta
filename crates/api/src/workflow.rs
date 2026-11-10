@@ -13,6 +13,7 @@ use yunta_render::refusal::Refused;
 use crate::{Error, Failure, Workspace};
 
 /// A workflow file read: where it is, and the workflow it declares.
+#[derive(Clone)]
 pub struct WorkflowFile {
     pub path: PathBuf,
     pub workflow: Workflow,
@@ -23,6 +24,7 @@ pub struct WorkflowFile {
 /// problem the file has, so a person fixes them all in one round.
 ///
 /// Not a [`WorkflowFile`], which a file breaking any rule never becomes.
+#[derive(Clone)]
 pub struct AuditedWorkflow {
     pub path: PathBuf,
     pub workflow: Workflow,

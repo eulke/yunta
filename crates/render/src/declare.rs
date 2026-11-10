@@ -33,17 +33,13 @@ pub fn as_detected(detected: &Detected, key: &ConfigKey) -> Option<String> {
     }
 }
 
-/// The role a project that names none gets proposed: what the skeletons
-/// `yunta new` writes name in their comments.
-const PROPOSED_RUNNER: &str = "implementer";
-
 /// The lines that say how to declare the runners `roles` names — the
 /// proposed role when it names none — each on the first adapter that
 /// answered on the machine, and `defaults.runner` when a node names no
 /// runner of its own (`needs_default`). Ready to paste: the one placeholder
 /// is the model, which only the project can choose.
 pub fn runners(roles: &[RunnerName], needs_default: bool, adapters: &MachineAdapters) -> Fix {
-    let proposed = [RunnerName::from_static(PROPOSED_RUNNER)];
+    let proposed = [RunnerName::PROPOSED];
     let roles = match roles.is_empty() {
         true => &proposed[..],
         false => roles,

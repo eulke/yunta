@@ -1,9 +1,9 @@
-use yunta_core::{OptionId, RunId};
+use yunta_core::{NodeId, OptionId, RunId};
 
 use surco::look::Look;
 use surco::surface::{Surface, Terminal};
 
-use super::{GateAnswered, Resolution};
+use super::{GateAnswered, QuestionsAnswered, Resolution, RoundAnswer};
 use crate::page::Page;
 
 #[test]
@@ -68,5 +68,39 @@ fn every_answer_says_a_resume_applies_it() {
         GateAnswered::sentence(&run, &OptionId::from_static("approve")),
         "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `approve`; a resume in the background \
          applies it"
+    );
+}
+
+/// A round answered says which node it answered and that a resume carries the run
+/// on; one left says nothing was recorded and how to be asked again; and off a
+/// terminal, where they are asked.
+#[test]
+fn each_round_answer_says_how_it_ended_and_what_to_type_next() {
+    let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
+    let node = NodeId::from_static("ask");
+    let said = |answer: RoundAnswer| {
+        let page = QuestionsAnswered {
+            run_id: &run,
+            answer: &answer,
+        };
+        Terminal::on(Look::plain()).draw(&page.document(&Look::plain()))
+    };
+    let answered = said(RoundAnswer::Answered { node: node.clone() });
+    assert!(
+        answered.starts_with("+ run AAAAAA ; answered node `ask`\n"),
+        "{answered}"
+    );
+    assert!(answered.contains("carries the run on"), "{answered}");
+    let declined = said(RoundAnswer::Declined { node: node.clone() });
+    assert!(
+        declined.contains("the questions node `ask` asked"),
+        "{declined}"
+    );
+    assert!(declined.contains("yunta resolve-gate AAAAAA"), "{declined}");
+    assert!(said(RoundAnswer::Interrupted).is_empty());
+    let off = QuestionsAnswered::off_terminal(&run, &node);
+    assert!(
+        off.contains("`yunta resolve-gate AAAAAA` asks them"),
+        "{off}"
     );
 }

@@ -27,10 +27,11 @@
 //! - What a project's runs are: `field`, the [`FieldReading`] of the runs of
 //!   its repository or of this machine, as [`FieldReach`] asks; `run`, one
 //!   of them found by the [`RunRef`] a person typed, opened as an
-//!   [`OpenedRun`], read as a [`RunReading`] or a [`StatsReading`],
-//!   receipted, verified, and followed through its [`RunRegistry`] and the
-//!   [`Words`] its sessions say; `event_log`, the [`EventLog`] a follower
-//!   reads a moving run's log through; and `history`, a
+//!   [`OpenedRun`], read as a [`RunReading`] or a [`StatsReading`], its page
+//!   and a node's read whole, its document for a program, its page written for
+//!   a browser, receipted, verified, and followed as a [`Following`] that hands back
+//!   [`RunNews`], beside the [`RunRegistry`] its engine keeps; `event_log`, the
+//!   [`EventLog`] a moving run's log is read through; and `history`, a
 //!   workflow's past runs as a [`WorkflowHistory`].
 //! - What a workflow gets here: `workflow`, the file a reference names, read
 //!   as a [`WorkflowFile`] or audited whole as an [`AuditedWorkflow`];
@@ -84,7 +85,7 @@ mod workflow;
 mod workspace;
 
 pub use admission::{Admission, RunRequest};
-pub use answers::WaitingDecision;
+pub use answers::{WaitingDecision, WaitingQuestions};
 pub use cases::CaseSuite;
 pub use collect::Collect;
 pub use committer::Committer;
@@ -92,15 +93,18 @@ pub use creation::CreatedRun;
 pub use drive::{ClosingReading, Driven, Ending, Ports};
 pub use ending::ClosedRun;
 pub use error::{Error, Failure};
-pub use event_log::{EventLog, PromotionChain};
+pub use event_log::EventLog;
 pub use field::{offers_a_menu, FieldReach, FieldReading};
 pub use history::WorkflowHistory;
 pub use hold::HeldRun;
 pub use packs::{AuditedPack, FetchedPack, InstalledPack, Packs, ScaffoldedPack};
 pub use project::{config_layers, Project};
 pub use remark::{Remark, Remarks};
-pub use run::{OpenedRun, RunReading, RunRef, RunRegistry, StatsReading, Words};
-pub use setup::{DetectedProject, InitializedProject, WorkflowStem, WrittenWorkflow};
+pub use run::{Following, OpenedRun, RunNews, RunReading, RunRef, RunRegistry, StatsReading};
+pub use setup::{
+    DetectedProject, InitializedProject, ProjectSetup, ProposedRunners, RunnerDeclaration,
+    WorkflowStem, WrittenWorkflow,
+};
 pub use stop::Stop;
 pub use verdict::{ContextFiles, Judged, Verdict, VerdictReach};
 pub use workflow::{AuditedWorkflow, WorkflowFile};

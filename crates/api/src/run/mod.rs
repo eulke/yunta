@@ -6,6 +6,7 @@
 //! the run it was one slip away from, whichever interface asked.
 
 mod follow;
+mod page;
 mod reading;
 mod receipt;
 mod reference;
@@ -22,7 +23,7 @@ use yunta_storage::Storage;
 
 use crate::{Error, Failure, Project};
 
-pub use follow::{RunRegistry, Words};
+pub use follow::{Following, RunNews, RunRegistry};
 pub use reading::RunReading;
 pub use reference::RunRef;
 pub use stats::StatsReading;

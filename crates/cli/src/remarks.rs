@@ -38,5 +38,9 @@ pub(crate) fn say(remark: Remark, output: Mode, look: &Look) {
         Remark::ReplacedTreeKept { at, said } => {
             warn(yunta_render::refusal::replaced_tree_kept(&at, &said))
         }
+        Remark::UnreadManifestKeys { keys } => {
+            let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+            note(yunta_render::caution::unread_manifest_keys(&keys))
+        }
     }
 }

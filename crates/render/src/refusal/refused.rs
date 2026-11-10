@@ -18,7 +18,7 @@ use yunta_core::refusal::{
     AnswersRefusal, CasesRefusal, CloseRefusal, GateRefusal, PackRefusal, SetupRefusal, Unservable,
 };
 use yunta_core::step::{Arg, NextStep, Reach};
-use yunta_core::{InvalidId, Pid, RunId, UnknownDocument};
+use yunta_core::{InvalidId, NodeId, Pid, RunId, UnknownDocument};
 use yunta_replay::receipt::ReceiptError;
 use yunta_replay::registry::Asking;
 
@@ -69,6 +69,13 @@ pub enum Refused {
     TooManyRuns { active: usize, cap: u32 },
     /// A decision asked of a run that waits on none.
     NoDecision { run: RunId },
+    /// A node asked of a run that declares none by that name: the run, the
+    /// name asked, and every node it declares.
+    NoSuchNode {
+        run: RunId,
+        node: NodeId,
+        declared: Vec<NodeId>,
+    },
     /// What the workflow's own check refuses once a run's mode or the
     /// adapters this binary builds are known, under the workflow it judged.
     Unchecked {
@@ -305,6 +312,15 @@ impl Refused {
                 "run {} waits on no decision; `{}` says where it stands",
                 run.handle(),
                 command::line(&NextStep::status(run))
+            ),
+            Refused::NoSuchNode {
+                run,
+                node,
+                declared,
+            } => format!(
+                "run {} has no node `{node}`{}",
+                run.handle(),
+                surco::text::did_you_mean(node.as_str(), declared.iter().map(NodeId::as_str))
             ),
             Refused::Unchecked { workflow, errors } => super::words::unchecked(workflow, errors),
             Refused::Gate { run, refusal } => format!(

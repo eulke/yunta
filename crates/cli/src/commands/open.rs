@@ -1,23 +1,19 @@
-//! `yunta open`: a run's page as a browser reads it, in the run's own folder.
-//! A person at a terminal gets it opened; a script gets where it is.
+//! `yunta open`: a run's page as a browser reads it, which the API writes in the
+//! run's own folder. A person at a terminal gets it opened; a script gets where it
+//! is.
 
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use yunta_render::page::{Opened, Page};
 
 use surco::look::Look;
-use surco::surface::{Html, Surface};
 use yunta_core::RunId;
+use yunta_render::page::{Opened, Page};
 
-use super::status::page_for_a_browser;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use crate::shell::Shell;
-
-/// The file a run's page is written to, in the run's folder.
-const PAGE: &str = "page.html";
 
 /// Writes the run's page into its folder, and opens it when a person at a
 /// terminal asks for a page to read; any other reader only hears where it is.
@@ -28,9 +24,12 @@ pub async fn open(
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let project = shell.workspace().project()?;
-    let (doc, run_dir) = page_for_a_browser(&project, run_id).await?;
-    let path = run_dir.join(PAGE);
-    save(&path, &Html.draw(&doc))?;
+    let remarks = |remark| crate::remarks::say(remark, output, look);
+    let path = project
+        .run(run_id)
+        .await?
+        .page_for_a_browser(&remarks)
+        .await?;
     let opened = match output {
         Mode::Human if std::io::stdout().is_terminal() => Some(browser(&path).is_ok()),
         _ => None,
@@ -43,11 +42,6 @@ pub async fn open(
         },
         look,
     )
-}
-
-/// Writes the page a browser reads, naming the file it could not write.
-fn save(path: &Path, contents: &str) -> Result<(), CliError> {
-    std::fs::write(path, contents).map_err(|source| CliError::io("write", path.display(), source))
 }
 
 /// Asks the system's own opener for `page`. The opener hands the page to the

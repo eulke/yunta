@@ -522,6 +522,8 @@ Its groups, each green before the next: following; a run's page and the graph; a
   After `Stopped` or `Stalled` it hands back nothing. A stop tripped is `Error::Stopped`.
 - `READ_EVERY`, `REGISTRY_EVERY` and `SUCCESSOR_WAIT` move from the CLI's follower with their reasons. So do `ending` and the listening of `follow/listen.rs`.
 
+**Found in its turn:** `Following` owns no project: it opens a successor beside the run it was promoted from, by the rule the registry's successor already follows, so a task holds it whole. `next` hands back `Result<Option<RunNews>, Error>`; `Engine` comes only when the engine the registry names changed; what a session says comes between looks, as soon as it is heard. `PromotionChain` and `Words` are the API's own, since nothing outside it follows a run any more. The bench gains `store_path`, so a test reads a bench's log as a project's. Each of the five tests was seen red with the behavior it holds broken.
+
 **Fails first:** the API's tests of `Following`, over a log written in the test:
 - events past a seq;
 - a stop;
@@ -530,10 +532,10 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - words heard on a socket.
 
 **Acceptance criteria:**
-- [ ] Each news kind is handed back as the test's log and registry make it; `cargo test -p yunta-api` passes.
+- [x] Each news kind is handed back as the test's log and registry make it; `cargo test -p yunta-api` passes.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api --test following`
+- [x] Tests pass: `cargo test -p yunta-api --test following`
 
 **Dependencies:** Checkpoint A
 
@@ -547,13 +549,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - The CLI's follower asks `Project::follow` and draws each `RunNews` on its surface. It keeps opening the surface, delivering events, passing what was said to its observer, the closing block and the exit code.
 - `follow/listen.rs` goes: its listening is `Following`'s. The follower's doc stops saying it touches no registry, which it reads.
 
+**Found in its turn:** The follower takes no `RunNews::Engine`: its surface reads the registry itself, as it did. Six follower tests name the API's `following.rs` in their `Reached by:`, and `run_words`' row test its `listening.rs`.
+
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] The follow tests in `status_follow`, `status_follow/edges`, `status_follow/said`, `run_words` and the guarding flow pass unchanged; the follower's captures equal the base's.
+- [x] The follow tests in `status_follow`, `status_follow/edges`, `status_follow/said`, `run_words` and the guarding flow pass unchanged; the follower's captures equal the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test status_follow`, `--test run_words`, `suite.py cli-1..5`
+- [x] Tests pass: `cargo test -p yunta --test status_follow`, `--test run_words`, `suite.py cli-1..5`
 
 **Dependencies:** Task 18
 
@@ -562,7 +566,7 @@ Its groups, each green before the next: following; a run's page and the graph; a
 **Estimated scope:** M
 
 ### Group check: following
-- [ ] The suite's groups green; the follower's captures equal the base's.
+- [x] The suite's groups green; the follower's captures equal the base's.
 
 ### Task 20: a run's page and a node's page own their data
 
@@ -570,13 +574,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - Render's `page::Run` and `page::Node` lose their lifetime. They own their run id, frame, state, places, decision and plans, and `Places` and `escalation::Decision` own theirs.
 - The CLI's status and closing block, the fixtures and the tests build them owned.
 
+**Found in its turn:** The closing block holds its page: `Closing` was twelve fields that mirrored `page::Run`'s, built into a borrowed page at each draw; it is now the page itself, built once. Owning their data let render's run tests drop the values they leaked to borrow for `'static`. Until the API reads the page whole, `status` builds it from clones of its reading.
+
 **Fails first:** none: a change of form.
 
 **Acceptance criteria:**
-- [ ] The run page's goldens (`render/goldens/status`, `open`) and every capture equal the base's.
+- [x] The run page's goldens (`render/goldens/status`, `open`) and every capture equal the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render --features golden`, `suite.py cli-1..5`
+- [x] Tests pass: `cargo test -p yunta-render --features golden`, `suite.py cli-1..5`
 
 **Dependencies:** Group check: following
 
@@ -597,16 +603,18 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - **`OpenedRun::page_for_a_browser(self) -> Result<PathBuf, Error>`** writes `page.html` in the run's folder through Surco's `Html`.
 - The CLI's `status`, `print_page` and `open` call them, and its `read`, `note_unknown_keys`, `documents`, `page_body`, `find`, `run_page_for` and `page_for_a_browser` go. `open` keeps spawning the opener.
 
+**Found in its turn:** The run's document a program reads was built twice, by `status --json` and by the MCP's `workflow_status`: it is `OpenedRun::document(remarks)` now, and both ask it. `node_page`, `document` and `page_for_a_browser` take the remarks too, since `status --node`, `--json` and `open` said the unread keys as well. `status` keeps no answer type: a person gets the page, a program the document. The API's tests read a bench's runs through a shared `tests/bench_project`, which the following tests use too. Each of the three tests was seen red with the behavior it holds broken.
+
 **Fails first:** the API's tests:
 - a parked run's page holds the documents its decision shows;
 - a full page holds the plans;
 - an undeclared node is refused naming the nearest.
 
 **Acceptance criteria:**
-- [ ] `status`, `status --node` and `open`'s tests and captures equal the base's.
+- [x] `status`, `status --node` and `open`'s tests and captures equal the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test status_cmd --test status_node_cmd --test open_cmd`, `suite.py cli-1..5`
+- [x] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test status_cmd --test status_node_cmd --test open_cmd`, `suite.py cli-1..5`
 
 **Dependencies:** Task 20
 
@@ -624,13 +632,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - **`page::Graph` shows a workflow as Surco's `Diagram`,** under a headline naming it, and the run when it is a run's.
 - The CLI's `graph` keeps its arguments, the verdict it prints beside a file and its exit code, and prints render's text.
 
+**Found in its turn:** The labels a run derives are a type, `graph::Labels::of(frame)`, rather than a map anyone can build. `page::Graph` heads a workflow's graph `as written`, or with the run's handle and the word it stands at. Surco's reader takes no `subgraph`, so a workflow with a `parallel` group keeps its Mermaid source on a terminal, as any diagram it does not read; a workflow with none is drawn, dashed reroutes included. Its goldens hold both, and a run's.
+
 **Fails first:** `page::Graph`'s goldens in every environment.
 
 **Acceptance criteria:**
-- [ ] `graph_cmd`'s ten tests pass unchanged; the CLI's `graph.rs` holds no derivation.
+- [x] `graph_cmd`'s ten tests pass unchanged; the CLI's `graph.rs` holds no derivation.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render --features golden`, `cargo test -p yunta --test graph_cmd`
+- [x] Tests pass: `cargo test -p yunta-render --features golden`, `cargo test -p yunta --test graph_cmd`
 
 **Dependencies:** Task 21
 
@@ -639,7 +649,7 @@ Its groups, each green before the next: following; a run's page and the graph; a
 **Estimated scope:** M
 
 ### Group check: a run's page and the graph
-- [ ] The suite's groups green; digests and captures equal to the base's but the new goldens.
+- [x] The suite's groups green; digests and captures equal to the base's but the new goldens.
 
 ### Task 23: the questions a parked node asked, read and answered at a terminal
 
@@ -648,16 +658,18 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - **`yunta resolve-gate <run>` at a terminal answers a run parked on questions with the round**, through `OpenedRun::answer`, as the attached run asks it. Off a terminal it says how to answer, as for a gate.
 - `docs/concepts.md` says so beside the MCP tool.
 
+**Found in its turn:** The node a run is parked on is read off its pause, `Questions` or `AnswersRefused`; the round itself through the engine's `asked_questions`, which reads it as answering it does, by the hash its `questions_asked` named. `resolve-gate` with no option asks `waiting_questions` first: its refusal means the run waits on a decision, or nothing, and the menu goes on as before. What it answers is render's `QuestionsAnswered`, beside `GateAnswered`: answered, left with the questions still waiting, or interrupted; off a terminal it says `resolve-gate` asks them at one. `--by` stands over who answered at the round, as at the menu.
+
 **Fails first:**
 - the API's test reading a parked node's questions;
 - a console interaction test answering a parked round with `resolve-gate`, then the run going on.
 
 **Acceptance criteria:**
-- [ ] A parked round is answered from another terminal, and the run resumes detached with the answers on its log.
-- [ ] Every other `resolve-gate` capture equals the base's.
+- [x] A parked round is answered from another terminal, and the run resumes detached with the answers on its log.
+- [x] Every other `resolve-gate` capture equals the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test console_interaction`
+- [x] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test console_interaction`
 
 **Dependencies:** Group check: a run's page and the graph
 
@@ -671,13 +683,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - The sentences `yunta-mcp`'s tools build go to render, beside `GateAnswered::sentence`: `run_workflow`'s `run_id:` answer, `resume_run`'s and `answer_questions`'. Their text stays the same.
 - What a tool says of its own JSON arguments stays the tool's, as clap's words stay clap's.
 
+**Found in its turn:** `run_workflow`'s first line and `resume_run`'s answer are render's `start::started_id` and `start::resumed`, beside the line a run starts with; `answer_questions`' is `QuestionsAnswered::sentence`, beside `GateAnswered::sentence`. "driving forward independently", which a detached start, a resume and an answered round each said, is one constant.
+
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [ ] `mcp_answers.py`'s capture equals the base's.
+- [x] `mcp_answers.py`'s capture equals the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-mcp`, `cargo test -p yunta --test mcp_flow`
+- [x] Tests pass: `cargo test -p yunta-mcp`, `cargo test -p yunta --test mcp_flow`
 
 **Dependencies:** Task 23
 
@@ -698,13 +712,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - Render's `command` spells each as the CLI accepts it.
 - **`command::does(&NextStep) -> &'static str` says what each step does,** beside its line, for the palette and help.
 
+**Found in its turn:** The CLI's test held the one sample of every kind of step; it is core's `step::samples::every_step` now, behind the `testkit` feature, so the CLI's test runs each line through clap and render's says what each does, from one list, and its own test asks a sample of every kind. `History` names a `WorkflowName`. `does` and `line_for` say each family with arguments of its own through a helper, as `status` did. A step's words never say a state's: the listing reads "the ones waiting on you first".
+
 **Fails first:** render's command tests for each new line and for what every step does.
 
 **Acceptance criteria:**
-- [ ] Every new line parses in the CLI; a test runs each through clap.
+- [x] Every new line parses in the CLI; a test runs each through clap.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+- [x] Tests pass: `cargo test -p yunta-render`, `cargo test -p yunta --bins`
 
 **Dependencies:** Task 24
 
@@ -713,7 +729,7 @@ Its groups, each green before the next: following; a run's page and the graph; a
 **Estimated scope:** M
 
 ### Group check: answers and steps
-- [ ] The suite's groups green; captures equal to the base's but `resolve-gate` on a parked round, which the user reads at Checkpoint B.
+- [x] The suite's groups green; captures equal to the base's but `resolve-gate` on a parked round, which the user reads at Checkpoint B.
 
 ### Task 26: what a stage keeps is owned
 
@@ -722,13 +738,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - `DetectedProject` and `FetchedPack` own a clone of their `Workspace` where they borrowed one, and lose their lifetime.
 - Every caller compiles unchanged in what it does.
 
+**Found in its turn:** `InstalledPack`, which an install hands back, borrowed the workspace as `FetchedPack` did: it owns its clone too. Core's `Detected` derives `Clone`, since `InitializedProject` holds one.
+
 **Fails first:** none: a change of form.
 
 **Acceptance criteria:**
-- [ ] `git grep -n "DetectedProject<'\|FetchedPack<'"` finds nothing; the suite passes.
+- [x] `git grep -n "DetectedProject<'\|FetchedPack<'"` finds nothing; the suite passes.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`
+- [x] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`
 
 **Dependencies:** Group check: answers and steps
 
@@ -748,15 +766,17 @@ Its groups, each green before the next: following; a run's page and the graph; a
   - A proposed one is written commented, as today.
   - `write_project`'s parse check reads what was declared.
 
+**Found in its turn:** The role proposed to a project whose workflows name none, `implementer`, was written in two places, render's `declare` and the config `init` writes: it is core's `RunnerName::PROPOSED`. Detection probes the adapters, so `write` no longer does; the roles come from the catalog's workflows, and `defaults.runner` is wanted where `ConfigKey::needed_by` says a node needs it. A declared runner is written in block style, since a model may hold any printable character; a role left without a model is written commented beside the declared ones, and `defaults.runner` is written only where the role it names is declared.
+
 **Fails first:** the API's tests:
 - a declared runner written and read back by `ConfigLayer::read`;
 - a proposed one written byte for byte as the base writes it.
 
 **Acceptance criteria:**
-- [ ] `init_new_cmd`'s eighteen tests pass unchanged.
+- [x] `init_new_cmd`'s eighteen tests pass unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test init_new_cmd`
+- [x] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test init_new_cmd`
 
 **Dependencies:** Task 26
 
@@ -771,13 +791,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - It ends on installing a pack (`NextStep::PackAdd`) where every role is declared, and on the runner to declare, as today, where one is proposed.
 - The page gets its first goldens: none exist.
 
+**Found in its turn:** `InitializedProject` carries the runners `declared` and those `undeclared`, and the page reads both: the declared in one `runners` field under the adapters, since a field's label is fixed; with none declared it ends as it always did, on the runner to declare; with some, on the ones still to declare, without `defaults`; with all, on `yunta pack add <source>`. Its goldens: proposed, declared, partly declared.
+
 **Fails first:** `Initialized`'s goldens and tests, declared and proposed.
 
 **Acceptance criteria:**
-- [ ] The non-interactive `init` capture equals the base's.
+- [x] The non-interactive `init` capture equals the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render --features golden`
+- [x] Tests pass: `cargo test -p yunta-render --features golden`
 
 **Dependencies:** Task 27
 
@@ -794,15 +816,17 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - The words are render's `prompt`.
 - `README.md` and `docs/adapters.md` say that `init -i` declares the runners.
 
+**Found in its turn:** The three existing tests run on a `PATH` where no adapter answers, so `init -i` asks them no runner and they read the same on any machine; the new ones put the scripted `claude` on theirs. A key typed before a list is drawn is discarded, as every prompt discards what was typed before it opened: the test waits for the list. A model that is no model name is refused and asked again; Escape at the list keeps the first adapter, as `init`'s Escape keeps a default.
+
 **Fails first:** console interaction tests:
 - `init -i` writes a declared role from the adapter picked and the model typed;
 - an empty model leaves it proposed.
 
 **Acceptance criteria:**
-- [ ] The three existing `console_interaction/init.rs` tests pass, their prompts in order.
+- [x] The three existing `console_interaction/init.rs` tests pass, their prompts in order.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test console_interaction`
+- [x] Tests pass: `cargo test -p yunta --test console_interaction`
 
 **Dependencies:** Task 28
 
@@ -815,13 +839,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 **Description:**
 - `Workspace::new_workflow` writes a skeleton's `runner:` uncommented where the project's config declares that role, as it writes `lint` where the config declares it.
 
+**Found in its turn:** `skeleton` reads the merged config itself, `lint` and the runners alike; each skeleton node's `runner:` line is a placeholder, `{{implementer}}` or `{{planner}}`, written uncommented where the config declares the role with a candidate, and commented as before where it does not.
+
 **Fails first:** `new_names_the_runner_the_config_declares`, in `init_new_cmd`.
 
 **Acceptance criteria:**
-- [ ] A skeleton written where no runner is declared is byte for byte the base's.
+- [x] A skeleton written where no runner is declared is byte for byte the base's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test init_new_cmd`
+- [x] Tests pass: `cargo test -p yunta --test init_new_cmd`
 
 **Dependencies:** Task 29
 
@@ -830,7 +856,7 @@ Its groups, each green before the next: following; a run's page and the graph; a
 **Estimated scope:** S
 
 ### Group check: the runners
-- [ ] The suite's groups green; captures equal to the base's but `init -i`'s and the parked round's.
+- [x] The suite's groups green; captures equal to the base's but `init -i`'s and the parked round's.
 
 ### Task 31: Checkpoint B's proof
 
@@ -840,13 +866,15 @@ Its groups, each green before the next: following; a run's page and the graph; a
 - The release size, by crate.
 - All of it in `checkpoint-b.txt`.
 
+**Found in its turn:** The suite: 4,651 ran, Checkpoint A's 4,627 and 24 new; one name the reader missed, its line written with an escape before `ok`. Every capture is the base's but `init -i`'s, which asks the runner, and the new one where it is declared; `prompts.py` answers the runner where a binary asks it. `resolve-gate` on a parked round, the base's refusal beside the round now, the run carried on to its end. The real run reached `ship` in 115 s against the base's 211 s, `between_secs` 0.541 against 0.556; its follower differs from the base's only in what the agents did, and where the base's log recorded a read with no name. The text grew 75,212 bytes, the release 82,688 (0.29%).
+
 **Fails first:** none: a measurement.
 
 **Acceptance criteria:**
-- [ ] The follower's lines equal the base's but ids and times; `between_secs` inside the base's spread.
+- [x] The follower's lines equal the base's but ids and times; `between_secs` inside the base's spread.
 
 **Verification:**
-- [ ] Manual check: `checkpoint-b.txt` read whole.
+- [x] Manual check: `checkpoint-b.txt` read whole.
 
 **Dependencies:** Group check: the runners
 
@@ -855,9 +883,9 @@ Its groups, each green before the next: following; a run's page and the graph; a
 **Estimated scope:** S
 
 ### Checkpoint B: once, below the surfaces, and the runners
-- [ ] Following, a run's page, the graph, the parked questions and every command's step stand below the surfaces; what a stage keeps is owned.
-- [ ] The user reads `init -i`'s new questions and `resolve-gate` on a parked round; every other capture is the base's.
-- [ ] The user reviews; the phase commits.
+- [x] Following, a run's page, the graph, the parked questions and every command's step stand below the surfaces; what a stage keeps is owned.
+- [x] The user reads `init -i`'s new questions and `resolve-gate` on a parked round; every other capture is the base's.
+- [x] The user reviews; the phase commits.
 
 ## Phase 3: the application, and watching, deciding and starting
 
@@ -1216,8 +1244,8 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 - `Stage::Catalog(CatalogStage)` shows render's `Catalog`, with a workflow pointed at.
 - **For the workflow pointed at:**
   - its check, `Operation::Check`, shown as `Checked`;
-  - its graph, which leads to the graph stage (Task 50);
-  - its history, which leads to the stats stage (Task 50);
+  - its graph, which leads to the graph stage (Task 51);
+  - its history, which leads to the stats stage (Task 51);
   - running it, which leads to the start stage with it picked.
 
 **Fails first:** `crates/ui/tests/catalog.rs`: a workflow that breaks a rule shows its check with the rule named.
@@ -1329,7 +1357,31 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Estimated scope:** M
 
-### Task 50: what a run cost, and how a workflow is drawn
+### Task 50: Surco draws a group
+
+**Description:**
+- **Surco's flowchart reader reads a `subgraph`:** `subgraph <id>["<label>"]`, the nodes declared until its `end`, and a link that names the group's id, which links the group.
+- **The terminal draws a group as a box holding its nodes,** laid out with the rest of the chart and titled with its label, in every glyph set. Markdown keeps the source as written; HTML draws the group as it draws the chart.
+- A chart Surco still does not read keeps its source, as today.
+- `page::Graph`'s goldens of a workflow with a `parallel` group draw the group, no longer its source; `yunta graph` prints the same text.
+
+**Fails first:**
+- Surco's flowchart tests: a subgraph read with its nodes and the links to and from it; a link inside the group;
+- the terminal's goldens of a grouped chart, in every glyph set.
+
+**Acceptance criteria:**
+- [ ] `page::Graph`'s grouped goldens draw the group; every other diagram golden is unchanged.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-surco`, `cargo test -p yunta-render`, `cargo test -p yunta --test graph_cmd`
+
+**Dependencies:** Task 49
+
+**Files likely touched:** `crates/surco/src/diagram/{flowchart.rs,layer.rs,place.rs,down.rs,across.rs,outline.rs}`, `crates/surco/goldens/`, `crates/render/goldens/graph/`
+
+**Estimated scope:** L
+
+### Task 51: what a run cost, and how a workflow is drawn
 
 **Description:**
 - **`Stage::Stats(StatsStage)`:** a run's `Stats` (`Operation::ReadStats`), or a workflow's `History` (`Operation::ReadHistory`), reached from a run or from the catalog.
@@ -1345,7 +1397,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Verification:**
 - [ ] Tests pass: `cargo test -p yunta-ui --test stats_graph`
 
-**Dependencies:** Task 49
+**Dependencies:** Task 50
 
 **Files likely touched:** `crates/ui/src/{stage/stats.rs,stage/graph.rs,performer.rs}`, `crates/ui/tests/stats_graph.rs`
 
@@ -1354,7 +1406,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 ### Group check: what a run leaves and costs
 - [ ] The suite's groups green; the walk covers evidence, stats and the graph.
 
-### Task 51: doctor
+### Task 52: doctor
 
 **Description:**
 - **`Stage::Doctor(DoctorStage)`:** `Operation::Doctor { sessions: false }`, shown as `Doctor`, folded or every check.
@@ -1375,7 +1427,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Estimated scope:** M
 
-### Task 52: upkeep and the shape of a document
+### Task 53: upkeep and the shape of a document
 
 **Description:**
 - **`Stage::Upkeep(UpkeepStage)`:** `Operation::Collect { dry_run: true }`, shown as `Collected`. After a confirmation, `Operation::Collect { dry_run: false }`, its remarks shown as they come.
@@ -1391,7 +1443,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Verification:**
 - [ ] Tests pass: `cargo test -p yunta-ui --test upkeep_schema`
 
-**Dependencies:** Task 51
+**Dependencies:** Task 52
 
 **Files likely touched:** `crates/ui/src/{stage/upkeep.rs,stage/schema.rs,performer.rs}`, `crates/ui/tests/upkeep_schema.rs`
 
@@ -1400,7 +1452,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 ### Group check: the machine
 - [ ] The suite's groups green; the walk covers doctor, upkeep and schema.
 
-### Task 53: the palette
+### Task 54: the palette
 
 **Description:**
 - **`Dialog::Palette(Palette)` over every stage,** opened by its key.
@@ -1423,7 +1475,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Estimated scope:** M
 
-### Task 54: help, and every confirmation
+### Task 55: help, and every confirmation
 
 **Description:**
 - **`Dialog::Help`** lists the keys of the stage and those always there, worded by `render::screen`.
@@ -1438,7 +1490,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Verification:**
 - [ ] Tests pass: `cargo test -p yunta-ui --test dialogs --test walk`
 
-**Dependencies:** Task 53
+**Dependencies:** Task 54
 
 **Files likely touched:** `crates/ui/src/{dialog.rs,dialog/confirmation.rs,state.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/dialogs.rs`, `crates/ui/tests/walk.rs`
 
@@ -1447,7 +1499,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 ### Group check: the dialogs
 - [ ] The suite's groups green; the walk covers every stage and every dialog.
 
-### Task 55: the proof
+### Task 56: the proof
 
 **Description:**
 - The suite's count against the base's, by name: moved, renamed, new, and none gone without a reason.
@@ -1469,7 +1521,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Estimated scope:** S
 
-### Task 56: a real run at the end
+### Task 57: a real run at the end
 
 **Description:**
 - As Task 3, from the final tree's release binary: followed with `yunta status --follow`, its gates answered with `yunta resolve-gate`, its time read from `yunta stats`.
@@ -1482,13 +1534,13 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Verification:**
 - [ ] Manual check: the run's numbers beside the base's in `after.txt`.
 
-**Dependencies:** Task 55
+**Dependencies:** Task 56
 
 **Files likely touched:** `.plans/yunta-tui/proof/app-core/real-after*` (outside git)
 
 **Estimated scope:** S
 
-### Task 57: the review
+### Task 58: the review
 
 **Description:**
 - The module's diff, read in four parts by readers of their own:
@@ -1506,7 +1558,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Verification:**
 - [ ] Tests pass: the suite's groups after the fixes.
 
-**Dependencies:** Task 56
+**Dependencies:** Task 57
 
 **Files likely touched:** as the findings say
 
@@ -1515,9 +1567,9 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 ### Checkpoint D: the module
 - [ ] Every stage of the spec works end to end against its sandbox; the walk covers every stage and dialog; what prints is the base's but the two changes this list names.
 - [ ] The user reviews the proof and the review.
-- [ ] The phase commits and is pushed; Task 58 follows, then `cargo clean`.
+- [ ] The phase commits and is pushed; Task 59 follows, then `cargo clean`.
 
-### Task 58: the pull request
+### Task 59: the pull request
 
 **Description:**
 - PR #30's body gains the module; CI on Linux and macOS.

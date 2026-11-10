@@ -339,6 +339,13 @@ string_id!(
     RunnerName, what = "runner name", rule = NAME_RULE, check = is_name
 );
 
+impl RunnerName {
+    /// The role a project whose workflows name none gets proposed: what the
+    /// skeletons `yunta new` writes name in their comments, and what setting a
+    /// repository up declares.
+    pub const PROPOSED: RunnerName = RunnerName::from_static("implementer");
+}
+
 string_id!(
     /// An adapter's id as config names it (`claude-code`, `codex`,
     /// `mock`): `^[A-Za-z][A-Za-z0-9_-]*$`.

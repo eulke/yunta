@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use crate::{AdapterId, CommandName, GitHubRepo};
 
 /// What one repository was found to have.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Detected {
     pub ecosystem: Option<Ecosystem>,
     /// What the repository runs for each capability, by the name a

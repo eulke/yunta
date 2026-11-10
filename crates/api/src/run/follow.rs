@@ -1,7 +1,10 @@
-//! See [`super`]. Following a run while it moves, past its log: the registry
-//! its engine keeps beside it, which names the process driving it and the
-//! socket its sessions' words are heard on, and those words. Owned, so a task
-//! drawing the run holds its own.
+//! See [`super`]. Following a run while it moves: the [`Following`] that hands back
+//! what comes as [`RunNews`], at one pace for every interface; the registry its engine
+//! keeps beside it, which names the process driving it and the socket its sessions'
+//! words are heard on; and those words. Owned, so a task drawing the run holds its own.
+
+mod following;
+mod listening;
 
 use std::path::{Path, PathBuf};
 
@@ -11,6 +14,8 @@ use yunta_engine::said::Hearing;
 use yunta_replay::registry::Engine;
 
 use super::OpenedRun;
+
+pub use following::{Following, RunNews};
 
 /// The registry a run's engine keeps in the run's directory: the process
 /// driving the run, whom it asks at its terminal, and the socket its
@@ -50,20 +55,20 @@ impl OpenedRun<'_> {
 }
 
 /// What a run's sessions say, heard off the socket its engine serves.
-pub struct Words {
+struct Words {
     hearing: Hearing,
 }
 
 impl Words {
     /// Listens on `socket`, the one a run's registry names: `None` when
     /// nothing serves it, as a socket a gone engine left behind.
-    pub async fn hear(socket: &Path) -> Option<Words> {
+    async fn hear(socket: &Path) -> Option<Words> {
         let hearing = yunta_engine::said::connect(socket).await.ok()?;
         Some(Words { hearing })
     }
 
     /// The next thing a session says; `None` once the engine stops serving.
-    pub async fn next(&mut self) -> Option<Said> {
+    async fn next(&mut self) -> Option<Said> {
         self.hearing.next().await.map(|heard| heard.said)
     }
 }

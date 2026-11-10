@@ -6,10 +6,10 @@
 //! on says so as recorded, because a reader who took it for a refusal would
 //! answer the same gate twice.
 
-use yunta_core::events::{DecisionOn, GateWaitingPayload, HumanChoice};
+use yunta_core::events::{DecisionOn, GateWaitingPayload, HumanChoice, PauseReason};
 use yunta_core::port::QuestionsReply;
 use yunta_core::shown::ShownDocument;
-use yunta_core::{NodeId, OptionId, Responder, RunId};
+use yunta_core::{NodeId, OptionId, QuestionsFile, Responder, RunId};
 use yunta_render::refusal::Refused;
 use yunta_replay::RunState;
 
@@ -17,6 +17,7 @@ use crate::{Error, Failure, OpenedRun};
 
 /// The decision a run waits on, with the documents it shows and the run's
 /// state, which the menu a person picks from is drawn from.
+#[derive(Clone)]
 pub struct WaitingDecision {
     pub on: DecisionOn,
     pub escalation: GateWaitingPayload,
@@ -24,7 +25,43 @@ pub struct WaitingDecision {
     pub state: RunState,
 }
 
+/// The questions a node parked on and nobody has answered: the node, and the
+/// round it asked, as the document it handed over holds it.
+#[derive(Clone)]
+pub struct WaitingQuestions {
+    pub node: NodeId,
+    pub questions: QuestionsFile,
+}
+
 impl OpenedRun<'_> {
+    /// The questions this run is parked on, read from the document the node handed
+    /// over, by the hash its `questions_asked` recorded: refused when it waits on
+    /// none, as a run that waits on no decision is.
+    pub async fn waiting_questions(&self) -> Result<WaitingQuestions, Error> {
+        let frame = self.frame();
+        let reason = frame.phase.waiting_on().and_then(|on| on.reason());
+        let node = match reason {
+            Some(
+                PauseReason::Questions { node, .. } | PauseReason::AnswersRefused { node, .. },
+            ) => node.clone(),
+            _ => {
+                return Err(Refused::NoDecision {
+                    run: self.id.clone(),
+                }
+                .into())
+            }
+        };
+        let questions = yunta_engine::asked_questions(&self.dir, &self.events, &node)
+            .await
+            .map_err(|error| match error {
+                yunta_engine::AnswerQuestionsError::Refused(refusal) => {
+                    Error::from(Refused::Answers(refusal))
+                }
+                failed => Failure::new(failed).into(),
+            })?;
+        Ok(WaitingQuestions { node, questions })
+    }
+
     /// The decision this run waits on, with what it shows: refused when it
     /// waits on none, naming the command that says where it stands.
     pub async fn waiting_decision(&self) -> Result<WaitingDecision, Error> {

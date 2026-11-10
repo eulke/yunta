@@ -95,7 +95,8 @@ Three nodes, three node kinds:
 **3. Name a runner.** `fix-lint`'s `runner: executor` needs at least one adapter
 candidate in config, even though it may never actually run. Add one to
 `.yunta/config.yaml` — `yunta init` ends with this step, naming the adapter CLIs
-it found on your machine:
+it found on your machine, and `yunta init -i` asks each runner's adapter and
+model and writes it declared:
 
 ```yaml
 runners:
@@ -171,7 +172,7 @@ work held to its plan, PR).
 
 | Command | Does |
 |---|---|
-| `yunta init [-i] [--force]` | Detects language, the project's commands and suite, the forge `origin` is on, base branch and available adapters; writes `.yunta/config.yaml`. `-i` asks to confirm the project's name and base branch. |
+| `yunta init [-i] [--force]` | Detects language, the project's commands and suite, the forge `origin` is on, base branch and available adapters; writes `.yunta/config.yaml`. `-i` asks to confirm the project's name and base branch, then each runner the workflows name: its adapter, among those that answered, and its model; a runner whose model is left empty stays commented, to declare later. |
 | `yunta new <name> [--shape one-node\|lint-fix\|tasks] [-i] [--force]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and reports the verdict `check` reaches on it, exit code included. A `lint-fix` skeleton runs the project's own `lint` command when its config declares one. |
 | `yunta schema [<document>] [--json]` | The shape of a document Yunta reads and validates — `tasks`, `spec`, `findings`, `questions`, `answers` — as an annotated example to copy, or as JSON Schema for an editor; `workflow` lists every key a workflow and each kind of node read. With no arguments, lists the documents. Nothing has to be set up first: this is how anyone who has to produce one of these documents, agent or person, learns the shape instead of guessing it. |
 | `yunta check <workflow> [--config <path>]` | Validates a workflow statically: cycles, unreachable reroutes, undefined runners, template variables, permission ceilings — no session opened. `--config` checks it against another config file. |

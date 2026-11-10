@@ -20,7 +20,7 @@ use yunta_replay::frame::{NodeFrame, NodeStanding};
 
 use super::Run;
 
-impl Run<'_> {
+impl Run {
     /// The story's blocks, at `--full` and deeper; nothing at a glance.
     pub(super) fn story(&self, glyphs: Glyphs) -> Vec<Block> {
         if !self.depth.reaches(Depth::Full) {
@@ -119,7 +119,7 @@ impl Run<'_> {
         });
         [
             said,
-            crate::state::handed(self.state, &node.id)
+            crate::state::handed(&self.state, &node.id)
                 .filter(|_| !self.decision_says_how_its_plan_got_accepted()),
             attempts(node),
             rerouted,
@@ -138,7 +138,7 @@ impl Run<'_> {
     fn decision_says_how_its_plan_got_accepted(&self) -> bool {
         self.decision
             .iter()
-            .flat_map(|decision| decision.shown)
+            .flat_map(|decision| &decision.shown)
             .any(|document| {
                 matches!(
                     &document.content,

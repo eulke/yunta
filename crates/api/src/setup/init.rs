@@ -1,14 +1,18 @@
 //! See [`super`]. A repository prepared for Yunta once: its ecosystem, test
 //! command, base branch and the adapter CLIs this machine answers for are
-//! detected, then `.yunta/config.yaml`, defensive `.gitignore` entries and
-//! the mechanism skill are written. Every value is the best one detected; a
-//! caller that asks a person hands in what they answered instead.
+//! detected, and the runner roles its workflows name proposed; then
+//! `.yunta/config.yaml`, defensive `.gitignore` entries and the mechanism
+//! skill are written. Every value is the best one detected; a caller that asks
+//! a person hands in what they answered instead, the runners included: each
+//! role a person put on an adapter with a model is written declared, and the
+//! rest stay proposed, commented, as `init` writes them unasked.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use yunta_core::refusal::SetupRefusal;
 use yunta_core::step::NextStep;
-use yunta_core::{Detected, ProbedAdapter};
+use yunta_core::{ConfigKey, Detected, ProbedAdapter, RunnerCandidate, RunnerName, Workflow};
 use yunta_engine::git::Cause;
 use yunta_engine::process::Supervision;
 use yunta_render::command;
@@ -23,11 +27,7 @@ impl Workspace {
     /// the project's name and base branch as detected, and what the
     /// repository runs. Refused when the project's config is there already
     /// and `force` does not say to write it again.
-    pub async fn detect_project(
-        &self,
-        force: bool,
-        stop: &Stop,
-    ) -> Result<DetectedProject<'_>, Error> {
+    pub async fn detect_project(&self, force: bool, stop: &Stop) -> Result<DetectedProject, Error> {
         let config = self.dir.join(".yunta/config.yaml");
         if config.exists() && !force {
             return Err(Refused::Setup(SetupRefusal::Exists { path: config }).into());
@@ -39,51 +39,129 @@ impl Workspace {
             .unwrap_or_else(|| "workflow-project".to_string());
         let base_branch = base_branch(&self.dir, self.supervision(stop)).await?;
         let detected = crate::machine::in_repo(self, &self.dir, stop).await?;
+        let probed = crate::machine::probe_known_adapters().await;
+        let workflows: Vec<Workflow> = self
+            .catalog_workflows()
+            .into_iter()
+            .map(|(_, workflow)| workflow)
+            .collect();
         Ok(DetectedProject {
-            workspace: self,
+            workspace: self.clone(),
             name,
             base_branch,
             detected,
+            probed,
+            proposed: ProposedRunners::of(&workflows),
             force,
         })
     }
 }
 
+/// The runner roles a repository's setup proposes: those its workflows name, or
+/// the one proposed to a project whose workflows name none; and whether a node
+/// names no runner, so `defaults.runner` names the first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposedRunners {
+    pub roles: Vec<RunnerName>,
+    pub needs_default: bool,
+}
+
+impl ProposedRunners {
+    /// What `workflows` propose, each role once, in the order their nodes name
+    /// them.
+    fn of(workflows: &[Workflow]) -> Self {
+        let mut roles: Vec<RunnerName> = Vec::new();
+        let mut needs_default = false;
+        for node in workflows.iter().flat_map(Workflow::iter_nodes) {
+            for role in node.runner.iter().chain(&node.runners) {
+                if !roles.contains(role) {
+                    roles.push(role.clone());
+                }
+            }
+            needs_default |= ConfigKey::needed_by(node).contains(&ConfigKey::Runner);
+        }
+        if roles.is_empty() {
+            roles.push(RunnerName::PROPOSED);
+        }
+        ProposedRunners {
+            roles,
+            needs_default,
+        }
+    }
+}
+
+/// What a project is set up as: the name and base branch it is written under, and
+/// how its runners are written.
+#[derive(Debug, Clone)]
+pub struct ProjectSetup {
+    pub name: String,
+    pub base_branch: String,
+    pub runners: RunnerDeclaration,
+}
+
+/// How setting a project up writes its runners.
+#[derive(Debug, Clone)]
+pub enum RunnerDeclaration {
+    /// Commented out, each proposed role on the first adapter that answered, its
+    /// model left blank: what `init` writes when nobody answers for them.
+    Proposed,
+    /// As a person answered: each role on the adapter they picked, with the model
+    /// they typed. A proposed role missing here stays proposed.
+    Declared(BTreeMap<RunnerName, RunnerCandidate>),
+}
+
 /// A repository's project as `init` would write it, before anything is
-/// written: the name and base branch it detected, and what the repository
-/// runs.
-pub struct DetectedProject<'w> {
-    workspace: &'w Workspace,
+/// written: the name and base branch it detected, what the repository runs, the
+/// adapters this machine answered for, and the runner roles it proposes.
+pub struct DetectedProject {
+    workspace: Workspace,
     pub name: String,
     pub base_branch: String,
     pub detected: Detected,
+    pub probed: Vec<ProbedAdapter>,
+    pub proposed: ProposedRunners,
     force: bool,
 }
 
-/// What `init` wrote, and what it left as it was, with what it detected and
-/// the adapters this machine answered for.
+/// What `init` wrote, and what it left as it was, with what it detected, the
+/// adapters this machine answered for, the runners declared and those proposed
+/// and left undeclared.
+#[derive(Clone)]
 pub struct InitializedProject {
     pub wrote: Vec<String>,
     pub skipped: Vec<String>,
     pub detected: Detected,
     pub probed: Vec<ProbedAdapter>,
+    pub declared: BTreeMap<RunnerName, RunnerCandidate>,
+    pub undeclared: Vec<RunnerName>,
 }
 
-impl DetectedProject<'_> {
-    /// Writes the project as `name` on `base_branch`: its config, from what
-    /// the repository runs and the adapters this machine answers for, parsed
-    /// back before it is written; the ignore entries `init` adds once; and
+impl DetectedProject {
+    /// Writes the project as `setup` says: its config, from what the repository
+    /// runs, the adapters this machine answers for and the runners as declared,
+    /// parsed back before it is written; the ignore entries `init` adds once; and
     /// the mechanism skill, written again only under `force`.
-    pub async fn write(self, name: &str, base_branch: &str) -> Result<InitializedProject, Error> {
-        let probed = crate::machine::probe_known_adapters().await;
-        let config_yaml = config_yaml(name, base_branch, &probed, &self.detected);
+    pub async fn write(self, setup: ProjectSetup) -> Result<InitializedProject, Error> {
+        let config_yaml = config_yaml(&setup, &self.probed, &self.detected, &self.proposed);
         let repo = &self.workspace.dir;
         let (wrote, skipped) = write_project(repo, config_yaml, self.force).await?;
+        let declared = match setup.runners {
+            RunnerDeclaration::Proposed => BTreeMap::new(),
+            RunnerDeclaration::Declared(declared) => declared,
+        };
+        let undeclared = self
+            .proposed
+            .roles
+            .into_iter()
+            .filter(|role| !declared.contains_key(role))
+            .collect();
         Ok(InitializedProject {
             wrote,
             skipped,
             detected: self.detected,
-            probed,
+            probed: self.probed,
+            declared,
+            undeclared,
         })
     }
 }
@@ -121,13 +199,14 @@ async fn base_branch(repo: &Path, supervision: Supervision<'_>) -> Result<String
 }
 
 /// The project's config as `init` writes it: its name and base branch, what
-/// the repository was detected to run, and the runners it could name, with
-/// each adapter this machine answered for, healthy or not.
+/// the repository was detected to run, and its runners, declared as `setup`
+/// says or proposed, with each adapter this machine answered for, healthy or
+/// not.
 fn config_yaml(
-    project_name: &str,
-    base_branch: &str,
+    setup: &ProjectSetup,
     probed: &[ProbedAdapter],
     detected: &Detected,
+    proposed: &ProposedRunners,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -137,8 +216,8 @@ fn config_yaml(
     out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
     out.push_str("# config layer), never in this file.\n\n");
     out.push_str("project:\n");
-    out.push_str(&format!("  name: {}\n", yaml_scalar(project_name)));
-    out.push_str(&format!("  base_branch: {base_branch}\n"));
+    out.push_str(&format!("  name: {}\n", yaml_scalar(&setup.name)));
+    out.push_str(&format!("  base_branch: {}\n", setup.base_branch));
     out.push_str("  branch_prefix: yunta/\n\n");
     out.push_str(&detected_yaml(detected));
 
@@ -157,20 +236,63 @@ fn config_yaml(
             ));
         }
     }
-    out.push_str("# runners:\n");
-    out.push_str("#   implementer:\n");
-    if let Some(healthy) = probed.iter().find(|a| a.healthy) {
-        out.push_str(&format!(
-            "#     - {{ adapter: {}, model: <model-name> }}\n",
-            healthy.id
-        ));
-    } else {
-        out.push_str(&format!(
-            "#     - {{ adapter: {}, model: <model-name> }}\n",
-            crate::machine::first_built_adapter()
-        ));
+    let declared = match &setup.runners {
+        RunnerDeclaration::Declared(declared) if !declared.is_empty() => declared,
+        _ => {
+            out.push_str(&proposed_runners_yaml(probed, proposed));
+            return out;
+        }
+    };
+    out.push_str("runners:\n");
+    for role in &proposed.roles {
+        match declared.get(role) {
+            Some(candidate) => out.push_str(&declared_runner_yaml(role, candidate)),
+            None => out.push_str(&proposed_runner_yaml("  # ", role, probed)),
+        }
+    }
+    let default = proposed.roles.first().filter(|_| proposed.needs_default);
+    match default {
+        Some(role) if declared.contains_key(role) => {
+            out.push_str(&format!("defaults:\n  runner: {role}\n"));
+        }
+        Some(role) => out.push_str(&format!("# defaults:\n#   runner: {role}\n")),
+        None => {}
     }
     out
+}
+
+/// The runners `proposed` names, commented out, each on the first adapter that
+/// answered and its model left blank; and `defaults.runner`, commented, where a
+/// node names none.
+fn proposed_runners_yaml(probed: &[ProbedAdapter], proposed: &ProposedRunners) -> String {
+    let mut out = String::from("# runners:\n");
+    for role in &proposed.roles {
+        out.push_str(&proposed_runner_yaml("#   ", role, probed));
+    }
+    if let (true, Some(first)) = (proposed.needs_default, proposed.roles.first()) {
+        out.push_str(&format!("# defaults:\n#   runner: {first}\n"));
+    }
+    out
+}
+
+/// One proposed runner, commented out after `lead`: on the first adapter that
+/// answered, or the first this build knows when none did, its model blank.
+fn proposed_runner_yaml(lead: &str, runner: &RunnerName, probed: &[ProbedAdapter]) -> String {
+    let adapter = match probed.iter().find(|adapter| adapter.healthy) {
+        Some(healthy) => healthy.id.to_string(),
+        None => crate::machine::first_built_adapter().to_string(),
+    };
+    format!("{lead}{runner}:\n{lead}  - {{ adapter: {adapter}, model: <model-name> }}\n")
+}
+
+/// One declared runner, as a person answered it: on its adapter, with its model,
+/// which YAML reads back whole whatever it holds.
+fn declared_runner_yaml(runner: &RunnerName, candidate: &RunnerCandidate) -> String {
+    format!(
+        "  {runner}:\n    - adapter: {}\n      model: {}\n",
+        candidate.adapter,
+        yaml_scalar(candidate.model.as_str())
+    )
 }
 
 /// What `init` found in the repository, as config: the commands a

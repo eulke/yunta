@@ -30,19 +30,19 @@ use super::{caution_row, Run, RunScope};
 /// point at where the time went, few enough that the row stays one row.
 const SLOWEST: usize = 3;
 
-impl Run<'_> {
+impl Run {
     /// The facts with something to say on this page, in the order a reader
     /// checks them. A fact with nothing to say is not a row.
     pub(super) fn facts(&self, glyphs: Glyphs) -> Fields {
         let full = self.depth.reaches(Depth::Full);
         let harvest = self.holds_harvest();
-        let mut fields = Fields::new().push_if("progress", progress::row(self.frame, glyphs));
+        let mut fields = Fields::new().push_if("progress", progress::row(&self.frame, glyphs));
         // The whole story names every node and task in a table of its own.
         if !full {
-            for place in progress::places(self.frame) {
+            for place in progress::places(&self.frame) {
                 fields = fields.push_marked("nodes", place.standing.mark(), place.said);
             }
-            let tasks = progress::tasks_row(self.frame, &self.state.tasks, glyphs);
+            let tasks = progress::tasks_row(&self.frame, &self.state.tasks, glyphs);
             fields = fields.push_if("tasks", tasks.unwrap_or_default());
         }
         for left in self.left_out() {
@@ -51,7 +51,7 @@ impl Run<'_> {
         if harvest {
             fields = self.came_to(fields, glyphs);
         }
-        fields = fields.push_if("caution", caution_row(self.frame));
+        fields = fields.push_if("caution", caution_row(&self.frame));
         if harvest {
             fields = self.went_to(fields, glyphs);
         }
@@ -67,7 +67,11 @@ impl Run<'_> {
         if self.depth.reaches(Depth::Dig) {
             fields = fields.push_if("id", self.run_id.to_string()).push_if(
                 "kept in",
-                paths::shown(self.places.run_dir, self.places.cwd, self.places.home),
+                paths::shown(
+                    &self.places.run_dir,
+                    &self.places.cwd,
+                    self.places.home.as_deref(),
+                ),
             );
         }
         fields
@@ -183,7 +187,11 @@ impl Run<'_> {
 
     /// The branch the run worked on and where that work sits now.
     fn branch(&self) -> String {
-        let tree = paths::shown(self.places.worktree, self.places.cwd, self.places.home);
+        let tree = paths::shown(
+            &self.places.worktree,
+            &self.places.cwd,
+            self.places.home.as_deref(),
+        );
         match self.places.isolation {
             Isolation::Worktree => format!(
                 "{} off {}, in {tree}",
@@ -207,9 +215,9 @@ impl Run<'_> {
             "{} under {}",
             counted(written, "artifact"),
             paths::shown(
-                &yunta_core::run_dir::artifacts(self.places.run_dir),
-                self.places.cwd,
-                self.places.home
+                &yunta_core::run_dir::artifacts(&self.places.run_dir),
+                &self.places.cwd,
+                self.places.home.as_deref()
             )
         )
     }
@@ -265,7 +273,7 @@ impl Run<'_> {
             return Vec::new();
         }
         let mut blocks = vec![Block::Heading("children".to_string())];
-        for (under, born) in children::children_by_node(self.frame) {
+        for (under, born) in children::children_by_node(&self.frame) {
             blocks.push(
                 Section {
                     lead: None,

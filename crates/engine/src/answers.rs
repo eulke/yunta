@@ -225,6 +225,19 @@ pub async fn answer_questions(
     Ok(record(&log, run_dir, node, &questions, reply).await?)
 }
 
+/// The questions `node` asked and nobody has answered, read from the document
+/// it asked from: what a surface puts to a person who answers the round from
+/// another process.
+pub async fn asked_questions(
+    run_dir: &Path,
+    events: &[StoredEvent],
+    node: &NodeId,
+) -> Result<QuestionsFile, AnswerQuestionsError> {
+    asked_from(run_dir, events, node)
+        .await
+        .map(|(_, questions)| questions)
+}
+
 /// The round `node` is waiting on and the document it asked from, as the
 /// run holds it.
 ///

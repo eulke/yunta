@@ -8,11 +8,15 @@
 //! retry, abort, promote and internal gates alike. Same detach
 //! mechanism as `run --detach`: a control-plane operation never blocks
 //! for the run's own duration.
+//!
+//! A run parked on the questions a node asked is answered the same way, with
+//! no option to name: the round is put to the person at this terminal as the
+//! run itself asks it, and the answers are recorded and handed on alike.
 
 use std::collections::BTreeMap;
 
 use surco::look::Look;
-use yunta_api::{Project, WaitingDecision};
+use yunta_api::{OpenedRun, Project, WaitingDecision, WaitingQuestions};
 use yunta_core::events::{ChangesCountedPayload, DecisionOn, GateWaitingPayload, HumanChoice};
 use yunta_core::shown::ShownDocument;
 use yunta_core::step::{Choice, NextStep};
@@ -21,14 +25,15 @@ use yunta_render::command;
 use yunta_render::command::Reader;
 use yunta_render::document::GateAnswerDocument;
 use yunta_render::escalation::Route;
-use yunta_render::page::{GateAnswered, Page, Resolution};
+use yunta_render::page::{GateAnswered, Page, QuestionsAnswered, Resolution, RoundAnswer};
 use yunta_render::prompt::Escape;
+use yunta_render::refusal::Refused;
 use yunta_ui::prompt::Opens;
 
 use crate::ask::{Ask, Console, NoAnswer};
 use crate::error::CliError;
 use crate::output::Outcome;
-use crate::output::{emit, Answer, Mode};
+use crate::output::{emit, show, Answer, Mode};
 use crate::shell::Shell;
 use crate::surface::Diagnostics;
 
@@ -84,6 +89,10 @@ pub async fn resolve_gate(
     needs_an_option(run_id, option, output)?;
     let project = shell.workspace().project()?;
     let Some(option) = option else {
+        let open = project.run(run_id).await?;
+        if let Some(waiting) = parked_round(&open).await? {
+            return answered_round(&project, &open, waiting, resolved_by, output, look).await;
+        }
         let chosen = chosen(&project, run_id).await?;
         return settled(
             &project,
@@ -106,6 +115,71 @@ pub async fn resolve_gate(
         look,
     )
     .await
+}
+
+/// The round `open` is parked on, or `None` where it waits on no questions and
+/// what it waits on is a decision, or nothing.
+async fn parked_round(open: &OpenedRun<'_>) -> Result<Option<WaitingQuestions>, CliError> {
+    match open.waiting_questions().await {
+        Ok(waiting) => Ok(Some(waiting)),
+        Err(yunta_api::Error::Refused(Refused::NoDecision { .. })) => Ok(None),
+        Err(other) => Err(other.into()),
+    }
+}
+
+/// The round `open` is parked on, put to the person at this terminal as the run
+/// asks it, recorded, and the run handed on; or the page that says nothing was.
+/// Who the command line names stands over who answered at the round. Off a
+/// terminal there is nobody to ask, and the refusal says where they are asked.
+async fn answered_round(
+    project: &Project,
+    open: &OpenedRun<'_>,
+    waiting: WaitingQuestions,
+    by: Option<&Responder>,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let WaitingQuestions { node, questions } = waiting;
+    let replied = {
+        let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
+            return Err(CliError::msg(QuestionsAnswered::off_terminal(
+                &open.id, &node,
+            )));
+        };
+        crate::ask::answer(&console, &project.workspace.env, &node, &questions)
+    };
+    let answer = match replied {
+        Ok(mut reply) => {
+            if let Some(by) = by {
+                reply.responder = Some(by.clone());
+            }
+            open.answer(&node, reply).await?;
+            RoundAnswer::Answered { node }
+        }
+        Err(NoAnswer::Declined) => RoundAnswer::Declined { node },
+        Err(NoAnswer::Interrupted) => RoundAnswer::Interrupted,
+        Err(NoAnswer::Unreadable(error)) => {
+            return Err(CliError::msg(yunta_render::escalation::console_unreadable(
+                &error.to_string(),
+            )))
+        }
+        Err(NoAnswer::Failed(why)) => {
+            return Err(CliError::msg(yunta_render::escalation::menu_unanswered(
+                &why,
+            )))
+        }
+    };
+    if output == Mode::Human {
+        let page = QuestionsAnswered {
+            run_id: &open.id,
+            answer: &answer,
+        };
+        show(look, &page);
+    }
+    Ok(match answer {
+        RoundAnswer::Interrupted => Outcome::interrupted(),
+        RoundAnswer::Answered { .. } | RoundAnswer::Declined { .. } => Outcome::Success,
+    })
 }
 
 /// What a person at the menu did, carried through: recorded and handed back, or the page

@@ -29,7 +29,7 @@ impl Page for Closed<'_> {
             "closed by {}: its checkouts went back to the project, and its branch stays until \
              `{}` removes it",
             self.by,
-            command::line(&NextStep::Gc)
+            command::line(&NextStep::Gc { dry_run: false })
         );
         Doc::new().with(headline).with(Gist::new(gist))
     }

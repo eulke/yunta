@@ -59,6 +59,9 @@ pub enum Remark {
     /// A pack's tree an install or a removal replaced, which stays on disk
     /// though the pack is in place: where it is, and what the disk said.
     ReplacedTreeKept { at: PathBuf, said: String },
+    /// The keys of a run's manifest a newer binary wrote and this one does not
+    /// read, said before anything is read of the run.
+    UnreadManifestKeys { keys: Vec<String> },
 }
 
 /// Where an operation says its remarks, in the order it says them.

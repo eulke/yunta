@@ -10,7 +10,7 @@ use yunta_core::events::{
     NodeFinishedPayload, NodeOutcome, NodeStartedPayload, NodeState, RunEvent, SessionEvent,
     StoredEvent, TokenUsage,
 };
-use yunta_core::{NodeId, OnFailure, RunId, Workflow};
+use yunta_core::{NodeId, OnFailure, Workflow};
 use yunta_replay::frame::{Declares, GateAsks, NodeFrame, NodeStanding, RunFrame};
 use yunta_replay::RunState;
 use yunta_testkit_core::{fixed_now, Log};
@@ -31,7 +31,7 @@ fn goldens() -> PathBuf {
 }
 
 /// The page as a terminal draws it for `look`.
-fn draw(page: &Run<'_>, look: &Look) -> String {
+fn draw(page: &Run, look: &Look) -> String {
     surco::surface::Surface::draw(&surco::surface::Terminal::on(*look), &page.document(look))
 }
 
@@ -210,31 +210,30 @@ fn a_blocked_task_says_where_its_work_is() {
 }
 
 /// The page of the run `events` write, in `scope`.
-fn page_of(events: Vec<StoredEvent>, scope: RunScope) -> Run<'static> {
+fn page_of(events: Vec<StoredEvent>, scope: RunScope) -> Run {
     framed(events, |_| scope)
 }
 
 /// The closing the run `events` write leaves, with the exit its word gives.
-fn closing_of(events: Vec<StoredEvent>) -> Run<'static> {
+fn closing_of(events: Vec<StoredEvent>) -> Run {
     framed(events, closing)
 }
 
 /// The page of the run `events` write, in the scope its frame gives.
-fn framed(events: Vec<StoredEvent>, scope: impl FnOnce(&RunFrame) -> RunScope) -> Run<'static> {
-    let state: &'static RunState = Box::leak(Box::new(RunState::replay(&events)));
-    let frame: &'static RunFrame = Box::leak(Box::new(RunFrame::of(
+fn framed(events: Vec<StoredEvent>, scope: impl FnOnce(&RunFrame) -> RunScope) -> Run {
+    let state = RunState::replay(&events);
+    let frame = RunFrame::of(
         &RUN,
         &workflow(),
-        state,
+        &state,
         None,
         &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         fixed_now(),
-    )));
-    let run_id: &'static RunId = Box::leak(Box::new(RUN));
+    );
     Run {
-        scope: scope(frame),
+        scope: scope(&frame),
         depth: Depth::Glance,
-        run_id,
+        run_id: RUN,
         frame,
         state,
         places: places(),
@@ -244,7 +243,7 @@ fn framed(events: Vec<StoredEvent>, scope: impl FnOnce(&RunFrame) -> RunScope) -
 }
 
 /// The status page of the run `spend_log` writes.
-fn running_page() -> Run<'static> {
+fn running_page() -> Run {
     page_of(spend_log(), RunScope::Status)
 }
 
@@ -296,7 +295,7 @@ fn counted(files: u32, added: u64, removed: u64) -> Vec<StoredEvent> {
 /// says nothing of it.
 #[test]
 fn a_closing_says_what_the_run_changed() {
-    let row = |page: &Run<'_>| {
+    let row = |page: &Run| {
         draw(page, &Look::plain())
             .lines()
             .find(|line| line.trim_start().starts_with("changed"))
@@ -413,13 +412,13 @@ fn corrected_nodes() -> Vec<NodeFrame> {
 
 /// The status page of a run whose frame holds `nodes`, read at `Depth::Full`
 /// where its trace is drawn.
-fn trace_page(nodes: Vec<NodeFrame>) -> Run<'static> {
+fn trace_page(nodes: Vec<NodeFrame>) -> Run {
     let mut page = page_of(Vec::new(), RunScope::Status);
     page.depth = Depth::Full;
-    page.frame = Box::leak(Box::new(RunFrame {
+    page.frame = RunFrame {
         nodes,
         ..RunFrame::sample(&RUN)
-    }));
+    };
     page
 }
 

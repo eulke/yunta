@@ -2,7 +2,7 @@
 //! reads differently, each with the frame, the state and the decision its
 //! page reads.
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::escalation::Decision;
@@ -50,15 +50,15 @@ pub(crate) fn closing(frame: &RunFrame) -> RunScope {
 }
 
 /// Where the run lives, as every fixture page names it.
-pub(crate) fn places() -> Places<'static> {
+pub(crate) fn places() -> Places {
     Places {
-        run_dir: Path::new("/home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4"),
-        worktree: Path::new("/home/me/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4"),
-        branch: "yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4",
-        base_branch: "main",
+        run_dir: PathBuf::from("/home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4"),
+        worktree: PathBuf::from("/home/me/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4"),
+        branch: "yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4".to_string(),
+        base_branch: "main".to_string(),
         isolation: Isolation::Worktree,
-        cwd: Path::new("/home/me/project"),
-        home: Some(Path::new("/home/me")),
+        cwd: PathBuf::from("/home/me/project"),
+        home: Some(PathBuf::from("/home/me")),
     }
 }
 
@@ -330,18 +330,18 @@ impl Case {
         closing(&self.frame)
     }
 
-    pub(crate) fn page(&self, scope: RunScope, depth: Depth) -> Run<'_> {
+    pub(crate) fn page(&self, scope: RunScope, depth: Depth) -> Run {
         Run {
             scope,
             depth,
-            run_id: &self.run_id,
-            frame: &self.frame,
-            state: &self.state,
+            run_id: self.run_id.clone(),
+            frame: self.frame.clone(),
+            state: self.state.clone(),
             places: places(),
-            decision: self.decision.as_ref().map(|(on, escalation)| Decision {
+            decision: self.decision.clone().map(|(on, escalation)| Decision {
                 on,
                 escalation,
-                shown: &[],
+                shown: Vec::new(),
             }),
             plans: Vec::new(),
         }

@@ -1,0 +1,25 @@
+✓ yunta init · done · in /home/me/project
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+  wrote        .yunta/config.yaml
+  ecosystem    none known (looked for Cargo.toml,
+               package.json, go.mod, pyproject.toml);
+               declare `commands:` and `baseline.suite` by
+               hand
+
+  ✓ claude-code  healthy (2.1.0)
+  ▲ codex        unavailable (not on PATH)
+
+  runners      implementer on claude-code, model opus
+
+for this repo's CLAUDE.md, to paste yourself: Yunta never
+writes to that file
+  This repo uses Yunta for verified workflows. Before implementing
+  something ad hoc, check `yunta list` (or the `list_workflows` MCP
+  tool) for an existing verified workflow that already covers it.
+
+next
+  yunta pack add <source>
+    installs a pack of workflows to run
+  yunta doctor
+    confirms everything above is usable

@@ -110,9 +110,10 @@ a terminal the run asks right away, so you can fix the cause and choose
 `retry` without leaving it; otherwise `yunta resolve-gate <run> retry`
 answers later. A plain `yunta resume` never retries a failed node on its own.
 `yunta resolve-gate` (or the MCP `resolve_gate` tool) answers a decision from
-a completely separate process, and the MCP `answer_questions` tool answers a
-node's questions the same way; either lands on the log and a detached resume
-carries the run on from there. Nothing about a run depends on the process that
+a completely separate process. A node's questions are answered the same way:
+`yunta resolve-gate <run>` at a terminal asks the round as the run itself
+would, and the MCP `answer_questions` tool takes the answers whole. Either
+lands on the log and a detached resume carries the run on from there. Nothing about a run depends on the process that
 started it, or hit the wait, staying alive.
 
 ## Where to go next

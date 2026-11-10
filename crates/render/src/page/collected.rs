@@ -161,7 +161,8 @@ impl Page for Collected {
             (0, true) => Mark::Absent,
             _ => Mark::Caution,
         };
-        let mut headline = Headline::new(mark, command::line(&NextStep::Gc), said);
+        let mut headline =
+            Headline::new(mark, command::line(&NextStep::Gc { dry_run: false }), said);
         if self.problems > 0 {
             headline = headline.fact(format!("{} above", counted(self.problems, "problem")));
         }
@@ -179,7 +180,10 @@ impl Page for Collected {
             .fold(Fields::new(), |rows, (done, what)| rows.push_if(done, what))
             .push_if("now", self.now.clone().unwrap_or_default());
         let steps = match self.dry_run && !self.rows.is_empty() {
-            true => vec![(command::line(&NextStep::Gc), "does what this pass would")],
+            true => vec![(
+                command::line(&NextStep::Gc { dry_run: false }),
+                "does what this pass would",
+            )],
             false => Vec::new(),
         };
         Doc::new()

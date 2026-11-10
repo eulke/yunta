@@ -34,18 +34,18 @@ struct Stopped {
 impl Stopped {
     /// The closing it leaves: its page at a glance, as the process that
     /// drove it draws it.
-    fn page(&self) -> Run<'_> {
+    fn page(&self) -> Run {
         Run {
             scope: closing(&self.frame),
             depth: Depth::Glance,
-            run_id: &self.run_id,
-            frame: &self.frame,
-            state: &self.state,
+            run_id: self.run_id.clone(),
+            frame: self.frame.clone(),
+            state: self.state.clone(),
             places: places(),
-            decision: self.decision.as_ref().map(|(on, escalation)| Decision {
+            decision: self.decision.clone().map(|(on, escalation)| Decision {
                 on,
                 escalation,
-                shown: &[],
+                shown: Vec::new(),
             }),
             plans: Vec::new(),
         }

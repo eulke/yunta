@@ -1,6 +1,6 @@
 //! Every command a reader is told to type, written once: each [`NextStep`] as
-//! the line a person or an agent types, and each action a run offers as that
-//! line beside what it does.
+//! the line a person or an agent types, what each does, and each action a run
+//! offers as that line beside what it does to the run.
 //!
 //! Every surface that tells a reader what to type next writes it here: a page, a
 //! refusal, a pull request's body, the JSON an agent reads. So a phrase met on
@@ -15,7 +15,7 @@
 use surco::doc::Depth;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::step::{Arg, Choice, NextStep, Reach};
-use yunta_core::{NodeId, OptionId, RunId};
+use yunta_core::{NodeId, OptionId, RunId, WorkflowShape};
 use yunta_replay::frame::{Action, Effect};
 
 /// Who copies a command off a line: a person, who reads a run by its handle,
@@ -56,6 +56,10 @@ pub fn line_for(step: &NextStep, reader: Reader) -> String {
         NextStep::Review { run } => format!("yunta review {}", reader.name_of(run)),
         NextStep::Open { run } => format!("yunta open {}", reader.name_of(run)),
         NextStep::Receipt { run } => format!("yunta receipt {}", reader.name_of(run)),
+        NextStep::Stats { run } => format!("yunta stats {}", reader.name_of(run)),
+        NextStep::History { workflow } => format!("yunta stats --workflow {workflow}"),
+        NextStep::Graph { workflow } => format!("yunta graph {}", given(workflow, "<workflow>")),
+        NextStep::RunGraph { run } => format!("yunta graph --run {}", reader.name_of(run)),
         NextStep::Verify { run } => format!("yunta verify {}", reader.name_of(run)),
         NextStep::ResolveGate { run, choice } => resolve_gate(reader.name_of(run), choice),
         NextStep::Run { workflow } => format!("yunta run {}", given(workflow, "<workflow>")),
@@ -63,33 +67,145 @@ pub fn line_for(step: &NextStep, reader: Reader) -> String {
         NextStep::List => "yunta list".to_string(),
         NextStep::ListRuns { reach } => list_runs(*reach),
         NextStep::Schemas => "yunta schema".to_string(),
-        NextStep::Schema { document, json } => {
-            format!(
-                "yunta schema {}{}",
-                given(document, "<document>"),
-                flag(*json, " --json")
-            )
-        }
-        NextStep::Doctor { sessions, full } => {
-            format!(
-                "yunta doctor{}{}",
-                flag(*sessions, " --session"),
-                flag(*full, " --full")
-            )
-        }
+        NextStep::Schema { document, json } => schema(document, *json),
+        NextStep::Doctor { sessions, full } => doctor(*sessions, *full),
         NextStep::Test { dir: None } => "yunta test".to_string(),
         NextStep::Test { dir: Some(dir) } => format!("yunta test --dir {dir}"),
         NextStep::Init => "yunta init".to_string(),
+        NextStep::NewWorkflow { name, shape } => new_workflow(name, *shape),
         NextStep::PackAdd { source } => format!("yunta pack add {}", given(source, "<source>")),
         NextStep::PackUpdate { pack, reference } => {
             format!("yunta pack update {pack} {}", given(reference, "<ref>"))
         }
         NextStep::PackRemove { pack } => format!("yunta pack remove {pack}"),
         NextStep::PackNew { pack } => format!("yunta pack new {pack}"),
-        NextStep::Gc => "yunta gc".to_string(),
+        NextStep::PackList => "yunta pack list".to_string(),
+        NextStep::PackAudit { pack } => format!("yunta pack audit {pack}"),
+        NextStep::Gc { dry_run } => format!("yunta gc{}", flag(*dry_run, " --dry-run")),
         NextStep::Help => "yunta --help".to_string(),
         NextStep::ShowCommit { commit } => format!("git show {commit}"),
     }
+}
+
+/// What `step` does, beside its line where a reader picks one by it: a palette, and
+/// help. Not what an action does to the run it names ([`effect`]), which a run's
+/// page says.
+pub fn does(step: &NextStep) -> &'static str {
+    match step {
+        NextStep::Status { node, depth, .. } => status_does(node.is_some(), *depth),
+        NextStep::Needs => "shows the run waiting on you, and how to answer it",
+        NextStep::Follow { .. } => "follows the run as it moves",
+        NextStep::Resume { .. } => "continues the run from its log",
+        NextStep::Cancel { .. } => "stops the run and everything under it",
+        NextStep::Close { .. } => "closes the run for good",
+        NextStep::Review { .. } => "reads the plan the run waits on, and answers it there",
+        NextStep::Open { .. } => "opens the run's page in a browser",
+        NextStep::Receipt { .. } => "writes the run's verified work receipt",
+        NextStep::Verify { .. } => "checks the run's event chain and its artifacts",
+        NextStep::Stats { .. } => "shows what the run cost",
+        NextStep::History { .. } => "shows what the workflow's past runs cost",
+        NextStep::Graph { .. } => "draws the workflow's graph",
+        NextStep::RunGraph { .. } => "draws the run's graph, each node as its log stands",
+        NextStep::ResolveGate { choice, .. } => resolve_gate_does(choice),
+        NextStep::Run { .. } => "runs the workflow",
+        NextStep::Check { .. } => "checks the workflow, naming each rule it breaks",
+        NextStep::List => "lists the workflows this repository can run",
+        NextStep::ListRuns { reach } => list_runs_does(*reach),
+        NextStep::Schemas => "lists every document yunta shows",
+        NextStep::Schema { json, .. } => schema_does(*json),
+        NextStep::Doctor { sessions, full } => doctor_does(*sessions, *full),
+        NextStep::Test { .. } => "runs the project's workflow test cases",
+        NextStep::Init => "prepares the repository for yunta",
+        NextStep::NewWorkflow { .. } => "writes a new workflow from a skeleton",
+        NextStep::PackAdd { .. } => "installs a pack",
+        NextStep::PackUpdate { .. } => "updates a pack to another reference",
+        NextStep::PackRemove { .. } => "removes a pack",
+        NextStep::PackNew { .. } => "writes the skeleton a new pack starts from",
+        NextStep::PackList => "lists the installed packs, each checked against the lock",
+        NextStep::PackAudit { .. } => "audits everything a pack holds and asks for",
+        NextStep::Gc { dry_run } => gc_does(*dry_run),
+        NextStep::Help => "says what yunta does, and every command it takes",
+        NextStep::ShowCommit { .. } => "shows the commit the run's work is held in",
+    }
+}
+
+/// What a `status` step does: one node whole, or the run at `depth`.
+fn status_does(one_node: bool, depth: Depth) -> &'static str {
+    match (one_node, depth) {
+        (true, _) => "shows one node of the run whole",
+        (false, Depth::Glance) => "says where the run stands",
+        (false, Depth::Full) => "tells the run's whole story",
+        (false, Depth::Dig) => "tells the run's story with every trace it keeps",
+    }
+}
+
+/// What a `resolve-gate` step does, as it chooses.
+fn resolve_gate_does(choice: &Choice) -> &'static str {
+    match choice {
+        Choice::Asked => "puts what the run waits on to you",
+        Choice::Blank | Choice::Picked { .. } => "answers the decision the run waits on",
+    }
+}
+
+/// What listing the runs as far as `reach` does.
+fn list_runs_does(reach: Reach) -> &'static str {
+    match reach {
+        Reach::Repository => "lists this repository's runs, the ones waiting on you first",
+        Reach::WithClosed => "lists this repository's runs, the closed ones too",
+        Reach::Machine => "lists every run on this machine",
+    }
+}
+
+/// What a `schema` step does: shows the document, or prints its JSON Schema.
+fn schema_does(json: bool) -> &'static str {
+    match json {
+        true => "prints the JSON Schema an editor validates against",
+        false => "shows a document's shape",
+    }
+}
+
+/// What a `doctor` step does, as far as its flags reach.
+fn doctor_does(sessions: bool, full: bool) -> &'static str {
+    match (sessions, full) {
+        (true, _) => "opens a session on each agent binding",
+        (false, true) => "checks this machine, every check unfolded",
+        (false, false) => "checks this machine and its agent CLIs",
+    }
+}
+
+/// What a `gc` step does, or would.
+fn gc_does(dry_run: bool) -> &'static str {
+    match dry_run {
+        true => "says what reclaiming would remove, and removes nothing",
+        false => "reclaims the disk of runs past their retention",
+    }
+}
+
+/// `yunta schema`, for `document`, or the JSON Schema of it with `json`.
+fn schema(document: &Arg<String>, json: bool) -> String {
+    format!(
+        "yunta schema {}{}",
+        given(document, "<document>"),
+        flag(json, " --json")
+    )
+}
+
+/// `yunta doctor`, a session opened per binding with `sessions`, every check unfolded
+/// with `full`.
+fn doctor(sessions: bool, full: bool) -> String {
+    format!(
+        "yunta doctor{}{}",
+        flag(sessions, " --session"),
+        flag(full, " --full")
+    )
+}
+
+/// `yunta new`, for the workflow `name`, from the skeleton of `shape` when one is named.
+fn new_workflow(name: &Arg<String>, shape: Option<WorkflowShape>) -> String {
+    let shape = shape
+        .map(|shape| format!(" --shape {}", shape.label()))
+        .unwrap_or_default();
+    format!("yunta new {}{shape}", given(name, "<name>"))
 }
 
 /// `yunta status`, for the run named `run`, one of its nodes, at a depth.

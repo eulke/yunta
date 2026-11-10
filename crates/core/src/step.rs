@@ -7,7 +7,8 @@
 
 use surco::doc::Depth;
 
-use crate::ids::{NodeId, OptionId, PackRef, RunId};
+use crate::ids::{NodeId, OptionId, PackRef, RunId, WorkflowName};
+use crate::WorkflowShape;
 
 /// A command line a person or an agent types, as data: every one Yunta tells a
 /// reader to type, and the git command it points a reader to. Not the CLI's
@@ -38,6 +39,15 @@ pub enum NextStep {
     Open { run: RunId },
     /// `yunta receipt <run>`.
     Receipt { run: RunId },
+    /// `yunta stats <run>`: what a run cost.
+    Stats { run: RunId },
+    /// `yunta stats --workflow <workflow>`: what a workflow's past runs cost.
+    History { workflow: WorkflowName },
+    /// `yunta graph <workflow>`: a workflow's graph, as its file declares it.
+    Graph { workflow: Arg<String> },
+    /// `yunta graph --run <run>`: the graph of the workflow a run froze, each node
+    /// labelled with what the run's log derives for it.
+    RunGraph { run: RunId },
     /// `yunta verify <run>`.
     Verify { run: RunId },
     /// `yunta resolve-gate <run>`, answered as `choice` says.
@@ -61,6 +71,12 @@ pub enum NextStep {
     Test { dir: Option<String> },
     /// `yunta init`: a repository prepared for yunta.
     Init,
+    /// `yunta new <name>`: a new workflow written from the skeleton of `shape`, or
+    /// of the shape `new` picks when none is named.
+    NewWorkflow {
+        name: Arg<String>,
+        shape: Option<WorkflowShape>,
+    },
     /// `yunta pack add <source>`.
     PackAdd { source: Arg<String> },
     /// `yunta pack update <pack> <ref>`.
@@ -72,13 +88,21 @@ pub enum NextStep {
     PackRemove { pack: PackRef },
     /// `yunta pack new <pack>`: the skeleton a new pack starts from.
     PackNew { pack: PackRef },
-    /// `yunta gc`: the disk of runs past their retention, reclaimed.
-    Gc,
+    /// `yunta pack list`: every installed pack, its content checked against the lock.
+    PackList,
+    /// `yunta pack audit <pack>`: everything an installed pack holds and asks for.
+    PackAudit { pack: PackRef },
+    /// `yunta gc`: the disk of runs past their retention, reclaimed; with
+    /// `dry_run`, what would be, said and left alone.
+    Gc { dry_run: bool },
     /// `yunta --help`: what yunta does, and every command it takes.
     Help,
     /// `git show <commit>`: a commit a run's work is held in, by the id a reader meets it under.
     ShowCommit { commit: String },
 }
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod samples;
 
 impl NextStep {
     /// `yunta status <run>`: the run at a glance, the step a reader is pointed

@@ -43,10 +43,12 @@
 //! - What a machine reads: `document`, every versioned JSON document of a
 //!   run, its stats, a decision and a refusal, the same from every command
 //!   and tool.
+//! - A workflow drawn: `graph`, its nodes and edges as Mermaid and as DOT,
+//!   labelled with what a run's log derives when the graph is a run's.
 //! - Every page a command shows, in the one form it takes: `page`, with a
-//!   run's and its nodes', what each command answers, a pack's, the receipt,
-//!   the findings, a gate's page, and what a decision shows: a plan, read at
-//!   its desk, a spec, or any document.
+//!   run's and its nodes', a workflow's graph, what each command answers, a
+//!   pack's, the receipt, the findings, a gate's page, and what a decision
+//!   shows: a plan, read at its desk, a spec, or any document.
 
 pub mod blocks;
 pub mod caution;
@@ -63,6 +65,7 @@ pub mod escalation;
 pub mod evidence;
 pub mod failure;
 pub mod found;
+pub mod graph;
 pub mod inputs;
 pub mod offers;
 pub mod outcome;
@@ -98,6 +101,7 @@ mod tests {
     mod findings;
     mod found;
     mod grant;
+    mod initialized;
     mod inputs;
     mod offers;
     mod publication;

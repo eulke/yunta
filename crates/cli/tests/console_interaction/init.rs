@@ -1,6 +1,94 @@
-//! `yunta init` asking at a terminal.
+//! `yunta init` asking at a terminal: the project's name and base branch, and
+//! each runner its workflows propose, on an adapter this machine answers for.
 
 use super::*;
+
+/// A `PATH` on which no adapter CLI answers, so `init -i` asks no runner and what
+/// a test reads does not depend on the CLIs the machine running the suite has.
+const NO_ADAPTER: &str = "/usr/bin:/bin";
+
+/// A `PATH` on which the one adapter CLI is the scripted `claude`.
+fn only_claude(root: &Path) -> String {
+    let bin = root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(yunta_testkit_core::stubs::claude_code(), bin.join("claude"))
+        .unwrap();
+    format!("{}:{NO_ADAPTER}", bin.display())
+}
+
+/// `init -i` in a fresh repository under `root`, with only `claude` answering,
+/// its name and base branch kept: the terminal at the first runner it asks.
+fn asked_for_a_runner(root: &Path) -> (Terminal, std::path::PathBuf) {
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    yunta_testkit::init_repo(&repo);
+    let home = root.join("state");
+    let path = only_claude(root);
+    let mut terminal =
+        yunta_on_terminal!(&repo, &home, &["init", "-i"], &[("PATH", path.as_str())]);
+    terminal.wait_for("project name", "init never asked for a project name");
+    terminal.keys("\r");
+    terminal.wait_for("base branch", "init never asked for a base branch");
+    terminal.keys("\r");
+    terminal.wait_for(
+        "the adapter `implementer` runs on",
+        "init never asked the runner's adapter",
+    );
+    // A key typed before the list is drawn is no answer to it.
+    terminal.wait_for(
+        &format!("{POINTED}claude-code"),
+        "the adapters that answered were never listed",
+    );
+    (terminal, repo)
+}
+
+/// The runner proposed is put on the adapter picked, with the model typed, and
+/// written declared.
+#[test]
+fn init_declares_a_runner_on_the_adapter_picked_with_the_model_typed() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut terminal, repo) = asked_for_a_runner(root.path());
+    terminal.keys("\r");
+    terminal.wait_for(
+        "the model `implementer` runs",
+        "init never asked the runner's model",
+    );
+    terminal.keys("opus\r");
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+    let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
+    assert!(
+        config
+            .contains("runners:\n  implementer:\n    - adapter: claude-code\n      model: opus\n"),
+        "{config}"
+    );
+    assert!(
+        drawn.contains("implementer on claude-code, model opus"),
+        "{drawn}"
+    );
+}
+
+/// A model left empty leaves the runner proposed, written commented as `init`
+/// writes it unasked.
+#[test]
+fn an_empty_model_leaves_the_runner_proposed() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut terminal, repo) = asked_for_a_runner(root.path());
+    terminal.keys("\r");
+    terminal.wait_for(
+        "the model `implementer` runs",
+        "init never asked the runner's model",
+    );
+    terminal.keys("\r");
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+    let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
+    assert!(
+        config.contains("# runners:\n#   implementer:\n"),
+        "{config}"
+    );
+    assert!(!config.contains("\nrunners:"), "{config}");
+}
 
 #[test]
 fn init_asks_through_the_console_and_honours_escape() {
@@ -14,7 +102,7 @@ fn init_asks_through_the_console_and_honours_escape() {
     yunta_testkit::init_repo(&repo);
     let home = root.path().join("state");
 
-    let mut terminal = yunta_on_terminal!(&repo, &home, &["init", "-i"]);
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["init", "-i"], &[("PATH", NO_ADAPTER)]);
     terminal.wait_for("project name", "init never asked for a project name");
     terminal.keys("orchard\r");
     terminal.wait_for("base branch", "init never asked for a base branch");
@@ -57,7 +145,7 @@ fn init_says_the_value_a_line_left_empty_keeps() {
     yunta_testkit::init_repo(&repo);
     let home = root.path().join("state");
 
-    let mut terminal = yunta_on_terminal!(&repo, &home, &["init", "-i"]);
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["init", "-i"], &[("PATH", NO_ADAPTER)]);
     terminal.wait_for("project name", "init never asked for a project name");
     terminal.keys("\r");
     terminal.wait_for("base branch", "init never asked for a base branch");
@@ -82,7 +170,7 @@ fn ctrl_c_at_init_stops_it_with_nothing_written_or_said() {
     yunta_testkit::init_repo(&repo);
     let home = root.path().join("state");
 
-    let mut terminal = yunta_on_terminal!(&repo, &home, &["init", "-i"]);
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["init", "-i"], &[("PATH", NO_ADAPTER)]);
     terminal.wait_for("project name", "init never asked for a project name");
     terminal.keys("\x03");
 

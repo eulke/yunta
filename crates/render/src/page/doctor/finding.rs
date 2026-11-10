@@ -331,7 +331,7 @@ pub(super) fn checkouts_check(kept: &str, keep: CheckoutsKeep) -> Check {
             .so("the next checkout taken empties the builds past the budget")
             .fix(Fix::said(format!(
                 "run `{}` to empty them now",
-                command::line(&NextStep::Gc)
+                command::line(&NextStep::Gc { dry_run: false })
             ))),
         CheckoutsKeep::Within => check(Found::Holds),
     }

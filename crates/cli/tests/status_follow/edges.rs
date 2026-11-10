@@ -44,7 +44,7 @@ fn block_from(drawn: &str, named: &str) -> String {
 /// it, to the end `yunta run` reaches with the same chain: the successor's
 /// block and code.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/run/follow/following.rs`
 #[test]
 fn a_promotion_is_followed_onto_its_successor() {
     let root = tempfile::tempdir().unwrap();
@@ -175,7 +175,7 @@ fn kinds(home: &Path, id: &str) -> Vec<String> {
 /// A follower only reads. Two of them on one run leave its registry and its
 /// lock as they were, and its log holds what a run nobody followed holds.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/run/follow/following.rs`
 #[test]
 fn two_followers_change_nothing() {
     let root = tempfile::tempdir().unwrap();

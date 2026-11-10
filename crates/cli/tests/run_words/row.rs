@@ -73,8 +73,8 @@ fn the_run(home: &std::path::Path) -> String {
 /// for the same session: what it had said before the follower came, read off
 /// the run's socket, and what it says after.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`,
-/// `crates/cli/src/commands/status/follow/listen.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/run/follow/following.rs`,
+/// `crates/api/src/run/follow/listening.rs`
 #[test]
 fn a_follower_shows_the_row_the_attached_run_shows() {
     let root = tempfile::tempdir().unwrap();

@@ -27,6 +27,9 @@ mod handing_back;
 #[path = "console_interaction/init.rs"]
 mod init;
 
+#[path = "console_interaction/questions.rs"]
+mod questions;
+
 /// What a decision put to a person points at first, by the option it offers first.
 const POINTED: &str = "▸ ";
 

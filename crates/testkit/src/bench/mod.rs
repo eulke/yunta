@@ -166,6 +166,12 @@ impl Bench {
         }
     }
 
+    /// Where this bench's event store lives: what a project that reads the bench's runs
+    /// names as its log.
+    pub fn store_path(&self) -> &std::path::Path {
+        &self.db
+    }
+
     /// A second run in this bench's world: the same worktree, runs root
     /// and event store, under a run id of its own — what a run that
     /// hands something over to the next one needs, since both sides

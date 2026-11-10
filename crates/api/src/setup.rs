@@ -9,7 +9,9 @@ mod init;
 mod skill;
 mod workflow;
 
-pub use init::{DetectedProject, InitializedProject};
+pub use init::{
+    DetectedProject, InitializedProject, ProjectSetup, ProposedRunners, RunnerDeclaration,
+};
 pub use workflow::{WorkflowStem, WrittenWorkflow};
 
 /// A file or a directory `init` or `new` could not write: what it was doing,

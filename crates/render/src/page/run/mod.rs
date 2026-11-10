@@ -25,7 +25,7 @@ mod story;
 
 pub use browser::RunInABrowser;
 
-use std::path::Path;
+use std::path::PathBuf;
 
 use super::Page;
 use crate::command::{self, Reader};
@@ -44,19 +44,19 @@ use yunta_replay::RunState;
 
 /// Where a run lives and where its paths are shown from, as the caller found
 /// them: what a page names that the run's own log does not carry.
-#[derive(Debug, Clone, Copy)]
-pub struct Places<'a> {
-    pub run_dir: &'a Path,
-    pub worktree: &'a Path,
+#[derive(Debug, Clone)]
+pub struct Places {
+    pub run_dir: PathBuf,
+    pub worktree: PathBuf,
     /// The run's own branch.
-    pub branch: &'a str,
+    pub branch: String,
     /// The branch it started from, as its manifest froze it.
-    pub base_branch: &'a str,
+    pub base_branch: String,
     pub isolation: Isolation,
     /// Where paths are shown from: the directory this was run in, and
     /// the home `~` stands for.
-    pub cwd: &'a Path,
-    pub home: Option<&'a Path>,
+    pub cwd: PathBuf,
+    pub home: Option<PathBuf>,
 }
 
 /// Which page a run is drawn as.
@@ -78,32 +78,32 @@ const IN_A_BROWSER: &str = "the whole page, in a browser";
 /// What a page is drawn from: one run as its log derives it, the places
 /// its page names, the decision it waits on, and how much of it a reader
 /// asked for.
-pub struct Run<'a> {
+pub struct Run {
     pub scope: RunScope,
     pub depth: Depth,
-    pub run_id: &'a RunId,
+    pub run_id: RunId,
     /// The run at the instant the page is read at: what drives it, and how
     /// long it has stood where it is, measured there.
-    pub frame: &'a RunFrame,
+    pub frame: RunFrame,
     /// The run as its log derives it; the frame is read from the same log.
-    pub state: &'a RunState,
+    pub state: RunState,
     /// Where the page's paths are shown from, and the tree the run works in.
-    pub places: Places<'a>,
-    pub decision: Option<Decision<'a>>,
+    pub places: Places,
+    pub decision: Option<Decision>,
     /// The change each finished node's accepted plan says it makes, by that
     /// node: the story says it in the node's row, in place of what the node
     /// said last. Empty where the page draws no story.
     pub plans: Vec<(NodeId, String)>,
 }
 
-impl Page for Run<'_> {
+impl Page for Run {
     /// The page as one document, in the order a person reads it for.
     /// Nothing here paints: the surface it is drawn on does.
     fn document(&self, look: &Look) -> Doc {
         let mut doc = Doc::new().with(self.headline()).with(Furrow(
             self.frame.nodes.iter().map(|node| node.standing).collect(),
         ));
-        if let Some(gist) = crate::state::gist(self.frame) {
+        if let Some(gist) = crate::state::gist(&self.frame) {
             doc = doc.with(Gist::new(gist));
         }
         let doc = doc
@@ -123,7 +123,7 @@ impl Page for Run<'_> {
     }
 }
 
-impl Run<'_> {
+impl Run {
     /// What a run parked on a person says when its pause rebuilds no menu
     /// — a scope, an answers file, a review on a forge, a child: that no
     /// option answers it here, so a reader who knows the menus other stops
@@ -211,17 +211,21 @@ impl Run<'_> {
     /// not stand there already. A person who has just watched their terminal
     /// stop is the one who needs telling that nothing holds the answer open.
     fn decided(&self) -> Vec<Block> {
-        let Some(decision) = self.decision else {
+        let Some(decision) = &self.decision else {
             return Vec::new();
         };
         let mut blocks: Vec<Block> = Vec::new();
         // The closing's branch row says where the run works.
-        let shown = surco::paths::shown(self.places.worktree, self.places.cwd, self.places.home);
+        let shown = surco::paths::shown(
+            &self.places.worktree,
+            &self.places.cwd,
+            self.places.home.as_deref(),
+        );
         if !matches!(self.scope, RunScope::Closing { .. })
             && !self.depth.reaches(Depth::Full)
             && shown != "."
         {
-            let tree = escalation::run_tree_line(self.places.worktree);
+            let tree = escalation::run_tree_line(&self.places.worktree);
             blocks.push(Prose(tree).into());
         }
         // A failed node's evidence is quoted above the decision, so the
@@ -232,7 +236,7 @@ impl Run<'_> {
                 .failed()
                 .any(|(node, _)| decision.on.node() == Some(&node.id)),
         };
-        let mut section = decision.section(self.run_id, beside, self.otherwise());
+        let mut section = decision.section(&self.run_id, beside, self.otherwise());
         if matches!(self.scope, RunScope::Closing { .. }) {
             section.blocks.push(
                 Note(
@@ -278,7 +282,7 @@ impl Run<'_> {
         let mut steps = self.offered();
         match (self.scope, self.depth) {
             (RunScope::Closing { .. }, _) => steps.push((
-                command::line(&NextStep::status(self.run_id)),
+                command::line(&NextStep::status(&self.run_id)),
                 "shows the whole run",
             )),
             (RunScope::Status, Depth::Glance) => steps.push((
@@ -304,7 +308,7 @@ impl Run<'_> {
 
     /// The escalation the run stopped on, when the log rebuilds one.
     pub(crate) fn decided_escalation(&self) -> Option<&GateWaitingPayload> {
-        self.decision.map(|decision| decision.escalation)
+        self.decision.as_ref().map(|decision| &decision.escalation)
     }
 
     /// Settled and in-flight spend, split in and out: nothing for a run that

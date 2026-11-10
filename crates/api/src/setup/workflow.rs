@@ -9,29 +9,51 @@
 use std::path::PathBuf;
 
 use yunta_core::refusal::SetupRefusal;
-use yunta_core::{CommandName, ConfigLayer, Workflow, WorkflowShape};
+use yunta_core::{CommandName, ConfigLayer, RunnerName, Workflow, WorkflowShape};
 use yunta_render::page::Diagnosis;
 use yunta_render::refusal::Refused;
 
 use super::SetupUnwritten;
 use crate::{Error, Failure, Judged, Stop, VerdictReach, Workspace};
 
-/// The skeleton of `shape` named `stem`. `lint_declared` says whether the project's
-/// config declares a `lint` command, which a lint-fix skeleton then runs
-/// by name instead of leaving a placeholder.
-fn skeleton(shape: WorkflowShape, stem: &WorkflowStem, lint_declared: bool) -> String {
+/// The skeleton of `shape` named `stem`, as far as the project's `config`
+/// declares what it names: a `lint` command, which a lint-fix skeleton then runs
+/// by name instead of leaving a placeholder, and each runner a node names,
+/// written uncommented where the config declares it.
+fn skeleton(shape: WorkflowShape, stem: &WorkflowStem, config: &ConfigLayer) -> String {
     let template = match shape {
         WorkflowShape::OneNode => ONE_NODE_TEMPLATE,
         WorkflowShape::LintFix => LINT_FIX_TEMPLATE,
         WorkflowShape::Tasks => TASKS_TEMPLATE,
     };
-    let lint = match lint_declared {
-        true => LINT_DECLARED,
-        false => LINT_PLACEHOLDER,
+    let lint = match config.command(&CommandName::from_static("lint")) {
+        Some(_) => LINT_DECLARED,
+        None => LINT_PLACEHOLDER,
     };
+    let planner = RunnerName::from_static("planner");
     template
         .replace("{{workflow-name}}", stem.as_str())
         .replace("{{lint}}", lint)
+        .replace(
+            "{{implementer}}",
+            &runner_line(&RunnerName::PROPOSED, config),
+        )
+        .replace("{{planner}}", &runner_line(&planner, config))
+}
+
+/// The `runner:` line a skeleton's node names `runner` with: uncommented where the
+/// project's `config` declares it, and commented, to uncomment once it does,
+/// where it does not.
+fn runner_line(runner: &RunnerName, config: &ConfigLayer) -> String {
+    let declared = config.runners.as_ref().is_some_and(|runners| {
+        runners
+            .get(runner)
+            .is_some_and(|candidates| !candidates.is_empty())
+    });
+    match declared {
+        true => format!("runner: {runner}  # as the project's config declares it"),
+        false => format!("# runner: {runner}  # uncomment once runners: defines this role"),
+    }
 }
 
 /// The stem a new workflow's file takes: letters, digits, `-` and `_` only,
@@ -79,8 +101,7 @@ impl Workspace {
     ) -> Result<WrittenWorkflow<'_>, Error> {
         let layers = crate::config_layers(&self.dir, &self.env)?;
         let config = ConfigLayer::merge_layers(layers.into_iter().map(|(_, layer)| layer));
-        let lint_declared = config.command(&CommandName::from_static("lint")).is_some();
-        let yaml = skeleton(shape, stem, lint_declared);
+        let yaml = skeleton(shape, stem, &config);
         let workflow = Workflow::parse(&yaml).map_err(|error| {
             Failure::new(SkeletonUnparsed {
                 shape: shape.label(),
@@ -156,9 +177,10 @@ struct SkeletonUnparsed {
 
 // Written as plain literals (not `format!`) so `{{`/`}}` YAML flow-mapping
 // syntax and `{{run.dir}}` template braces stay literal — no escaping
-// gymnastics to get wrong. `{{workflow-name}}` is the one placeholder
-// `skeleton` substitutes; it can't collide with real workflow syntax
-// (no schema key or template looks like it).
+// gymnastics to get wrong. `{{workflow-name}}`, `{{lint}}`,
+// `{{implementer}}` and `{{planner}}` are the placeholders `skeleton`
+// substitutes; none can collide with real workflow syntax (no schema key or
+// template looks like one).
 
 const ONE_NODE_TEMPLATE: &str = "\
 name: {{workflow-name}}
@@ -187,7 +209,7 @@ nodes:
     on_failure: { goto: fix, max_reroutes: 1 }
   - id: fix
     kind: prompt
-    # runner: implementer  # uncomment once runners: defines this role
+    {{implementer}}
     prompt: \"Fix what `lint` reported.\"
 ";
 
@@ -209,13 +231,13 @@ name: {{workflow-name}}
 nodes:
   - id: plan
     kind: prompt
-    # runner: planner  # uncomment once runners: defines this role
+    {{planner}}
     prompt: \"Plan the work and hand over the tasks document.\"
     artifacts:
       produces: [tasks]
   - id: implement
     kind: loop
-    # runner: implementer  # uncomment once runners: defines this role
+    {{implementer}}
     depends_on: [plan]
     until: all_tasks_complete
     prompt: \"Read your next task from the tasks document and implement it.\"

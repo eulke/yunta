@@ -196,7 +196,7 @@ fn no_room(available: u64, need: u64, keep_free: u64) -> String {
 /// What makes room on a disk the checkouts fill: `gc`, the command that
 /// reclaims, among the other ways.
 pub fn make_room() -> String {
-    let gc = crate::command::line(&NextStep::Gc);
+    let gc = crate::command::line(&NextStep::Gc { dry_run: false });
     format!("make room (`{gc}`, close a parked run, or lower `storage.pool.keep_free`)")
 }
 

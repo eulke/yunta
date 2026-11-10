@@ -9,7 +9,7 @@
 
 use surco::components::{ChoiceList, Choices, Legend, TypedAnswer, TypedRow};
 use surco::line::{Line, Tone};
-use yunta_core::{Responder, WorkflowShape};
+use yunta_core::{Responder, RunnerName, WorkflowShape};
 
 pub mod card;
 pub mod desk;
@@ -117,6 +117,20 @@ pub fn keeping(asked: &str, kept: &str) -> Line {
     Line::new()
         .push(Tone::Strong, asked)
         .push(Tone::Muted, format!(" (enter keeps `{kept}`)"))
+}
+
+/// What `init -i` says above the adapters it offers `runner`: the ones this machine
+/// answers for.
+pub fn runs_on(runner: &RunnerName) -> String {
+    format!("the adapter `{runner}` runs on")
+}
+
+/// What `init -i` asks `runner`'s model with: it has no default, since the model is
+/// the project's to choose, and a line left empty leaves the runner to declare later.
+pub fn model_of(runner: &RunnerName) -> Line {
+    Line::new()
+        .push(Tone::Strong, format!("the model `{runner}` runs"))
+        .push(Tone::Muted, " (enter with none leaves it to declare later)")
 }
 
 /// What `new -i` says above the shapes it offers.

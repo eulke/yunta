@@ -74,15 +74,8 @@ pub(crate) async fn workflow_status(
 ) -> Result<String, ToolError> {
     let run_id = required_run_id(args)?;
     let project = plane.workspace.project()?;
-    let reading = project.run(&run_id).await?.reading().await?;
-    let document = yunta_render::document::RunDocument::of(
-        &reading.run.id,
-        &reading.run.events,
-        &reading.state,
-        &reading.run.manifest.doc,
-        &reading.frame,
-        reading.decision.clone(),
-    );
+    let open = project.run(&run_id).await?;
+    let document = open.document(plane.remarks.as_ref()).await?;
     yunta_render::document::to_json_string(&document).map_err(ToolError::Unwritten)
 }
 
@@ -113,7 +106,7 @@ pub(crate) async fn run_workflow(
     let created = admission.create(remarks, &plane.stop).await?;
     let warnings = created.warnings.clone();
     let run_id = created.start_detached(&plane.stop).await?;
-    Ok(std::iter::once(format!("run_id: {run_id}"))
+    Ok(std::iter::once(yunta_render::start::started_id(&run_id))
         .chain(warnings.lines())
         .collect::<Vec<_>>()
         .join("\n"))
@@ -157,9 +150,7 @@ pub(crate) async fn resume_run(
     let open = project.run(&run_id).await?;
     open.refuse_if_driven().await?;
     open.resume_detached().await?;
-    Ok(format!(
-        "run {run_id}: resumed, driving forward independently"
-    ))
+    Ok(yunta_render::start::resumed(&run_id))
 }
 
 /// Records the decision and hands the run back, answering with the sentence
@@ -202,8 +193,8 @@ pub(crate) async fn answer_questions(
         responder: by,
     };
     open.answer(&node, reply).await?;
-    Ok(format!(
-        "run {run_id}: node `{node}` answered, driving forward independently"
+    Ok(yunta_render::page::QuestionsAnswered::sentence(
+        &run_id, &node,
     ))
 }
 
