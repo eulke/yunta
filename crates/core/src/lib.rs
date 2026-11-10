@@ -162,7 +162,7 @@ pub use workflow::{
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
     NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
     RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, Workflow,
-    WorkflowFault,
+    WorkflowFault, WorkflowShape,
 };
 
 /// The schema major this binary speaks — what a

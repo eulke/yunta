@@ -1,0 +1,10 @@
+␛[1;35m▎␛[0m ␛[1;35m◆␛[0m ␛[1mplan `T001` needs a decision␛[0m                                               ␛[2mapprove-plan · A32BZY␛[0m
+␛[1;35m▎␛[0m the tasks document the planner handed over
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[1;35m▸␛[0m ␛[1madjust  ␛[0mBack to `plan`: sends what you say
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[1mwhat should the plan change␛[0m
+␛[1;35m▎␛[0m ␛[2m> ␛[0msplit the second task in two
+␛[1;35m▎␛[0m ␛[31m✗␛[0m this option needs an answer
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[2menter sends it · esc goes back␛[0m

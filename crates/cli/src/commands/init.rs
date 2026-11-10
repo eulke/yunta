@@ -7,11 +7,11 @@
 //! non-interactive with a warning when stdin isn't a TTY: `init` must never
 //! hang waiting for input that isn't coming.
 
-use surco::line::{Line, Tone};
 use surco::look::Look;
 use yunta_render::page::Initialized;
+use yunta_render::prompt::{keeping, Escape, BASE_BRANCH, PROJECT_NAME, USING_DETECTED_DEFAULTS};
 
-use crate::ask::{ask_line, Console, Escape};
+use crate::ask::{ask_line, Console};
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::shell::Shell;
@@ -52,10 +52,7 @@ pub async fn init(
 /// setting that already has a detected value is that value. `None` where
 /// Ctrl-C stopped `init`.
 fn asked(console: &Console, prompt: &str, default: &str) -> Option<String> {
-    let asking = Line::new()
-        .push(Tone::Strong, prompt)
-        .push(Tone::Muted, format!(" (enter keeps `{default}`)"));
-    ask_line(console, &asking, default)
+    ask_line(console, &keeping(prompt, default), default)
 }
 
 /// The project's name and base branch, as `init` answers them: asked on
@@ -74,8 +71,8 @@ fn project_answers(
             // best-effort: the notice informs only; a refused write falls back to the defaults.
             let _ = console.say(&console.escape().said());
             Some((
-                asked(console, "project name", &default_name)?,
-                asked(console, "base branch", &default_branch)?,
+                asked(console, PROJECT_NAME, &default_name)?,
+                asked(console, BASE_BRANCH, &default_branch)?,
             ))
         }
         None => Some((default_name, default_branch)),
@@ -93,7 +90,7 @@ async fn open_console(interactive: bool) -> Option<Console> {
         false => None,
     };
     if interactive && console.is_none() {
-        crate::ask::no_terminal("using detected defaults");
+        crate::ask::no_terminal(USING_DETECTED_DEFAULTS);
     }
     console
 }

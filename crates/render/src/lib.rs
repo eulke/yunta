@@ -25,6 +25,10 @@
 //!   `caution`, `inputs`, `place`, `target`, `policy`, and `progress`, how far
 //!   it has come and where it stands on one line, and `children`, the runs
 //!   it bore, under the nodes that bore them.
+//! - What happened to a run, in order: `chronicle`, what each moment of it
+//!   says, the same on every surface that follows the run; and `watched`,
+//!   the rows a person watches a moving run by: what needs them, each node
+//!   at work with what its session said, and the counters.
 //! - A decision a person meets: `escalation`, `claim`, `evidence`, `offers`
 //!   and `found`.
 //! - What Yunta refuses: `refusal`, the sentences of every refusal over its data.
@@ -32,6 +36,8 @@
 //!   resumed or detached; and `ending`, what a cancel or a close says while it
 //!   stops a run's engine and gives its checkouts back, and what stops it.
 //! - What leaves the terminal: `blocks` and `published`.
+//! - What a prompt says: `prompt`, what Escape does where it opens, the keys a
+//!   list answers to, and what a command says with no terminal to ask on.
 //! - What a reader is told to type: `command`, every command written once,
 //!   and `declare`, what to declare in a project's config.
 //! - What a machine reads: `document`, every versioned JSON document of a
@@ -46,6 +52,7 @@ pub mod blocks;
 pub mod caution;
 pub mod changes;
 pub mod children;
+pub mod chronicle;
 pub mod claim;
 pub mod command;
 pub mod declare;
@@ -64,12 +71,14 @@ pub mod pause;
 pub mod place;
 pub mod policy;
 pub mod progress;
+pub mod prompt;
 pub mod published;
 pub mod refusal;
 pub mod spend;
 pub mod start;
 pub mod state;
 pub mod target;
+pub mod watched;
 
 /// How an instant reads to a person: the day and the minute, in UTC, as a
 /// log's clock keeps it — a limit's reset, when a page was drawn.

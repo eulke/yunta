@@ -17,6 +17,7 @@
 mod attention;
 mod card;
 mod checklist;
+mod choice_list;
 mod concern;
 mod decision;
 mod desk;
@@ -35,13 +36,15 @@ mod runs;
 mod said;
 mod screen;
 mod table;
+mod typed_answer;
 
 pub use attention::{Answer, Attention};
 pub use card::{Card, CardBody, ChoiceRow, Choices, RoundRow, RoundStanding, TypedRow};
 pub use checklist::{Check, Checklist, Fix, Found};
+pub use choice_list::ChoiceList;
 pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};
-pub use desk::{Desk, DeskFoot, FootRow, Pane, RailGroup, RailRow};
+pub use desk::{Desk, DeskFoot, FootRow, Pane, PaneLaid, RailGroup, RailRow};
 pub use diffstat::{Diffstat, FileRow, MoreFiles, COLUMNS};
 pub use document::{Against, Code, Fold, Lead, Marked, Marks, Note, Part, Prose, Section, Title};
 pub use evidence::{Evidence, Whole};
@@ -57,6 +60,7 @@ pub use runs::{Edge, RunLine, Runs};
 pub use said::{PathNote, Paths, Said};
 pub use screen::{Count, Overlay, Region, Screen, Side};
 pub use table::{Cell, Column, Holds, Row, Table};
+pub use typed_answer::TypedAnswer;
 
 #[cfg(test)]
 mod catalog;

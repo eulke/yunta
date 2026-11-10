@@ -20,9 +20,10 @@ use surco::glyphs::Glyphs;
 use surco::look::Look;
 use surco::paint::Paint;
 use yunta_core::RunId;
+use yunta_render::chronicle;
 use yunta_replay::frame::Moment;
 
-use super::{chronicle, write_line};
+use super::write_line;
 
 /// One line per event, written as the event arrives.
 pub(super) struct Lines {
@@ -76,7 +77,7 @@ impl Lines {
             &mut self.out,
             &format!("[{}] {said}", duration(moment.elapsed)),
         );
-        for line in chronicle::evidence(moment, run, &look) {
+        for line in crate::output::blocks_lines(&chronicle::evidence(moment, run), &look) {
             write_line(&mut self.out, &self.paint.line(&line));
         }
     }
@@ -96,7 +97,9 @@ mod pause_reason_tests {
     use yunta_core::{NodeId, QuestionId, RunId};
     use yunta_replay::frame::WaitingOn;
 
-    use super::super::chronicle;
+    use yunta_render::chronicle;
+
+    use super::super::draw::kept;
     use super::Lines;
 
     /// One of every reason a run parks on. The `match` is what keeps it
@@ -260,7 +263,7 @@ mod pause_reason_tests {
             &RunId::from_static("01JQ0000000000000000000000"),
             surco::glyphs::Glyphs::Unicode,
         );
-        (written.text(), chronicle::kept(&moment.happening))
+        (written.text(), kept(&moment.happening))
     }
 
     /// A person choosing an option that goes back is no failure on any surface: the node's
@@ -328,58 +331,5 @@ mod pause_reason_tests {
             assert_eq!(yunta_render::pause::parked_on(&waiting), one_line);
             assert_eq!(yunta_render::pause::parked_in_full(&waiting), one_line);
         }
-    }
-}
-
-/// The line a promotion says when its log names neither a cause nor a
-/// sentence: the mode alone, on the chronicle line every surface writes.
-#[cfg(test)]
-mod promotion_tests {
-    use yunta_core::events::{run, Evidence, Failure, PromotionCause};
-
-    use super::super::chronicle;
-
-    #[test]
-    fn a_promotion_with_no_cause_recorded_reads_as_the_mode_alone() {
-        let promoted =
-            yunta_replay::frame::Happening::Run(run::happening::Happening::PromotionSignaled {
-                to: "ship".into(),
-                cause: None,
-                legacy_reason: None,
-                evidence: Evidence::none(),
-            });
-        let said = chronicle::say(
-            &yunta_replay::frame::Moment::sample(None, promoted),
-            surco::glyphs::Glyphs::Unicode,
-        );
-        assert_eq!(said.text, "run promoted to `ship`");
-    }
-
-    /// The failure a promotion carries is read beside the node whose
-    /// reroutes ran out, after the node and the mode it moves to.
-    #[test]
-    fn a_promotion_says_the_failure_that_exhausted_its_re_routes() {
-        let cause = PromotionCause {
-            node: "lint".into(),
-            goto: "fix-lint".into(),
-            failure: Some(Failure::Message {
-                outcome: "exit 1".into(),
-            }),
-        };
-        let promoted =
-            yunta_replay::frame::Happening::Run(run::happening::Happening::PromotionSignaled {
-                to: "ship".into(),
-                cause: Some(cause),
-                legacy_reason: None,
-                evidence: Evidence::none(),
-            });
-        let said = chronicle::say(
-            &yunta_replay::frame::Moment::sample(None, promoted),
-            surco::glyphs::Glyphs::Unicode,
-        );
-        assert_eq!(
-            said.text,
-            "run promoted to `ship`: node `lint` exhausted its reroutes to `fix-lint` (exit 1)"
-        );
     }
 }

@@ -15,9 +15,12 @@ use crate::paint::Paint;
 use crate::surface::Surface;
 use text::{cell, cell_code_span, code_span, literal, plain_text};
 
+mod asked;
+mod card;
 mod code;
 mod decision;
 mod description;
+mod desk;
 mod diffstat;
 mod fence;
 pub(in crate::surface) mod fold;
@@ -119,6 +122,10 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         Block::Paths(paths) => self::paths(paths),
         Block::Diffstat(stat) => diffstat::diffstat(stat),
         Block::Decision(decision) => decision::decision(decision),
+        Block::Card(drawn) => card::card(drawn),
+        Block::Desk(drawn) => desk::desk(drawn),
+        Block::TypedAnswer(drawn) => asked::typed_answer(drawn),
+        Block::ChoiceList(drawn) => asked::choice_list(drawn),
         Block::Checklist(list) => self::checklist(list),
         Block::Problem(said) => problem::problem(said),
         Block::Refusal(refusal) => problem::refusal(refusal),

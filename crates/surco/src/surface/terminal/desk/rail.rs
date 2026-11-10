@@ -42,6 +42,15 @@ pub(super) fn rail_rows(
     lines.iter().map(|line| fit(line, cells, glyphs)).collect()
 }
 
+/// The rows the rail needs to keep every group, laid out in `cells`: each group's rows and
+/// the blank row after it, as [`kept_lines`] counts what a group costs.
+pub(super) fn rail_length(groups: &[RailGroup], look: &Look, cells: usize) -> usize {
+    groups
+        .iter()
+        .map(|group| group_lines(group, look.glyphs, cells).len() + 1)
+        .sum()
+}
+
 /// The lines of the groups the rail keeps, with a blank row between two of them. A group with
 /// a place to stand on is always kept. The others are kept in order while each fits in what
 /// the places leave, and at the first that does not fit, it and every one after it go.
@@ -258,3 +267,6 @@ fn fit(line: &Line, cells: usize, glyphs: Glyphs) -> Line {
     let spare = cells.saturating_sub(cell_width(&cut.text()));
     cut.plain(" ".repeat(spare))
 }
+
+#[cfg(test)]
+mod tests;

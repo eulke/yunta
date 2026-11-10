@@ -1,11 +1,11 @@
-# Tasks: `control`
+# Tasks: `app-core`
 
-Spec: `SPEC-control.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-09, in four phases.** Base: `34217b5f` (`feature/yunta-tui`, with rmcp 3.9.0 and rusqlite 0.41.1).
+Spec: `SPEC-app-core.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-10, in four phases.** Base: `85f9c8a3` (`feature/yunta-tui`; `92d05277` with control's last checks).
 
 **How these run:**
 - One at a time, with `incremental-implementation` and `test-driven-development`, in four phases, each ending at a checkpoint for the user.
-- Inside a phase, each group of tasks ends at a group check: the suite's groups green, and the digests, captures, documents and answers against the base where the group touches them. A group check does not stop for the user.
-- Inside a phase, the work stops for the user only on a decision that is theirs: a printed text, document or answer that would change, a choice neither the plan nor this list makes, or a failure whose cause is not found.
+- Inside a phase, each group of tasks ends at a group check: the suite's groups green, and the digests and captures against the base where the group touches them. A group check does not stop for the user.
+- Inside a phase, the work stops for the user only on a decision that is theirs: a printed text that would change beyond what this list names, a choice neither the plan nor this list makes, or a failure whose cause is not found.
 - `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`.
 - Before editing a file, `cargo xtask docs --about <files>`; each rule, trap and note it prints is kept true.
 - A commit closes each phase, once the user approves its checkpoint and every step of the `ci` job passes. Paths are staged by name. Then `cargo clean`.
@@ -17,1180 +17,1518 @@ Spec: `SPEC-control.md`. Plan: `tasks/plan.md`. Status: **approved on 2026-11-09
 - A task that moves a file does it with `git mv` before it edits it. A file that is only partly moving is split: the moving part goes, the rest stays.
 - A task that renames or moves is larger than five files: one path to each item means a name and its callers change in one step. Each such step is mechanical, the compiler names every caller, and the moved bodies are read with `git diff -M` against their old files.
 
-**How a command moves to the API:**
-- The API's operation is named as what a person does (the plan's decision 4) and returns data: render's page data, replay's readings, core's types, or the API's own handles. It prints nothing, and it takes nothing from its process.
-- The CLI's command keeps clap, the streams, the prompts and the exit code: it asks the API, then draws render's page or writes render's document.
-- When the MCP server asks for the same thing, its tool calls the same function in the same task.
-- The CLI's `Context` keeps, until its last user moves, only what the commands still outside the API need. It is built from the API's project and deleted with that user (Task 39).
-- No public item of `yunta-api` takes or returns a type of `yunta-engine`, `yunta-storage` or `yunta-adapters`; Task 42 holds it.
+**How a prompt splits** (the plan's decision 1):
+- `yunta-ui` keeps where a prompt stands and what a stroke does there. It writes no sentence.
+- `yunta-render`'s `prompt` takes where it stands, as plain data, and gives back the Surco component, worded.
+- Surco draws the component: in a document, and held at a terminal's height with the cursor.
+- The CLI's `ask` holds it on a terminal.
+
+**Where each test lives:**
+- A stage's own behavior is tested in `crates/ui/tests/`, through `State` alone, or through the `Performer` against a workspace built in the test.
+- Work that spawns Yunta's binary is tested in `crates/cli/tests/`, where `CARGO_BIN_EXE_yunta` exists, driving `yunta_ui` the same way. That work is a run started or resumed detached, and a decision handed to a detached resume.
+- The walk lives in `crates/ui/tests/walk.rs`.
 
 **What fails first:**
-- A move has no new behavior, so no test can fail for it. Its guard is every test and golden it touches, passing unchanged, and the digests, captures, documents and answers of the base (Tasks 1 to 3).
-- A new rule, a new test or a changed text is seen red, for its own cause, before it passes.
+- A move has no new behavior, so no test can fail for it. Its guard is every test and golden it touches, passing unchanged, and the base's digests and captures (Tasks 1 to 3).
+- A new behavior, a new test or a changed text is seen red, for its own cause, before it passes.
 
-## Phase 1: the base, and what moves below the surfaces
+**Decided in this list, beyond the plan, approved by the user with it:**
+- **`yunta resolve-gate` at a terminal answers a run parked on questions with the round** (Task 23).
+  - Today only the attached run, and an agent over MCP's `answer_questions`, can answer it.
+  - The decision stage needs the same reading, and every interface behaves the same.
+  - It changes what `resolve-gate` does on such a run, which the user approved with this list.
+- **What the control plane answers in a sentence is said by render** (Task 24). `run_workflow`, `resume_run` and `answer_questions` build their answers in `yunta-mcp` today. Their text stays the same.
+- **`WorkflowShape` moves to core** (Task 15).
+  - Render says what each shape does, and render cannot read `yunta-api`.
+  - The skeleton each shape writes stays the API's.
+- **The page that shows what setup found, before anything is written, is `page::Setup`** (Task 44). `Detected` is core's.
 
-Its groups, each green before the next: the base; the ports in core; refusals as core data, said by render; what MCP speaks, and the documents.
+## Phase 1: the crate, and the moves that print the same
+
+Its groups, each green before the next: the base; the words to render; every prompt a block; the prompts to `yunta-ui`.
 
 ### Task 1: the proof's tools, pointed at this module
 
 **Description:**
-- `goldens.py`, `pages.sh` and `normalize.py` are copied from `proof/run-pages/` into `.plans/yunta-tui/proof/control/`, unchanged but for their folder. A mask `normalize.py` gains stands for a difference seen between two captures of the base, and says so.
-- `documents.py` writes every JSON document a command writes, each command `Command::json` names with `--json`, over the runs `capture.sh` leaves in a sandbox of its own (finished, failed, gated, capped, parked): `status` of each, `list --runs`, `stats` and `stats --workflow`, `verify`, `receipt`, `open`, `doctor`, `schema` and `schema tasks`; then `run --adapter mock`, a refused run, `resolve-gate`, `resume`, `cancel` and `close`. `status --node` takes no `--json`.
-- `mcp_answers.py` starts `yunta mcp` over stdio in a sandbox of its own, with a run parked on its questions added as `mcp_flow` adds one. It says `initialize`, asks `tools/list`, and calls each tool: `list_workflows`; `workflow_status` on each run and on one nobody has; `document_shape` of four kinds and one Yunta does not read; `answer_questions` refused, then answered; `resolve_gate` refused, on a finished run, then answered; `resume_run`; `run_workflow` of an unknown workflow, then of a bash one. Each answer is kept as sorted JSON with its text unescaped under it.
-- `prints.sh` runs the three into one capture directory, which `normalize.py` compares whole.
+- `goldens.py`, `pages.sh`, `normalize.py`, `documents.py`, `mcp_answers.py` and `prints.sh` are copied from `proof/control/` into `.plans/yunta-tui/proof/app-core/`, unchanged but for their folder.
+- `prompts.py` drives the CLI's prompts at a pseudo-terminal (Python's `pty`) in a sandbox of its own, sending keys and keeping every byte written:
+  - `init -i`, taking the defaults and then typing over them;
+  - `new -i`, picking the second shape after filtering;
+  - `resolve-gate` on a parked gate, moving and choosing an option that asks for words;
+  - `review` on a run parked on a plan, turning the proof and picking by number;
+  - a round of questions, as the attached `yunta run` of a questions workflow asks it.
+- `follow.sh` captures `status --follow` through a pipe, on a finished mock run and on a parked one.
+- `prints.sh` runs them all into one capture directory, which `normalize.py` compares whole.
+
+**Found in its turn:** `goldens.py` covers Surco's goldens too (132 on the base), since this module adds Surco blocks; each prompt and follower capture names its run's whole id, so the handles it shows are masked.
 
 **Fails first:** none: tools.
 
 **Acceptance criteria:**
-- [x] Each tool runs twice on the base and finds nothing between its two runs.
+- [x] Each tool runs twice on the base and finds nothing between its two runs, once normalized.
 
 **Verification:**
-- [x] Manual check: the two runs' outputs differ in no line once normalized.
+- [x] Manual check: `python3 normalize.py` over the two runs prints no difference.
 
 **Dependencies:** None
 
-**Files likely touched:** `.plans/yunta-tui/proof/control/{goldens.py,pages.sh,normalize.py,documents.py,mcp_answers.py,prints.sh}` (outside git)
+**Files likely touched:** `.plans/yunta-tui/proof/app-core/{goldens.py,pages.sh,normalize.py,documents.py,mcp_answers.py,prompts.py,follow.sh,prints.sh}` (outside git)
 
 **Estimated scope:** M
 
-### Task 2: what the base prints and answers
+### Task 2: what the base prints
 
 **Description:**
-- The suite's binaries and tests by name, in `suite.py`'s groups, into `proof/control/base-suite/`.
+- The suite's binaries and tests by name, in `suite.py`'s groups, into `proof/app-core/base-suite/`.
 - Every golden's digest, `digests-base.txt`.
-- A release build, `proof/control/yunta-base`; its size; `prints.sh` from it into `base-1/`, then again into `base-2/`.
+- A release build, `proof/app-core/yunta-base`, and its size. A symbol build, for `tools/size_by_crate.py`.
+- `prints.sh` from the release build into `base-1/`, then again into `base-2/`.
 
 **Fails first:** none: measurements.
 
 **Acceptance criteria:**
-- [x] `base-1` and `base-2` are equal once normalized; the counts are written in `baseline.txt`.
+- [x] `base-1` and `base-2` are equal once normalized; the counts and sizes are written in `baseline.txt`.
 
 **Verification:**
 - [x] Manual check: `python3 normalize.py base-1 base-2` prints no difference.
 
 **Dependencies:** Task 1
 
-**Files likely touched:** `.plans/yunta-tui/proof/control/` (outside git)
+**Files likely touched:** `.plans/yunta-tui/proof/app-core/` (outside git)
 
 **Estimated scope:** S
 
-### Task 3: a real run on the base
+### Task 3: a real run followed on the base
 
 **Description:**
-- fragua, started detached from the base's release binary, on the CLI and model the session-ends runs used (conform on `gpt-6-luna`), stopped before its `pr` node.
-- Its gates answered with `yunta resolve-gate`; its time between nodes and its tokens read from `yunta stats <run>`.
-- The run's id, time and tokens go into `baseline.txt`.
+- fragua is started detached from the base's release binary, on the CLI and model `control`'s runs used (conform on `gpt-6-luna`). It is followed with `yunta status --follow` through a pipe from its start, and stopped before its `pr` node.
+- Its gates are answered with `yunta resolve-gate`. Its time between nodes and its tokens are read from `yunta stats <run>`.
+- The follower's lines, normalized for ids and times, go into `real-base-follow.txt`. The run's id, time and tokens go into `baseline.txt`.
+
+**Found in its turn:** run `01M72VBQBW4PYXA5YQFX8VRA0Q` waited at `ship` after 211 s with nothing asked before it; `between_secs` 0.556 s; 2.91M tokens, 2.21M cached; the follower wrote 176 lines and ended where the run parked (exit 3).
 
 **Fails first:** none: a measurement.
 
 **Acceptance criteria:**
-- [x] The run reaches the node before `pr`; its `between_secs` and tokens are recorded.
+- [x] The run reaches the node before `pr`; the follower ended where the run stopped; `between_secs` and tokens are recorded.
 
 **Verification:**
-- [x] Manual check: `yunta stats <run>` read back from `baseline.txt`: run `HM6VJX` waited at `ship` after 222 s with nothing asked before it; `between_secs` 0.550 s; 2.15M tokens, 1.44M of them cached.
+- [x] Manual check: `yunta stats <run>` read back from `baseline.txt`.
 
 **Dependencies:** Task 2
 
-**Files likely touched:** `.plans/yunta-tui/proof/control/real-base*` (outside git)
+**Files likely touched:** `.plans/yunta-tui/proof/app-core/real-base*` (outside git)
 
 **Estimated scope:** S
 
 ### Group check: the base
-- [x] The base's suite, digests, captures, documents and answers stand, twice equal.
-- [x] The real run's time and tokens are recorded.
+- [x] The base's suite, digests and captures stand, twice equal.
+- [x] The real run's follower lines, time and tokens are recorded.
 
-### Task 4: the person port is core's
+### Task 4: the crate `yunta-ui`
 
 **Description:**
-- The engine's `Asking` is renamed `DecisionAsked` in place, with every caller: `Asking` is replay's registry reading, which a surface reads beside it.
-- `crates/engine/src/human_interaction.rs` moves whole with `git mv` to `crates/core/src/port/person.rs`, a private module: `HumanInteraction`, `QuestionsReply`, `DecisionAsked` and `NoInteraction` each have one path, `yunta_core::port::<item>`, as the session's and the forge's items mostly are read. `core::port`'s `//!` names the port.
-- Its `//!` loses what only the engine can say (its links to the engine's items), and says where the console and the MCP tool implement it.
-- The engine calls it from core and exports none of it. `NoInteraction`, the port with nobody at it, moves with it: it holds no IO and no engine rule, and the engine's tests, the testkit and the API build it.
+- `crates/ui`, package `yunta-ui`, library `yunta_ui`, joins the workspace.
+  - Its manifest names core, replay, render, api, surco and `tokio`, each from the workspace's table.
+  - Its `//!` says what the crate is: the user interface, apart from its medium, writing no sentence and knowing no terminal. Its map grows with each task that adds to it.
+- `crates/ui/tests/no_terminal_in_the_interface.rs` reads the manifest's `[dependencies]` and refuses `crossterm`, `console`, `nix`, `indicatif`, `ratatui`, `yunta-engine`, `yunta-storage` and `yunta-adapters`, naming where such a reading belongs, as `no_engine_in_the_cli.rs` does.
+- The crate is added to the `ci` job's isolation loop and to `tools/gate.sh`'s.
+- `.agents/architecture.md` gains `yunta-ui`'s row and `yunta`'s edge to it. The row's bytes come out of what the file says twice or a `//!` already says. Without such a sentence, the work stops for the user rather than raising the cap.
+
+**Found in its turn:** `yunta`'s row gains `ui` when the CLI first depends on the crate (Task 10), so the table holds its manifests at every task. The row's bytes came from two sentences the API's and `process/mark.rs`'s `//!` already say and from "the CLI and the adapters draw", no longer the whole list: 6,116 of 6,144 bytes.
+
+**Fails first:** the manifest test, with `console` added to the manifest for the run: it fails naming `console`; then `console` comes out.
+
+**Acceptance criteria:**
+- [x] `cargo check -p yunta-ui` passes; the manifest test passes on the real manifest.
+- [x] `cargo xtask docs --check` passes, with the cap unchanged.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-ui`
+- [x] Manual check: the manifest test's message names the crate refused and where its reading belongs.
+
+**Dependencies:** Group check: the base
+
+**Files likely touched:** `Cargo.toml`, `crates/ui/{Cargo.toml,src/lib.rs,tests/no_terminal_in_the_interface.rs}`, `.github/workflows/ci.yml`, `.agents/architecture.md`
+
+**Estimated scope:** M
+
+### Task 5: what a moment of the chronicle says is render's
+
+**Description:**
+- `crates/cli/src/surface/chronicle/` moves to `crates/render/src/chronicle/` with `git mv`: `mod.rs`'s words, `words.rs`, `task_words.rs`, `rail_words.rs`, `scope_words.rs`, `baseline_words.rs`, `format_words.rs`, `capability_words.rs`, and their tests.
+- `Said`, `say`, `says_anything`, `line` and `evidence` become `pub` at `yunta_render::chronicle::<item>`, one path each.
+- `evidence` draws its failure's blocks through `surco::surface::Terminal`, where it called the CLI's `crate::output::blocks_lines`.
+- What a terminal keeps above its region stays in the CLI: `kept` and `graduation` go to `crates/cli/src/surface/scrollback.rs`, the terminal's own history, with the tests that test them (`kept_from_event`'s).
+- `draw.rs` and `lines.rs` call render. Render's map names `chronicle`, and `pause`'s `//!` stops pointing at the CLI.
+
+**Found in its turn:** `kept` and `graduation` went to `surface/draw.rs`, whose `//!` is what a surface keeps and where it puts it, rather than `scrollback.rs`, the writer. `evidence` hands back its blocks, and the CLI draws them: render draws with no surface here. Three tests that held both a sentence and a keeping split by owner; `lines.rs`'s two promotion tests, which test words, moved to render; the long test `draw.rs` held inline, counted once its module became a file, split into one test per promise.
 
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [x] `git grep -n 'yunta_engine::\(HumanInteraction\|QuestionsReply\|Asking\)'` finds nothing; the engine's `lib.rs` names none of them.
-- [x] The suite passes unchanged.
+- [x] `crates/cli/src/surface/chronicle/` is gone; the CLI writes no sentence of a moment.
+- [x] The 26 tests pass under render, but those of `kept`, which pass in the CLI, each by name.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-core -p yunta-testkit`, then `suite.py engine-1..5` and `cli-1..5`.
-- [x] Manual check: `git diff -M --stat` shows the file moved, and its body changed only in paths and the rename.
-
-**Dependencies:** Task 3
-
-**Files likely touched:** `crates/core/src/port/{person.rs,mod.rs}`, `crates/engine/src/{lib.rs,run/ctx.rs,run/escalation.rs,run/mod.rs,run/questions_exec.rs,run/schedule/decision.rs,task_cycle/outcome.rs}`, `crates/cli/src/{human_interaction.rs,ask/form.rs,commands/promote.rs,commands/registry.rs}`, `crates/testkit/src/{interaction.rs,lib.rs}`, eight tests under `crates/engine/tests/`
-
-**Estimated scope:** L (mechanical)
-
-### Task 5: the observer port is core's
-
-**Description:**
-- `crates/engine/src/observer.rs` moves with `git mv` to `crates/core/src/port/observer.rs`: `RunObserver` and `Observed`.
-- `Said`, what one session said, moves from `engine::said` to the same module with its serde shape. `TEXT_MOST` and the bounding of a frame stay with the engine's voices, which cut the text before they hand it on.
-- The `//!`'s list of the sites that append outside the log's door stays true from core: it names them by what they do, not by an engine path core cannot link.
-- The engine keeps serving the words socket; `said::connect` stays the engine's until Task 23 moves its reader.
-
-**Fails first:** none: a move.
-
-**Acceptance criteria:**
-- [x] `git grep -n 'yunta_engine::\(RunObserver\|Observed\|said::Said\)'` finds nothing; the engine exports neither port.
-- [x] `crates/engine/tests/observer.rs` passes unchanged, and so does the suite.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-core -p yunta-engine --test observer`, then the suite's groups.
-- [x] Manual check: the moved body read with `git diff -M`.
+- [x] Tests pass: `cargo test -p yunta-render`, `cargo test -p yunta --bins`, `suite.py cli-1..5`
+- [x] Manual check: `git diff -M --stat`; `render/tests/pure.rs` passes.
 
 **Dependencies:** Task 4
 
-**Files likely touched:** `crates/core/src/port/{observer.rs,mod.rs}`, `crates/engine/src/{lib.rs,said/mod.rs,run_log.rs,run_tools/host.rs}`, `crates/cli/src/surface/{feed.rs,region.rs,view/mod.rs,view/said.rs,mod.rs}`, `crates/cli/src/commands/{drive/watch.rs,status/follow/listen.rs}`, `crates/testkit/src/{observer.rs,bench/*.rs}`
+**Files likely touched:** `crates/cli/src/surface/chronicle/**` → `crates/render/src/chronicle/**`, `crates/cli/src/surface/{mod.rs,draw.rs,lines.rs,scrollback.rs}`, `crates/render/src/{lib.rs,pause.rs}`
 
 **Estimated scope:** L (mechanical)
 
-### Group check: the ports
-- [x] The suite's count equals the base's, by name; every golden's digest equals the base's.
-
-### Task 6: what a check finds is core's
+### Task 6: a moving run's rows are render's
 
 **Description:**
-- `core::check` holds `CheckError` (from `engine/check/error.rs`), `Composition` (from `check/refs.rs`), `Unanswerable` (from `check/sources.rs`) and `UntakenRoute` (from `check/gates.rs`), with their `Display` and their own tests.
-- The engine keeps every check that finds them, and imports them from core.
-- `check/error.rs` moves whole with `git mv`; the other three types are cut from files that keep their checks, each into a module of its own (`composition.rs`, `unanswerable.rs`, `untaken_route.rs`), private, so each item has one path, `yunta_core::check::<item>`.
-- `check/pointer.rs`, where in the workflow file each of them points, moves with them: inherent methods live with their type. Where a node is declared was said twice, in the engine's `check/site.rs` and in `Place::pointer`'s closure; it is said once, `workflow::declared_node`, and `site.rs` goes.
+- `crates/cli/src/surface/view/` (`mod.rs`, `said.rs`, `tests.rs`, `said/tests.rs`) moves to `crates/render/src/watched/` with `git mv`. It holds:
+  - the row that asks for a person (`asked`, `attention`);
+  - each working node's rows with what its session said (`node_rows`, `working`);
+  - the footer and the title, and the answering command.
+- The items the region calls become `pub` at `yunta_render::watched::<item>`. `QUIET_AFTER`, `DETAIL_DEPTH` and `FURROW_LEAST` move with their reasons.
+- The CLI's `region.rs` calls render. Render's map names `watched`.
 
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [x] The engine names the four types only through `yunta_core::check`, and exports none of them.
-- [x] Every check test, and the CLI's refusals, pass unchanged.
+- [x] `crates/cli/src/surface/view/` is gone; its 23 tests pass under render by name.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-core`, `suite.py engine-1..5`, `cli-1..5`.
+- [x] Tests pass: `cargo test -p yunta-render`, `suite.py cli-1..5`
 
 **Dependencies:** Task 5
 
-**Files likely touched:** `crates/core/src/{check/mod.rs,check/error.rs,check/composition.rs,check/unanswerable.rs,check/untaken_route.rs,check/pointer.rs,workflow/place.rs,workflow/mod.rs,lib.rs}`, `crates/engine/src/check/{mod.rs,refs.rs,sources.rs,gates.rs,pointer.rs,site.rs}`, `crates/engine/src/lib.rs`, `crates/cli/src/{commands/verdict.rs,commands/refusals.rs,commands/run.rs,commands/doctor/*.rs,detect/mod.rs,error/page.rs,error/words/*.rs}`
-
-**Estimated scope:** L (mechanical)
-
-### Task 7: a refused gate and a refused close are core's
-
-**Description:**
-- `core::refusal` holds:
-  - `GateRefusal`: `NotPaused`, `NothingToResolve`, `UnknownOption`, `Unsaid` and `Withheld`, the refusals of `ResolveGateError`;
-  - `CloseRefusal`: `AlreadyClosed`, `Driven` and `Moving`.
-- No `ViewFault`: `StoreError`, what an artifact view meets, holds `Object(ObjectProblem)`, already core's data, and `Io`, a failure. A view the store lacks an object for is said from `ObjectProblem`, as it is today.
-- `ResolveGateError` becomes `Refused(GateRefusal)`, `Storage` and `Documents`; `CloseRunError` becomes `Refused(CloseRefusal)`, `Storage` and `Export`. Each refusal's display is still its code, through `Refused`'s.
-- Every match on those variants, in the engine, its tests and the CLI, matches the new shape.
-
-**Fails first:** none: a reshape; the texts are pinned by the CLI's tests.
-
-**Acceptance criteria:**
-- [x] No caller tells a refusal from a failure by listing an error's variants: it matches `Refused(_)`.
-- [x] The suite passes unchanged.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-core`, the engine's `resolve_gate*`, `close*` and `artifact*` targets, then the suite's groups.
-
-**Dependencies:** Task 6
-
-**Files likely touched:** `crates/core/src/{refusal.rs,lib.rs}`, `crates/engine/src/{run/escalation.rs,run/close.rs}`, `crates/cli/src/{error.rs,error/words.rs}`, the engine's tests that match on them
+**Files likely touched:** `crates/cli/src/surface/view/**` → `crates/render/src/watched/**`, `crates/cli/src/surface/{mod.rs,region.rs}`, `crates/render/src/lib.rs`
 
 **Estimated scope:** M
 
-### Task 8: render says every refusal
+### Group check: the words to render
+- [x] The suite's groups green; digests and captures equal to the base's, the follower's capture among them.
+
+### Task 7: the card is a block
 
 **Description:**
-- `crates/render/src/refusal/` takes, with `git mv`, the CLI's `error/words.rs` (as `words.rs`), `error/words/refusals.rs` (as `check.rs`), `error/words/wrapped.rs` and `error/words/tests.rs`: every sentence over what Yunta refuses, said from core's data.
-- One path each: `yunta_render::refusal::{gate, close, moving, hold_unclear, inputs, refused_answer, already_installed, not_installed}` and `yunta_render::refusal::check::{said, line, lacking}`. `resolve_gate` over the engine's error becomes `gate` over `GateRefusal`, and `close` takes `CloseRefusal`.
-- The CLI keeps, in a new `error/words.rs`, only what still reads an engine error: `resolve_gate` and `close` over the engine's errors, which hand a refusal to render and say a failure below it, `documents` and `project_view`. Their three tests stay with them; the API's `Failure` takes them in Phase 2.
-- The words' tests move with them, reading core's types where they read the engine's (`InputsProblem`, not the engine's alias of it).
+- `surco::doc::Block::Card(Card)`.
+- **The terminal draws it two ways.**
+  - In a document, every option shows.
+  - Held, `Card::drawn(look, rows)` becomes `Terminal::held(&Block, rows) -> Placed`, its bytes and cursor as today.
+- **A typed row holds the whole text, split at the cursor.**
+  - The terminal fits it to its room, as the CLI's `Field::parts` and `fitting` did.
+  - The CLI's card and round hand over the whole text where they handed over the fitted parts.
+- **`Markdown` and `Html` draw a card:** its question, edge and about, its choices with the one pointed at, the words being typed, a round's rows, and its legend.
+- Goldens for the three bodies (choosing, saying, a round) in every environment, beside the card's terminal goldens.
 
-**Fails first:** none: the words move; their tests pass unchanged where they now live.
+**Found in its turn:** The catalog of every block gained a card, so its goldens (components/catalog.*, markdown/catalog.md, html/catalog.html) grew by it: every other golden is the base's. A round's card is now built with no look: what a field shows is fitted where it is drawn. The fitting is `TypedRow::fitted`, in Surco's terminal module `typed`, with the two tests that held it in the CLI.
+
+**Fails first:** the card's `Markdown` and `Html` goldens (no drawing yet), and a card in a document drawn whole by the terminal.
 
 **Acceptance criteria:**
-- [x] Render holds every sentence over what Yunta refuses; the CLI's `error::words` holds only sentences over an engine error.
-- [x] The words' tests pass in render, unchanged but for the types they build.
+- [x] `crates/surco/goldens/card/` holds its five terminal goldens unchanged and the new ones; the terminal's card and round tests pass unchanged.
+- [x] The CLI's prompts' captures equal the base's.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-render`; the CLI's binaries and `check`, `close_cmd`, `gate_review_cmd`, `gate_withheld_cmd`, `pack_cmd`, `pack_requires_doctor_cmd`, `parked_runs` and `run_flow`.
-- [x] Manual check: each moved function read with `git diff -M` against its old body.
+- [x] Tests pass: `cargo test -p yunta-surco --features golden`, `cargo test -p yunta --bins`
+- [x] Manual check: the new goldens read as a card would in a browser and a Markdown file.
+
+**Dependencies:** Group check: the words to render
+
+**Files likely touched:** `crates/surco/src/{doc.rs,components/card.rs,surface/terminal/{mod.rs,card.rs,card/round.rs},surface/markdown/mod.rs,surface/html/blocks.rs}`, `crates/surco/goldens/card/`, `crates/cli/src/ask/{field.rs,card.rs,form.rs}`
+
+**Estimated scope:** L
+
+### Task 8: the desk is a block
+
+**Description:**
+- `surco::doc::Block::Desk(Desk)`.
+- **The terminal draws it two ways.**
+  - In a document: its title, its rail as a list, its whole pane, and its foot.
+  - Held: `Desk::drawn(look, rows)` becomes the held drawing, at the exact width the CLI's `PlanDesk::look` asked for, its bytes as today.
+- **What a held desk laid out is `surco::components::PaneLaid { top, page, most }`.** `LaidDesk` carries it beside its `Placed`, as a surface reports it to the model.
+- **`Markdown` and `Html` draw a desk,** and goldens of the desk are added in every environment: the terminal had none.
+
+**Found in its turn:** A desk's pane held lines render had laid out at a terminal's pane measure, so a desk's model needed the terminal's exact width and a page drew it as a terminal's transcript. The pane now holds its `Doc` (`Pane::doc`), and whether the row a pointer stands on stays in sight (`follows_pointer`): the terminal lays it out at the pane's measure and finds the pointer there, as render did, so render's desk goldens are unchanged byte for byte; Markdown and HTML draw it as the document it is. `Placed` carries what a held desk laid out of its pane (`PaneLaid`); `LaidDesk` is gone. Under 90 columns a desk in a document has no rail, as a held one has none.
+
+**Fails first:** the desk's goldens, in every environment.
+
+**Acceptance criteria:**
+- [x] The terminal's desk tests pass unchanged; the CLI's `review` capture equals the base's.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-surco --features golden`, `cargo test -p yunta --bins`
 
 **Dependencies:** Task 7
 
-**Files likely touched:** `crates/render/src/{refusal/mod.rs,refusal/words.rs,refusal/check.rs,refusal/wrapped.rs,refusal/tests.rs,lib.rs}`, `crates/cli/src/{error.rs,error/words.rs,error/words/tests.rs,error/page.rs,commands/doctor/packs.rs,commands/pack.rs,commands/run.rs}`
+**Files likely touched:** `crates/surco/src/{doc.rs,components/desk.rs,surface/terminal/desk.rs,surface/markdown/mod.rs,surface/html/blocks.rs}`, `crates/surco/goldens/desk/`
 
-**Estimated scope:** L (mechanical)
+**Estimated scope:** M
 
-### Task 9: the CLI carries render's refusal
+### Task 9: the typed answer and the choice list are blocks
 
 **Description:**
-- `yunta_render::refusal::Refused`, in `refusal/refused.rs`, is one refusal as a value: `UnknownRun`, `AmbiguousRun` with its `Candidate`s (moved from `run_ref`, which hands it the glyphs), `Gate`, `Close`, `Answers`, `Moving`, `Asking`, `HoldUnclear`, `Inputs`, `SurfaceAnswer`, `Object`, `Document`, `Unrunnable` and `UnknownDocument`. It says itself to a `Reader` (`said`), says what goes on (`advice`), gives the blocks under it, and is a `Page`.
-- A reply to a node's questions the run refuses was an engine error too: `core::refusal::AnswersRefusal` (`NothingAsked`, `Rejected(Report)`), and `AnswerQuestionsError` carries it as `Refused(_)` beside `Unreadable`, `Write`, `Render` and `Storage`, saying what it said.
-- `CliError::Refused(Refused)` replaces `RunNotFound`, `NotPaused`, `NoMenu`, `CloseRefused`, `RunMoving`, `RunAsking`, `RunHoldUnclear`, `AmbiguousRun`, `Document`, `Unrunnable` and `UnknownDocument`. A refusal inside `RunError`, `ManifestError` or `AnswerQuestionsError` becomes it in their `From`; `CliError::from_gate` and `from_close` take the run a gate's or a close's refusal names. What stays an engine type in `CliError` is a failure below a refusal, until the API's `Failure` in Phase 2.
-- `carried_words` keeps only failures; `headline_for_a_person`, `blocks` and the sentences of refusals are render's; the CLI's page delegates a refusal to render's and says a failure.
-- The page helpers that build render's data from core's go to render: `blocks::diagnostic::document_problems`, `refusal::check::problem` and `refusal::unrunnable`.
-- Two smells this raised are brought down where their seam shows: `CheckError::node_pointer` splits into it and `setting_pointer`, and the engine's `escalation` tests keep what `resolve_gate` refuses in `escalation/refused.rs`.
+- **`surco::components::TypedAnswer { asked: Line, typed: TypedRow }`, as `Block::TypedAnswer`:** a line asked and the answer typed under it, which `ask_line` draws.
+- **`surco::components::ChoiceList { choices: Option<Choices>, filter: Option<String>, legend: Legend }`, as `Block::ChoiceList`:** what `choose` draws through `narrowed`.
+- **The terminal draws each in a document and held,** their held bytes and cursor as `LineAsked::drawn` and `Picker::drawn` draw them today. `Markdown` and `Html` draw them, with goldens.
 
-**Fails first:** none: every refusal's text is pinned by the CLI's tests, the captures, the documents and the answers.
+**Found in its turn:** `Terminal::held` holds every prompt block; the line asked and the picker draw through it, and the list's `AROUND` went to Surco with them. A test that sizes a short terminal names its rows. Split test files are named `tests.rs`, beside the module they test, since the smell counters read any other file under `src` as production code.
+
+**Fails first:** the two blocks' goldens.
 
 **Acceptance criteria:**
-- [x] `CliError` names no engine type for a refusal: a refusal reaches it only as `Refused`.
-- [x] Every refusal's text, in the tests and the captures, equals the base's.
+- [x] The `init -i` and `new -i` captures equal the base's.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-render`; the engine's `parked_answers` and `escalation`; the CLI's binaries and `check`, `close_cmd`, `gate_review_cmd`, `gate_withheld_cmd`, `pack_cmd`, `parked_runs`, `run_ref_cmd`, `mcp_flow`, `run_flow`, `three_questions`, `status_cmd`, `integration`, `command_output` and `schema_cmd`.
-- [x] Manual check: a release build's captures, documents and answers against `base-1`, with `normalize.py`.
+- [x] Tests pass: `cargo test -p yunta-surco --features golden`, `cargo test -p yunta --bins`
 
 **Dependencies:** Task 8
 
-**Files likely touched:** `crates/core/src/{refusal.rs,check/pointer.rs,lib.rs}`, `crates/engine/src/answers.rs`, `crates/engine/tests/{escalation.rs,escalation/refused.rs}`, `crates/render/src/{refusal/refused.rs,refusal/mod.rs,refusal/words.rs,refusal/check.rs,blocks/diagnostic.rs}`, `crates/cli/src/{error.rs,error/page.rs,error/hold.rs,commands/run_ref.rs,commands/verdict.rs,commands/check.rs,commands/registry.rs,commands/run.rs,commands/list/mod.rs,commands/pack/scaffold.rs,commands/close.rs,commands/resolve_gate.rs,commands/test/case.rs,context.rs,main.rs}`
+**Files likely touched:** `crates/surco/src/{doc.rs,components/mod.rs,components/typed_answer.rs,components/choice_list.rs,surface/terminal/{mod.rs,card.rs},surface/markdown/mod.rs,surface/html/blocks.rs}`, `crates/surco/goldens/{typed_answer,choice_list}/`
 
 **Estimated scope:** L
 
-### Group check: the refusals
-- [x] Every refusal's text is the same, through the CLI's tests and the captures.
-- [x] The suite's count equals the base's, by name, but for the tests that moved with their words.
+### Group check: every prompt a block
+- [x] The suite's groups green; the goldens equal the base's but the new ones; every prompt's capture equals the base's.
 
-### Task 10: `yunta-mcp-protocol`
+### Task 10: a stroke, a press and an answerable prompt are `yunta-ui`'s
 
 **Description:**
-- `crates/mcp-protocol`, package `yunta-mcp-protocol`, library `yunta_mcp_protocol`, depending on `rmcp` and nothing in the workspace.
-- Its root takes `crates/engine/src/mcp.rs` with `git mv`: `tool_list`, and the `//!` that says why every MCP server of Yunta answers one shape.
-- The engine's per-run tools and the CLI's control plane call it; `engine::mcp` is gone.
-- `.agents/architecture.md`'s crate table gains its row, and the CI's and the gate's crate-by-crate check name it. The file stands at 6,142 of its 6,144 bytes: the note under the table that the first product rule and its test already say goes.
+- `Stroke` moves from `ask/keys.rs` to `crates/ui/src/prompt/stroke.rs`. `Strokes`, which reads a `console::Key`, stays, with its bracketed paste and its six tests.
+- `Press<T>` moves from `ask/held.rs` to `crates/ui/src/prompt/press.rs`.
+- **The terminal-free half of `Held` becomes `yunta_ui::prompt::Answerable`.**
+  - It has `type Answer`, `press`, `typing`, `block(&self, look) -> Block`, and `laid(&mut self, PaneLaid)`, whose default does nothing.
+  - `Held::look` goes: the held desk is drawn at its exact width by Surco.
+- **The CLI's `hold<P: Answerable>`** draws `Terminal::held(&prompt.block(look), rows)`, and hands a desk what it laid out.
+- The five prompts, still in the CLI, implement `Answerable`. Each `block` returns its component as a block, worded as it is today.
+- The CLI depends on `yunta-ui`.
+
+**Found in its turn:** `Terminal::held` takes the terminal's columns too: a desk is held at the terminal's exact width, which `Held::look` gave it before, so the loop knows nothing of desks; the CLI's test of that width moved to Surco as `a_held_desk_is_as_wide_as_the_terminal`. With `laid` in place, the desk's `Cell<Seen>` went in this task: it keeps the `PaneLaid` it was handed, and its tests hand it back as the loop does. A shown document in the desk's pane is built with the look it is given: no page of one reads the width.
 
 **Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [x] The engine's `[dependencies]` name `yunta-mcp-protocol`; nothing names `yunta_engine::mcp`.
-- [x] `run_tools`, `tool_names`, `mcp_flow` and the adapters' tests pass unchanged; `cargo xtask docs --check` passes.
+- [x] `ask/held.rs` holds only `hold`, `Quiet`, `Place` and their arithmetic; its three tests pass.
+- [x] Every prompt's capture equals the base's.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-mcp-protocol`; `cargo check -p yunta-mcp-protocol` alone; the engine's `run_tools`, `tool_names`, `mcp_context` and `run_tool_refusal`; the CLI's `mcp_flow` and `rail_cmd`.
+- [x] Tests pass: `cargo test -p yunta-ui`, `cargo test -p yunta --bins`, `suite.py cli-1..5`
 
-**Dependencies:** Task 9
+**Dependencies:** Group check: every prompt a block
 
-**Files likely touched:** `Cargo.toml`, `crates/mcp-protocol/{Cargo.toml,src/lib.rs}`, `crates/engine/{Cargo.toml,src/lib.rs,src/run_tools/session.rs}`, `crates/cli/{Cargo.toml,src/commands/mcp.rs}`, `.agents/architecture.md`, `.github/workflows/ci.yml`
-
-**Estimated scope:** M
-
-### Task 11: the branch a run works on is core's
-
-**Description:**
-- `run_branch` and the prefix of every run's branch move from `engine/worktree/branches.rs` to core, beside `RunId`'s handle: `run_id.branch()` and `RunId::BRANCHES`, a name every crate reads the same way, which needs no IO.
-- The engine names the branch from core; the documents of Task 12 and the CLI's pages read it there.
-
-**Fails first:** none: a move.
-
-**Acceptance criteria:**
-- [x] `git grep -n 'yunta_engine::run_branch'` finds nothing; the suite passes unchanged.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-core --lib`; the engine's library and `git`, `resume_worktree` and `checkout_pool_shared`; the CLI's `run_checkouts`, `status_cmd` and `run_flow`.
-
-**Dependencies:** Task 9
-
-**Files likely touched:** `crates/core/src/ids/run.rs`, `crates/engine/src/{worktree/branches.rs,lib.rs}`, `crates/cli/src/{commands/drive.rs,commands/run.rs,commands/status/mod.rs,json/facts.rs}`
-
-**Estimated scope:** M (mechanical)
-
-### Task 12: a run's JSON documents are render's
-
-**Description:**
-- `crates/render/src/document/` takes, with `git mv`, the CLI's `json/` and the documents it is built of: `commands/stats/json.rs` (as `stats.rs`) and `commands/status/decision_json.rs` (as `decision.rs`); `ErrorDocument` and `NextCommand` leave `output/mod.rs` for `document/error.rs`. Every document carries its `schema_version`, from render's page data and replay's.
-- The code a run's word maps to is part of what a document says, so it is said once there, `document::exit_code`; the CLI's `exit()` reads its outcome off it, and an interrupted invocation is `Outcome::interrupted()`.
-- What reads the engine (`decision_of`, `shown_of`) stays the CLI's, in `commands/status/decision.rs`, until Task 21 reads a run through the API. The field's rows take the glyphs the CLI hands them, as they took the process's before.
-- Each command's own answer document (`CancelAnswer`, `CloseAnswer`, `DoctorAnswer`, `ListRunsAnswer`, `ResolveGateAnswer`, `VerifyAnswer`) moves to `render::document` with the task that takes its command to the API: its fields are read off what the API returns.
-
-**Fails first:** none: a move.
-
-**Acceptance criteria:**
-- [x] Render holds a run's documents and their parts; the CLI has no `json` module.
-- [x] The documents and the MCP answers equal the base's, byte for byte once normalized.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-render`; the CLI's binaries and `status_cmd`, `stats_cmd`, `run_flow`, `mcp_flow`, `run_inbox_cmd`, `verify_cmd`, `receipt_cmd`, `detected_cmd`, `command_output`, `run_words`, `parked_runs` and `stalled_runs`.
-- [x] Manual check: a release build's documents and answers against `base-1`.
-
-**Dependencies:** Tasks 10, 11
-
-**Files likely touched:** `crates/render/{Cargo.toml,src/lib.rs,src/document/*.rs}`, `crates/cli/src/{main.rs,output/mod.rs,output/exit.rs,commands/status/mod.rs,commands/status/decision.rs,commands/stats/mod.rs,commands/drive.rs,commands/list/inbox.rs}`, the commands that name a document
+**Files likely touched:** `crates/ui/src/{lib.rs,prompt.rs,prompt/{stroke.rs,press.rs,answerable.rs}}`, `crates/cli/Cargo.toml`, `crates/cli/src/ask/{held.rs,keys.rs,mod.rs,card.rs,desk.rs,form.rs,field.rs,menu.rs}`
 
 **Estimated scope:** L (mechanical)
 
-### Checkpoint A: below the surfaces
-- [x] The ports, the refusals' data, what MCP speaks and the documents stand below every surface, and no engine exports them.
-- [x] The JSON documents and the MCP answers, byte for byte; every refusal's text the same; the suite's count equals the base's, by name, but for the tests that moved with what they test.
-- [x] The user reviews; the phase commits, with `SPEC-control.md`, `CAPABILITY-MAP.md`, `tasks/plan.md` and `tasks/todo.md`: approved on 2026-11-09.
-
-## Phase 2: `yunta-api`, its workspace, and reading through it
-
-Its groups, each green before the next: the crate and its workspace; reading through the API.
-
-### Task 13: the crate, its workspace, its stop and its errors
+### Task 11: what Escape does, and the words every prompt shares, are render's
 
 **Description:**
-- `crates/api`, package `yunta-api`, library `yunta_api`, with the dependencies the plan's decision 2 names; its root's `//!` maps the crate by the subjects of decision 4.
-- `workspace.rs`: `Workspace`, the six fields of decision 3. `stop.rs`: `Stop`, its two stages, and the engine's `Supervision` built from it inside the crate.
-- `error.rs`: `Error { Refused(Refused), Failed(Failure), Stopped }`; `Failure` boxes the cause and says its chain as the CLI's `describe` says it.
-- `.agents/architecture.md`'s table gains the row; the crate names what it uses so far (core, render, and the engine from Task 15), and the CI's and the gate's crate-by-crate check name it. The file stands at its budget: a few rows and sentences say the same facts in fewer words.
+- `Escape` (`Parks`, `LeavesWaiting`, `KeepsDefault`, `TakesTheFirst`), with `said` and `does`, moves to `yunta_render::prompt::Escape`.
+- `ESC`, `ANSWER` and `FOLDED`, and `list_legend`, move to render's `prompt`.
+- `no_terminal`'s sentence moves to render. Its fallbacks are said there too: "using detected defaults", "defaulting to `one-node`".
+- Every caller names render's.
 
-**Fails first:**
-- `Failure`'s words: a test that a store failure wrapped twice says the same line `describe` says for it today, red until `Failure` says its chain.
-- `Stop`: a test that stopping cancels what runs and leaves the abort standing, and that aborting cancels both, red until `Stop` holds two tokens.
+**Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [x] The crate builds with no public item that takes or returns an engine, store or adapter type.
-- [x] Both tests pass; `cargo xtask docs --check` passes.
+- [x] `git grep -n 'enum Escape' crates/cli` finds nothing; the prompts' captures equal the base's.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`.
+- [x] Tests pass: `cargo test -p yunta-render`, `cargo test -p yunta --bins`
 
-**Dependencies:** Checkpoint A
+**Dependencies:** Task 10
 
-**Files likely touched:** `Cargo.toml`, `crates/api/{Cargo.toml,src/lib.rs,src/workspace.rs,src/stop.rs,src/error.rs}`, `.agents/architecture.md`
+**Files likely touched:** `crates/render/src/{lib.rs,prompt.rs}`, `crates/cli/src/ask/{mod.rs,field.rs,menu.rs,card.rs,desk.rs,form.rs,decision.rs}`, `crates/cli/src/commands/{init.rs,new.rs,review.rs,resolve_gate.rs}`, `crates/cli/src/human_interaction.rs`
 
-**Estimated scope:** M
+**Estimated scope:** L (mechanical)
 
-### Task 14: the shell reads the process once
+### Task 12: the typed line and the picker are `yunta-ui`'s
 
 **Description:**
-- `crates/cli/src/shell.rs` replaces `context.rs`'s reading of the process: the directory, `Env`, the clock, the id source, the secrets, the binary (`current_exe`), and the interrupt, which gives the `Stop`. It builds the `Workspace` and the `Stop` once.
-- `main.rs` builds the shell first; the terminal's variables it reads for the look come from the shell's `Env`.
-- `process_env()` (five callers), `process_clock()`, `own_binary()`, `time_until`'s own clock and the `current_dir` reads in `init`, `list`, `new`, `pack`, `pack/scaffold` and `test` go: each takes the workspace.
-- The MCP server reads its directory once when it starts, not at each call: it holds a shell that shares the stages.
-- `main`'s reads go there too: `shell::environment()` and `shell::arguments()`. The router reads the shell once for every command, `completions`, `schema` and the rail hook included, so no arm can read it twice and none is left without it; `route` holds the arms, and no command answers the field.
-- The CLI's interrupt trips the API's `Stop`; the context is `Context::of(shell)` or `Context::in_dir(shell, dir)`, its clock and ids the workspace's `Arc`s, its binary the shell's. `system_clock_outside_boundary` allows `shell.rs` in place of `context.rs` now, since the clock is built there.
+- `ask/field.rs`'s model moves to `crates/ui/src/prompt/typed_line.rs`. `Field` is renamed `TypedLine`: `Field` is render's page and Surco's row. `Typed` and `Edit` keep their names.
+- `LineAsked` moves to `prompt/line_asked.rs`. Its block is render's `prompt::typed_answer`.
+- `Picker<T>` moves to `prompt/picker.rs`, and `Choice<T>` is renamed `Alternative<T>`: `Choice` is core's `step::Choice`. Its block is render's `prompt::choice_list`, with its legend's words.
+- The CLI's `ask_line` and `choose` hold them.
 
-**Fails first:** none: the same values reach the same places.
+**Found in its turn:** What the CLI keeps of the two files is in `ask/line.rs` (`ask_line`) and `ask/choose.rs` (`choose`), named for the calls that hold them. `LineAsked` owns the line it asks, so it is a prompt any surface holds. The picker's list and filter are public while the round that reads them is the CLI's (Task 13).
+
+**Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [x] `git grep -n 'current_dir()\|current_exe()\|process_env\|process_clock\|args_os' -- crates/cli/src` finds only `shell.rs`.
-- [x] The suite passes unchanged.
+- [x] The eight tests of the typed line and the eleven of the picker pass under `yunta-ui` by name.
+- [x] The `init -i` and `new -i` captures equal the base's.
 
 **Verification:**
-- [x] Tests pass: `suite.py cli-1..5`.
+- [x] Tests pass: `cargo test -p yunta-ui`, `cargo test -p yunta --bins`, `suite.py cli-1..5`
+
+**Dependencies:** Task 11
+
+**Files likely touched:** `crates/ui/src/prompt/{typed_line.rs,line_asked.rs,picker.rs,picker/tests.rs}`, `crates/render/src/prompt.rs`, `crates/cli/src/ask/{field.rs,menu.rs,mod.rs}`, `crates/cli/src/commands/new.rs`
+
+**Estimated scope:** L (mechanical)
+
+### Task 13: the round is `yunta-ui`'s
+
+**Description:**
+- `ask/form.rs`'s model moves to `crates/ui/src/prompt/round.rs`, and `Settled` is renamed `SettledAnswers`: `Settled` is core's.
+- Its words move to render's `prompt::round`: `SKIP`, `NOTHING_KEPT`, its legend, `said_of`, `note`, `shown`, `violations`. The round hands render where it stands, and render builds its `Card`.
+- The CLI's `answer` holds it.
+
+**Found in its turn:** Render's `prompt::round` builds the round's card (`card`, `legend`) and says its words (`SKIP`, `NOTHING_KEPT`, `note`, `boolean`); the model hands it the rows and where it stands. The CLI keeps `answer` in `ask/round.rs`. `yunta-ui` gains a dev-dependency on core's `testkit` for the samples its tests build.
+
+**Fails first:** none: a move.
+
+**Acceptance criteria:**
+- [x] The nineteen tests of the round pass under `yunta-ui` by name; the round's capture equals the base's.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-ui`, `cargo test -p yunta-render`, `suite.py cli-1..5`
+
+**Dependencies:** Task 12
+
+**Files likely touched:** `crates/ui/src/prompt/{round.rs,round/tests.rs}`, `crates/render/src/prompt/round.rs`, `crates/cli/src/ask/{form.rs,mod.rs}`, `crates/cli/src/human_interaction.rs`
+
+**Estimated scope:** L (mechanical)
+
+### Task 14: the decision card is `yunta-ui`'s
+
+**Description:**
+- `ask/card.rs`'s model moves to `crates/ui/src/prompt/decision_card.rs`, and `Answer` is renamed `PickedOption`: `Answer` is core's (questions) and Surco's (attention). `Reply` keeps its name.
+- Its words move to render's `prompt::card`: `NEEDS_WORDS`, `A_NOTE`, and the legend's "move", "chooses", "adds a note", "reads the plan", "sends it", "records it" and "goes back".
+
+**Found in its turn:** Render's `prompt::card` says the card's keys (`choosing_legend`, `saying_legend`) and builds the words being said (`saying`, with `NEEDS_WORDS` and `A_NOTE`).
+
+**Fails first:** none: a move.
+
+**Acceptance criteria:**
+- [x] The card's twelve tests pass under `yunta-ui` by name; the `resolve-gate` capture equals the base's.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-ui`, `suite.py cli-1..5`
 
 **Dependencies:** Task 13
 
-**Files likely touched:** `crates/cli/src/{shell.rs,context.rs,main.rs,project.rs,cli/dispatch.rs,commands/init.rs,commands/list/mod.rs,commands/new.rs,commands/pack.rs,commands/pack/scaffold.rs,commands/test/mod.rs,commands/mcp.rs}`
+**Files likely touched:** `crates/ui/src/prompt/{decision_card.rs,decision_card/tests.rs}`, `crates/render/src/prompt/card.rs`, `crates/cli/src/ask/{card.rs,decision.rs,mod.rs}`
 
-**Estimated scope:** L (mechanical)
+**Estimated scope:** M
 
-### Task 15: a project is the API's
+### Task 15: the desk is `yunta-ui`'s, and a shape is core's
 
 **Description:**
-- `Workspace::project()` returns `yunta_api::Project`, from `crates/cli/src/project.rs` and `context.rs`: the config layers, the roots, the store's path, a run's directory, the pool and tree a run uses, and the layers `yunta schema`'s config reading names.
-- `ProjectError`'s cases become the API's: a missing state root and an unreadable layer are failures; none is a refusal today.
-- Measured: resolving a project says nothing on the way, so `Remarks` is born with its first sayer, an estimate's caution (Task 25).
-- `Workspace::project()` and `project_at(dir)` resolve it; `config_layers(dir, env)` reads the layers `yunta check` names. The project holds the user root it was resolved under, so finding a run reads no environment.
-- The pool a run takes its trees from is the engine's, so it stays on the CLI's context (`Context::pool_of`) until the run path moves; `bound_checkout` was a wrapper of replay's `state.run.checkout()`, which its callers read directly.
-- The CLI's `Project` is gone; its `Context` holds the API's `Project` and, until their last user moves, the store and the supervision the remaining commands use.
+- `ask/desk.rs`'s model moves to `crates/ui/src/prompt/plan_desk.rs`, with `Asked`, `Leaving` and `Left`.
+  - `Seen` and its `Cell` go: `laid` takes what the surface laid out, and `scroll` reads it.
+  - Its words move to render's `prompt::desk`: its title, edge, foot, legend and what leaving does.
+- **`WorkflowShape` moves to core's `workflow` module, with `parse`, `all` and `label`.**
+  - What each shape does, `does`, moves to render's `prompt`, with "choose a shape".
+  - The skeleton each shape writes stays the API's, as a function of the shape.
+  - The stray doc line on `label` goes.
+- **The words `init -i` asks with move to render's `prompt`:** "project name", "base branch", "(enter keeps `…`)".
 
-**Fails first:** none: every project resolves as it did.
+**Found in its turn:** The desk's `Cell<Seen>` had gone in Task 10. Render's `prompt::desk` says its title, edge and keys (`DeskKeys`). `WorkflowShape` is `yunta_core::WorkflowShape`, in `workflow/skeleton.rs`, its `parse` refusing with core's `SetupRefusal`; the skeletons stay the API's as `skeleton(shape, stem, lint)`. `PlanDesk` keeps its borrow of render's `Reading`: how a stage that owns its decision holds one is Phase 3's.
+
+**Fails first:** none: a move.
 
 **Acceptance criteria:**
-- [x] The CLI has no `project.rs`; every project resolves through `Workspace::project()`.
-- [x] The suite passes unchanged, and the captures equal the base's.
+- [x] The desk's thirteen tests pass under `yunta-ui` by name, with the ones that read `Seen` reading what `laid` was handed.
+- [x] The `review`, `init -i` and `new -i` captures equal the base's.
 
 **Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
+- [x] Tests pass: `cargo test -p yunta-ui -p yunta-core -p yunta-api`, `suite.py cli-1..5`
 
 **Dependencies:** Task 14
 
-**Files likely touched:** `crates/api/src/{project.rs,workspace.rs,lib.rs}`, `crates/cli/src/{project.rs,context.rs,error.rs,commands/schema.rs}`
-
-**Estimated scope:** M
-
-### Task 16: the adapters a binary builds are the API's
-
-**Description:**
-- `yunta_api::machine` takes from `commands/mod.rs`: `built_adapters`, `built_adapter`, `built_adapter_names`, `built_adapter_ids`, `first_built_adapter`, `real_adapters`, `service_vars`, `declared_facts` and the `Adapters` they make, with the adapters' ids they name. Its test of the example a surface offers moves with it.
-- What `check` knows of an adapter, `AdapterFacts`, is check data like the rest: it moves to `core::check`, so `declared_facts` names no engine type.
-- Every caller asks the API.
-
-**Fails first:** none: a move.
-
-**Acceptance criteria:**
-- [x] `commands/mod.rs` names no adapter crate; the suite passes unchanged.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
-
-**Dependencies:** Task 15
-
-**Files likely touched:** `crates/api/src/machine/{mod.rs,adapters.rs}`, `crates/cli/src/commands/{mod.rs,run.rs,resume.rs,doctor/mod.rs,test/case.rs}`
-
-**Estimated scope:** M
-
-### Task 17: detection is the API's
-
-**Description:**
-- `crates/cli/src/detect/` moves with `git mv` to `crates/api/src/machine/detection/`, with its tests: what a repository is, what it runs, and its remote.
-- `in_repo(workspace, repo, stop)` builds the supervision git reads the remote under from the workspace and the caller's `Stop`, inside the API (`Workspace::supervision`); a stop while it reads is `Error::Stopped`. The CLI's context carries the workspace and gives the stop, for the commands still outside the API.
-- `init`, `doctor` and the pages that show `Detected` ask the API.
-
-**Fails first:** none: a move.
-
-**Acceptance criteria:**
-- [x] The CLI has no `detect` module; the detection tests pass in the API, unchanged.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `detected_cmd` target, `suite.py cli-1..5`.
-
-**Dependencies:** Task 16
-
-**Files likely touched:** `crates/api/src/machine/detection/*.rs`, `crates/cli/src/{main.rs,commands/init.rs,commands/doctor/mod.rs}`
-
-**Estimated scope:** M (mechanical)
-
-### Group check: the workspace
-- [x] The CLI resolves every project through the API; the environment is read once.
-- [x] The suite and the captures equal the base's.
-
-### Task 19: the field is the API's
-
-**Description:**
-- `Project::field(reach, depth)` returns the rows, the unreadable runs and the runs elsewhere, from `commands/list/inbox.rs`: the registry, the engines that drive, the run branches.
-- `yunta list` and `yunta list --runs` ask it.
-- Its answer document moves to `render::document` with it, its fields read off what the API returns.
-- Found in Phase 1: `list --runs --json` writes each row's reason and words with this terminal's glyphs, so `YUNTA_GLYPHS=ascii` changes the document, while a run's document always writes Unicode. A document reads the same whichever terminal asked for it: the field's rows take Unicode, as a run's do, and the glyphs leave `document::field::rows`.
-- Found in Task 19's turn: how deep a listing reads is the page's, never the reading's, so the API takes `Project::field(FieldReach::Here | Machine, &stop)` and returns a `FieldReading`, named apart from render's page; core's `step::Reach` stays the command line's. A project carries the workspace it was resolved from, which its operations read the directory, clock and environment from, so the context's own copy goes. A git the caller's stop cancelled is `Error::Stopped`, in one conversion. render's `FieldDocument` is the whole listing document, which the CLI's answer serializes.
-
-**Fails first:** a test that `list --runs --json` under `YUNTA_GLYPHS=ascii` writes the same document as without it, red while the rows take the terminal's glyphs.
-
-**Acceptance criteria:**
-- [x] `list --runs --json` writes one document whatever glyphs the terminal asks for; `list`'s page still draws them.
-- [x] `inbox.rs` names no engine or store; `list`'s captures and documents equal the base's.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `run_inbox_cmd`, `stalled_runs` and `surface_parity` targets.
-
-**Dependencies:** Task 18
-
-**Files likely touched:** `crates/api/src/field.rs`, `crates/cli/src/commands/list/{mod.rs,inbox.rs}`
-
-**Estimated scope:** S
-
-### Task 20: a run named, opened by the API
-
-**Description:**
-- `Project::run(&RunRef)` resolves a reference (`last`, a handle, an id) and returns an `OpenedRun`: its manifest and directory. The resolving moves from `commands/run_ref.rs`; `RunArg`, clap's, stays in the CLI.
-- `Context::open_run`, `near_run` and `run_roots` move with it; a run nobody has and a reference that names several are the API's refusals.
-- Found in Task 20's turn: a reference names a run and an id opens one, two questions an interface asks apart (a person types a reference, the field and the control plane hold ids), so the API answers `Project::find(&RunRef, &stop) -> RunId` and `Project::run(&RunId) -> OpenedRun { id, dir, manifest, events }`. A candidate of an ambiguous reference holds its field row and render draws it with the reader's glyphs, so the API refuses without reading a terminal. `last` with no run, `needs` with none waiting and a text no id can be are render's refusals, said as before.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] Every command that names a run opens it through the API; a missed id still says the near one.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`.
-
-**Dependencies:** Task 19
-
-**Files likely touched:** `crates/api/src/run/{mod.rs,reference.rs}`, `crates/cli/src/{commands/run_ref.rs,context.rs,cli/dispatch.rs,cli/mod.rs}`
-
-**Estimated scope:** M
-
-### Task 21: a run's reading
-
-**Description:**
-- `OpenedRun::reading(depth)` returns a `RunReading`: its state, frame, decision, documents and plans, with the engine that drives it and the branch.
-- `status`, `status --node`, `graph` and the JSON's decision read it; the documents of Task 12 take the decision from it.
-- Found in Task 21's turn: an opened run is asked again, so `OpenedRun<'p>` keeps the project it was opened in, and `reading()` takes no depth: how deep a page reads is the page's, and the reading answers `waits_on`, `shown`, `produced(node)` and `plans()` when a page asks. `graph` reads `frame()`, which rebuilds no decision, so a run with an unreadable document still draws. The reading's frame carries the estimate a run parked on its budget was told, which reads the workflow's history, so `Project::history` (`WorkflowHistory`), `prior_estimation` and `budget_prior` come here from Task 22, and `status/decision.rs` goes: the drive calls the engine's two readers itself until it moves. A `RunError` the API meets is a refusal, the stop, or a failure, in one conversion.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `status/mod.rs`, `graph.rs` and render's documents name no engine; their captures and documents equal the base's.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `status_cmd`, `status_node_cmd`, `status_nodes_cmd`, `status_page_cmd` and `graph_cmd` targets.
-
-**Dependencies:** Task 20
-
-**Files likely touched:** `crates/api/src/run/reading.rs`, `crates/cli/src/{commands/status/mod.rs,graph.rs,main.rs}`
-
-**Estimated scope:** M
-
-### Task 22: a run's stats, history, receipt, verification and open page
-
-**Description:**
-- `OpenedRun::stats()`, `OpenedRun::receipt()`, `OpenedRun::verification()` and `OpenedRun::opened()` return the data `stats`, `receipt`, `verify` and `open` draw; `stats --workflow` reads `Project::history`, which Task 21 brought.
-- `verify`'s answer document moves to `render::document` with it, its fields read off what the API returns.
-- Found in Task 22's turn: `OpenedRun::stats()` returns a `StatsReading` (the frame, the counts, the project's prices). `OpenedRun::receipt()` derives the receipt and writes both formats beside the run, which a later node reads, so every interface leaves them; a run not finished is render's `Refused::NoReceipt`. A run is verified by its id, `Project::verification(&id)`, never opened, because the chain answers about a log whose payloads no longer parse; it returns render's `Verification` (the chain, and what reading the objects found), whose `checks()` render says, and `VerificationDocument` writes them. `open` draws the reading Task 21 gave it; the page file it writes and the browser it asks for are how a terminal shows a page, which a desktop shows its own way, so no `opened()` operation. render's documents each have one path at `document::`.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] Those five commands name no engine or store; their captures equal the base's.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `stats_cmd`, `receipt_cmd`, `verify_cmd`, `open_cmd` and `verification_effectiveness_cmd` targets.
-
-**Dependencies:** Task 21
-
-**Files likely touched:** `crates/api/src/run/{stats.rs,receipt.rs,verification.rs,opened.rs}`, `crates/cli/src/commands/{stats/mod.rs,receipt.rs,verify.rs,open.rs}`
-
-**Estimated scope:** M
-
-### Task 23: following a run
-
-**Description:**
-- `OpenedRun::follow()` reads the run's heads, its log after a seq, whom its engine asks, and its words over the socket (`said::connect`'s reader).
-- `status --follow`, the live region's gaps (`surface/mod.rs`, `painter.rs`, `turns.rs`) and the MCP tool `workflow_status` read it.
-- Found in Task 23's turn: what follows a moving run is held by a task that draws it, so the API hands owned handles rather than one borrowing the project: `EventLog` (a run's log, what came past a seq, the runs it holds), `RunRegistry` (the process driving a run, and its successor's registry) and `Words` (what the sessions say on the registry's socket). `offers_a_menu` decides a parked run's menu for the field's rows and the region's alike. The drive opens an `EventLog` for its region and its closing until it moves into the API, which then builds it on the store it drives with. `Pace`, the cadence of a poll over state another process owns, moves to `core::pace`, since the engine, `cancel` and the follower all space their looks with it. The workflow_status tool reads the run as Task 21 left it.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] The surface and `status --follow` name no engine or store; the follow tests and `workflow_status`' answers equal the base's.
-
-**Verification:**
-- [x] Tests pass: the CLI's `status_follow`, `live_motion`, `run_words`, `run_surface` and `mcp_flow` targets.
-
-**Dependencies:** Task 21
-
-**Files likely touched:** `crates/api/src/run/follow.rs`, `crates/cli/src/commands/status/{follow.rs,follow/listen.rs}`, `crates/cli/src/surface/{mod.rs,painter.rs,turns.rs}`, `crates/cli/src/commands/mcp/tools.rs`
-
-**Estimated scope:** M
-
-### Task 18: the catalog is the API's
-
-**Description:**
-- `Project::catalog()` returns render's `Catalog` data, from `commands/list/mod.rs`: the workflows here, the installed packs' and their publishers'.
-- `yunta list --workflows` and the MCP tool `list_workflows` call it.
-- Found in Task 18's turn: each entry's estimate reads the workflow's history off the store, which the API reads from Task 22 on; so the catalog follows it, and `catalog_workflows`, which `doctor` and the forge read, goes with it.
-- Found in Task 18's turn: what the catalog offers is read off the repository alone, and `list --workflows` lists in a project that does not resolve, only without estimates; so the catalog is the workspace's, `Workspace::catalog()` and `Workspace::catalog_workflows()`, and the project is tried for the history only.
-
-**Fails first:** none: the same catalog.
-
-**Acceptance criteria:**
-- [x] One function reads the catalog for both; `list`'s captures and `list_workflows`' answer equal the base's.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `run_inbox_cmd`, `pack_resolution_cmd` and `mcp_flow` targets.
-
-**Dependencies:** Task 22
-
-**Files likely touched:** `crates/api/src/catalog.rs`, `crates/cli/src/commands/{list/mod.rs,mcp/tools.rs}`
-
-**Estimated scope:** S
-
-### Task 24: the wait after a host sleeps is core's
-
-**Description:**
-- `SETTLE_AFTER_SUSPENSION` moves from `engine/wakefulness.rs` to `core::clock`, beside the host clock whose awake time it measures: the engine waits it, and the live region's words say it.
-
-**Fails first:** none: a move.
-
-**Acceptance criteria:**
-- [x] `surface/chronicle/words.rs` reads it from core; `host_suspension` passes unchanged.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-engine --test host_suspension`, the CLI's chronicle tests.
-
-**Dependencies:** Task 18
-
-**Files likely touched:** `crates/core/src/clock.rs`, `crates/engine/src/{wakefulness.rs,lib.rs}`, `crates/engine/tests/host_suspension.rs`, `crates/cli/src/surface/chronicle/words.rs`
-
-**Estimated scope:** S
-
-### Checkpoint B: the workspace and reading
-- [x] The CLI resolves every project and reads every run through the API; the environment is read once.
-- [x] The captures, the documents and the follow tests equal the base's.
-- [x] The user reviews; the phase commits.
-
-## Phase 3: running a run, answering it and ending it, through the API
-
-Its groups, each green before the next: admission and running; answers and a run's end.
-
-### Task 25: admission
-
-**Description:**
-- `Project::admit(&reference, inputs, mode)` returns an `Admission`: the verdict, the preflight and the cautions. It takes from `commands/verdict.rs`, `refusals.rs`, `committer.rs`, `forge.rs`'s reachability, and `run.rs`'s check, estimate and context files.
-- An estimate's caution reaches the caller as a `Remark`.
-- `yunta check`, `new`'s verdict and `run`'s preflight ask it.
-- Found in Phase 1: the engine names core's `InputsProblem` a second time, `pub use yunta_core::inputs::InputsProblem as InputsError`. The alias goes, and every caller names `InputsProblem`: one path to each item.
-- Found in Task 25's turn: `check`, `new` and `graph` ask `Project::verdict(Judged { workflow, path, config, conflicts }, VerdictReach, &stop)`; its `Verdict` answers `passes`, `cautions`, `checked`, `diagnosis` and `refusal`, and the CLI says it. `Project::admit(RunRequest, &remarks, &stop)` takes the inputs read and the adapter pinned (`--input` and `--fixture` are the CLI's flags; a request is `hermetic` for a test case, which freezes none of the person's knowledge), and says each caution and the estimate as a `Remark` in the order the CLI printed them. What a run front refuses is render's value: `NoCommitter`, `ForgeUnreachable`, `Unservable` (core's data: a pin no runner reaches, an unbuilt pin, a mock run with no fixture, no adapter, unhealthy adapters) and `Unchecked` (said with `check::line`, which names the near miss everywhere now). `machine::servable` is the API's, for a run and a resume; `Workspace::committer` answers `Committer::Named | Unnamed`, and a stop while git answers is the caller's stop in `doctor` too. Whether a run reaches a pull request is core's `opens_a_pull_request`; whether a program is on `PATH` is `Env::finds`. `doctor`'s probe and the test runner are admitted like any run. The admission hands the CLI its frozen run (`Admission::frozen`) until Task 26 creates the run in the API.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `check.rs`, `verdict.rs` and `refusals.rs` hold no engine call; a refused run's text equals the base's.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `check`, `check_keys_cmd`, `context_files_cmd`, `forge_cmd`, `git_identity_cmd`, `run_flow` and `init_new_cmd` targets.
-
-**Dependencies:** Checkpoint B
-
-**Files likely touched:** `crates/api/src/admission.rs`, `crates/cli/src/commands/{check.rs,verdict.rs,refusals.rs,committer.rs,forge.rs,run.rs,new.rs}`
-
-**Estimated scope:** M
-
-### Task 26: creating a run
-
-**Description:**
-- `Admission::create()` returns a `CreatedRun`: the run born on the log, its checkout prepared and its hold taken. It takes from `run.rs` (`build_frozen_manifest`, `prepare_worktree`) and `registry.rs`'s creation.
-- Found in Task 26's turn: `Admission::create(&remarks, &stop)` returns a `CreatedRun` (its id, directory, tree, manifest, estimate and cautions); the run's hold is taken by whoever drives it, here or in a detached process, so it is the drive's (Task 27) and the hand-off's (Task 28), not the creation's. A run past `limits.max_concurrent_runs` is render's `Refused::TooManyRuns`, and a dead process's lock this checkout takes over is a `Remark`. Until the drive moves, the CLI takes the created run as its `Prepared`.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `run.rs` creates no run itself; the run tests and captures equal the base's.
-
-**Verification:**
-- [x] Tests pass: the CLI's `run_flow`, `run_checkouts` and `environment_cmd` targets.
-
-**Dependencies:** Task 25
-
-**Files likely touched:** `crates/api/src/admission.rs`, `crates/api/src/drive.rs`, `crates/cli/src/commands/{run.rs,registry.rs}`
-
-**Estimated scope:** M
-
-### Task 27: driving a run here
-
-**Description:**
-- `CreatedRun::drive(person, observer, &stop)` and `OpenedRun::drive(...)` run it here with the ports a surface passes, follow its promotions, and return how it ended. They take from `drive.rs`, `registry.rs`'s execution, `promote.rs` and `run/attached.rs`.
-- The CLI passes its console and its live region; the test runner and doctor pass the engine's surface with nobody to ask, through the API.
-- Found in Task 27's turn, done with Task 28 so no hand-off has two paths meanwhile: a run is driven once this process holds it, so `CreatedRun::hold(&stop)` and `OpenedRun::take_back(&remarks, &stop)` (a parked run: refusals, the reset waited out, the claim, its checkout) both give a `HeldRun`, and `HeldRun::drive(Ports { person, observer }, &remarks, &stop)` executes it, follows its promotions, gives back what it held, hands a run paused on a reset to a detached resume, and returns a `Driven` (its last run, state and `Ending`, which never ends promoted) whose `closing()` and `document()` the CLI draws; `Project::closing` is the follower's too. What a lock on a run refuses, the forge that does not take its token and a wait for a reset are the API's (`Remark::ForgeUnavailable`, `Remark::WaitingForReset`), and `crate::remarks` says every remark for the CLI. The test runner drives its scripted runs and answers their gates its own way, so the registry moves with it, as `commands/test/scripted.rs`, until the cases move into the API; `doctor`'s probe drives through the API. A mock fixture is read by `machine::read_fixture`. `Pace` and the promotion's test are the API's; the test is one test per promise.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `drive.rs`, `registry.rs` and `promote.rs` hold no engine call; the run, promotion and live tests equal the base's.
-
-**Verification:**
-- [x] Tests pass: `suite.py cli-1..5`.
-
-**Dependencies:** Task 26
-
-**Files likely touched:** `crates/api/src/drive.rs`, `crates/cli/src/commands/{drive.rs,drive/watch.rs,registry.rs,promote.rs,run/attached.rs}`
+**Files likely touched:** `crates/ui/src/prompt/{plan_desk.rs,plan_desk/tests.rs}`, `crates/render/src/prompt/desk.rs`, `crates/core/src/workflow/{mod.rs,skeleton_shape.rs}`, `crates/api/src/{setup.rs,setup/workflow.rs,lib.rs}`, `crates/cli/src/ask/{desk.rs,decision.rs}`, `crates/cli/src/commands/{init.rs,new.rs}`
 
 **Estimated scope:** L
 
-### Task 28: detaching a run, and handing a resume on
+### Task 16: `Deciding`, the card with the plan behind it
 
 **Description:**
-- `CreatedRun::start_detached()` and `OpenedRun::resume_detached()` start Yunta's own binary from the workspace; `DetachedResumeError` becomes the API's failure.
-- `yunta run --detach`, `yunta resume` and the MCP tools `run_workflow` and `resume_run` call the same functions.
-- Found in Task 28's turn: `resolve-gate` and the MCP answer tool hand the run on through `OpenedRun::resume_detached()` too, and a hand-on that fails after the decision or the answers are recorded is still said as recorded-but-not-resumed. `OpenedRun::refuse_if_driven()` is the API's, for every caller that is about to write on a run.
+- `decide`'s turns in `ask/decision.rs` become `yunta_ui::prompt::Deciding`, with `Opens`.
+  - It opens on the card or on the plan.
+  - The card's `Reply::Read` turns to the desk.
+  - The desk's `Left::Back` turns back to the card, or declines when it opened on the plan.
+  - `Left::Picked` answers the card's option.
+- It answers a `PickedOption`, and says which of the two is in front.
+- **The CLI's `decide` holds `Deciding` and keeps the terminal's part:** the alternate screen while the desk is in front, the documents printed where the terminal has no room for a desk, and the attribution.
+- `question`, `edge`, `about` and `chose`'s words move to render's `prompt`.
 
-**Fails first:** none.
+**Found in its turn:** The question was already render's `escalation::claim_words`, which the card and the desk now both read; `edge`, `about` and `chose` are render's `prompt::card`. `Deciding` builds the desk itself (`Deciding::new(card)`, `Deciding::on_plan(card, reading, asked, opens)`), so the desk lists the card's options and Escape there follows what the decision opened on: `PlanDesk::new`, `Leaving` and the card's `reading`, `rows` and `pick` are the crate's own. A surface that holds both alike holds `Deciding` as one `Answerable`; the terminal holds `in_front` (`InFront`) and hands back what it came to through `replied` and `left`, the same turns. The line an answer is attributed with, which the decision and the round both say, is render's `prompt::attributed`; what stays in `ask/` is the terminal's own: its failures to restore itself, and the tests' messages. Sixteen files of the phase had another crate's `use` in the crate's own block; their imports are regrouped.
+
+**Fails first:** `Deciding`'s tests, written against `decide`'s behavior, each seen red by breaking the turn it holds once:
+- opening on the plan and leaving declines;
+- reading turns to the desk;
+- a number picked at the desk answers the card's option.
 
 **Acceptance criteria:**
-- [x] One function starts a run detached and one hands a resume on, for the CLI and the tools; `run_workflow`'s and `resume_run`'s answers equal the base's.
+- [x] `ask/decision.rs` holds no turn between the two; the `resolve-gate` and `review` captures and tests equal the base's.
 
 **Verification:**
-- [x] Tests pass: the CLI's `run_flow`, `parked_runs`, `status_follow` and `mcp_flow` targets.
+- [x] Tests pass: `cargo test -p yunta-ui`, `suite.py cli-1..5`
+
+**Dependencies:** Task 15
+
+**Files likely touched:** `crates/ui/src/prompt/{deciding.rs,deciding/tests.rs}`, `crates/render/src/prompt.rs`, `crates/cli/src/ask/{decision.rs,mod.rs}`, `crates/cli/src/human_interaction.rs`
+
+**Estimated scope:** M
+
+### Group check: the prompts
+- [x] The suite's groups green; every prompt's capture and every golden's digest equal to the base's.
+- [x] `crates/cli/src/ask/` holds `Console`, `keyboard`, `hold`, `Strokes`, `NoAnswer`, `Answered`, and `decide`, `answer`, `choose` and `ask_line` as the calls that hold a prompt; nothing else.
+
+### Task 17: Checkpoint A's proof
+
+**Description:**
+- The suite's count against the base's, by name: each moved test found under its new owner.
+- Every golden's digest, the new goldens listed. The captures from a release build of the phase's tree.
+- The manifest test, and `cargo xtask docs --check`.
+- All of it in `proof/app-core/checkpoint-a.txt`.
+
+**Found in its turn:** Measured on the final tree, after the attribution's words went to render: base 4,607 tests by name, now 4,627: 114 moved, 4 gone each with its successors named, 24 new. 154 captures equal to the base's. The goldens that changed are the catalog of every block's seven, which gained the four new blocks; 37 new. The release is 49,584 bytes larger (0.18%).
+
+**Fails first:** none: a measurement.
+
+**Acceptance criteria:**
+- [x] No test gone without its new name; no capture different; no golden changed but the new.
+
+**Verification:**
+- [x] Manual check: `checkpoint-a.txt` read whole.
+
+**Dependencies:** Group check: the prompts
+
+**Files likely touched:** `.plans/yunta-tui/proof/app-core/` (outside git)
+
+**Estimated scope:** S
+
+### Checkpoint A: the crate, and the moves that print the same
+- [x] Every sentence of the chronicle, of a moving run's rows and of every prompt is render's; every prompt draws as a block; the prompts' models are `yunta-ui`'s.
+- [x] What prints is the base's, byte for byte.
+- [ ] The user reviews; the phase commits, with `SPEC-app-core.md`, `CAPABILITY-MAP.md`, the closed modules' specs, `tasks/plan.md` and `tasks/todo.md`.
+
+## Phase 2: what every surface needs, once, and the runners
+
+Its groups, each green before the next: following; a run's page and the graph; answers and steps; what a stage keeps; the runners.
+
+### Task 18: following a run is the API's
+
+**Description:**
+- `Project::follow(&RunId) -> Result<Following, Error>`. `Following` owns what it reads: the log, the registry, the clock, the promotion chain, the run's frame and the last seq.
+- **`Following::next(&mut self, &Stop)` hands back `RunNews`:**
+  - `Events(Vec<StoredEvent>)`: what came past the last seq;
+  - `Engine(Engine)`: the engine, as the registry reads it;
+  - `Said(Said)`: what a session said;
+  - `Successor { run, events }`: the run a promotion handed it to, followed from here;
+  - `Stopped` and `Stalled`.
+
+  After `Stopped` or `Stalled` it hands back nothing. A stop tripped is `Error::Stopped`.
+- `READ_EVERY`, `REGISTRY_EVERY` and `SUCCESSOR_WAIT` move from the CLI's follower with their reasons. So do `ending` and the listening of `follow/listen.rs`.
+
+**Fails first:** the API's tests of `Following`, over a log written in the test:
+- events past a seq;
+- a stop;
+- a stall under a registry naming a dead engine;
+- a promotion's successor;
+- words heard on a socket.
+
+**Acceptance criteria:**
+- [ ] Each news kind is handed back as the test's log and registry make it; `cargo test -p yunta-api` passes.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-api --test following`
+
+**Dependencies:** Checkpoint A
+
+**Files likely touched:** `crates/api/src/{lib.rs,run/follow.rs,run/follow/following.rs,event_log.rs}`, `crates/api/tests/following.rs`
+
+**Estimated scope:** M
+
+### Task 19: `status --follow` follows through the API
+
+**Description:**
+- The CLI's follower asks `Project::follow` and draws each `RunNews` on its surface. It keeps opening the surface, delivering events, passing what was said to its observer, the closing block and the exit code.
+- `follow/listen.rs` goes: its listening is `Following`'s. The follower's doc stops saying it touches no registry, which it reads.
+
+**Fails first:** none: a move.
+
+**Acceptance criteria:**
+- [ ] The follow tests in `status_follow`, `status_follow/edges`, `status_follow/said`, `run_words` and the guarding flow pass unchanged; the follower's captures equal the base's.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta --test status_follow`, `--test run_words`, `suite.py cli-1..5`
+
+**Dependencies:** Task 18
+
+**Files likely touched:** `crates/cli/src/commands/status/{follow.rs,follow/listen.rs}`, `crates/cli/src/surface/mod.rs`
+
+**Estimated scope:** M
+
+### Group check: following
+- [ ] The suite's groups green; the follower's captures equal the base's.
+
+### Task 20: a run's page and a node's page own their data
+
+**Description:**
+- Render's `page::Run` and `page::Node` lose their lifetime. They own their run id, frame, state, places, decision and plans, and `Places` and `escalation::Decision` own theirs.
+- The CLI's status and closing block, the fixtures and the tests build them owned.
+
+**Fails first:** none: a change of form.
+
+**Acceptance criteria:**
+- [ ] The run page's goldens (`render/goldens/status`, `open`) and every capture equal the base's.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-render --features golden`, `suite.py cli-1..5`
+
+**Dependencies:** Group check: following
+
+**Files likely touched:** `crates/render/src/page/run/{mod.rs,facts.rs,browser.rs,fixtures.rs,tests.rs,tests/*.rs}`, `crates/render/src/page/node.rs`, `crates/render/src/escalation.rs`, `crates/cli/src/surface/closing/mod.rs`, `crates/cli/src/commands/status/mod.rs`
+
+**Estimated scope:** L (mechanical)
+
+### Task 21: the API reads a run's page whole
+
+**Description:**
+- **`OpenedRun::page(self, Depth, &dyn Remarks) -> Result<page::Run, Error>`** reads the page with:
+  - the documents the decision it waits on shows;
+  - the plans at full depth;
+  - its places.
+
+  What its manifest holds that this binary does not read is said as `Remark::UnreadManifestKeys { keys }`, which render words.
+- **`OpenedRun::node_page(self, &NodeId) -> Result<page::Node, Error>`** reads a node's page. A node the run does not declare is refused as render's `Refused::NoSuchNode { run, node, declared }`, beside `Refused::NoDecision`, said with the name it is nearest to, as the CLI said it.
+- **`OpenedRun::page_for_a_browser(self) -> Result<PathBuf, Error>`** writes `page.html` in the run's folder through Surco's `Html`.
+- The CLI's `status`, `print_page` and `open` call them, and its `read`, `note_unknown_keys`, `documents`, `page_body`, `find`, `run_page_for` and `page_for_a_browser` go. `open` keeps spawning the opener.
+
+**Fails first:** the API's tests:
+- a parked run's page holds the documents its decision shows;
+- a full page holds the plans;
+- an undeclared node is refused naming the nearest.
+
+**Acceptance criteria:**
+- [ ] `status`, `status --node` and `open`'s tests and captures equal the base's.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test status_cmd --test status_node_cmd --test open_cmd`, `suite.py cli-1..5`
+
+**Dependencies:** Task 20
+
+**Files likely touched:** `crates/api/src/{run/reading.rs,run/page.rs,remark.rs,lib.rs}`, `crates/render/src/refusal/refused.rs`, `crates/cli/src/commands/{status/mod.rs,open.rs}`, `crates/cli/src/remarks.rs`, `crates/api/tests/run_page.rs`
+
+**Estimated scope:** L
+
+### Task 22: the graph is render's
+
+**Description:**
+- **`crates/cli/src/graph.rs`'s derivation moves to `crates/render/src/graph.rs`:**
+  - `mermaid(&Workflow, Option<&Labels>)`, `dot(...)` and `labels(&RunFrame)`;
+  - `children_of`, `labelled` and `escape_dot`;
+  - its three tests.
+- **`page::Graph` shows a workflow as Surco's `Diagram`,** under a headline naming it, and the run when it is a run's.
+- The CLI's `graph` keeps its arguments, the verdict it prints beside a file and its exit code, and prints render's text.
+
+**Fails first:** `page::Graph`'s goldens in every environment.
+
+**Acceptance criteria:**
+- [ ] `graph_cmd`'s ten tests pass unchanged; the CLI's `graph.rs` holds no derivation.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-render --features golden`, `cargo test -p yunta --test graph_cmd`
+
+**Dependencies:** Task 21
+
+**Files likely touched:** `crates/cli/src/graph.rs`, `crates/render/src/{lib.rs,graph.rs,page.rs,page/graph.rs}`, `crates/render/goldens/graph/`
+
+**Estimated scope:** M
+
+### Group check: a run's page and the graph
+- [ ] The suite's groups green; digests and captures equal to the base's but the new goldens.
+
+### Task 23: the questions a parked node asked, read and answered at a terminal
+
+**Description:**
+- **`OpenedRun::waiting_questions(&self) -> Result<WaitingQuestions, Error>`** reads the questions document a parked node handed over, by the hash its `questions_asked` recorded. `WaitingQuestions` holds the node and its `QuestionsFile`. A run waiting on none is refused as `waiting_decision` refuses.
+- **`yunta resolve-gate <run>` at a terminal answers a run parked on questions with the round**, through `OpenedRun::answer`, as the attached run asks it. Off a terminal it says how to answer, as for a gate.
+- `docs/concepts.md` says so beside the MCP tool.
+
+**Fails first:**
+- the API's test reading a parked node's questions;
+- a console interaction test answering a parked round with `resolve-gate`, then the run going on.
+
+**Acceptance criteria:**
+- [ ] A parked round is answered from another terminal, and the run resumes detached with the answers on its log.
+- [ ] Every other `resolve-gate` capture equals the base's.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test console_interaction`
+
+**Dependencies:** Group check: a run's page and the graph
+
+**Files likely touched:** `crates/api/src/{answers.rs,lib.rs}`, `crates/cli/src/commands/resolve_gate.rs`, `crates/cli/tests/console_interaction/questions.rs`, `docs/concepts.md`
+
+**Estimated scope:** M
+
+### Task 24: what the control plane answers in a sentence is render's
+
+**Description:**
+- The sentences `yunta-mcp`'s tools build go to render, beside `GateAnswered::sentence`: `run_workflow`'s `run_id:` answer, `resume_run`'s and `answer_questions`'. Their text stays the same.
+- What a tool says of its own JSON arguments stays the tool's, as clap's words stay clap's.
+
+**Fails first:** none: a move.
+
+**Acceptance criteria:**
+- [ ] `mcp_answers.py`'s capture equals the base's.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-mcp`, `cargo test -p yunta --test mcp_flow`
+
+**Dependencies:** Task 23
+
+**Files likely touched:** `crates/mcp/src/tools.rs`, `crates/render/src/page/answered.rs`
+
+**Estimated scope:** S
+
+### Task 25: every command is a step, and render says what each does
+
+**Description:**
+- **`NextStep` gains the commands a person types that it lacks:**
+  - `Stats { run }` and `History { workflow }`;
+  - `Graph { workflow: Arg<String> }` and `RunGraph { run }`;
+  - `NewWorkflow { name: Arg<String>, shape: Option<WorkflowShape> }`;
+  - `PackList` and `PackAudit { pack }`.
+
+  `Gc` gains `dry_run`.
+- Render's `command` spells each as the CLI accepts it.
+- **`command::does(&NextStep) -> &'static str` says what each step does,** beside its line, for the palette and help.
+
+**Fails first:** render's command tests for each new line and for what every step does.
+
+**Acceptance criteria:**
+- [ ] Every new line parses in the CLI; a test runs each through clap.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-render`, `cargo test -p yunta --bins`
+
+**Dependencies:** Task 24
+
+**Files likely touched:** `crates/core/src/step.rs`, `crates/render/src/{command.rs,command/tests.rs}`, `crates/cli/src/cli/tests.rs`
+
+**Estimated scope:** M
+
+### Group check: answers and steps
+- [ ] The suite's groups green; captures equal to the base's but `resolve-gate` on a parked round, which the user reads at Checkpoint B.
+
+### Task 26: what a stage keeps is owned
+
+**Description:**
+- These derive `Clone`, with what they hold: `FieldReading`, `StatsReading`, `WaitingDecision`, `WaitingQuestions`, `WorkflowFile`, `AuditedWorkflow`, `InitializedProject` and `ClosingReading`.
+- `DetectedProject` and `FetchedPack` own a clone of their `Workspace` where they borrowed one, and lose their lifetime.
+- Every caller compiles unchanged in what it does.
+
+**Fails first:** none: a change of form.
+
+**Acceptance criteria:**
+- [ ] `git grep -n "DetectedProject<'\|FetchedPack<'"` finds nothing; the suite passes.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-api`, `suite.py cli-1..5`
+
+**Dependencies:** Group check: answers and steps
+
+**Files likely touched:** `crates/api/src/{field.rs,run/stats.rs,answers.rs,workflow.rs,setup/init.rs,packs.rs,drive.rs}`, `crates/render/src/page/field.rs`
+
+**Estimated scope:** M
+
+### Task 27: setting up proposes runners, and writes those declared
+
+**Description:**
+- **`Workspace::detect_project` probes the adapters and proposes the roles.**
+  - `DetectedProject` carries `probed: Vec<ProbedAdapter>` and `proposed: ProposedRunners { roles, needs_default }`.
+  - The roles are those the repository's workflows name, or `implementer` when they name none.
+- **`ProjectSetup { name, base_branch, runners: RunnerDeclaration }`.** `RunnerDeclaration` is `Proposed` or `Declared(BTreeMap<RunnerName, RunnerCandidate>)`.
+- **`DetectedProject::write(self, ProjectSetup)`.**
+  - A declared role is written uncommented, with `defaults.runner` where a node names none.
+  - A proposed one is written commented, as today.
+  - `write_project`'s parse check reads what was declared.
+
+**Fails first:** the API's tests:
+- a declared runner written and read back by `ConfigLayer::read`;
+- a proposed one written byte for byte as the base writes it.
+
+**Acceptance criteria:**
+- [ ] `init_new_cmd`'s eighteen tests pass unchanged.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-api`, `cargo test -p yunta --test init_new_cmd`
+
+**Dependencies:** Task 26
+
+**Files likely touched:** `crates/api/src/{setup/init.rs,setup/init/tests.rs,lib.rs}`, `crates/cli/src/commands/init.rs`
+
+**Estimated scope:** M
+
+### Task 28: what `init` says of its runners
+
+**Description:**
+- `Initialized` says each declared role, its adapter and its model.
+- It ends on installing a pack (`NextStep::PackAdd`) where every role is declared, and on the runner to declare, as today, where one is proposed.
+- The page gets its first goldens: none exist.
+
+**Fails first:** `Initialized`'s goldens and tests, declared and proposed.
+
+**Acceptance criteria:**
+- [ ] The non-interactive `init` capture equals the base's.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-render --features golden`
 
 **Dependencies:** Task 27
 
-**Files likely touched:** `crates/api/src/detach.rs`, `crates/cli/src/commands/{mod.rs,run/detach.rs,resume.rs,mcp/tools.rs,mcp/runs.rs}`
+**Files likely touched:** `crates/render/src/page/initialized.rs`, `crates/render/src/tests/initialized.rs`, `crates/render/goldens/initialized/`
 
-**Estimated scope:** M
+**Estimated scope:** S
 
-### Task 29: a real run after admission and running
+### Task 29: `init -i` asks each role
 
 **Description:**
-- The same fragua run as Task 3, from this phase's release binary, its gates answered the same way.
+- After the name and the base branch, `init -i` asks each proposed role:
+  - its adapter, on the picker, among those that answered, the first standing;
+  - its model, on a typed line with no default. A line left empty leaves the role proposed.
+- The words are render's `prompt`.
+- `README.md` and `docs/adapters.md` say that `init -i` declares the runners.
 
-**Fails first:** none: a measurement.
+**Fails first:** console interaction tests:
+- `init -i` writes a declared role from the adapter picked and the model typed;
+- an empty model leaves it proposed.
 
 **Acceptance criteria:**
-- [x] It reaches the node before `pr`; its `between_secs` sits inside the base's spread. (Run 01M7147YP06CJVD759QRDF5P1Q: the base's path, at `ship` after 211 s, 2.03M tokens, `between_secs` 0.550052 against the base's 0.550108.)
+- [ ] The three existing `console_interaction/init.rs` tests pass, their prompts in order.
 
 **Verification:**
-- [x] Manual check: `yunta stats <run>` beside `baseline.txt`.
+- [ ] Tests pass: `cargo test -p yunta --test console_interaction`
 
 **Dependencies:** Task 28
 
-**Files likely touched:** `.plans/yunta-tui/proof/control/real-g*` (outside git)
+**Files likely touched:** `crates/cli/src/commands/init.rs`, `crates/render/src/prompt.rs`, `crates/cli/tests/console_interaction/init.rs`, `README.md`, `docs/adapters.md`
 
-**Estimated scope:** S
+**Estimated scope:** M
 
-### Group check: the run path
-- [x] The run path's tests and captures equal the base's; the real run sits beside the base's. (147 captures and 99 goldens equal; 4,567 tests, 59 moved, none lost: three renamed with their code.)
-
-### Task 30: a gate's decision
+### Task 30: a skeleton names the runner the config declares
 
 **Description:**
-- `OpenedRun::decide(choice)` records a gate's decision, then hands the resume on.
-- Who answered is stamped from the workspace's `Env` when the caller claims nobody: `identity.rs` moves to the API, and the console's questions take the responder from there.
-- `yunta resolve-gate`, `yunta review` and the MCP tool `resolve_gate` call it.
-- Its answer document moves to `render::document` with it, its fields read off what the API returns.
-- Found in Task 30's turn: who answered is a rule on core's `Responder`, `Responder::answering(claimed, user)`, which the console, `close` and the API stamp alike, so `identity.rs` goes rather than moving to the API. `OpenedRun::waiting_decision()` reads the decision with what it shows (a run that waits on none is render's `Refused::NoDecision`), and `OpenedRun::decide(choice)` records it and hands the run on; a hand-on that fails after the decision is recorded is said by the API as `decision recorded, but …`, and the engine's gate failures keep their words. `GateAnswerDocument` is render's.
+- `Workspace::new_workflow` writes a skeleton's `runner:` uncommented where the project's config declares that role, as it writes `lint` where the config declares it.
 
-**Fails first:** none.
+**Fails first:** `new_names_the_runner_the_config_declares`, in `init_new_cmd`.
 
 **Acceptance criteria:**
-- [x] `resolve_gate.rs` and `review.rs` hold no engine call; their tests and `resolve_gate`'s answers equal the base's.
+- [ ] A skeleton written where no runner is declared is byte for byte the base's.
 
 **Verification:**
-- [x] Tests pass: the CLI's `gate_review_cmd`, `gate_withheld_cmd`, `plan_desk`, `parked_runs`, `git_identity_cmd` and `mcp_flow` targets.
+- [ ] Tests pass: `cargo test -p yunta --test init_new_cmd`
 
 **Dependencies:** Task 29
 
-**Files likely touched:** `crates/api/src/{answers.rs,identity.rs}`, `crates/cli/src/{identity.rs,ask/mod.rs,commands/resolve_gate.rs,commands/review.rs,commands/mcp/tools.rs}`
-
-**Estimated scope:** M
-
-### Task 31: a questions artifact's answers
-
-**Description:**
-- `OpenedRun::answer(&node, answers)` records them, then hands the resume on.
-- The MCP tool `answer_questions` calls it; a person at the terminal answers through the person port, as now.
-- Found in Task 31's turn: the reply is core's `port::QuestionsReply`, the same shape the person port answers with; the API stamps who answered and says a failed hand-on as `answers recorded, but …`.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `mcp/answers.rs` and `mcp/tools.rs` hold no engine call; `answer_questions`' answers, a refused one among them, equal the base's.
-
-**Verification:**
-- [x] Tests pass: the CLI's `three_questions`, `parked_runs`, `console_interaction` and `mcp_flow` targets.
-
-**Dependencies:** Task 30
-
-**Files likely touched:** `crates/api/src/answers.rs`, `crates/cli/src/commands/mcp/{answers.rs,tools.rs}`
-
-**Estimated scope:** M
-
-### Task 32: cancelling a run
-
-**Description:**
-- `OpenedRun::cancel(&stop)` signals the engine that drives it, waits, and records the pause after a crash; what it waits on reaches the caller as a `Remark`. It takes from `cancel.rs` and `cancel/registered.rs`.
-- Its answer document moves to `render::document` with it, its fields read off what the API returns.
-- Found in Task 32's turn: `OpenedRun::cancel(&remarks, &stop)` lives in `api/src/ending.rs`, the registration wait in `ending/registered.rs`, and the process groups with init's guard in `ending/groups.rs`. What it says while it works is a `Remark` each (`SignallingEngine`, `StoppedWaiting`, `Escalating`, `GroupRefused`, `Unstopped`, `RegistryKept`, `CheckoutKept`), whose sentences are render's `ending`, so the application says them in the same words; a registry it cannot read, a node with no registry and an interrupt that does not reach the engine are failures that say what goes on, as before. `CancelDocument` is render's. `Project::storage()` opens the store for every API operation, in place of seven copies.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `cancel.rs` holds no engine call; the cancel tests equal the base's.
-
-**Verification:**
-- [x] Tests pass: the CLI's `parked_runs`, `run_flow` and `run_words` targets.
-
-**Dependencies:** Task 29
-
-**Files likely touched:** `crates/api/src/ending.rs`, `crates/cli/src/commands/{cancel.rs,cancel/registered.rs}`
-
-**Estimated scope:** M
-
-### Task 33: closing a run
-
-**Description:**
-- `OpenedRun::close()` closes it, releases its checkouts, and returns what close answers; who closed it is stamped as Task 30 stamps a decision.
-- Its answer document moves to `render::document` with it, its fields read off what the API returns.
-- Found in Task 33's turn: `OpenedRun::close(by, &remarks, &stop)` answers who closed it, stamped in the API from the caller's claim or the workspace's user, and `decide(option, by, free_text)` now stamps the same way: `resolve-gate --option` hands the claim on as given, and only the menu, which asks the person at its terminal, names who answered there. A close's failures are the API's, so the CLI's close error, `from_close` and its words go, the export's sentence to render's `ending`; `CloseDocument` is render's, and the context's `pool_of` goes with its last caller.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `close.rs` holds no engine call; the close tests equal the base's.
-
-**Verification:**
-- [x] Tests pass: the CLI's `close_cmd` target.
-
-**Dependencies:** Task 32
-
-**Files likely touched:** `crates/api/src/ending.rs`, `crates/cli/src/commands/close.rs`
+**Files likely touched:** `crates/api/src/setup/workflow.rs`, `crates/cli/tests/init_new_cmd.rs`
 
 **Estimated scope:** S
 
-### Checkpoint C: the run's path, its answers and its end
-- [x] The run path's tests and captures equal the base's; the real run sits beside the base's.
-- [x] `resolve-gate`, `review`, `cancel` and `close`, their tests and the parked runs' flows equal the base's.
-- [x] The user reviews; the phase commits.
+### Group check: the runners
+- [ ] The suite's groups green; captures equal to the base's but `init -i`'s and the parked round's.
 
-## Phase 4: upkeep, the MCP server, the frontier and the proof
-
-Its groups, each green before the next: the project's upkeep through the API; the MCP server, a crate of its own; the frontier; the proof and the review.
-
-### Task 34: collecting
+### Task 31: Checkpoint B's proof
 
 **Description:**
-- `Project::collect(Collect::Pass | Collect::DryRun, remarks)` from `gc/mod.rs` and `gc/pool.rs`; each problem `gc` meets reaches the caller as a `Remark`, in order.
-- Found in Task 34's turn: `Project::collect(collect, &remarks, &stop)` returns render's `Collected`, filled as the pass goes. A pass is a `Collection` whose methods share the project, the pool, the remarks and the page (`api/src/collect.rs`, `collect/pool.rs`), so no function takes them as four arguments; each problem is `Remark::Uncollected`, said and counted. A run's footprint is removed directory by directory (`Removal`), and one run's reclaim is a method of its own, so no function passes fifty lines. The CLI's `gc` is one file; its `load_manifest` and `Context::storage` go with their last caller.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `gc` holds no engine call; its tests and the dry run's capture equal the base's.
-
-**Verification:**
-- [x] Tests pass: the CLI's `gc_cmd`, `gc_lock` and `run_checkouts` targets.
-
-**Dependencies:** Checkpoint C
-
-**Files likely touched:** `crates/api/src/collect.rs`, `crates/cli/src/commands/gc/{mod.rs,pool.rs}`
-
-**Estimated scope:** M
-
-### Task 35: the packs are the API's
-
-**Description:**
-- `Project::packs()` returns `Packs`: `add`, `update`, `remove`, `list`, `audit` and `new`, from `crates/cli/src/pack.rs` and `commands/pack.rs`, `pack/audit.rs`, `pack/scaffold.rs`. `PackError` becomes the API's.
-- Found in Task 35's turn: packs are the repository's, so `Workspace::packs()` returns `Packs`, not the project: `pack list`, `remove` and `new` read no state root, and resolving a project would create one and refuse a malformed config they never read; `add`, `update` and `audit` resolve the project first in the CLI, as before. `fetch` and `fetch_update` answer a `FetchedPack` whose audit a person reads before `install`, which answers an `InstalledPack` whose `needs(&project)` says what it lacks; `remove`, `list` (render's `Listed`), `audit` (`AuditedPack`) and `scaffold` (`ScaffoldedPack`, then `check()`). The pack refusals are core's `PackRefusal`, said by render as `Refused::Pack` in the words they had; `PackError` is private to `packs::vendor` and reaches a caller as a `Failure`. The pack's cases still run in the CLI (`commands/pack/audit.rs`) until Task 39 moves the case runner: then `install`, `audit` and the scaffold's check run them in the API. The CLI map's stale `detect` and `pack` entries go.
-
-**Fails first:** none: a move.
-
-**Acceptance criteria:**
-- [x] The CLI's pack commands only parse, ask and draw; their tests equal the base's.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api`, the CLI's `pack_cmd`, `pack_audit_cmd`, `pack_ceiling_cmd`, `pack_policy_cmd`, `pack_provenance_cmd`, `pack_resolution_cmd` and `factory_packs_cmd` targets.
-
-**Dependencies:** Checkpoint C
-
-**Files likely touched:** `crates/api/src/packs.rs`, `crates/cli/src/{pack.rs,commands/pack.rs,commands/pack/audit.rs,commands/pack/scaffold.rs}`
-
-**Estimated scope:** M
-
-### Task 36: two pack commands at once both stand
-
-**Description:**
-- `yunta_api::packs` holds `.yunta/yunta.lock` with the engine's file lock across each command's read and write, waiting for another pack command.
-
-- Found in Task 36's turn: the packs are held through `.yunta/yunta.lock.held`, beside the lock, with the engine's lock (`HeldPacks`, let go on drop), only from the read of the lock to its write: an `update` reads the lock unheld to know where to clone from and reads it again held before it writes, so another command is never kept waiting through a clone. `remove` waits too, so it takes the caller's stop; `docs/packs.md` says the file. Before the hold the test failed at its first look, the install having written the lock while the packs were held; after it, it passes, and the CLI's two adds at once stood ten runs out of ten.
-
-**Fails first:** the lock's test: it holds the lock, starts an `add` of one pack, sees it wait without writing, adds another pack's entry, releases, and finds both entries in the file. Without the lock, the `add` writes at once and the file holds one entry.
-
-**Acceptance criteria:**
-- [x] The test fails for the lost entry before, and passes after.
-- [x] Two `pack add` of different packs started at once both stand in the lock file.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-api --test packs`, the CLI's `pack_cmd` target.
-
-**Dependencies:** Task 35
-
-**Files likely touched:** `crates/api/src/packs.rs`, `crates/api/tests/packs.rs`
-
-**Estimated scope:** S
-
-### Task 37: `init` and `new`
-
-**Description:**
-- `yunta_api::setup`: `Project::init(...)` and `Project::new_workflow(...)` from `init.rs`, `init/` and `new.rs`, with the committer's check.
-- Found in Task 37's turn: `init` is what makes a project, and `new` resolves one only to judge what it wrote, so both are the workspace's, as the packs are: `Workspace::detect_project(force, &stop)` answers a `DetectedProject` (name, base branch, what the repository runs), whose `write(name, base_branch)` probes the adapters and writes the config, the ignore entries and the skill, answering an `InitializedProject`; `Workspace::new_workflow(&stem, shape, force)` answers a `WrittenWorkflow` whose `diagnosis(&stop)` is `check`'s verdict. A new workflow's file stem is a `WorkflowStem`, parsed before the console asks a shape, and its shape a `WorkflowShape`; their refusals and a file there already are core's `SetupRefusal`, said by render as `Refused::Setup` in the words they had. The console's questions stay the CLI's. The base had no committer check in `init` or `new`: the committer is the API's since Task 25.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `init` and `new` hold no engine call; their tests and captures, the skill `init` writes among them, equal the base's.
-
-**Verification:**
-- [x] Tests pass: the CLI's `init_new_cmd`, `console_interaction` and `runner_step_cmd` targets.
-
-**Dependencies:** Task 36
-
-**Files likely touched:** `crates/api/src/setup.rs`, `crates/cli/src/commands/{init.rs,init/*.rs,new.rs,committer.rs}`
-
-**Estimated scope:** M
-
-### Task 38: doctor's checks
-
-**Description:**
-- `Project::doctor(checks)` from `doctor/mod.rs`, `doctor/packs.rs`, `doctor/session.rs` and the forge's checks, in `yunta_api::machine`.
-- Its answer document moves to `render::document` with it, its fields read off what the API returns.
-- Found in Task 38's turn: `Project::doctor(session, &remarks, &stop)` returns surco's `Checklist`, from `machine/doctor.rs` and `machine/doctor/{forge,packs,session,first_run}.rs`. The forge a run reaches is `crate::forge::forge_for`, with the workspace's secrets, for the drive and `doctor` alike: the CLI built `doctor`'s from the process's own secrets. A session probe runs in the API's `Sandbox` (`crate::sandbox`, with `Project::sandboxed`), which the test runner takes in Task 39, and says all its run says but the estimate, as the CLI's quiet mode did. `DoctorDocument` is render's. The CLI's `forge` module and `Context::adapters` go.
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `doctor` only parses, asks and draws; its tests and `doctor --json` equal the base's.
-
-**Verification:**
-- [x] Tests pass: the CLI's `detected_cmd`, `forge_cmd`, `git_identity_cmd`, `pack_requires_doctor_cmd` and `runner_step_cmd` targets.
-
-**Dependencies:** Task 37
-
-**Files likely touched:** `crates/api/src/machine/doctor.rs`, `crates/cli/src/commands/{doctor/*.rs,forge.rs}`
-
-**Estimated scope:** M
-
-### Task 39: the test runner
-
-**Description:**
-- `Project::cases(&dir, |case| ...)` runs every case and hands each back as it ends, from `test/mod.rs`, `test/case.rs` and `test/case/problems.rs`.
-- The CLI's `Context` loses its last user and is deleted.
-- Found in Task 39's turn: a case resolves its project where its cases are, a repository or a pack's directory, so the cases are the workspace's: `Workspace::cases(&root)` answers a `CaseSuite` (named apart from render's pack `Cases`) whose `names()` set the column before `run(each, &remarks, &stop)` hands each `RanCase` back and answers render's `Tested`; finding none, or a directory that does not read, is core's `CasesRefusal`. A case is played through the API's own admission, creation and `execute`, its `Means` lending the scripted mock (`adapters_and_script`), a stand-in forge and an empty environment, so the CLI's scripted drive goes; its gates are answered as `decide` records one (`answers::unrecorded`). A pack's cases now run in the API, as Task 35 said they would: `InstalledPack::{shipped_cases, run_cases}`, `Packs::audit` and `ScaffoldedPack::check`. What a probe's or a case's run says is all but the estimate (`remark::Unestimated`). Every command takes its project and its stop from the shell (`Shell::project`), and the run path's `Driving`, `Attaching` and `Detaching` carry them, so `context.rs`, `load_yaml`, `CliError::ResolveGate`, `from_gate`, its words and `Shell::rail_command` go. `collect.rs` passed 500 lines and split along what a pass does to the runs (`collect/runs.rs`).
-
-**Fails first:** none.
-
-**Acceptance criteria:**
-- [x] `yunta test` only parses, asks and draws; its tests equal the base's; the CLI has no `context.rs`.
-
-**Verification:**
-- [x] Tests pass: the CLI's `init_new_cmd`, `factory_packs_cmd` and `run_flow` targets, then `suite.py cli-1..5`.
-
-**Dependencies:** Task 38
-
-**Files likely touched:** `crates/api/src/cases.rs`, `crates/cli/src/{context.rs,commands/test/*.rs}`
-
-**Estimated scope:** M
-
-### Group check: upkeep
-- [x] Those commands' tests, and the lock's, pass.
-- Found in its turn (`proof/control/group-upkeep.txt`): 147 captures and 99 goldens equal to the base's; 4,569 tests against the base's 4,556, 87 moved and the same 3 renamed, the two of the pack lock new; release 29,342,896 bytes, 347 KB over Checkpoint C, measured by crate at Checkpoint D.
-
-### Task 40: `yunta-mcp`
-
-**Description:**
-- `crates/mcp`, package `yunta-mcp`, library `yunta_mcp`: each tool, its schema, its arguments, what it asks of the API and its answer, from `commands/mcp.rs` and `commands/mcp/`, moved with `git mv`.
-- `ControlPlane::new(workspace, stop)` is an `rmcp` handler with no transport.
-- `yunta mcp` serves it on stdio; the CLI's `commands/mcp.rs` keeps only that.
-- `.agents/architecture.md`'s table gains its row.
-- Found in Task 40's turn: the crate prints nothing, so `ControlPlane::new(workspace, stop, remarks)` takes where what the API says is said; `yunta mcp` hands it a quiet sayer, as its own server did. Each tool asks the API directly (`admit`, `create`, `start_detached`, `decide`, `answer`), so the CLI's `resolve_gate::resolve` and `run::start_detached` go; a tool's error is a `ToolError` said to an agent in the words the CLI's error said. The API's `Error::Stopped` says "interrupted by a person", as the engine's cancelled run did, so every surface says a stop in one sentence; `document_shape` reads render's `Schema::shape`. The shell's and the interrupt's derived copies go with the server they were for, and with them the test of a shared interrupt; a clone of a `Stop` sharing its stages is the API's own test. The table's row fit the file's cap by saying four rules shorter.
-
-**Fails first:** none: a move.
-
-**Acceptance criteria:**
-- [x] The tools' answers equal the base's; `mcp_flow` passes unchanged; the descriptions' test passes in the crate.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p yunta-mcp`, the CLI's `mcp_flow` target.
-- [x] Manual check: `mcp_answers.py` from a release build against `base-1`.
-
-**Dependencies:** Task 39
-
-**Files likely touched:** `Cargo.toml`, `crates/mcp/{Cargo.toml,src/lib.rs,src/tools.rs,src/answers.rs,src/read.rs,src/runs.rs}`, `crates/cli/{Cargo.toml,src/commands/mcp.rs}`, `.agents/architecture.md`
-
-**Estimated scope:** M
-
-### Group check: the MCP server
-- [x] `mcp_flow` and every tool's answer equal the base's: 147 captures, the 23 answers among them, equal to `base-1` from the release build (`proof/control/mcp-crate`).
-
-### Task 41: no surface names the engine, the store or the adapters
-
-**Description:**
-- `crates/cli/tests/no_engine_in_the_cli.rs` and `crates/mcp/tests/no_engine_in_the_control_plane.rs` read each crate's `[dependencies]`, as `no_adapter_crate_in_engine` reads the engine's, and fail naming the crate and saying the reading belongs to `yunta-api`.
-- The CLI's and `yunta-mcp`'s manifests drop `yunta-engine`, `yunta-storage` and `yunta-adapters`; a CLI test that drives the engine directly takes it as a dev-dependency.
-- Found in Task 41's turn: the CLI's test failed naming the three crates; `yunta-mcp`'s passed from the start, the crate being made in Task 40 with none of them. The CLI's error drops every variant an engine or store type held, and a stop is its own `CliError::Stopped`, said as before. An artifact view the store could not write was said in the CLI's words only when the error reached it as `CliError::Run`, which no command's error has done since the run path moved: the API's conversion now says it (`ViewUnwritten`, render's `failure::unwritten_view`), so every interface says it, and the CLI's `error::words` goes. Which adapter scripts its sessions is the API's to say (`machine::scripts_sessions`). `tempfile` is the CLI's for its tests alone.
-
-**Fails first:** both tests, against the manifests as they are: they name the three crates.
-
-**Acceptance criteria:**
-- [x] Both tests fail before the drop, for the crates named, and pass after.
-
-**Verification:**
-- [x] Tests pass: both targets, then `suite.py cli-1..5`, `cargo test -p yunta-mcp`.
-
-**Dependencies:** Task 40
-
-**Files likely touched:** `crates/cli/{Cargo.toml,tests/no_engine_in_the_cli.rs}`, `crates/mcp/{Cargo.toml,tests/no_engine_in_the_control_plane.rs}`
-
-**Estimated scope:** S
-
-### Task 42: what reads the process, and what the API shows, held
-
-**Description:**
-- The smell `process_read_below_the_shell` counts, outside `crates/cli/src/shell.rs` and the tests, `current_dir`, `current_exe`, `env::args` and a signal handler; its baseline is zero.
-- `system_clock_outside_boundary` allows `shell.rs` in place of `context.rs`; `env_read_outside_boundary` holds `crates/api` as every crate.
-- A test of the API reads its public items and fails on one that names an engine, store or adapter type.
-
-- Found in Task 42's turn: the counter reads `env::current_dir`, `env::current_exe`, `env::args`, `signal::unix::signal(` and `signal::ctrl_c(`, never a command's `.current_dir(`, which sets a child's directory and reads nothing. Its one site was the SIGINT the CLI's `Interrupt::ctrl_c` installed, which the shell now installs, the interrupt being the two stages a source trips. The two boundary counters held already: the clock is the shell's, and `crates/api` is no exception to the environment's. The API's test reads every `pub` item off its source, by the paths and the names its file imports, and found none naming a type below it: the earlier phases kept what the API uses alone `pub(crate)`.
-
-**Fails first:** the smell's own test, a site with `current_dir` in a fixture outside the shell, red until the counter exists; the API's test against a public item planted in a fixture.
-
-**Acceptance criteria:**
-- [x] `cargo xtask smells --check` passes with the new counter at zero.
-- [x] The API's test passes over the crate.
-
-**Verification:**
-- [x] Tests pass: `cargo test -p xtask`, `cargo test -p yunta-api`.
-
-**Dependencies:** Task 41
-
-**Files likely touched:** `xtask/src/{smells.rs,smells/sites.rs,smells/baseline.rs}`, xtask's smell tests, `crates/api/tests/public_items.rs`
-
-**Estimated scope:** M
-
-### Task 43: the docs say where each thing is
-
-**Description:**
-- `.agents/architecture.md`'s table changes `yunta`'s row; each moved module's `//!`; render's and core's crate maps; `AGENTS.md`'s map rows for the control plane and the ports.
-- `CAPABILITY-MAP.md`'s `app-core` row gains the chronicle's words, for `yunta-render`.
-
-- Found in Task 43's turn: the checker named the `yunta` row's crates (api, core, mcp, render, replay, surco); the run's paragraph opens with the API reading the config layers and the workflow, and the file stays within its 6,144 bytes. `AGENTS.md` sends the control plane to `crates/mcp/src/lib.rs`, and gains a row for the API, in the words its `//!` opens with. Core's map says a project's refusals too; the protocol crate's says the control plane is `yunta-mcp`. `docs --about` raised the generic reader's trap over the moved code: the pack manifest, read in the engine and the API, and a workflow's skeleton, parsed in the API beside core's own reader, are each read through one concrete reader in core now (`PackManifest::read`, `Workflow::parse`), and the lock through `PackLock::read`. The CLI's two adds at once say they hold the end state, the API's test the wait.
-
-**Fails first:** `cargo xtask docs --check` against the stale rows.
-
-**Acceptance criteria:**
-- [x] `cargo xtask docs --check` passes; `cargo xtask docs --about` over the diff prints nothing left untrue.
-
-**Verification:**
-- [x] Manual check: each map's row names a file that exists.
-
-**Dependencies:** Task 42
-
-**Files likely touched:** `.agents/architecture.md`, `AGENTS.md`, `CAPABILITY-MAP.md`, `crates/{core,render,api,mcp,mcp-protocol}/src/lib.rs`
-
-**Estimated scope:** M
-
-### Group check: the frontier
-- [x] Both manifest tests, the smell and the API's test hold.
-
-### Task 44: the proof
-
-**Description:**
-- The suite's count against the base's, by name, each moved test found where it went.
-- Every golden's digest; the captures, the documents and the MCP answers from the final release build; its size against the base's.
-
-**Fails first:** none: measurements.
-
-- Found in Task 44's turn: the suite's tools and CI's crate-by-crate check listed the crates by hand and missed `yunta-mcp`; it is in `ci.yml`'s list, `tools/gate.sh` and `tools/suite.py` now, and its tests in the proof's log.
-
-**Acceptance criteria:**
-- [x] Every difference from the base is a move, explained in `after.txt`; nothing printed changes.
-
-**Verification:**
-- [x] Manual check: `suite_diff.py`, `goldens.py --against`, `normalize.py base-1 final`.
-
-**Dependencies:** Task 43
-
-**Files likely touched:** `.plans/yunta-tui/proof/control/` (outside git)
-
-**Estimated scope:** S
-
-### Task 45: a real run at the end
-
-**Description:**
-- The same fragua run as Task 3 from the final release binary.
+- The suite's count by name against Checkpoint A's; every golden's digest; the captures, with the two that change shown beside the base's.
+- A real run followed with the API's following, as Task 3's: its follower lines against the base's, its time between nodes and its tokens.
+- The release size, by crate.
+- All of it in `checkpoint-b.txt`.
 
 **Fails first:** none: a measurement.
 
-- Found in Task 45's turn: run 01M71GDCY01468K5SJQA1RCXWD reached `ship` in 206 s with nothing asked before it; `between_secs` 0.552 against the base's 0.550 (Task 29's 0.550, Checkpoint C's 0.570), 2.31M tokens; its `abort` and `close` went through the API and exited 0 (`proof/control/real-final.txt`).
-
 **Acceptance criteria:**
-- [x] Its `between_secs` sits inside the base's spread.
+- [ ] The follower's lines equal the base's but ids and times; `between_secs` inside the base's spread.
 
 **Verification:**
-- [x] Manual check: `yunta stats <run>` beside the base's.
+- [ ] Manual check: `checkpoint-b.txt` read whole.
 
-**Dependencies:** Task 44
+**Dependencies:** Group check: the runners
 
-**Files likely touched:** `.plans/yunta-tui/proof/control/real-final*` (outside git)
+**Files likely touched:** `.plans/yunta-tui/proof/app-core/` (outside git)
 
 **Estimated scope:** S
 
-### Task 46: the review
+### Checkpoint B: once, below the surfaces, and the runners
+- [ ] Following, a run's page, the graph, the parked questions and every command's step stand below the surfaces; what a stage keeps is owned.
+- [ ] The user reads `init -i`'s new questions and `resolve-gate` on a parked round; every other capture is the base's.
+- [ ] The user reviews; the phase commits.
+
+## Phase 3: the application, and watching, deciding and starting
+
+Its groups, each green before the next: the values; watching; deciding; starting.
+
+### Task 32: the application's values
 
 **Description:**
-- The module's diff read in four parts (core and render; the API; the CLI; the MCP crates, xtask and docs) by readers of their own on Haiku, with `code-review-and-quality`'s axes and the standing directive.
-- The lead checks each finding against the code, the user decides each that stands, and the fixes go in before the commit.
+- `State`, `Input`, `Request`, `Ticket`, `Operation`, `Outcome`, `News` and `Stage`, with the plan's signatures, each in its own module of `crates/ui/src/`.
+- `State::opened(now)` asks `Operation::InRepository` and stands on nothing until it is answered. Outside a repository it opens on `Stage::Signpost`, which shows render's `Signpost`.
+- An `Outcome` or `News` for a ticket the state let go changes nothing.
+- `render::screen` holds the first words a screen says: the signpost's trail.
 
-**Fails first:** each fix that changes behavior, red first.
-
-**Found in its turn:** 40 findings from the four readers, each checked against the code and the base `34217b5f`. Each that stands carries a proposal; the user's decision is written beside it.
-
-- Of this module, standing:
-  - R1. `packs.rs`: what decides an install is judged before the hold and never again under it. Two adds of one pack both pass `AlreadyInstalled`, and an update that loses to a `remove` writes the pack back into the lock. Proposal: after the hold is taken, check again that an add is still absent and an update still locked. Red first.
-  - R2. `packs/vendor.rs`: `clone_pack` runs git in the process's directory, so a relative local source (`./pack`) resolves against the process, not `Workspace.dir`. `first_run` links its probe with the process's `PATH`, not the workspace's. Proposal: clone in the workspace's directory, and take `cc` from `Workspace.env`'s `PATH`. Red first.
-  - R3. `core/src/refusal.rs`: `GateRefusal::UnknownOption { declared }`, `Unservable::NoAdapter { built }` and `SetupRefusal::UnknownShape { shapes }` carry a list already joined into a string, beside `UnbuiltPin { runnable: Vec<_> }`. Proposal: carry lists, and render joins them. Nothing printed changes.
-  - R4. `engine/src/frozen/provenance.rs`: reads `yunta.lock` through the generic parser, not `PackLock::read`. A lock from a newer binary is trusted there and refused in the API. Proposal: read it through `PackLock::read`, so a newer lock is a provenance gap. Red first.
-  - R5. Docs the module left false:
-    - the engine's crate map ("the CLI is the only shipped crate above it");
-    - core's `port` ("Both ports", and an MCP server that implements no port);
-    - `check/error.rs`, which points at a module doc that no longer says it;
-    - `ConfigLayer::read`'s claim, while the testkit still parses layers and workflows itself (proposal: the testkit uses the readers);
-    - `CAPABILITY-MAP.md`'s `yunta-mcp` row, which names `replay`, and its `yunta` row, which needs "in its dependencies";
-    - `ControlPlane`'s doc, which omits the remarks sink;
-    - `cases.rs`, which omits `stopped` from the final words;
-    - the CLI manifest's reasons for `tokio-util` and `rmcp`;
-    - three imports out of their group.
-  - R6. The CLI reaches a project two ways, `shell.project()` (17 sites) and `shell.workspace().project()` (6), and `pack.rs` reaches packs two ways too. Proposal: one way each.
-  - R7. render's `DoctorDocument` re-derives `holds`, which `Doctor` keeps privately. Proposal: one rule, shared.
-  - R8. `close` answers only who closed the run, so the CLI writes `Standing::Stopped` itself, while `cancel` answers its standing. Proposal: `close` answers the standing the run is left in.
-- Architectural, carried from the base, standing:
-  - A1. Sentences are built outside render:
-    - in the API: a case's problems (`cases/case.rs`, `case/problems.rs`), what `gc` removed and kept (`collect.rs`), and `Remark::Unstopped`/`Uncollected`'s `said`;
-    - in the CLI: the forge-unavailable remark, the reset-wait line, "detached, driving forward independently", "resuming", the interrupt line, the unreadable terminal and the status manifest note.
-
-    Proposal: the API returns typed data and render words it, every line an interface other than the CLI meets included. The CLI's own process lines go too, so every interface says them in the same words. Captures guard.
-  - A2. `status --follow` decides two things itself: which run a promotion handed the work to (`successor`) and when following ends (`ending`). A TUI would decide them again. Proposal: the successor is `EventLog`'s, the end is `RunFrame`'s in replay, and the CLI draws.
-  - A3. The CLI reads a workflow file and a config file itself (`main.rs`'s `load_workflow`/`audit_workflow`, `check.rs`'s `read_config`). Proposal: the workspace reads them in the API, and `main.rs` only parses and dispatches, as its doc says.
-- Defects of the base, carried unchanged:
-  - B1. An operation the stop ended exits 1, with an error page, while every other interrupt exits 130. `yunta mcp` stopped exits 0. Proposal: both exit 130. Red first.
-  - B2. `doctor`'s remote check matches a substring, so `acme/web` passes for `acme/website`. Proposal: compare owner and repository whole. Red first.
-  - B3. A control-plane `null` value or input is recorded as the text `null`. Proposal: refuse it by name. Red first.
-  - B4. `split_source_and_ref` splits `git@host:repo.git` (no `/`) into `git` and a ref. Proposal: an `@` with no `/` after it and a `:` after it is SSH. Red first.
-  - B5. `init` writes the project name unquoted, so a name with ` #` is cut. Proposal: write it as YAML quotes it, which leaves ordinary names unchanged. Red first.
-  - B6. `pack update`'s comment says its inventory is shown "only when there is a decision to make", while its doc and the base show it whenever the new ref ships executors. Proposal: correct the comment.
-  - B7. `setup/skill.rs` cites "the docs this was built against". Proposal: say the format and nothing about its source.
-  - B8. CI's crate-by-crate check leaves out `yunta-testkit` and `yunta-testkit-core`. Proposal: add them.
-  - B9. A cancel settles an engine whose pid answers as another user's (`Liveness::Unknown`) as crashed. Proposal: no change. A pid another user reuses after a crash reads the same way, and refusing would leave that run uncancellable.
-  - B10. `gc` purges the rows of a run whose directory holds no manifest and keeps the directory. Proposal: no change. A directory with no manifest is no run of Yunta's.
-  - B11. The engine's `AnswersError::Refused(Report)` wraps the report core's `AnswersRefusal::Rejected` carries. Proposal: no change. It is the engine's own path, where a refused reply pauses the node, and no interface reads it.
-  - B12. `graph.rs`'s `derived_labels` always answers `Some`. Proposal: it answers the labels.
-- Refuted:
-  - The map's `engine::mcp` names where the item moved from.
-  - `list_workflows`' "this repository's own catalog" holds: packs are vendored in the repository.
-  - The shell's doc names the arguments, environment, directory, binary path and interrupt. A terminal's streams are the surface's, and `main` is above the shell.
-  - `open`'s page file was decided in Task 22's turn.
-  - The reset-wait line's "word" is the `waiting:` the test asserts.
-  - The JSON refusal's comment holds: the agent reader spells ids whole.
-  - `yunta-replay` is linked by every interface, so the API's public items may name its types.
-  - A pid as a unique name and `std::env::consts::OS` read nothing of the environment.
-  - The sandbox copies a linked file as a regular file, as its doc says.
-
-**Decided 2026-11-10:** the user approved every proposal: R1-R8, A1-A3, B1-B8 and B12 fixed, B9-B11 left as they are. Each fix that changes behavior has a test that failed first for the cause it names:
-- R1: `the_second_of_two_adds_of_one_pack_is_refused_once_the_first_installed`, `an_update_that_finds_its_pack_removed_is_refused_and_writes_nothing`.
-- R2: `a_relative_source_is_read_from_the_workspace`, `a_workspace_whose_path_has_no_compiler_leaves_the_probe_out`.
-- R4: `a_lock_a_newer_binary_wrote_is_a_gap_and_names_no_commit`.
-- B1: `an_add_a_person_interrupts_exits_as_interrupted`, `an_interrupted_control_plane_exits_as_interrupted` (red with the fix taken out).
-- B2: `a_remote_names_a_repository_by_its_owner_and_name_whole`, once the rule moved unchanged to `GitHubRepo::is_named_by`.
-- B3: `a_null_input_is_refused_by_its_name`, `a_null_answer_is_refused_by_its_question`.
-- B4: `the_at_of_an_ssh_shorthand_is_never_a_pin`.
-- B5: `a_project_name_reads_back_whole`.
-
-**Found in the fixes' turn:**
-- B1 met a second cause: a pack's git that the stop cancelled was said as a failure, because the pack's own conversion went around the API's. Now every git the API asks is the stop.
-- A1 met `Refused::AmbiguousRun { said }`, a sentence the API built. It now carries an `Ambiguity`, and render says it.
-- `Remark::Unstopped`'s `said` is the error's own words, with no sentence around them, as `RegistryKept`'s is, so it stays.
-- A case expecting a task `never registered` matched before, by comparing against the display word. A task never registered now matches no expectation. That word was never a status a case could write.
-- Two more, which the user approved after the first round:
-  - D1: `doctor`'s checklist was worded in the API (`machine/doctor/*`, `first_run.rs`), the A1 move on six files. Now `Project::doctor` hands back `Vec<render::page::doctor::Finding>`, one typed finding per check: the adapter's health, the forge's and the remote's answers, what the checkouts keep, the first run's cost and whether it slows a suite, what a pack lacks or is refused for, and how a session ended (`ProbeEnded`). Render says each, and says a fix once under the first row that needs it. The thresholds stay where they are decided, `keep_of` and `slows_a_suite` in the API, each with its test. The page, the document and the exit code read one `Readiness`.
-  - D2: a case that named a retired `final_state` said only "could not load test case", because `read_case` dropped the reason. Now `CaseUnread` carries why, with every cause (`a_case_that_does_not_read_says_why`, red first).
-- `PromotionChain::from` became `starting_at`, a name the `From` trait does not claim.
+**Fails first:** `crates/ui/tests/state.rs`:
+- opening asks where it stands;
+- a late outcome is dropped;
+- outside a repository the screen is the signpost.
 
 **Acceptance criteria:**
-- [x] Every finding is recorded here with its decision.
+- [ ] `State` is `Clone`; the three tests pass through `State` alone.
 
 **Verification:**
-- [x] Tests pass: the suite's groups after the fixes (4,607 tests, `proof/control/group-review.txt`; the gate's 282 binaries and 4,611 tests).
+- [ ] Tests pass: `cargo test -p yunta-ui`
+
+**Dependencies:** Checkpoint B
+
+**Files likely touched:** `crates/ui/src/{lib.rs,state.rs,input.rs,request.rs,operation.rs,outcome.rs,stage.rs,stage/signpost.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/state.rs`
+
+**Estimated scope:** L
+
+### Task 33: the performer
+
+**Description:**
+- **`Performer::new(Workspace)` and `perform(ticket, operation, inputs)`.**
+  - Each operation gets a `Stop` of its own.
+  - What the operation remarks is sent as `Input::Remark`, and its end as `Input::Outcome`.
+  - An `Error` comes back as `Outcome::Refused`, `Failed` or `Stopped`.
+- **`let_go(ticket)`** trips that ticket's stop and drops what the performer holds for it.
+- `Operation::InRepository` is carried out first. Each later task adds its operations here.
+
+**Fails first:** `crates/ui/tests/performer.rs`, against a workspace in a temporary directory:
+- `InRepository` answers;
+- a refused operation comes back as render's refusal.
+
+**Acceptance criteria:**
+- [ ] The performer reads nothing of its process: the workspace is the test's.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test performer`
+
+**Dependencies:** Task 32
+
+**Files likely touched:** `crates/ui/src/{performer.rs,performer/held.rs}`, `crates/ui/Cargo.toml`, `crates/ui/tests/performer.rs`
+
+**Estimated scope:** M
+
+### Task 34: the walk
+
+**Description:**
+- **`crates/ui/tests/walk.rs` starts from `State::opened` and applies every stroke and every outcome a pending ticket can have.**
+  - The strokes: every `Stroke` but `Insert`, and `Insert` of each key a stage binds and of one letter.
+  - Each operation is answered by its recording.
+- **The recordings come from `walk/home.rs`**, which builds a scratch home with runs at every standing, a parked gate, a plan, a questions node, packs and a repository never set up. `walk/recorded.rs` performs each distinct operation once on a fresh copy and keeps its outcome.
+- **States are deduped** by their screen in Markdown and the operations they wait on.
+- **What it holds:**
+  - `update` never panics;
+  - every request is one the performer carries out;
+  - every screen draws with `Html` and `Markdown`;
+  - every palette row is a step its stage takes, spelled as `command::line` spells it.
+
+**Fails first:** a stage that panics on a stroke, made to for the run, is found by the walk with the strokes that reach it.
+
+**Acceptance criteria:**
+- [ ] The walk covers the signpost and finishes in under a minute; it grows with each stage.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test walk`
+
+**Dependencies:** Task 33
+
+**Files likely touched:** `crates/ui/tests/{walk.rs,walk/home.rs,walk/recorded.rs}`
+
+**Estimated scope:** M
+
+### Task 35: the sandboxes
+
+**Description:**
+- **`crates/ui/tests/support/mod.rs` drives a `State` and a `Performer` until no ticket is pending:** `drive(state, performer, strokes) -> State`.
+- **`crates/cli/tests/interface/mod.rs` does the same where the work spawns Yunta,** with the workspace's binary `CARGO_BIN_EXE_yunta` and the mock adapter.
+
+**Fails first:** none: harnesses, first used in Task 36.
+
+**Acceptance criteria:**
+- [ ] Both drive the signpost to quiet.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui`, `cargo test -p yunta --test interface`
+
+**Dependencies:** Task 34
+
+**Files likely touched:** `crates/ui/tests/support/mod.rs`, `crates/cli/tests/{interface.rs,interface/mod.rs}`
+
+**Estimated scope:** S
+
+### Group check: the values
+- [ ] The suite's groups green; the walk covers the signpost.
+
+### Task 36: the field
+
+**Description:**
+- `Stage::Field(FieldStage)`, shown in a repository with runs. `FieldStage` holds the reading, the row pointed at, the rows marked, the reach and the depth.
+- **What a person does there:**
+  - open the run pointed at;
+  - go to what needs them (`NextStep::Needs`);
+  - resume (`Operation::Resume`);
+  - cancel one run, after a confirmation;
+  - close one run or every marked one, after one confirmation naming each;
+  - widen the reach to the machine, or the depth to the closed runs.
+- The screen: render's `Field` in its main region, the tally of each standing, the attention, and the legend from `render::screen`.
+- A repository set up with no runs opens on the first run (Task 41), a stage this task points to.
+
+**Fails first:**
+- `crates/ui/tests/field.rs`: marking and closing two runs asks one confirmation naming both, then `Operation::Close` with both;
+- `crates/cli/tests/interface/field.rs`: two mock runs closed, the field read again.
+
+**Acceptance criteria:**
+- [ ] The walk covers the field at every reach and depth.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test field --test walk`, `cargo test -p yunta --test interface`
+
+**Dependencies:** Group check: the values
+
+**Files likely touched:** `crates/ui/src/{stage/field.rs,dialog.rs,dialog/confirmation.rs,performer.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/field.rs`, `crates/cli/tests/interface/field.rs`
+
+**Estimated scope:** L
+
+### Task 37: a run, followed
+
+**Description:**
+- `Stage::Run(RunStage)`. `RunStage` holds:
+  - the run's page, from `Operation::ReadPage`;
+  - its moments, folded by replay's `chronicle` from the events `Operation::Follow` hands back as `News::Run`;
+  - what its sessions said, and whether it follows.
+- The screen:
+  - the trail;
+  - the ribbon;
+  - the chronicle in render's words in the main region, the moving rows of `render::watched` under it;
+  - the run's page beside it.
+- A promotion's successor is followed on, its page read again. The run's stop or stall reads its page once more and stops following.
+
+**Fails first:**
+- `crates/ui/tests/run_stage.rs`: news of events grows the chronicle;
+- `crates/cli/tests/interface/run.rs`: a mock run followed to its end, and a promotion onto its successor, as `status_follow/edges` makes one.
+
+**Acceptance criteria:**
+- [ ] The run stage's chronicle says each moment in the words `status --follow` writes through a pipe.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test run_stage`, `cargo test -p yunta --test interface`
+
+**Dependencies:** Task 36
+
+**Files likely touched:** `crates/ui/src/{stage/run.rs,performer.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/run_stage.rs`, `crates/cli/tests/interface/run.rs`
+
+**Estimated scope:** L
+
+### Task 38: a run's node, and what it offers
+
+**Description:**
+- **Picking a node** stops following, and shows its page (`Operation::ReadNodePage`) in place of the run's.
+- **What `RunFrame::actions` offers is bound to keys and listed:**
+  - stopping, after a confirmation;
+  - going on (`Operation::Resume`);
+  - answering, which opens the decision (Task 39).
+
+  The receipt, verifying and the page in a browser lead to the evidence stage (Task 49).
+- **A run asked at another terminal** is shown as asking there, with only what the frame offers: stopping it.
+
+**Fails first:** `crates/ui/tests/run_stage.rs`:
+- a node picked shows its page and stops following;
+- a run asking at its terminal offers only stopping.
+
+**Acceptance criteria:**
+- [ ] Every key the run stage binds is a step of `RunFrame::actions`, or moves within the stage.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test run_stage --test walk`
+
+**Dependencies:** Task 37
+
+**Files likely touched:** `crates/ui/src/stage/run.rs`, `crates/render/src/screen.rs`, `crates/ui/tests/run_stage.rs`
+
+**Estimated scope:** M
+
+### Group check: watching
+- [ ] The suite's groups green; the walk covers the signpost, the field and a run.
+
+### Task 39: a gate, decided
+
+**Description:**
+- `Stage::Decision(DecisionStage)`. `Operation::ReadDecision` reads `WaitingDecision`.
+- The stage holds a `Deciding`. The card stands in the main region, with the documents the decision shows (render's `Gate::AboveTheCard`) beside it. The desk takes the screen when it is in front, and `Input::Laid` reaches it.
+- **What a person does there:**
+  - pick an option, with words where it asks: `Operation::Decide`, handed to a detached resume by the API;
+  - leave the decision waiting, back to where they came from.
+
+**Fails first:**
+- `crates/ui/tests/decision_stage.rs`: reading turns to the desk, and a number picked there decides;
+- `crates/cli/tests/interface/decision.rs`: a parked gate decided, and the run resumed detached.
+
+**Acceptance criteria:**
+- [ ] The card's legend, words and refusals are the CLI's `resolve-gate`'s, drawn as blocks.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test decision_stage`, `cargo test -p yunta --test interface`
+
+**Dependencies:** Group check: watching
+
+**Files likely touched:** `crates/ui/src/{stage/decision.rs,performer.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/decision_stage.rs`, `crates/cli/tests/interface/decision.rs`
+
+**Estimated scope:** M
+
+### Task 40: a round, answered
+
+**Description:**
+- **A run parked on questions opens its round in the decision stage.** `Operation::ReadQuestions` reads `WaitingQuestions`.
+- **The `Round` answers through `Operation::Answer`.** Nothing is recorded until the last answer, and Escape leaves with nothing recorded.
+
+**Fails first:** `crates/cli/tests/interface/questions.rs`: a parked round answered, and the run resumed with the answers on its log.
+
+**Acceptance criteria:**
+- [ ] The round's words and refusals are the attached run's.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta --test interface`
+
+**Dependencies:** Task 39
+
+**Files likely touched:** `crates/ui/src/{stage/decision.rs,performer.rs}`, `crates/cli/tests/interface/questions.rs`
+
+**Estimated scope:** S
+
+### Group check: deciding
+- [ ] The suite's groups green; the walk covers the decision stage on a gate, a plan and a round.
+
+### Task 41: the first run
+
+**Description:**
+- **`Stage::FirstRun(FirstRunStage)`,** in a repository set up with no runs. It holds the request being typed on a `TypedLine`, and the catalog from `Operation::ReadCatalog`.
+- **The screen:** the first run's question from `render::screen`, over the catalog's page.
+- **Enter takes the request to the start stage,** with the request already typed.
+
+**Fails first:** `crates/ui/tests/first_run.rs`: a set-up repository with no runs opens here, and typed words reach the start stage.
+
+**Acceptance criteria:**
+- [ ] The walk covers the first run.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test first_run --test walk`
+
+**Dependencies:** Group check: deciding
+
+**Files likely touched:** `crates/ui/src/{stage/first_run.rs,performer.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/first_run.rs`
+
+**Estimated scope:** S
+
+### Task 42: a run started
+
+**Description:**
+- **`Stage::Start(StartStage)`:**
+  - the workflow, picked off the catalog on a `Picker`;
+  - each input it declares, on a `TypedLine`, with the request typed in the input the workflow reads it from;
+  - its mode and its adapter, each on a `Picker`, defaulting as `yunta run` defaults.
+- **`Operation::Start` admits, creates and starts the run detached, as `yunta run --detach` does.** Admission's cautions come back as remarks and stand on the screen. The run is then followed (Task 37).
+- **A refusal is said by render,** and the person stays where they were, to change what was refused.
+
+**Fails first:** `crates/cli/tests/interface/start.rs`:
+- a mock workflow started detached and followed to its end;
+- an input left empty, refused as `yunta run` refuses it.
+
+**Acceptance criteria:**
+- [ ] What `Operation::Start` asks is the `RunRequest` `yunta run` builds from the same choices.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta --test interface`, `cargo test -p yunta-ui --test walk`
+
+**Dependencies:** Task 41
+
+**Files likely touched:** `crates/ui/src/{stage/start.rs,performer.rs}`, `crates/render/src/screen.rs`, `crates/cli/tests/interface/start.rs`
+
+**Estimated scope:** M
+
+### Group check: starting
+- [ ] The suite's groups green; the walk covers every stage built so far.
+
+### Task 43: Checkpoint C's proof
+
+**Description:**
+- The suite's count by name, every golden's digest and the captures, against Checkpoint B's.
+- The walk's count of states and screens.
+- All of it in `checkpoint-c.txt`.
+
+**Fails first:** none: a measurement.
+
+**Acceptance criteria:**
+- [ ] Nothing the CLI prints changed in this phase.
+
+**Verification:**
+- [ ] Manual check: `checkpoint-c.txt` read whole.
+
+**Dependencies:** Group check: starting
+
+**Files likely touched:** `.plans/yunta-tui/proof/app-core/` (outside git)
+
+**Estimated scope:** S
+
+### Checkpoint C: watching, deciding, starting
+- [ ] The walk covers the signpost, the field, a run, a decision and a start; each works end to end against its sandbox.
+- [ ] The user reviews; the phase commits.
+
+## Phase 4: every other stage, the dialogs, and the proof
+
+Its groups, each green before the next: setup; the catalog; what a run leaves and costs; the machine; the dialogs; the proof and the review.
+
+### Task 44: setup
+
+**Description:**
+- **`Stage::Setup(SetupStage)`,** in a repository never set up. `Operation::DetectProject` reads it, and the performer holds the `DetectedProject` under its ticket.
+- **The screen shows `page::Setup`, render's page of what was found and would be written.** `Detected` is core's, hence the name.
+- **What a person answers:** the name and the base branch on `TypedLine`s, and each proposed role's adapter and model, as `init -i` asks them.
+- **`Operation::WriteSetup { ticket, setup }` writes it.** The screen shows `Initialized`, then offers a pack to install (Task 48).
+
+**Fails first:**
+- `crates/ui/tests/setup.rs`: the answers become the `ProjectSetup` `init -i` would write;
+- render's goldens of `page::Setup`.
+
+**Acceptance criteria:**
+- [ ] A setup left before writing writes nothing, and its detected project is dropped.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test setup`, `cargo test -p yunta-render --features golden`
+
+**Dependencies:** Checkpoint C
+
+**Files likely touched:** `crates/ui/src/{stage/setup.rs,performer.rs,performer/held.rs}`, `crates/render/src/{page.rs,page/setup.rs,screen.rs}`, `crates/ui/tests/setup.rs`
+
+**Estimated scope:** M
+
+### Group check: setup
+- [ ] The suite's groups green; the walk covers setup.
+
+### Task 45: the catalog
+
+**Description:**
+- `Stage::Catalog(CatalogStage)` shows render's `Catalog`, with a workflow pointed at.
+- **For the workflow pointed at:**
+  - its check, `Operation::Check`, shown as `Checked`;
+  - its graph, which leads to the graph stage (Task 50);
+  - its history, which leads to the stats stage (Task 50);
+  - running it, which leads to the start stage with it picked.
+
+**Fails first:** `crates/ui/tests/catalog.rs`: a workflow that breaks a rule shows its check with the rule named.
+
+**Acceptance criteria:**
+- [ ] The check's page is the one `yunta check` prints.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test catalog`
+
+**Dependencies:** Group check: setup
+
+**Files likely touched:** `crates/ui/src/{stage/catalog.rs,performer.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/catalog.rs`
+
+**Estimated scope:** M
+
+### Task 46: a new workflow, and the cases
+
+**Description:**
+- **A new workflow:** a name on a `TypedLine` and a shape on a `Picker`. `Operation::NewWorkflow` writes it, and the screen shows `NewWorkflow` with its diagnosis.
+- **The cases:** `Operation::RunCases` runs the project's, each case handed back as `News::Case` as it ends. `Tested` grows on the screen, and a person can stop them.
+
+**Fails first:** `crates/ui/tests/catalog.rs`:
+- a workflow written in a sandbox;
+- two cases, each seen as it ends, the second stopped by `LetGo`.
+
+**Acceptance criteria:**
+- [ ] The skeleton and the cases' page are those `yunta new` and `yunta test` write.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test catalog`
 
 **Dependencies:** Task 45
+
+**Files likely touched:** `crates/ui/src/{stage/catalog.rs,performer.rs}`, `crates/ui/tests/catalog.rs`
+
+**Estimated scope:** M
+
+### Task 47: the packs, listed, audited, removed and scaffolded
+
+**Description:**
+- **`Operation::ListPacks`** shows render's listed packs, and **`Operation::AuditPack`** a pack's audit.
+- **Removing a pack** asks a confirmation, then `Operation::RemovePack`.
+- **Scaffolding a pack:** a name on a `TypedLine`, then `Operation::ScaffoldPack` and its check.
+
+**Fails first:** `crates/ui/tests/packs.rs`: a pack removed after its confirmation, and the listing read again.
+
+**Acceptance criteria:**
+- [ ] Each page is the one the matching `yunta pack` command prints.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test packs`
+
+**Dependencies:** Task 46
+
+**Files likely touched:** `crates/ui/src/{stage/catalog.rs,stage/catalog/packs.rs,performer.rs}`, `crates/ui/tests/packs.rs`
+
+**Estimated scope:** M
+
+### Task 48: a pack installed or updated from the copy its audit read
+
+**Description:**
+- **`Operation::FetchPack { source }` and `Operation::FetchUpdate { pack, reference }`** fetch a pack, and the performer holds the `FetchedPack` under its ticket.
+  - The screen shows its inventory.
+  - Where it ships executors, a confirmation names them.
+- **`Operation::InstallPack { ticket }`** installs the held copy. It never fetches again.
+- **The screen** shows `Installed` or `Updated`, with what the project lacks for its workflows.
+- **Leaving before confirming** lets the ticket go, and the temporary checkout goes with it.
+
+**Fails first:** `crates/ui/tests/packs.rs`:
+- a local pack with an executor installed after its confirmation, from the commit its audit read;
+- a pack left unconfirmed leaves no temporary checkout.
+
+**Acceptance criteria:**
+- [ ] What is installed is the commit the audit read, even where the source moved between the two.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test packs`
+
+**Dependencies:** Task 47
+
+**Files likely touched:** `crates/ui/src/{stage/catalog/packs.rs,performer.rs,performer/held.rs}`, `crates/ui/tests/packs.rs`
+
+**Estimated scope:** M
+
+### Group check: the catalog
+- [ ] The suite's groups green; the walk covers the catalog and the packs.
+
+### Task 49: what a run leaves
+
+**Description:**
+- **`Stage::Evidence(EvidenceStage)`:**
+  - the receipt of a finished run, `Operation::WriteReceipt`, shown as `Receipt`;
+  - a run's chain verified, `Operation::Verify`, shown as `Verified`;
+  - its page in a browser, `Operation::WritePageForBrowser`, then `Request::ShowPage` with its path, and `Opened`.
+- The run stage's actions that `RunFrame::actions` offers for these lead here.
+
+**Fails first:** `crates/ui/tests/evidence.rs`: a finished mock run's receipt written, and its page asked to be shown at the path the API wrote.
+
+**Acceptance criteria:**
+- [ ] The receipt's two files and `page.html` are those `yunta receipt` and `yunta open` write.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test evidence`
+
+**Dependencies:** Group check: the catalog
+
+**Files likely touched:** `crates/ui/src/{stage/evidence.rs,stage/run.rs,performer.rs}`, `crates/ui/tests/evidence.rs`
+
+**Estimated scope:** M
+
+### Task 50: what a run cost, and how a workflow is drawn
+
+**Description:**
+- **`Stage::Stats(StatsStage)`:** a run's `Stats` (`Operation::ReadStats`), or a workflow's `History` (`Operation::ReadHistory`), reached from a run or from the catalog.
+- **`Stage::Graph(GraphStage)`:** `page::Graph` of a workflow (`Operation::ReadWorkflow`), or of a run, labelled with its frame.
+
+**Fails first:** `crates/ui/tests/stats_graph.rs`:
+- a finished mock run's stats;
+- its graph labelled with each node's word.
+
+**Acceptance criteria:**
+- [ ] The pages are those `yunta stats` and `yunta graph` draw.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test stats_graph`
+
+**Dependencies:** Task 49
+
+**Files likely touched:** `crates/ui/src/{stage/stats.rs,stage/graph.rs,performer.rs}`, `crates/ui/tests/stats_graph.rs`
+
+**Estimated scope:** M
+
+### Group check: what a run leaves and costs
+- [ ] The suite's groups green; the walk covers evidence, stats and the graph.
+
+### Task 51: doctor
+
+**Description:**
+- **`Stage::Doctor(DoctorStage)`:** `Operation::Doctor { sessions: false }`, shown as `Doctor`, folded or every check.
+- **A session per binding** is opened after a confirmation that says it spends a prompt each. Its remarks show as they come, and a person can stop it.
+- **A checkouts finding over its budget** leads to upkeep.
+
+**Fails first:** `crates/ui/tests/doctor.rs`: the findings of a sandbox, unfolded; the sessions asked only after the confirmation.
+
+**Acceptance criteria:**
+- [ ] The page is the one `yunta doctor` and `--full` print.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test doctor`
+
+**Dependencies:** Group check: what a run leaves and costs
+
+**Files likely touched:** `crates/ui/src/{stage/doctor.rs,performer.rs}`, `crates/ui/tests/doctor.rs`
+
+**Estimated scope:** M
+
+### Task 52: upkeep and the shape of a document
+
+**Description:**
+- **`Stage::Upkeep(UpkeepStage)`:** `Operation::Collect { dry_run: true }`, shown as `Collected`. After a confirmation, `Operation::Collect { dry_run: false }`, its remarks shown as they come.
+- **`Stage::Schema(SchemaStage)`:** every document's shape, and the one picked, from core's `shape`, with no operation.
+
+**Fails first:** `crates/ui/tests/upkeep_schema.rs`:
+- a sandbox's checkouts collected after the dry run's confirmation;
+- `tasks`' shape picked.
+
+**Acceptance criteria:**
+- [ ] The pages are those `yunta gc --dry-run`, `yunta gc` and `yunta schema` print.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test upkeep_schema`
+
+**Dependencies:** Task 51
+
+**Files likely touched:** `crates/ui/src/{stage/upkeep.rs,stage/schema.rs,performer.rs}`, `crates/ui/tests/upkeep_schema.rs`
+
+**Estimated scope:** S
+
+### Group check: the machine
+- [ ] The suite's groups green; the walk covers doctor, upkeep and schema.
+
+### Task 53: the palette
+
+**Description:**
+- **`Dialog::Palette(Palette)` over every stage,** opened by its key.
+  - It lists the steps the stage offers, then those always there.
+  - Each row has its line from `command::line` and what it does from `command::does`.
+  - The rows are a `Picker<NextStep>`, and typed words filter them.
+- **Choosing a row does what its key does on the stage**, or leads to the stage that does it.
+
+**Fails first:** `crates/ui/tests/palette.rs`: on a parked run, the palette lists answering first and every always-there step after; "doc" filters to doctor.
+
+**Acceptance criteria:**
+- [ ] The walk holds every row of every stage's palette.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test palette --test walk`
+
+**Dependencies:** Group check: the machine
+
+**Files likely touched:** `crates/ui/src/{dialog.rs,dialog/palette.rs,state.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/palette.rs`
+
+**Estimated scope:** M
+
+### Task 54: help, and every confirmation
+
+**Description:**
+- **`Dialog::Help`** lists the keys of the stage and those always there, worded by `render::screen`.
+- **Every act that stops, closes, removes or spends stands behind `Dialog::Confirmation`,** saying what it does and the command that does the same. These are cancel, close, removing a pack, a pack's executors, doctor's sessions and collecting.
+- Escape leaves a dialog with nothing done.
+
+**Fails first:** `crates/ui/tests/dialogs.rs`: each of those acts asks before its operation, and Escape leaves it undone.
+
+**Acceptance criteria:**
+- [ ] No operation that stops, closes, removes or spends is requested without a confirmation; the walk holds it.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-ui --test dialogs --test walk`
+
+**Dependencies:** Task 53
+
+**Files likely touched:** `crates/ui/src/{dialog.rs,dialog/confirmation.rs,state.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/dialogs.rs`, `crates/ui/tests/walk.rs`
+
+**Estimated scope:** M
+
+### Group check: the dialogs
+- [ ] The suite's groups green; the walk covers every stage and every dialog.
+
+### Task 55: the proof
+
+**Description:**
+- The suite's count against the base's, by name: moved, renamed, new, and none gone without a reason.
+- Every golden's digest; the captures, with `init -i`'s and the parked round's shown beside the base's.
+- The walk's count of states and screens. The release binary's size by crate and by copy against the base's (`tools/size_by_crate.py`, `tools/duplicates.py`).
+- All of it in `proof/app-core/after.txt`.
+
+**Fails first:** none: a measurement.
+
+**Acceptance criteria:**
+- [ ] Every difference from the base is one this list names; the static Linux binary stays under its ceiling.
+
+**Verification:**
+- [ ] Manual check: `after.txt` read whole.
+
+**Dependencies:** Group check: the dialogs
+
+**Files likely touched:** `.plans/yunta-tui/proof/app-core/` (outside git)
+
+**Estimated scope:** S
+
+### Task 56: a real run at the end
+
+**Description:**
+- As Task 3, from the final tree's release binary: followed with `yunta status --follow`, its gates answered with `yunta resolve-gate`, its time read from `yunta stats`.
+
+**Fails first:** none: a measurement.
+
+**Acceptance criteria:**
+- [ ] The follower's lines equal the base's but ids and times; `between_secs` inside the base's spread.
+
+**Verification:**
+- [ ] Manual check: the run's numbers beside the base's in `after.txt`.
+
+**Dependencies:** Task 55
+
+**Files likely touched:** `.plans/yunta-tui/proof/app-core/real-after*` (outside git)
+
+**Estimated scope:** S
+
+### Task 57: the review
+
+**Description:**
+- The module's diff, read in four parts by readers of their own:
+  - the moves to render and the prompts' split;
+  - the API's following, pages, questions and runners;
+  - `yunta-ui`'s values, performer and walk;
+  - the stages and dialogs.
+- Each finding is checked against the code and the base, and recorded here with its decision.
+
+**Fails first:** none: a review.
+
+**Acceptance criteria:**
+- [ ] Every finding is recorded here with its decision.
+
+**Verification:**
+- [ ] Tests pass: the suite's groups after the fixes.
+
+**Dependencies:** Task 56
 
 **Files likely touched:** as the findings say
 
 **Estimated scope:** M
 
 ### Checkpoint D: the module
-- [x] The release binary's code against Checkpoint A's, by crate and by copy (`tools/size_by_crate.py`, `tools/duplicates.py`, both built with symbols): found after Phase 2, when the static Linux binary passed its 40 MiB ceiling, that a release build shares no generics, so each crate that named the generic YAML reader on a manifest or a config layer built its own copy of everything that reads them; since then core reads each through one concrete reader (`Manifest::read_frozen`, `ConfigLayer::read`), and the binary went from 32.16 MB to 28.95 MB. Every document more than one crate reads is read through one such reader, and the binary stays at or under that size.
-  - Measured on the final tree (`proof/control/size-checkpoint-d.txt`): code 26,713,908 bytes at Checkpoint A, 25,377,452 now, 1,336,456 fewer; `serde_path_to_error` 845 KB and `yunta_core` 608 KB fewer, `yunta` 448 KB fewer as its code went to `yunta_api` (413 KB) and `yunta_mcp` (63 KB). Release 28,251,712 bytes, under the 28.95 MB this item holds it to.
-  - Copies the generic readers still build twice are small: a question's visitor two more (32 KB) and the skills section's one more (16 KB). Nothing above them is a document read in a second crate.
-- [x] The user reviews the proof and the review.
-- [x] The phase commits and is pushed (`92d05277`); Task 47 follows, then `cargo clean`, done.
+- [ ] Every stage of the spec works end to end against its sandbox; the walk covers every stage and dialog; what prints is the base's but the two changes this list names.
+- [ ] The user reviews the proof and the review.
+- [ ] The phase commits and is pushed; Task 58 follows, then `cargo clean`.
 
-### Task 47: the pull request
+### Task 58: the pull request
 
 **Description:**
 - PR #30's body gains the module; CI on Linux and macOS.
 
 **Fails first:** none.
 
-**Found in its turn:** the first run of `test-macos` failed one engine test, `measure_beside_loop::a_red_measurement_holds_no_guard`: on the slower runner the task's pre-check ran the red suite as a guard and stopped the node, where the run should finish. No file on that path changed in this module; the job passed when run again. A race the base already holds, recorded in `.agents/open.md`.
-
 **Acceptance criteria:**
-- [x] CI green on Linux and macOS.
+- [ ] CI green on Linux and macOS.
 
 **Verification:**
-- [x] Manual check: `gh pr checks 30`: ci, musl-build, test-release and test-macos pass.
+- [ ] Manual check: `gh pr checks 30`: ci, musl-build, test-release and test-macos pass.
 
 **Dependencies:** Checkpoint D
 

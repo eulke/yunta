@@ -10,7 +10,7 @@ mod skill;
 mod workflow;
 
 pub use init::{DetectedProject, InitializedProject};
-pub use workflow::{WorkflowShape, WorkflowStem, WrittenWorkflow};
+pub use workflow::{WorkflowStem, WrittenWorkflow};
 
 /// A file or a directory `init` or `new` could not write: what it was doing,
 /// and the disk's words.

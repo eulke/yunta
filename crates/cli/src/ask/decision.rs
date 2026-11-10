@@ -1,29 +1,23 @@
-//! The decision a person makes when the run stops and asks.
+//! The decision a person makes when the run stops and asks, held at a terminal.
 //!
-//! The decision is a card held where it opened: its question, what a reader
-//! needs to answer it, and each option with what choosing it does and costs,
-//! one pointed at. Arrows move the pointer, Enter chooses, `n` adds a note and
-//! Escape parks the run. What the card stands under is drawn above it, when
-//! there is anything to draw: the documents the desk does not show, and what
-//! weighs on it. `r` reads the plan the decision is on, at the desk on the
-//! terminal's other screen; a person who came to read a plan opens on that
-//! plan first. The card itself lives in [`super::card`] and the desk in
-//! [`super::desk`]; this module gathers what they are drawn from and puts them
-//! to the person.
+//! The decision is `yunta_ui`'s [`Deciding`]: its card, and the plan it is on a key
+//! away, with the turns between them. This module holds the one in front where a
+//! terminal can: the card where it opened, the desk on the terminal's other screen, and
+//! the plan printed in the history where the terminal has no room for a desk. What the
+//! card stands under is drawn above it, when there is anything to draw: the documents
+//! the desk does not show, and what weighs on it. What the card says is render's
+//! `prompt::card`.
 
 use std::collections::BTreeMap;
 
-use surco::glyphs::Glyphs;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
 use yunta_core::shown::ShownDocument;
 use yunta_core::{Env, NodeId, OptionId, RunId};
-use yunta_render::changes;
-use yunta_render::escalation::{self, Route};
+use yunta_render::escalation::{claim_words, Route};
 use yunta_render::page::{desk, Gate, Page};
+use yunta_render::prompt::{card, FOLDED};
+use yunta_ui::prompt::{Asked, Deciding, DecisionCard, InFront, Opens, PickedOption, Press};
 
-use super::card::{Answer, DecisionCard, Reply};
-use super::desk::{Asked, Leaving, Left, PlanDesk};
-use super::field::FOLDED;
 use super::held::hold;
 use super::{attributed, Answered, Console, NoAnswer};
 
@@ -49,30 +43,18 @@ pub(crate) struct Ask<'a> {
     pub(crate) opens: Opens,
 }
 
-/// What a decision opens on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Opens {
-    /// Its card, with the plan a key away.
-    TheCard,
-    /// The plan it is on, for a person who came to read it.
-    ThePlan,
-}
-
 /// Puts the decision to the person as a card held where it opened, and returns what
 /// they chose. `env` is the ambient identity the choice is attributed to.
 pub(crate) fn decide(console: &Console, env: &Env, mut ask: Ask<'_>) -> Answered<HumanChoice> {
     present(console, &ask)?;
     let glyphs = console.look().glyphs;
-    let (edge, about) = (edge(&ask, glyphs), about(&ask, glyphs));
+    let documents = ask.shown.map_or(&[][..], |(_, documents)| documents);
+    let edge = card::edge(ask.node, ask.shown.map(|(run, _)| run), glyphs);
+    let about = card::about(ask.escalation, documents, ask.changed, glyphs);
     let routes = std::mem::take(&mut ask.routes);
-    let mut card =
-        DecisionCard::new(ask.escalation, console.escape(), routes).standing_on(edge, about);
-    let mut desk = desk_of(console, &ask, &card);
-    if desk.is_some() {
-        card = card.reading();
-    }
-    let answer = answered(console, &ask, &mut card, desk.as_mut())?;
-    console.say_unless_chronicled(&chose(&answer))?;
+    let card = DecisionCard::new(ask.escalation, console.escape(), routes).standing_on(edge, about);
+    let answer = answered(console, &ask, &mut deciding(&ask, card))?;
+    console.say_unless_chronicled(&card::chose(&answer.option, answer.words.as_deref()))?;
     if answer.folded {
         console.say(FOLDED)?;
     }
@@ -84,75 +66,60 @@ pub(crate) fn decide(console: &Console, env: &Env, mut ask: Ask<'_>) -> Answered
     })
 }
 
-/// The desk of the plan `ask` is on, when it is on one.
-fn desk_of<'a>(console: &Console, ask: &Ask<'a>, card: &DecisionCard) -> Option<PlanDesk<'a>> {
-    let (run, documents) = ask.shown?;
-    let reading = desk::reading(documents, run)?;
+/// The decision on `card`, with the plan `ask` is on behind it when it is on one.
+fn deciding<'a>(ask: &Ask<'a>, card: DecisionCard) -> Deciding<'a> {
+    let Some((run, documents)) = ask.shown else {
+        return Deciding::new(card);
+    };
+    let Some(reading) = desk::reading(documents, run) else {
+        return Deciding::new(card);
+    };
     let asked = Asked {
-        question: question(ask),
+        question: claim_words(ask.escalation),
         node: ask.node.map(ToString::to_string),
         run: Some(run.handle().to_string()),
         called: ask.called.clone(),
     };
-    let leaving = match ask.opens {
-        Opens::TheCard => Leaving::ToTheCard,
-        Opens::ThePlan => Leaving::TheCommand(console.escape()),
-    };
-    Some(PlanDesk::new(reading, asked, card.rows(), leaving))
+    Deciding::on_plan(card, reading, asked, ask.opens)
 }
 
-/// The card and the desk, until the decision is answered.
+/// The one in front, held until the decision is answered: the card where it opened,
+/// and the desk on the terminal's other screen. A terminal with no room for a desk gets
+/// the plan in its history, over the card. Ctrl-C at the desk reaches the run only once
+/// the other screen is gone, so what it says stands on the screen that stays.
 fn answered(
     console: &Console,
     ask: &Ask<'_>,
-    card: &mut DecisionCard,
-    mut desk: Option<&mut PlanDesk<'_>>,
-) -> Answered<Answer> {
-    if ask.opens == Opens::ThePlan {
-        if let Some(answer) = read(console, ask, card, desk.as_deref_mut())? {
-            return Ok(answer);
-        }
-    }
+    deciding: &mut Deciding<'_>,
+) -> Answered<PickedOption> {
     loop {
-        match hold(console, card)? {
-            Reply::Chose(answer) => return Ok(answer),
-            Reply::Read => {
-                if let Some(answer) = read(console, ask, card, desk.as_deref_mut())? {
+        match deciding.in_front() {
+            InFront::TheCard(card) => {
+                let reply = hold(console, card)?;
+                if let Some(answer) = deciding.replied(reply) {
                     return Ok(answer);
                 }
             }
-        }
-    }
-}
-
-/// A stay at the desk: what it answered, or `None` where the card has more to say. A
-/// terminal with no room for a desk gets the plan in its history, over the card. Ctrl-C
-/// reaches the run only once the other screen is gone, so what it says stands on the
-/// screen that stays.
-fn read(
-    console: &Console,
-    ask: &Ask<'_>,
-    card: &mut DecisionCard,
-    desk: Option<&mut PlanDesk<'_>>,
-) -> Answered<Option<Answer>> {
-    let Some(desk) = desk else {
-        return Ok(None);
-    };
-    let (columns, rows) = console.size();
-    if columns < DESK_COLUMNS || rows < DESK_ROWS {
-        print_documents(console, ask)?;
-        return Ok(None);
-    }
-    console.alternate_on()?;
-    let left = hold(console, desk);
-    console.alternate_off()?;
-    match left? {
-        Left::Back if ask.opens == Opens::ThePlan => Err(NoAnswer::Declined),
-        Left::Back => Ok(None),
-        Left::Picked(index) => Ok(card.pick(index)),
-        Left::Interrupted => {
-            console.interrupt();
-            Err(NoAnswer::Interrupted)
+            InFront::ThePlan(desk) => {
+                let (columns, rows) = console.size();
+                if columns < DESK_COLUMNS || rows < DESK_ROWS {
+                    print_documents(console, ask)?;
+                    deciding.plan_unshown();
+                    continue;
+                }
+                console.alternate_on()?;
+                let left = hold(console, desk);
+                console.alternate_off()?;
+                match deciding.left(left?) {
+                    Press::Answer(answer) => return Ok(answer),
+                    Press::Decline => return Err(NoAnswer::Declined),
+                    Press::Interrupt => {
+                        console.interrupt();
+                        return Err(NoAnswer::Interrupted);
+                    }
+                    Press::Stay | Press::Moved => {}
+                }
+            }
         }
     }
 }
@@ -191,46 +158,4 @@ fn draw_page(console: &Console, page: &impl Page) -> std::io::Result<()> {
         console.say(line)?;
     }
     console.say("")
-}
-
-/// The sentence that says what the decision is, as the card and the desk both put it.
-fn question(ask: &Ask<'_>) -> String {
-    yunta_render::claim::sentence(ask.escalation.summary(), ask.escalation.failure())
-}
-
-/// What stands on the card's far edge: the node the decision is on and the run's
-/// handle, apart by a separator, whichever of them there are.
-fn edge(ask: &Ask<'_>, glyphs: Glyphs) -> Option<String> {
-    let parts: Vec<String> = ask
-        .node
-        .map(|node| node.to_string())
-        .into_iter()
-        .chain(ask.shown.map(|(run, _)| run.handle().to_string()))
-        .collect();
-    let separator = format!(" {} ", glyphs.sep());
-    (!parts.is_empty()).then(|| parts.join(separator.as_str()))
-}
-
-/// What a reader needs to answer, under the question: the record the engine attached
-/// to it, audited against the documents it stands under, then what the run changed
-/// when the change was counted. A plan the decision is on adds what the plan says about
-/// the question.
-fn about(ask: &Ask<'_>, glyphs: Glyphs) -> Vec<String> {
-    let documents = ask.shown.map_or(&[][..], |(_, documents)| documents);
-    let question = question(ask);
-    let mut about: Vec<String> = desk::plan_among(documents)
-        .map(|(_, review)| desk::about(review, &question, glyphs))
-        .unwrap_or_default();
-    about.extend(escalation::record(ask.escalation, documents));
-    about.extend(ask.changed.and_then(|change| changes::of(change, glyphs)));
-    about
-}
-
-/// The line a choice is kept as in the history: the option, and the words it was
-/// said with, as the person wrote them.
-fn chose(answer: &Answer) -> String {
-    match &answer.words {
-        Some(words) => format!("chose `{}`: {words}", answer.option),
-        None => format!("chose `{}`", answer.option),
-    }
 }

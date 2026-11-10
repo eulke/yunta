@@ -5,15 +5,15 @@
 use crate::components::{Lead, Section};
 use crate::doc::{Block, Doc};
 use crate::line::{Line, Tone};
-use crate::look::Look;
+use crate::look::{Look, Width};
 use crate::surface::Surface;
 use crate::width::{cell_width, INDENT};
 use crate::words::Standing;
 
+mod asked;
 mod attention;
 mod card;
 pub use card::{narrowed, said_whole, Placed};
-pub use desk::LaidDesk;
 mod checklist;
 pub(in crate::surface) use checklist::{FIX, SO};
 mod concern;
@@ -28,6 +28,7 @@ mod headline;
 mod legend;
 pub(in crate::surface) mod markdown;
 mod next;
+mod typed;
 pub(in crate::surface) use next::{NEXT, OR};
 mod page;
 mod problem;
@@ -111,6 +112,31 @@ impl Terminal {
         }
     }
 
+    /// `block` held on a terminal `columns` wide and `rows` high while a person
+    /// answers it: a prompt's block fitted to the rows, with where the cursor stands
+    /// when it is typed into, and any other block as a document draws it. A desk lays
+    /// out columns of its own across every cell the terminal has; everything else
+    /// keeps to the measure of a line.
+    pub fn held(&self, block: &Block, columns: usize, rows: usize) -> Placed {
+        match block {
+            Block::Card(card) => card.drawn(&self.look, rows),
+            Block::Desk(desk) => {
+                let whole = Look {
+                    width: Width::exact(columns),
+                    ..self.look
+                };
+                desk.drawn(&whole, rows)
+            }
+            Block::TypedAnswer(asked) => asked.drawn(&self.look),
+            Block::ChoiceList(list) => list.drawn(&self.look, rows),
+            block => Placed {
+                lines: self.block(block),
+                cursor: None,
+                pane: None,
+            },
+        }
+    }
+
     /// One block as its own layout draws it, at the stream's width.
     fn laid(&self, block: &Block) -> Vec<Line> {
         let look = &self.look;
@@ -128,6 +154,12 @@ impl Terminal {
             Block::Paths(block) => block.lines(look),
             Block::Diffstat(block) => block.lines(look),
             Block::Decision(block) => block.lines(look),
+            // In a document a card takes the rows it needs: only a prompt held on a
+            // terminal fits one to the rows it has.
+            Block::Card(block) => block.drawn(look, usize::MAX).lines,
+            Block::Desk(block) => block.drawn_whole(look),
+            Block::TypedAnswer(block) => block.drawn(look).lines,
+            Block::ChoiceList(block) => block.drawn(look, usize::MAX).lines,
             Block::Checklist(block) => block.lines(look),
             Block::Problem(block) => block.lines(look),
             Block::Refusal(block) => block.lines(look),

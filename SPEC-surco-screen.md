@@ -16,7 +16,7 @@ Surco has the grammar and almost every block an application needs. What it lacks
 
 ### Who this is for
 
-- **`app-core` and `tui`**, the modules after this one. `yunta-app`'s `view(state)` returns a `Screen`. `yunta-tui` lays it out with Ratatui's `Layout`, draws each region's document through Surco's terminal surface at that region's width, and reads colors through the public style reading. Neither invents a component, a color or a glyph.
+- **`app-core` and `tui`**, the modules after this one. `yunta-ui`'s `view(state)` returns a `Screen`. `yunta-tui` lays it out with Ratatui's `Layout`, draws each region's document through Surco's terminal surface at that region's width, and reads colors through the public style reading. Neither invents a component, a color or a glyph.
 - **The desktop, later**, in GPUI or as a page: another interface with the same look. It reads the same `Screen` and lays it out its own way. A screen holds no cell, no pixel and no color, so each interface sizes its regions itself, and Surco's tokens give them all one look. The `Html` surface draws every screen from the first day, which proves it, as the map's rule "The desktop stays possible without building it" asks.
 - **A person at a terminal today**, who sees nothing change. The attached region, the prompts and every page print what they print at the base commit.
 
@@ -61,11 +61,11 @@ Surco has the grammar and almost every block an application needs. What it lacks
 ### Out of scope
 
 - Ratatui, crossterm and any dependency of `yunta-surco` on them. `yunta-surco` gains no dependency.
-- `yunta-app`, `yunta-tui`, bare `yunta`, `update` and messages, key handling and focus moving: the `app-core` and `tui` modules. A `Screen` says which region has the focus; nothing here moves it.
+- `yunta-ui`, `yunta-tui`, bare `yunta`, `update` and messages, key handling and focus moving: the `app-core` and `tui` modules. A `Screen` says which region has the focus; nothing here moves it.
 - The wordmark, the horizon and mouse capture.
 - Laying a screen out on a terminal: the panes, their widths, what gives way, the overlay's box. That is the `tui` module's.
 - Typography, sizes, spacing and radii as tokens a desktop reads. They live today only as the `Html` surface's CSS. That is the `desktop` module's, or a module of tokens before it.
-- Moving the prompts' models (`card`, `menu`, `form`, `field`, `desk`) to `yunta-app`: the map gives that to `app-core`. Here they only build a `Legend` where they built strings.
+- Moving the prompts' models (`card`, `menu`, `form`, `field`, `desk`) to `yunta-ui`: the map gives that to `app-core`. Here they only build a `Legend` where they built strings.
 - Retuning a color, or changing any existing block.
 
 ## Tech Stack

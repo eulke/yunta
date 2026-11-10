@@ -1,12 +1,13 @@
 //! A plan as its desk reads it: every place a person can stand on, what each shows, and
 //! what the rail says of the whole, from the plan the rest of these tests read.
 
-use surco::components::{DeskFoot, FootRow, Legend, RailGroup, RailRow};
+use surco::components::{Desk, DeskFoot, FootRow, Legend, RailGroup, RailRow};
 use surco::glyphs::Glyphs;
 use surco::golden::assert_golden;
 use surco::line::Line;
 use surco::look::{Look, Width};
 use surco::paint::Paint;
+use surco::surface::Terminal;
 use yunta_core::shown::PlanReview;
 
 use super::documents::{global_packs, goldens, review as greeting};
@@ -22,10 +23,16 @@ fn look(cells: usize) -> Look {
     }
 }
 
-/// What a person spot on `spot` reads in the pane of a terminal 80 cells wide.
+/// What a person spot on `spot` reads in the pane of a terminal 80 cells wide, laid out at
+/// the pane's measure as the desk lays it out.
 fn read(reading: &Reading<'_>, spot: &Spot) -> Vec<String> {
-    reading
-        .pane_lines(spot, &look(80))
+    let terminal = look(80);
+    let measure = Look {
+        width: Width::row(Desk::pane_cells(&terminal), None),
+        ..terminal
+    };
+    Terminal::on(measure)
+        .lines(&reading.pane_doc(spot, &terminal))
         .iter()
         .map(Line::text)
         .collect()
@@ -271,7 +278,6 @@ fn the_desk_matches_its_goldens() {
             )
             .drawn(&look, 36);
         let text: String = laid
-            .placed
             .lines
             .iter()
             .map(|line| format!("{}\n", line.text().trim_end()))

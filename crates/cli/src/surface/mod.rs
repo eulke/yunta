@@ -3,8 +3,8 @@
 //! Three surfaces over two derivations and one vocabulary. The engine
 //! derives from the log where each thing stands
 //! ([`RunFrame`](yunta_replay::frame::RunFrame)) and what happened, in order
-//! ([`yunta_replay::frame::chronicle`]); this module's own `chronicle` chooses
-//! a moment's words once; each surface only lays them out. The region
+//! ([`yunta_replay::frame::chronicle`]); render's `chronicle` chooses a
+//! moment's words once; each surface only lays them out. The region
 //! draws what is open, the history above it keeps what closed or asked,
 //! and the append-only surface writes every moment. A reader moving
 //! between them meets the same facts in the same words.
@@ -20,7 +20,6 @@
 //! What a session says is on no log: the driving process gets it from the
 //! observer, a follower off the run's socket, and only the region draws it.
 
-mod chronicle;
 mod closing;
 mod draw;
 mod feed;
@@ -32,7 +31,6 @@ mod screen;
 mod scrollback;
 pub(crate) mod terminal;
 mod turns;
-mod view;
 
 use std::io::Write;
 use std::sync::Arc;

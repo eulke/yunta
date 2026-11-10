@@ -165,7 +165,7 @@ The reason is the next three interfaces. The terminal application (`app-core`, `
 
 ### Out of scope
 
-- `yunta-app`, the terminal application and the desktop.
+- `yunta-ui`, the terminal application and the desktop.
 - Any change to what a command does, prints or answers.
 - How the desktop reaches the API, in-process or through the binary's `--json`. It is `desktop`'s to decide; the API is a library either way.
 

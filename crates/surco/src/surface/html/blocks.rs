@@ -2,7 +2,9 @@
 //! it holds, gathered as it draws them.
 
 use super::text::{class_of, command, esc, line, mark, steps, title_words, words};
-use super::{code, decision, diagram, markdown, notices, screen, tables, GLYPHS};
+use super::{
+    asked, card, code, decision, desk, diagram, markdown, notices, screen, tables, GLYPHS,
+};
 use crate::components::{Fields, Headline, Lead, Next, PathNote, Paths, Reads, Section, Title};
 use crate::doc::Block;
 use crate::glyphs::Mark;
@@ -102,6 +104,10 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
         Block::Paths(listed) => paths(listed),
         Block::Diffstat(stat) => tables::diffstat(stat),
         Block::Decision(asked) => decision::decision(asked),
+        Block::Card(asked) => card::card(asked),
+        Block::Desk(read) => desk::desk(reader, read),
+        Block::TypedAnswer(drawn) => asked::typed_answer(drawn),
+        Block::ChoiceList(drawn) => asked::choice_list(drawn),
         Block::Checklist(list) => tables::checklist(list),
         Block::Problem(problem) => notices::problem(problem),
         Block::Refusal(refusal) => notices::refusal(refusal),

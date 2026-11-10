@@ -5,10 +5,14 @@
 //! picks under `--interactive`, or `one-node`.
 
 use surco::look::Look;
-use yunta_api::{WorkflowShape, WorkflowStem};
+use yunta_api::WorkflowStem;
+use yunta_core::WorkflowShape;
 use yunta_render::page::NewWorkflow;
+use yunta_render::prompt::{defaulting_to, shape_does, Escape, CHOOSE_A_SHAPE};
+use yunta_render::refusal::Refused;
+use yunta_ui::prompt::Alternative;
 
-use crate::ask::{choose, Choice, Console, Escape, NoAnswer};
+use crate::ask::{choose, Console, NoAnswer};
 use crate::error::CliError;
 use crate::output::show;
 use crate::output::Outcome;
@@ -55,13 +59,13 @@ pub async fn new_workflow(
 fn picked(console: &Console) -> WorkflowShape {
     let choices = WorkflowShape::all()
         .into_iter()
-        .map(|shape| Choice {
-            label: Some(shape.does().to_string()),
-            ..Choice::named(shape.label(), shape)
+        .map(|shape| Alternative {
+            label: Some(shape_does(shape).to_string()),
+            ..Alternative::named(shape.label(), shape)
         })
         .collect();
     console
-        .say("choose a shape")
+        .say(CHOOSE_A_SHAPE)
         .map_err(NoAnswer::from)
         .and_then(|()| choose(console, choices))
         .unwrap_or(WorkflowShape::OneNode)
@@ -71,7 +75,7 @@ fn picked(console: &Console) -> WorkflowShape {
 /// one a person picks on the console under `--interactive`, or `one-node`.
 async fn choose_shape(shape: Option<&str>, interactive: bool) -> Result<WorkflowShape, CliError> {
     match shape {
-        Some(raw) => Ok(WorkflowShape::parse(raw)?),
+        Some(raw) => Ok(WorkflowShape::parse(raw).map_err(Refused::Setup)?),
         // There is no run drawing here, so what opening the console has
         // to say goes out through a door onto nothing, which is stderr.
         None => Ok(match interactive {
@@ -79,7 +83,7 @@ async fn choose_shape(shape: Option<&str>, interactive: bool) -> Result<Workflow
             true => match Console::open(&Diagnostics::none(), Escape::TakesTheFirst).await {
                 Some(console) => picked(&console),
                 None => {
-                    crate::ask::no_terminal("defaulting to `one-node`");
+                    crate::ask::no_terminal(&defaulting_to(WorkflowShape::OneNode.label()));
                     WorkflowShape::OneNode
                 }
             },

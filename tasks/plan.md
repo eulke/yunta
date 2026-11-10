@@ -1,254 +1,354 @@
-# Implementation Plan: `control`
+# Implementation Plan: `app-core`
 
-Spec: `SPEC-control.md`, approved on 2026-11-09. Base: `feature/yunta-tui` at `d4e540f8`, with `77091b01` and the pool's fix for a cut-off add on top. `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`.
+Spec: `SPEC-app-core.md`, approved on 2026-11-10. Base: `feature/yunta-tui` at `92d05277`, where `control` ended. `cargo` means `sh .plans/yunta-tui/tools/cargo-in.sh /Users/eulke/development/yunta-tui <args>`.
 
 ## Overview
 
-Every interface Yunta has, and every one it will have, plugs into the same behavior and gets it; none of them holds any. Today the CLI holds most of it: 125 call sites into the engine across its command modules, the error sentences, the reading of its process in many places, and an MCP server that builds the CLI's sequences again.
+Every surface Yunta will have gets the whole application by plugging in: the terminal application next, the desktop later. The CLI already gets every operation from `yunta-api`. What a person does at a screen still lives in the CLI, or nowhere:
 
-This plan moves that behavior below the surfaces:
-- the work into a new crate, `yunta-api`;
-- the refusals' data into core and their words into render;
-- the two ports an interface implements into core's `port`;
-- the JSON documents into render.
+- the prompts' models, mixed with the terminal in `ask/`;
+- the words of the chronicle, of the region's rows and of every prompt;
+- following a run, putting a run's page together, and the graph;
+- every stage the spike drew, which nothing builds.
 
-It also makes the MCP server an agent asks Yunta through an interface of its own, `yunta-mcp`, over what every MCP server of Yunta speaks, `yunta-mcp-protocol`. Nothing a person, an agent or a script reads changes.
+This plan moves the first three groups below the surfaces, printing what they print today. It then builds `yunta-ui`: the state a person has open, what each input does to it, the work it asks of Yunta as data, the performer that carries that work out through `yunta-api`, and each moment as a Surco `Screen`. Every stage is built, from the signpost to the command palette. It also makes setting a repository up declare its runners, in every interface, as the user chose.
 
 ## Architecture Decisions
 
 ### 1. What each layer is
 
-A behavior that two surfaces need lives below both of them, once. A surface reads its process, carries a request in and an answer out, draws, and takes input; it decides nothing another surface would decide again.
+The layers of `control` stand. One layer is added between the API and the surfaces.
 
 | Layer | Is | Holds |
 |---|---|---|
-| `yunta-core` | the domain | Types and rules every crate shares, with no IO: documents, events, the ports an engine calls, and the data of every refusal a person reads. |
-| `yunta-storage` | the log | The append-only store behind its interface. |
-| `yunta-replay` | what happened | Every reading of a run, derived from its log, with no IO. |
-| `yunta-mcp-protocol` | how Yunta speaks MCP | The protocol revisions every MCP server of Yunta announces, and the shape of what it answers. |
-| `yunta-engine` | how a run runs | Scheduling, the task cycle, the checkouts, git, the lock, the registry, the per-run tools. |
-| `yunta-adapters` | the agent CLIs | `claude-code`, `codex` and `mock` behind the port, and the forge. |
-| `yunta-render` | what Yunta says | To a person, as words and pages; to a machine, as versioned JSON documents. It reads nothing. |
-| `yunta-api` | what can be asked of Yunta | Each operation an interface asks for, done with the engine, the store and the adapters, handed a workspace, returning data. It prints nothing, knows no transport, and reads nothing of its own process. |
-| Surfaces | the interfaces | Each reads its process once and builds a `Workspace`. Each draws render's pages or writes its documents, and takes a person's input through the ports. |
+| `yunta-render` | what Yunta says | It gains the words of the chronicle, of a moving run's rows and of every prompt, the graph, and what each stage's screen says. It reads nothing. |
+| `yunta-api` | what can be asked of Yunta | It gains following a run, a run's page read whole, and writing that page for a browser. A value a stage keeps owns its data. |
+| `yunta-ui` | the user interface, apart from its medium | What a person has open, what each input does to it, the work it asks of Yunta, the performer that does that work, and each moment as a Surco `Screen`. It writes no sentence and knows no terminal. |
+| Surfaces | the interfaces | The CLI, `yunta-mcp`, and next the TUI. Each reads its input and hands it in. The TUI carries out what `yunta-ui` asks and lays out the screen it returns. |
 
-The surfaces are:
-- `yunta`, the CLI: clap, the streams, the attached region, the terminal's prompts, the exit code;
-- `yunta-mcp`: the tools an agent calls;
-- later, `yunta-app` and the TUI;
-- the desktop.
+A prompt splits across four crates, each holding one concern:
+
+| Concern | Crate | Example |
+|---|---|---|
+| Where the prompt stands, and what a stroke does there | `yunta-ui` | `DecisionCard` points at its second option. |
+| What it says, as the Surco block it draws | `yunta-render` (`prompt`) | "enter chooses", "esc leaves the run waiting". |
+| How that block is drawn | `yunta-surco` | the card on a terminal, fitted to 20 rows with the cursor; in HTML. |
+| Holding it on a terminal | `yunta` (`ask`) | Raw mode, keys read as strokes, the alternate screen. |
 
 ### 2. The crates and their edges
 
 | Crate | `[dependencies]` in the workspace |
 |---|---|
-| `yunta-mcp-protocol` | none (`rmcp`) |
-| `yunta-engine` | core, storage, replay, mcp-protocol, surco |
-| `yunta-api` | core, storage, replay, engine, adapters, render, surco |
-| `yunta-mcp` | core, replay, render, api, mcp-protocol, surco |
-| `yunta` | core, replay, render, api, mcp, surco |
+| `yunta-ui` | core, replay, render, api, surco; `tokio` |
+| `yunta` | core, replay, render, api, mcp, ui, surco |
 
-- A test of the CLI and a test of `yunta-mcp` each read the crate's `[dependencies]`, as `no_adapter_crate_in_engine` reads the engine's. Each fails, saying where the reading belongs, if `yunta-engine`, `yunta-storage` or `yunta-adapters` is named.
-- `.agents/architecture.md`'s table gains the three rows and changes `yunta`'s, which `cargo xtask docs --check` holds.
+- **A test reads `yunta-ui`'s manifest** (`no_terminal_or_engine_in_the_interface`), as `no_engine_in_the_cli` reads the CLI's. It fails, naming where the reading belongs, if `crossterm`, `console`, `nix`, `indicatif`, `ratatui`, `yunta-engine`, `yunta-storage` or `yunta-adapters` appears.
+- **`.agents/architecture.md`'s table gains `yunta-ui`'s row and changes `yunta`'s.** The file stands at 6,140 of its 6,144 bytes. The row's bytes come out of what the file says twice or a module's `//!` already says, in the same commit. If no such sentence is found, the work stops for the user rather than raising the cap.
+- **The map, the crate's own `//!` and `cargo xtask docs --check` agree.**
 
-### 3. The `Workspace` and the `Stop`
+### 3. The application as values
 
 ```rust
-// crates/api/src/workspace.rs
-/// What an interface hands the API instead of the API reading its process:
-/// where it works, the environment it was started with, and the boundaries
-/// every decision is injected through.
-pub struct Workspace {
-    /// The directory the request is about: the repository a command runs in.
-    pub dir: PathBuf,
-    /// The environment the process started with, read once.
-    pub env: Env,
-    pub clock: Arc<dyn Clock>,
-    pub ids: Arc<dyn IdSource>,
-    /// What a run or a forge reads by name: a secret's value.
-    pub secrets: Arc<dyn SecretSource>,
-    /// The binary a detached run, a resume handed on and the rail hook start:
-    /// Yunta itself.
-    pub binary: PathBuf,
+// crates/ui/src/lib.rs, what a surface names
+pub struct State { /* the stage, its dialog, what each stage read, the work in progress */ }
+
+impl State {
+    /// The application as it opens at `now`, and what it asks first: whether it stands
+    /// in a repository, and whether that repository was set up.
+    pub fn opened(now: DateTime<Utc>) -> (State, Vec<Request>);
+    /// What `input` does: the state it leaves, and what it asks for.
+    pub fn update(&mut self, input: Input) -> Vec<Request>;
+    /// This moment, as a screen any surface lays out.
+    pub fn screen(&self, look: &Look) -> Screen;
 }
 
-/// How the caller stops an operation, in the two stages a Ctrl-C has:
-/// stop what runs, then abort what tears it down.
-pub struct Stop {
-    stop: CancellationToken,
-    abort: CancellationToken,
+/// What reaches the application.
+pub enum Input {
+    Stroke(Stroke),
+    /// What a surface laid out of the desk's pane: its first line, a page, the last first line.
+    Laid(PaneLaid),
+    Time(DateTime<Utc>),
+    /// What a piece of work remarks while it works.
+    Remark(Ticket, Remark),
+    /// What lasting work hands back while it lasts: a followed run's news, a case that ended.
+    News(Ticket, News),
+    /// What a piece of work came to.
+    Outcome(Ticket, Outcome),
 }
-```
 
-- The CLI builds both in one module, `crates/cli/src/shell.rs`: the boundary where the process enters. It replaces `context.rs`, and its `Interrupt` gives the `Stop`.
-- The MCP server's caller builds them once when it starts; for `yunta mcp`, that is the shell.
-- `Context`, the CLI's `Project`, `process_env()` called in five places, `process_clock()` and `time_until`'s own clock are gone.
-- The API resolves the project from the workspace, as `Workspace::project()`.
+/// What the application asks for after an input.
+pub enum Request {
+    /// Work Yunta does, which the surface hands its performer.
+    Perform(Ticket, Operation),
+    /// The state no longer wants this work: stop it if it is under way, and drop what
+    /// the performer holds for it.
+    LetGo(Ticket),
+    /// A page a browser reads: a terminal hands it to the system's opener, the desktop
+    /// shows it in a window.
+    ShowPage(PathBuf),
+    Leave,
+}
 
-### 4. The API's operations, by what an interface asks
+/// Carries out an `Operation` through `yunta-api`, against the workspace it was made with,
+/// and hands back what it remarks, its news and its outcome as inputs.
+pub struct Performer { /* the workspace; each ticket's stop; what is held for a confirmation */ }
 
-Each operation reads as what a person does with Yunta. A handle is opened once and asked again: the project, then a run of it.
-
-```rust
-let project = workspace.project()?;                       // config layers, roots, the store
-let catalog = project.catalog().await?;                   // render's Catalog data
-let field = project.field(Reach::Here, depth).await?;     // rows, unreadable runs, elsewhere
-let run = project.run(&run_id)?;                          // OpenedRun: its manifest and directory
-let reading = run.reading(depth).await?;                  // state, frame, decision, documents, plans
-run.cancel(&stop).await?;                                 // CancelState
-run.close().await?;                                       // what close answers
-run.decide(choice).await?;                                // a gate's decision, then the resume handed on
-run.answer(&node, answers).await?;                        // a questions artifact's answers, then the same
-let admission = project.admit(&reference, inputs, mode).await?;   // verdict, preflight, cautions
-let created = admission.create().await?;                  // the run, its checkout and its hold
-created.start_detached().await?;                          // or created.drive(person, observer, &stop)
-project.collect(Collect::Pass).await?;                    // gc, or its dry run
-project.packs().add(&source, confirmed).await?;           // and update, remove, list, audit, new
-project.doctor(checks).await?;                            // doctor's checks
-project.cases(&dir, |case| ...).await?;                   // the test runner, each case as it ends
-```
-
-The crate's modules are named by subject:
-- `workspace`, `project`, `catalog`, `field`;
-- `run`: a run opened, its reading, its stats and history, its receipt and verification, the page `open` writes, and following it (heads, the log after a seq, whom an engine asks, the words);
-- `admission`, `drive`, `detach`, `answers`, `ending` (cancel and close), `collect`;
-- `packs`, which holds the lock;
-- `setup` (`init`, `new`), `machine` (doctor's checks, detection, the probes, and the adapters a binary builds), `cases`.
-
-Each public item has one path. Types that would meet render's (`page::Run`) are named apart: `OpenedRun`, `RunReading`. A note or caution a command says while it works (an estimate's caution, an unknown key, each problem `gc` meets, what a cancel waits on) reaches the caller through a sink it passes, in order, and the CLI says it then.
-
-### 5. Errors: what was refused, what failed, and the stop
-
-```rust
-// crates/api/src/error.rs
-/// Why the API did not do what it was asked.
-pub enum Error {
-    /// What Yunta refused: render says it, with the commands that go on.
-    Refused(Refused),
-    /// What failed below the API: the store, git, the disk, an adapter, a
-    /// workflow the catalog does not hold; said in its own words, with its causes.
-    Failed(Failure),
-    /// The caller's stop.
-    Stopped,
+impl Performer {
+    pub fn new(workspace: Workspace) -> Self;
+    pub async fn perform(&self, ticket: Ticket, operation: Operation, inputs: UnboundedSender<Input>);
+    pub fn let_go(&self, ticket: Ticket);
 }
 ```
 
-**What a refusal is.** A refusal has words of its own and advice; the CLI branches on its kind today. Its data goes to core, in the engine's terms, and the engine returns it:
-- **`core::check`:** `CheckError`, `Composition`, `Unanswerable`, `UntakenRoute`, from `engine/check`. Every field is already a core type. The engine keeps the checking.
-- **`core::refusal`:** `GateRefusal` (the five refusal variants of `ResolveGateError`), `CloseRefusal` (`AlreadyClosed`, `Driven`, `Moving`), and `ViewFault` (what `StoreError` says of an artifact view).
-- **Already core:** `InputsProblem`, `ObjectProblem`, and a refused answer's `Refusal`, `Claim` and `FailureMenu`.
-- The engine's `ResolveGateError` and `CloseRunError` each become `Refused(<the core refusal>)` beside their failure variants (`Storage`, `Documents`, `Export`).
+- **`Operation` has one variant per thing a stage asks of Yunta.**
+  - Reading: the repository and the field, a run's page and a node's, following a run, the decision it waits on, the catalog, a workflow and a run's graph, stats and history, a verification, doctor, a collection's dry run, the packs, a check, detecting a project.
+  - Acting: deciding, answering, cancelling, closing several runs, resuming, starting, writing a project's setup, writing a new workflow, running the cases, fetching, installing, updating, removing and scaffolding a pack, writing a receipt, collecting, writing a run's page for a browser.
 
-**Render's `refusal::Refused`** gathers every kind a person reads:
-- a workflow that cannot run here (`Unrunnable`), and a document that does not read;
-- a gate's answer refused, and a close refused;
-- a run another engine drives, one whose engine asks at its terminal, or one whose holder nobody can tell (built by the API from the lock and the registry);
-- inputs that do not satisfy, a refused answer, an object or a view the store lacks;
-- a reference that names several runs, and a document Yunta does not read.
+  Each variant is named by its verb (`Operation::Decide { run, option, words }`).
+- **`Outcome` has one variant per operation's data.** It also has three for an operation that did not do what it was asked: `Refused` (render's `Refused`, said by render), `Failed` (what the failure says), and `Stopped`.
+- **A `Ticket` is the state's number for a piece of work.** An answer to a ticket the state let go is dropped, so leaving a stage can never be undone by a late answer.
+- **What the performer holds between two pieces of work:**
+  - a fetched pack, while a person reads its audit and confirms what it executes;
+  - a detected project, while a person answers its setup.
 
-Render also holds `said(&Refused, Reader)` and `advice(&Refused, Reader)`, moved from the CLI's `error::words` and `CliError::sentence`, and a page for a refusal. Every interface says a refusal in one place, the TUI included.
+  It holds each under the ticket that fetched or detected it, and drops it at `LetGo`. A pack is installed from the copy its audit read, never from a second fetch.
+- **The state is `Clone`.** The walk branches it once per input.
 
-**A failure** is said by its own chain of causes, as `describe` says it today. `Failure` holds it as `Box<dyn Error + Send + Sync>`, so no interface names an engine, store or adapter type and none branches on one. The text a person reads is the same.
+### 4. Stages and dialogs
 
-`CliError` becomes `Refused`, `Failed` and `Interrupted`, beside what is the CLI's alone (its usage of the process). Its page draws render's.
+`Stage` is the enum of where a person is. Each variant holds a type of its own, in `stage::<name>`, with the `Stage` suffix: `Field`, `Catalog`, `Doctor` and `Stats` are render's pages, which those stages show.
 
-### 6. The ports an interface implements, in core's `port`
+| `Stage::` | Holds | Shows (render) | Asks (`yunta-api`) |
+|---|---|---|---|
+| `Signpost` | nothing | `Signpost` | `in_a_repository` |
+| `Setup(SetupStage)` | what was detected, the answers given, the runners proposed | the detected project, then `Initialized` | `detect_project`, `DetectedProject::write` |
+| `FirstRun(FirstRunStage)` | the request being typed, the catalog | the first run's question over the catalog | `catalog`, then Start |
+| `Field(FieldStage)` | the reading, the row pointed at, the rows marked, the reach | `Field` | `field`, `resume_detached`, `cancel`, `close` |
+| `Run(RunStage)` | the run's page, its moments, what its sessions said, the node picked, whether it follows | `Run`, `Node`, the chronicle, the moving rows | `follow`, `page`, `node_page` |
+| `Decision(DecisionStage)` | the `Deciding` or the `Round` in front of the person | the card, the desk, the round | `waiting_decision`, `decide`, `answer` |
+| `Start(StartStage)` | the request, the workflow, its inputs, mode and adapter, the cautions | the catalog, admission's cautions | `admit`, `create`, `start_detached` |
+| `Evidence(EvidenceStage)` | which of the three, and what it read | `Receipt`, `Verified`, `Opened` | `receipt`, `verification`, the page for a browser |
+| `Stats(StatsStage)` | a run's stats or a workflow's history | `Stats`, `History` | `stats`, `history` |
+| `Graph(GraphStage)` | the workflow, and a run's frame when it is a run's | `Graph` | `read_workflow`, a run's page |
+| `Catalog(CatalogStage)` | the catalog, the workflow pointed at, what a pack act is waiting on | `Catalog`, `Checked`, `NewWorkflow`, `Tested`, the pack pages | `catalog`, `verdict`, `new_workflow`, the cases, the packs |
+| `Doctor(DoctorStage)` | the findings, folded or whole | `Doctor` | `doctor`, `collect` |
+| `Upkeep(UpkeepStage)` | the dry run, then what was collected | `Collected` | `collect` |
+| `Schema(SchemaStage)` | every document, or the one picked | `Schema` | none: a shape is core's, read with no IO |
 
-- **The person port:** `HumanInteraction`, with `QuestionsReply` and what a decision is asked with. That type is named `DecisionAsked`, because `Asking` is replay's registry reading, which a surface reads beside it.
-- **The observer port:** `RunObserver`, with `Observed` and `Said`, the words a session says.
-- The engine calls them and re-exports none; the engine keeps serving the words socket.
-- Every field is a core type or an instant. They touch 8 engine files and 14 test files.
+- **What stands over a stage is a `Dialog`.** `Overlay` is Surco's region it is drawn into. The variants are `Palette(Palette)`, `Help` and `Confirmation(Confirmation)`.
+- **Every act is a `NextStep`.** The palette lists the steps a stage offers, then those always there, each spelled by `command::line` and described by render.
+  - The run stage offers what `RunFrame::actions` says, so a key, a palette row and the CLI's advice are one table.
+  - `NextStep` gains the commands it lacks: `Stats`, `History`, `Graph`, `NewWorkflow`, `PackList` and `PackAudit`.
+  - `Gc` gains its dry run.
+  - Render's `command` says what each step does, beside its line.
 
-### 7. MCP
+### 5. The prompts, moved
 
-- **`yunta-mcp-protocol`** is what every MCP server of Yunta speaks: the protocol revisions and the shape of a tool list, from `engine::mcp`. The engine's per-run tools speak it.
-- **`yunta-mcp`** is the server an agent asks Yunta through:
-  - each tool, its schema, its arguments, what it asks of the API, and its answer, from the CLI's `commands/mcp`;
-  - an `rmcp` handler with no transport;
-  - `yunta mcp` serves it on stdio, and a server can serve it over HTTP without copying a tool.
-  - Its tools call the same functions of the API the CLI's commands call.
+What moves from `crates/cli/src/ask/` to `yunta_ui::prompt`, by name, with its tests, and what is renamed because the name is taken in a crate `yunta-ui` reads:
 
-### 8. The JSON documents are render's
+| At the base | In `yunta_ui::prompt` | Why |
+|---|---|---|
+| `Stroke` | `Stroke` | |
+| `Press<T>` | `Press<T>` | |
+| `Held` (its terminal-free half) | `Answerable` | `Held` is core's (`process::Held`). A prompt is answered stroke by stroke. |
+| `Field`, `Typed`, `Edit` | `TypedLine`, `Typed`, `Edit` | `Field` is render's page and Surco's row. |
+| `LineAsked` | `LineAsked` | |
+| `Picker<T>`, `Choice<T>` | `Picker<T>`, `Alternative<T>` | `Choice` is core's (`step::Choice`). |
+| `Round`, `Settled` | `Round`, `SettledAnswers` | `Settled` is core's (findings). |
+| `DecisionCard`, `Answer`, `Reply` | `DecisionCard`, `PickedOption`, `Reply` | `Answer` is core's (questions) and Surco's (attention). |
+| `PlanDesk`, `Asked`, `Leaving`, `Left` | the same names | |
+| `decide`'s card-and-desk turns (`decision.rs`) | `Deciding` | The flow between a card and the plan behind it is pure. The CLI and the decision stage both hold it. |
+| `Escape` | render's `prompt::Escape` | What Escape does is said, so its data stands where its words are. |
 
-`crates/render/src/document/` holds what the CLI's `json/` holds: every document with its `schema_version`, written from render's page data and replay's, beside the pages. The CLI's `--json` and the MCP server's answers write the same shapes. The documents' tests move with them.
+```rust
+// crates/ui/src/prompt/answerable.rs
+/// A prompt a person answers stroke by stroke, drawn as one block on any surface.
+pub trait Answerable {
+    type Answer;
+    fn press(&mut self, stroke: Stroke) -> Press<Self::Answer>;
+    /// Whether a stroke types: what a surface hands a character to.
+    fn typing(&self) -> bool;
+    /// The prompt as it stands, as the block render words and Surco draws.
+    fn block(&self, look: &Look) -> Block;
+    /// What a surface laid out of it, for a prompt that scrolls by what was shown.
+    fn laid(&mut self, laid: PaneLaid) {}
+}
+```
 
-### 9. The pack lock
+- **The CLI keeps the terminal's half:** `Console`, the hold loop (`hold`, `Quiet`, `Place`), `keyboard`, `Strokes` and its bracketed paste, `NoAnswer`, `Answered`, and `decide`, `answer`, `choose` and `ask_line` as the calls that hold a prompt on a terminal.
+- **The hold loop draws the prompt's block fitted to the terminal's rows.** It hands the desk what was laid out (`laid`) where the desk wrote a `Cell<Seen>` while drawing (`desk.rs:329`).
+- **Each moved model gives up its words.** `NEEDS_WORDS`, `A_NOTE`, `SKIP`, `NOTHING_KEPT`, `FOLDED`, every legend and `Escape::does` move to render's `prompt`. `prompt` builds each prompt's Surco component from where it stands.
 
-`yunta_api::packs` holds `.yunta/yunta.lock` with the engine's file lock across each command's read and write, waiting for another pack command rather than refusing it. A test holds the lock, starts an `add`, sees it wait without writing, releases the lock, and finds both entries in the file.
+### 6. Every prompt is a block
 
-### 10. What reads the process, held
+- **`surco::doc::Block` gains four variants:**
+  - `Card(Card)`;
+  - `Desk(Desk)`;
+  - the typed line;
+  - the picker's list with its filter.
 
-- `crates/cli/src/shell.rs` is the one place that reads the process: the directory, the environment, the clock, the id source, the secrets, the binary, and the interrupt.
-- A smell, `process_read_below_the_shell`, counts at zero, outside it and the tests, `current_dir`, `current_exe`, `env::args` and a signal handler.
-- `system_clock_outside_boundary` allows the shell in place of `context.rs`, and `env_read_outside_boundary` holds the API as it holds every crate.
-- `Env`'s terminal variables, which `main` reads for the look, stay with the shell.
+  Each wraps the component that exists today, and the plan's tasks name the last two after the components they wrap.
+- **The terminal draws each block two ways.**
+  - In a document, the block takes the room it needs.
+  - Held, fitted to a height, it draws today's bytes, with the cursor where the typed row stands (`Placed`).
 
-### 11. Behavior another surface needs that this plan does not move
+  `Card::drawn(look, rows)` and `Desk::drawn(look, rows)` become that held drawing.
+- **`Markdown` and `Html` draw each block,** with goldens in every environment, beside the catalog's.
 
-These stay in the CLI after this module because the map gives them to `app-core`:
-- the terminal's prompts' models (`card`, `menu`, `form`, `field`, `desk`);
-- the live region's words, `surface/chronicle`: how each event of a run reads as a line, which the TUI's run screen needs.
+### 7. Every sentence is render's
 
-The map's `app-core` row gains the chronicle's words, for `yunta-render`, so no behavior is left in a surface unscheduled.
+| From | To | What |
+|---|---|---|
+| `crates/cli/src/surface/chronicle/` | `render::chronicle` | `Said`, `say`, `says_anything`, `line`, `evidence` and the seven words files, with their 26 tests. `kept` and `graduation`, what a terminal keeps above its region, stay with the CLI. `crate::output::blocks_lines` gives way to Surco's terminal. |
+| `crates/cli/src/surface/view/` | `render::watched` | A moving run's rows: what needs a person, each working node with what its session said, the footer, the title. The CLI's region and the run stage draw the same rows. |
+| the prompts' models; `init.rs`, `new.rs`; `WorkflowShape::does` | `render::prompt` | Every prompt's words and the block it draws. Also "project name", "base branch", "(enter keeps `…`)", "choose a shape", and what each shape does. The stray doc line on `WorkflowShape::label` goes. |
+| new | `render::screen` | What each stage's screen says: its trail, its regions' titles, its legend, the first run's question, each confirmation, the palette's and help's headings. |
+
+### 8. Assembled once, below the surfaces
+
+- **Following a run is `yunta-api`'s.**
+  - `Project::follow(&RunId) -> Following` owns what it reads: the log, the registry, the clock, the promotion chain.
+  - `Following::next(&Stop)` hands back `RunNews`: events past the last seq, the engine as the registry reads it, what a session said, the successor a promotion handed it to, and the run's stop or stall.
+  - `READ_EVERY`, `REGISTRY_EVERY` and `SUCCESSOR_WAIT` move with their reasons.
+  - The CLI's `status --follow` draws the news on its surface and prints its closing block. The run stage does the same with the same news.
+- **A run's page is read whole by `yunta-api`.**
+  - Render's `Run` and `Node` pages own what they are drawn from, as `Verification` and doctor's findings already do.
+  - `OpenedRun::page(depth, &Remarks)` and `OpenedRun::node_page(&NodeId)` return them, with the documents a decision shows, the plans at full depth, and the places. What the run's manifest holds that this binary does not read is said as a remark.
+  - `OpenedRun::page_for_a_browser()` writes `page.html` in the run's folder and returns its path.
+  - `status`, `open`, the closing block and the run stage take the same page. The CLI keeps spawning the system's opener.
+- **The graph is render's.** `render::graph` writes a workflow as Mermaid and as DOT, each node labelled with a frame's word when there is one. `page::Graph` holds it as Surco's `Diagram`. The CLI's `graph` prints its text, and the graph stage shows its page.
+- **What a stage keeps is owned and `Clone`.**
+  - `FieldReading`, `StatsReading`, `WaitingDecision`, `WorkflowFile` and the other readings a stage keeps derive `Clone`.
+  - `DetectedProject` and `FetchedPack` own a clone of their `Workspace` where they borrowed one. `Workspace` is `Clone`, and its parts are `Arc`s.
+
+### 9. Setting a repository up declares its runners
+
+```rust
+// crates/api/src/setup/init.rs
+pub struct ProjectSetup {
+    pub name: String,
+    pub base_branch: String,
+    pub runners: RunnerDeclaration,
+}
+
+/// How `init` writes the runners.
+pub enum RunnerDeclaration {
+    /// Commented out, each proposed role on the first adapter that answered, its model
+    /// left blank: what a non-interactive `init` writes.
+    Proposed,
+    /// As a person answered: each role on the adapter they picked, with the model they typed.
+    Declared(BTreeMap<RunnerName, RunnerCandidate>),
+}
+```
+
+- **Detection probes the adapters.** `DetectedProject` carries the probed adapters and the roles it proposes, so a person picks among them before anything is written. The roles are those the repository's workflows name, or `implementer` when they name none, with `defaults.runner` where a node names no runner.
+- **A person answers each role.** They pick its adapter among those that answered, the first by default, and type its model, which has no default. A role left without a model stays proposed.
+- **What writes and says it:**
+  - `DetectedProject::write(ProjectSetup)` writes declared roles uncommented.
+  - `Initialized` says what was declared, and ends on installing a pack when every role is declared.
+  - `init -i` asks on the CLI's prompts, and the setup stage asks on its own.
+- **A skeleton names the runner the config declares.** `yunta new` names it uncommented, as it names `lint` when the config declares it.
+
+### 10. How it is proven
+
+- **The walk.**
+  - It runs from recorded readings of every stage: a scratch home with runs at every standing, a parked gate, a plan, a questions node, packs, and a sandbox repository never set up.
+  - It applies every stroke and every outcome a pending ticket can have, and dedupes states by the screen each draws, in Markdown, and the tickets they wait on.
+  - It holds that `update` never panics, that every request is one the performer carries out, and that every screen draws with `Html` and `Markdown`.
+  - It also holds that every palette row is a step the stage takes, spelled as `command::line` spells it.
+- **The sandboxes.** Each stage is driven through the `Performer` against a workspace built in the test, with the mock adapter and no process read: the cases the spec lists.
+- **What prints.** Each move is guarded by:
+  - every golden's digest;
+  - `pages.sh`'s captures;
+  - the CLI's integration tests, including the follow, init, new, review and resolve-gate tests and the console interaction tests;
+  - the moved tests, by name.
+
+  `init -i`'s new questions are the one change to what prints. Their tests are written first and fail first.
+- **A real run, before and after.** Fragua, detached, followed with `yunta status --follow` to its first gate. The follower's output and the time between nodes are compared with the base's.
 
 ## Phases
 
-Four phases, each one commit with the suite green: every step of the `ci` job, the suite in its groups. Each ends at a checkpoint the user reviews, then `cargo clean`. Inside a phase, each group of work ends green, with what it prints compared against the base, before the next begins; a group does not stop for the user. The work stops inside a phase only on a decision that is the user's: a printed text that would change, a choice this plan does not make, or a failure whose cause is not found.
+Four phases, each one commit with the suite green: every step of the `ci` job, the suite in its groups. Each ends at a checkpoint the user reviews, then `cargo clean`.
 
-### Phase 1: the base, and what moves below the surfaces
+Inside a phase, each group of work ends green, with what it prints compared against the base, before the next begins. A group does not stop for the user. The work stops inside a phase only on a decision that is the user's: a printed text that would change, a choice this plan does not make, or a failure whose cause is not found.
+
+### Phase 1: the crate, and the moves that print the same
 - **The base:**
   - the suite's binaries and tests by name;
   - every golden's digest;
-  - `pages.sh`'s captures from a release build;
-  - every JSON document and every MCP tool's answer over a copy of a few runs in a scratch home;
-  - a real run: fragua detached, stopped before its `pr` node, its gates answered with `yunta resolve-gate`, its time read from `yunta stats`.
-  `.plans/yunta-tui/proof/control/` holds them.
-- **The ports in core:** `HumanInteraction`, `QuestionsReply`, `DecisionAsked`, `RunObserver`, `Observed` and `Said` move to `core::port`. The engine calls them from there, and the CLI's console and live region implement them from there.
-- **Refusals as core data, said by render:**
-  - `core::check` from the engine's check types, and `core::refusal`. The engine's errors split into refusal and failure.
-  - Render's `refusal::Refused`, with its `said`, its `advice` and its page, from the CLI's `error::words` and `CliError`. The words' tests move with them.
-  - `CliError` carries render's `Refused`.
-- **What MCP speaks, and the documents:** `yunta-mcp-protocol` from `engine::mcp`, with the engine on it; `render::document` from the CLI's `json/`.
+  - `pages.sh`'s captures, adding `init -i`, `new -i`, `review` and `resolve-gate` at a pseudo-terminal;
+  - a real run followed.
 
-**Checkpoint A:** every refusal's text, the JSON documents and the MCP answers are the same, through the CLI's tests, the captures, the documents and the answers.
+  `.plans/yunta-tui/proof/app-core/` holds them.
+- **The crate:** `crates/ui` with its map and its manifest test. The CLI depends on it. The rows of `.agents/architecture.md` and of the map are updated.
+- **The words to render:** `render::chronicle` and `render::watched`, with their tests. The CLI's region and lines draw through them.
+- **Every prompt a block:** the four blocks, drawn in a document and held, by the terminal, `Markdown` and `Html`, with goldens. The card's and the desk's terminal tests pass unchanged.
+- **The prompts to `yunta-ui`:**
+  - the models under their names, `Answerable`, and `Deciding` from `decide`;
+  - every prompt's words, `Escape` among them, to `render::prompt`;
+  - the hold loop on `Answerable` and `laid`.
 
-### Phase 2: `yunta-api`, its workspace, and reading through it
-- **The crate and its workspace:**
-  - the crate, `Workspace`, `Stop`, `Error`, `Failure`;
-  - the project, from `project.rs` and `context.rs`;
-  - the adapters a binary builds, the catalog and detection;
-  - `shell.rs` builds the workspace once.
-- **Reading through the API:**
-  - the field;
-  - a run's reading for `status`, `--node`, `stats`, a workflow's history, `receipt`, `verify`, `open`'s page, `graph`'s frame, and the JSON's decision;
-  - following a run, for `status --follow`, the live region's gaps and `workflow_status`.
+  The CLI's `ask/` keeps only the terminal's half.
 
-**Checkpoint B:** the CLI resolves every project and reads every run through the API; the environment is read once; the captures and the follow tests are unchanged.
+**Checkpoint A:** every golden's digest, every capture and every test's outcome equal to the base's, with the moved tests counted by name; the manifest test holds.
 
-### Phase 3: running a run, answering it and ending it, through the API
-- **Admission and running:**
-  - the verdict for `check` and `new`; the preflight; creation; driving here with the ports, and promotions;
-  - detaching, and handing a resume on;
-  - `run`, `resume` and `run_workflow` ask the API;
-  - a real run after this group.
-- **Answers and a run's end:**
-  - `resolve-gate`, `review` and answering questions;
-  - `cancel` and `close`, with their signals and the pause after a crash.
+### Phase 2: what every surface needs, once, and the runners
+- **Following in `yunta-api`:** `Following`, `RunNews`, and `status --follow` on them, its tests unchanged.
+- **A run's page read whole:**
+  - render's `Run` and `Node` own their data;
+  - `OpenedRun::page`, `node_page` and `page_for_a_browser`;
+  - `status`, `open` and the closing block on them.
+- **The graph in render:** `render::graph`, `page::Graph`, and the CLI's `graph` on them, its ten tests unchanged.
+- **Steps and what a stage keeps:**
+  - `NextStep`'s new steps, and what each step does in render's `command`;
+  - the readings a stage keeps derive `Clone`;
+  - `DetectedProject` and `FetchedPack` own their workspace.
+- **The runners at setup:**
+  - `ProjectSetup` and `RunnerDeclaration`, with detection probing;
+  - `Initialized` saying what was declared;
+  - `init -i` asking each role;
+  - the skeleton naming a declared runner.
 
-**Checkpoint C:** the run path, its real run beside the base's; those commands' tests and the parked runs' flows.
+  The tests are written first and fail first.
 
-### Phase 4: upkeep, the MCP server, the frontier and the proof
-- **The project's upkeep through the API:** `gc`; every `pack` command, with the lock and its test; `init` and `new`; `doctor`'s checks; the test runner, each case handed back as it ends.
-- **The MCP server, a crate of its own:** `yunta-mcp` from `commands/mcp`, on the API and `yunta-mcp-protocol`; `yunta mcp` serves it on stdio.
-- **The frontier:**
-  - the CLI's and `yunta-mcp`'s manifests drop the engine, the store and the adapters, with their tests;
-  - the smell for process reads;
-  - `.agents/architecture.md`'s table; each moved module's `//!`; render's and core's maps.
+**Checkpoint B:** the captures equal the base's but `init -i`'s, which the user reads; the follow, status, open and graph tests unchanged; a real run followed with the API's following beside the base's.
+
+### Phase 3: the application, and watching, deciding and starting
+- **The values:**
+  - `State`, `Input`, `Request`, `Ticket`, `Operation`, `Outcome`, `News`;
+  - the `Performer`, with what it holds and its stops;
+  - `render::screen`'s first words;
+  - the walk's harness and the sandboxes' harness.
+- **Watching:**
+  - the signpost;
+  - the field, with its reach, resuming, and cancelling or closing one run or several after one confirmation;
+  - the run stage, following through `Following`: its page, the chronicle, the moving rows, a node's page, the actions `RunFrame::actions` offers, a promotion followed on, and a run asked at another terminal shown read-only.
+- **Deciding:**
+  - a gate on its card and its plan at the desk, through `Deciding`;
+  - a round of questions;
+  - leaving it waiting.
+- **Starting:**
+  - the first run's question over the catalog;
+  - the start stage, from the request to admission's cautions;
+  - a run started detached and followed.
+
+**Checkpoint C:** the walk over these stages; watching, deciding and starting end to end against the sandboxes.
+
+### Phase 4: every other stage, the dialogs, and the proof
+- **Setup:** detected, answered, runners declared, written, then a pack offered.
+- **The catalog:**
+  - a workflow's check, graph and history;
+  - a new workflow by name and shape;
+  - the cases, each shown as it ends;
+  - the packs: list, audit, add and update with the executors confirmed on the copy audited, remove, scaffold.
+- **Evidence, stats and the graph:** the receipt written, a run verified, its page shown in a browser; a run's stats and a workflow's history; a workflow's or a run's graph.
+- **Doctor, upkeep and schema:** the findings, folded or whole; the sessions after a confirmation, each remark shown as it comes and stoppable; the dry run and then the collection; every document's shape.
+- **The dialogs:** the palette over every stage, filtered by typed words; help; every confirmation. The walk now covers every stage.
 - **The proof and the review:**
   - the suite's count against the base's, by name;
   - every golden's digest and the captures;
-  - the JSON documents and the MCP answers;
-  - a real run at the end beside the base's;
+  - the real run followed at the end;
+  - the release binary's size by crate against the base's;
   - the module's diff read in four parts by readers of their own, each finding checked and decided.
 
 **Checkpoint D:** the user reviews the proof and the review. Then the commit, the pull request's body, and CI on Linux and macOS.
@@ -257,15 +357,30 @@ Four phases, each one commit with the suite green: every step of the `ci` job, t
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| The move is large: about 200 call sites, ten error types, two ports, three new crates | High | Phases in dependency order, each compiling and green; a command group at a time; `git mv` for whole files. |
-| A refusal's text drifts when its words move to render | High | The CLI's tests and the captures pin every refusal; the words' unit tests move with them byte for byte. |
-| A failure's text changes when it is boxed | Medium | `describe` over the box says the same chain; tests that read a failure's text pass unchanged. |
-| The run path slows | Medium | Real runs on the base, after admission and running, and at the end; the time between nodes inside the base's spread. |
-| An async API borrowing the workspace fights lifetimes | Medium | Handles own what they need (`Arc` boundaries, an owned `Stop`), and `Supervision` is built inside the API. |
-| The MCP server answers differently once it is a crate | Medium | `mcp_flow` and every tool's answer captured on the base and compared once the server is its own crate. |
-| The pack lock's test is timing-dependent | Low | It holds the lock itself and watches the second command wait; no race decides it. |
+| A prompt draws differently once it is a block | High | The card's, round's and desk's terminal tests and goldens pass unchanged. The held drawing is today's `drawn`. Captures of `init -i`, `new -i`, `review` and `resolve-gate` at a pseudo-terminal are compared byte for byte. |
+| Splitting each prompt's words from its state changes a legend or a hint | High | The words move by string, and their tests move with them. The prompts' 66 terminal-free tests pass unchanged. |
+| The walk's states explode | Medium | States are deduped by the screen they draw and the tickets they wait on. Readings are a fixed scratch home, and a stroke that changes nothing visible is one state. |
+| The follower's move changes its timing | Medium | The follower's constants and loop move as they are. Its tests in `status_follow`, `run_words` and the guarding flow pass unchanged. The real run's follower output is compared with the base's. |
+| Owned pages cost a clone per page | Low | A frame and a state are cloned once per page read, the same order of work as drawing them. The real run's time between nodes is compared. |
+| `.agents/architecture.md` is at its cap | Low | The new row's bytes come out of what the file says twice or a `//!` already says. Without such a sentence, the work stops for the user. |
+| The binary grows past its ceiling | Medium | The release size by crate is measured at each checkpoint (`tools/size_by_crate.py`). Each document is read through core's one reader, as `control` left it. |
+| A held fetched pack or detected project outlives its stage | Low | The performer drops it at `LetGo`. A test leaves a pack's audit unconfirmed and finds the temporary checkout gone. |
 | The disk fills during gates | Low | `CARGO_INCREMENTAL=0`, one build at a time, `cargo clean` after each phase. |
+
+## Decisions This Plan Takes
+
+The spec leaves these to the plan. Each stands unless the review of this plan changes it:
+
+- `Request`, `Ticket`, `Operation`, `Outcome`, `News`, `Performer`, `State`, `Input`, `Dialog`, and the stage types with their `Stage` suffix.
+- Every act is a `NextStep`.
+- The four prompt blocks.
+- The prompts' words in render's `prompt`.
+- `Deciding`.
+- Render's `Run` and `Node` pages own their data, and the API reads them whole.
+- `Following` and `RunNews`.
+- A pack is installed from the copy its audit read.
+- The renames of section 5.
 
 ## Open Questions
 
-None. The user chose the refusals' place, the workspace's fields, the pack lock, the two MCP crates and their names, and the documents' place; the other names above stand unless the review of this plan changes them.
+None. The names in sections 3 to 9 are the plan's proposal for the user's review.

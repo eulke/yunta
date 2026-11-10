@@ -1,0 +1,2 @@
+␛[1;38;2;14;12;18mproject name␛[0m␛[38;2;123;117;111m (enter keeps `yunta`)␛[0m
+> yunta-tui

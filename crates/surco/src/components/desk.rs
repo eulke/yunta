@@ -4,7 +4,7 @@
 
 use super::{ChoiceRow, Legend};
 use crate::diagram::Diagram;
-use crate::line::Line;
+use crate::doc::Doc;
 
 /// One screen of a plan.
 pub struct Desk {
@@ -57,12 +57,12 @@ pub struct Pane {
     pub edge: Option<String>,
     /// Where it is among the places a person can stand on, said where no rail says it.
     pub place: Option<String>,
-    /// All of it, laid out for the pane's measure.
-    pub lines: Vec<Line>,
-    /// The first of `lines` a person asked to see.
+    /// All of it, as a document: each surface lays it out at the pane's measure.
+    pub doc: Doc,
+    /// The first of its lines, as a surface lays them out, a person asked to see.
     pub top: usize,
-    /// One of `lines` that has to be in sight, whatever `top` says.
-    pub keep: Option<usize>,
+    /// Whether the line a pointer stands on has to be in sight, whatever `top` says.
+    pub follows_pointer: bool,
 }
 
 /// What is being asked, under what is being read.
@@ -73,6 +73,17 @@ pub struct DeskFoot {
     pub legend: Legend,
 }
 
+/// What a surface laid out of a desk's pane: the first of its lines it shows, how many
+/// lines a page of it holds, and the last first line a scroll can reach. What the person
+/// reading scrolls by, handed back to whoever holds the desk rather than kept by the
+/// drawing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PaneLaid {
+    pub top: usize,
+    pub page: usize,
+    pub most: usize,
+}
+
 /// How the question stands.
 pub enum FootRow {
     /// Open, with the options a number picks, in the order their numbers
@@ -81,3 +92,6 @@ pub enum FootRow {
     /// One of them about to be chosen, with what it does and what it costs.
     Confirming(ChoiceRow),
 }
+
+#[cfg(test)]
+pub(crate) mod tests;

@@ -77,7 +77,7 @@ Measured on the tree, not taken from the map (the map's "about 2,650 lines" was 
 | `replay` module, `derive(events)` | the crate's root: `RunState::replay(&events)` | Replay is what the crate is; a `replay` module inside `yunta-replay` would say it twice. The call says what is done to what is returned |
 | `unknown_kind_counts(state)` | `state.unknown_kinds()` | A read of the state, like its other reads |
 | `live::{running_since, last_event_age, open_sessions, recent_tool_calls}(state, node, …)` | methods of `RunState`: `state.open_sessions(&node)` | A module of free functions over one type is that type's methods; `RunState` already reads one node this way |
-| `view` module | `frame` | It holds `RunFrame`, `NodeFrame` and the chronicle. `view` is what `yunta-app` calls its function from a state to a screen, and what the CLI calls its live region |
+| `view` module | `frame` | It holds `RunFrame`, `NodeFrame` and the chronicle. `view` is what `yunta-ui` calls its function from a state to a screen, and what the CLI calls its live region |
 | `run_frame(…, events, …)`, `run_frame_of(…, state, …)` | `RunFrame::of(…, &state, …)` | One derivation, one door: a caller with events replays them first, once |
 | `compute_run_stats`, `compute_run_stats_of`, `compute_run_stats_at`, `stats_observed_at` | `RunStats::at(&state, &workflow, now)`, `RunStats::as_logged(&state, &workflow)` | Two cases, named; no `Option` whose `None` stands for one of them |
 | `build_receipt`, `receipt_so_far` | `receipt::closed(…)`, `receipt::so_far(…)` | `Receipt` is a `yunta-core` type, so the module's functions say which receipt they build |

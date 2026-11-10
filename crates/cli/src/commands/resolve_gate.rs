@@ -12,23 +12,25 @@
 use std::collections::BTreeMap;
 
 use surco::look::Look;
+use yunta_api::{Project, WaitingDecision};
 use yunta_core::events::{ChangesCountedPayload, DecisionOn, GateWaitingPayload, HumanChoice};
 use yunta_core::shown::ShownDocument;
 use yunta_core::step::{Choice, NextStep};
 use yunta_core::{OptionId, Responder, RunId};
 use yunta_render::command;
 use yunta_render::command::Reader;
+use yunta_render::document::GateAnswerDocument;
 use yunta_render::escalation::Route;
 use yunta_render::page::{GateAnswered, Page, Resolution};
+use yunta_render::prompt::Escape;
+use yunta_ui::prompt::Opens;
 
-use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
+use crate::ask::{Ask, Console, NoAnswer};
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use crate::shell::Shell;
 use crate::surface::Diagnostics;
-use yunta_api::{Project, WaitingDecision};
-use yunta_render::document::GateAnswerDocument;
 
 /// Records the decision on the run's log and hands the run to a detached
 /// resume that applies it, through the API.

@@ -20,7 +20,7 @@
 //!   `packs`, the repository's [`Packs`], fetched, installed, updated,
 //!   removed, listed, audited and scaffolded; and `setup`, the repository
 //!   set up for Yunta, a [`DetectedProject`] written by `init` and a new
-//!   workflow written from its [`WorkflowShape`].
+//!   workflow written from the shape it starts as.
 //! - What a repository's cases do: `cases`, the [`CaseSuite`] under a
 //!   directory's `.yunta/tests/`, each run in a sandbox of its own with its
 //!   sessions scripted, and held to what it expects.
@@ -100,9 +100,7 @@ pub use packs::{AuditedPack, FetchedPack, InstalledPack, Packs, ScaffoldedPack};
 pub use project::{config_layers, Project};
 pub use remark::{Remark, Remarks};
 pub use run::{OpenedRun, RunReading, RunRef, RunRegistry, StatsReading, Words};
-pub use setup::{
-    DetectedProject, InitializedProject, WorkflowShape, WorkflowStem, WrittenWorkflow,
-};
+pub use setup::{DetectedProject, InitializedProject, WorkflowStem, WrittenWorkflow};
 pub use stop::Stop;
 pub use verdict::{ContextFiles, Judged, Verdict, VerdictReach};
 pub use workflow::{AuditedWorkflow, WorkflowFile};

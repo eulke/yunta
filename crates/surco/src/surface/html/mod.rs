@@ -4,9 +4,12 @@
 //! each from the palette, for a light ground and for a dark one. What a reader
 //! chooses is a command, on a button that copies it: a page runs nothing.
 
+mod asked;
 mod blocks;
+mod card;
 mod code;
 mod decision;
+mod desk;
 mod diagram;
 mod markdown;
 mod notices;

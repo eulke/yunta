@@ -55,9 +55,10 @@ pub struct ChoiceRow {
 pub struct TypedRow {
     /// What opens the row: `> `.
     pub prompt: String,
-    /// What the row shows of the words before the cursor.
+    /// The words before the cursor, whole: a surface shows what fits, as a
+    /// terminal's row does with [`TypedRow::fitted`].
     pub before: String,
-    /// What it shows after the cursor.
+    /// The words after the cursor, whole.
     pub after: String,
 }
 
@@ -93,3 +94,6 @@ pub enum RoundStanding {
     /// Still to be answered.
     Ahead,
 }
+
+#[cfg(test)]
+mod tests;

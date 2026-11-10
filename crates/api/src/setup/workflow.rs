@@ -9,84 +9,29 @@
 use std::path::PathBuf;
 
 use yunta_core::refusal::SetupRefusal;
-use yunta_core::{CommandName, ConfigLayer, Workflow};
+use yunta_core::{CommandName, ConfigLayer, Workflow, WorkflowShape};
 use yunta_render::page::Diagnosis;
 use yunta_render::refusal::Refused;
 
 use super::SetupUnwritten;
 use crate::{Error, Failure, Judged, Stop, VerdictReach, Workspace};
 
-/// A shape a new workflow starts as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkflowShape {
-    OneNode,
-    LintFix,
-    Tasks,
-}
-
-impl WorkflowShape {
-    /// The shape named `name`, or refused naming the ones that exist.
-    /// Parsed by [`WorkflowShape::label`], the same word a menu shows and a
-    /// page reports, so a shape cannot be spelled one way to a reader and
-    /// another to the parser.
-    pub fn parse(name: &str) -> Result<Self, Error> {
-        Self::all()
-            .into_iter()
-            .find(|shape| shape.label() == name)
-            .ok_or_else(|| {
-                Refused::Setup(SetupRefusal::UnknownShape {
-                    name: name.to_string(),
-                    shapes: Self::all()
-                        .iter()
-                        .map(|shape| shape.label().to_string())
-                        .collect(),
-                })
-                .into()
-            })
-    }
-
-    /// Every shape, the plainest first.
-    pub fn all() -> [Self; 3] {
-        [Self::OneNode, Self::LintFix, Self::Tasks]
-    }
-
-    /// The shapes as a sentence lists them: one home for "one of ...", so
-    /// it cannot fall behind [`WorkflowShape::all`].
-    /// The word the shape is named by.
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::OneNode => "one-node",
-            Self::LintFix => "lint-fix",
-            Self::Tasks => "tasks",
-        }
-    }
-
-    /// What a workflow of this shape does, beside its name on a menu.
-    pub fn does(&self) -> &'static str {
-        match self {
-            Self::OneNode => "one command whose exit code is the check",
-            Self::LintFix => "a check, and an agent that fixes what it finds",
-            Self::Tasks => "a plan of tasks, and an agent that works through them",
-        }
-    }
-
-    /// The skeleton named `stem`. `lint_declared` says whether the project's
-    /// config declares a `lint` command, which a lint-fix skeleton then runs
-    /// by name instead of leaving a placeholder.
-    fn skeleton(&self, stem: &WorkflowStem, lint_declared: bool) -> String {
-        let template = match self {
-            Self::OneNode => ONE_NODE_TEMPLATE,
-            Self::LintFix => LINT_FIX_TEMPLATE,
-            Self::Tasks => TASKS_TEMPLATE,
-        };
-        let lint = match lint_declared {
-            true => LINT_DECLARED,
-            false => LINT_PLACEHOLDER,
-        };
-        template
-            .replace("{{workflow-name}}", stem.as_str())
-            .replace("{{lint}}", lint)
-    }
+/// The skeleton of `shape` named `stem`. `lint_declared` says whether the project's
+/// config declares a `lint` command, which a lint-fix skeleton then runs
+/// by name instead of leaving a placeholder.
+fn skeleton(shape: WorkflowShape, stem: &WorkflowStem, lint_declared: bool) -> String {
+    let template = match shape {
+        WorkflowShape::OneNode => ONE_NODE_TEMPLATE,
+        WorkflowShape::LintFix => LINT_FIX_TEMPLATE,
+        WorkflowShape::Tasks => TASKS_TEMPLATE,
+    };
+    let lint = match lint_declared {
+        true => LINT_DECLARED,
+        false => LINT_PLACEHOLDER,
+    };
+    template
+        .replace("{{workflow-name}}", stem.as_str())
+        .replace("{{lint}}", lint)
 }
 
 /// The stem a new workflow's file takes: letters, digits, `-` and `_` only,
@@ -135,7 +80,7 @@ impl Workspace {
         let layers = crate::config_layers(&self.dir, &self.env)?;
         let config = ConfigLayer::merge_layers(layers.into_iter().map(|(_, layer)| layer));
         let lint_declared = config.command(&CommandName::from_static("lint")).is_some();
-        let yaml = shape.skeleton(stem, lint_declared);
+        let yaml = skeleton(shape, stem, lint_declared);
         let workflow = Workflow::parse(&yaml).map_err(|error| {
             Failure::new(SkeletonUnparsed {
                 shape: shape.label(),

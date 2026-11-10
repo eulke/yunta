@@ -7,15 +7,16 @@ use yunta_core::step::NextStep;
 use yunta_core::RunId;
 use yunta_render::command;
 use yunta_render::page::{desk, Review};
+use yunta_render::prompt::Escape;
+use yunta_ui::prompt::Opens;
 
-use crate::ask::{Console, Escape, Opens};
+use super::resolve_gate::{chosen_on, settled};
+use crate::ask::Console;
 use crate::error::CliError;
 use crate::output::Mode;
 use crate::output::Outcome;
 use crate::shell::Shell;
 use crate::surface::Diagnostics;
-
-use super::resolve_gate::{chosen_on, settled};
 
 /// Reads and answers the plan `run_id` waits on.
 pub async fn review(

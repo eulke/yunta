@@ -10,9 +10,9 @@
 //! surface already builds, and changes none of them.
 
 use crate::components::{
-    Attention, Checklist, Code, Concern, Decision, Diffstat, Evidence, Fields, Furrow, Gist,
-    Headline, Legend, Marked, Next, NodeTable, Note, Paths, Problem, Prose, Refusal, Ribbon, Runs,
-    Said, Section, Table,
+    Attention, Card, Checklist, ChoiceList, Code, Concern, Decision, Desk, Diffstat, Evidence,
+    Fields, Furrow, Gist, Headline, Legend, Marked, Next, NodeTable, Note, Paths, Problem, Prose,
+    Refusal, Ribbon, Runs, Said, Section, Table, TypedAnswer,
 };
 use crate::line::Line;
 
@@ -75,6 +75,17 @@ pub enum Block {
     /// What a change came to, file by file.
     Diffstat(Diffstat),
     Decision(Decision),
+    /// A decision put to a person while they answer it: its question, then its
+    /// options with one pointed at, the words being said for the one chosen, or
+    /// a round of questions; and its keys.
+    Card(Card),
+    /// A plan read at its desk while a person decides on it: what it is, the places
+    /// they can stand on, what is being read, and what is being asked.
+    Desk(Desk),
+    /// A line asked of a person and the answer typed under it.
+    TypedAnswer(TypedAnswer),
+    /// A list a person picks one value from, narrowed by what they type.
+    ChoiceList(ChoiceList),
     Checklist(Checklist),
     /// A problem found in a text, pointed at in its line.
     Problem(Problem),
@@ -134,6 +145,10 @@ block_from!(
     Paths(Paths),
     Diffstat(Diffstat),
     Decision(Decision),
+    Card(Card),
+    Desk(Desk),
+    TypedAnswer(TypedAnswer),
+    ChoiceList(ChoiceList),
     Checklist(Checklist),
     Problem(Problem),
     Refusal(Refusal),

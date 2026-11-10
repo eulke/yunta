@@ -4,7 +4,7 @@ How Yunta's crates fit and what every run guarantees; a crate's map is its root 
 
 ## A run
 
-`yunta-api` reads the config layers and the workflow an interface names; `check` refuses what cannot run. The
+An interface asks `yunta-api` for a run; `check` refuses what cannot run. The
 run loop schedules nodes, and a task's cycle opens sessions through the port on an adapter, each in a pooled
 checkout. The fence and the rail judge each write at the tool call, and the close judges the diff. Declared
 criteria the engine runs decide a task; an agent's word is never evidence. Every fact is an event in the log,
@@ -24,8 +24,9 @@ replay derives every state from it, and what a person reads is drawn from it in 
 | `yunta-engine` | scheduling, the task cycle | core, storage, replay, mcp-protocol, surco |
 | `yunta-api` | what interfaces ask of Yunta | core, storage, replay, engine, adapters, render, surco |
 | `yunta-mcp` | the control plane an agent asks Yunta through | core, render, api, mcp-protocol, surco |
-| `yunta` | the commands | core, replay, render, api, mcp, surco |
-| `yunta-testkit-core` | test scaffolding for crates below the engine | core |
+| `yunta-ui` | the interface apart from its medium | core, replay, render, api, surco |
+| `yunta` | the commands | core, replay, render, api, mcp, ui, surco |
+| `yunta-testkit-core` | test scaffolding below the engine | core |
 | `yunta-testkit` | whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
 | `xtask` | smells, the docs checker, schemas | core, surco |
 
@@ -33,12 +34,13 @@ replay derives every state from it, and what a person reads is drawn from it in 
 
 ## Product rules
 
-- The engine derives data and never draws; the CLI and the adapters draw.
+- The engine derives data and never draws.
   [test engine/no_adapter_crate_in_engine::the_engine_library_never_links_the_crate_that_draws]
 - What a person reads is a `Doc` a `Surface` draws; new output grows Surco as a principle, a token or a
   component in `crates/surco`, and what Yunta says with it stands in `crates/render`. [smell escape_outside_paint]
   [smell glyph_literal_outside_glyphs] [smell state_phrase_outside_words] [smell look_inside_a_block] [review]
-  Paths: `crates/cli/src/**`, `crates/adapters/src/**`, `crates/render/src/**`, `crates/surco/src/**`
+  Paths: `crates/cli/src/**`, `crates/ui/src/**`, `crates/adapters/src/**`, `crates/render/src/**`,
+  `crates/surco/src/**`
 - A richer layer adds no fact: every layer of a stream writes the same text, so a person without color reads
   all of it. [review]
   Paths: `crates/surco/src/paint.rs`, `crates/surco/src/surface/**`
@@ -81,5 +83,5 @@ replay derives every state from it, and what a person reads is drawn from it in 
 - No session writes what an agent CLI loads as configuration, at its own path or through a link the base commit
   holds; a person may grant the instruction files. [test engine/paths_deny] [test adapters/own_config]
 - Nothing a session's CLI started outlives its session, linked to it or carrying its mark, nor a dead engine's
-  `yunta cancel` or `yunta close`; on macOS an orphan running a platform binary may hide its mark.
+  `yunta cancel` or `yunta close`.
   [test core/process_tree] [test core/process_mark] [test adapters/contract] [test cli/session_ends]

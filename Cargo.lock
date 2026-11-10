@@ -3099,6 +3099,7 @@ dependencies = [
  "yunta-surco",
  "yunta-testkit",
  "yunta-testkit-core",
+ "yunta-ui",
 ]
 
 [[package]]
@@ -3324,6 +3325,18 @@ dependencies = [
  "serde_json",
  "tokio",
  "yunta-core",
+]
+
+[[package]]
+name = "yunta-ui"
+version = "0.0.5"
+dependencies = [
+ "tokio",
+ "yunta-api",
+ "yunta-core",
+ "yunta-render",
+ "yunta-replay",
+ "yunta-surco",
 ]
 
 [[package]]

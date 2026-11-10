@@ -2,7 +2,7 @@
 //! terminal, a page and a desktop draw at the top of a run and at its foot.
 
 use super::*;
-use crate::components::{Attention, Legend, Ribbon, Stretch};
+use crate::components::{Attention, Card, CardBody, ChoiceRow, Choices, Legend, Ribbon, Stretch};
 
 /// A run's ribbon: two nodes finished, the one running with its plow, and the
 /// rest still ahead.
@@ -30,6 +30,35 @@ fn legend() -> Legend {
         .key("q", "quit")
 }
 
+/// A gate put to a person: two options, the first pointed at, with where it
+/// leads and the keys that answer it.
+fn card() -> Card {
+    let option = |name: &str, said: &str| ChoiceRow {
+        name: name.to_string(),
+        said: Some(said.to_string()),
+        cost: None,
+    };
+    Card {
+        question: "gate `ship` needs a decision".to_string(),
+        edge: Some("approve KQERFD".to_string()),
+        about: vec!["the change is reviewed and its findings settled".to_string()],
+        body: CardBody::Choosing {
+            choices: Choices {
+                rows: vec![
+                    option("approve", "On to `pr`: opens the pull request"),
+                    option("abort", "Pause here: nothing runs"),
+                ],
+                at: 0,
+            },
+            then: Some("pr, then the run finishes".to_string()),
+        },
+        legend: Legend::new()
+            .arrows("move")
+            .key("enter", "chooses")
+            .key("esc", "leaves the run waiting"),
+    }
+}
+
 /// The blocks of a screen, under their heading: the part the catalog appends
 /// after its last one.
 pub(super) fn on_a_screen() -> Vec<Block> {
@@ -50,5 +79,9 @@ pub(super) fn on_a_screen() -> Vec<Block> {
         .of("Q78GRR")
         .into(),
         Attention::elsewhere("node `implement` asks at its terminal").into(),
+        card().into(),
+        crate::components::desk::tests::plan().into(),
+        crate::components::typed_answer::tests::named().into(),
+        crate::components::choice_list::tests::shapes().into(),
     ]
 }

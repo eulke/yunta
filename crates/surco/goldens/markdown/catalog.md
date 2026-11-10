@@ -172,3 +172,60 @@ grill finished · brief finished · plan running · build never ran · review ne
 ◆ **Q78GRR** needs you: the suite passed at baseline and now exits 101 · `a` go there
 
 ◆ needs you: node `implement` asks at its terminal
+
+◆ **gate `ship` needs a decision** · approve KQERFD
+
+the change is reviewed and its findings settled
+
+- ▸ **approve** On to `pr`: opens the pull request
+- **abort** Pause here: nothing runs
+
+then pr, then the run finishes
+
+`↑↓` move · `enter` chooses · `esc` leaves the run waiting
+
+**plan** · A32BZY · reviewed-plan (default) · 2 tasks · needs you  approve-plan
+
+Make it
+
+you asked: a file the run is about
+
+- the change
+
+**steps**
+- ▸ 1 T001
+- T002
+
+**impact**
+- made.txt · T001
+- said.txt · T002
+
+**weighs**
+- decided 2 `d`
+- the suite is red at baseline
+- flowchart LR
+  n0["T001"]
+  n1["T002"]
+  n0 --> n1
+
+**proof · T001** · step 1 of 1
+
+tested by    the file exists  
+**test -f made.txt**
+
+◆ **Plan registered. Approve?**
+
+`1` approve · `2` adjust · `3` abort
+
+`j k` task · `p` the card · `esc` leaves the run waiting
+
+**project name** (enter keeps `yunta`)
+
+> yunta-tui
+
+filter **n**
+
+- **one-node** one command whose exit code is the check
+- ▸ **lint-fix** a check, and an agent that fixes what it finds
+
+`↑↓` move · `type` to filter · `enter` chooses · `esc` takes the first

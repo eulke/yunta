@@ -23,6 +23,10 @@ fn kind_of(block: &Block) -> &'static str {
         Block::Paths(_) => "paths",
         Block::Diffstat(_) => "diffstat",
         Block::Decision(_) => "decision",
+        Block::Card(_) => "card",
+        Block::Desk(_) => "desk",
+        Block::TypedAnswer(_) => "typed answer",
+        Block::ChoiceList(_) => "choice list",
         Block::Checklist(_) => "checklist",
         Block::Problem(_) => "problem",
         Block::Refusal(_) => "refusal",
@@ -45,7 +49,7 @@ fn kind_of(block: &Block) -> &'static str {
 }
 
 /// Every kind there is, as [`kind_of`] names it.
-const KINDS: [&str; 31] = [
+const KINDS: [&str; 35] = [
     "headline",
     "furrow",
     "ribbon",
@@ -59,6 +63,10 @@ const KINDS: [&str; 31] = [
     "paths",
     "diffstat",
     "decision",
+    "card",
+    "desk",
+    "typed answer",
+    "choice list",
     "checklist",
     "problem",
     "refusal",

@@ -3,10 +3,11 @@
 //! character wraps. It fills the rows it is given, less the one a prompt never draws on.
 
 use super::card::Placed;
-use crate::components::{Desk, FootRow, Pane};
+use super::Terminal;
+use crate::components::{Desk, FootRow, Pane, PaneLaid};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Line, Tone};
-use crate::look::Look;
+use crate::look::{Look, Width};
 use crate::text::counted;
 use crate::width::cell_width;
 
@@ -37,15 +38,6 @@ const APART: usize = 2;
 const LEAST_TITLE: usize = 20;
 /// The rows the pane's title and the blank row under it take.
 const PANE_HEAD: usize = 2;
-
-/// A desk drawn, with what a key that scrolls it has to know: the first row of the pane it
-/// shows, how many rows its body has, and the highest first row it can show.
-pub struct LaidDesk {
-    pub placed: Placed,
-    pub top: usize,
-    pub page: usize,
-    pub most: usize,
-}
 
 /// The columns of a desk on a terminal of some width, so the head, the pane and the foot
 /// cannot disagree about them.
@@ -80,9 +72,29 @@ impl Desk {
         Measures::of(look.width.cells()).pane
     }
 
-    /// The desk drawn in `rows` rows of a terminal, less the row a prompt never draws on. On
-    /// a short one the head gives up what was asked, then the gist, then its blank rows.
-    pub fn drawn(&self, look: &Look, rows: usize) -> LaidDesk {
+    /// The desk drawn whole, as a document holds it: every group of its rail and every line
+    /// of its pane in sight.
+    pub(crate) fn drawn_whole(&self, look: &Look) -> Vec<Line> {
+        self.drawn(look, self.whole_rows(look)).lines
+    }
+
+    /// The rows the desk takes with nothing given up: its whole head, the longer of its rail
+    /// and its pane, its foot, and the row a prompt never draws on.
+    fn whole_rows(&self, look: &Look) -> usize {
+        let measures = Measures::of(look.width.cells());
+        let head = 2 + usize::from(self.gist.is_some()) + usize::from(self.asked.is_some());
+        let foot = self.foot_lines(look.glyphs, measures.whole).len();
+        let pane = PANE_HEAD + pane_lines(&self.pane, look, measures.pane).len();
+        let rail = measures
+            .rail
+            .map_or(0, |cells| rail_length(&self.rail, look, cells));
+        head + pane.max(rail).max(ROOM_TO_READ) + foot + 1
+    }
+
+    /// The desk drawn in `rows` rows of a terminal, less the row a prompt never draws on, with
+    /// what a key that scrolls it has to know of its pane. On a short one the head gives up
+    /// what was asked, then the gist, then its blank rows.
+    pub fn drawn(&self, look: &Look, rows: usize) -> Placed {
         let measures = Measures::of(look.width.cells());
         let glyphs = look.glyphs;
         let most = rows.saturating_sub(1);
@@ -106,14 +118,14 @@ impl Desk {
             })
             .collect();
         lines.truncate(most);
-        LaidDesk {
-            placed: Placed {
-                lines,
-                cursor: None,
-            },
-            top,
-            page,
-            most: pane_most,
+        Placed {
+            lines,
+            cursor: None,
+            pane: Some(PaneLaid {
+                top,
+                page,
+                most: pane_most,
+            }),
         }
     }
 
@@ -331,21 +343,39 @@ fn pane_rows(
     has_rail: bool,
 ) -> (Vec<Line>, usize, usize, usize) {
     let glyphs = look.glyphs;
+    let lines = pane_lines(pane, look, cells);
     let page = height.saturating_sub(PANE_HEAD);
-    let most = pane.lines.len().saturating_sub(page);
-    let top = scroll_top(pane, most, page);
+    let most = lines.len().saturating_sub(page);
+    let pointed = pane
+        .follows_pointer
+        .then(|| {
+            lines
+                .iter()
+                .position(|line| line.text().trim_start().starts_with(glyphs.pointer()))
+        })
+        .flatten();
+    let top = scroll_top(pane.top, pointed, most, page);
     let mut rows = vec![pane_title_row(pane, glyphs, cells, has_rail), Line::new()];
-    rows.extend(pane_body(&pane.lines, (top, page, most), cells, glyphs));
+    rows.extend(pane_body(&lines, (top, page, most), cells, glyphs));
     rows.truncate(height);
     rows.resize(height, Line::new());
     (rows, top, page, most)
 }
 
-/// The first line the pane shows: the one it was scrolled to, held within its last lines and
-/// moved so that the line a pointer stands on is in sight.
-fn scroll_top(pane: &Pane, most: usize, page: usize) -> usize {
-    let top = pane.top.min(most);
-    let Some(row) = pane.keep else {
+/// What the pane holds, laid out at its measure of `cells`.
+fn pane_lines(pane: &Pane, look: &Look, cells: usize) -> Vec<Line> {
+    let measure = Look {
+        width: Width::row(cells, None),
+        ..*look
+    };
+    Terminal::on(measure).lines(&pane.doc)
+}
+
+/// The first line the pane shows: the one it was scrolled to, `top`, held within its last
+/// lines and moved so that the line a pointer stands on, `pointed`, is in sight.
+fn scroll_top(top: usize, pointed: Option<usize>, most: usize, page: usize) -> usize {
+    let top = top.min(most);
+    let Some(row) = pointed else {
         return top;
     };
     // Past the last line every row of the body shows a line, so none is kept for a count.
@@ -393,7 +423,7 @@ fn pane_body(
 }
 
 mod rail;
-use rail::rail_rows;
+use rail::{rail_length, rail_rows};
 
 #[cfg(test)]
 mod tests;

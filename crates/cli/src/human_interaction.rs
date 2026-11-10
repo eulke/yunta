@@ -29,8 +29,10 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::port::{HumanInteraction, QuestionsReply};
 use yunta_core::{Env, QuestionsFile};
+use yunta_render::prompt::Escape;
+use yunta_ui::prompt::Opens;
 
-use crate::ask::{answer, decide, Answered, Ask, Console, Escape, NoAnswer, Opens};
+use crate::ask::{answer, decide, Answered, Ask, Console, NoAnswer};
 use crate::output::{note, warn};
 use crate::surface::{Curtain, Diagnostics};
 

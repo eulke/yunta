@@ -3,18 +3,19 @@
 //! the words it is said with. Every row opens on the decision's edge and is
 //! tinted, and the row pointed at is set apart where a layer draws fills.
 
-use crate::components::{Card, CardBody, ChoiceRow, Choices, TypedRow};
+use crate::components::{Card, CardBody, ChoiceRow, Choices, PaneLaid, TypedRow};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
 use crate::text::counted;
 use crate::width::{cell_width, id_column, middle_cut, INDENT};
 
-/// A prompt's lines, and where the cursor stands when a field is open: the row,
-/// counted from its first line, and the cell.
+/// A prompt's lines, where the cursor stands when a field is open (the row, counted
+/// from its first line, and the cell), and what was laid out of a pane it scrolls.
 pub struct Placed {
     pub lines: Vec<Line>,
     pub cursor: Option<(usize, usize)>,
+    pub pane: Option<PaneLaid>,
 }
 
 /// The cells the edge and the space after it take at the start of a row.
@@ -36,7 +37,7 @@ const LEAST_TEXT: usize = 12;
 const HEAD_GAP: usize = 2;
 
 /// The cell the cursor needs past the last character of a field.
-const CURSOR_CELL: usize = 1;
+pub(super) const CURSOR_CELL: usize = 1;
 
 /// The cells the mark of a line that needs a person, or a refusal, and the space
 /// after it take: the rest of such a line wraps under them.
@@ -81,12 +82,13 @@ impl Card {
                 .map(|row| on_the_edge(row, look.glyphs))
                 .collect(),
             cursor: placed.cursor,
+            pane: None,
         }
     }
 
     /// The cells a field on a card may fill with `prompt` before it: what the card's
     /// edge, the prompt and the cell the cursor needs past the last character leave.
-    pub fn typed_room(look: &Look, prompt: &str) -> usize {
+    pub(crate) fn typed_room(look: &Look, prompt: &str) -> usize {
         look.width
             .cells()
             .saturating_sub(EDGE + cell_width(prompt) + CURSOR_CELL)
@@ -138,7 +140,11 @@ impl Card {
         };
         let cursor = cursor.map(|(row, cell)| (head.len() + row, EDGE + cell));
         let lines = head.into_iter().chain(middle).chain(foot).collect();
-        Placed { lines, cursor }
+        Placed {
+            lines,
+            cursor,
+            pane: None,
+        }
     }
 
     /// The question under the mark of what needs a person, wrapped under itself,
@@ -189,15 +195,13 @@ fn saying(
     let mut lines = chosen.lines(true, cell_width(&chosen.name) + NAME_GAP, room, look.glyphs);
     lines.push(Line::new());
     lines.extend(Line::new().push(Tone::Strong, asks).wrap(room));
-    let cursor = (
-        lines.len(),
-        cell_width(&typed.prompt) + cell_width(&typed.before),
-    );
+    let (before, after) = typed.fitted(Card::typed_room(look, &typed.prompt));
+    let cursor = (lines.len(), cell_width(&typed.prompt) + cell_width(&before));
     lines.push(
         Line::new()
             .push(Tone::Muted, typed.prompt.as_str())
-            .plain(typed.before.as_str())
-            .plain(typed.after.as_str()),
+            .plain(before)
+            .plain(after),
     );
     if let Some(refused) = refused {
         lines.extend(marked(

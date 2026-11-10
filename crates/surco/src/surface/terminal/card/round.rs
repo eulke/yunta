@@ -63,7 +63,7 @@ impl<'a> Drawn<'a> {
 impl Card {
     /// The cells a field in a round may fill with `prompt` before it: what a field on a
     /// card may fill, less the margin it stands in from its question.
-    pub fn typed_room_in_round(look: &Look, prompt: &str) -> usize {
+    pub(crate) fn typed_room_in_round(look: &Look, prompt: &str) -> usize {
         Card::typed_room(look, prompt).saturating_sub(UNDER)
     }
 }
@@ -278,14 +278,15 @@ fn typing<'a>(
 ) -> Drawn<'a> {
     let mut lines = being_answered(row, look, room);
     let field_at = lines.len();
+    let (before, after) = typed.fitted(Card::typed_room_in_round(look, &typed.prompt));
     let cursor = (
         field_at,
-        UNDER + cell_width(&typed.prompt) + cell_width(&typed.before),
+        UNDER + cell_width(&typed.prompt) + cell_width(&before),
     );
     let field = Line::new()
         .push(Tone::Muted, typed.prompt.as_str())
-        .plain(typed.before.as_str())
-        .plain(typed.after.as_str());
+        .plain(before)
+        .plain(after);
     lines.push(indented(field));
     lines.extend(refusals(refused, room, look.glyphs));
     Drawn {

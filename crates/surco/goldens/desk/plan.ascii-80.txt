@@ -1,0 +1,18 @@
+ plan ; A32BZY ; reviewed-plan (default) ; 2 tasks      needs you  approve-plan
+ Make it
+ you asked  a file the run is about
+
+ proof · T001                                                       step 1 of 1
+
+ tested by    the file exists
+              test -f made.txt
+
+
+
+
+
+
+
+ ? Plan registered. Approve?
+ 1 approve   2 adjust   3 abort
+ j k task ; p the card ; esc leaves the run waiting

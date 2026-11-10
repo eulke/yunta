@@ -35,10 +35,11 @@ use surco::motion::Motion;
 use surco::paint::Paint;
 use yunta_core::port::Said;
 use yunta_core::{NodeId, RunId};
+use yunta_render::watched;
 use yunta_replay::frame::{NodeStanding, RunFrame};
 
 use super::scrollback::Scrollback;
-use super::{view, Screen};
+use super::Screen;
 
 /// The region's rows carry text, and beside the footer's words the run's
 /// furrow: no bar of one quantity and no percentage. The furrow is where each
@@ -146,12 +147,12 @@ impl Region {
     /// registry, the row says so instead.
     pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
         let attention = match &frame.asking {
-            Some(asking) => view::asked(asking, &self.look()),
-            None => view::attention(frame, run_id, answerable, &self.look()),
+            Some(asking) => watched::asked(asking, &self.look()),
+            None => watched::attention(frame, run_id, answerable, &self.look()),
         }
         .map(|line| self.fit(&line));
         self.attend(attention);
-        let working = view::working(frame);
+        let working = watched::working(frame);
         // What a node that stopped working said, and what another run said,
         // is let go: a node that works again says something new. A node yet
         // to start keeps what it said until it works.
@@ -163,7 +164,7 @@ impl Region {
             .into_iter()
             .flat_map(|node| {
                 let said = self.said.get(&(run_id.clone(), node.id.clone()));
-                view::node_rows(frame, node, said, &self.look(), self.motion)
+                watched::node_rows(frame, node, said, &self.look(), self.motion)
             })
             .map(|row| self.fit(&row))
             .collect();
@@ -172,7 +173,7 @@ impl Region {
             bar.set_message(text);
         }
         self.footer
-            .set_message(self.fit(&view::footer(frame, &self.look())));
+            .set_message(self.fit(&watched::footer(frame, &self.look())));
     }
 
     /// Tells the window a person is being asked, as a prompt takes the terminal:
@@ -182,7 +183,7 @@ impl Region {
             return;
         }
         self.told = true;
-        let title = view::title(frame, run_id, self.glyphs);
+        let title = watched::title(frame, run_id, self.glyphs);
         let bell = if self.bell { surco::paint::BELL } else { "" };
         // A terminal that refuses the sequence is a terminal nothing could be
         // reported on either.

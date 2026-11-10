@@ -1,0 +1,34 @@
+[package]
+name = "yunta-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Yunta's user interface, apart from the medium that shows it: what a person has open, what each input does to it, the work it asks of Yunta, and each moment as a Surco screen."
+
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Every operation a stage asks for, carried out by the performer.
+yunta-api.workspace = true
+# The domain a stage holds: runs, nodes, decisions, the steps a person takes.
+yunta-core.workspace = true
+# What a run is, read from its log: its frame, its moments, what it offers.
+yunta-replay.workspace = true
+# Every sentence a stage says, and the pages it shows.
+yunta-render.workspace = true
+# The screen a stage draws, and the blocks a prompt draws as.
+yunta-surco.workspace = true
+# The performer's runtime, as the API's: the work a stage asks for is async.
+tokio.workspace = true
+
+[dev-dependencies]
+# The samples a test builds a question or a run from.
+yunta-core = { workspace = true, features = ["testkit"] }

@@ -9,50 +9,13 @@
 use nix::sys::termios::{tcgetattr, tcsetattr, LocalFlags, SetArg, Termios};
 use surco::look::Look;
 use surco::paint::{right, up, CLEAR_DOWN, PASTE_OFF, PASTE_ON, SYNC_BEGIN, SYNC_END};
-use surco::surface::Placed;
+use surco::surface::{Placed, Terminal};
 use surco::width::cell_width;
+use yunta_ui::prompt::{Answerable, Press};
 
-use super::keys::{Stroke, Strokes};
+use super::keys::Strokes;
 use super::{Answered, Console, NoAnswer};
 use crate::output::warn;
-
-/// A prompt the loop can hold.
-pub(crate) trait Held {
-    /// What answering it comes to.
-    type Answer;
-
-    /// What it draws, in `rows` rows of the terminal.
-    fn drawn(&self, look: &Look, rows: usize) -> Placed;
-
-    /// What a stroke asks of it.
-    fn press(&mut self, stroke: Stroke) -> Press<Self::Answer>;
-
-    /// Whether a field is open, where what is pasted is what is typed. Anywhere
-    /// else a paste answers nothing.
-    fn typing(&self) -> bool;
-
-    /// How it looks on a terminal `columns` wide: a prompt holds to the measure a line
-    /// has, unless it lays out columns of its own.
-    fn look(&self, line: Look, _columns: usize) -> Look {
-        line
-    }
-}
-
-/// What a stroke asks of a prompt.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Press<T> {
-    /// It stays, drawn again.
-    Stay,
-    /// It stays, on another question: what was typed for the last one is no answer
-    /// to this one.
-    Moved,
-    /// It is answered.
-    Answer(T),
-    /// The person leaves it without an answer.
-    Decline,
-    /// The person stops the run.
-    Interrupt,
-}
 
 /// What ended a prompt.
 enum Ended<T> {
@@ -62,7 +25,7 @@ enum Ended<T> {
 }
 
 /// Puts `prompt` to the person until it is answered.
-pub(crate) fn hold<P: Held>(console: &Console, prompt: &mut P) -> Answered<P::Answer> {
+pub(crate) fn hold<P: Answerable>(console: &Console, prompt: &mut P) -> Answered<P::Answer> {
     console.discard_typed();
     let quiet = Quiet::on(console)?;
     let mut place = Place::default();
@@ -86,7 +49,7 @@ pub(crate) fn hold<P: Held>(console: &Console, prompt: &mut P) -> Answered<P::An
 /// stopped. A stroke that stays redraws it, and so does a tick that finds the terminal
 /// changed size. A stroke that moves to another question discards what was typed
 /// before it is drawn.
-fn hold_until_it_ends<P: Held>(
+fn hold_until_it_ends<P: Answerable>(
     console: &Console,
     prompt: &mut P,
     place: &mut Place,
@@ -117,11 +80,20 @@ fn hold_until_it_ends<P: Held>(
     }
 }
 
-/// Draws `prompt` over what `place` last drew, at the terminal's size now.
-fn redraw<P: Held>(console: &Console, prompt: &P, place: &mut Place) -> std::io::Result<()> {
+/// Draws `prompt` over what `place` last drew, at the terminal's size now, and hands it
+/// back what was laid out of a pane it scrolls.
+fn redraw<P: Answerable>(
+    console: &Console,
+    prompt: &mut P,
+    place: &mut Place,
+) -> std::io::Result<()> {
     let (columns, rows) = console.size();
-    let look = prompt.look(console.look(), columns);
-    place.draw(console, &prompt.drawn(&look, rows), &look)
+    let look = console.look();
+    let placed = Terminal::on(look).held(&prompt.block(&look), columns, rows);
+    if let Some(pane) = placed.pane {
+        prompt.laid(pane);
+    }
+    place.draw(console, &placed, &look)
 }
 
 /// The terminal as a prompt holds it: each key reaches the read as it is pressed

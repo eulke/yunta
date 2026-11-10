@@ -42,6 +42,7 @@ mod place;
 mod ranks;
 mod references;
 mod scope;
+mod skeleton;
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -77,6 +78,7 @@ pub use optional::{followers, left_out, opens_a_pull_request, reroute_sources, B
 pub(crate) use place::declared_node;
 pub use place::Place;
 pub use scope::NodeScope;
+pub use skeleton::WorkflowShape;
 
 /// A workflow definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

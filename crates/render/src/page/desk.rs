@@ -10,9 +10,7 @@ use surco::components::{Desk, DeskFoot, Pane, RailGroup, RailRow};
 use surco::diagram::Diagram;
 use surco::doc::Doc;
 use surco::glyphs::Glyphs;
-use surco::line::Line;
-use surco::look::{Look, Width};
-use surco::surface::Terminal;
+use surco::look::Look;
 use surco::text::counted;
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
 use yunta_core::{RunId, Task};
@@ -150,34 +148,24 @@ impl<'a> Reading<'a> {
         groups
     }
 
-    /// What the pane holds at `spot`, laid out for its measure on a terminal as wide as
-    /// `look` says.
-    pub fn pane_lines(&self, spot: &Spot, look: &Look) -> Vec<Line> {
-        let inner = Look {
-            width: Width::row(Desk::pane_cells(look), None),
-            ..*look
-        };
-        let terminal = Terminal::on(inner);
+    /// What the pane holds at `spot`, as a document a surface lays out at the pane's
+    /// measure, in the glyphs `look` draws with.
+    pub fn pane_doc(&self, spot: &Spot, look: &Look) -> Doc {
         let Some(place) = self.places.get(spot.at) else {
-            return Vec::new();
+            return Doc::new();
         };
         match (spot.view, place) {
-            (View::Choices, _) => {
-                let doc = change::deciding(self.review, spot.choice, look.glyphs);
-                terminal.lines(&doc)
-            }
-            (_, Place::Also(at)) => self.also.get(*at).map_or_else(Vec::new, |also| {
-                terminal.lines(&also.shown.document(&inner))
-            }),
-            (View::Proof, Place::Task { task, .. }) => {
-                terminal.lines(&proof::of_task(task, self.review))
-            }
-            (View::Proof, Place::TheChange) => terminal.lines(&proof::of_plan(self.review)),
+            (View::Choices, _) => change::deciding(self.review, spot.choice, look.glyphs),
+            (_, Place::Also(at)) => self
+                .also
+                .get(*at)
+                .map_or_else(Doc::new, |also| also.shown.document(look)),
+            (View::Proof, Place::Task { task, .. }) => proof::of_task(task, self.review),
+            (View::Proof, Place::TheChange) => proof::of_plan(self.review),
             (View::Stop, Place::Task { task, .. }) => {
-                let card = card::card(task, self.review);
-                terminal.lines(&Doc::new().with_all(card.blocks))
+                Doc::new().with_all(card::card(task, self.review).blocks)
             }
-            (View::Stop, Place::TheChange) => terminal.lines(&change::words(self.review)),
+            (View::Stop, Place::TheChange) => change::words(self.review),
         }
     }
 
@@ -354,23 +342,16 @@ impl<'a> Reading<'a> {
     }
 
     /// The pane of a desk at `spot`: its title, what is at its far end, where it is,
-    /// its lines, and the row a pointer stands on.
+    /// what it holds, and whether the row a pointer stands on stays in sight.
     fn pane(&self, spot: &Spot, look: &Look) -> Pane {
         let (title, edge, place) = self.heading(spot, look.glyphs.sep());
-        let lines = self.pane_lines(spot, look);
-        let keep = match spot.view {
-            View::Choices => lines
-                .iter()
-                .position(|line| line.text().trim_start().starts_with(look.glyphs.pointer())),
-            View::Proof | View::Stop => None,
-        };
         Pane {
             title,
             edge,
             place,
-            lines,
+            doc: self.pane_doc(spot, look),
             top: spot.top,
-            keep,
+            follows_pointer: spot.view == View::Choices,
         }
     }
 

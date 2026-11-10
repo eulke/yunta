@@ -134,3 +134,44 @@
 ␛[1;35m◆␛[0m ␛[1mQ78GRR␛[0m␛[1;35m needs you␛[0m: the suite passed at baseline and now exits 101␛[2m · ␛[0m␛[1ma␛[0m␛[2m go there␛[0m
 
 ␛[1;35m◆ needs you␛[0m: node `implement` asks at its terminal
+
+␛[1;35m▎␛[0m ␛[1;35m◆␛[0m ␛[1mgate `ship` needs a decision␛[0m                                                      ␛[2mapprove KQERFD␛[0m
+␛[1;35m▎␛[0m the change is reviewed and its findings settled
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[1;35m▸␛[0m ␛[1mapprove  ␛[0mOn to `pr`: opens the pull request
+␛[1;35m▎␛[0m   abort    Pause here: nothing runs
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[2mthen␛[0m  pr, then the run finishes
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[2m↑↓ move · enter chooses · esc leaves the run waiting␛[0m
+
+ ␛[1mplan␛[0m␛[2m · ␛[0m␛[2mA32BZY␛[0m␛[2m · ␛[0m␛[2mreviewed-plan (default)␛[0m␛[2m · ␛[0m␛[2m2 tasks␛[0m                          ␛[2mneeds you  approve-plan␛[0m
+ Make it
+ ␛[2myou asked␛[0m  a file the run is about
+
+     the change                ␛[2m │ ␛[0m␛[1mproof · T001␛[0m                                          ␛[2mstep 1 of 1␛[0m
+                               ␛[2m │ ␛[0m
+ ␛[1msteps␛[0m                         ␛[2m │ ␛[0m␛[2mtested by    ␛[0mthe file exists
+ 1 ␛[1;35m▸␛[0m ␛[1mT001␛[0m                      ␛[2m │ ␛[0m             ␛[1mtest -f made.txt␛[0m
+     T002                      ␛[2m │ ␛[0m
+                               ␛[2m │ ␛[0m
+ ␛[1mimpact␛[0m                        ␛[2m │ ␛[0m
+ made.txt                  ␛[2mT001␛[0m␛[2m │ ␛[0m
+ said.txt                  ␛[2mT002␛[0m␛[2m │ ␛[0m
+                               ␛[2m │ ␛[0m
+ ␛[1mweighs␛[0m                        ␛[2m │ ␛[0m
+ decided                  ␛[1m 2␛[0m␛[2m  d␛[0m␛[2m │ ␛[0m
+ ␛[33m▲␛[0m the suite is red at baseline␛[2m │ ␛[0m
+ T001 → T002                   ␛[2m │ ␛[0m
+                               ␛[2m │ ␛[0m
+
+ ␛[1;35m◆␛[0m ␛[1mPlan registered. Approve?␛[0m
+ ␛[1m1␛[0m approve   ␛[1m2␛[0m adjust   ␛[1m3␛[0m abort                  ␛[2mj k task · p the card · esc leaves the run waiting␛[0m
+
+␛[1mproject name␛[0m␛[2m (enter keeps `yunta`)␛[0m
+> yunta-tui
+
+␛[2mfilter ␛[0m␛[1mn␛[0m
+  one-node  one command whose exit code is the check
+␛[1;35m▸␛[0m ␛[1mlint-fix  ␛[0ma check, and an agent that fixes what it finds
+␛[2m↑↓ move · type to filter · enter chooses · esc takes the first␛[0m
