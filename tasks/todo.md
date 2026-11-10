@@ -1162,7 +1162,7 @@ Its groups, each green before the next: the project's upkeep through the API; th
 - [x] Every finding is recorded here with its decision.
 
 **Verification:**
-- [ ] Tests pass: the suite's groups after the fixes.
+- [x] Tests pass: the suite's groups after the fixes (4,607 tests, `proof/control/group-review.txt`; the gate's 282 binaries and 4,611 tests).
 
 **Dependencies:** Task 45
 
@@ -1171,9 +1171,11 @@ Its groups, each green before the next: the project's upkeep through the API; th
 **Estimated scope:** M
 
 ### Checkpoint D: the module
-- [ ] The release binary's code against Checkpoint A's, by crate and by copy (`tools/size_by_crate.py`, `tools/duplicates.py`, both built with symbols): found after Phase 2, when the static Linux binary passed its 40 MiB ceiling, that a release build shares no generics, so each crate that named the generic YAML reader on a manifest or a config layer built its own copy of everything that reads them; since then core reads each through one concrete reader (`Manifest::read_frozen`, `ConfigLayer::read`), and the binary went from 32.16 MB to 28.95 MB. Every document more than one crate reads is read through one such reader, and the binary stays at or under that size.
-- [ ] The user reviews the proof and the review.
-- [ ] The phase commits and is pushed; Task 47 follows, then `cargo clean`.
+- [x] The release binary's code against Checkpoint A's, by crate and by copy (`tools/size_by_crate.py`, `tools/duplicates.py`, both built with symbols): found after Phase 2, when the static Linux binary passed its 40 MiB ceiling, that a release build shares no generics, so each crate that named the generic YAML reader on a manifest or a config layer built its own copy of everything that reads them; since then core reads each through one concrete reader (`Manifest::read_frozen`, `ConfigLayer::read`), and the binary went from 32.16 MB to 28.95 MB. Every document more than one crate reads is read through one such reader, and the binary stays at or under that size.
+  - Measured on the final tree (`proof/control/size-checkpoint-d.txt`): code 26,713,908 bytes at Checkpoint A, 25,377,452 now, 1,336,456 fewer; `serde_path_to_error` 845 KB and `yunta_core` 608 KB fewer, `yunta` 448 KB fewer as its code went to `yunta_api` (413 KB) and `yunta_mcp` (63 KB). Release 28,251,712 bytes, under the 28.95 MB this item holds it to.
+  - Copies the generic readers still build twice are small: a question's visitor two more (32 KB) and the skills section's one more (16 KB). Nothing above them is a document read in a second crate.
+- [x] The user reviews the proof and the review.
+- [x] The phase commits and is pushed (`92d05277`); Task 47 follows, then `cargo clean`, done.
 
 ### Task 47: the pull request
 
@@ -1182,11 +1184,13 @@ Its groups, each green before the next: the project's upkeep through the API; th
 
 **Fails first:** none.
 
+**Found in its turn:** the first run of `test-macos` failed one engine test, `measure_beside_loop::a_red_measurement_holds_no_guard`: on the slower runner the task's pre-check ran the red suite as a guard and stopped the node, where the run should finish. No file on that path changed in this module; the job passed when run again. A race the base already holds, recorded in `.agents/open.md`.
+
 **Acceptance criteria:**
-- [ ] CI green on Linux and macOS.
+- [x] CI green on Linux and macOS.
 
 **Verification:**
-- [ ] Manual check: `gh pr checks 30`.
+- [x] Manual check: `gh pr checks 30`: ci, musl-build, test-release and test-macos pass.
 
 **Dependencies:** Checkpoint D
 

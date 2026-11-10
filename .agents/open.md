@@ -2,6 +2,14 @@
 
 Work Yunta has not done yet, and questions it has not answered. An entry is deleted by the change that does it.
 
+### A red measurement can still stop a task's pre-check
+Paths: `crates/engine/src/task_cycle/**`, `crates/engine/src/run/aside.rs`, `crates/engine/src/run/baseline.rs`, `crates/engine/tests/measure_beside_loop.rs`
+A loop starts beside the lineage's measurement, and a task is held to the suite only when the suite passed before
+the run changed anything. On macOS's CI runner, `a_red_measurement_holds_no_guard` once saw the task's pre-check
+run a red suite (`sleep 2; false`) as a guard and stop the node with `BrokenGuard`, where the run should finish;
+run again, it passed. The order between the pre-check and the measurement landing is a race the test does not
+pin. Reproduce it under load, many runs beside busy loops, before deciding what the pre-check waits on.
+
 ### A skill a run revises is not the one its later sessions load
 Paths: `crates/engine/src/frozen/**`, `crates/adapters/src/mount.rs`, `crates/engine/src/run/session_plan.rs`
 A run freezes each skill when it is born and mounts that copy in every session, so a node that rewrites a skill's
