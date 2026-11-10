@@ -4,6 +4,7 @@
 //! A terminal writes each line as it comes; a program keeps them for its
 //! document.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use yunta_core::caution::Caution;
@@ -52,11 +53,30 @@ pub enum Remark {
     /// A checkout of a run that could not go back to the project's pool, and
     /// stays the run's until `gc` collects it: the run, and what stopped it.
     CheckoutKept { run: RunId, said: String },
+    /// Something a pass of collection could not do, left for a later pass:
+    /// what it was about, and what stopped it.
+    Uncollected(yunta_render::page::Uncollected),
+    /// A pack's tree an install or a removal replaced, which stays on disk
+    /// though the pack is in place: where it is, and what the disk said.
+    ReplacedTreeKept { at: PathBuf, said: String },
 }
 
 /// Where an operation says its remarks, in the order it says them.
 pub trait Remarks: Sync {
     fn remark(&self, remark: Remark);
+}
+
+/// What a run made to check something rather than to work says: all it
+/// says but the estimate, which no such run, a probe's or a case's, is worth
+/// a line of.
+pub(crate) struct Unestimated<'a>(pub(crate) &'a dyn Remarks);
+
+impl Remarks for Unestimated<'_> {
+    fn remark(&self, remark: Remark) {
+        if !matches!(remark, Remark::Estimate(_)) {
+            self.0.remark(remark);
+        }
+    }
 }
 
 /// A closure takes each remark as it is said.

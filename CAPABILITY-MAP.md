@@ -40,10 +40,10 @@ New or changed dependencies:
 | `yunta-mcp-protocol` | nothing in the workspace; `rmcp` |
 | `yunta-engine` | core, storage, replay, mcp-protocol, surco |
 | `yunta-api` | core, storage, replay, engine, adapters, render, surco |
-| `yunta-mcp` | core, replay, render, api, mcp-protocol, surco |
+| `yunta-mcp` | core, render, api, mcp-protocol, surco |
 | `yunta-app` | core, replay, render, api, surco |
 | `yunta-tui` | app, surco, ratatui, crossterm |
-| `yunta` | core, replay, render, api, mcp, surco, and the app and the TUI as they come; never the engine, the store or the adapters |
+| `yunta` | core, replay, render, api, mcp, surco, and the app and the TUI as they come; its dependencies never name the engine, the store or the adapters |
 | desktop | app, surco |
 
 What moves:
@@ -85,7 +85,7 @@ What moves:
 | `run-state` | The `yunta-replay` crate, cutting the cycle between `replay` and `stats`, each item with one path and a name that says what it is | nothing |
 | `run-pages` | Every page in `yunta-render`, in one form; what a run offers next as actions; every command spelled once; the CLI printing exactly the same | `run-state` |
 | `control` | `yunta-api`, with the CLI and MCP mounted on it | `log-follow`, `run-state` |
-| `app-core` | `yunta-app`: stages, screens, effects and moved prompts | `control`, `run-pages`, `surco-screen` |
+| `app-core` | `yunta-app`: stages, screens, effects and moved prompts; the chronicle's words, for `yunta-render` | `control`, `run-pages`, `surco-screen` |
 | `tui` | `yunta-tui`, bare `yunta` and `deny.toml`, in slices: watch, decide, start. It lays a screen out with Ratatui's `Layout`, draws each pane through Surco's terminal at `Width::exact`, and draws the overlay's box in Surco's glyphs; `surco-screen`'s `tui-reference` frames are its reference | `app-core`, `parked-answers` |
 | `desktop` | Reserved only: no spec and no code yet | `app-core` |
 

@@ -313,7 +313,7 @@ async fn pack_command(shell: &Shell, action: PackAction, look: &Look) -> Result<
             commands::pack::update(shell, &pack, &r#ref, yes, look).await
         }
         PackAction::New { pack } => commands::pack::new_pack(shell, &pack, look).await,
-        PackAction::Remove { pack } => commands::pack::remove(shell, &pack, look),
+        PackAction::Remove { pack } => commands::pack::remove(shell, &pack, look).await,
         PackAction::List => commands::pack::list(shell, look),
         PackAction::Audit { pack } => commands::pack::audit(shell, &pack, look).await,
     }

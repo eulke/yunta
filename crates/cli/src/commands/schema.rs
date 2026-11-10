@@ -13,7 +13,6 @@
 //! doors rendering one do not.
 
 use surco::look::Look;
-use surco::surface::Surface;
 use yunta_core::shape::contract;
 use yunta_core::step::NextStep;
 use yunta_core::DocumentKind;
@@ -23,7 +22,7 @@ use crate::error::CliError;
 
 use crate::output::Outcome;
 use crate::output::{raw, show, Mode};
-use yunta_render::page::{Page, Schema};
+use yunta_render::page::Schema;
 
 /// Prints one document's shape, or lists the documents when none is named.
 pub fn schema(name: Option<&str>, output: Mode, look: &Look) -> Result<Outcome, CliError> {
@@ -53,16 +52,4 @@ pub fn schema(name: Option<&str>, output: Mode, look: &Look) -> Result<Outcome, 
         (DocumentKind::Artifact(kind), _) => raw(&contract(kind)),
     }
     Ok(Outcome::Success)
-}
-
-/// The shape a writer reads, as a control-plane client is handed it: a
-/// kind's annotated example, or the keys a workflow reads, as Markdown.
-pub(crate) fn shape(kind: DocumentKind) -> String {
-    match kind {
-        DocumentKind::Artifact(kind) => contract(kind),
-        DocumentKind::Workflow => {
-            let markdown = surco::surface::Markdown;
-            markdown.draw(&Schema::WorkflowKeys.document(&markdown.look()))
-        }
-    }
 }

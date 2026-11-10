@@ -22,44 +22,24 @@ use yunta_render::escalation::Route;
 use yunta_render::page::{GateAnswered, Page, Resolution};
 
 use crate::ask::{Ask, Console, Escape, NoAnswer, Opens};
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
 use crate::shell::Shell;
 use crate::surface::Diagnostics;
-use yunta_api::WaitingDecision;
+use yunta_api::{Project, WaitingDecision};
 use yunta_render::document::GateAnswerDocument;
-
-/// Records the decision and hands the run back, returning the sentence
-/// that says so.
-///
-/// The one path a gate is answered through, whichever door asked: the
-/// control plane's `resolve_gate` tool returns this sentence in a tool
-/// result, and the command draws the same words as a page. Two doors, one
-/// decision, one wording, and one place that knows a decision recorded is
-/// not a decision undone when the hand-off fails.
-pub(crate) async fn resolve(
-    ctx: &Context,
-    run_id: &RunId,
-    option: &OptionId,
-    resolved_by: Option<&Responder>,
-    free_text: Option<&str>,
-) -> Result<String, CliError> {
-    record(ctx, run_id, option, resolved_by, free_text).await?;
-    Ok(GateAnswered::sentence(run_id, option))
-}
 
 /// Records the decision on the run's log and hands the run to a detached
 /// resume that applies it, through the API.
 async fn record(
-    ctx: &Context,
+    project: &Project,
     run_id: &RunId,
     option: &OptionId,
     resolved_by: Option<&Responder>,
     free_text: Option<&str>,
 ) -> Result<(), CliError> {
-    let open = ctx.project.run(run_id).await?;
+    let open = project.run(run_id).await?;
     let free_text = free_text.map(str::to_string);
     Ok(open.decide(option.clone(), resolved_by, free_text).await?)
 }
@@ -100,19 +80,37 @@ pub async fn resolve_gate(
     look: &Look,
 ) -> Result<Outcome, CliError> {
     needs_an_option(run_id, option, output)?;
-    let ctx = Context::of(shell)?;
+    let project = shell.workspace().project()?;
     let Some(option) = option else {
-        let chosen = chosen(&ctx, run_id).await?;
-        return settled(&ctx, run_id, chosen, resolved_by, free_text, output, look).await;
+        let chosen = chosen(&project, run_id).await?;
+        return settled(
+            &project,
+            run_id,
+            chosen,
+            resolved_by,
+            free_text,
+            output,
+            look,
+        )
+        .await;
     };
-    recorded(&ctx, run_id, option, resolved_by, free_text, output, look).await
+    recorded(
+        &project,
+        run_id,
+        option,
+        resolved_by,
+        free_text,
+        output,
+        look,
+    )
+    .await
 }
 
 /// What a person at the menu did, carried through: recorded and handed back, or the page
 /// that says nothing was. Who the command line names stands over who answered at the
 /// menu, and the words typed at the menu over the command line's.
 pub(super) async fn settled(
-    ctx: &Context,
+    project: &Project,
     run_id: &RunId,
     chosen: Chosen,
     by: Option<&Responder>,
@@ -127,7 +125,7 @@ pub(super) async fn settled(
     let by = by.unwrap_or(&choice.by);
     let free_text = choice.free_text.as_deref().or(free_text);
     recorded(
-        ctx,
+        project,
         run_id,
         &choice.option,
         Some(by),
@@ -142,7 +140,7 @@ pub(super) async fn settled(
 /// answers that the decision is resolved. Who decided is `by`, or whom the API
 /// stamps when it names nobody.
 async fn recorded(
-    ctx: &Context,
+    project: &Project,
     run_id: &RunId,
     option: &OptionId,
     by: Option<&Responder>,
@@ -150,7 +148,7 @@ async fn recorded(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    record(ctx, run_id, option, by, free_text).await?;
+    record(project, run_id, option, by, free_text).await?;
     let resolution = Resolution::Resolved {
         option: option.clone(),
     };
@@ -177,8 +175,8 @@ pub(super) struct Waiting {
 /// The decision `run_id` waits on, with what it shows and what the run
 /// changed, as the menu a person picks from is drawn: refused, by the API,
 /// when the run waits on none.
-pub(super) async fn waiting_of(ctx: &Context, run_id: &RunId) -> Result<Waiting, CliError> {
-    let open = ctx.project.run(run_id).await?;
+pub(super) async fn waiting_of(project: &Project, run_id: &RunId) -> Result<Waiting, CliError> {
+    let open = project.run(run_id).await?;
     let WaitingDecision {
         on,
         escalation,
@@ -244,19 +242,19 @@ impl Answer for ResolveGateAnswer {
 /// Off a terminal there is nobody to put it to, and what is refused
 /// lists the command that chooses each option, so the next invocation
 /// is one copied line.
-async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
-    let waiting = waiting_of(ctx, run_id).await?;
+async fn chosen(project: &Project, run_id: &RunId) -> Result<Chosen, CliError> {
+    let waiting = waiting_of(project, run_id).await?;
     let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
         return Err(off_terminal(run_id, &waiting.escalation));
     };
-    chosen_on(&console, ctx, run_id, &waiting, Opens::TheCard)
+    chosen_on(&console, project, run_id, &waiting, Opens::TheCard)
 }
 
 /// The option a person picks off the menu `run_id` waits on, put to them on `console`:
 /// the decision's documents above its card, opened the way `opens` says.
 pub(super) fn chosen_on(
     console: &Console,
-    ctx: &Context,
+    project: &Project,
     run_id: &RunId,
     waiting: &Waiting,
     opens: Opens,
@@ -270,16 +268,16 @@ pub(super) fn chosen_on(
         called: Some(waiting.called.clone()),
         opens,
     };
-    match crate::ask::decide(console, &ctx.env, ask) {
+    match crate::ask::decide(console, &project.workspace.env, ask) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => Ok(Chosen::Not(Resolution::Declined)),
         Err(NoAnswer::Interrupted) => Ok(Chosen::Not(Resolution::Interrupted)),
-        Err(NoAnswer::Unreadable(error)) => Err(CliError::msg(format!(
-            "this terminal could not be read or drawn on ({error}): nothing recorded"
-        ))),
-        Err(NoAnswer::Failed(why)) => Err(CliError::msg(format!(
-            "the menu ended without an answer ({why}): nothing recorded"
-        ))),
+        Err(NoAnswer::Unreadable(error)) => Err(CliError::msg(
+            yunta_render::escalation::console_unreadable(&error.to_string()),
+        )),
+        Err(NoAnswer::Failed(why)) => Err(CliError::msg(
+            yunta_render::escalation::menu_unanswered(&why),
+        )),
     }
 }
 

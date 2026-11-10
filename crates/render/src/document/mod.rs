@@ -27,6 +27,7 @@ pub mod check;
 mod close;
 pub mod decision;
 mod diagnostics;
+mod doctor;
 mod error;
 mod facts;
 mod field;
@@ -38,6 +39,7 @@ mod waiting;
 
 pub use cancel::CancelDocument;
 pub use close::CloseDocument;
+pub use doctor::DoctorDocument;
 pub use error::{ErrorDocument, NextCommand};
 pub use field::FieldDocument;
 pub use gate_answer::GateAnswerDocument;

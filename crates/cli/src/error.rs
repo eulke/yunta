@@ -9,12 +9,10 @@
 
 use std::fmt::Display;
 
-use yunta_core::RunId;
 use yunta_render::command::Reader;
 use yunta_render::refusal::Refused;
 
 pub(crate) mod page;
-pub(crate) mod words;
 
 /// Everything a subcommand can fail with, phrased so its `Display` names
 /// what went wrong and what to do. `main` turns it into one line on
@@ -43,52 +41,16 @@ pub enum CliError {
     #[error(transparent)]
     Failed(#[from] yunta_api::Failure),
 
-    #[error(transparent)]
-    Pack(#[from] crate::pack::PackError),
-
-    #[error(transparent)]
-    Storage(#[from] yunta_storage::StorageError),
-
-    #[error(transparent)]
-    Catalog(#[from] yunta_engine::CatalogError),
-
-    /// What the run failed with. The refusals it carries (an object its
-    /// store lacks, an answer no decision takes) reach a command as
-    /// [`CliError::Refused`]: see the conversion below.
-    #[error(transparent)]
-    Run(yunta_engine::RunError),
-
-    /// A git call the command made that did not answer. A stop the token
-    /// made is the command's cancellation, not a failed git: see the
-    /// conversion below.
-    #[error(transparent)]
-    Git(yunta_engine::GitError),
-
-    /// A manifest that could not be frozen. A stop the token made while git
-    /// answered it is the command's cancellation, not a failed manifest: see
-    /// the conversion below.
-    #[error(transparent)]
-    Manifest(yunta_engine::ManifestError),
-
-    /// What recording a decision failed with below its refusal: the store,
-    /// or the documents the gate shows. A refusal is
-    /// [`CliError::Refused`], through [`CliError::from_gate`].
-    #[error(transparent)]
-    ResolveGate(yunta_engine::ResolveGateError),
-
-    /// What recording a reply to a node's questions failed with below its
-    /// refusal. A refusal is [`CliError::Refused`]: see the conversion below.
-    #[error(transparent)]
-    AnswerQuestions(yunta_engine::AnswerQuestionsError),
+    /// This invocation's stop: a person interrupted it, said as a run the
+    /// engine was stopped in says it.
+    #[error("interrupted by a person")]
+    Stopped,
 
     /// A value that has to be an identifier and is not — a run id, an
     /// adapter, a mode, a gate option, a responder — wherever one is
     /// read off an argument.
     #[error(transparent)]
     InvalidId(#[from] yunta_core::InvalidId),
-
-    #[error(transparent)]
-    Worktree(#[from] yunta_engine::WorktreeError),
 
     #[error(transparent)]
     FrozenPaths(#[from] yunta_core::RelativeRootError),
@@ -124,77 +86,6 @@ impl CliError {
     pub fn msg(message: impl Into<String>) -> Self {
         CliError::Message(message.into())
     }
-
-    /// What recording a decision on `run_id` met: the run's refusal, which
-    /// names the run for the command that goes on, or a failure below it.
-    pub fn from_gate(run_id: &RunId, error: yunta_engine::ResolveGateError) -> Self {
-        match error {
-            yunta_engine::ResolveGateError::Refused(refusal) => Refused::Gate {
-                run: run_id.clone(),
-                refusal,
-            }
-            .into(),
-            failed => CliError::ResolveGate(failed),
-        }
-    }
-}
-
-/// A git the token stopped is the command's cancellation, the one a run's
-/// own git reaches; any other git failure is a git failure.
-impl From<yunta_engine::GitError> for CliError {
-    fn from(error: yunta_engine::GitError) -> Self {
-        match error.cancelled() {
-            true => CliError::Run(yunta_engine::RunError::Cancelled),
-            false => CliError::Git(error),
-        }
-    }
-}
-
-/// A manifest the token stopped while git answered it is the run's
-/// cancellation, the same one a run's own git reaches; inputs it does not take
-/// are refused; any other manifest failure stays a manifest failure.
-impl From<yunta_engine::ManifestError> for CliError {
-    fn from(error: yunta_engine::ManifestError) -> Self {
-        match error {
-            yunta_engine::ManifestError::Inputs(problem) => Refused::Inputs(problem).into(),
-            error if error.cancelled() => CliError::Run(yunta_engine::RunError::Cancelled),
-            error => CliError::Manifest(error),
-        }
-    }
-}
-
-/// What a run met: an object its store lacks and an answer no decision takes
-/// are refusals; anything else it failed with is the run's failure.
-impl From<yunta_engine::RunError> for CliError {
-    fn from(error: yunta_engine::RunError) -> Self {
-        match error {
-            yunta_engine::RunError::Object(problem) => Refused::Object(problem).into(),
-            yunta_engine::RunError::RefusedAnswer {
-                refused,
-                summary,
-                failure,
-            } => Refused::SurfaceAnswer {
-                refused,
-                claim: summary,
-                menu: failure,
-            }
-            .into(),
-            failed => CliError::Run(failed),
-        }
-    }
-}
-
-/// A reply the run does not take is refused; anything else recording it met
-/// failed below.
-impl From<yunta_engine::AnswerQuestionsError> for CliError {
-    fn from(error: yunta_engine::AnswerQuestionsError) -> Self {
-        match error {
-            yunta_engine::AnswerQuestionsError::Refused(refusal) => {
-                Refused::Answers(refusal).into()
-            }
-            failed => CliError::AnswerQuestions(failed),
-        }
-    }
 }
 
 /// What the API did not do: a refusal render says, a failure below it, or
@@ -204,7 +95,7 @@ impl From<yunta_api::Error> for CliError {
         match error {
             yunta_api::Error::Refused(refused) => CliError::Refused(refused),
             yunta_api::Error::Failed(failure) => CliError::Failed(failure),
-            yunta_api::Error::Stopped => CliError::Run(yunta_engine::RunError::Cancelled),
+            yunta_api::Error::Stopped => CliError::Stopped,
         }
     }
 }
@@ -217,32 +108,14 @@ impl From<yunta_core::UnknownDocument> for CliError {
 }
 
 impl CliError {
-    /// The words of a refusal whose sentence already names its cause, which
-    /// the chain of causes would otherwise append a second time.
-    fn carried_words(&self) -> Option<String> {
-        match self {
-            CliError::ResolveGate(refusal @ yunta_engine::ResolveGateError::Documents(_)) => {
-                Some(words::resolve_gate(refusal))
-            }
-            CliError::Run(yunta_engine::RunError::Artifact(
-                yunta_engine::AcceptError::Project { name, source },
-            )) => Some(words::project_view(name, source)),
-            _ => None,
-        }
-    }
-
     /// The refusal as `reader` reads it, with what caused it: a run's
     /// advice names it by its handle for a person, by its whole id for
     /// an agent. A refusal that found problems in a text says how many to
     /// a person, whose page points at each in its line, and says each to
     /// an agent, which reads no page.
     pub fn said_to(&self, reader: Reader) -> String {
-        if let Some(said) = self.carried_words() {
-            return said;
-        }
         let said = match self {
             CliError::Refused(refused) => refused.said(reader),
-            CliError::ResolveGate(error) => words::resolve_gate(error),
             failed => failed.to_string(),
         };
         // What caused it goes with it, to a person and an agent alike: a

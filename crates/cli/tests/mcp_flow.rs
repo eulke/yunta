@@ -943,6 +943,34 @@ async fn a_modern_client_lists_the_control_plane_tools_without_a_handshake() {
     assert_serves_the_control_plane_tools(&listed);
 }
 
+/// A control plane a person interrupts closes as any process SIGINT ended
+/// does: the code says a person stopped it, while its client is still
+/// connected.
+#[tokio::test]
+async fn an_interrupted_control_plane_exits_as_interrupted() {
+    let root = tempfile::tempdir().unwrap();
+    let mut server = RawStdio::spawn(root.path(), &root.path().join("state"));
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion": MODERN_REVISION,
+        "io.modelcontextprotocol/clientInfo": {"name": "raw-client", "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    });
+    // An answer is the sign the server is serving, its interrupt installed.
+    server
+        .request(1, "tools/list", json!({"_meta": meta}))
+        .await;
+
+    let pid = server.child.id().expect("the server is running");
+    yunta_core::process::signal::signal_process(
+        yunta_core::Pid::try_from(pid).unwrap(),
+        yunta_core::process::signal::Signal::SIGINT,
+    )
+    .unwrap();
+    let ended = server.child.wait().await.unwrap();
+
+    assert_eq!(ended.code(), Some(130));
+}
+
 #[tokio::test]
 async fn a_legacy_client_still_initializes_and_lists_the_same_control_plane_tools() {
     let root = tempfile::tempdir().unwrap();
@@ -1323,7 +1351,7 @@ impl HoldingRun {
 /// caller reads, so the tool refuses first: the sentence a person reads, naming the
 /// run whole.
 ///
-/// Reached by: `crates/cli/src/commands/mcp/tools.rs`
+/// Reached by: `crates/mcp/src/tools.rs`
 #[tokio::test]
 async fn resume_run_on_a_moving_run_is_refused_and_starts_nothing() {
     let run = HoldingRun::started();
@@ -1449,7 +1477,7 @@ async fn resolve_gate_beside_an_unreadable_lock_records_nothing() {
 
 /// The same for the other answer that starts a resume.
 ///
-/// Reached by: `crates/cli/src/commands/mcp/tools.rs`
+/// Reached by: `crates/mcp/src/tools.rs`
 #[tokio::test]
 async fn answer_questions_beside_an_unreadable_lock_records_nothing() {
     let root = tempfile::tempdir().unwrap();

@@ -79,7 +79,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{Failure, PauseReason};
-use yunta_core::port::{Adapter, Forge, ForgeError};
+use yunta_core::port::{Adapter, Forge, ForgeError, HumanInteraction, RunObserver};
 use yunta_core::{
     AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId, WorkflowName,
 };
@@ -101,8 +101,6 @@ pub use pause::record_pause_after_crash;
 pub use promote::{
     create_promotion_successor, CallerInfra, Predecessor, PromotionSuccessor, RunRoots,
 };
-use yunta_core::port::HumanInteraction;
-use yunta_core::port::RunObserver;
 
 /// A frozen `manifest.yaml` that cannot be read back.
 #[derive(Debug, Error)]

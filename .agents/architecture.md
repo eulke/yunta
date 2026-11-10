@@ -4,17 +4,17 @@ How Yunta's crates fit and what every run guarantees; a crate's map is its root 
 
 ## A run
 
-`yunta` reads the config layers and the workflow; `check` refuses what cannot run. The run loop schedules
-nodes, and a task's cycle opens sessions through the port on an adapter, each in a pooled checkout. The
-fence and the rail judge each write at the tool call, and the close judges the diff. Declared criteria the
-engine runs decide a task; an agent's word is never evidence. Every fact is an event in the log, replay derives
-every state from it, and what a person reads is drawn from it in Surco.
+`yunta-api` reads the config layers and the workflow an interface names; `check` refuses what cannot run. The
+run loop schedules nodes, and a task's cycle opens sessions through the port on an adapter, each in a pooled
+checkout. The fence and the rail judge each write at the tool call, and the close judges the diff. Declared
+criteria the engine runs decide a task; an agent's word is never evidence. Every fact is an event in the log,
+replay derives every state from it, and what a person reads is drawn from it in Surco.
 
 ## Crates
 
 | Crate | Owns | Depends on (`[dependencies]`) |
 |---|---|---|
-| `yunta-surco` | Surco: its words, marks and figures, the `Doc` a `Surface` draws, one code lexer | nothing in the workspace |
+| `yunta-surco` | Surco: words, marks, figures, the `Doc` a `Surface` draws, a code lexer | nothing in the workspace |
 | `yunta-core` | domain types, the port, shapes, protection | surco |
 | `yunta-storage` | the append-only log, SQLite behind its interface | core |
 | `yunta-replay` | replay, every reading of a run, no IO | core, surco |
@@ -23,7 +23,8 @@ every state from it, and what a person reads is drawn from it in Surco.
 | `yunta-mcp-protocol` | MCP as Yunta speaks it | nothing in the workspace |
 | `yunta-engine` | scheduling, the task cycle | core, storage, replay, mcp-protocol, surco |
 | `yunta-api` | what interfaces ask of Yunta | core, storage, replay, engine, adapters, render, surco |
-| `yunta` | the commands | core, storage, replay, mcp-protocol, engine, adapters, render, api, surco |
+| `yunta-mcp` | the control plane an agent asks Yunta through | core, render, api, mcp-protocol, surco |
+| `yunta` | the commands | core, replay, render, api, mcp, surco |
 | `yunta-testkit-core` | test scaffolding for crates below the engine | core |
 | `yunta-testkit` | whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
 | `xtask` | smells, the docs checker, schemas | core, surco |
@@ -46,8 +47,8 @@ every state from it, and what a person reads is drawn from it in Surco.
   [smell dash_in_prod_strings]
 - Every adapter (`claude-code`, `codex`, `mock`) offers the same features; a gap is a defect.
   [test adapters/contract]
-- A task session's brief names its task, and its contract (notes, scope, criteria) is read through the run's
-  tools, never copied into the prompt; what else a node reads, its workflow declares.
+- A task session's brief names its task; its contract (notes, scope, criteria) is read through the run's tools,
+  never copied into the prompt, and what else a node reads its workflow declares.
   [test engine/run_sessions::a_task_session_reads_its_task_through_its_tools_and_its_check_is_the_close_s]
 - Nothing retries unless an input the failure depends on changed. [test engine/check_retry]
 - A run stops for a person only for intent, an approval they chose or a fix only they can make; mechanical
@@ -59,13 +60,13 @@ every state from it, and what a person reads is drawn from it in Surco.
 - Modes belong to workflows: the engine's code never names one. [smell mode_name_in_prod]
 - A run has one engine: `RunEnv` borrows a hold only `hold_run` makes; a second resume is refused and a dead
   holder replaced. [test engine/run_guard]
-- One answer pays for one engine: `continue` lifts the token cap only in the engine that took it, and the next
-  one stands under the cap again. [test engine/parked_answers]
+- One answer pays for one engine: `continue` lifts the token cap only in the engine that took it.
+  [test engine/parked_answers]
 - A follower only reads: it takes no lock, writes no event, signals no engine.
   [test cli/status_follow]
 - What a session says while it works reaches another process only through its run's socket, redacted: the
-  log keeps each note's digest, nothing writes the words to disk, and only a terminal draws them. The summary
-  a session ends with is its node's outcome, logged as ever. [test engine/run_words] [test cli/run_words]
+  log keeps each note's digest and no words, and only a terminal draws them; the summary a session ends with is
+  its node's outcome. [test engine/run_words] [test cli/run_words]
 - A safety mechanism adds no wall-clock time to a run. [review]
   Paths: `crates/core/src/rail/**`, `crates/engine/src/task_cycle/**`, `crates/engine/src/worktree/**`,
   `crates/adapters/src/**`

@@ -245,3 +245,35 @@ pub fn config_layers(
 ) -> Result<Vec<(&'static str, ConfigLayer)>, Error> {
     load_named_layers(dir, env).map_err(|failed| Error::Failed(Failure::new(failed)))
 }
+
+impl Workspace {
+    /// The one merged config file at `path`, read through core's reader of a
+    /// config layer: what `check --config` judges a workflow against instead
+    /// of the project's layers. A path written relative is the workspace's,
+    /// and is named as it was written.
+    pub fn read_config(&self, path: &Path) -> Result<ConfigLayer, Error> {
+        let path = path.to_path_buf();
+        let text = match std::fs::read_to_string(self.dir.join(&path)) {
+            Ok(text) => text,
+            Err(source) => return Err(Failure::new(ConfigUnread::Read { path, source }).into()),
+        };
+        ConfigLayer::read(&text)
+            .map_err(|error| Failure::new(ConfigUnread::Parse { path, error }).into())
+    }
+}
+
+/// A config file named by path that did not read: the disk refused it, or
+/// its text is no config layer.
+#[derive(Debug, thiserror::Error)]
+enum ConfigUnread {
+    #[error("failed to read config at {}: {source}", path.display())]
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("failed to parse config at {}: {error}", path.display())]
+    Parse {
+        path: PathBuf,
+        error: yunta_core::yaml::YamlError,
+    },
+}

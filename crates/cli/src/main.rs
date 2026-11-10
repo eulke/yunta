@@ -3,10 +3,8 @@
 //! `commands/`. Its map:
 //!
 //! - Commands: `cli` parses and routes, `commands` holds one module per
-//!   subcommand, `context` opens each one, `help` prints the help, `graph`
-//!   draws a workflow's graph, `pack` installs and lists packs, and `detect`
-//!   reads what a repository says about itself and which adapters this machine
-//!   answers for.
+//!   subcommand, `help` prints the help, and `graph` draws a workflow's
+//!   graph.
 //! - What a person sees and answers: every page a command shows is render's,
 //!   filled with what the command read; `output` owns what a command writes,
 //!   the streams it is drawn to and the code it exits with, `remarks` says what
@@ -34,21 +32,18 @@
 mod ask;
 mod cli;
 mod commands;
-mod context;
 mod error;
 mod graph;
 mod help;
 mod human_interaction;
 mod interrupt;
 mod output;
-mod pack;
 mod remarks;
 mod shell;
 mod surface;
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
-use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -57,8 +52,6 @@ use surco::paint::ColorWhen;
 use yunta_core::Env;
 
 use crate::error::CliError;
-use yunta_render::refusal::Refused;
-
 use crate::output::Outcome;
 
 fn main() -> ExitCode {
@@ -106,7 +99,9 @@ fn main() -> ExitCode {
 const FAILED: ExitCode = ExitCode::FAILURE;
 
 /// The status a command's outcome leaves the process with. A refused error
-/// is written to the reader first, in the mode and look the command ran with.
+/// is written to the reader first, in the mode and look the command ran with;
+/// the stop a person asked for is told by its code alone, as a shell tells
+/// it of any process SIGINT ended.
 fn exit_status(
     outcome: Result<Outcome, CliError>,
     mode: output::Mode,
@@ -114,6 +109,7 @@ fn exit_status(
 ) -> ExitCode {
     match outcome {
         Ok(outcome) => ExitCode::from(outcome.code()),
+        Err(CliError::Stopped) => ExitCode::from(Outcome::interrupted().code()),
         Err(error) => {
             output::refused(&error, mode, look);
             FAILED
@@ -265,66 +261,6 @@ fn drive(
     let outcome = runtime.block_on(cli.run(env, started, mode, look));
     runtime.shutdown_background();
     outcome
-}
-
-/// The run manifest at `path`, read through the one door every
-/// persisted document goes through — so a manifest from a newer binary
-/// is refused naming both versions, and a key this one does not know
-/// comes back on the document instead of being dropped.
-pub(crate) fn load_manifest(
-    path: &Path,
-) -> Result<yunta_core::persisted::PersistedDoc<yunta_core::Manifest>, CliError> {
-    let bytes = std::fs::read(path)
-        .map_err(|source| CliError::io("read run manifest at", path.display(), source))?;
-    yunta_core::Manifest::read_frozen(&bytes)
-        .map_err(|error| CliError::msg(yunta_core::describe(&error)))
-}
-
-/// The workflow at `path`, read through the one door that holds it to
-/// its own rules — never the bare parser, which would hand back a graph
-/// nobody checked.
-pub(crate) fn load_workflow(path: &Path) -> Result<yunta_core::Workflow, CliError> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|source| CliError::io("read workflow at", path.display(), source))?;
-    yunta_core::workflow::read::read(&contents, path).map_err(|report| {
-        CliError::from(Refused::Document {
-            report: Box::new(report),
-            text: Some(contents.clone()),
-        })
-    })
-}
-
-/// The workflow at `path` read in one pass: every problem the file has,
-/// and the workflow it declares once the keys nothing reads are taken
-/// out, when what is left reads. `yunta check` judges that workflow too,
-/// so a person fixes every problem in one round; nothing runs it.
-pub(crate) fn audit_workflow(
-    path: &Path,
-) -> Result<
-    (
-        Option<yunta_core::Workflow>,
-        yunta_core::diagnostic::Report,
-        String,
-    ),
-    CliError,
-> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|source| CliError::io("read workflow at", path.display(), source))?;
-    let (workflow, report) = yunta_core::workflow::read::read_all(&contents, path);
-    Ok((workflow, report, contents))
-}
-
-/// Reads and parses a YAML file into `T`, naming what it was reading and
-/// where when it can't — the loader for everything that is neither a
-/// workflow nor a persisted document.
-pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
-    path: &Path,
-    what: &str,
-) -> Result<T, CliError> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|source| CliError::io(&format!("read {what} at"), path.display(), source))?;
-    yunta_core::yaml::parse(&contents)
-        .map_err(|e| CliError::msg(format!("failed to parse {what} at {}: {e}", path.display())))
 }
 
 #[cfg(test)]

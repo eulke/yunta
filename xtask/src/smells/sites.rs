@@ -42,6 +42,10 @@ pub const COUNTERS: &[Counter] = &[
         count_system_clock_outside_boundary,
     ),
     ("env_read_outside_boundary", count_env_read_outside_boundary),
+    (
+        "process_read_below_the_shell",
+        count_process_read_below_the_shell,
+    ),
     ("env_mutation_in_tests", count_env_mutation_in_tests),
     (
         "sleep_outside_mock_latency",
@@ -222,9 +226,8 @@ pub(super) fn owned(path: &Path, owners: &[&str]) -> bool {
 ///
 /// Driving the engine by hand repeats the setup the owners perform — the
 /// store, the clock, the process registry — and a repeat drifts from it.
-/// The engine's run module owns the run's own steps, the API's drive owns the
-/// call for every interface, and the test runner owns its scripted runs' until
-/// they move into the API.
+/// The engine's run module owns the run's own steps, and the API's drive owns
+/// the call for every interface, a project's cases among them.
 fn count_execute_run_outside_testkit(root: &Path) -> usize {
     outside(
         root,
@@ -233,7 +236,6 @@ fn count_execute_run_outside_testkit(root: &Path) -> usize {
             "crates/testkit/",
             "crates/engine/src/run/",
             "crates/api/src/drive.rs",
-            "crates/cli/src/commands/test/scripted.rs",
         ],
     )
 }
@@ -306,6 +308,29 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             // reading that request is what the module is for.
             "crates/surco/src/golden.rs",
         ],
+    )
+}
+
+/// The process read below the shell: its directory, its binary, its
+/// arguments, or a handler of its signals.
+///
+/// What an invocation knows of its process enters once, at the shell, and
+/// every operation below takes it from the workspace the shell hands in. Read
+/// deeper, it is an input nothing declares: an interface built on the API
+/// could not hand a directory of its own, and a test could not set one. A
+/// child process's directory, set on its command, is no read; a test stages
+/// the process it needs.
+fn count_process_read_below_the_shell(root: &Path) -> usize {
+    outside(
+        root,
+        &[
+            Text("env::current_dir"),
+            Text("env::current_exe"),
+            Text("env::args"),
+            Text("signal::unix::signal("),
+            Text("signal::ctrl_c("),
+        ],
+        &["crates/cli/src/shell.rs", "crates/*/tests/", "/tests.rs"],
     )
 }
 

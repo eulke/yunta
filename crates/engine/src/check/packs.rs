@@ -89,7 +89,7 @@ fn read_manifest(path: std::path::PathBuf) -> Result<yunta_core::PackManifest, B
             detail: e.to_string(),
         })
     })?;
-    yunta_core::yaml::parse::<yunta_core::PackManifest>(&text).map_err(|e| {
+    yunta_core::PackManifest::read(&text).map_err(|e| {
         Box::new(CheckError::PackManifestMalformed {
             path,
             detail: e.to_string(),

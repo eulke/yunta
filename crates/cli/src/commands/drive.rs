@@ -13,24 +13,25 @@ use std::path::Path;
 
 use surco::glyphs::Glyphs;
 use surco::look::Look;
-use yunta_api::{ClosingReading, Driven, HeldRun, Ports, Remark};
+use yunta_api::{ClosingReading, Driven, HeldRun, Ports, Project, Remark, Stop};
 use yunta_core::{Manifest, RunId};
 use yunta_render::page::Places;
 use yunta_replay::history::PriorEstimation;
 
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Mode;
 use crate::output::Outcome;
 use crate::surface::{Closing, ClosingEnv, Delivery, TerminalEnv};
 use watch::watch;
 
-/// What the invocation that drives a run here reports with: where it runs,
-/// how it reports — a live surface for `Human`, the run id and one verdict
-/// line for `Quiet`, one versioned document with no live surface at all for
-/// `Json` — and the stdout look everything it draws is drawn with.
+/// What the invocation that drives a run here reports with: the project it
+/// runs in and what stops it, how it reports (a live surface for `Human`,
+/// the run id and one verdict line for `Quiet`, one versioned document with
+/// no live surface at all for `Json`), and the stdout look everything it
+/// draws is drawn with.
 pub(crate) struct Driving<'a> {
-    pub(crate) ctx: &'a Context,
+    pub(crate) project: &'a Project,
+    pub(crate) stop: &'a Stop,
     pub(crate) output: Mode,
     pub(crate) look: &'a Look,
 }
@@ -58,14 +59,14 @@ impl Presentation {
 pub(crate) async fn drive(env: Driving<'_>, held: HeldRun<'_>) -> Result<Outcome, CliError> {
     let shown = Presentation::of(env.output);
     let watching = watch(&env, &held, &shown).await?;
-    let stop = env.ctx.stop();
+    let stop = env.stop;
     let (output, look) = (env.output, env.look);
     let say = |remark: Remark| crate::remarks::say(remark, output, look);
     let ports = Ports {
         person: &watching.asking,
         observer: watching.observer.clone(),
     };
-    let driven = held.drive(ports, &say, &stop).await;
+    let driven = held.drive(ports, &say, stop).await;
     watching.close().await;
     let outcome = reported(&env, &driven?).await?;
     // A person who interrupted the invocation is told so by its exit code,
@@ -91,8 +92,8 @@ async fn reported(env: &Driving<'_>, driven: &Driven<'_>) -> Result<Outcome, Cli
         run_dir: &driven.dir,
         worktree: &driven.worktree,
         prior: driven.prior.as_ref(),
-        cwd: &env.ctx.cwd,
-        home: env.ctx.env.home.as_deref(),
+        cwd: &env.project.workspace.dir,
+        home: env.project.workspace.env.home.as_deref(),
     };
     let closing = closed.closing(driven.closing().await?);
     // The run id already went out when the invocation opened. The verdict

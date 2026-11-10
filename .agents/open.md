@@ -10,7 +10,7 @@ needs the engine to own it: a revision recorded in the log, frozen and mounted f
 proven to load a mount that changed between sessions.
 
 ### A test case asserts where a run ends, never the path it took
-Paths: `crates/cli/src/commands/test/**`
+Paths: `crates/api/src/cases.rs`, `crates/api/src/cases/**`
 A case's `expect` names the final state and the state of each node and task. It cannot say how many times a node
 ran or was rerouted, that the log holds a kind so many times, or that something never happened — a lint fixed
 in two laps and one fixed in four pass alike. The shape to add: `nodes: {<id>: {runs, reroutes}}` beside the

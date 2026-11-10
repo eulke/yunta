@@ -20,7 +20,6 @@ use yunta_api::Remark;
 use yunta_core::RunId;
 
 use crate::commands::drive::{drive, Driving};
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Mode;
 use crate::output::Outcome;
@@ -32,18 +31,20 @@ pub async fn resume(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
-    let open = ctx.project.run(run_id).await?;
+    let project = shell.workspace().project()?;
+    let open = project.run(run_id).await?;
     let say = |remark: Remark| crate::remarks::say(remark, output, look);
-    let Some(held) = open.take_back(&say, &ctx.stop()).await? else {
+    let stop = shell.stop();
+    let Some(held) = open.take_back(&say, &stop).await? else {
         // A person interrupted the wait for a reset or for the engine that
         // parked the run: it stays parked, and nothing was taken.
         return Ok(crate::output::Outcome::interrupted());
     };
-    super::started(run_id, "resuming", output, look);
+    super::started(run_id, yunta_render::start::Start::Resuming, output, look);
     drive(
         Driving {
-            ctx: &ctx,
+            project: &project,
+            stop: &stop,
             output,
             look,
         },

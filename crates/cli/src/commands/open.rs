@@ -11,7 +11,6 @@ use surco::surface::{Html, Surface};
 use yunta_core::RunId;
 
 use super::status::page_for_a_browser;
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
@@ -28,8 +27,8 @@ pub async fn open(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
-    let (doc, run_dir) = page_for_a_browser(&ctx, run_id).await?;
+    let project = shell.workspace().project()?;
+    let (doc, run_dir) = page_for_a_browser(&project, run_id).await?;
     let path = run_dir.join(PAGE);
     save(&path, &Html.draw(&doc))?;
     let opened = match output {

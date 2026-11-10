@@ -40,6 +40,12 @@ actually vendored on disk against the lock and says so if they've drifted —
 an offline, no-network way to confirm the vendoring hasn't been tampered with
 or gone stale.
 
+`add`, `update` and `remove` hold `.yunta/yunta.lock.held` from the moment
+they read the lock to the moment they write it back, so two pack commands
+started at once take turns and both of their entries stand. The file exists
+only while one of them runs; one a crashed command left behind is taken over
+by the next.
+
 Once installed, a pack's workflows and skills are addressable by
 `publisher/name` — the name after the slash is the workflow or skill's own
 file basename (as declared in `pack.yaml`'s `contents:`), not the pack's own

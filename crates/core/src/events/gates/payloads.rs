@@ -150,7 +150,7 @@ impl GateWaitingPayload {
         let Some(option) = self.options.iter().find(|o| o.id == choice.option) else {
             return Err(Refusal::OffMenu {
                 chosen: choice.option.clone(),
-                offered: self.offered(),
+                offered: self.options.iter().map(|o| o.id.clone()).collect(),
             });
         };
         let said = choice
@@ -164,16 +164,6 @@ impl GateWaitingPayload {
             }),
             _ => Ok(()),
         }
-    }
-
-    /// The menu's option ids as one comma-separated line, for a refusal that
-    /// names what was offered.
-    pub fn offered(&self) -> String {
-        self.options
-            .iter()
-            .map(|o| o.id.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
     }
 }
 

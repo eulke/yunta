@@ -1,9 +1,9 @@
 //! The workflow engine: DAG scheduler, verification cycle, resumability.
 //! `yunta-engine` never depends on rusqlite/sqlx directly and never contains
 //! CLI-specific knowledge — the crate graph enforces both, not convention. It
-//! reaches an adapter only through the port `yunta-core` declares, and the CLI
-//! is the only shipped crate above it; the test harness `yunta-testkit` builds
-//! on it too. What a run is, as its log says, is `yunta-replay`'s: the engine
+//! reaches an adapter only through the port `yunta-core` declares, and
+//! `yunta-api` is the only shipped crate above it; the test harness
+//! `yunta-testkit` builds on it too. What a run is, as its log says, is `yunta-replay`'s: the engine
 //! drives a run and writes its log, and reads back what replay derives from
 //! it. Its map:
 //!

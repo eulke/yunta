@@ -15,7 +15,7 @@ use yunta_core::events::{
     FindingSays, FindingSeverity, StoredEvent,
 };
 use yunta_core::fence::Coverage;
-use yunta_core::port::{Adapter, Forge};
+use yunta_core::port::{Adapter, Forge, HumanInteraction, RunObserver};
 use yunta_core::protected::Protected;
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Location, Manifest, NodeId, RunId, Seq};
 use yunta_storage::AsyncStorage;
@@ -23,8 +23,6 @@ use yunta_storage::AsyncStorage;
 use crate::run_log::RunLog;
 use crate::run_log::RunView;
 use crate::task_cycle::Memo;
-use yunta_core::port::HumanInteraction;
-use yunta_core::port::RunObserver;
 
 use super::RunError;
 

@@ -301,7 +301,10 @@ fn a_decision_the_run_cannot_take_says_why_and_what_to_choose_instead() {
     assert_eq!(
         gate(&GateRefusal::UnknownOption {
             chosen: OptionId::from_static("retry"),
-            declared: "proceed, abort".to_string(),
+            declared: vec![
+                OptionId::from_static("proceed"),
+                OptionId::from_static("abort")
+            ],
         }),
         "option `retry` isn't valid here; declared options: proceed, abort"
     );

@@ -396,6 +396,7 @@ mod tests {
         "system_clock_outside_boundary",
         "let_underscore_in_prod",
         "env_read_outside_boundary",
+        "process_read_below_the_shell",
         "exit_failure_in_cli",
         "create_run_outside_testkit",
         "execute_run_outside_testkit",

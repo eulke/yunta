@@ -14,8 +14,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use yunta_adapters::MOCK_ID;
-use yunta_api::{Admission, CreatedRun, Remark, RunRequest};
+use yunta_api::machine::scripts_sessions;
+use yunta_api::{Admission, CreatedRun, Project, Remark, RunRequest, Stop};
 use yunta_core::step::NextStep;
 use yunta_core::{AdapterId, InputName, ModeName, RunAdapter};
 use yunta_render::command;
@@ -23,9 +23,6 @@ use yunta_render::command;
 mod attached;
 mod detach;
 
-pub(crate) use detach::start_detached;
-
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Mode;
 use crate::output::Outcome;
@@ -70,12 +67,14 @@ pub async fn run(
     detach: bool,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
+    let project = shell.workspace().project()?;
+    let stop = shell.stop();
     let mock_fixture = mock_fixture(adapter, fixture, detach)?;
 
     if detach {
         return detach::detached(detach::Detaching {
-            ctx: &ctx,
+            project: &project,
+            stop: &stop,
             workflow_path,
             raw_inputs,
             adapter,
@@ -87,7 +86,8 @@ pub async fn run(
     }
 
     attached::attached(attached::Attaching {
-        ctx: &ctx,
+        project: &project,
+        stop: &stop,
         workflow_path,
         raw_inputs,
         adapter,
@@ -115,15 +115,15 @@ fn mock_fixture<'a>(
         // A fixture is read by whoever runs the sessions, and `--detach`
         // hands the run to another process, which resolves the adapters
         // `runners:` names and takes no fixture of its own.
-        (Some(id), _) if *id == MOCK_ID && detach => Err(CliError::msg(format!(
+        (Some(id), _) if scripts_sessions(id) && detach => Err(CliError::msg(format!(
             "`--adapter mock` scripts every session from a fixture, and `--detach` hands \
              the run to another process that resolves the adapters `runners:` names and \
              reads no fixture; drop `--detach` to run against a fixture here, or write a \
              case and run `{test}`",
             test = command::line(&NextStep::Test { dir: None })
         ))),
-        (Some(id), Some(path)) if *id == MOCK_ID => Ok(Some(path)),
-        (Some(id), None) if *id == MOCK_ID => Err(CliError::msg(format!(
+        (Some(id), Some(path)) if scripts_sessions(id) => Ok(Some(path)),
+        (Some(id), None) if scripts_sessions(id) => Err(CliError::msg(format!(
             "`--adapter mock` runs the workflow against a scripted fixture; pass \
              `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
              case and run `{test}`",
@@ -141,7 +141,8 @@ fn mock_fixture<'a>(
 /// `mock_fixture`, each caution and the estimate said the way `output` asks
 /// as the API says them.
 pub(crate) async fn admitted<'p>(
-    ctx: &'p Context,
+    project: &'p Project,
+    stop: &Stop,
     asked: Asked<'_>,
     output: Mode,
     look: &Look,
@@ -161,7 +162,7 @@ pub(crate) async fn admitted<'p>(
         hermetic: asked.hermetic,
     };
     let say = |remark: Remark| crate::remarks::say(remark, output, look);
-    Ok(ctx.project.admit(request, &say, &ctx.stop()).await?)
+    Ok(project.admit(request, &say, stop).await?)
 }
 
 /// What a run is asked for with on the command line: the workflow reference,
@@ -181,11 +182,11 @@ pub(crate) struct Asked<'a> {
 /// way `output` asks: the shared create step of an executed run and a detached
 /// one. Prints nothing of its own: the caller reports what it made.
 pub(crate) async fn create_run_from<'p>(
-    ctx: &Context,
     admission: Admission<'p>,
+    stop: &Stop,
     output: Mode,
     look: &Look,
 ) -> Result<CreatedRun<'p>, CliError> {
     let say = |remark: Remark| crate::remarks::say(remark, output, look);
-    Ok(admission.create(&say, &ctx.stop()).await?)
+    Ok(admission.create(&say, stop).await?)
 }

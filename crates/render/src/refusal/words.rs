@@ -10,9 +10,11 @@ use yunta_core::check::CheckError;
 use yunta_core::events::{Claim, FailureMenu, Refusal};
 use yunta_core::inputs::InputsProblem;
 use yunta_core::refusal::Unservable;
-use yunta_core::refusal::{AnswersRefusal, CloseRefusal, GateRefusal};
+use yunta_core::refusal::{
+    AnswersRefusal, CasesRefusal, CloseRefusal, GateRefusal, PackRefusal, PackVerb, SetupRefusal,
+};
 use yunta_core::step::{Arg, NextStep, Reach};
-use yunta_core::{AdapterId, PackRef, Pid};
+use yunta_core::{AdapterId, OptionId, PackRef, Pid};
 use yunta_replay::receipt::ReceiptError;
 
 /// What `last` says where the repository it is asked in has no run, and the
@@ -86,6 +88,15 @@ pub fn stale_lock_taken(pid: Pid) -> String {
     format!("this checkout's isolation lock belonged to a dead process (pid {pid}): taking it over")
 }
 
+/// What a pack install or removal says of the tree it replaced, which stays
+/// on disk at `at` though the pack is in place: what the disk said.
+pub fn replaced_tree_kept(at: &Path, said: &str) -> String {
+    format!(
+        "could not remove the replaced tree at {}: {said}",
+        at.display()
+    )
+}
+
 /// What this binary cannot serve for a run, naming what a reader changes.
 pub(super) fn unservable(unservable: &Unservable) -> String {
     match unservable {
@@ -114,9 +125,10 @@ pub(super) fn unservable(unservable: &Unservable) -> String {
             .to_string(),
         Unservable::NoAdapter { built } => format!(
             "this workflow has prompt/loop nodes but `runners:` in the merged config\n\
-             names no adapter this binary can run (built: {built}). To exercise this\n\
+             names no adapter this binary can run (built: {}). To exercise this\n\
              workflow with the `mock` adapter instead, declare a test case under\n\
              .yunta/tests/ and run `{}`.",
+            surco::text::listed(built.iter().map(AdapterId::as_str)),
             command::line(&NextStep::Test { dir: None })
         ),
         Unservable::Unhealthy { adapters } => {
@@ -140,6 +152,15 @@ pub(super) fn unservable(unservable: &Unservable) -> String {
 
 /// The adapters a runner's candidates are on, comma-separated, or `none` for
 /// a runner with no candidate at all.
+/// A menu's options, by id, in the order it offers them.
+fn options(offered: &[OptionId]) -> String {
+    offered
+        .iter()
+        .map(OptionId::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn listed(adapters: &[AdapterId]) -> String {
     if adapters.is_empty() {
         return "none".to_string();
@@ -202,7 +223,10 @@ pub fn refused_answer(refused: &Refusal, claim: &Claim, menu: Option<&FailureMen
 fn refusal(refused: &Refusal) -> String {
     match refused {
         Refusal::OffMenu { chosen, offered } => {
-            format!("`{chosen}` is not one of the options offered ({offered})")
+            format!(
+                "`{chosen}` is not one of the options offered ({})",
+                options(offered)
+            )
         }
         Refusal::Unsaid { chosen, asks } => format!(
             "`{chosen}` asks \"{}\", and the answer says nothing",
@@ -228,7 +252,10 @@ pub fn gate(refusal: &GateRefusal) -> String {
              gate node, an external gate with no forge)"
             .to_string(),
         GateRefusal::UnknownOption { chosen, declared } => {
-            format!("option `{chosen}` isn't valid here; declared options: {declared}")
+            format!(
+                "option `{chosen}` isn't valid here; declared options: {}",
+                options(declared)
+            )
         }
         GateRefusal::Unsaid { chosen, asks } => format!(
             "option `{chosen}` asks \"{}\"; say it with the choice",
@@ -273,9 +300,120 @@ pub fn close(refusal: &CloseRefusal) -> String {
     }
 }
 
+/// Why a pack command refuses, in the words of the command refused: what the
+/// pack is or where it stands, the policy that stops it, and the lines that
+/// go on where there are some.
+pub(super) fn pack(refusal: &PackRefusal) -> String {
+    match refusal {
+        PackRefusal::AlreadyInstalled { pack, at } => already_installed(pack, at),
+        PackRefusal::NotInstalled { pack } => not_installed(pack),
+        PackRefusal::NothingToRemove { pack } => format!("`{pack}` isn't installed"),
+        PackRefusal::NotVendored { pack, root } => {
+            format!("`{pack}` isn't installed under {}", root.display())
+        }
+        PackRefusal::SchemaOutside {
+            pack,
+            range,
+            speaks,
+        } => format!(
+            "`{pack}` declares `yunta_schema: \"{range}\"`, and this binary speaks schema \
+             {speaks}. Install a version of yunta inside that range, or a release of the pack \
+             that accepts this one."
+        ),
+        PackRefusal::PublisherNotAllowed {
+            publisher,
+            allowed,
+            declared_by,
+        } => format!(
+            "publisher `{publisher}` is not in `permissions.packs.publishers.allow` \
+             (declared by the {} config {}); allowed: {}. Add the publisher there, or \
+             install a pack from an allowed publisher.",
+            declared_by.join("/"),
+            surco::text::agreeing(declared_by.len(), "layer", "layers"),
+            allowed
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        PackRefusal::ExecutorsDenied {
+            executors,
+            declared_by,
+            verb,
+        } => format!(
+            "this pack declares {} and `permissions.packs.executors` \
+             is `deny` (declared by the {} config {}): `--yes` cannot override a \
+             permissions ceiling. Change the policy there, or {} a pack \
+             without executors.",
+            surco::text::counted(*executors, "executor"),
+            declared_by.join("/"),
+            surco::text::agreeing(declared_by.len(), "layer", "layers"),
+            pack_verb(*verb),
+        ),
+        PackRefusal::ExecutorsUnconfirmed { executors, verb } => format!(
+            "this pack declares {}: executable code, not just \
+             declarative YAML. Review the inventory above, then re-run with `--yes` to \
+             confirm the {}.",
+            surco::text::counted(*executors, "executor"),
+            pack_verb(*verb),
+        ),
+        PackRefusal::AnotherPack {
+            pack,
+            reference,
+            cloned_from,
+            is,
+        } => format!(
+            "`{reference}` of `{cloned_from}` identifies itself as `{is}`, not `{pack}`; \
+             refusing to update a pack into a different one"
+        ),
+        PackRefusal::DirectoryExists { dir } => format!(
+            "{} already exists; choose another name or remove it first",
+            dir.display()
+        ),
+    }
+}
+
+/// Why setting a repository up refuses, in the words of the command refused.
+pub(super) fn setup(refusal: &SetupRefusal) -> String {
+    match refusal {
+        SetupRefusal::Exists { path } => format!(
+            "{} already exists; pass --force to overwrite",
+            path.display()
+        ),
+        SetupRefusal::EmptyName => "workflow name can't be empty".to_string(),
+        SetupRefusal::UnsafeName { name } => {
+            format!("workflow name `{name}` must be letters, digits, `-` or `_` only")
+        }
+        SetupRefusal::UnknownShape { name, shapes } => {
+            format!(
+                "unknown shape `{name}`; choose one of: {}",
+                shapes.join(", ")
+            )
+        }
+    }
+}
+
+/// Why a project's cases do not run, naming where they were looked for.
+pub(super) fn cases(refusal: &CasesRefusal) -> String {
+    match refusal {
+        CasesRefusal::Unreadable { dir } => {
+            format!("cannot read test cases from {}", dir.display())
+        }
+        CasesRefusal::NoneFound { dir } => format!("no test cases found under {}", dir.display()),
+    }
+}
+
+/// What a pack command does, as its refusal says it.
+fn pack_verb(verb: PackVerb) -> &'static str {
+    match verb {
+        PackVerb::Install => "install",
+        PackVerb::Update => "update",
+    }
+}
+
 /// Why `add` refuses `pack`, installed already at `dest`: the lines that
 /// change its ref, or take it out first.
-pub fn already_installed(pack: &PackRef, dest: &Path) -> String {
+fn already_installed(pack: &PackRef, dest: &Path) -> String {
     let update = NextStep::PackUpdate {
         pack: pack.clone(),
         reference: Arg::Blank,
@@ -290,7 +428,7 @@ pub fn already_installed(pack: &PackRef, dest: &Path) -> String {
 }
 
 /// Why `update` refuses `pack`, which is not installed: the line that adds it.
-pub fn not_installed(pack: &PackRef) -> String {
+fn not_installed(pack: &PackRef) -> String {
     let add = NextStep::PackAdd { source: Arg::Blank };
     format!(
         "`{pack}` isn't installed; `{}` it first, not update",

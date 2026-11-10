@@ -76,11 +76,10 @@ pub fn built_adapter(id: &AdapterId) -> Option<std::sync::Arc<dyn Adapter>> {
         .find(|built| built.id() == id)
 }
 
-/// What this binary can run on, as a person reads it: every built
-/// adapter's own id, in order, comma-separated — the phrase a refusal
-/// ends with, derived rather than written.
-pub fn built_adapter_names() -> String {
-    surco::text::listed(built_adapter_ids().iter().map(AdapterId::as_str))
+/// Whether `id` names the adapter that scripts every session from a
+/// fixture rather than calling an agent CLI.
+pub fn scripts_sessions(id: &AdapterId) -> bool {
+    *id == yunta_adapters::MOCK_ID
 }
 
 /// Every adapter this binary builds, by its own id, in the order the

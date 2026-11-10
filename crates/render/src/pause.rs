@@ -238,5 +238,12 @@ fn child_paused(node: &NodeId, run: &RunId, child: &PauseReason) -> String {
     )
 }
 
+/// The line a person reads of `run` while a resume waits out `pause`: the
+/// run's handle, then the word the pause is called by and its sentence,
+/// which names the node and the instant.
+pub fn run_waits(run: &RunId, pause: &PauseReason) -> String {
+    format!("run {}: {}", run.handle(), said(pause))
+}
+
 #[cfg(test)]
 mod tests;

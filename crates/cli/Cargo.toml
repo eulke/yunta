@@ -16,32 +16,25 @@ path = "src/main.rs"
 
 [dependencies]
 yunta-core.workspace = true
-yunta-engine.workspace = true
 yunta-replay.workspace = true
 # What can be asked of Yunta, handed the workspace this process reads once.
 yunta-api.workspace = true
-# The shape every MCP result of Yunta takes, which the control plane answers in.
-yunta-mcp-protocol.workspace = true
+# The control plane `yunta mcp` serves on stdio.
+yunta-mcp.workspace = true
 yunta-render.workspace = true
 yunta-surco = { workspace = true, features = ["clap"] }
-yunta-adapters.workspace = true
-yunta-storage.workspace = true
 clap = { workspace = true, features = ["derive"] }
 clap_complete.workspace = true
 chrono.workspace = true
 serde = { workspace = true, features = ["derive"] }
-# `yunta stats --json` — already a transitive dependency of every crate
-# here via `yunta-engine`, made direct now that the CLI serializes its
-# own JSON DTOs rather than only ever deserializing YAML.
+# The documents a command writes as JSON, and the JSON a test reads back.
 serde_json.workspace = true
-# `yunta test` sandboxes each case in a throwaway worktree/runs root.
-tempfile.workspace = true
 thiserror.workspace = true
 # `yunta run`/`resume`/`test` drive the async engine; a current-thread
 # runtime is all the sequential scheduler needs.
 tokio = { workspace = true, features = ["rt", "macros", "signal", "time", "process"] }
-# CancellationToken for the Ctrl-C -> root-token bridge; the engine
-# already speaks this type on its execute_run surface.
+# `CancellationToken`: each stage of the API's `Stop` the interrupt trips,
+# and what a prompt or a follower waits on beside its work.
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
@@ -56,8 +49,7 @@ indicatif.workspace = true
 # Reads a key at a time, for the prompts a gate and a questions artifact need. Already in the tree through indicatif.
 console.workspace = true
 # `ConsoleInteraction` implements `yunta_core::port::HumanInteraction`, whose
-# method is dyn-safe async — same reason yunta-engine/yunta-adapters
-# already depend on this.
+# method is dyn-safe async, as every crate implementing a port depends on it.
 async-trait.workspace = true
 # A prompt's key read turns the terminal's line discipline off, and a
 # read abandoned mid-key never turns it back on: this is what reads the
@@ -66,10 +58,8 @@ async-trait.workspace = true
 # behind `yunta-adapters`, which already puts this crate in the binary,
 # so nothing new is linked in.
 nix = { workspace = true, features = ["term", "poll"] }
-# `yunta mcp`: the control-plane MCP server, stdio. `server` +
-# `transport-io` only — no HTTP transport, no client features: the
-# per-run MCP server is a separate, later concern with its own
-# transport (HTTP loopback).
+# `yunta mcp` serves the control plane on stdio: `server` and
+# `transport-io` only, no HTTP transport and no client.
 rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 [dev-dependencies]
@@ -83,6 +73,10 @@ yunta-replay = { workspace = true, features = ["testkit"] }
 # `verify`'s broken-chain test corrupts a stored event behind the store's
 # back through the same fault injector storage's own tests use.
 yunta-storage = { workspace = true, features = ["testkit"] }
+# What a test stages below the API before a command reads it: a run the
+# engine drove, a registry an engine wrote, a scripted adapter.
+yunta-engine.workspace = true
+yunta-adapters.workspace = true
 # The shared test harness: git-repo fixture, `yunta_in!`, fixed clock.
 yunta-testkit.workspace = true
 yunta-testkit-core.workspace = true

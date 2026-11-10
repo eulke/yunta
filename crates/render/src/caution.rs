@@ -196,6 +196,17 @@ pub fn missing_sentence(
     }
 }
 
+/// What a run's page is noted with when its manifest carries `keys` this
+/// binary does not know: a newer yunta wrote them, and they are not read.
+pub fn unread_manifest_keys(keys: &[&str]) -> String {
+    format!(
+        "this run's manifest carries {} this binary does not know ({}): a newer yunta \
+         wrote it, and what it recorded there is not read here",
+        counted(keys.len(), "key"),
+        keys.join(", ")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{line, nodes};

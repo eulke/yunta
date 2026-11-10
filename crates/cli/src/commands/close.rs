@@ -10,7 +10,6 @@ use yunta_core::{Responder, RunId};
 use yunta_render::document::CloseDocument;
 use yunta_render::page::{Closed, Page};
 
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
@@ -23,14 +22,14 @@ pub async fn close(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
-    let open = ctx.project.run(run_id).await?;
+    let project = shell.workspace().project()?;
+    let open = project.run(run_id).await?;
     let say = |remark: Remark| crate::remarks::say(remark, output, look);
-    let by = open.close(by, &say, &ctx.stop()).await?;
+    let closed = open.close(by, &say, &shell.stop()).await?;
     let answer = CloseAnswer {
         run_id: run_id.clone(),
-        word: Standing::Stopped,
-        by,
+        word: closed.standing,
+        by: closed.by,
     };
     emit(output, &answer, look)
 }

@@ -5,6 +5,7 @@
 use surco::components::{Fields, Next};
 use surco::doc::{Block, Doc};
 use surco::look::Look;
+use surco::surface::Surface;
 use surco::text::listed;
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::{DocumentKind, NodeKind};
@@ -22,6 +23,20 @@ pub enum Schema {
     Documents,
     /// Every key a workflow reads.
     WorkflowKeys,
+}
+
+impl Schema {
+    /// The shape a writer reads, as a control-plane client is handed it: a
+    /// kind's annotated example, or the keys a workflow reads, as Markdown.
+    pub fn shape(kind: DocumentKind) -> String {
+        match kind {
+            DocumentKind::Artifact(kind) => yunta_core::shape::contract(kind),
+            DocumentKind::Workflow => {
+                let markdown = surco::surface::Markdown;
+                markdown.draw(&Schema::WorkflowKeys.document(&markdown.look()))
+            }
+        }
+    }
 }
 
 impl Page for Schema {

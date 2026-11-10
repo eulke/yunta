@@ -1,0 +1,35 @@
+[package]
+name = "yunta-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The control plane an agent asks Yunta through: an MCP server over yunta-api, with no transport of its own."
+
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# What each tool asks: every operation the control plane offers is one of
+# the API's.
+yunta-api.workspace = true
+yunta-core.workspace = true
+# The words a tool answers in: a refusal said to an agent, a document, a
+# document's shape, the sentence a decision recorded leaves.
+yunta-render.workspace = true
+# The catalog drawn as Markdown, and the words a list is said in.
+yunta-surco.workspace = true
+# How every MCP server of Yunta answers: a tool's definition and the list
+# of them.
+yunta-mcp-protocol.workspace = true
+# A server handler, with no transport of its own: the interface that
+# serves it brings one.
+rmcp = { workspace = true, features = ["server"] }
+# A tool's arguments and its schema, as JSON.
+serde_json.workspace = true

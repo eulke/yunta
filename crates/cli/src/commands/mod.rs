@@ -6,7 +6,6 @@ pub mod check;
 pub mod close;
 pub mod doctor;
 pub(crate) mod drive;
-pub(crate) mod forge;
 pub mod gc;
 pub mod init;
 pub mod list;
@@ -27,27 +26,17 @@ pub mod status;
 pub mod test;
 pub mod verify;
 
-use yunta_core::step::NextStep;
-use yunta_render::command;
+use yunta_render::start::Start;
 
 use crate::output::Mode;
 use surco::look::Look;
 
-/// The line a run starts with: its whole id — the record a script and a
-/// log keep — what is happening to it, and the command that follows it
-/// by its handle. Under `--quiet`, the id and nothing else; under `--json`,
-/// nothing, because the document is the whole answer.
-pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, output: Mode, look: &Look) {
+/// The line a run starts with, as render says it. Under `--quiet`, the id
+/// and nothing else; under `--json`, nothing, because the document is the
+/// whole answer.
+pub(crate) fn started(run_id: &yunta_core::RunId, start: Start, output: Mode, look: &Look) {
     match output {
-        Mode::Human => crate::output::say(
-            look,
-            format!(
-                "run {run_id}: {doing} (`{}` follows it)",
-                command::line(&NextStep::Follow {
-                    run: run_id.clone()
-                })
-            ),
-        ),
+        Mode::Human => crate::output::say(look, yunta_render::start::line(run_id, start)),
         Mode::Quiet => crate::output::say(look, run_id.to_string()),
         Mode::Json => {}
     }

@@ -15,9 +15,13 @@ use crate::NonEmpty;
 /// variant's display is its code; the words a reader sees are the caller's.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Refusal {
-    /// The option is not on the menu, and `offered` lists the options it holds.
+    /// The option is not on the menu, and `offered` lists the options it holds,
+    /// in the order it offers them.
     #[error("off_menu")]
-    OffMenu { chosen: OptionId, offered: String },
+    OffMenu {
+        chosen: OptionId,
+        offered: Vec<OptionId>,
+    },
     /// The option asks for words, and the answer has none.
     #[error("unsaid")]
     Unsaid { chosen: OptionId, asks: Asks },

@@ -141,6 +141,7 @@ pub(super) fn fix(name: &str) -> &'static str {
         "module_docs_over_60_lines" => "keep the `//!` to how the module works; move a rule to the test that holds it",
         "numeric_const_without_reason" => "put a `///` line above the constant saying why it has its value",
         "parenthesized_plural_in_prod_strings" => "write the plural the number calls for",
+        "process_read_below_the_shell" => "read it in the shell and hand it in through the workspace",
         "prod_fns_over_50_lines" | "prod_fns_over_100_lines" => "split the function where a seam shows",
         "reason_built_by_format" => "record the values as fields and let the surface word them",
         "run_tool_named_outside_vocabulary" => "name the tool through the session vocabulary's rule",

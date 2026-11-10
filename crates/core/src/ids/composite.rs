@@ -109,6 +109,21 @@ impl GitHubRepo {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    /// Whether the git remote at `url` names this repository: the last two
+    /// segments of its path, a trailing `.git` dropped, are its owner and
+    /// name whole, whatever the scheme (`https://`, `ssh://`, or the scp form
+    /// `git@host:owner/name`). GitHub takes either in any case, so the case
+    /// is not compared.
+    pub fn is_named_by(&self, url: &str) -> bool {
+        let path = url.trim_end_matches('/');
+        let path = path.strip_suffix(".git").unwrap_or(path);
+        let mut segments = path.rsplit(['/', ':']);
+        let (Some(name), Some(owner)) = (segments.next(), segments.next()) else {
+            return false;
+        };
+        owner.eq_ignore_ascii_case(&self.owner) && name.eq_ignore_ascii_case(&self.name)
+    }
 }
 
 impl fmt::Display for GitHubRepo {

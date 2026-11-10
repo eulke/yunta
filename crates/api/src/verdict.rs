@@ -23,7 +23,7 @@ use yunta_render::blocks::diagnostic::{hinted, located, Pointed};
 use yunta_render::page::{Checked, Diagnosis, Unrunnable};
 use yunta_render::refusal::Refused;
 
-use crate::{Error, Failure, Project, Stop, Workspace};
+use crate::{Error, Project, Stop, Workspace};
 
 /// How much of the project a verdict reads beyond the workflow itself.
 ///
@@ -216,20 +216,6 @@ impl Workspace {
     /// `path` as a reader in this workspace's directory names it.
     pub fn shown(&self, path: &Path) -> String {
         surco::paths::shown(path, &self.dir, self.env.home.as_deref())
-    }
-
-    /// The file a workflow reference names, the one rule every interface
-    /// shares: a bare catalog name (no extension) resolves through the
-    /// repository's catalog, then a publisher's vendored packs
-    /// (`acme/review`); anything carrying an extension is taken as a literal
-    /// path.
-    pub fn workflow_file(&self, reference: &Path) -> Result<PathBuf, Error> {
-        if reference.extension().is_some() {
-            return Ok(reference.to_path_buf());
-        }
-        let resolved = yunta_engine::resolve_workflow(&self.dir, &reference.to_string_lossy())
-            .map_err(Failure::new)?;
-        Ok(resolved.path)
     }
 }
 

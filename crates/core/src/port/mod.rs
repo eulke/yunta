@@ -5,12 +5,12 @@
 //! Four ports: [`session`], the agent CLI an adapter drives;
 //! [`forge`], the pull request an external gate is decided on;
 //! [`HumanInteraction`], the person a gate's decision or a node's questions
-//! are put to, which the CLI's console and the MCP server's tools answer; and
+//! are put to, which a surface's console answers; and
 //! [`RunObserver`], whoever draws a run as the engine writes its log and
 //! hears what its sessions say. [`policy`]
 //! says what the engine does when an adapter lacks a capability, and
 //! [`SessionRequest::redactor`] takes every secret a session holds out of
-//! what it says. Both
+//! what it says. The
 //! ports live in this crate so the engine depends on their contracts
 //! rather than on a concrete implementation, and the engine's library
 //! never links the crate the implementations are built in.

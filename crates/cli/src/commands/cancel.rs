@@ -8,7 +8,6 @@ use yunta_core::RunId;
 use yunta_render::document::CancelDocument;
 use yunta_render::page::{CancelState, Cancelled, Page};
 
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
@@ -20,10 +19,10 @@ pub async fn cancel(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
-    let open = ctx.project.run(run_id).await?;
+    let project = shell.workspace().project()?;
+    let open = project.run(run_id).await?;
     let say = |remark: Remark| crate::remarks::say(remark, output, look);
-    let state = open.cancel(&say, &ctx.stop()).await?;
+    let state = open.cancel(&say, &shell.stop()).await?;
     let answer = CancelAnswer {
         run_id: run_id.clone(),
         state,

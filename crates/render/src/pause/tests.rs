@@ -2,7 +2,9 @@ use surco::words::Standing;
 use yunta_core::events::{Failure, PauseReason};
 use yunta_core::{NodeId, QuestionId, RunId};
 
-use super::{asked_questions, sentence, standing};
+use chrono::TimeZone;
+
+use super::{asked_questions, run_waits, sentence, standing};
 
 #[test]
 fn a_node_that_waits_for_a_reset_names_the_moment_it_resumes() {
@@ -163,5 +165,25 @@ fn questions_awaiting_an_answer_are_said_one_way() {
     assert_eq!(
         asked_questions(&[QuestionId::from("q-scope"), QuestionId::from("q-api")]),
         "asked 2 questions: `q-scope`, `q-api`"
+    );
+}
+
+#[test]
+fn the_wait_line_names_the_run_its_word_and_the_node_the_reset_is_for() {
+    let run = RunId::from_static("run-1");
+    let at = chrono::Utc
+        .with_ymd_and_hms(2026, 10, 13, 12, 0, 0)
+        .unwrap();
+    let reason = PauseReason::AwaitingReset {
+        node: NodeId::from_static("build"),
+        at,
+    };
+    let line = run_waits(&run, &reason);
+    assert!(
+        line.starts_with(&format!(
+            "run {}: waiting: node `build` waits for its limit to reset at ",
+            run.handle()
+        )),
+        "{line}"
     );
 }

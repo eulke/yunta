@@ -198,9 +198,8 @@ pub enum CheckError {
     /// declared input — scanned wherever a template can appear inline
     /// in the workflow (prompt text, `bash`/hook commands, `context:`
     /// patterns and command/query text). A `prompt: {file: ...}` body
-    /// isn't scanned: `check` never reads files (see this module's own
-    /// doc comment), so an undeclared reference there still only
-    /// surfaces at run time.
+    /// isn't scanned: `check` reads no file a workflow points at, so an
+    /// undeclared reference there still only surfaces at run time.
     /// The reference as written: what an author reads back, whether or
     /// not it could have been an input name at all.
     #[error("undeclared_input")]

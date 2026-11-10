@@ -17,7 +17,6 @@ use std::path::Path;
 use yunta_core::{NodeId, RunId, Workflow};
 use yunta_replay::frame::RunFrame;
 
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::shell::Shell;
@@ -38,29 +37,29 @@ pub async fn graph(
     format: GraphFormat,
     look: &surco::look::Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
+    let project = shell.workspace().project()?;
 
     let (workflow, labels, outcome) = match (workflow_path, run_id) {
         (Some(path), None) => {
             // A bare catalog name resolves the same way `check` and
             // `run` resolve it — `graph review` works without spelling
             // out the path.
-            let path = ctx.project.workspace.workflow_file(path)?;
-            let workflow = crate::load_workflow(&path)?;
+            let yunta_api::WorkflowFile { path, workflow } =
+                project.workspace.read_workflow(path)?;
             // A file that reads is drawn whatever the project's config
             // makes of it, with the verdict beside the drawing, on
             // stderr, and in the exit code: the graph is the file's.
             let judged = yunta_api::Judged {
                 workflow: &workflow,
                 path: &path,
-                config: &ctx.project.config,
-                conflicts: ctx.project.layer_conflicts()?,
+                config: &project.config,
+                conflicts: project.layer_conflicts()?,
             };
             let reach = yunta_api::VerdictReach::Workflow;
-            let verdict = ctx.project.verdict(judged, reach, &ctx.stop()).await?;
+            let verdict = project.verdict(judged, reach, &shell.stop()).await?;
             // A verdict with nothing to say stays off the drawing's way.
             if !verdict.passes() || !verdict.cautions().is_empty() {
-                crate::output::show_on_stderr(look, &verdict.checked(&ctx.stop()).await?);
+                crate::output::show_on_stderr(look, &verdict.checked(&shell.stop()).await?);
             }
             let outcome = match verdict.passes() {
                 true => Outcome::Success,
@@ -69,9 +68,9 @@ pub async fn graph(
             (workflow, None, outcome)
         }
         (None, Some(run_id)) => {
-            let open = ctx.project.run(run_id).await?;
+            let open = project.run(run_id).await?;
             let frame = open.frame();
-            let labels = derived_labels(&frame);
+            let labels = Some(derived_labels(&frame));
             (open.manifest.doc.workflow, labels, Outcome::Success)
         }
         (Some(_), Some(_)) => {
@@ -106,19 +105,17 @@ pub async fn graph(
 /// from, so the diagram, the page and the document say the same word
 /// about the same node — a node this run's mode leaves out included,
 /// and labelled `skipped`.
-fn derived_labels(frame: &RunFrame) -> Option<Labels> {
-    Some(
-        frame
-            .nodes
-            .iter()
-            .map(|node| {
-                (
-                    node.id.clone(),
-                    yunta_render::state::NodeDisplay::from(node).label(),
-                )
-            })
-            .collect(),
-    )
+fn derived_labels(frame: &RunFrame) -> Labels {
+    frame
+        .nodes
+        .iter()
+        .map(|node| {
+            (
+                node.id.clone(),
+                yunta_render::state::NodeDisplay::from(node).label(),
+            )
+        })
+        .collect()
 }
 
 /// Renders the workflow's DAG as a Mermaid `graph TD`: one declaration per

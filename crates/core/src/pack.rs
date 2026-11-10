@@ -175,6 +175,16 @@ pub struct PackLock {
     pub packs: BTreeMap<PackRef, PackLockEntry>,
 }
 
+impl PackLock {
+    /// A `yunta.lock`, read as the persisted document it is: refused when a
+    /// newer binary wrote it, with what that binary wrote beside it kept.
+    pub fn read(
+        bytes: &[u8],
+    ) -> Result<crate::persisted::PersistedDoc<PackLock>, crate::persisted::PersistedError> {
+        crate::persisted::PersistedDoc::read(bytes)
+    }
+}
+
 impl crate::persisted::Persisted for PackLock {
     /// 1 from the first version that stamps one. A lock written before
     /// this reads as 0, which is older than this binary and therefore
@@ -202,6 +212,14 @@ pub fn stays_inside(path: &str) -> bool {
 }
 
 impl PackManifest {
+    /// A pack's `pack.yaml`, read. Every crate that reads one reads it
+    /// through here: the generic reader is built in each crate that names
+    /// it, so one concrete reader keeps one copy of what reads it in the
+    /// binary.
+    pub fn read(text: &str) -> Result<PackManifest, crate::yaml::YamlError> {
+        crate::yaml::parse(text)
+    }
+
     /// The pack's identity, `publisher/name`.
     pub fn reference(&self) -> PackRef {
         PackRef::new(self.publisher.clone(), self.name.clone())

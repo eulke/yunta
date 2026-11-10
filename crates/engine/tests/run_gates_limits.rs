@@ -195,7 +195,10 @@ async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
         panic!("expected the answer refused as off the menu, got {error:?}");
     };
     assert_eq!(chosen, "whatever");
-    assert_eq!(offered, "proceed, revise, abort");
+    assert_eq!(
+        offered,
+        ["proceed", "revise", "abort"].map(yunta_core::OptionId::from_static)
+    );
     let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(

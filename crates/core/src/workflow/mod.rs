@@ -124,6 +124,15 @@ pub struct Workflow {
 }
 
 impl Workflow {
+    /// A workflow's text parsed as it is written, no reference judged: what a
+    /// skeleton is held to before it is written. Every crate that parses one
+    /// does it through here, as `read` does: the generic reader is built in
+    /// each crate that names it, and a workflow carries every kind of node,
+    /// so one concrete reader keeps one copy of what reads it in the binary.
+    pub fn parse(text: &str) -> Result<Workflow, crate::yaml::YamlError> {
+        crate::yaml::parse(text)
+    }
+
     /// Every node in declaration (pre-)order, `parallel` children
     /// included — THE one owner of node traversal: replay,
     /// progress, stats and check all derive per-node views from a flat

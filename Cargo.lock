@@ -3092,7 +3092,7 @@ dependencies = [
  "yunta-api",
  "yunta-core",
  "yunta-engine",
- "yunta-mcp-protocol",
+ "yunta-mcp",
  "yunta-render",
  "yunta-replay",
  "yunta-storage",
@@ -3131,6 +3131,7 @@ version = "0.0.5"
 dependencies = [
  "async-trait",
  "chrono",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",
@@ -3216,6 +3217,19 @@ dependencies = [
  "yunta-surco",
  "yunta-testkit",
  "yunta-testkit-core",
+]
+
+[[package]]
+name = "yunta-mcp"
+version = "0.0.5"
+dependencies = [
+ "rmcp",
+ "serde_json",
+ "yunta-api",
+ "yunta-core",
+ "yunta-mcp-protocol",
+ "yunta-render",
+ "yunta-surco",
 ]
 
 [[package]]

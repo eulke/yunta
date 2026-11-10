@@ -19,7 +19,7 @@ use yunta_core::events::{self, DecisionOn, GateWaitingPayload, PauseReason};
 use yunta_core::port::{Forge, HumanInteraction, RunObserver};
 use yunta_core::rail::RailCommand;
 use yunta_core::shown::ShownDocument;
-use yunta_core::{Manifest, ModeName, NodeId, Pid, RunAdapter, RunId};
+use yunta_core::{Env, Manifest, ModeName, NodeId, Pid, RunAdapter, RunId};
 use yunta_engine::{RunEnv, RunHold, RunReport, RunTerminal};
 use yunta_render::document::{PreRunWarnings, RunDocument};
 use yunta_replay::history::PriorEstimation;
@@ -28,7 +28,7 @@ use yunta_replay::RunState;
 use yunta_storage::AsyncStorage;
 
 use crate::machine::Adapters;
-use crate::{Error, Failure, HeldRun, Project, Remark, Remarks, Stop};
+use crate::{Error, Failure, HeldRun, Project, Remarks, Stop};
 
 /// What a surface lends a run it drives here: who the run asks when it needs
 /// a person, and who watches what it does as it does it.
@@ -87,20 +87,22 @@ pub struct ClosingReading {
 
 /// One run of a chain, handed to the engine with the claim this process
 /// holds on it.
-struct Execution<'a> {
-    id: &'a RunId,
-    manifest: &'a Manifest,
-    hold: RunHold,
-    worktree: &'a Path,
+pub(crate) struct Execution<'a> {
+    pub(crate) id: &'a RunId,
+    pub(crate) manifest: &'a Manifest,
+    pub(crate) hold: RunHold,
+    pub(crate) worktree: &'a Path,
 }
 
 /// What every run of a chain is driven with: the sessions' adapters, the
-/// forge, the log, and the ports the surface lent.
-struct Means<'a> {
-    adapters: Adapters,
-    forge: Option<Arc<dyn Forge>>,
-    storage: AsyncStorage,
-    ports: Ports<'a>,
+/// forge, the log, the ports the surface lent, and the environment its
+/// nodes read: the workspace's, or none for a run as hermetic as a case.
+pub(crate) struct Means<'a> {
+    pub(crate) adapters: Adapters,
+    pub(crate) forge: Option<Arc<dyn Forge>>,
+    pub(crate) storage: AsyncStorage,
+    pub(crate) ports: Ports<'a>,
+    pub(crate) ambient: &'a Env,
 }
 
 impl<'p> HeldRun<'p> {
@@ -119,9 +121,14 @@ impl<'p> HeldRun<'p> {
         let storage = project.storage().await?;
         let means = Means {
             adapters,
-            forge: project.forge_for(&self.manifest.config, remarks),
+            forge: crate::forge::forge_for(
+                &self.manifest.config,
+                project.workspace.secrets.as_ref(),
+                remarks,
+            ),
             storage,
             ports,
+            ambient: &project.workspace.env,
         };
         let execution = Execution {
             id: &self.id,
@@ -244,33 +251,10 @@ impl Project {
         Ok(document.warnings(warnings))
     }
 
-    /// The forge a run under `config` reaches: none when the config declares
-    /// none or the variable its token is in is not set here — a gate then
-    /// falls back to the person, a legitimate state on a machine with no
-    /// credentials — and none, said through `remarks`, when the forge does
-    /// not take the token.
-    fn forge_for(
-        &self,
-        config: &yunta_core::ConfigLayer,
-        remarks: &dyn Remarks,
-    ) -> Option<Arc<dyn Forge>> {
-        let github = config.forge.as_ref()?.github.as_ref()?;
-        let token = self.workspace.secrets.get(&github.token_env)?;
-        match yunta_adapters::GitHubForge::new(github.repo.clone(), token) {
-            Ok(forge) => Some(Arc::new(forge)),
-            Err(error) => {
-                remarks.remark(Remark::ForgeUnavailable {
-                    said: yunta_core::describe(&error),
-                });
-                None
-            }
-        }
-    }
-
     /// Runs one run of a chain to its stop. The claim ends as this returns,
     /// before anything hands the run on: a detached resume that waits for a
     /// reset would otherwise find its own parent holding the run.
-    async fn execute(
+    pub(crate) async fn execute(
         &self,
         execution: Execution<'_>,
         means: &Means<'_>,
@@ -289,7 +273,7 @@ impl Project {
             human_interaction: means.ports.person,
             forge: means.forge.as_deref(),
             cancel: stop.work(),
-            ambient: Some(&workspace.env),
+            ambient: Some(means.ambient),
             secrets: Arc::clone(&workspace.secrets),
             observer: means.ports.observer.clone(),
             rail_command: Some(RailCommand::new(workspace.binary.clone())),
@@ -424,6 +408,17 @@ impl Project {
 /// claims kept in the run's directory so a resumed run goes on from the
 /// scripts its earlier sessions claimed.
 fn adapters_for(manifest: &Manifest, dir: &Path, worktree: &Path) -> Result<Adapters, Error> {
+    adapters_and_script(manifest, dir, worktree).map(|(adapters, _)| adapters)
+}
+
+/// The registry the manifest's sessions run on, with the scripted mock a
+/// mock run's registry is built on, so a caller can ask which of its scripts
+/// no session claimed.
+pub(crate) fn adapters_and_script(
+    manifest: &Manifest,
+    dir: &Path,
+    worktree: &Path,
+) -> Result<(Adapters, Option<Arc<MockAdapter>>), Error> {
     match &manifest.adapter {
         Some(RunAdapter::Mock { fixture }) => {
             let claims = dir.join(yunta_adapters::MOCK_CLAIMS_FILE);
@@ -432,9 +427,10 @@ fn adapters_for(manifest: &Manifest, dir: &Path, worktree: &Path) -> Result<Adap
                     .keeping_claims(claims)
                     .map_err(Failure::new)?,
             );
-            Ok(yunta_adapters::registry(&manifest.config, mock))
+            let adapters = yunta_adapters::registry(&manifest.config, Arc::clone(&mock));
+            Ok((adapters, Some(mock)))
         }
-        _ => Ok(crate::machine::real_adapters(&manifest.config)),
+        _ => Ok((crate::machine::real_adapters(&manifest.config), None)),
     }
 }
 

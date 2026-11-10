@@ -20,8 +20,8 @@ mod wrapped;
 #[cfg(test)]
 mod tests;
 
-pub use refused::{Candidate, Refused};
+pub use refused::{Ambiguity, Candidate, Refused};
 pub use words::{
-    already_installed, answers, close, gate, hold_unclear, inputs, moving, not_installed,
-    refused_answer, stale_lock_taken, unnamed_committer, unrunnable,
+    answers, close, gate, hold_unclear, inputs, moving, refused_answer, replaced_tree_kept,
+    stale_lock_taken, unnamed_committer, unrunnable,
 };

@@ -67,7 +67,7 @@ pub(super) async fn watch(
     } else {
         // The run's creation is written before any observer exists, so the
         // first thing the surface knows is read once, here.
-        let log = env.ctx.project.event_log().await?;
+        let log = env.project.event_log().await?;
         let seed = log.events(&held.id).await?;
         Some(Surface::open(
             SurfaceEnv {
@@ -75,7 +75,7 @@ pub(super) async fn watch(
                 manifest: &held.manifest,
                 prior: held.prior.as_ref(),
                 log: &log,
-                clock: std::sync::Arc::clone(&env.ctx.clock),
+                clock: std::sync::Arc::clone(&env.project.workspace.clock),
                 delivery: shown.delivery,
                 glyphs: shown.glyphs,
                 engine: EngineReading::This,
@@ -83,10 +83,10 @@ pub(super) async fn watch(
             seed,
         ))
     };
-    // The token is the invocation's, installed when its `Context`
-    // loaded; what this arranges is the line the person reads when they
+    // The token is the invocation's, installed when the shell read the
+    // process; what this arranges is the line the person reads when they
     // press Ctrl-C, which belongs above the region the surface pins.
-    let cancel = env.ctx.cancellation().clone();
+    let cancel = env.stop.work().clone();
     Ok(Watching {
         observer: surface.as_ref().and_then(Surface::observer),
         asking: crate::human_interaction::ConsoleInteraction::new(
@@ -97,7 +97,7 @@ pub(super) async fn watch(
                 .as_ref()
                 .map_or_else(Diagnostics::none, Surface::diagnostics),
             cancel.clone(),
-            env.ctx.env.clone(),
+            env.project.workspace.env.clone(),
             surface.as_ref().is_some_and(Surface::chronicles),
         ),
         announcing: Some(announce(
@@ -121,7 +121,7 @@ fn announce(diagnostics: Diagnostics, cancel: CancellationToken) -> JoinHandle<(
     tokio::spawn(async move {
         cancel.cancelled().await;
         diagnostics
-            .raise("interrupt received: stopping the run (sessions get interrupt, then kill)")
+            .raise(yunta_render::ending::STOPPING_AT_INTERRUPT)
             .await;
     })
 }

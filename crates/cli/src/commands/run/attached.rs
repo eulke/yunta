@@ -6,12 +6,12 @@
 use std::path::Path;
 
 use surco::look::Look;
-use surco::words::Standing;
+use yunta_api::{Project, Stop};
 use yunta_core::{AdapterId, ModeName};
+use yunta_render::start::Start;
 
 use super::{admitted, create_run_from, Asked};
 use crate::commands::drive::{drive, Driving};
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Mode;
 use crate::output::Outcome;
@@ -20,7 +20,8 @@ use crate::output::Outcome;
 /// overrides every run resolves, plus the fixture that scripts its
 /// sessions when there is one and how this invocation reports progress.
 pub(super) struct Attaching<'a> {
-    pub(super) ctx: &'a Context,
+    pub(super) project: &'a Project,
+    pub(super) stop: &'a Stop,
     pub(super) workflow_path: &'a Path,
     pub(super) raw_inputs: &'a [String],
     pub(super) adapter: Option<&'a AdapterId>,
@@ -39,7 +40,8 @@ pub(super) struct Attaching<'a> {
 /// this function hands back.
 pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliError> {
     let Attaching {
-        ctx,
+        project,
+        stop,
         workflow_path,
         raw_inputs,
         adapter,
@@ -56,9 +58,15 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         mode,
         hermetic: false,
     };
-    let admission = admitted(ctx, asked, output, look).await?;
-    let created = create_run_from(ctx, admission, output, look).await?;
-    super::super::started(&created.id, Standing::Created.word(), output, look);
-    let held = created.hold(&ctx.stop()).await?;
-    drive(Driving { ctx, output, look }, held).await
+    let admission = admitted(project, stop, asked, output, look).await?;
+    let created = create_run_from(admission, stop, output, look).await?;
+    super::super::started(&created.id, Start::Created, output, look);
+    let held = created.hold(stop).await?;
+    let driving = Driving {
+        project,
+        stop,
+        output,
+        look,
+    };
+    drive(driving, held).await
 }

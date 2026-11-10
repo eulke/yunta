@@ -104,7 +104,17 @@ impl Env {
     /// Whether `command` names a file in a directory of this environment's
     /// `PATH`: the one a run started in it inherits.
     pub fn finds(&self, command: &str) -> bool {
-        self.path.iter().any(|dir| dir.join(command).is_file())
+        self.find(command).is_some()
+    }
+
+    /// Where `command` is in this environment's `PATH`: the first of its
+    /// directories that holds a file by that name, as a shell started in it
+    /// would run.
+    pub fn find(&self, command: &str) -> Option<std::path::PathBuf> {
+        self.path
+            .iter()
+            .map(|dir| dir.join(command))
+            .find(|candidate| candidate.is_file())
     }
 
     /// The process environment, read once here, at the shell's edge, so
@@ -429,6 +439,31 @@ mod tests {
         fn get(&self, _name: &str) -> Option<Secret<String>> {
             Some(Secret::new(self.0.to_string()))
         }
+    }
+
+    /// A command is found where a shell started in the environment would run
+    /// it: the first directory of its `PATH` holding a file by that name; a
+    /// directory by that name is no command.
+    #[test]
+    fn a_command_is_found_in_the_first_directory_of_the_path_that_holds_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (empty, first, second) = (
+            root.path().join("empty"),
+            root.path().join("first"),
+            root.path().join("second"),
+        );
+        std::fs::create_dir_all(empty.join("cc")).unwrap();
+        for dir in [&first, &second] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("cc"), "").unwrap();
+        }
+        let env = Env {
+            path: vec![empty, first.clone(), second],
+            ..Env::default()
+        };
+
+        assert_eq!(env.find("cc"), Some(first.join("cc")));
+        assert_eq!(env.find("ld"), None);
     }
 
     #[test]

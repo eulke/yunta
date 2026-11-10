@@ -9,7 +9,6 @@ use yunta_render::command;
 use yunta_render::page::{desk, Review};
 
 use crate::ask::{Console, Escape, Opens};
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Mode;
 use crate::output::Outcome;
@@ -25,8 +24,8 @@ pub async fn review(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
-    let waiting = super::resolve_gate::waiting_of(&ctx, run_id).await?;
+    let project = shell.workspace().project()?;
+    let waiting = super::resolve_gate::waiting_of(&project, run_id).await?;
     let Some((plan, _)) = desk::plan_among(&waiting.shown) else {
         return Err(CliError::msg(format!(
             "run {} waits on a decision that shows no plan; `{}` says what it does show",
@@ -43,6 +42,6 @@ pub async fn review(
         crate::output::show(look, &page);
         return Ok(Outcome::Success);
     };
-    let chosen = chosen_on(&console, &ctx, run_id, &waiting, Opens::ThePlan)?;
-    settled(&ctx, run_id, chosen, None, None, output, look).await
+    let chosen = chosen_on(&console, &project, run_id, &waiting, Opens::ThePlan)?;
+    settled(&project, run_id, chosen, None, None, output, look).await
 }

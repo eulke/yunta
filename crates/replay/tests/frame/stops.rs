@@ -5,6 +5,46 @@
 
 use super::*;
 
+/// A run moves while it is created or running under an engine that lives;
+/// parked, ended, promoted, or stalled under an engine that is gone, it
+/// does not.
+#[test]
+fn a_run_moves_while_it_runs_under_an_engine_that_lives() {
+    let frame = |phase: RunPhase, standing: Standing| RunFrame {
+        phase,
+        standing,
+        ..RunFrame::sample(&yunta_core::RunId::from_static("run-1"))
+    };
+    assert!(frame(RunPhase::Created, Standing::Running).moves());
+    assert!(frame(RunPhase::Running, Standing::Running).moves());
+    assert!(!frame(RunPhase::Running, Standing::Stalled).moves());
+    assert!(!frame(RunPhase::Finished, Standing::Finished).moves());
+    assert!(!frame(RunPhase::Cancelled, Standing::Stopped).moves());
+    assert!(!frame(RunPhase::Promoted { to: None }, Standing::Promoted).moves());
+}
+
+/// A run handed to a detached process has no registry for an instant, and
+/// a follower that read that as a stall would end on a run about to move.
+/// Only an engine its registry names, and that is gone, stalls it.
+#[test]
+fn an_absent_registry_is_not_a_stall() {
+    let under = |engine: Engine| {
+        let nodes = vec![yunta_replay::frame::NodeFrame::sample(
+            &NodeId::from_static("build"),
+            NodeStanding::Reached(NodeState::Running { attempt: 1 }),
+        )];
+        let phase = RunPhase::Running;
+        RunFrame {
+            standing: yunta_replay::frame::run_standing(&phase, &nodes, 0, &engine),
+            phase,
+            nodes,
+            ..RunFrame::sample(&yunta_core::RunId::from_static("run-1"))
+        }
+    };
+    assert!(under(Engine::Unrecorded).moves());
+    assert!(!under(Engine::Dead).moves());
+}
+
 #[test]
 fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
     // A node id names *which* node stopped; only the sentence the engine

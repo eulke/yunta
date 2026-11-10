@@ -19,7 +19,7 @@
 //!   `caution`; `best_effort` names a step a run carries on past.
 //! - What Yunta refuses, as data a surface says: `check`, what `yunta check`
 //!   finds in a workflow, and `refusal`, a decision, a reply or a close a run
-//!   will not take.
+//!   will not take, and a pack, a file or a case a project will not.
 //! - Boundaries a decision is handed rather than reaching for: `clock`,
 //!   `id_source`, `process`, `disk`, `durable` and `secret`; and `pace`, how
 //!   long a poll over state another process owns waits between looks.

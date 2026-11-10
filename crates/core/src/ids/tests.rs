@@ -3,6 +3,33 @@
 
 use super::*;
 
+/// A remote names a repository by the last two segments of its path, `.git`
+/// or not, whatever its scheme, and by those segments whole: a remote of
+/// another repository whose name starts the same names a different one.
+#[test]
+fn a_remote_names_a_repository_by_its_owner_and_name_whole() {
+    let repo: GitHubRepo = "acme/web".parse().unwrap();
+    for url in [
+        "https://github.com/acme/web.git",
+        "https://github.com/acme/web",
+        "https://github.com/acme/web/",
+        "git@github.com:acme/web.git",
+        "ssh://git@github.com/acme/web.git",
+        "https://github.com/Acme/Web.git",
+    ] {
+        assert!(repo.is_named_by(url), "{url} names acme/web");
+    }
+    for url in [
+        "https://github.com/acme/website.git",
+        "https://github.com/acme/web-app",
+        "https://github.com/notacme/web.git",
+        "git@github.com:acme/webs.git",
+        "https://github.com",
+    ] {
+        assert!(!repo.is_named_by(url), "{url} names another repository");
+    }
+}
+
 #[test]
 fn a_handle_is_the_random_tail_of_a_ulid() {
     let made = ulid::Ulid::from_parts(1_700_000_000_000, 0x0123_4567_89AB_CDEF);

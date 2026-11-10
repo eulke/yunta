@@ -98,7 +98,7 @@ pub(crate) fn refuse_sessionless(nodes: &[&Node], adapters: &Adapters) -> Result
     let needs_sessions = nodes.iter().any(|node| node.opens_session());
     if needs_sessions && adapters.is_empty() {
         return Err(refused(Unservable::NoAdapter {
-            built: super::built_adapter_names(),
+            built: super::built_adapter_ids(),
         }));
     }
     Ok(())

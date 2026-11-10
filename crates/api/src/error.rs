@@ -15,8 +15,8 @@ pub enum Error {
     /// and its causes'.
     #[error(transparent)]
     Failed(#[from] Failure),
-    /// The caller's stop.
-    #[error("stopped")]
+    /// The caller's stop, said as a run the engine was stopped in says it.
+    #[error("interrupted by a person")]
     Stopped,
 }
 
@@ -50,6 +50,10 @@ impl From<yunta_engine::RunError> for Error {
             }
             .into(),
             yunta_engine::RunError::Cancelled => Error::Stopped,
+            yunta_engine::RunError::Artifact(yunta_engine::AcceptError::Project {
+                name,
+                source,
+            }) => Failure::new(ViewUnwritten { name, source }).into(),
             failed => Failure::new(failed).into(),
         }
     }
@@ -78,6 +82,29 @@ impl From<yunta_engine::WorktreeError> for Error {
         }
     }
 }
+
+/// An artifact's view under `artifacts/` the store could not write. Its
+/// sentence names the object or the store's step that stopped it, so no cause
+/// is said after it again.
+#[derive(Debug)]
+struct ViewUnwritten {
+    name: String,
+    source: yunta_engine::StoreError,
+}
+
+impl fmt::Display for ViewUnwritten {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let why = match &self.source {
+            yunta_engine::StoreError::Object(problem) => yunta_render::failure::object(problem),
+            yunta_engine::StoreError::Io { .. } => self.source.to_string(),
+        };
+        let said = yunta_render::failure::unwritten_view(&self.name, &why);
+        f.write_str(&yunta_core::with_causes(said, &self.source))
+    }
+}
+
+/// The sentence says the cause already.
+impl std::error::Error for ViewUnwritten {}
 
 /// What failed below the API, held as the error it was, so no interface
 /// names an engine, store or adapter type and none branches on one: a
@@ -116,6 +143,29 @@ impl std::error::Error for Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An artifact's view the store could not write names the object it
+    /// lacks once, in the object's words.
+    #[test]
+    fn an_artifact_view_that_cannot_be_written_names_the_object_it_lacks() {
+        let hash = yunta_core::sha256_hex(b"report");
+        let named = hash.to_string();
+        let missing = yunta_core::events::ObjectProblem::Missing { hash };
+        let run = yunta_engine::RunError::Artifact(yunta_engine::AcceptError::Project {
+            name: "report.md".to_string(),
+            source: yunta_engine::StoreError::Object(missing),
+        });
+        let Error::Failed(failure) = Error::from(run) else {
+            panic!("an unwritten view fails below the API");
+        };
+        assert_eq!(
+            failure.said(),
+            format!(
+                "failed to write the `artifacts/` view of `report.md`: the run holds no object \
+                 `{named}`: an artifact names bytes that are not under `objects/`"
+            )
+        );
+    }
 
     /// A failure two levels deep, as the store says one: what it was doing,
     /// then the disk's own words.

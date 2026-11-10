@@ -319,5 +319,24 @@ fn past_the_first(ranks: Vec<Vec<NodeId>>) -> Vec<Vec<NodeId>> {
     ranks.into_iter().skip(1).collect()
 }
 
+/// What a run says when the forge its external gates publish on does not
+/// answer: `said`, the forge's own words, and that those gates are put to a
+/// person at the console instead.
+pub fn forge_unavailable(said: &str) -> String {
+    format!("the forge is unavailable: {said}; external gates degrade to the console")
+}
+
+/// What a person is told when the console a decision is put to could not be
+/// read or drawn on, `error` in its own words: nothing was recorded.
+pub fn console_unreadable(error: &str) -> String {
+    format!("this terminal could not be read or drawn on ({error}): nothing recorded")
+}
+
+/// What a person is told when the menu a decision is put to ended with no
+/// answer, `why` in its own words: nothing was recorded.
+pub fn menu_unanswered(why: &str) -> String {
+    format!("the menu ended without an answer ({why}): nothing recorded")
+}
+
 #[cfg(test)]
 mod tests;

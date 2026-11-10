@@ -1,7 +1,8 @@
 //! How Yunta speaks MCP: what every MCP result it serves is shaped like.
 //!
 //! Two servers answer MCP: the per-run tool listener the engine starts for
-//! one session, and the control plane `yunta mcp` serves over stdio. Both
+//! one session, and the control plane `yunta-mcp` answers on whatever
+//! transport an interface serves it (`yunta mcp`, stdio). Both
 //! announce the same set of protocol revisions, so both owe their clients
 //! the same result shape, and the decision lives below both rather than
 //! once per server: a second copy is a second chance for one of them to

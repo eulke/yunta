@@ -10,7 +10,7 @@
 use std::str::FromStr;
 
 use yunta_core::RunId;
-use yunta_render::refusal::{Candidate, Refused};
+use yunta_render::refusal::{Ambiguity, Candidate, Refused};
 use yunta_storage::Storage;
 
 use crate::{Error, Failure, FieldReach, Project, Stop};
@@ -83,7 +83,9 @@ impl Project {
                     })
                     .collect::<Vec<_>>();
                 Err(Refused::AmbiguousRun {
-                    said: format!("`{typed}` is part of {} ids", candidates.len()),
+                    ambiguity: Ambiguity::PartOfIds {
+                        typed: typed.to_string(),
+                    },
                     candidates,
                 }
                 .into())
@@ -99,10 +101,7 @@ impl Project {
             [] => Err(Refused::NoneNeedsYou.into()),
             [one] => Ok(one.frame.run_id.clone()),
             several => Err(Refused::AmbiguousRun {
-                said: format!(
-                    "{} of this repository need you",
-                    surco::text::counted(several.len(), "run")
-                ),
+                ambiguity: Ambiguity::SeveralNeedYou,
                 candidates: several
                     .iter()
                     .map(|row| Candidate::of((*row).clone()))

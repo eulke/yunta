@@ -176,7 +176,8 @@ pub struct Verified<'a> {
 
 impl Page for Verified<'_> {
     fn document(&self, _look: &Look) -> Doc {
-        let mark = match self.holds() {
+        let integrity = Integrity::of(self.checks);
+        let mark = match integrity.holds() {
             true => Mark::Done,
             false => Mark::Failed,
         };
@@ -184,7 +185,7 @@ impl Page for Verified<'_> {
             Headline::new(
                 mark,
                 format!("run {}", self.run_id.handle()),
-                Verified::word(self.holds()),
+                integrity.word(),
             ),
             self.checks,
         );
@@ -192,17 +193,35 @@ impl Page for Verified<'_> {
     }
 }
 
-impl Verified<'_> {
-    /// Whether every check holds.
-    fn holds(&self) -> bool {
-        self.checks.iter().all(Check::holds)
+/// Whether a run's evidence is intact, as every check of it finds: the
+/// verdict its page and its document both say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Integrity {
+    /// Every check holds.
+    Intact,
+    /// A check does not hold.
+    Broken,
+}
+
+impl Integrity {
+    /// The integrity `checks` find: intact only when every one holds.
+    pub(crate) fn of(checks: &[Check]) -> Integrity {
+        match checks.iter().all(Check::holds) {
+            true => Integrity::Intact,
+            false => Integrity::Broken,
+        }
     }
 
-    /// The word a verdict says: `intact` when every check holds, `broken` when one does not.
-    pub fn word(holds: bool) -> &'static str {
-        match holds {
-            true => "intact",
-            false => "broken",
+    /// Whether every check holds.
+    pub(crate) fn holds(self) -> bool {
+        self == Integrity::Intact
+    }
+
+    /// The word the verdict says.
+    pub(crate) fn word(self) -> &'static str {
+        match self {
+            Integrity::Intact => "intact",
+            Integrity::Broken => "broken",
         }
     }
 }

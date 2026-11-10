@@ -6,7 +6,7 @@ use surco::components::Check;
 use yunta_core::RunId;
 
 use super::SCHEMA_VERSION;
-use crate::page::Verified;
+use crate::page::Integrity;
 
 /// The verdict on a run's evidence as a program reads it: whether every
 /// check holds, the word the headline says, and each check in the order it
@@ -20,12 +20,12 @@ pub struct VerificationDocument<'a> {
 
 impl serde::Serialize for VerificationDocument<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let holds = self.checks.iter().all(Check::holds);
+        let integrity = Integrity::of(self.checks);
         Written {
             schema_version: SCHEMA_VERSION,
             run_id: self.run_id,
-            holds,
-            word: Verified::word(holds),
+            holds: integrity.holds(),
+            word: integrity.word(),
             checks: self.checks,
         }
         .serialize(serializer)

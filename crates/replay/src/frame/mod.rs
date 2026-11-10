@@ -247,6 +247,15 @@ impl RunFrame {
         }
     }
 
+    /// Whether the run still moves as this frame reads it: created or
+    /// running, under an engine that lives. A run its log ended, parked or
+    /// promoted does not move, nor does one whose engine is gone (`stalled`):
+    /// what a follower of the run, in any interface, stops at.
+    pub fn moves(&self) -> bool {
+        matches!(self.phase, RunPhase::Created | RunPhase::Running)
+            && self.standing != Standing::Stalled
+    }
+
     /// The nodes that stand failed, each with its failure, in declaration
     /// order. A node whose log says it failed can stand otherwise: one a
     /// reset holds is `waiting`, and the pause says what holds it; one a

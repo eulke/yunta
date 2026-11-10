@@ -21,6 +21,7 @@ use yunta_replay::history::PriorEstimation;
 
 use crate::{
     Committer, Error, Failure, Judged, Project, Remark, Remarks, Stop, Verdict, VerdictReach,
+    WorkflowFile,
 };
 
 /// What a run is asked for with: its workflow by reference, its inputs by
@@ -118,8 +119,7 @@ impl Project {
         remarks: &dyn Remarks,
         stop: &Stop,
     ) -> Result<(PathBuf, Workflow), Error> {
-        let path = self.workspace.workflow_file(reference)?;
-        let workflow = read_workflow(&path)?;
+        let WorkflowFile { path, workflow } = self.workspace.read_workflow(reference)?;
         let judged = Judged {
             workflow: &workflow,
             path: &path,
@@ -255,30 +255,4 @@ impl Admission<'_> {
     pub fn mode(&self) -> &ModeName {
         &self.mode
     }
-}
-
-/// A workflow file that could not be read off the disk.
-#[derive(Debug, thiserror::Error)]
-#[error("failed to read workflow at {}: {source}", path.display())]
-struct WorkflowUnread {
-    path: PathBuf,
-    source: std::io::Error,
-}
-
-/// The workflow at `path`, read through the one door that holds it to its
-/// own rules: a file that breaks them is refused, quoted.
-fn read_workflow(path: &Path) -> Result<Workflow, Error> {
-    let contents = std::fs::read_to_string(path).map_err(|source| {
-        Failure::new(WorkflowUnread {
-            path: path.to_path_buf(),
-            source,
-        })
-    })?;
-    yunta_core::workflow::read::read(&contents, path).map_err(|report| {
-        Refused::Document {
-            report: Box::new(report),
-            text: Some(contents.clone()),
-        }
-        .into()
-    })
 }

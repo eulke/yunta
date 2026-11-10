@@ -10,7 +10,7 @@ use crate::page::RanCase;
 
 /// A pack's own cases, under its `.yunta/tests/` in the format `yunta test`
 /// reads: none, counted, or run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Cases {
     /// The pack ships none.
     NoneShipped,

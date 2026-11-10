@@ -116,7 +116,7 @@ struct ManifestUnread {
 }
 
 /// The manifest at `path`, as the run froze it.
-fn read_manifest(path: &Path) -> Result<PersistedDoc<Manifest>, Failure> {
+pub(crate) fn read_manifest(path: &Path) -> Result<PersistedDoc<Manifest>, Failure> {
     let bytes = std::fs::read(path).map_err(|source| {
         Failure::new(ManifestUnread {
             path: path.to_path_buf(),

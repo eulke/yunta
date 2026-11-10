@@ -107,6 +107,11 @@ pub fn log_unexported(detail: &str) -> String {
     format!("could not write the run's events.jsonl: {detail}")
 }
 
+/// What a person who interrupted a run this process drives reads while the
+/// run stops: its sessions are interrupted first, then killed.
+pub const STOPPING_AT_INTERRUPT: &str =
+    "interrupt received: stopping the run (sessions get interrupt, then kill)";
+
 #[cfg(test)]
 mod tests {
     use super::log_unexported;

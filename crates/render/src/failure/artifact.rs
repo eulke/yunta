@@ -4,8 +4,16 @@
 //! publishes that no node of the run produced.
 
 use yunta_core::events::{ArtifactId, MountError, NameProblem, ObjectProblem};
+use yunta_core::run_dir::ARTIFACTS_DIR;
 use yunta_core::template::TemplateError;
 use yunta_core::{ArtifactFailure, InputName, NodeId};
+
+/// What an artifact's view under `artifacts/` that could not be written says:
+/// the artifact it is of, and `why`, the object or the store's step that
+/// stopped it.
+pub fn unwritten_view(name: &str, why: &str) -> String {
+    format!("failed to write the `{ARTIFACTS_DIR}/` view of `{name}`: {why}")
+}
 
 /// Each document that did not close, one block after another.
 pub(super) fn artifacts_said(artifacts: &[ArtifactFailure]) -> String {

@@ -9,7 +9,7 @@
 use yunta_core::events::{DecisionOn, GateWaitingPayload, HumanChoice};
 use yunta_core::port::QuestionsReply;
 use yunta_core::shown::ShownDocument;
-use yunta_core::{NodeId, OptionId, Responder};
+use yunta_core::{NodeId, OptionId, Responder, RunId};
 use yunta_render::refusal::Refused;
 use yunta_replay::RunState;
 
@@ -78,7 +78,7 @@ impl OpenedRun<'_> {
             manifest, &self.dir, &storage, &self.id, clock, choice, &redactor,
         )
         .await
-        .map_err(|error| self.unrecorded(error))?;
+        .map_err(|error| unrecorded(&self.id, error))?;
         self.handed_on(Recorded::Decision).await
     }
 
@@ -119,21 +119,6 @@ impl OpenedRun<'_> {
         self.handed_on(Recorded::Answers).await
     }
 
-    /// What a decision the run would not take, or could not record, is.
-    fn unrecorded(&self, error: yunta_engine::ResolveGateError) -> Error {
-        match error {
-            yunta_engine::ResolveGateError::Refused(refusal) => Refused::Gate {
-                run: self.id.clone(),
-                refusal,
-            }
-            .into(),
-            yunta_engine::ResolveGateError::Storage(error) => Failure::new(error).into(),
-            yunta_engine::ResolveGateError::Documents(run) => {
-                Failure::new(GateDocumentsUnread(run)).into()
-            }
-        }
-    }
-
     /// Hands the run on to a detached resume once what `recorded` names is on
     /// its log; a hand-on that fails says that was recorded all the same.
     pub(crate) async fn handed_on(&self, recorded: Recorded) -> Result<(), Error> {
@@ -143,6 +128,21 @@ impl OpenedRun<'_> {
                 Err(Failure::new(RecordedNotResumed { recorded, failure }).into())
             }
             Err(other) => Err(other),
+        }
+    }
+}
+
+/// What a decision run `id` would not take, or could not record, is.
+pub(crate) fn unrecorded(id: &RunId, error: yunta_engine::ResolveGateError) -> Error {
+    match error {
+        yunta_engine::ResolveGateError::Refused(refusal) => Refused::Gate {
+            run: id.clone(),
+            refusal,
+        }
+        .into(),
+        yunta_engine::ResolveGateError::Storage(error) => Failure::new(error).into(),
+        yunta_engine::ResolveGateError::Documents(run) => {
+            Failure::new(GateDocumentsUnread(run)).into()
         }
     }
 }
@@ -200,5 +200,31 @@ impl std::fmt::Display for GateDocumentsUnread {
 impl std::error::Error for GateDocumentsUnread {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         std::error::Error::source(self.0.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::ObjectProblem;
+    use yunta_core::sha256_hex;
+
+    use super::GateDocumentsUnread;
+    use crate::Failure;
+
+    /// A decision whose documents cannot be read names the object they lack
+    /// once: in the object's words, with no cause saying it again.
+    #[test]
+    fn a_decision_whose_documents_cannot_be_read_names_the_object_once() {
+        let run = yunta_engine::RunError::Object(ObjectProblem::Missing {
+            hash: sha256_hex(b"plan"),
+        });
+        let said = Failure::new(GateDocumentsUnread(Box::new(run))).said();
+        assert!(
+            said.starts_with(
+                "the documents the decision shows cannot be read: the run holds no object `"
+            ),
+            "{said}"
+        );
+        assert_eq!(said.matches("the run holds no object").count(), 1, "{said}");
     }
 }

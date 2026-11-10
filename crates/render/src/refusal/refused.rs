@@ -14,7 +14,9 @@ use yunta_core::check::CheckError;
 use yunta_core::diagnostic::Report;
 use yunta_core::events::{Claim, FailureMenu, ObjectProblem, Refusal};
 use yunta_core::inputs::InputsProblem;
-use yunta_core::refusal::{AnswersRefusal, CloseRefusal, GateRefusal, Unservable};
+use yunta_core::refusal::{
+    AnswersRefusal, CasesRefusal, CloseRefusal, GateRefusal, PackRefusal, SetupRefusal, Unservable,
+};
 use yunta_core::step::{Arg, NextStep, Reach};
 use yunta_core::{InvalidId, Pid, RunId, UnknownDocument};
 use yunta_replay::receipt::ReceiptError;
@@ -37,10 +39,10 @@ pub enum Refused {
         roots: Vec<String>,
         near: Option<String>,
     },
-    /// A reference several runs answer to, said as it was given, and every
-    /// run it could be.
+    /// A reference several runs answer to, what made it answer to them, and
+    /// every run it could be.
     AmbiguousRun {
-        said: String,
+        ambiguity: Ambiguity,
         candidates: Vec<Candidate>,
     },
     /// `last`, where the repository it is asked in has no run.
@@ -112,6 +114,35 @@ pub enum Refused {
     Unrunnable(Box<Unrunnable>),
     /// A document this binary does not show.
     UnknownDocument(UnknownDocument),
+    /// A pack command a pack, or the policy on packs, refuses.
+    Pack(Box<PackRefusal>),
+    /// Setting a repository up refuses a file or a name.
+    Setup(SetupRefusal),
+    /// A project's cases, none of which runs where they were looked for.
+    Cases(CasesRefusal),
+}
+
+/// What made a reference answer to several runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ambiguity {
+    /// Text a person typed that is part of each of their ids.
+    PartOfIds { typed: String },
+    /// `needs`, where each of them waits on a person.
+    SeveralNeedYou,
+}
+
+impl Ambiguity {
+    /// What the reference was, as the refusal opens with it, over
+    /// `candidates` runs.
+    fn said(&self, candidates: usize) -> String {
+        match self {
+            Ambiguity::PartOfIds { typed } => format!("`{typed}` is part of {candidates} ids"),
+            Ambiguity::SeveralNeedYou => format!(
+                "{} of this repository need you",
+                surco::text::counted(candidates, "run")
+            ),
+        }
+    }
 }
 
 /// A run a reference could mean, and what tells it apart from the others it
@@ -232,7 +263,10 @@ impl Refused {
                 &super::unrunnable(Arg::Given(refusal.workflow.clone())),
                 refusal.problems.len(),
             )),
-            Refused::AmbiguousRun { said, .. } => Some(name_one(said)),
+            Refused::AmbiguousRun {
+                ambiguity,
+                candidates,
+            } => Some(name_one(&ambiguity.said(candidates.len()))),
             _ => None,
         }
     }
@@ -246,9 +280,14 @@ impl Refused {
                 "no run is called `{run}`{}",
                 surco::text::near_miss(near.as_deref())
             ),
-            Refused::AmbiguousRun { said, candidates } => {
-                format!("{}:{}", name_one(said), one_per_line(candidates))
-            }
+            Refused::AmbiguousRun {
+                ambiguity,
+                candidates,
+            } => format!(
+                "{}:{}",
+                name_one(&ambiguity.said(candidates.len())),
+                one_per_line(candidates)
+            ),
             Refused::NoRunHere => super::words::no_run_here(),
             Refused::NoneNeedsYou => super::words::none_needs_you(),
             Refused::InvalidId(invalid) => invalid.to_string(),
@@ -295,6 +334,9 @@ impl Refused {
             ),
             Refused::Unrunnable(refusal) => unrunnable_said(refusal),
             Refused::UnknownDocument(unknown) => unknown.to_string(),
+            Refused::Pack(refusal) => super::words::pack(refusal),
+            Refused::Setup(refusal) => super::words::setup(refusal),
+            Refused::Cases(refusal) => super::words::cases(refusal),
         }
     }
 }

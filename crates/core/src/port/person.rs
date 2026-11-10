@@ -15,9 +15,11 @@
 //! concrete UI and never writes to the console itself); the MCP one is a
 //! `resolve_gate` tool, not built here.
 
-use crate::events::{Channel, GateWaitingPayload, HumanChoice};
-use crate::{Answer, QuestionsFile, Responder};
 use async_trait::async_trait;
+
+use crate::events::{Channel, GateWaitingPayload, HumanChoice};
+use crate::shown::ShownDocument;
+use crate::{Answer, QuestionsFile, Responder};
 
 /// What a decision is asked with, beside the escalation the log records:
 /// the documents the escalation shows, read from the run for the person
@@ -40,8 +42,6 @@ pub struct DecisionAsked<'a> {
     /// The mode the run follows.
     pub mode: &'a crate::ModeName,
 }
-
-use crate::shown::ShownDocument;
 
 /// One surface's reply to a `kind: questions` artifact:
 /// the answers plus which channel produced them and who answered — the

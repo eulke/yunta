@@ -13,7 +13,6 @@ use yunta_render::page::{History, Page, Stats};
 
 use yunta_core::{RunId, WorkflowName};
 
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, Answer, Mode};
@@ -94,9 +93,9 @@ pub(crate) async fn of_workflow(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
+    let project = shell.workspace().project()?;
 
-    let past = ctx.project.history(workflow_name).await;
+    let past = project.history(workflow_name).await;
     let history = past.summaries();
     // A person with no history to show is told so, and nothing else is
     // read: the findings are drawn from every past log, read against the

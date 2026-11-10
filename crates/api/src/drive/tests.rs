@@ -96,6 +96,7 @@ async fn chased() -> Chased {
             person: &AlwaysPromote,
             observer: Some(recorder.clone()),
         },
+        ambient: &project.workspace.env,
     };
     let parent = bench.run_id.clone();
     let chain = (parent.clone(), bench.manifest(), bench.tree(), report);

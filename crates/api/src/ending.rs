@@ -36,6 +36,7 @@ mod registered;
 use std::path::Path;
 use std::time::Duration;
 
+use surco::words::Standing;
 use yunta_core::events::{PauseReason, RunPhaseRaw};
 use yunta_core::pace::Pace;
 use yunta_core::process::signal::{signal_process, Liveness, Signal};
@@ -59,6 +60,14 @@ const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often a cancel reads the log again while it waits for the engine to
 /// register, and to record its terminal after the SIGINT.
 const ENGINE_SHUTDOWN_POLL: Duration = Duration::from_millis(200);
+
+/// A run closed for good: the word its log has it stand in after the close,
+/// and who closed it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClosedRun {
+    pub standing: Standing,
+    pub by: Responder,
+}
 
 impl OpenedRun<'_> {
     /// Cancels this run, whatever its log says it is doing, and answers how
@@ -89,7 +98,7 @@ impl OpenedRun<'_> {
 
     /// Closes this run for good, stopped and waiting on a person, as
     /// `cancelled` by `by`, or by the workspace's user marked unverified, and
-    /// answers who closed it. Refused when an engine drives it, its log says
+    /// answers the word the run stands in now and who closed it. Refused when an engine drives it, its log says
     /// it moves, or it is closed already. A run whose engine died is settled
     /// first, as a cancel settles one; its checkouts go back to the project's
     /// pool once it is closed.
@@ -98,7 +107,7 @@ impl OpenedRun<'_> {
         by: Option<&Responder>,
         remarks: &dyn Remarks,
         stop: &Stop,
-    ) -> Result<Responder, Error> {
+    ) -> Result<ClosedRun, Error> {
         let workspace = &self.project.workspace;
         // Resolved before anything is written: a short declared secret
         // refuses the close here, and the run stays as it is.
@@ -119,7 +128,16 @@ impl OpenedRun<'_> {
         .await
         .map_err(|error| self.unclosed(error))?;
         self.give_back(remarks, stop).await;
-        Ok(by)
+        // The word is the log's, read after the close: what every reader of
+        // the run says of it from now on.
+        let events = storage
+            .events_for_run(self.id.clone())
+            .await
+            .map_err(Failure::new)?;
+        let standing = self
+            .frame_of(&RunState::replay(&events), clock.now())
+            .standing;
+        Ok(ClosedRun { standing, by })
     }
 
     /// Stops a run whose log says it is moving: signals the engine it runs

@@ -16,14 +16,13 @@ pub(crate) mod follow;
 
 use std::path::PathBuf;
 
-use yunta_api::{OpenedRun, RunReading};
+use yunta_api::{OpenedRun, Project, RunReading};
 use yunta_core::shown::ShownDocument;
 use yunta_core::{NodeId, RunId};
 use yunta_render::escalation::Decision;
 use yunta_render::page::{Node, Page, Places, Run, RunScope};
 use yunta_replay::frame::{NodeFrame, RunFrame};
 
-use crate::context::Context;
 use crate::error::CliError;
 use crate::output::note;
 use crate::output::Outcome;
@@ -43,10 +42,10 @@ pub async fn status(
     (node, depth): (Option<&NodeId>, Depth),
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let ctx = Context::of(shell)?;
-    let reading = read(&ctx, run_id).await?;
+    let project = shell.workspace().project()?;
+    let reading = read(&project, run_id).await?;
     let documents = documents(&reading, output, node).await?;
-    let body = page_body(&ctx, &reading, &documents, (output, node, depth)).await?;
+    let body = page_body(&project, &reading, &documents, (output, node, depth)).await?;
     let answer = StatusAnswer {
         body,
         reading: &reading,
@@ -58,14 +57,14 @@ pub async fn status(
 /// word the run is called by on it: what a caller that exits with the run's
 /// code reads.
 pub(crate) async fn print_page(
-    ctx: &Context,
+    project: &Project,
     run_id: &RunId,
     look: &Look,
 ) -> Result<surco::words::Standing, CliError> {
-    let reading = read(ctx, run_id).await?;
+    let reading = read(project, run_id).await?;
     let documents = documents(&reading, Mode::Human, None).await?;
     let page = (Mode::Human, None, Depth::Glance);
-    let body = page_body(ctx, &reading, &documents, page).await?;
+    let body = page_body(project, &reading, &documents, page).await?;
     let answer = StatusAnswer {
         body,
         reading: &reading,
@@ -78,8 +77,8 @@ pub(crate) async fn print_page(
 /// know in a manifest a newer binary wrote is said first, because a reader
 /// acting on a manifest whose newer half is invisible to them should know
 /// that is what they are doing.
-async fn read<'p>(ctx: &'p Context, run_id: &RunId) -> Result<RunReading<'p>, CliError> {
-    let open = ctx.project.run(run_id).await?;
+async fn read<'p>(project: &'p Project, run_id: &RunId) -> Result<RunReading<'p>, CliError> {
+    let open = project.run(run_id).await?;
     note_unknown_keys(&open);
     Ok(open.reading().await?)
 }
@@ -89,11 +88,8 @@ async fn read<'p>(ctx: &'p Context, run_id: &RunId) -> Result<RunReading<'p>, Cl
 fn note_unknown_keys(open: &OpenedRun<'_>) {
     let manifest = &open.manifest;
     if !manifest.unknown.is_empty() {
-        note(format!(
-            "this run's manifest carries {} this binary does not know ({}): a newer yunta \
-             wrote it, and what it recorded there is not read here",
-            surco::text::counted(manifest.unknown.len(), "key"),
-            manifest.unknown_keys().join(", ")
+        note(yunta_render::caution::unread_manifest_keys(
+            &manifest.unknown_keys(),
         ));
     }
 }
@@ -123,7 +119,7 @@ enum Body<'a> {
 /// it shows. Every other reader gets the run's page, which is what its
 /// document is about.
 async fn page_body<'a>(
-    ctx: &'a Context,
+    project: &'a Project,
     reading: &'a RunReading<'a>,
     documents: &'a [ShownDocument],
     (output, node, depth): (Mode, Option<&NodeId>, Depth),
@@ -134,13 +130,13 @@ async fn page_body<'a>(
             run_id,
             node: find(run_id, &reading.frame, id)?,
             run_dir: &reading.run.dir,
-            cwd: &ctx.cwd,
-            home: ctx.env.home.as_deref(),
+            cwd: &project.workspace.dir,
+            home: project.workspace.env.home.as_deref(),
             documents,
             state: &reading.state,
         })),
         _ => Ok(Body::Run(Box::new(
-            run_page_for(ctx, reading, documents, (output, depth)).await,
+            run_page_for(project, reading, documents, (output, depth)).await,
         ))),
     }
 }
@@ -166,7 +162,7 @@ fn find<'a>(run_id: &RunId, frame: &'a RunFrame, id: &NodeId) -> Result<&'a Node
 /// gets the decision the run waits on, showing `documents`, and, at the depth
 /// that draws the run's story, the change each finished node's plan makes.
 async fn run_page_for<'a>(
-    ctx: &'a Context,
+    project: &'a Project,
     reading: &'a RunReading<'a>,
     documents: &'a [ShownDocument],
     (output, depth): (Mode, Depth),
@@ -196,8 +192,8 @@ async fn run_page_for<'a>(
             branch: &reading.branch,
             base_branch: &manifest.base_branch,
             isolation: manifest.isolation,
-            cwd: &ctx.cwd,
-            home: ctx.env.home.as_deref(),
+            cwd: &project.workspace.dir,
+            home: project.workspace.env.home.as_deref(),
         },
         decision,
         plans,
@@ -208,12 +204,12 @@ async fn run_page_for<'a>(
 /// `--full`, and, where it waits on a decision, each document the decision is
 /// about, whole, before it: a browser has the room a terminal does not.
 pub(crate) async fn page_for_a_browser(
-    ctx: &Context,
+    project: &Project,
     run_id: &RunId,
 ) -> Result<(Doc, PathBuf), CliError> {
-    let reading = read(ctx, run_id).await?;
+    let reading = read(project, run_id).await?;
     let documents = documents(&reading, Mode::Human, None).await?;
-    let page = run_page_for(ctx, &reading, &documents, (Mode::Human, Depth::Full))
+    let page = run_page_for(project, &reading, &documents, (Mode::Human, Depth::Full))
         .await
         .in_a_browser(reading.now);
     let doc = page.document(&surco::surface::Html.look());

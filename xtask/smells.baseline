@@ -23,6 +23,7 @@ mode_name_in_prod 0
 module_docs_over_60_lines 0
 numeric_const_without_reason 0
 parenthesized_plural_in_prod_strings 0
+process_read_below_the_shell 0
 prod_fns_over_100_lines 0
 prod_fns_over_50_lines 32
 reason_built_by_format 0

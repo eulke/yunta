@@ -3,6 +3,7 @@
 
 use super::*;
 use yunta_core::refusal::GateRefusal;
+use yunta_core::OptionId;
 use yunta_engine::ResolveGateError;
 
 #[tokio::test]
@@ -42,7 +43,7 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
     match err {
         ResolveGateError::Refused(GateRefusal::UnknownOption { chosen, declared }) => {
             assert_eq!(chosen, "nonexistent-option");
-            assert_eq!(declared, "retry, abort");
+            assert_eq!(declared, ["retry", "abort"].map(OptionId::from_static));
         }
         other => panic!("expected UnknownOption, got {other:?}"),
     }
