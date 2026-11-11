@@ -30,7 +30,7 @@ use crate::page::{FieldRow, Page, Unrunnable};
 /// about, where it looked, what a text it refused holds. Not a failure, which
 /// something below broke; a refusal is what is true of a run, a request or a
 /// workflow.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Refused {
     /// A run this machine has no record of, wherever it looked: `roots`, as
     /// a person reads a path, and the run it was one slip away from.

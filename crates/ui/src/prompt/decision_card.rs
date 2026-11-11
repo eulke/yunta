@@ -4,17 +4,13 @@
 //! comes out. No option names a command: the prompt is how one is chosen, and the
 //! commands are said where the run is parked.
 
-use std::collections::BTreeMap;
-
 use surco::components::{Card, CardBody, ChoiceRow, Choices, Legend};
 use surco::doc::Block;
 use surco::look::Look;
-use yunta_core::events::GateWaitingPayload;
 use yunta_core::OptionId;
-use yunta_render::escalation::Route;
 use yunta_render::prompt::{card, Escape};
 
-use super::{Answerable, Edit, Press, Stroke, TypedLine};
+use super::{Answerable, DecisionPut, Edit, Press, Stroke, TypedLine};
 
 /// The option a person chose on a decision's card, and the words it was said with. Not
 /// core's answer to a question, nor what an attention asks for.
@@ -36,6 +32,7 @@ pub enum Reply {
 }
 
 /// One option as the card holds it.
+#[derive(Debug, Clone)]
 struct Offered {
     id: OptionId,
     row: ChoiceRow,
@@ -44,18 +41,20 @@ struct Offered {
 }
 
 /// The words an option is being said with.
+#[derive(Debug, Clone)]
 struct Saying {
     field: TypedLine,
     refused: bool,
 }
 
 /// A decision being answered.
+#[derive(Debug, Clone)]
 pub struct DecisionCard {
+    /// The decision the card puts: what stands on its edge and under its question is
+    /// said from it, in the glyphs the card is drawn with.
+    put: DecisionPut,
     question: String,
-    edge: Option<String>,
-    about: Vec<String>,
     offered: Vec<Offered>,
-    routes: BTreeMap<OptionId, Route>,
     at: usize,
     saying: Option<Saying>,
     escape: Escape,
@@ -64,14 +63,11 @@ pub struct DecisionCard {
 }
 
 impl DecisionCard {
-    /// The card for `escalation`: its question, and every option it offers with what
-    /// it says and what it costs, the pointer on the first. `routes` says what
-    /// follows each option that leads somewhere.
-    pub fn new(
-        escalation: &GateWaitingPayload,
-        escape: Escape,
-        routes: BTreeMap<OptionId, Route>,
-    ) -> Self {
+    /// The card for the decision `put`: its question, and every option it offers with
+    /// what it says and what it costs, the pointer on the first, with what follows each
+    /// option that leads somewhere. Escape at the card does what `escape` says.
+    pub(crate) fn new(put: DecisionPut, escape: Escape) -> Self {
+        let escalation = &put.escalation;
         let offered = escalation
             .options()
             .iter()
@@ -91,10 +87,8 @@ impl DecisionCard {
             .collect();
         Self {
             question: yunta_render::escalation::claim_words(escalation),
-            edge: None,
-            about: Vec::new(),
             offered,
-            routes,
+            put,
             at: 0,
             saying: None,
             escape,
@@ -102,18 +96,15 @@ impl DecisionCard {
         }
     }
 
-    /// Sets what stands on the card's far edge, and what a reader needs to answer
-    /// under the question.
-    pub fn standing_on(mut self, edge: Option<String>, about: Vec<String>) -> Self {
-        self.edge = edge;
-        self.about = about;
-        self
-    }
-
     /// Offers the plan the decision is on, a key away.
     pub(crate) fn reading(mut self) -> Self {
         self.reads = true;
         self
+    }
+
+    /// The decision the card puts.
+    pub(crate) fn decision(&self) -> &DecisionPut {
+        &self.put
     }
 
     /// What Escape does at the card.
@@ -160,7 +151,7 @@ impl DecisionCard {
             },
             then: self
                 .pointed()
-                .and_then(|pointed| self.routes.get(&pointed.id))
+                .and_then(|pointed| self.put.routes.get(&pointed.id))
                 .map(|route| route.said(look.glyphs)),
         }
     }
@@ -262,10 +253,16 @@ impl Answerable for DecisionCard {
             None => self.choosing_body(look),
             Some(saying) => self.typing_body(saying, look),
         };
+        let put = &self.put;
         Block::Card(Card {
             question: self.question.clone(),
-            edge: self.edge.clone(),
-            about: self.about.clone(),
+            edge: card::edge(put.node.as_ref(), put.run(), look.glyphs),
+            about: card::about(
+                &put.escalation,
+                put.documents(),
+                put.changed.as_ref(),
+                look.glyphs,
+            ),
             body,
             legend: self.legend(),
         })

@@ -14,7 +14,7 @@ use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use yunta_core::step::{Arg, NextStep};
-use yunta_core::{InputSpec, Workflow};
+use yunta_core::Workflow;
 
 use super::Page;
 use crate::command;
@@ -25,6 +25,7 @@ use crate::command;
 /// the `list_workflows` control-plane tool answers with it as Markdown, so
 /// the two never drift. Given a project's storage, each workflow carries its
 /// prior estimation; a broken pack is named, never silently dropped.
+#[derive(Debug, Clone)]
 pub struct Catalog {
     /// Each installed pack that does not read, as its error says it.
     pub broken_packs: Vec<String>,
@@ -37,6 +38,7 @@ pub struct Catalog {
 
 /// One workflow the catalog offers, by the name a person runs it with, as
 /// its file read.
+#[derive(Debug, Clone)]
 pub struct OfferedWorkflow {
     pub name: String,
     pub workflow: Result<ReadableWorkflow, UnreadableWorkflow>,
@@ -44,12 +46,14 @@ pub struct OfferedWorkflow {
 
 /// A workflow that reads, and how its past runs usually went, when its
 /// history says.
+#[derive(Debug, Clone)]
 pub struct ReadableWorkflow {
     pub workflow: Workflow,
     pub usually: Option<yunta_replay::history::PriorEstimation>,
 }
 
 /// Why a workflow file the catalog offers does not read.
+#[derive(Debug, Clone)]
 pub enum UnreadableWorkflow {
     /// The file could not be read, as the error says.
     File(String),
@@ -160,20 +164,9 @@ fn input_fields(workflow: &Workflow, glyphs: surco::glyphs::Glyphs) -> Fields {
             format!(
                 "--input {input_name}={} ({}, {optionality}){description}",
                 glyphs.ellipsis(),
-                input_type_label(spec)
+                crate::inputs::type_label(spec)
             ),
         );
     }
     fields
-}
-
-fn input_type_label(spec: &InputSpec) -> &'static str {
-    match spec {
-        InputSpec::String { .. } => "string",
-        InputSpec::Number { .. } => "number",
-        InputSpec::Boolean { .. } => "boolean",
-        InputSpec::Enum { .. } => "enum",
-        InputSpec::Path { .. } => "path",
-        InputSpec::Document { .. } => "document",
-    }
 }

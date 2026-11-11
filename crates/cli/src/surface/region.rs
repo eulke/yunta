@@ -4,12 +4,9 @@
 //! node at work, and a footer that always says whether the run needs
 //! them.
 //!
-//! It is the one place that keeps what a session said: the last frame
-//! for each working node, which it lets go when the node stops working.
-//! A node yet to start keeps what it said too, since a follower hears a
-//! session off the run's socket and reads the node's start off the log, and
-//! the words can come first. A frame from another run is never drawn, so a
-//! child's words stay with the child.
+//! It is the one place on a terminal that keeps what a session said, by
+//! render's [`Heard`], and draws render's watched rows: the row that asks,
+//! each working node's rows, and the footer.
 //!
 //! It takes no alternate screen, no raw mode and no mouse capture, which
 //! is why the reader keeps their scrollback, their text selection, and a
@@ -24,7 +21,6 @@
 //! goes through the [`Scrollback`], which takes the region down, writes,
 //! and puts it back.
 
-use std::collections::HashMap;
 use std::io::Write;
 
 use indicatif::style::TemplateError;
@@ -34,9 +30,9 @@ use surco::line::Line;
 use surco::motion::Motion;
 use surco::paint::Paint;
 use yunta_core::port::Said;
-use yunta_core::{NodeId, RunId};
-use yunta_render::watched;
-use yunta_replay::frame::{NodeStanding, RunFrame};
+use yunta_core::RunId;
+use yunta_render::watched::{self, Heard};
+use yunta_replay::frame::RunFrame;
 
 use super::scrollback::Scrollback;
 use super::Screen;
@@ -78,10 +74,9 @@ pub(super) struct Region {
     /// Whether the window's title says a person is being asked.
     told: bool,
     /// What a session of each working node, or of one yet to start, said
-    /// last, by run and node.
-    /// Only a region keeps it, so nothing said reaches a surface that is
-    /// not a terminal.
-    said: HashMap<(RunId, NodeId), Said>,
+    /// last. Only a region keeps it, so nothing said reaches a surface
+    /// that is not a terminal.
+    heard: Heard,
 }
 
 impl Region {
@@ -114,7 +109,7 @@ impl Region {
             motion: Motion::default(),
             bell: false,
             told: false,
-            said: HashMap::new(),
+            heard: Heard::default(),
         })
     }
 
@@ -133,8 +128,7 @@ impl Region {
     /// Keeps what a session said, for the row of its node while the node
     /// works. The next redraw shows it.
     pub(super) fn hear(&mut self, said: Said) {
-        self.said
-            .insert((said.run_id.clone(), said.node_id.clone()), said);
+        self.heard.hear(said);
     }
 
     /// Redraws the region from `frame`, sending up the nodes that stopped
@@ -146,34 +140,16 @@ impl Region {
     /// its own terminal, as a process that follows the run reads it off the
     /// registry, the row says so instead.
     pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
-        let attention = match &frame.asking {
-            Some(asking) => watched::asked(asking, &self.look()),
-            None => watched::attention(frame, run_id, answerable, &self.look()),
-        }
-        .map(|line| self.fit(&line));
+        self.heard.kept_to(frame, run_id);
+        let rows = watched::rows(frame, run_id, answerable, &self.heard, &self.look());
+        let attention = rows.attention.map(|line| self.fit(&line));
         self.attend(attention);
-        let working = watched::working(frame);
-        // What a node that stopped working said, and what another run said,
-        // is let go: a node that works again says something new. A node yet
-        // to start keeps what it said until it works.
-        self.said.retain(|(run, node), _| {
-            run == run_id
-                && (working.iter().any(|working| &working.id == node) || yet_to_start(frame, node))
-        });
-        let rows: Vec<String> = working
-            .into_iter()
-            .flat_map(|node| {
-                let said = self.said.get(&(run_id.clone(), node.id.clone()));
-                watched::node_rows(frame, node, said, &self.look(), self.motion)
-            })
-            .map(|row| self.fit(&row))
-            .collect();
-        self.resize(rows.len());
-        for (bar, text) in self.body.iter().zip(rows) {
+        let nodes: Vec<String> = rows.nodes.iter().map(|row| self.fit(row)).collect();
+        self.resize(nodes.len());
+        for (bar, text) in self.body.iter().zip(nodes) {
             bar.set_message(text);
         }
-        self.footer
-            .set_message(self.fit(&watched::footer(frame, &self.look())));
+        self.footer.set_message(self.fit(&rows.footer));
     }
 
     /// Tells the window a person is being asked, as a prompt takes the terminal:
@@ -275,6 +251,7 @@ impl Region {
             glyphs: self.glyphs,
             paint: self.paint,
             width: crate::output::row_width(usize::from(self.screen.width())),
+            motion: self.motion,
         }
     }
 
@@ -314,14 +291,6 @@ impl Region {
 /// it, and the plain-text style.
 fn row(style: &ProgressStyle) -> ProgressBar {
     ProgressBar::no_length().with_style(style.clone())
-}
-
-/// Whether `frame` holds `node` and has not started it.
-fn yet_to_start(frame: &RunFrame, node: &NodeId) -> bool {
-    frame
-        .nodes
-        .iter()
-        .any(|held| &held.id == node && matches!(held.state, NodeStanding::ToGo))
 }
 
 #[cfg(test)]

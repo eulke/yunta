@@ -20,12 +20,13 @@ fn look(cells: usize) -> Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::exact(cells),
+        motion: surco::motion::Motion::Moves,
     }
 }
 
 /// What a person spot on `spot` reads in the pane of a terminal 80 cells wide, laid out at
 /// the pane's measure as the desk lays it out.
-fn read(reading: &Reading<'_>, spot: &Spot) -> Vec<String> {
+fn read(reading: &Reading, spot: &Spot) -> Vec<String> {
     let terminal = look(80);
     let measure = Look {
         width: Width::row(Desk::pane_cells(&terminal), None),
@@ -43,7 +44,7 @@ fn holds(rows: &[String], needle: &str) -> bool {
 }
 
 /// The rail as a person spot on `at` reads it.
-fn rail(reading: &Reading<'_>, at: usize) -> Vec<RailGroup> {
+fn rail(reading: &Reading, at: usize) -> Vec<RailGroup> {
     reading.rail(&Spot {
         at,
         view: View::Stop,
@@ -78,7 +79,7 @@ fn group<'a>(groups: &'a [RailGroup], title: &str) -> Option<&'a RailGroup> {
 #[test]
 fn the_change_is_what_the_author_wrote() {
     let review = greeting();
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     let spot = Spot {
         at: 0,
         view: View::Stop,
@@ -103,7 +104,7 @@ fn the_change_is_what_the_author_wrote() {
 #[test]
 fn a_card_has_no_tests_and_its_proof_has_them_whole() {
     let review = global_packs();
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     let mut spot = Spot {
         at: 1,
         view: View::Stop,
@@ -149,7 +150,7 @@ fn a_card_has_no_tests_and_its_proof_has_them_whole() {
 #[test]
 fn what_was_decided_shows_one_decision_open() {
     let review = greeting();
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     assert_eq!(reading.choices(), 1, "one was made for the person");
     let spot = Spot {
         at: 0,
@@ -171,7 +172,7 @@ fn what_was_decided_shows_one_decision_open() {
     assert!(holds(&rows, "left out"), "{}", rows.join("\n"));
 
     let packs = global_packs();
-    let reading = Reading::of(&packs, Vec::new());
+    let reading = Reading::of(packs.clone(), Vec::new());
     assert_eq!(reading.choices(), 4);
     let spot = Spot { choice: 2, ..spot };
     let rows = read(&reading, &spot);
@@ -225,7 +226,7 @@ fn a_card_says_what_the_plan_is_about_and_how_big_it_is() {
 #[test]
 fn the_desk_matches_its_goldens() {
     let review: PlanReview = global_packs();
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     let foot = |[moves, p, d]: [&str; 3]| DeskFoot {
         question: "Plan and its tests registered. Approve?".to_string(),
         row: FootRow::Options {

@@ -108,6 +108,7 @@ pub(crate) fn stderr_look() -> Look {
         glyphs: glyphs(),
         paint: stderr_paint(),
         width: stderr_width(),
+        motion: crate::surface::TerminalEnv::settled().motion,
     }
 }
 
@@ -138,6 +139,7 @@ pub(crate) fn stdout_look() -> Look {
         glyphs: glyphs(),
         paint: stdout_paint(),
         width: stdout_width(),
+        motion: crate::surface::TerminalEnv::settled().motion,
     }
 }
 

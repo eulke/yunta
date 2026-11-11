@@ -38,6 +38,8 @@
 //! - What leaves the terminal: `blocks` and `published`.
 //! - What a prompt says: `prompt`, what Escape does where it opens, the keys a
 //!   list answers to, and what a command says with no terminal to ask on.
+//! - What the application's screens say around their pages: `screen`, the trail
+//!   every screen starts at and each stage's keys.
 //! - What a reader is told to type: `command`, every command written once,
 //!   and `declare`, what to declare in a project's config.
 //! - What a machine reads: `document`, every versioned JSON document of a
@@ -77,6 +79,7 @@ pub mod progress;
 pub mod prompt;
 pub mod published;
 pub mod refusal;
+pub mod screen;
 pub mod spend;
 pub mod start;
 pub mod state;

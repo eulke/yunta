@@ -19,13 +19,12 @@ use tokio::sync::mpsc;
 use yunta_core::events::StoredEvent;
 use yunta_core::pace::Pace;
 use yunta_core::port::Said;
-use yunta_core::{Clock, Manifest, RunId, Seq};
+use yunta_core::{Clock, RunId};
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::registry::Engine;
-use yunta_replay::RunState;
 
 use super::listening::Listening;
-use super::RunRegistry;
+use super::{FollowedRun, RunRegistry};
 use crate::event_log::{EventLog, PromotionChain};
 use crate::run::read_manifest;
 use crate::{Error, Project, Stop};
@@ -48,7 +47,7 @@ const SUCCESSOR_WAIT: Duration = Duration::from_secs(30);
 
 /// What a look at a followed run found. Not what a run's observer is handed in the
 /// process that drives it, which sees each step as it is taken.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RunNews {
     /// What came past the last event read, in the log's order.
     Events(Vec<StoredEvent>),
@@ -56,12 +55,9 @@ pub enum RunNews {
     Engine(Engine),
     /// What one of the run's sessions said.
     Said(Said),
-    /// The run a promotion handed the work to, followed from here on, with its log as
-    /// it stands.
-    Successor {
-        run: RunId,
-        events: Vec<StoredEvent>,
-    },
+    /// The run a promotion handed the work to, followed from here on, as its log
+    /// stands.
+    Successor(Box<FollowedRun>),
     /// The run no longer moves.
     Stopped,
     /// Its log says it moves, and the engine its registry names is gone.
@@ -74,9 +70,12 @@ pub struct Following {
     log: EventLog,
     clock: Arc<dyn Clock>,
     chain: PromotionChain,
-    run: Followed,
-    /// The process driving the run, as its registry said when last read.
-    engine: Engine,
+    /// The run followed now, as far as it has been read.
+    followed: FollowedRun,
+    /// The directory the run followed now keeps its manifest and documents in.
+    dir: PathBuf,
+    /// The registry the run followed now keeps beside it.
+    registry: RunRegistry,
     /// When the registry was last read: it is read again once a second has passed.
     registry_read_at: DateTime<Utc>,
     listening: Listening,
@@ -85,18 +84,6 @@ pub struct Following {
     news: VecDeque<RunNews>,
     /// Whether the run stopped or stalled, after which nothing more is handed back.
     ended: bool,
-}
-
-/// The run a following is on, as far as it has read it.
-struct Followed {
-    id: RunId,
-    dir: PathBuf,
-    manifest: Manifest,
-    registry: RunRegistry,
-    /// Every event read, so a log that stops making sense is derived whole, which is
-    /// what says where it broke.
-    events: Vec<StoredEvent>,
-    state: RunState,
 }
 
 /// How following a run ends, read off its frame.
@@ -113,22 +100,16 @@ impl Project {
         let log = self.event_log().await?;
         let chain = PromotionChain::starting_at(&log, id.clone()).await?;
         let registry = open.registry();
-        let engine = registry.engine();
+        let followed =
+            FollowedRun::read(open.id, open.manifest.doc, open.events, registry.engine());
         let (ear, heard) = mpsc::unbounded_channel();
-        let run = Followed {
-            id: open.id,
-            dir: open.dir,
-            manifest: open.manifest.doc,
-            registry,
-            state: RunState::replay(&open.events),
-            events: open.events,
-        };
         Ok(Following {
             log,
             clock: Arc::clone(&self.workspace.clock),
             chain,
-            run,
-            engine,
+            followed,
+            dir: open.dir,
+            registry,
             registry_read_at: self.workspace.clock.now(),
             listening: Listening::handing_to(ear),
             heard,
@@ -159,34 +140,20 @@ impl Following {
         }
     }
 
-    /// The run followed now: the one asked for, or the last a promotion handed it to.
-    pub fn run(&self) -> &RunId {
-        &self.run.id
+    /// The run followed now, as far as it has been read: the one asked for, or the
+    /// last a promotion handed the work to.
+    pub fn followed(&self) -> &FollowedRun {
+        &self.followed
     }
 
     /// The directory the run followed now keeps its manifest and documents in.
     pub fn dir(&self) -> &Path {
-        &self.run.dir
-    }
-
-    /// The manifest the run followed now froze.
-    pub fn manifest(&self) -> &Manifest {
-        &self.run.manifest
-    }
-
-    /// Every event of the run followed now read so far, in the log's order.
-    pub fn events(&self) -> &[StoredEvent] {
-        &self.run.events
-    }
-
-    /// The state the events read so far derive.
-    pub fn state(&self) -> &RunState {
-        &self.run.state
+        &self.dir
     }
 
     /// The registry the run followed now keeps beside it.
     pub fn registry(&self) -> &RunRegistry {
-        &self.run.registry
+        &self.registry
     }
 
     /// The log the run is read from.
@@ -194,26 +161,27 @@ impl Following {
         &self.log
     }
 
-    /// The run's frame now, from what was read and the engine as last read.
+    /// The run's frame now, by the following's clock, from what was read and the
+    /// engine as last read.
     pub fn frame(&self) -> RunFrame {
-        self.frame_at(self.clock.now())
+        self.followed.frame(self.clock.now())
     }
 
     /// One look at the run: what came past the last event read, the registry when it is
     /// a second old, the socket it names, and whether the run still moves. A run that
     /// closed promoted is followed onto its successor.
     async fn look(&mut self, stop: &Stop) -> Result<(), Error> {
-        let past = self.log.events_after(&self.run.id, self.run.last()).await?;
+        let past = self
+            .log
+            .events_after(&self.followed.run, self.followed.last())
+            .await?;
         if !past.is_empty() {
-            for event in &past {
-                self.run.take(event);
-            }
-            self.news.push_back(RunNews::Events(past));
+            self.found(RunNews::Events(past));
         }
         let now = self.clock.now();
         self.read_registry(now);
-        self.listening.on(self.engine.words());
-        let frame = self.frame_at(now);
+        self.listening.on(self.followed.engine.words());
+        let frame = self.followed.frame(now);
         let promoted = matches!(frame.phase, RunPhase::Promoted { .. });
         match ending(&frame) {
             None => {}
@@ -234,10 +202,9 @@ impl Following {
             return;
         }
         self.registry_read_at = now;
-        let engine = self.run.registry.engine();
-        if engine != self.engine {
-            self.engine = engine.clone();
-            self.news.push_back(RunNews::Engine(engine));
+        let engine = self.registry.engine();
+        if engine != self.followed.engine {
+            self.found(RunNews::Engine(engine));
         }
     }
 
@@ -263,25 +230,22 @@ impl Following {
     /// Follows `successor` from here on, beside the run it was promoted from, since the
     /// engine that promotes creates it under the runs root it works in.
     async fn go_on_with(&mut self, successor: RunId) -> Result<(), Error> {
-        let dir = self.run.dir.with_file_name(successor.as_str());
+        let dir = self.dir.with_file_name(successor.as_str());
         let manifest = read_manifest(&yunta_engine::run_dir::manifest_path(&dir))?.doc;
         let events = self.log.events(&successor).await?;
-        let registry = self.run.registry.of_successor(&successor);
-        self.engine = registry.engine();
+        let registry = self.registry.of_successor(&successor);
+        let followed = FollowedRun::read(successor, manifest, events, registry.engine());
+        self.dir = dir;
+        self.registry = registry;
         self.registry_read_at = self.clock.now();
-        self.run = Followed {
-            id: successor.clone(),
-            dir,
-            manifest,
-            registry,
-            state: RunState::replay(&events),
-            events: events.clone(),
-        };
-        self.news.push_back(RunNews::Successor {
-            run: successor,
-            events,
-        });
+        self.found(RunNews::Successor(Box::new(followed)));
         Ok(())
+    }
+
+    /// `news` folded into the run followed, and kept to hand back.
+    fn found(&mut self, news: RunNews) {
+        self.followed.took(&news);
+        self.news.push_back(news);
     }
 
     /// Hands back `news` as the last.
@@ -289,34 +253,6 @@ impl Following {
         self.listening.on(None);
         self.news.push_back(news);
         self.ended = true;
-    }
-
-    fn frame_at(&self, now: DateTime<Utc>) -> RunFrame {
-        RunFrame::of(
-            &self.run.id,
-            &self.run.manifest.workflow,
-            &self.run.state,
-            None,
-            &self.engine,
-            now,
-        )
-    }
-}
-
-impl Followed {
-    /// The seq of the last event read; a run is never followed before its first event
-    /// is on the log.
-    fn last(&self) -> Seq {
-        self.events.last().map_or(Seq::FIRST, |event| event.seq)
-    }
-
-    /// Folds one event into the state, deriving the whole log again when it does not
-    /// fold, which is what marks where the log broke.
-    fn take(&mut self, event: &StoredEvent) {
-        self.events.push(event.clone());
-        if self.state.apply(event).is_err() {
-            self.state = RunState::replay(&self.events);
-        }
     }
 }
 

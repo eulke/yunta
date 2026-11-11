@@ -11,7 +11,8 @@ const NEXT: &str = "Now I add a test for the empty input.";
 /// something else, the row says that instead.
 ///
 /// Reached by: `crates/cli/src/surface/feed.rs`,
-/// `crates/cli/src/surface/painter.rs`, `crates/cli/src/surface/region.rs`
+/// `crates/cli/src/surface/painter.rs`, `crates/cli/src/surface/region.rs`,
+/// `crates/render/src/watched/heard.rs`
 #[test]
 fn attached_run_shows_what_its_session_says_under_its_node() {
     let root = tempfile::tempdir().unwrap();
@@ -124,7 +125,7 @@ fn a_follower_shows_the_row_the_attached_run_shows() {
 /// does on a run `--detach` has just handed over or one being resumed,
 /// listens to the socket once the run's registry names it.
 ///
-/// Reached by: `crates/cli/src/surface/region.rs`
+/// Reached by: `crates/cli/src/surface/region.rs`, `crates/render/src/watched/heard.rs`
 #[test]
 fn a_follower_listens_once_the_registry_names_a_socket() {
     let root = tempfile::tempdir().unwrap();

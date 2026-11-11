@@ -31,7 +31,7 @@ pub struct Typed {
 /// A line break kept inside a paste is one of those characters, so what
 /// was pasted is still recoverable when the answer is assembled; it is
 /// drawn as the space it becomes.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TypedLine {
     characters: Vec<char>,
     cursor: usize,

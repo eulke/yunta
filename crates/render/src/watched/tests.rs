@@ -12,6 +12,7 @@ fn look(cells: usize) -> Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: surco::look::Width::row(cells, None),
+        motion: Motion::Moves,
     }
 }
 
@@ -39,8 +40,8 @@ fn the_live_view_indents_a_groups_children_under_it() {
         yunta_replay::frame::NodeFrame::sample(&NodeId::from("review-a"), NodeStanding::ToGo);
     child.group = Some(group.id.clone());
 
-    let top = drawn(node_rows(&frame, &group, None, &look(120), Motion::Moves));
-    let under = drawn(node_rows(&frame, &child, None, &look(120), Motion::Moves));
+    let top = drawn(node_rows(&frame, &group, None, &look(120)));
+    let under = drawn(node_rows(&frame, &child, None, &look(120)));
     assert!(
         !top[0].starts_with(' '),
         "a top-level node starts at the margin: {top:?}"
@@ -67,7 +68,7 @@ fn a_running_task_no_session_works_is_said_to_be_checking_its_criteria() {
         },
     ];
 
-    let rows = drawn(node_rows(&frame, &node, None, &look(120), Motion::Moves));
+    let rows = drawn(node_rows(&frame, &node, None, &look(120)));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "tasks running: T001 (checking criteria), T002"),
@@ -89,7 +90,11 @@ fn at_work(events: u64, age: u64) -> NodeFrame {
 /// The first row of `node`, as a reader sees it.
 fn first_row(node: &NodeFrame, motion: Motion) -> String {
     let frame = RunFrame::sample(&RUN);
-    drawn(node_rows(&frame, node, None, &look(120), motion)).remove(0)
+    let look = Look {
+        motion,
+        ..look(120)
+    };
+    drawn(node_rows(&frame, node, None, &look)).remove(0)
 }
 
 #[test]
@@ -109,7 +114,7 @@ fn a_node_that_falls_quiet_says_for_how_long_and_its_spin_goes_out() {
 
     let frame = RunFrame::sample(&RUN);
     let tone = |age| {
-        let rows = node_rows(&frame, &at_work(3, age), None, &look(120), Motion::Moves);
+        let rows = node_rows(&frame, &at_work(3, age), None, &look(120));
         rows.first()
             .and_then(|row| row.spans().first())
             .map(|span| span.tone)
@@ -182,7 +187,7 @@ fn a_node_row_says_what_its_calls_came_to() {
         yunta_replay::frame::NodeFrame::sample(&NodeId::from("implement"), NodeStanding::ToGo);
     node.activity = activity();
 
-    let rows = drawn(node_rows(&frame, &node, None, &look(120), Motion::Moves));
+    let rows = drawn(node_rows(&frame, &node, None, &look(120)));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "read ×4 · edit crates/cli/src/pack.rs · run cargo test"),
@@ -197,17 +202,36 @@ fn a_row_with_no_room_lets_its_oldest_calls_go() {
         yunta_replay::frame::NodeFrame::sample(&NodeId::from("implement"), NodeStanding::ToGo);
     node.activity = activity();
 
-    let rows = drawn(node_rows(&frame, &node, None, &look(50), Motion::Moves));
+    let rows = drawn(node_rows(&frame, &node, None, &look(50)));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "edit crates/cli/src/pack.rs · run cargo test"),
         "{rows:?}"
     );
-    let rows = drawn(node_rows(&frame, &node, None, &look(20), Motion::Moves));
+    let rows = drawn(node_rows(&frame, &node, None, &look(20)));
     assert!(
         rows.iter().any(|row| row.trim() == "run cargo test"),
         "what it does now is what stays: {rows:?}"
     );
+}
+
+/// The ribbon names each node over its stretch, and plows the running node's stretch a
+/// cell for each event it has had only where the view moves.
+#[test]
+fn the_ribbon_plows_the_running_node_only_where_the_view_moves() {
+    let frame = RunFrame {
+        nodes: vec![at_work(7, 0)],
+        ..RunFrame::sample(&RUN)
+    };
+    let moving = ribbon(&frame, Motion::Moves);
+    let names: Vec<&str> = moving
+        .stretches
+        .iter()
+        .map(|stretch| stretch.name.as_str())
+        .collect();
+    assert_eq!(names, ["implement"]);
+    assert_eq!(moving.events, Some(7));
+    assert_eq!(ribbon(&frame, Motion::Still).events, None);
 }
 
 /// A run in `phase`, with `prior` as what its workflow's history

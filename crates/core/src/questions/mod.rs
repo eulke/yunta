@@ -60,7 +60,7 @@ pub struct QuestionsFile {
 // Strings deliberately, not a typed enum per answer kind: the artifact is
 // what a following node's session reads, and text is the only shape every
 // consumer shares.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Answer {
     pub id: QuestionId,
     pub value: String,

@@ -71,7 +71,7 @@ async fn a_run_that_waits_on_no_questions_is_refused_as_one_that_waits_on_no_dec
         .await;
     let project = project_of(&bench);
     let open = project.run(&bench.run_id).await.unwrap();
-    let refused = open.waiting_questions().await.err().expect("no questions");
+    let refused = open.waiting_questions().await.expect_err("no questions");
     assert!(
         matches!(refused, Error::Refused(Refused::NoDecision { .. })),
         "{refused}"

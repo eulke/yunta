@@ -1,6 +1,6 @@
 //! What a surface needs to know about the stream it is drawn on: the
-//! characters it may draw, the paint it gets, and how many cells a line
-//! may take on it.
+//! characters it may draw, the paint it gets, how many cells a line may
+//! take on it, and whether what moves on it turns.
 //!
 //! The width is measured, not assumed: a terminal says how wide it is,
 //! and a reader who wants another width says so with `COLUMNS`, which
@@ -19,27 +19,35 @@
 //! own edge bounds it, so a block drawn there takes those cells and no more.
 
 use crate::glyphs::Glyphs;
+use crate::motion::Motion;
 use crate::paint::Paint;
 use crate::width::LINE_WIDTH;
 
 /// How one stream's lines are drawn: the characters they are drawn
-/// with, the paint they get and the cells they may take.
+/// with, the paint they get, the cells they may take, and whether what
+/// moves on them turns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Look {
     pub glyphs: Glyphs,
     pub paint: Paint,
     pub width: Width,
+    /// Whether a running mark's spin and a ribbon's plow turn with the
+    /// events that arrive: still for a reader who asked a view to stand
+    /// still, and for a page that is read rather than watched.
+    pub motion: Motion,
 }
 
 impl Look {
     /// The look of a line with nothing but its words: ASCII, unpainted,
-    /// at the width a line has off a terminal — what a test compares a
-    /// surface against, and what a reader with no terminal gets.
+    /// at the width a line has off a terminal, standing still — what a
+    /// test compares a surface against, and what a reader with no terminal
+    /// gets.
     pub fn plain() -> Self {
         Look {
             glyphs: Glyphs::Ascii,
             paint: Paint::Plain,
             width: Width::of(None, None),
+            motion: Motion::Still,
         }
     }
 
@@ -53,6 +61,7 @@ impl Look {
             },
             paint: environment.paint,
             width: Width::of(Some(environment.width), None),
+            motion: Motion::Moves,
         }
     }
 }

@@ -126,6 +126,7 @@ fn held(screen: &Screen) -> BTreeSet<String> {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::of(Some(120), None),
+        motion: crate::motion::Motion::Moves,
     });
     let mut strings = screen.trail.clone();
     strings.extend(screen.tally.iter().map(Count::said));

@@ -11,6 +11,7 @@ fn look(cells: usize) -> Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::of(Some(cells), None),
+        motion: crate::motion::Motion::Moves,
     }
 }
 

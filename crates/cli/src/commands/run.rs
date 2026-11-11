@@ -155,9 +155,9 @@ pub(crate) async fn admitted<'p>(
         None => asked.adapter.map(|id| RunAdapter::Named(id.clone())),
     };
     let request = RunRequest {
-        workflow: asked.workflow_path,
+        workflow: asked.workflow_path.to_path_buf(),
         inputs,
-        mode: asked.mode,
+        mode: asked.mode.cloned(),
         adapter,
         hermetic: asked.hermetic,
     };

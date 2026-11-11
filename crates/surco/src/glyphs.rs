@@ -184,6 +184,14 @@ impl Glyphs {
         }
     }
 
+    /// What marks a row a person picked for an act that takes several.
+    pub fn picked(self) -> char {
+        match self {
+            Self::Unicode => '■',
+            Self::Ascii => '+',
+        }
+    }
+
     /// What says the keys that move up and down a list: `↑↓ move`.
     pub fn up_down(self) -> &'static str {
         match self {

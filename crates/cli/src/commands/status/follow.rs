@@ -39,14 +39,15 @@ pub(crate) async fn follow(
         let standing = super::print_page(&project, run_id, look).await?;
         return Ok(crate::output::exit(standing));
     }
-    let started = following.events().first().map(|event| event.timestamp);
+    let followed = following.followed();
+    let started = followed.events.first().map(|event| event.timestamp);
     let prior = project
-        .prior_estimation(following.manifest(), &frame.mode, started)
+        .prior_estimation(&followed.manifest, &frame.mode, started)
         .await;
     let surface = Surface::open(
         SurfaceEnv {
             run_id,
-            manifest: following.manifest(),
+            manifest: &followed.manifest,
             prior: prior.as_ref(),
             log: following.log(),
             clock: std::sync::Arc::clone(&project.workspace.clock),
@@ -54,7 +55,7 @@ pub(crate) async fn follow(
             glyphs: crate::output::glyphs(),
             engine: EngineReading::Registry(following.registry().clone()),
         },
-        following.events().to_vec(),
+        followed.events.clone(),
     );
     let ended = drawn(&mut following, &shell.stop(), &surface).await;
     surface.close().await;
@@ -95,8 +96,13 @@ async fn drawn(
     let mut ended = Ended::Stopped;
     while let Some(news) = following.next(stop).await? {
         match news {
-            RunNews::Events(events) | RunNews::Successor { events, .. } => {
+            RunNews::Events(events) => {
                 for event in events {
+                    surface.deliver(event).await;
+                }
+            }
+            RunNews::Successor(successor) => {
+                for event in successor.events {
                     surface.deliver(event).await;
                 }
             }
@@ -121,9 +127,10 @@ async fn closing(
     project: &Project,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let (run_id, manifest, run_dir) = (following.run(), following.manifest(), following.dir());
-    let bound = following
-        .state()
+    let followed = following.followed();
+    let (run_id, manifest, run_dir) = (&followed.run, &followed.manifest, following.dir());
+    let bound = followed
+        .state
         .run
         .checkout()
         .map(std::path::Path::to_path_buf);

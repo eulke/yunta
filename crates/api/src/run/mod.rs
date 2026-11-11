@@ -23,7 +23,7 @@ use yunta_storage::Storage;
 
 use crate::{Error, Failure, Project};
 
-pub use follow::{Following, RunNews, RunRegistry};
+pub use follow::{FollowedRun, Following, RunNews, RunRegistry};
 pub use reading::RunReading;
 pub use reference::RunRef;
 pub use stats::StatsReading;

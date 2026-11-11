@@ -401,3 +401,40 @@ fn a_rail_summary_says_its_calls_and_model() {
 
 mod calls;
 mod promotion;
+
+/// The chronicle as a document logs every moment that says anything, in order, each on
+/// the line a pipe writes for it: the run's own clock, its mark, then its words.
+#[test]
+fn the_chronicle_told_logs_each_moment_on_the_line_a_pipe_writes() {
+    let events: Vec<StoredEvent> = [(0, "exit 1"), (5, "exit 2")]
+        .into_iter()
+        .enumerate()
+        .map(|(at, (seconds, cause))| StoredEvent {
+            seq: (at as u64 + 1).into(),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: None,
+            timestamp: chrono::DateTime::UNIX_EPOCH + chrono::Duration::seconds(seconds),
+            body: EventBody::Known(rerouted(cause)),
+        })
+        .collect();
+    let moments = derive_chronicle(&events);
+    let doc = told(
+        &moments,
+        &RunId::from("01JQ0000000000000000000000"),
+        &Look::plain(),
+    );
+    let [Block::Lines(lines)] = doc.blocks() else {
+        panic!("one run of lines, nothing failed");
+    };
+    let written: Vec<String> = lines
+        .iter()
+        .map(|line| surco::paint::Paint::Plain.line(line))
+        .collect();
+    assert_eq!(
+        written,
+        [
+            "[0s] @ run rerouted to `fix-lint`: exit 1",
+            "[5s] @ run rerouted to `fix-lint`: exit 2"
+        ]
+    );
+}

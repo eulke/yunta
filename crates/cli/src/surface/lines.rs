@@ -15,9 +15,9 @@
 
 use std::io::Write;
 
-use surco::figures::duration;
 use surco::glyphs::Glyphs;
 use surco::look::Look;
+use surco::motion::Motion;
 use surco::paint::Paint;
 use yunta_core::RunId;
 use yunta_render::chronicle;
@@ -71,11 +71,12 @@ impl Lines {
             glyphs,
             paint: self.paint,
             width: crate::output::stderr_width(),
+            // One line per moment, nothing redrawn: nothing on a pipe turns.
+            motion: Motion::Still,
         };
-        let said = self.paint.line(&chronicle::line(moment, &look));
         write_line(
             &mut self.out,
-            &format!("[{}] {said}", duration(moment.elapsed)),
+            &self.paint.line(&chronicle::logged(moment, &look)),
         );
         for line in crate::output::blocks_lines(&chronicle::evidence(moment, run), &look) {
             write_line(&mut self.out, &self.paint.line(&line));

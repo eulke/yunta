@@ -31,3 +31,11 @@ pub enum Stroke {
     /// Nothing the line acts on.
     Ignored,
 }
+
+impl Stroke {
+    /// Whether the stroke adds text to the line being typed: a character, or a line
+    /// break inside pasted text.
+    pub fn types(self) -> bool {
+        matches!(self, Stroke::Insert(_) | Stroke::PastedBreak)
+    }
+}

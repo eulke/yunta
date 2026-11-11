@@ -2,7 +2,9 @@
 //! started by an independent `yunta resume`, or a parked run handed on to one,
 //! without waiting for it. No new execution path: the detached child is an
 //! ordinary resume, exactly what a person would run by hand, started from the
-//! workspace's own binary in the workspace's directory.
+//! workspace's own binary in the workspace's directory, with the workspace's
+//! environment: the child reads at its edge what this workspace was given, never
+//! what this process happens to hold.
 //!
 //! The child's log goes to `run.dir/scratch/detached.log`, never silently
 //! discarded; its process group is its own, so a signal to the caller's group
@@ -98,6 +100,12 @@ pub(crate) async fn resume_detached(
         .stdin(std::process::Stdio::null())
         .stdout(log)
         .stderr(log_err);
+    for (name, value) in workspace.env.handed_on() {
+        match value {
+            Some(value) => child.env(name, value),
+            None => child.env_remove(name),
+        };
+    }
     #[cfg(unix)]
     child.process_group(0);
     let mut child = child.spawn().map_err(failed)?;

@@ -30,6 +30,9 @@ pub enum Escape {
     KeepsDefault,
     /// A choice with no detected value: Escape takes the first, the plainest of them.
     TakesTheFirst,
+    /// A question of several a person is taken through: Escape goes back to where they
+    /// came from.
+    GoesBack,
 }
 
 impl Escape {
@@ -45,6 +48,7 @@ impl Escape {
             Escape::LeavesWaiting => "leaves the run waiting",
             Escape::KeepsDefault => "keeps the detected default",
             Escape::TakesTheFirst => "takes the first",
+            Escape::GoesBack => "goes back",
         }
     }
 }

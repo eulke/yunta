@@ -127,8 +127,19 @@ pub(super) fn runs(runs: &Runs) -> String {
 /// One run as a table row, its cells in the order a reader answers them.
 fn run_row(run: &RunLine) -> String {
     let mark = run.standing.mark();
+    let pointer = match run.pointed {
+        true => format!(
+            "{} ",
+            text::esc(&crate::glyphs::Glyphs::Unicode.pointer().to_string())
+        ),
+        false => String::new(),
+    };
+    let picked = match run.marked {
+        true => ", picked",
+        false => "",
+    };
     let state = format!(
-        "{} {}",
+        "{pointer}{} {}{picked}",
         text::mark(mark),
         toned(Tone::of(mark), run.standing.word())
     );

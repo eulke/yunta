@@ -3331,12 +3331,16 @@ dependencies = [
 name = "yunta-ui"
 version = "0.0.5"
 dependencies = [
+ "chrono",
+ "tempfile",
  "tokio",
  "yunta-api",
  "yunta-core",
  "yunta-render",
  "yunta-replay",
  "yunta-surco",
+ "yunta-testkit",
+ "yunta-testkit-core",
 ]
 
 [[package]]

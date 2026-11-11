@@ -340,6 +340,7 @@ fn markdown_says_every_word_the_terminal_does() {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::of(Some(120), None),
+        motion: crate::motion::Motion::Moves,
     };
     let terminal = words(&paint(&every_block(), &look));
     let markdown = words(&Markdown.draw(&every_block()));

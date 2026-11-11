@@ -17,6 +17,7 @@ fn look() -> Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: surco::look::Width::row(120, None),
+        motion: Motion::Still,
     }
 }
 
@@ -48,7 +49,7 @@ fn working() -> NodeFrame {
 
 fn rows(node: &NodeFrame, said: Option<&Said>) -> Vec<String> {
     let frame = RunFrame::sample(&RUN);
-    node_rows(&frame, node, said, &look(), Motion::Still)
+    node_rows(&frame, node, said, &look())
         .iter()
         .map(|row| Paint::Plain.line(row))
         .collect()

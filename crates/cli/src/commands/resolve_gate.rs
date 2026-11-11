@@ -13,24 +13,20 @@
 //! no option to name: the round is put to the person at this terminal as the
 //! run itself asks it, and the answers are recorded and handed on alike.
 
-use std::collections::BTreeMap;
-
 use surco::look::Look;
 use yunta_api::{OpenedRun, Project, WaitingDecision, WaitingQuestions};
-use yunta_core::events::{ChangesCountedPayload, DecisionOn, GateWaitingPayload, HumanChoice};
-use yunta_core::shown::ShownDocument;
+use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::step::{Choice, NextStep};
 use yunta_core::{OptionId, Responder, RunId};
 use yunta_render::command;
 use yunta_render::command::Reader;
 use yunta_render::document::GateAnswerDocument;
-use yunta_render::escalation::Route;
 use yunta_render::page::{GateAnswered, Page, QuestionsAnswered, Resolution, RoundAnswer};
 use yunta_render::prompt::Escape;
 use yunta_render::refusal::Refused;
-use yunta_ui::prompt::Opens;
+use yunta_ui::prompt::{DecisionPut, Opens};
 
-use crate::ask::{Ask, Console, NoAnswer};
+use crate::ask::{Console, NoAnswer};
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, show, Answer, Mode};
@@ -238,40 +234,6 @@ pub(super) enum Chosen {
     Not(Resolution),
 }
 
-/// A decision a run waits on, with what it shows.
-pub(super) struct Waiting {
-    pub(super) on: DecisionOn,
-    pub(super) escalation: GateWaitingPayload,
-    pub(super) shown: Vec<ShownDocument>,
-    routes: BTreeMap<OptionId, Route>,
-    changed: Option<ChangesCountedPayload>,
-    called: String,
-}
-
-/// The decision `run_id` waits on, with what it shows and what the run
-/// changed, as the menu a person picks from is drawn: refused, by the API,
-/// when the run waits on none.
-pub(super) async fn waiting_of(project: &Project, run_id: &RunId) -> Result<Waiting, CliError> {
-    let open = project.run(run_id).await?;
-    let WaitingDecision {
-        on,
-        escalation,
-        shown,
-        state,
-    } = open.waiting_decision().await?;
-    let workflow = &open.manifest.doc.workflow;
-    let routes =
-        yunta_render::escalation::routes(&escalation, workflow, state.run.left_out(), on.node());
-    Ok(Waiting {
-        on,
-        escalation,
-        shown,
-        routes,
-        changed: state.current_change().cloned(),
-        called: yunta_render::state::called(&workflow.name, state.run.mode()),
-    })
-}
-
 /// What a gate answer did: the document a program reads, and the page a
 /// person reads.
 pub(crate) struct ResolveGateAnswer {
@@ -319,7 +281,7 @@ impl Answer for ResolveGateAnswer {
 /// lists the command that chooses each option, so the next invocation
 /// is one copied line.
 async fn chosen(project: &Project, run_id: &RunId) -> Result<Chosen, CliError> {
-    let waiting = waiting_of(project, run_id).await?;
+    let waiting = project.run(run_id).await?.waiting_decision().await?;
     let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
         return Err(off_terminal(run_id, &waiting.escalation));
     };
@@ -332,19 +294,11 @@ pub(super) fn chosen_on(
     console: &Console,
     project: &Project,
     run_id: &RunId,
-    waiting: &Waiting,
+    waiting: &WaitingDecision,
     opens: Opens,
 ) -> Result<Chosen, CliError> {
-    let ask = Ask {
-        escalation: &waiting.escalation,
-        shown: Some((run_id, &waiting.shown)),
-        changed: waiting.changed.as_ref(),
-        routes: waiting.routes.clone(),
-        node: waiting.on.node(),
-        called: Some(waiting.called.clone()),
-        opens,
-    };
-    match crate::ask::decide(console, &project.workspace.env, ask) {
+    let put = DecisionPut::waiting(run_id, waiting);
+    match crate::ask::decide(console, &project.workspace.env, &put, opens) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => Ok(Chosen::Not(Resolution::Declined)),
         Err(NoAnswer::Interrupted) => Ok(Chosen::Not(Resolution::Interrupted)),

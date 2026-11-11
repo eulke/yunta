@@ -23,6 +23,7 @@ use crate::components::Screen;
 use crate::doc::Doc;
 use crate::glyphs::Glyphs;
 use crate::look::{Look, Width};
+use crate::motion::Motion;
 use crate::paint::Paint;
 use crate::surface::Surface;
 
@@ -50,12 +51,14 @@ impl Html {
         screen::screen(screen)
     }
 
-    /// The look a document is built with for a page.
+    /// The look a document is built with for a page, which is read rather
+    /// than watched, so nothing on it turns.
     pub fn look(&self) -> Look {
         Look {
             glyphs: GLYPHS,
             paint: Paint::Plain,
             width: Width::of(Some(CELLS), None),
+            motion: Motion::Still,
         }
     }
 }

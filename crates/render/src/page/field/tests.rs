@@ -67,6 +67,8 @@ fn field_page<'a>(
         here: true,
         storage: std::path::Path::new("/home/me/.yunta"),
         depth,
+        pointed: None,
+        marked: &[],
     }
 }
 
@@ -292,4 +294,34 @@ fn every_word_a_run_can_be_called_by_has_a_group() {
         .map(|word| FieldGroup::of(word, false))
         .collect();
     assert_eq!(groups.len(), Standing::ALL.len());
+}
+
+/// Where a person moves through the field, the run a key acts on carries the pointer and
+/// the runs picked for an act that takes several carry the picked mark; a field only
+/// read carries neither.
+#[test]
+fn the_run_pointed_at_and_the_ones_picked_are_said_on_their_rows() {
+    let rows = vec![
+        row("01AAAAAAAAAAAAAAAAAAAAAAAA", FieldGroup::Stopped, 60),
+        row("01BBBBBBBBBBBBBBBBBBBBBBBB", FieldGroup::Stopped, 30),
+    ];
+    let picked = [RunId::from_static("01BBBBBBBBBBBBBBBBBBBBBBBB")];
+    let field = Field {
+        pointed: Some(&rows[0].frame.run_id),
+        marked: &picked,
+        ..field_page(&rows, &[], Depth::Glance)
+    };
+    let look = Look::plain();
+    let drawn = Terminal::on(look).draw(&field.document(&look));
+    let row_of = |handle: &str| {
+        drawn
+            .lines()
+            .find(|line| line.contains(handle))
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert!(row_of("AAAAAA").starts_with("* "), "{drawn}");
+    assert!(row_of("BBBBBB").starts_with(" +"), "{drawn}");
+    let read = render(rows.clone());
+    assert!(!read.contains("* ") && !read.contains(" +"), "{read}");
 }

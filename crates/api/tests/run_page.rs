@@ -98,8 +98,7 @@ async fn a_node_the_run_does_not_declare_is_refused_with_the_name_it_is_nearest_
     let refused = open
         .node_page(&NodeId::from("aprove-plan"), &Kept::default())
         .await
-        .err()
-        .expect("no such node");
+        .expect_err("no such node");
     let Error::Refused(Refused::NoSuchNode { declared, .. }) = &refused else {
         panic!("refused as no such node: {refused}");
     };

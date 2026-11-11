@@ -12,10 +12,15 @@
 use surco::components::PaneLaid;
 use surco::doc::Block;
 use surco::look::Look;
-use yunta_render::page::desk::Reading;
+use yunta_render::escalation::claim_words;
+use yunta_render::page::desk::{self, Reading};
+use yunta_render::prompt::Escape;
 
 use super::plan_desk::Leaving;
-use super::{Answerable, Asked, DecisionCard, Left, PickedOption, PlanDesk, Press, Reply, Stroke};
+use super::{
+    Answerable, Asked, DecisionCard, DecisionPut, Left, PickedOption, PlanDesk, Press, Reply,
+    Stroke,
+};
 
 /// What a decision opens on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,30 +33,53 @@ pub enum Opens {
 
 /// The one of a decision's two prompts in front, to be held. Not where a decision
 /// opens ([`Opens`]), which is where it stood first.
-pub enum InFront<'d, 'a> {
+pub enum InFront<'d> {
     /// The card, answered with one key.
     TheCard(&'d mut DecisionCard),
     /// The desk of the plan the decision is on.
-    ThePlan(&'d mut PlanDesk<'a>),
+    ThePlan(&'d mut PlanDesk),
 }
 
 /// A decision being answered: its card, and the plan it is on when it is on one.
-pub struct Deciding<'a> {
+#[derive(Debug, Clone)]
+pub struct Deciding {
     card: DecisionCard,
-    plan: Option<Plan<'a>>,
+    plan: Option<Plan>,
 }
 
 /// The plan a decision is on: the desk it is read at, what the decision opened on, and
 /// whether the plan is in front of the card.
-struct Plan<'a> {
-    desk: PlanDesk<'a>,
+#[derive(Debug, Clone)]
+struct Plan {
+    desk: PlanDesk,
     opens: Opens,
     in_front: bool,
 }
 
-impl<'a> Deciding<'a> {
+impl Deciding {
+    /// The decision `put` puts, opening on `opens`, Escape at its card doing what
+    /// `escape` says: its card, with the plan behind it where it shows one with a place
+    /// to stand on.
+    pub fn put(put: &DecisionPut, opens: Opens, escape: Escape) -> Self {
+        let reading = put
+            .shown
+            .as_ref()
+            .and_then(|(run, documents)| desk::reading(documents, run));
+        let asked = Asked {
+            question: claim_words(&put.escalation),
+            node: put.node.as_ref().map(ToString::to_string),
+            run: put.run().map(|run| run.handle().to_string()),
+            called: put.called.clone(),
+        };
+        let card = DecisionCard::new(put.clone(), escape);
+        match reading {
+            Some(reading) => Deciding::on_plan(card, reading, asked, opens),
+            None => Deciding::new(card),
+        }
+    }
+
     /// The decision on `card` alone, with no plan behind it.
-    pub fn new(card: DecisionCard) -> Self {
+    pub(crate) fn new(card: DecisionCard) -> Self {
         Self { card, plan: None }
     }
 
@@ -59,7 +87,12 @@ impl<'a> Deciding<'a> {
     /// by `asked`, opening on `opens`. The card offers reading the plan, and the desk
     /// lists the card's options; Escape at the desk goes back to the card, or, for a
     /// person who came to read the plan, does what it does at the card.
-    pub fn on_plan(card: DecisionCard, reading: Reading<'a>, asked: Asked, opens: Opens) -> Self {
+    pub(crate) fn on_plan(
+        card: DecisionCard,
+        reading: Reading,
+        asked: Asked,
+        opens: Opens,
+    ) -> Self {
         let card = card.reading();
         let leaving = match opens {
             Opens::TheCard => Leaving::ToTheCard,
@@ -77,7 +110,7 @@ impl<'a> Deciding<'a> {
     }
 
     /// The one in front, to be held.
-    pub fn in_front(&mut self) -> InFront<'_, 'a> {
+    pub fn in_front(&mut self) -> InFront<'_> {
         match self.plan.as_mut() {
             Some(Plan {
                 desk,
@@ -123,6 +156,16 @@ impl<'a> Deciding<'a> {
         }
     }
 
+    /// The decision put to the person.
+    pub fn decision(&self) -> &DecisionPut {
+        self.card.decision()
+    }
+
+    /// Whether the plan stands in front of the card.
+    pub fn plan_in_front(&self) -> bool {
+        self.desk_in_front().is_some()
+    }
+
     /// The plan has no room where the decision is held: the card stands in front.
     pub fn plan_unshown(&mut self) {
         if let Some(plan) = self.plan.as_mut() {
@@ -131,7 +174,7 @@ impl<'a> Deciding<'a> {
     }
 
     /// The desk, while the plan is in front.
-    fn desk_in_front(&self) -> Option<&PlanDesk<'a>> {
+    fn desk_in_front(&self) -> Option<&PlanDesk> {
         self.plan
             .as_ref()
             .filter(|plan| plan.in_front)
@@ -139,7 +182,7 @@ impl<'a> Deciding<'a> {
     }
 }
 
-impl Answerable for Deciding<'_> {
+impl Answerable for Deciding {
     type Answer = PickedOption;
 
     /// A stroke goes to the one in front, and what it comes to turns the decision.

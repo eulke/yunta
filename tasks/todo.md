@@ -899,16 +899,18 @@ Its groups, each green before the next: the values; watching; deciding; starting
 - An `Outcome` or `News` for a ticket the state let go changes nothing.
 - `render::screen` holds the first words a screen says: the signpost's trail.
 
+**Found in its turn:** The state stands on no stage until it knows where it is (`Option<Stage>`), and where learning it fails its screen says what stopped it and leaving is what is left; `Ticket` is the state's own, minted in order, with no constructor a surface can call. `yunta-ui` depends on `chrono` directly, as render and the API do, for the instant `opened` and `Input::Time` carry. The late-answer test answers `true` first, so a late `false`, taken, would put the signpost on screen. Each test was seen red with its rule broken.
+
 **Fails first:** `crates/ui/tests/state.rs`:
 - opening asks where it stands;
 - a late outcome is dropped;
 - outside a repository the screen is the signpost.
 
 **Acceptance criteria:**
-- [ ] `State` is `Clone`; the three tests pass through `State` alone.
+- [x] `State` is `Clone`; the three tests pass through `State` alone.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui`
+- [x] Tests pass: `cargo test -p yunta-ui`
 
 **Dependencies:** Checkpoint B
 
@@ -926,15 +928,17 @@ Its groups, each green before the next: the values; watching; deciding; starting
 - **`let_go(ticket)`** trips that ticket's stop and drops what the performer holds for it.
 - `Operation::InRepository` is carried out first. Each later task adds its operations here.
 
+**Found in its turn:** With `InRepository` the only operation, nothing it asks can be refused: what the test holds is a config that does not read, which comes back as `Outcome::Failed` in the API's words; the first operation that refuses brings its test. The performer passes no remarks until an operation says some, and `let_go` is first held by the run stage's following (Task 37). The test's workspace has a `YUNTA_HOME` and an org layer of its own and a fixed `PATH`, so nothing of the machine's is read.
+
 **Fails first:** `crates/ui/tests/performer.rs`, against a workspace in a temporary directory:
 - `InRepository` answers;
 - a refused operation comes back as render's refusal.
 
 **Acceptance criteria:**
-- [ ] The performer reads nothing of its process: the workspace is the test's.
+- [x] The performer reads nothing of its process: the workspace is the test's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test performer`
+- [x] Tests pass: `cargo test -p yunta-ui --test performer`
 
 **Dependencies:** Task 32
 
@@ -956,13 +960,15 @@ Its groups, each green before the next: the values; watching; deciding; starting
   - every screen draws with `Html` and `Markdown`;
   - every palette row is a step its stage takes, spelled as `command::line` spells it.
 
+**Found in its turn:** The walk answers a piece of work with each outcome recorded for it in every state that waits on it, so an outcome is `Clone`, and with it render's `Refused` and the two types it held that were not, `Unrunnable` and replay's `ReceiptError`. The state says the work it waits on (`State::waiting_on`), which the walk dedups by beside the screen. The palette's rows are held once the palette is built (Task 55). The walk was seen red with a stage made to panic on `Tab`, naming `opened`, the answer and the stroke.
+
 **Fails first:** a stage that panics on a stroke, made to for the run, is found by the walk with the strokes that reach it.
 
 **Acceptance criteria:**
-- [ ] The walk covers the signpost and finishes in under a minute; it grows with each stage.
+- [x] The walk covers the signpost and finishes in under a minute; it grows with each stage.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test walk`
 
 **Dependencies:** Task 33
 
@@ -976,13 +982,15 @@ Its groups, each green before the next: the values; watching; deciding; starting
 - **`crates/ui/tests/support/mod.rs` drives a `State` and a `Performer` until no ticket is pending:** `drive(state, performer, strokes) -> State`.
 - **`crates/cli/tests/interface/mod.rs` does the same where the work spawns Yunta,** with the workspace's binary `CARGO_BIN_EXE_yunta` and the mock adapter.
 
+**Found in its turn:** How a request is carried out is the performer's, once, for every surface and harness: `Performer::take` starts work under its ticket in a task of its own, stops work let go, and hands back what only a surface does, a page or leaving. Each harness's `drive` is the loop around it; the CLI's lives in `tests/interface.rs`, the root its stage groups sit beside, as `console_interaction.rs` holds its own, its workspace running this build's `yunta`. `tests/support` is shared by several binaries of `yunta-ui`, so it allows what one of them leaves unused, as the engine's `common` does. Each harness has a test driving the signpost to quiet and to `Leave`.
+
 **Fails first:** none: harnesses, first used in Task 36.
 
 **Acceptance criteria:**
-- [ ] Both drive the signpost to quiet.
+- [x] Both drive the signpost to quiet.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui`, `cargo test -p yunta --test interface`
+- [x] Tests pass: `cargo test -p yunta-ui`, `cargo test -p yunta --test interface`
 
 **Dependencies:** Task 34
 
@@ -991,7 +999,7 @@ Its groups, each green before the next: the values; watching; deciding; starting
 **Estimated scope:** S
 
 ### Group check: the values
-- [ ] The suite's groups green; the walk covers the signpost.
+- [x] The suite's groups green; the walk covers the signpost.
 
 ### Task 36: the field
 
@@ -1011,11 +1019,13 @@ Its groups, each green before the next: the values; watching; deciding; starting
 - `crates/ui/tests/field.rs`: marking and closing two runs asks one confirmation naming both, then `Operation::Close` with both;
 - `crates/cli/tests/interface/field.rs`: two mock runs closed, the field read again.
 
+**Found in its turn:** The pointer and the picks are the field's own: render's `Field` takes the run pointed at and the runs picked and says them on their rows, Surco's `RunLine` draws them (a pointer, and `■`, `+` in ASCII), and the page says the order it lists runs in (`Field::listed`), which the pointer moves along. The state asks no work it already waits on, and a reading asked again lets go the one of its kind under way (`Operation::reads`); without that the walk grows without end. The walk goes breadth first, keeps a state once it is new, and keys the work a state waits on by kind, since it answers every piece of work of a kind with the same recordings: 2,459 states in about 4 s, and a panic set at full depth with a run picked is found with the inputs that reach it. Opening the run pointed at and going to what needs a person bind with the run stage (Task 37). Render's field page keeps its row in `page/field/row.rs`. The CLI harness's workspace takes the state root the testkit hands the binary, so the runs the binary starts are the field's.
+
 **Acceptance criteria:**
-- [ ] The walk covers the field at every reach and depth.
+- [x] The walk covers the field at every reach and depth.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test field --test walk`, `cargo test -p yunta --test interface`
+- [x] Tests pass: `cargo test -p yunta-ui --test field --test walk`, `cargo test -p yunta --test interface`
 
 **Dependencies:** Group check: the values
 
@@ -1041,11 +1051,13 @@ Its groups, each green before the next: the values; watching; deciding; starting
 - `crates/ui/tests/run_stage.rs`: news of events grows the chronicle;
 - `crates/cli/tests/interface/run.rs`: a mock run followed to its end, and a promotion onto its successor, as `status_follow/edges` makes one.
 
+**Found in its turn:** The run a following reads is the API's `FollowedRun`: the manifest it froze, every event read, the state they derive and its engine. The following folds each piece of news into it, and an interface keeps a copy and folds the same news by the same `took`; `RunNews::Successor` carries the successor whole. Render owns what a watched run shows: the line a pipe writes for a moment (`chronicle::logged`), the chronicle as a document (`chronicle::told`), what the sessions said last (`watched::Heard`, from the CLI's region), the rows (`watched::rows`) and the ribbon (`watched::ribbon`); the CLI's region and pipe draw through them, their tests unchanged. A stage opens over another and goes back to it (`Want::Open`, `Want::Back`), letting go the readings it waits on, and work is let go by what it is (`Want::LetGo`). A piped follower writes nothing for the log it attached to, while the stage keeps the run's whole story: the follower's lines close the stage's chronicle, word for word. Enter opens the run pointed at and `n` the one waiting on the person; the field is read again on return. Surco's `Look` carries motion: the watched rows and the ribbon turn as the look they are drawn with says, a page read rather than watched (plain, Markdown, HTML, a pipe) stands still, and the CLI's looks carry what `YUNTA_MOTION` asked, so the stage turns its marks as its surface's reader asked. The walk records news beside outcomes: 2,651 states in about 4 s.
+
 **Acceptance criteria:**
-- [ ] The run stage's chronicle says each moment in the words `status --follow` writes through a pipe.
+- [x] The run stage's chronicle says each moment in the words `status --follow` writes through a pipe.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test run_stage`, `cargo test -p yunta --test interface`
+- [x] Tests pass: `cargo test -p yunta-ui --test run_stage`, `cargo test -p yunta --test interface`
 
 **Dependencies:** Task 36
 
@@ -1069,11 +1081,13 @@ Its groups, each green before the next: the values; watching; deciding; starting
 - a node picked shows its page and stops following;
 - a run asking at its terminal offers only stopping.
 
+**Found in its turn:** A pointer moves along the run's nodes (`j`, `k`); Enter picks the node pointed at, stops following and shows its page in place of the run's, and Esc goes back to the run's page. An act is bound to a key only where `RunFrame::actions` offers it, read with the decision the run's page says it stopped on: `c` stops and `x` closes after a confirmation, `r` goes on and reads the run again, and `w` opens the child a run waits on over it. Answering, the receipt, verifying and the page for a browser are offered by the decision and evidence stages. The legend says each bound act in render's words for its effect (`run_legend`), and a run that comes back into view follows again and reads its page or its node's again. The node page travels as an outcome, so render's `Node` is `Clone`. The walk reaches node pages too: 4,449 states in about 10 s.
+
 **Acceptance criteria:**
-- [ ] Every key the run stage binds is a step of `RunFrame::actions`, or moves within the stage.
+- [x] Every key the run stage binds is a step of `RunFrame::actions`, or moves within the stage.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test run_stage --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test run_stage --test walk`
 
 **Dependencies:** Task 37
 
@@ -1082,7 +1096,7 @@ Its groups, each green before the next: the values; watching; deciding; starting
 **Estimated scope:** M
 
 ### Group check: watching
-- [ ] The suite's groups green; the walk covers the signpost, the field and a run.
+- [x] The suite's groups green; the walk covers the signpost, the field and a run.
 
 ### Task 39: a gate, decided
 
@@ -1097,11 +1111,21 @@ Its groups, each green before the next: the values; watching; deciding; starting
 - `crates/ui/tests/decision_stage.rs`: reading turns to the desk, and a number picked there decides;
 - `crates/cli/tests/interface/decision.rs`: a parked gate decided, and the run resumed detached.
 
+**Found in its turn:**
+- **A decision travels as a value.** Render's desk `Reading` and `AlsoShown` own the plan and the documents they read, so `PlanDesk` and `Deciding` carry no lifetime and are `Clone`, as the state is.
+- **One value puts a decision, wherever it was read.** `prompt::DecisionPut` holds the escalation, its documents, the change, the routes, the node and the workflow and mode; `DecisionPut::waiting` puts it from the API's `WaitingDecision`, and `DecisionPut::asked` from what the engine driving a run asks with. The card holds it and says its edge and the lines under its question in the glyphs it is drawn with. `Deciding::put` builds the card and the plan behind it. The CLI's `Ask` is gone, and `resolve-gate`, `review` and a run's own prompt put their decisions from the same value.
+- **The waiting decision.** `WaitingDecision` carries the routes, the change and the workflow and mode its menu is drawn from, in place of the run's state, so the CLI and the application read one decision.
+- **Opening a decision from a run.** The run stage opens it with `a` where the run stopped on a menu (the step its attention row names) and with `p` where `RunFrame::actions` offers reading the plan; its acts moved to `stage/run/acts.rs`. The desk takes the screen while the plan is in front, and what a surface laid out reaches it through `Input::Laid`. `State::typing` says when a field is open, for a surface's pastes.
+- **A detached resume stands where the workspace stands.** It inherited the process's environment, not the workspace's `Env`, so a resume handed on from a workspace given its own environment never found its run. `Env::handed_on`, the reverse of `Env::of_vars`, hands the child the workspace's environment; in a shell they are the same.
+- **The card is `resolve-gate`'s.** Every line the application's card draws on an 80-column terminal is on the screen `resolve-gate` holds; a card built with another Escape fails that.
+- **The walk.** It tries strokes only where a state waits on at most one piece of work, and types nothing into an open field (`Stroke::types`). With every key the stages bind, it reaches the decision in 6,292 states in about 10 s.
+- **Files over 500 lines.** `config/env.rs`'s tests stand in `env/tests.rs`, and the desk's finding of a plan among a decision's documents in `desk/among.rs`.
+
 **Acceptance criteria:**
-- [ ] The card's legend, words and refusals are the CLI's `resolve-gate`'s, drawn as blocks.
+- [x] The card's legend, words and refusals are the CLI's `resolve-gate`'s, drawn as blocks.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test decision_stage`, `cargo test -p yunta --test interface`
+- [x] Tests pass: `cargo test -p yunta-ui --test decision_stage`, `cargo test -p yunta --test interface`
 
 **Dependencies:** Group check: watching
 
@@ -1117,11 +1141,17 @@ Its groups, each green before the next: the values; watching; deciding; starting
 
 **Fails first:** `crates/cli/tests/interface/questions.rs`: a parked round answered, and the run resumed with the answers on its log.
 
+**Found in its turn:**
+- **Reading the round first.** The decision stage reads what a run waits on as `resolve-gate` reads it with no option: its round first, and its decision where the refusal says it is parked on no round. A person who came to read the plan reads the decision alone.
+- **One rule for a waiting round.** `yunta_api::waiting_round` names the node a run's round waits at, for the API's `waiting_questions` and for the run stage, which offers `a` on a run parked on a round as on one parked on a menu.
+- **What a round is.** It is `prompt::Round`, the one the attached run asks, `Clone` now: its words and the refusals it says under a question are the run's. Nothing is recorded until its last answer, and a round of no questions is answered with nothing. `Operation::Answer` records the answers on `Channel::Tty`, the channel of every surface the application has today; core's `Answer` is `Eq`, so an operation compares whole.
+- **The walk.** The runs it decides and answers stand in worlds of their own, since every run the field lists multiplies where the pointer and the picks stand: 2,426 states in about 4 s, the decision and the round among them.
+
 **Acceptance criteria:**
-- [ ] The round's words and refusals are the attached run's.
+- [x] The round's words and refusals are the attached run's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test interface`
+- [x] Tests pass: `cargo test -p yunta --test interface`
 
 **Dependencies:** Task 39
 
@@ -1130,7 +1160,7 @@ Its groups, each green before the next: the values; watching; deciding; starting
 **Estimated scope:** S
 
 ### Group check: deciding
-- [ ] The suite's groups green; the walk covers the decision stage on a gate, a plan and a round.
+- [x] The suite's groups green; the walk covers the decision stage on a gate, a plan and a round.
 
 ### Task 41: the first run
 
@@ -1141,11 +1171,17 @@ Its groups, each green before the next: the values; watching; deciding; starting
 
 **Fails first:** `crates/ui/tests/first_run.rs`: a set-up repository with no runs opens here, and typed words reach the start stage.
 
+**Found in its turn:**
+- **Where the application opens.** It asks the repository it works in as far as Yunta goes: `yunta_api::Repository`, none, never set up or set up, read by `Project::repository`, which takes the place of `in_a_repository` for `yunta` alone too; the repository's config layer has one path, `repository_layer`, which `init` and the layers read. A set-up repository with no run opens on the first run.
+- **While the runs are read.** The screen says so, and that Yunta was never set up in the repository where it was not; the walk told the two apart only once the screen did.
+- **A stage that takes another's place.** `Want::Replace` puts a stage in the place of the one the person is at, what that one opened over staying under it. The first run gives way to the field once its repository has a run, and a started run's stage takes the start's place.
+- **The question.** It is a `LineAsked` over render's `Catalog`, whose types are `Clone`. Enter takes what was typed to the start stage.
+
 **Acceptance criteria:**
-- [ ] The walk covers the first run.
+- [x] The walk covers the first run.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test first_run --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test first_run --test walk`
 
 **Dependencies:** Group check: deciding
 
@@ -1167,11 +1203,17 @@ Its groups, each green before the next: the values; watching; deciding; starting
 - a mock workflow started detached and followed to its end;
 - an input left empty, refused as `yunta run` refuses it.
 
+**Found in its turn:**
+- **The request is a value.** `RunRequest` owns what it asks with and compares whole, so `Operation::Start` carries the request `yunta run`, the control plane, a case and a doctor probe build alike; core's `RunAdapter` is `Eq`.
+- **The questions.** The workflow is picked off the catalog, the request typed at the first run stands in the input the workflow declares as its request, each other input is asked on a `LineAsked` in the workflow's order (one left empty is left out, as an unset `--input` is), the mode where the workflow declares any, and the adapter, none first, which leaves it to the runners. Escape goes back (`Escape::GoesBack`); a refusal is said and the questions are asked again.
+- **What admission says.** The words and weight of every remark are `yunta_ui::remark`'s, which the CLI's `remarks.rs` says through now, unchanged: the start stage shows what admission said under the questions. An input's type label is render's `inputs::type_label`, for the catalog and the question alike.
+- **The walk.** A list is narrowed by one character at most, since its filter takes characters though a paste answers nothing there: 2,507 states in about 4 s, the first run and a start among them.
+
 **Acceptance criteria:**
-- [ ] What `Operation::Start` asks is the `RunRequest` `yunta run` builds from the same choices.
+- [x] What `Operation::Start` asks is the `RunRequest` `yunta run` builds from the same choices.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test interface`, `cargo test -p yunta-ui --test walk`
+- [x] Tests pass: `cargo test -p yunta --test interface`, `cargo test -p yunta-ui --test walk`
 
 **Dependencies:** Task 41
 
@@ -1180,7 +1222,7 @@ Its groups, each green before the next: the values; watching; deciding; starting
 **Estimated scope:** M
 
 ### Group check: starting
-- [ ] The suite's groups green; the walk covers every stage built so far.
+- [x] The suite's groups green; the walk covers every stage built so far.
 
 ### Task 43: Checkpoint C's proof
 
@@ -1191,11 +1233,13 @@ Its groups, each green before the next: the values; watching; deciding; starting
 
 **Fails first:** none: a measurement.
 
+**Found in its turn:** The captures against Checkpoint B's differ in nine views, each saying the version of Claude Code installed on this machine, which moved from 2.1.319 to 2.1.322 between the two: the machine's, not the code's. The suite ran 4,691, 4,650 at Checkpoint B; `env.rs`'s tests ran under `config::env::tests` once they moved beside it. The release is 66,080 bytes over Checkpoint B's. The walk reaches 2,507 states, each a screen with the kinds of work it waits on.
+
 **Acceptance criteria:**
-- [ ] Nothing the CLI prints changed in this phase.
+- [x] Nothing the CLI prints changed in this phase.
 
 **Verification:**
-- [ ] Manual check: `checkpoint-c.txt` read whole.
+- [x] Manual check: `checkpoint-c.txt` read whole.
 
 **Dependencies:** Group check: starting
 
@@ -1204,7 +1248,7 @@ Its groups, each green before the next: the values; watching; deciding; starting
 **Estimated scope:** S
 
 ### Checkpoint C: watching, deciding, starting
-- [ ] The walk covers the signpost, the field, a run, a decision and a start; each works end to end against its sandbox.
+- [x] The walk covers the signpost, the field, a run, a decision and a start; each works end to end against its sandbox.
 - [ ] The user reviews; the phase commits.
 
 ## Phase 4: every other stage, the dialogs, and the proof

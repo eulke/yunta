@@ -35,7 +35,7 @@ pub enum FieldReach {
 /// runs that leaves to other projects.
 ///
 /// Not render's field page, which a person reads drawn from it.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct FieldReading {
     pub rows: Vec<FieldRow>,
     /// The runs it can name but not read.
@@ -91,11 +91,33 @@ impl Project {
         Ok(field)
     }
 
-    /// Whether this project is rooted inside a git repository: what decides
-    /// whether its field is that repository's runs.
-    pub async fn in_a_repository(&self, stop: &Stop) -> Result<bool, Error> {
-        Ok(Here::of(self, stop).await?.is_some())
+    /// The repository this project works in, as far as Yunta goes: what decides
+    /// whether its field is that repository's runs, and whether Yunta was set up
+    /// in it.
+    pub async fn repository(&self, stop: &Stop) -> Result<Repository, Error> {
+        if Here::of(self, stop).await?.is_none() {
+            return Ok(Repository::Absent);
+        }
+        let layer = crate::project::repository_layer(&self.workspace.dir);
+        match tokio::fs::try_exists(&layer).await {
+            Ok(true) => Ok(Repository::SetUp),
+            Ok(false) => Ok(Repository::NeverSetUp),
+            Err(unread) => Err(Failure::new(unread).into()),
+        }
     }
+}
+
+/// The repository a project works in, as far as Yunta goes. Not the repository's own
+/// state, which nothing here reads beyond its being one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Repository {
+    /// The project works in no git repository.
+    Absent,
+    /// A git repository Yunta was never set up in: it holds no config layer of
+    /// Yunta's.
+    NeverSetUp,
+    /// A git repository Yunta was set up in.
+    SetUp,
 }
 
 impl FieldReading {

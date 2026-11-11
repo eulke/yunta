@@ -1,8 +1,10 @@
 //! See [`super`]. Following a run while it moves: the [`Following`] that hands back
-//! what comes as [`RunNews`], at one pace for every interface; the registry its engine
-//! keeps beside it, which names the process driving it and the socket its sessions'
-//! words are heard on; and those words. Owned, so a task drawing the run holds its own.
+//! what comes as [`RunNews`], at one pace for every interface; the [`FollowedRun`] that
+//! news folds into, which an interface keeps a copy of; the registry its engine keeps
+//! beside it, which names the process driving it and the socket its sessions' words are
+//! heard on; and those words. Owned, so a task drawing the run holds its own.
 
+mod followed;
 mod following;
 mod listening;
 
@@ -15,6 +17,7 @@ use yunta_replay::registry::Engine;
 
 use super::OpenedRun;
 
+pub use followed::FollowedRun;
 pub use following::{Following, RunNews};
 
 /// The registry a run's engine keeps in the run's directory: the process

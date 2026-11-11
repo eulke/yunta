@@ -8,14 +8,14 @@ use super::super::deciding::brief;
 use super::super::documents::{global_packs, review as greeting, run};
 use super::{group, holds, rail, read, stops};
 use crate::page::desk::{AlsoShown, Reading, Spot, View};
-use crate::page::{Form, Shown};
+use crate::page::Form;
 
 /// A person starts on what the plan says of itself, and then walks its tasks, step by
 /// step: a step's number stands on its first task.
 #[test]
 fn the_stops_run_from_what_the_plan_says_through_each_task_in_its_step() {
     let review = global_packs();
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     assert_eq!(reading.stops(), 5);
     let shown = stops(&rail(&reading, 2));
     assert_eq!(
@@ -36,7 +36,7 @@ fn a_plan_with_no_description_or_design_opens_on_its_first_task() {
     let mut review = greeting();
     review.plan.description = None;
     review.plan.design = None;
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     assert_eq!(reading.stops(), 2);
     assert_eq!(stops(&rail(&reading, 0))[0].1, "greet");
     assert!(stops(&rail(&reading, 0))[0].2);
@@ -50,14 +50,12 @@ fn what_else_a_decision_shows_is_a_stop_too() {
     let run = run();
     let also = vec![AlsoShown {
         name: "the brief".to_string(),
-        shown: Shown {
-            document: &brief,
-            run: &run,
-            form: Form::Review,
-        },
+        document: brief.clone(),
+        run: run.clone(),
+        form: Form::Review,
         leads: false,
     }];
-    let reading = Reading::of(&review, also);
+    let reading = Reading::of(review.clone(), also);
     assert_eq!(reading.stops(), 4);
     let groups = rail(&reading, 3);
     let also = group(&groups, "also shown").expect("its group");
@@ -85,14 +83,12 @@ fn what_a_decision_shows_before_its_plan_is_read_before_it() {
     let run = run();
     let also = vec![AlsoShown {
         name: "the brief".to_string(),
-        shown: Shown {
-            document: &brief,
-            run: &run,
-            form: Form::Review,
-        },
+        document: brief.clone(),
+        run: run.clone(),
+        form: Form::Review,
         leads: true,
     }];
-    let reading = Reading::of(&review, also);
+    let reading = Reading::of(review.clone(), also);
     let shown = stops(&rail(&reading, 0));
     assert_eq!(shown[0], (String::new(), "the brief".to_string(), true));
     assert_eq!(shown[1].1, "the change");
@@ -110,7 +106,7 @@ fn what_a_decision_shows_before_its_plan_is_read_before_it() {
 #[test]
 fn the_rail_says_the_order_and_who_changes_what_by_short_names() {
     let review = global_packs();
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     let groups = rail(&reading, 1);
     assert!(
         matches!(
@@ -146,7 +142,7 @@ fn the_rail_says_the_order_and_who_changes_what_by_short_names() {
 fn a_plan_of_one_task_has_no_order_and_keeps_its_whole_name() {
     let mut review = greeting();
     review.plan.tasks.truncate(1);
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     let groups = rail(&reading, 1);
     assert!(group(&groups, "order").is_none());
     let impact = group(&groups, "impact").expect("its impact");
@@ -158,7 +154,7 @@ fn a_plan_of_one_task_has_no_order_and_keeps_its_whole_name() {
 #[test]
 fn the_rail_counts_what_was_decided_and_what_the_plan_implies() {
     let review = global_packs();
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     let groups = rail(&reading, 1);
     let tallies: Vec<(&str, usize, Option<char>)> = groups
         .iter()
@@ -189,7 +185,7 @@ fn a_shape_named_in_too_many_files_is_said_by_how_many() {
     let mut review = global_packs();
     let read = review.shapes_read.as_mut().expect("the fixture's reading");
     set_common(read, 214);
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     let groups = rail(&reading, 1);
     let implies = group(&groups, "implies").expect("what it implies");
     assert!(
@@ -219,7 +215,7 @@ fn what_keeps_a_plan_from_being_proven_stands_in_the_rail() {
         !review.flaws().is_empty(),
         "this plan cannot be proven as written"
     );
-    let reading = Reading::of(&review, Vec::new());
+    let reading = Reading::of(review.clone(), Vec::new());
     let groups = rail(&reading, 1);
     let weighing: Vec<&str> = groups
         .iter()

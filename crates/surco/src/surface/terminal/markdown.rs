@@ -298,6 +298,7 @@ mod tests {
             glyphs,
             paint: Paint::Plain,
             width: Width::of(None, None).within(width),
+            motion: crate::motion::Motion::Moves,
         };
         markdown(text, "", &look).iter().map(Line::text).collect()
     }

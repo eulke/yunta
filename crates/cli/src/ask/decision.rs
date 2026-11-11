@@ -8,15 +8,12 @@
 //! the desk does not show, and what weighs on it. What the card says is render's
 //! `prompt::card`.
 
-use std::collections::BTreeMap;
-
-use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
+use yunta_core::events::HumanChoice;
 use yunta_core::shown::ShownDocument;
-use yunta_core::{Env, NodeId, OptionId, RunId};
-use yunta_render::escalation::{claim_words, Route};
-use yunta_render::page::{desk, Gate, Page};
+use yunta_core::{Env, RunId};
+use yunta_render::page::{Gate, Page};
 use yunta_render::prompt::{card, FOLDED};
-use yunta_ui::prompt::{Asked, Deciding, DecisionCard, InFront, Opens, PickedOption, Press};
+use yunta_ui::prompt::{Deciding, DecisionPut, InFront, Opens, PickedOption, Press};
 
 use super::held::hold;
 use super::{attributed, Answered, Console, NoAnswer};
@@ -29,31 +26,17 @@ const DESK_COLUMNS: usize = 40;
 /// read something between them.
 const DESK_ROWS: usize = 12;
 
-/// What a decision is asked with: the escalation, the documents it shows in the run
-/// they belong to, what the run changed, what follows each answer, the node it is
-/// on, the workflow and mode the run follows, and what it opens on.
-pub(crate) struct Ask<'a> {
-    pub(crate) escalation: &'a GateWaitingPayload,
-    pub(crate) shown: Option<(&'a RunId, &'a [ShownDocument])>,
-    pub(crate) changed: Option<&'a ChangesCountedPayload>,
-    pub(crate) routes: BTreeMap<OptionId, Route>,
-    pub(crate) node: Option<&'a NodeId>,
-    /// The workflow and the mode the run follows.
-    pub(crate) called: Option<String>,
-    pub(crate) opens: Opens,
-}
-
-/// Puts the decision to the person as a card held where it opened, and returns what
-/// they chose. `env` is the ambient identity the choice is attributed to.
-pub(crate) fn decide(console: &Console, env: &Env, mut ask: Ask<'_>) -> Answered<HumanChoice> {
-    present(console, &ask)?;
-    let glyphs = console.look().glyphs;
-    let documents = ask.shown.map_or(&[][..], |(_, documents)| documents);
-    let edge = card::edge(ask.node, ask.shown.map(|(run, _)| run), glyphs);
-    let about = card::about(ask.escalation, documents, ask.changed, glyphs);
-    let routes = std::mem::take(&mut ask.routes);
-    let card = DecisionCard::new(ask.escalation, console.escape(), routes).standing_on(edge, about);
-    let answer = answered(console, &ask, &mut deciding(&ask, card))?;
+/// Puts the decision `put` to the person as a card held where it opens, on `opens`, and
+/// returns what they chose. `env` is the ambient identity the choice is attributed to.
+pub(crate) fn decide(
+    console: &Console,
+    env: &Env,
+    put: &DecisionPut,
+    opens: Opens,
+) -> Answered<HumanChoice> {
+    present(console, put)?;
+    let mut deciding = Deciding::put(put, opens, console.escape());
+    let answer = answered(console, put, &mut deciding)?;
     console.say_unless_chronicled(&card::chose(&answer.option, answer.words.as_deref()))?;
     if answer.folded {
         console.say(FOLDED)?;
@@ -66,31 +49,14 @@ pub(crate) fn decide(console: &Console, env: &Env, mut ask: Ask<'_>) -> Answered
     })
 }
 
-/// The decision on `card`, with the plan `ask` is on behind it when it is on one.
-fn deciding<'a>(ask: &Ask<'a>, card: DecisionCard) -> Deciding<'a> {
-    let Some((run, documents)) = ask.shown else {
-        return Deciding::new(card);
-    };
-    let Some(reading) = desk::reading(documents, run) else {
-        return Deciding::new(card);
-    };
-    let asked = Asked {
-        question: claim_words(ask.escalation),
-        node: ask.node.map(ToString::to_string),
-        run: Some(run.handle().to_string()),
-        called: ask.called.clone(),
-    };
-    Deciding::on_plan(card, reading, asked, ask.opens)
-}
-
 /// The one in front, held until the decision is answered: the card where it opened,
 /// and the desk on the terminal's other screen. A terminal with no room for a desk gets
 /// the plan in its history, over the card. Ctrl-C at the desk reaches the run only once
 /// the other screen is gone, so what it says stands on the screen that stays.
 fn answered(
     console: &Console,
-    ask: &Ask<'_>,
-    deciding: &mut Deciding<'_>,
+    put: &DecisionPut,
+    deciding: &mut Deciding,
 ) -> Answered<PickedOption> {
     loop {
         match deciding.in_front() {
@@ -103,7 +69,7 @@ fn answered(
             InFront::ThePlan(desk) => {
                 let (columns, rows) = console.size();
                 if columns < DESK_COLUMNS || rows < DESK_ROWS {
-                    print_documents(console, ask)?;
+                    print_documents(console, put)?;
                     deciding.plan_unshown();
                     continue;
                 }
@@ -128,22 +94,29 @@ fn answered(
 /// the desk does not show, in the form a terminal shows it, and what weighs on it. A plan
 /// among the documents is read at the desk and draws nothing here. Nothing is drawn when
 /// there is neither, since the card opens on its question.
-fn present(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
+fn present(console: &Console, put: &DecisionPut) -> std::io::Result<()> {
     let page = Gate::AboveTheCard {
-        shown: ask.shown,
-        escalation: ask.escalation,
+        shown: shown(put),
+        escalation: &put.escalation,
     };
     draw_page(console, &page)
 }
 
 /// Draws everything the decision has to say, what weighs on it last, for a terminal with no
 /// room for the desk.
-fn print_documents(console: &Console, ask: &Ask<'_>) -> std::io::Result<()> {
+fn print_documents(console: &Console, put: &DecisionPut) -> std::io::Result<()> {
     let page = Gate::InPlaceOfTheDesk {
-        shown: ask.shown,
-        escalation: ask.escalation,
+        shown: shown(put),
+        escalation: &put.escalation,
     };
     draw_page(console, &page)
+}
+
+/// The documents `put` shows, in the run they belong to, as a gate's page reads them.
+fn shown(put: &DecisionPut) -> Option<(&RunId, &[ShownDocument])> {
+    put.shown
+        .as_ref()
+        .map(|(run, documents)| (run, documents.as_slice()))
 }
 
 /// Draws `page` the way a prompt draws what it stands under: each line said, then a

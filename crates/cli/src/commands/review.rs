@@ -26,7 +26,7 @@ pub async fn review(
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let project = shell.workspace().project()?;
-    let waiting = super::resolve_gate::waiting_of(&project, run_id).await?;
+    let waiting = project.run(run_id).await?.waiting_decision().await?;
     let Some((plan, _)) = desk::plan_among(&waiting.shown) else {
         return Err(CliError::msg(format!(
             "run {} waits on a decision that shows no plan; `{}` says what it does show",

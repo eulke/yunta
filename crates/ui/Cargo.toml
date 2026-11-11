@@ -26,9 +26,18 @@ yunta-replay.workspace = true
 yunta-render.workspace = true
 # The screen a stage draws, and the blocks a prompt draws as.
 yunta-surco.workspace = true
+# The instant the application stands at, which every input that reads time hands in.
+chrono.workspace = true
 # The performer's runtime, as the API's: the work a stage asks for is async.
 tokio.workspace = true
 
 [dev-dependencies]
 # The samples a test builds a question or a run from.
 yunta-core = { workspace = true, features = ["testkit"] }
+# The frames a test builds a field's runs from.
+yunta-replay = { workspace = true, features = ["testkit"] }
+# A clock that stands still, and a git repository a test makes.
+yunta-testkit-core.workspace = true
+yunta-testkit.workspace = true
+# The directory a test's workspace works in.
+tempfile.workspace = true

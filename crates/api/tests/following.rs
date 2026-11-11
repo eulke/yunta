@@ -135,7 +135,11 @@ async fn what_came_past_the_last_event_read_is_handed_back() {
     let (run, dir) = world.born("moving").await;
     let _engine = driven_by_this_process(&dir);
     let mut following = world.project.follow(&run).await.unwrap();
-    assert_eq!(following.events().len(), 1, "the run's birth is read whole");
+    assert_eq!(
+        following.followed().events.len(),
+        1,
+        "the run's birth is read whole"
+    );
 
     let seq = world.record(
         &run,
@@ -148,7 +152,7 @@ async fn what_came_past_the_last_event_read_is_handed_back() {
     };
     let seqs: Vec<Seq> = events.iter().map(|event| event.seq).collect();
     assert_eq!(seqs, vec![seq]);
-    assert_eq!(following.events().len(), 2, "what came is read on");
+    assert_eq!(following.followed().events.len(), 2, "what came is read on");
 }
 
 #[tokio::test]
@@ -190,16 +194,41 @@ async fn a_run_that_closes_promoted_is_followed_onto_its_successor() {
         next(&mut following).await,
         Some(RunNews::Events(_))
     ));
-    let Some(RunNews::Successor {
-        run: next_run,
-        events,
-    }) = next(&mut following).await
-    else {
+    let Some(RunNews::Successor(next_run)) = next(&mut following).await else {
         panic!("the successor is followed on");
     };
-    assert_eq!(next_run, successor);
-    assert_eq!(events.len(), 1, "the successor's log as it stands");
-    assert_eq!(following.run(), &successor);
+    assert_eq!(next_run.run, successor);
+    assert_eq!(next_run.events.len(), 1, "the successor's log as it stands");
+    assert_eq!(following.followed().run, successor);
+}
+
+/// A copy of the run followed, taken as following starts and handed each piece of news,
+/// stands where the following does: onto the successor, with its whole log.
+#[tokio::test]
+async fn a_followed_run_handed_each_news_stands_where_the_following_does() {
+    let world = World::new();
+    let (run, dir) = world.born("copied").await;
+    let _engine = driven_by_this_process(&dir);
+    let mut following = world.project.follow(&run).await.unwrap();
+    let mut kept = following.followed().clone();
+
+    let closed = RunFinishedPayload::closed(
+        TerminalState::Promoted,
+        RunMetrics::of(TokenUsage::default(), 0),
+    );
+    world.record(&run, EventPayload::Run(RunEvent::Finished(closed)));
+    let successor = world.successor_of(&run, "copied-on").await;
+    while kept.run != successor {
+        let news = next(&mut following)
+            .await
+            .expect("news until the successor");
+        kept.took(&news);
+    }
+
+    let followed = following.followed();
+    assert_eq!(kept.run, followed.run);
+    assert_eq!(kept.events.len(), followed.events.len());
+    assert_eq!(kept.engine, followed.engine);
 }
 
 #[tokio::test]

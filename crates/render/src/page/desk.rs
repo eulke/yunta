@@ -9,23 +9,41 @@
 use surco::components::{Desk, DeskFoot, Pane, RailGroup, RailRow};
 use surco::diagram::Diagram;
 use surco::doc::Doc;
-use surco::glyphs::Glyphs;
 use surco::look::Look;
 use surco::text::counted;
-use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
+use yunta_core::shown::{PlanReview, ShownDocument};
 use yunta_core::{RunId, Task};
 
 use super::plan::{card, change, head, proof, said, steps, tree, Form};
 use super::{Page, Shown};
 
+mod among;
+pub use among::{about, plan_among, reading};
+
 /// What else a decision shows beside its plan: a place of its own.
-pub struct AlsoShown<'a> {
+#[derive(Debug, Clone)]
+pub struct AlsoShown {
     /// The name the desk's rail and pane give it.
     pub name: String,
-    /// What it shows, drawn whole in the pane, with the pane's look.
-    pub shown: Shown<'a>,
+    /// The document, as the run holds it.
+    pub document: ShownDocument,
+    /// The run it belongs to.
+    pub run: RunId,
+    /// How much of it the pane draws, whole, with the pane's look.
+    pub form: Form,
     /// Whether the decision lists it before its plan, so it is read before it.
     pub leads: bool,
+}
+
+impl AlsoShown {
+    /// What it shows, as the page of what it is.
+    fn shown(&self) -> Shown<'_> {
+        Shown {
+            document: &self.document,
+            run: &self.run,
+            form: self.form,
+        }
+    }
 }
 
 /// What is in front of a person on a place.
@@ -53,48 +71,59 @@ pub struct Spot {
 }
 
 /// One place a person can stand on.
-enum Place<'a> {
+#[derive(Debug, Clone)]
+enum Place {
     /// What the plan says of itself.
     TheChange,
-    /// A task, in its step, counted from 0, and its place among all the tasks.
-    Task {
-        task: &'a Task,
-        step: usize,
-        nth: usize,
-    },
+    /// A task, by its place among the plan's tasks, in its step, counted from 0, and
+    /// its place among all the tasks in the order the steps hold them.
+    Task { at: usize, step: usize, nth: usize },
     /// What else the decision shows, by its place among [`Reading::also`].
     Also(usize),
 }
 
-/// A plan being read: its places in the order a person walks them.
-pub struct Reading<'a> {
-    review: &'a PlanReview,
-    places: Vec<Place<'a>>,
-    steps: Vec<Vec<&'a Task>>,
-    also: Vec<AlsoShown<'a>>,
+/// A plan being read: its places in the order a person walks them. It owns what it
+/// reads, so whatever holds a plan's desk holds it whole.
+#[derive(Debug, Clone)]
+pub struct Reading {
+    review: PlanReview,
+    places: Vec<Place>,
+    /// Each step's tasks, by their places among the plan's tasks.
+    steps: Vec<Vec<usize>>,
+    also: Vec<AlsoShown>,
 }
 
-impl<'a> Reading<'a> {
+impl Reading {
     /// `review` as a person reads it, with what else its decision shows.
-    pub fn of(review: &'a PlanReview, also: Vec<AlsoShown<'a>>) -> Self {
-        let steps = review.plan.steps();
-        let mut places: Vec<Place<'a>> = also
+    pub fn of(review: PlanReview, also: Vec<AlsoShown>) -> Self {
+        let steps: Vec<Vec<usize>> = review
+            .plan
+            .steps()
+            .iter()
+            .map(|tasks| {
+                tasks
+                    .iter()
+                    .filter_map(|task| place_of(&review, task))
+                    .collect()
+            })
+            .collect();
+        let mut places: Vec<Place> = also
             .iter()
             .enumerate()
             .filter(|(_, also)| also.leads)
             .map(|(at, _)| Place::Also(at))
             .collect();
-        if says_of_itself(review) {
+        if says_of_itself(&review) {
             places.push(Place::TheChange);
         }
         let tasks = steps
             .iter()
             .enumerate()
-            .flat_map(|(step, tasks)| tasks.iter().map(move |task| (step, *task)));
+            .flat_map(|(step, tasks)| tasks.iter().map(move |at| (step, *at)));
         places.extend(
             tasks
                 .enumerate()
-                .map(|(nth, (step, task))| Place::Task { task, step, nth }),
+                .map(|(nth, (step, at))| Place::Task { at, step, nth }),
         );
         places.extend(
             also.iter()
@@ -110,6 +139,11 @@ impl<'a> Reading<'a> {
         }
     }
 
+    /// The plan's task at `at`, among its tasks.
+    fn task(&self, at: usize) -> &Task {
+        &self.review.plan.tasks[at]
+    }
+
     /// How many places a person can stand on.
     pub fn stops(&self) -> usize {
         self.places.len()
@@ -117,7 +151,7 @@ impl<'a> Reading<'a> {
 
     /// How many decisions were made for the person.
     pub fn choices(&self) -> usize {
-        change::decided_for_you(self.review).count()
+        change::decided_for_you(&self.review).count()
     }
 
     /// Whether what was decided holds anything to show: a decision, an answer, a risk or
@@ -125,7 +159,7 @@ impl<'a> Reading<'a> {
     pub fn says_what_it_decided(&self) -> bool {
         let plan = &self.review.plan;
         !plan.decisions.is_empty()
-            || change::answered(self.review).next().is_some()
+            || change::answered(&self.review).next().is_some()
             || !plan.risks.is_empty()
             || !plan.out_of_scope.is_empty()
     }
@@ -135,7 +169,7 @@ impl<'a> Reading<'a> {
     pub fn has_proof(&self, at: usize) -> bool {
         match self.places.get(at) {
             Some(Place::Task { .. }) => true,
-            Some(Place::TheChange) => !proof::held(self.review, None).is_empty(),
+            Some(Place::TheChange) => !proof::held(&self.review, None).is_empty(),
             Some(Place::Also(_)) | None => false,
         }
     }
@@ -155,17 +189,17 @@ impl<'a> Reading<'a> {
             return Doc::new();
         };
         match (spot.view, place) {
-            (View::Choices, _) => change::deciding(self.review, spot.choice, look.glyphs),
+            (View::Choices, _) => change::deciding(&self.review, spot.choice, look.glyphs),
             (_, Place::Also(at)) => self
                 .also
                 .get(*at)
-                .map_or_else(Doc::new, |also| also.shown.document(look)),
-            (View::Proof, Place::Task { task, .. }) => proof::of_task(task, self.review),
-            (View::Proof, Place::TheChange) => proof::of_plan(self.review),
-            (View::Stop, Place::Task { task, .. }) => {
-                Doc::new().with_all(card::card(task, self.review).blocks)
+                .map_or_else(Doc::new, |also| also.shown().document(look)),
+            (View::Proof, Place::Task { at, .. }) => proof::of_task(self.task(*at), &self.review),
+            (View::Proof, Place::TheChange) => proof::of_plan(&self.review),
+            (View::Stop, Place::Task { at, .. }) => {
+                Doc::new().with_all(card::card(self.task(*at), &self.review).blocks)
             }
-            (View::Stop, Place::TheChange) => change::words(self.review),
+            (View::Stop, Place::TheChange) => change::words(&self.review),
         }
     }
 
@@ -179,7 +213,7 @@ impl<'a> Reading<'a> {
         foot: DeskFoot,
         look: &Look,
     ) -> Desk {
-        let review = self.review;
+        let review = &self.review;
         let size = head::size(review, self.steps.len());
         Desk {
             title: title.iter().cloned().chain([size]).collect(),
@@ -207,16 +241,14 @@ impl<'a> Reading<'a> {
             matches!(place, Place::TheChange).then(|| (String::new(), "the change".to_string()))
         });
         let tasks = self.stop_rows(spot, |place| match place {
-            Place::Task { task, step, .. } => {
-                let first = self.steps[*step]
-                    .first()
-                    .is_some_and(|first| first.id == task.id);
+            Place::Task { at, step, .. } => {
+                let first = self.steps[*step].first() == Some(at);
                 let lead = if first {
                     (step + 1).to_string()
                 } else {
                     String::new()
                 };
-                Some((lead, task.id.as_str().to_string()))
+                Some((lead, self.task(*at).id.as_str().to_string()))
             }
             _ => None,
         });
@@ -243,7 +275,7 @@ impl<'a> Reading<'a> {
     /// proven, its order, what was decided and what it leaves out, what it implies beyond
     /// its tasks, and what each task changes.
     fn rail_of_plan(&self) -> Vec<RailGroup> {
-        let review = self.review;
+        let review = &self.review;
         let plan = &review.plan;
         let decided = change::decided_for_you(review).count();
         let tallies: Vec<RailRow> = [
@@ -289,7 +321,7 @@ impl<'a> Reading<'a> {
     fn stop_rows(
         &self,
         spot: &Spot,
-        lead_and_name: impl Fn(&Place<'a>) -> Option<(String, String)>,
+        lead_and_name: impl Fn(&Place) -> Option<(String, String)>,
     ) -> Vec<RailRow> {
         self.places
             .iter()
@@ -306,15 +338,20 @@ impl<'a> Reading<'a> {
     }
 
     /// The tasks in the order the steps hold them.
-    fn tasks(&self) -> impl Iterator<Item = &'a Task> + '_ {
-        self.steps.iter().flatten().copied()
+    fn tasks(&self) -> impl Iterator<Item = &Task> + '_ {
+        self.steps.iter().flatten().map(|at| self.task(*at))
     }
 
     /// The order the tasks wait on each other in, drawn over their short names.
     fn order(&self) -> Option<Diagram> {
         let names = self.task_names();
         let labels: Vec<&str> = names.iter().map(String::as_str).collect();
-        steps::order(&self.steps, &labels)
+        let steps: Vec<Vec<&Task>> = self
+            .steps
+            .iter()
+            .map(|tasks| tasks.iter().map(|at| self.task(*at)).collect())
+            .collect();
+        steps::order(&steps, &labels)
     }
 
     /// Each task's short name, in the order the steps hold the tasks.
@@ -329,7 +366,7 @@ impl<'a> Reading<'a> {
         self.tasks()
             .zip(names)
             .flat_map(|(task, name)| {
-                let judged = card::judged(self.review, task);
+                let judged = card::judged(&self.review, task);
                 let files = card::changed_files(task, judged);
                 card::impact_paths(&files)
                     .into_iter()
@@ -360,7 +397,7 @@ impl<'a> Reading<'a> {
     fn heading(&self, spot: &Spot, sep: char) -> (String, Option<String>, Option<String>) {
         let place = self.places.get(spot.at);
         match (spot.view, place) {
-            (View::Choices, _) => match change::decided_for_you(self.review).count() {
+            (View::Choices, _) => match change::decided_for_you(&self.review).count() {
                 0 => ("what was decided".to_string(), None, None),
                 n => (
                     "decided for you".to_string(),
@@ -368,7 +405,8 @@ impl<'a> Reading<'a> {
                     Some(counted(n, "choice")),
                 ),
             },
-            (view, Some(Place::Task { task, step, nth })) => {
+            (view, Some(Place::Task { at, step, nth })) => {
+                let task = self.task(*at);
                 let edge = format!("step {} of {}", step + 1, self.steps.len());
                 let place = format!("{}, task {} of {}", task.id, nth + 1, self.tasks().count());
                 let title = match view {
@@ -401,66 +439,16 @@ fn group(title: Option<&str>, rows: Vec<RailRow>) -> Option<RailGroup> {
     })
 }
 
-/// The lines a decision's card says of `review`: what it is about, unless `question` says
-/// it; how big it is, a fact each; and what it implies past its tasks.
-pub fn about(review: &PlanReview, question: &str, glyphs: Glyphs) -> Vec<String> {
-    let steps = review.plan.steps();
-    let mut lines: Vec<String> = Vec::new();
-    if let Some(summary) = said(&review.plan.summary).filter(|summary| !question.contains(*summary))
-    {
-        lines.push(summary.to_string());
-    }
-    lines.push(head::facts(review, steps.len()).join(&format!(" {} ", glyphs.sep())));
-    lines.extend(tree::implied_by_all(
-        &review.plan.shapes,
-        review.shapes_read.as_ref(),
-    ));
-    lines
-}
-
-/// The plan among `documents` as a person reads it, with the others as what else it
-/// shows; `None` when no document is a plan, or the plan has no place to stand on.
-pub fn reading<'a>(documents: &'a [ShownDocument], run: &'a RunId) -> Option<Reading<'a>> {
-    let (plan, review) = plan_among(documents)?;
-    let mut leads = true;
-    let mut also = Vec::new();
-    for document in documents {
-        if std::ptr::eq(document, plan) {
-            leads = false;
-            continue;
-        }
-        also.push(AlsoShown {
-            name: super::shown::called(document),
-            shown: Shown {
-                document,
-                run,
-                form: Form::Review,
-            },
-            leads,
-        });
-    }
-    Some(Reading::of(review, also))
-}
-
-/// Whether `review` holds a place for a person to stand on: a task, or what it says of
-/// itself. A plan with neither has nothing to read at a desk.
-fn has_a_place(review: &PlanReview) -> bool {
-    !review.plan.tasks.is_empty() || says_of_itself(review)
+/// Where `task`, one of `review`'s tasks, stands among them.
+fn place_of(review: &PlanReview, task: &Task) -> Option<usize> {
+    review
+        .plan
+        .tasks
+        .iter()
+        .position(|held| std::ptr::eq(held, task))
 }
 
 /// Whether the plan says anything of itself as a whole.
-fn says_of_itself(review: &PlanReview) -> bool {
+pub(super) fn says_of_itself(review: &PlanReview) -> bool {
     said(&review.plan.description).is_some() || said(&review.plan.design).is_some()
-}
-
-/// The first document among `documents` that is a plan with something to read,
-/// with the plan it holds: what a person reads at a desk. A plan with no task,
-/// description or design is a document like any other.
-pub fn plan_among(documents: &[ShownDocument]) -> Option<(&ShownDocument, &PlanReview)> {
-    documents
-        .iter()
-        .find_map(|document| match &document.content {
-            ShownContent::Tasks(review) if has_a_place(review) => Some((document, &**review)),
-            _ => None,
-        })
 }

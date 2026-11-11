@@ -78,6 +78,7 @@ const IN_A_BROWSER: &str = "the whole page, in a browser";
 /// What a page is drawn from: one run as its log derives it, the places
 /// its page names, the decision it waits on, and how much of it a reader
 /// asked for.
+#[derive(Debug, Clone)]
 pub struct Run {
     pub scope: RunScope,
     pub depth: Depth,

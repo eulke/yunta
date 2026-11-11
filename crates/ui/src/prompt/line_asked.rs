@@ -7,6 +7,7 @@ use surco::look::Look;
 use super::{Answerable, Edit, Press, Stroke, Typed, TypedLine};
 
 /// A line being answered, under what asks for it.
+#[derive(Debug, Clone)]
 pub struct LineAsked {
     asked: Line,
     line: TypedLine,

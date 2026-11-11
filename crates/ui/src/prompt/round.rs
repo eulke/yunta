@@ -32,13 +32,14 @@ pub struct SettledAnswers {
 }
 
 /// How the question being answered is answered.
+#[derive(Debug, Clone)]
 enum Answering {
     Typing(TypedLine),
     Picking(Picker<Option<String>>),
 }
 
 /// What a question was answered with.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Given {
     /// The value it records, or `None` for an optional one left without.
     value: Option<String>,
@@ -61,12 +62,14 @@ impl Given {
 }
 
 /// One question of the round, with what was given for it where it has been.
+#[derive(Debug, Clone)]
 struct Step {
     question: Question,
     given: Option<Given>,
 }
 
 /// A round of questions being answered, one at a time.
+#[derive(Debug, Clone)]
 pub struct Round {
     node: NodeId,
     steps: Vec<Step>,

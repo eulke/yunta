@@ -28,7 +28,7 @@ impl Workspace {
     /// repository runs. Refused when the project's config is there already
     /// and `force` does not say to write it again.
     pub async fn detect_project(&self, force: bool, stop: &Stop) -> Result<DetectedProject, Error> {
-        let config = self.dir.join(".yunta/config.yaml");
+        let config = crate::project::repository_layer(&self.dir);
         if config.exists() && !force {
             return Err(Refused::Setup(SetupRefusal::Exists { path: config }).into());
         }

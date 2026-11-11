@@ -12,17 +12,22 @@ use crate::prompt::plan_desk::tests::{look, review};
 use crate::prompt::{Answerable, Asked, PickedOption, Press, Stroke};
 
 /// The gate of the card's tests, on the plan of the desk's tests, opening on `opens`.
-fn deciding(review: &PlanReview, opens: Opens) -> Deciding<'_> {
+fn deciding(review: &PlanReview, opens: Opens) -> Deciding {
     let asked = Asked {
         question: "Plan registered. Approve?".to_string(),
         node: Some("approve-plan".to_string()),
         run: Some("EKPBGE".to_string()),
         called: Some("harvest (standard)".to_string()),
     };
-    Deciding::on_plan(card(), Reading::of(review, Vec::new()), asked, opens)
+    Deciding::on_plan(
+        card(),
+        Reading::of(review.clone(), Vec::new()),
+        asked,
+        opens,
+    )
 }
 
-fn shows_the_plan(deciding: &mut Deciding<'_>) -> bool {
+fn shows_the_plan(deciding: &mut Deciding) -> bool {
     let block_is_the_desk = matches!(deciding.block(&look()), Block::Desk(_));
     let held_is_the_desk = matches!(deciding.in_front(), InFront::ThePlan(_));
     assert_eq!(block_is_the_desk, held_is_the_desk, "drawn and held agree");

@@ -174,7 +174,7 @@ pub(crate) fn load_named_layers(
     let candidates = [
         ("org", org),
         ("user", user_root.join("config.yaml")),
-        ("repo", cwd.join(".yunta/config.yaml")),
+        ("repo", repository_layer(cwd)),
     ];
 
     let mut layers = Vec::new();
@@ -184,6 +184,12 @@ pub(crate) fn load_named_layers(
         }
     }
     Ok(layers)
+}
+
+/// The repository's own config layer, in the directory `dir` a project works
+/// in: what `init` writes, and what says Yunta was set up there.
+pub(crate) fn repository_layer(dir: &Path) -> PathBuf {
+    dir.join(".yunta/config.yaml")
 }
 
 /// `version:` a layer may declare — the one this binary reads.

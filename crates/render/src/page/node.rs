@@ -23,6 +23,7 @@ use yunta_replay::RunState;
 /// A node of a run, as `status --node` shows it: where it stands, what it
 /// said or what failed it, what it took, the documents it produced, and what
 /// to type next.
+#[derive(Debug, Clone)]
 pub struct Node {
     pub run_id: RunId,
     /// The node the page is about, as the run's frame derives it.

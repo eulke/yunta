@@ -18,6 +18,7 @@ pub(super) fn look(glyphs: Glyphs, cells: usize) -> Look {
         glyphs,
         paint: Paint::Plain,
         width: Width::exact(cells),
+        motion: crate::motion::Motion::Moves,
     }
 }
 

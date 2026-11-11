@@ -26,6 +26,10 @@ pub struct RunLine {
     /// What holds it, in one line; empty when nothing does.
     pub said: String,
     pub edge: Edge,
+    /// Whether the row is the one a key would act on.
+    pub pointed: bool,
+    /// Whether a person picked the run for an act that takes several.
+    pub marked: bool,
 }
 
 /// What a run's row ends with, at the line's far edge.

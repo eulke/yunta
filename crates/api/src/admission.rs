@@ -26,12 +26,14 @@ use crate::{
 
 /// What a run is asked for with: its workflow by reference, its inputs by
 /// name, the mode it starts in, and the adapter its sessions are pinned to.
-pub struct RunRequest<'a> {
+/// A value, so the same choices make the same request from any interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunRequest {
     /// A catalog name, or a path to the workflow's file.
-    pub workflow: &'a Path,
+    pub workflow: PathBuf,
     pub inputs: HashMap<InputName, String>,
     /// The mode it starts in: the workflow's first mode when none is named.
-    pub mode: Option<&'a ModeName>,
+    pub mode: Option<ModeName>,
     /// One adapter this binary builds, by its id, or a mock fixture's text:
     /// every session runs on it. None, and runner resolution picks.
     pub adapter: Option<RunAdapter>,
@@ -61,11 +63,11 @@ impl Project {
     /// cost, when anything stops it.
     pub async fn admit(
         &self,
-        request: RunRequest<'_>,
+        request: RunRequest,
         remarks: &dyn Remarks,
         stop: &Stop,
     ) -> Result<Admission<'_>, Error> {
-        let (path, workflow) = self.runnable(request.workflow, remarks, stop).await?;
+        let (path, workflow) = self.runnable(&request.workflow, remarks, stop).await?;
         self.refuse_without_committer(stop).await?;
         if !matches!(request.adapter, Some(RunAdapter::Mock { .. })) {
             self.refuse_unreachable_forge(&workflow)?;
@@ -76,11 +78,11 @@ impl Project {
             .with_adapter(request.adapter);
         let mode = request
             .mode
-            .cloned()
+            .clone()
             .unwrap_or_else(|| frozen.manifest.workflow.first_mode());
         let shown = Arg::Given(self.workspace.shown(&path));
         crate::machine::servable(&frozen.manifest, &mode, shown).await?;
-        let reference = Arg::Given(self.workspace.shown(request.workflow));
+        let reference = Arg::Given(self.workspace.shown(&request.workflow));
         let refused = |errors| Refused::Unchecked {
             workflow: reference.clone(),
             errors,
@@ -177,7 +179,7 @@ impl Project {
         &self,
         workflow: &Workflow,
         path: &Path,
-        request: &RunRequest<'_>,
+        request: &RunRequest,
         stop: &Stop,
     ) -> Result<FrozenRun, Error> {
         let workflow_dir = path.parent().unwrap_or(Path::new("."));

@@ -18,6 +18,7 @@ use super::{Answerable, Press, Stroke};
 const NUMBERED: usize = 9;
 
 /// What a decision is asked with, on the desk.
+#[derive(Debug, Clone)]
 pub struct Asked {
     pub question: String,
     /// The node it is on.
@@ -29,7 +30,7 @@ pub struct Asked {
 }
 
 /// Where Escape goes from the desk.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum Leaving {
     /// Back to the card it opened from.
     ToTheCard,
@@ -50,8 +51,9 @@ pub enum Left {
 }
 
 /// A plan being read.
-pub struct PlanDesk<'a> {
-    reading: Reading<'a>,
+#[derive(Debug, Clone)]
+pub struct PlanDesk {
+    reading: Reading,
     asked: Asked,
     offered: Vec<ChoiceRow>,
     leaving: Leaving,
@@ -62,11 +64,11 @@ pub struct PlanDesk<'a> {
     laid: PaneLaid,
 }
 
-impl<'a> PlanDesk<'a> {
+impl PlanDesk {
     /// The desk of `reading` at its first stop, the plan's own, with nothing waiting to be
     /// confirmed.
     pub(crate) fn new(
-        reading: Reading<'a>,
+        reading: Reading,
         asked: Asked,
         offered: Vec<ChoiceRow>,
         leaving: Leaving,
@@ -276,7 +278,7 @@ fn around(at: usize, count: usize, forward: bool) -> usize {
     }
 }
 
-impl Answerable for PlanDesk<'_> {
+impl Answerable for PlanDesk {
     type Answer = Left;
 
     /// The desk as it stands: the plan at the place it stands on, and its foot.

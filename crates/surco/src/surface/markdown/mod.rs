@@ -11,6 +11,7 @@ use crate::doc::{Block, Doc};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
+use crate::motion::Motion;
 use crate::paint::Paint;
 use crate::surface::Surface;
 use text::{cell, cell_code_span, code_span, literal, plain_text};
@@ -54,12 +55,14 @@ const GLYPHS: Glyphs = Glyphs::Unicode;
 
 impl Markdown {
     /// The look a document is built with for a Markdown reader: its glyphs,
-    /// no paint, and no width, since a viewer wraps a file's words.
+    /// no paint, no width, since a viewer wraps a file's words, and nothing
+    /// that turns, since a file is read rather than watched.
     pub fn look(&self) -> Look {
         Look {
             glyphs: GLYPHS,
             paint: Paint::Plain,
             width: Width::of(None, None),
+            motion: Motion::Still,
         }
     }
 }
@@ -288,8 +291,17 @@ fn id_cell(said: &Cell) -> String {
     .join(" ")
 }
 
-/// Each run as a table row: where it stands, its handle, what it runs, what
-/// holds it, and its edge.
+/// The pointer before the row a key acts on, as a file keeps it; nothing before any
+/// other.
+fn held(row: &crate::components::RunLine) -> String {
+    match row.pointed {
+        true => format!("{} ", GLYPHS.pointer()),
+        false => String::new(),
+    }
+}
+
+/// Each run as a table row: where it stands, and whether it is pointed at or picked;
+/// its handle, what it runs, what holds it, and its edge.
 fn runs(runs: &Runs) -> String {
     let mut out = String::from("| | run | workflow | where it stands | |\n|---|---|---|---|---|");
     for row in &runs.rows {
@@ -298,9 +310,14 @@ fn runs(runs: &Runs) -> String {
             Edge::Command(command) => cell_code_span(command),
         };
         out.push_str(&format!(
-            "\n| {} {} | {} | {} ({}) | {} | {edge} |",
+            "\n| {}{} {}{} | {} | {} ({}) | {} | {edge} |",
+            held(row),
             GLYPHS.mark(row.standing.mark()),
             row.standing.word(),
+            match row.marked {
+                true => ", picked",
+                false => "",
+            },
             cell_code_span(&row.handle),
             cell(&row.workflow),
             cell(&row.mode),

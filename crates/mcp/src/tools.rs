@@ -3,7 +3,7 @@
 //! run asks it, so an agent client and a terminal reach the same verdict.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 
 use serde_json::Value;
 use yunta_api::RunRequest;
@@ -95,9 +95,9 @@ pub(crate) async fn run_workflow(
     let mode: Option<ModeName> = optional_id(args, "mode")?;
     let project = plane.workspace.project()?;
     let request = RunRequest {
-        workflow: Path::new(name),
+        workflow: PathBuf::from(name),
         inputs,
-        mode: mode.as_ref(),
+        mode,
         adapter: adapter.map(RunAdapter::Named),
         hermetic: false,
     };

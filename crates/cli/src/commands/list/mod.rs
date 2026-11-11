@@ -22,7 +22,7 @@ pub use runs::list_runs;
 /// repository; anywhere else, where Yunta works and what to type.
 pub async fn field(shell: &Shell, look: &Look) -> Result<Outcome, CliError> {
     let project = shell.workspace().project()?;
-    if project.in_a_repository(&shell.stop()).await? {
+    if project.repository(&shell.stop()).await? != yunta_api::Repository::Absent {
         return list_runs(
             shell,
             yunta_api::FieldReach::Here,

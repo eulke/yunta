@@ -147,7 +147,7 @@ async fn drive_probe(
         .await?;
     let probing = probe_project(project, &sandbox, candidate);
     let request = RunRequest {
-        workflow: &workflow,
+        workflow: workflow.clone(),
         inputs: Default::default(),
         mode: None,
         adapter: None,

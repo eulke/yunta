@@ -11,6 +11,7 @@
 mod answerable;
 mod deciding;
 mod decision_card;
+mod decision_put;
 mod line_asked;
 mod picker;
 mod plan_desk;
@@ -22,6 +23,7 @@ mod typed_line;
 pub use answerable::Answerable;
 pub use deciding::{Deciding, InFront, Opens};
 pub use decision_card::{DecisionCard, PickedOption, Reply};
+pub use decision_put::DecisionPut;
 pub use line_asked::LineAsked;
 pub use picker::{Alternative, Picker};
 pub use plan_desk::{Asked, Left, PlanDesk};

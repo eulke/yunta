@@ -11,6 +11,7 @@ use yunta_render::escalation::Route;
 use yunta_render::prompt::Escape;
 
 use super::{DecisionCard, PickedOption, Reply};
+use crate::prompt::DecisionPut;
 use crate::prompt::{Answerable, Press, Stroke};
 
 /// A gate offering to go on, to go back with words, and to pause.
@@ -57,7 +58,11 @@ pub(crate) fn card() -> DecisionCard {
             ]),
         ),
     ]);
-    DecisionCard::new(&escalation, Escape::Parks, routes)
+    let put = DecisionPut {
+        routes,
+        ..DecisionPut::alone(escalation)
+    };
+    DecisionCard::new(put, Escape::Parks)
 }
 
 fn answer(option: &'static str, words: Option<&str>) -> Press<Reply> {
@@ -137,7 +142,7 @@ fn an_option_whose_words_are_its_id_is_named_once() {
         NonEmpty::from((GateOption::reserved(ReservedOption::Approve), Vec::new())),
     )
     .into_payload();
-    let card = DecisionCard::new(&escalation, Escape::Parks, BTreeMap::new());
+    let card = DecisionCard::new(DecisionPut::alone(escalation), Escape::Parks);
     let rows = rows(&card);
     assert!(
         rows.iter().any(|row| row.ends_with("* approve")),

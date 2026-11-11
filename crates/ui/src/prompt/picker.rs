@@ -17,6 +17,7 @@ use super::{Answerable, Press, Stroke};
 /// One of the alternatives a list offers: what it is called, what it does when its
 /// name does not say it, and what the caller gets back for it. Not core's
 /// `step::Choice`, how a command line chooses on a decision.
+#[derive(Debug, Clone)]
 pub struct Alternative<T> {
     pub name: String,
     pub label: Option<String>,
@@ -35,6 +36,7 @@ impl<T> Alternative<T> {
 }
 
 /// A list being answered.
+#[derive(Debug, Clone)]
 pub struct Picker<T> {
     choices: Vec<Alternative<T>>,
     /// What was typed to narrow it.

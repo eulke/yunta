@@ -24,7 +24,7 @@ use yunta_core::receipt::{
     EventChainStatus, FailedNode, Receipt, RunnerUsage, ScopeSummary,
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ReceiptError {
     /// A receipt certifies *closed* work — a run still
     /// `running`/`waiting`/`paused` has no

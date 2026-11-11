@@ -6,31 +6,54 @@
 //! on says so as recorded, because a reader who took it for a refusal would
 //! answer the same gate twice.
 
-use yunta_core::events::{DecisionOn, GateWaitingPayload, HumanChoice, PauseReason};
+use std::collections::BTreeMap;
+
+use yunta_core::events::{
+    ChangesCountedPayload, DecisionOn, GateWaitingPayload, HumanChoice, PauseReason,
+};
 use yunta_core::port::QuestionsReply;
 use yunta_core::shown::ShownDocument;
 use yunta_core::{NodeId, OptionId, QuestionsFile, Responder, RunId};
+use yunta_render::escalation::Route;
 use yunta_render::refusal::Refused;
+use yunta_replay::frame::RunFrame;
 use yunta_replay::RunState;
 
 use crate::{Error, Failure, OpenedRun};
 
-/// The decision a run waits on, with the documents it shows and the run's
-/// state, which the menu a person picks from is drawn from.
-#[derive(Clone)]
+/// The decision a run waits on, with the documents it shows and what the menu a person
+/// picks from is drawn from.
+#[derive(Debug, Clone)]
 pub struct WaitingDecision {
     pub on: DecisionOn,
     pub escalation: GateWaitingPayload,
     pub shown: Vec<ShownDocument>,
-    pub state: RunState,
+    /// What follows each option that leads somewhere.
+    pub routes: BTreeMap<OptionId, Route>,
+    /// What the run changed, when the change was counted on its newest tree.
+    pub changed: Option<ChangesCountedPayload>,
+    /// The workflow and the mode the run follows, as a person reads them.
+    pub called: String,
 }
 
 /// The questions a node parked on and nobody has answered: the node, and the
 /// round it asked, as the document it handed over holds it.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct WaitingQuestions {
     pub node: NodeId,
     pub questions: QuestionsFile,
+}
+
+/// The node whose round of questions the run framed as `frame` is parked on, asked and
+/// not answered, or answered with answers the engine refused; `None` for a run parked
+/// on anything else, or not parked.
+pub fn waiting_round(frame: &RunFrame) -> Option<&NodeId> {
+    match frame.phase.waiting_on().and_then(|on| on.reason()) {
+        Some(PauseReason::Questions { node, .. } | PauseReason::AnswersRefused { node, .. }) => {
+            Some(node)
+        }
+        _ => None,
+    }
 }
 
 impl OpenedRun<'_> {
@@ -39,17 +62,11 @@ impl OpenedRun<'_> {
     /// none, as a run that waits on no decision is.
     pub async fn waiting_questions(&self) -> Result<WaitingQuestions, Error> {
         let frame = self.frame();
-        let reason = frame.phase.waiting_on().and_then(|on| on.reason());
-        let node = match reason {
-            Some(
-                PauseReason::Questions { node, .. } | PauseReason::AnswersRefused { node, .. },
-            ) => node.clone(),
-            _ => {
-                return Err(Refused::NoDecision {
-                    run: self.id.clone(),
-                }
-                .into())
+        let Some(node) = waiting_round(&frame).cloned() else {
+            return Err(Refused::NoDecision {
+                run: self.id.clone(),
             }
+            .into());
         };
         let questions = yunta_engine::asked_questions(&self.dir, &self.events, &node)
             .await
@@ -78,11 +95,20 @@ impl OpenedRun<'_> {
         let asked = manifest.request();
         let shown =
             yunta_engine::shown_documents(&self.dir, escalation.shows(), &state, asked).await?;
+        let workflow = &manifest.workflow;
+        let routes = yunta_render::escalation::routes(
+            &escalation,
+            workflow,
+            state.run.left_out(),
+            on.node(),
+        );
         Ok(WaitingDecision {
+            routes,
+            changed: state.current_change().cloned(),
+            called: yunta_render::state::called(&workflow.name, state.run.mode()),
             on,
             escalation,
             shown,
-            state,
         })
     }
 

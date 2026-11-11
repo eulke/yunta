@@ -10,8 +10,43 @@
 //! through `yunta-api`. `tests/no_terminal_in_the_interface.rs` holds the
 //! second half.
 //!
-//! Its map: `prompt`, the prompts a person answers stroke by stroke, each the
-//! [`Answerable`](prompt::Answerable) a surface holds, the [`Stroke`](prompt::Stroke)
-//! it is handed and the [`Press`](prompt::Press) it answers with.
+//! Its map:
+//!
+//! - The application as values: `state`, the [`State`] an [`Input`] changes,
+//!   which says what it asks for as [`Request`]s and is read as a screen; `stage`,
+//!   the [`Stage`] a person is at; `dialog`, the [`Dialog`] standing over it until it
+//!   is answered; `operation`, the [`Operation`]s a stage asks of
+//!   Yunta under a [`Ticket`] (`ticket`); `outcome` and `news`, what that work comes
+//!   to as an [`Outcome`] and hands back while it lasts as [`News`]; `input` and
+//!   `request`.
+//! - `performer`, the [`Performer`] a surface hands each request to, which carries
+//!   the work out through `yunta-api` and hands back what it says and comes to;
+//!   `remark`, what a remark the API makes while it works says, and how a person
+//!   meets it, alike on every interface.
+//! - `prompt`, the prompts a person answers stroke by stroke, each the
+//!   [`Answerable`](prompt::Answerable) a surface holds, the [`Stroke`](prompt::Stroke)
+//!   it is handed and the [`Press`](prompt::Press) it answers with.
 
+mod dialog;
+mod input;
+mod news;
+mod operation;
+mod outcome;
+mod performer;
 pub mod prompt;
+pub mod remark;
+mod request;
+mod stage;
+mod state;
+mod ticket;
+
+pub use dialog::{Confirmation, Dialog};
+pub use input::Input;
+pub use news::News;
+pub use operation::Operation;
+pub use outcome::Outcome;
+pub use performer::Performer;
+pub use request::Request;
+pub use stage::{DecisionStage, FieldStage, FirstRunStage, RunStage, Stage, StartStage};
+pub use state::State;
+pub use ticket::Ticket;

@@ -18,7 +18,7 @@ use super::Page;
 /// Why a workflow cannot run here: every problem, each pointed at in its
 /// line when it has one, and what this project could declare for the ones
 /// a declaration fixes.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Unrunnable {
     /// The workflow refused, as a reader in this directory names its file.
     pub workflow: String,

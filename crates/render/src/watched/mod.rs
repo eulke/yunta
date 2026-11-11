@@ -23,11 +23,14 @@ use crate::engine;
 use crate::pause;
 use crate::spend::Breakdown;
 
+mod heard;
 mod said;
+
+pub use heard::Heard;
 
 use crate::children::{child_row, children_of};
 
-use surco::components::Attention;
+use surco::components::{Attention, Ribbon, Stretch};
 use surco::doc::Block;
 use surco::figures::duration;
 use surco::glyphs::Glyphs;
@@ -200,7 +203,6 @@ pub fn node_rows(
     node: &NodeFrame,
     said: Option<&yunta_core::port::Said>,
     look: &Look,
-    motion: Motion,
 ) -> Vec<Line> {
     let glyphs = look.glyphs;
     // A `parallel` group's children sit one step under the group, the
@@ -210,7 +212,7 @@ pub fn node_rows(
         None => String::new(),
     };
     let detail = format!("{under}{}", indent(DETAIL_DEPTH));
-    let mut rows = vec![headline(node, glyphs, motion).under(&under)];
+    let mut rows = vec![headline(node, glyphs, look.motion).under(&under)];
     if !node.running_tasks.is_empty() {
         rows.push(Line::new().plain(detail.as_str()).push(
             Tone::Muted,
@@ -291,6 +293,64 @@ fn headline(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
     match rest.is_empty() {
         true => row,
         false => row.push(Tone::Muted, format!("{sep}{}", rest.join(&sep))),
+    }
+}
+
+/// The rows a person watches a moving run by: the row that asks for them where something
+/// does, each working node's rows with what its session said last, and the footer. Not
+/// the run's chronicle, which says what happened, in order.
+pub struct Rows {
+    /// The row that asks for the person, or says whom the run's engine asks at its own
+    /// terminal; absent while nothing needs them.
+    pub attention: Option<Line>,
+    /// Each working node's rows, in the workflow's order.
+    pub nodes: Vec<Line>,
+    pub footer: Line,
+}
+
+/// The rows of `frame`, the run `run_id`, with what `heard` kept of what its sessions
+/// said. `answerable` says whether the run stopped on a menu of its own, which decides
+/// the command the attention row offers; a run whose engine asks at its own terminal
+/// says so in its place.
+pub fn rows(
+    frame: &RunFrame,
+    run_id: &RunId,
+    answerable: bool,
+    heard: &Heard,
+    look: &Look,
+) -> Rows {
+    let attention = match &frame.asking {
+        Some(asking) => asked(asking, look),
+        None => attention(frame, run_id, answerable, look),
+    };
+    let nodes = working(frame)
+        .into_iter()
+        .flat_map(|node| node_rows(frame, node, heard.of(run_id, &node.id), look))
+        .collect();
+    Rows {
+        attention,
+        nodes,
+        footer: footer(frame, look),
+    }
+}
+
+/// The run's signature at the top of a screen that watches it: each node's name over
+/// its stretch, in the workflow's order, and, where the view moves, the plow along the
+/// running node's stretch a cell for each event it has had.
+pub fn ribbon(frame: &RunFrame, motion: Motion) -> Ribbon {
+    let ribbon = Ribbon::new(
+        frame
+            .nodes
+            .iter()
+            .map(|node| Stretch::new(node.id.as_str(), node.standing)),
+    );
+    let running = frame
+        .nodes
+        .iter()
+        .find(|node| node.standing == Standing::Running);
+    match (motion, running) {
+        (Motion::Moves, Some(node)) => ribbon.plowed(node.events),
+        (Motion::Moves, None) | (Motion::Still, _) => ribbon,
     }
 }
 

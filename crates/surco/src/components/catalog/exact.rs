@@ -28,6 +28,7 @@ fn every_block_draws_within_an_exact_width() {
                 glyphs,
                 paint: Paint::Plain,
                 width: Width::exact(cells),
+                motion: crate::motion::Motion::Moves,
             };
             let drawn = catch_unwind(AssertUnwindSafe(|| Terminal::on(look).draw(&doc)))
                 .unwrap_or_else(|_| panic!("{set} at {cells} cells: drawing panicked"));

@@ -47,7 +47,7 @@ mod line;
 mod round;
 
 pub(crate) use choose::choose;
-pub(crate) use decision::{decide, Ask};
+pub(crate) use decision::decide;
 pub(crate) use line::ask_line;
 pub(crate) use round::answer;
 
@@ -261,6 +261,7 @@ impl Console {
             glyphs: crate::output::glyphs(),
             paint: crate::output::stderr_paint(),
             width: crate::output::row_width(usize::from(self.term.size().1)),
+            motion: crate::surface::TerminalEnv::settled().motion,
         }
     }
 

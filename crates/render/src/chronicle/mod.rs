@@ -23,7 +23,8 @@ mod task_words;
 mod words;
 
 use surco::components::Whole;
-use surco::doc::{Block, Depth};
+use surco::doc::{Block, Depth, Doc};
+use surco::figures::duration;
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use surco::look::Look;
@@ -142,6 +143,38 @@ pub fn line(moment: &Moment, look: &Look) -> Line {
         None => Line::new(),
     };
     line.plain(said.text)
+}
+
+/// The line one moment is logged on, for a reader who meets the run after the fact: the
+/// run's own clock at that moment, in brackets, then the moment's line. What a pipe
+/// writes, and what the run's chronicle shows wherever a person follows it.
+pub fn logged(moment: &Moment, look: &Look) -> Line {
+    Line::new()
+        .plain(format!("[{}] ", duration(moment.elapsed)))
+        .then(line(moment, look))
+}
+
+/// The run's chronicle as a document: every moment that says anything, logged, and
+/// under a node that failed what it printed. `run` is what the run is called by.
+pub fn told(moments: &[Moment], run: &RunId, look: &Look) -> Doc {
+    let mut doc = Doc::new();
+    let mut lines = Vec::new();
+    for moment in moments
+        .iter()
+        .filter(|moment| says_anything(&moment.happening))
+    {
+        lines.push(logged(moment, look));
+        let printed = evidence(moment, run);
+        if !printed.is_empty() {
+            doc = doc
+                .with(Block::Lines(std::mem::take(&mut lines)))
+                .with_all(printed);
+        }
+    }
+    match lines.is_empty() {
+        true => doc,
+        false => doc.with(Block::Lines(lines)),
+    }
 }
 
 /// What a node that failed printed, as the blocks a surface quotes under the

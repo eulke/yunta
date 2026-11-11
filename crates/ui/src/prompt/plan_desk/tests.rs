@@ -101,9 +101,9 @@ fn option(name: &str, said: &str) -> ChoiceRow {
     }
 }
 
-fn desk(review: &PlanReview, leaving: Leaving) -> PlanDesk<'_> {
+fn desk(review: &PlanReview, leaving: Leaving) -> PlanDesk {
     PlanDesk::new(
-        Reading::of(review, Vec::new()),
+        Reading::of(review.clone(), Vec::new()),
         Asked {
             question: "Plan registered. Approve?".to_string(),
             node: Some("approve-plan".to_string()),
@@ -123,12 +123,13 @@ pub(crate) fn look() -> Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::exact(COLUMNS),
+        motion: surco::motion::Motion::Moves,
     }
 }
 
 /// The desk as a terminal holds it, handed back what was laid out of its pane as the
 /// terminal's loop hands it back.
-fn rows(desk: &mut PlanDesk<'_>) -> Vec<String> {
+fn rows(desk: &mut PlanDesk) -> Vec<String> {
     let held = surco::surface::Terminal::on(look()).held(&desk.block(&look()), COLUMNS, ROWS);
     if let Some(pane) = held.pane {
         desk.laid(pane);
@@ -136,11 +137,11 @@ fn rows(desk: &mut PlanDesk<'_>) -> Vec<String> {
     held.lines.iter().map(|line| line.text()).collect()
 }
 
-fn holds(desk: &mut PlanDesk<'_>, needle: &str) -> bool {
+fn holds(desk: &mut PlanDesk, needle: &str) -> bool {
     rows(desk).iter().any(|row| row.contains(needle))
 }
 
-fn press(desk: &mut PlanDesk<'_>, keys: &str) {
+fn press(desk: &mut PlanDesk, keys: &str) {
     for key in keys.chars() {
         assert_eq!(desk.press(Stroke::Insert(key)), Press::Stay, "{key}");
     }

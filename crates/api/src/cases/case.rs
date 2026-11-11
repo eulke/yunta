@@ -210,9 +210,9 @@ async fn play(
 ) -> Result<Played, Error> {
     let fixture = crate::machine::read_fixture(fixture_path).await?;
     let request = RunRequest {
-        workflow: Path::new(case.workflow.as_str()),
+        workflow: PathBuf::from(case.workflow.as_str()),
         inputs: case.inputs.clone().into_iter().collect(),
-        mode: case.mode.as_ref(),
+        mode: case.mode.clone(),
         adapter: Some(RunAdapter::Mock { fixture }),
         // A case is hermetic at birth too: its manifest freezes no user
         // knowledge, as its sessions read none.

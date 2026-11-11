@@ -111,7 +111,7 @@ pub struct ProjectIdentity {
 
 /// Frozen with the run: `Named` pins every runner to its candidate on that
 /// adapter; `Mock` carries the fixture text read at creation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum RunAdapter {
     Named(AdapterId),

@@ -5,42 +5,17 @@
 
 use surco::look::Look;
 use yunta_api::Remark;
-use yunta_render::ending;
+use yunta_ui::remark::Weight;
 
 use crate::output::{note, progress, warn, Mode};
 
-/// Says `remark` the way `output` asks, with `look`.
+/// Says `remark` the way `output` asks, with `look`: in the words and with the weight
+/// every interface says it with.
 pub(crate) fn say(remark: Remark, output: Mode, look: &Look) {
-    match remark {
-        Remark::Caution(caution) => warn(yunta_render::caution::line(&caution)),
-        Remark::Estimate(estimation) => progress(
-            output,
-            look,
-            yunta_render::spend::estimation(&estimation, look.glyphs),
-        ),
-        Remark::StaleLockTaken { pid } => warn(yunta_render::refusal::stale_lock_taken(pid)),
-        Remark::WaitingForReset { run, reason } => {
-            progress(output, look, yunta_render::pause::run_waits(&run, &reason))
-        }
-        Remark::ForgeUnavailable { said } => {
-            warn(yunta_render::escalation::forge_unavailable(&said))
-        }
-        Remark::SignallingEngine { run, engine } => {
-            progress(output, look, ending::signalling(&run, engine))
-        }
-        Remark::StoppedWaiting { run } => note(ending::stopped_waiting(&run)),
-        Remark::Escalating { run, waited } => note(ending::escalating(&run, waited)),
-        Remark::GroupRefused { pgid } => warn(ending::group_refused(pgid)),
-        Remark::Unstopped { said } => warn(said),
-        Remark::RegistryKept { said } => warn(ending::registry_kept(&said)),
-        Remark::CheckoutKept { run, said } => warn(ending::checkout_kept(&run, &said)),
-        Remark::Uncollected(uncollected) => warn(uncollected.said()),
-        Remark::ReplacedTreeKept { at, said } => {
-            warn(yunta_render::refusal::replaced_tree_kept(&at, &said))
-        }
-        Remark::UnreadManifestKeys { keys } => {
-            let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
-            note(yunta_render::caution::unread_manifest_keys(&keys))
-        }
+    let said = yunta_ui::remark::said(&remark, look.glyphs);
+    match said.weight {
+        Weight::Warning => warn(said.words),
+        Weight::Note => note(said.words),
+        Weight::Progress => progress(output, look, said.words),
     }
 }

@@ -311,6 +311,8 @@ fn field() -> Runs {
                 furrow: plowed(5, Standing::NeedsYou, 9),
                 said: "implement asks at its terminal".to_string(),
                 edge: Edge::Age("32m".to_string()),
+                pointed: false,
+                marked: false,
             },
             RunLine {
                 standing: Standing::Stopped,
@@ -320,6 +322,8 @@ fn field() -> Runs {
                 furrow: plowed(2, Standing::Stopped, 4),
                 said: format!("{} while it ran", Standing::Stopped.word()),
                 edge: Edge::Command("yunta resume 60Y934".to_string()),
+                pointed: false,
+                marked: false,
             },
         ],
     }
@@ -436,6 +440,7 @@ fn markdown_says_every_word_the_terminal_says_of_every_block() {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::of(Some(120), None),
+        motion: crate::motion::Motion::Moves,
     };
     let doc = catalog();
     let terminal = words(&Terminal::on(look).draw(&doc));
@@ -464,6 +469,7 @@ fn a_change_that_names_no_file_draws_nothing() {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::of(Some(120), None),
+        motion: crate::motion::Motion::Moves,
     };
     assert_eq!(Terminal::on(look).draw(&none()).trim(), "");
     assert_eq!(Markdown.draw(&none()).trim(), "");
