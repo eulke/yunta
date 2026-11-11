@@ -23,7 +23,7 @@ mod terminal;
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use surco::doc::Block;
 use surco::surface::{Html, Markdown};
@@ -36,11 +36,9 @@ use recorded::Recordings;
 use support::now;
 use terminal::{laid_out, scrolled};
 
-/// How long the whole walk may take: it is run with the rest of the suite.
-const WITHIN: Duration = Duration::from_secs(60);
-
-/// The most states the walk visits before it calls the application endless: about what
-/// it walks in the minute it may take, far past the few thousand its stages reach.
+/// The most states the walk visits before it calls the application endless: more than
+/// twice what its stages reach, counted in states rather than seconds so the bound holds
+/// alike on a fast machine and on a slow runner beside the rest of the suite.
 const MOST_STATES: usize = 40_000;
 
 /// What a screen the walk must reach shows, and what that screen is.
@@ -256,7 +254,7 @@ fn every_state_the_application_reaches_holds() {
     });
 }
 
-/// The walk over `recordings`, held to its time and to every screen it must reach.
+/// The walk over `recordings`, held to every screen it must reach.
 fn walked_whole(recordings: &Recordings) {
     let started = Instant::now();
     let walked = walk(recordings);
@@ -265,11 +263,6 @@ fn walked_whole(recordings: &Recordings) {
         walked.steps.len(),
         walked.palettes.len(),
         walked.helps.len(),
-        started.elapsed()
-    );
-    assert!(
-        started.elapsed() < WITHIN,
-        "the walk took {:?}",
         started.elapsed()
     );
     assert!(

@@ -1807,6 +1807,8 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Description:**
 - PR #30's body gains the module; CI on Linux and macOS.
 
+**Found in its turn:** The walk's one-minute cap failed CI on Linux: its runner walks the same 17,294 states in 108 s that this machine walks in about 40 s. A clock bounds the machine, not the walk, so the cap is gone and the walk is bounded by the states it visits (`MOST_STATES`), alike on every machine.
+
 **Fails first:** none.
 
 **Acceptance criteria:**
