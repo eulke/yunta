@@ -1812,10 +1812,10 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Fails first:** none.
 
 **Acceptance criteria:**
-- [ ] CI green on Linux and macOS.
+- [x] CI green on Linux and macOS.
 
 **Verification:**
-- [ ] Manual check: `gh pr checks 30`: ci, musl-build, test-release and test-macos pass.
+- [x] Manual check: `gh pr checks 30`: ci, musl-build, test-release and test-macos pass.
 
 **Dependencies:** Checkpoint D
 
