@@ -39,5 +39,7 @@ yunta-replay = { workspace = true, features = ["testkit"] }
 # A clock that stands still, and a git repository a test makes.
 yunta-testkit-core.workspace = true
 yunta-testkit.workspace = true
+# A run's log appended to behind the engine's back, so replay reads it broken.
+yunta-storage = { workspace = true, features = ["testkit"] }
 # The directory a test's workspace works in.
 tempfile.workspace = true

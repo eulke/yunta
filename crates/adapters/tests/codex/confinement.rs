@@ -7,6 +7,7 @@ use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 
 use yunta_core::port::ProbeReport;
+use yunta_core::process::SearchPath;
 use yunta_core::{AdapterError, Unbuildable};
 
 /// A CLI older than the lowest version the permissions profile was checked
@@ -26,7 +27,7 @@ async fn a_codex_older_than_the_profile_floor_is_unhealthy_at_probe() {
         binary: Some(binary),
     });
     assert!(matches!(
-        adapter.probe().await.unwrap(),
+        adapter.probe(&SearchPath::default()).await.unwrap(),
         ProbeReport::Unhealthy { .. }
     ));
 }

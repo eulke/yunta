@@ -324,12 +324,16 @@ fn level(depth: usize) -> usize {
 }
 
 /// What leads a section's title, with the space that sets it apart: its mark,
-/// or its place in a numbered list.
+/// its place in a numbered list, or the pointer where it stands on it.
 fn lead_text(lead: Option<Lead>) -> String {
     match lead {
         Some(Lead::Mark(sign)) => format!("{} ", mark(sign)),
         Some(Lead::Ordinal(at)) => format!("{at}  "),
-        None => String::new(),
+        Some(Lead::Pointer { on: true }) => format!(
+            "{} ",
+            esc(&crate::glyphs::Glyphs::Unicode.pointer().to_string())
+        ),
+        Some(Lead::Pointer { on: false }) | None => String::new(),
     }
 }
 

@@ -16,6 +16,7 @@ use crate::graph::{self, Labels};
 
 /// What a workflow's graph is drawn from: the workflow, and the run it was drawn
 /// from, with the frame its log derives, when it is a run's.
+#[derive(Debug, Clone)]
 pub struct Graph {
     pub workflow: Workflow,
     pub run: Option<(RunId, RunFrame)>,

@@ -1,7 +1,7 @@
 //! See [`crate`]. What reaches the application.
 
 use chrono::{DateTime, Utc};
-use surco::components::PaneLaid;
+use surco::components::ScreenLaid;
 use yunta_api::Remark;
 
 use crate::prompt::Stroke;
@@ -13,9 +13,9 @@ use crate::{News, Outcome, Ticket};
 #[derive(Debug)]
 pub enum Input {
     Stroke(Stroke),
-    /// What a surface laid out of a pane that scrolls: its first line, a page, the last
-    /// first line.
-    Laid(PaneLaid),
+    /// What a surface laid out of the screen's regions that it shows in part: of each,
+    /// its first line, a page, the last first line.
+    Laid(ScreenLaid),
     /// The instant the application stands at now.
     Time(DateTime<Utc>),
     /// What a piece of work remarks while it works.

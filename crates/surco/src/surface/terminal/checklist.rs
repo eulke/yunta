@@ -54,7 +54,7 @@ impl Checklist {
             }
         }
         for check in rest {
-            lines.extend(row(check, &layout, look));
+            lines.extend(row(check, self.points_at(check), &layout, look));
         }
         lines
     }
@@ -94,13 +94,18 @@ impl Checklist {
     }
 }
 
-/// One check's row, then what hangs under it: what its finding means and
-/// how to make it hold, beside their labels in the subjects' column, then
-/// what says more.
-fn row(check: &Check, layout: &Layout, look: &Look) -> Vec<Line> {
+/// One check's row, the pointer in its margin where it is `pointed` at, then
+/// what hangs under it: what its finding means and how to make it hold, beside
+/// their labels in the subjects' column, then what says more.
+fn row(check: &Check, pointed: bool, layout: &Layout, look: &Look) -> Vec<Line> {
     let mark = check.found.mark();
-    let head = Line::new()
-        .plain(INDENT)
+    let margin = match pointed {
+        true => Line::new()
+            .push(Tone::Strong, look.glyphs.pointer().to_string())
+            .plain(" "),
+        false => Line::new().plain(INDENT),
+    };
+    let head = margin
         .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
         .plain(" ")
         .push(Tone::Strong, check.subject.as_str());

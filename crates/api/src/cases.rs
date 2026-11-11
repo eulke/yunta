@@ -181,3 +181,24 @@ fn case_name(path: &Path) -> String {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Remark;
+
+    /// An interface runs the cases on a task of its own, which a runtime may move
+    /// from one thread to another: what runs them, the run each case drives
+    /// included, holds nothing a thread cannot hand on. This fails to compile where
+    /// it does not.
+    /// Reached by: `crates/engine/src/run/aside.rs`, `crates/engine/src/run/exec.rs`,
+    /// `crates/engine/src/run/node_exec.rs`, `crates/engine/src/run/workflow_exec/child.rs`
+    #[test]
+    fn running_the_cases_can_move_between_threads() {
+        fn sendable<T: Send>(_: &T) {}
+        let _checked = |suite: &CaseSuite<'_>, stop: &Stop| {
+            let remarks = |_: Remark| {};
+            sendable(&suite.run(|_| {}, &remarks, stop));
+        };
+    }
+}

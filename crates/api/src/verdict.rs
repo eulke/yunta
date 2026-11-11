@@ -9,6 +9,10 @@
 //! use has to provide (what the pack it comes from `requires:`, and the
 //! programs its literal commands start), and the `files:` its nodes read in
 //! the commit a run would start from.
+//!
+//! `check`'s whole answer, the verdict's page with what the workflow's past
+//! runs say of how it verifies its work, is a [`WorkflowCheck`]
+//! ([`Project::check`]): the CLI prints it and the application shows it.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -22,8 +26,9 @@ use yunta_core::{CommitSha, ConfigLayer, Detected, Isolation, NodeId, Workflow};
 use yunta_render::blocks::diagnostic::{hinted, located, Pointed};
 use yunta_render::page::{Checked, Diagnosis, Unrunnable};
 use yunta_render::refusal::Refused;
+use yunta_replay::verification_effectiveness::VerificationFindings;
 
-use crate::{Error, Project, Stop, Workspace};
+use crate::{AuditedWorkflow, Error, Project, Stop, Workspace};
 
 /// How much of the project a verdict reads beyond the workflow itself.
 ///
@@ -188,7 +193,7 @@ impl Project {
         origin: &yunta_engine::WorkflowOrigin,
     ) -> (Vec<CheckError>, Vec<Caution>) {
         let env = &self.workspace.env;
-        let on_path = |program: &str| env.finds(program);
+        let on_path = |program: &str| env.path.find(program).is_some();
         let unprovided = match origin {
             yunta_engine::WorkflowOrigin::Pack {
                 publisher,
@@ -205,10 +210,61 @@ impl Project {
         };
         let missing_programs = yunta_engine::programs_named(workflow, config)
             .into_iter()
-            .filter(|(_, program)| !env.finds(program))
+            .filter(|(_, program)| env.path.find(program).is_none())
             .map(|(node, program)| Caution::ProgramNotOnPath { node, program })
             .collect();
         (unprovided, missing_programs)
+    }
+}
+
+/// A workflow checked as `yunta check` checks it: the verdict's page, whether
+/// the workflow can run here, and what its past runs say of how it verifies its
+/// work, which is advice heard after the verdict.
+#[derive(Debug, Clone)]
+pub struct WorkflowCheck {
+    pub checked: Checked,
+    pub passes: bool,
+    pub findings: VerificationFindings,
+}
+
+impl Project {
+    /// The workflow `reference` names checked as `yunta check` checks it: read
+    /// in one pass, judged against the project's own config layers, merged as
+    /// a run merges them and refused where a lower one re-permits what a higher
+    /// one denied, or against the one merged file `config` names, every file
+    /// its nodes read looked for in the commit a run would start from; and what
+    /// its past runs say. A project that never ran it says nothing of them.
+    pub async fn check(
+        &self,
+        reference: &Path,
+        config: Option<&Path>,
+        stop: &Stop,
+    ) -> Result<WorkflowCheck, Error> {
+        let AuditedWorkflow {
+            path,
+            workflow,
+            problems,
+        } = self.workspace.audit_workflow(reference)?;
+        let (config, conflicts) = match config {
+            Some(file) => (self.workspace.read_config(file)?, Vec::new()),
+            None => (self.config.clone(), self.layer_conflicts()?),
+        };
+        let judged = Judged {
+            workflow: &workflow,
+            path: &path,
+            config: &config,
+            conflicts,
+        };
+        let verdict = self
+            .verdict(judged, VerdictReach::Workflow, stop)
+            .await?
+            .with_file_problems(problems.diagnostics);
+        let findings = self.history(&workflow.name).await.findings(&workflow);
+        Ok(WorkflowCheck {
+            checked: verdict.checked(stop).await?,
+            passes: verdict.passes(),
+            findings,
+        })
     }
 }
 
@@ -322,7 +378,7 @@ impl Verdict<'_> {
         let workspace = &self.project.workspace;
         let in_repo = crate::machine::in_repo(workspace, &workspace.dir, stop).await?;
         let detected = Detected {
-            adapters: crate::machine::adapters_for(&self.errors).await,
+            adapters: crate::machine::adapters_for(&self.errors, &workspace.env.path).await,
             ..in_repo
         };
         Ok(crate::machine::suggestions(&self.errors, &detected))

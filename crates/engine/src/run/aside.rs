@@ -22,7 +22,7 @@ pub(super) struct Aside<'a> {
 }
 
 /// A measurement under way.
-type Measurement<'a> = Pin<Box<dyn Future<Output = Result<(), RunError>> + 'a>>;
+type Measurement<'a> = Pin<Box<dyn Future<Output = Result<(), RunError>> + Send + 'a>>;
 
 impl<'a> Aside<'a> {
     /// Nothing under way, and stopped by whatever stops the run.

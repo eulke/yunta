@@ -34,6 +34,12 @@ impl RunRegistry {
         RunRegistry { dir }
     }
 
+    /// The directory of the run it is the registry of, which keeps the run's manifest
+    /// and documents beside it.
+    pub fn run_dir(&self) -> &Path {
+        &self.dir
+    }
+
     /// The process driving the run as the registry names it and this machine
     /// answers for it now: alive, gone, or never recorded.
     pub fn engine(&self) -> Engine {

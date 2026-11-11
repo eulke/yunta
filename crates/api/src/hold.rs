@@ -93,7 +93,8 @@ impl<'p> OpenedRun<'p> {
             return Err(Refused::Unservable(Unservable::MockBeforeFrozenAdapter).into());
         }
         // A run taken back from its log has no file of its own to check again.
-        crate::machine::servable(manifest, state.run.mode(), Arg::Blank).await?;
+        let search_path = &project.workspace.env.path;
+        crate::machine::servable(manifest, state.run.mode(), Arg::Blank, search_path).await?;
         self.refuse_if_driven().await?;
         if !waited_out_reset(
             project.workspace.clock.as_ref(),

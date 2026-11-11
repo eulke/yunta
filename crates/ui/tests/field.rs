@@ -158,3 +158,39 @@ fn a_reading_asked_again_lets_go_the_one_under_way() {
         "the late reading is dropped: {screen}"
     );
 }
+
+/// A closing that fails partway says what failed, and the field is read again, so the
+/// runs it closed before the failure are no longer listed.
+#[test]
+fn a_closing_that_fails_partway_says_so_and_reads_the_field_again() {
+    let mut state = on_the_field(vec![stopped(&FIRST), stopped(&SECOND)]);
+    pressed(
+        &mut state,
+        &[
+            Stroke::Insert(' '),
+            Stroke::Insert('j'),
+            Stroke::Insert(' '),
+            Stroke::Insert('x'),
+        ],
+    );
+    let asked = pressed(&mut state, &[Stroke::Enter]);
+    let [Request::Perform(closing, Operation::Close { .. })] = asked.as_slice() else {
+        panic!("{asked:?}");
+    };
+    let failed = "the disk refused the second run's close".to_string();
+    let partway = Outcome::Closed {
+        closed: vec![FIRST],
+        refused: Vec::new(),
+        failed: Some(failed.clone()),
+    };
+    let asked = state.update(Input::Outcome(*closing, partway));
+    assert!(
+        matches!(
+            asked.as_slice(),
+            [Request::Perform(_, Operation::Field { .. })]
+        ),
+        "{asked:?}"
+    );
+    let shown = Markdown.draw(&state.screen(&Markdown.look()).main.doc);
+    assert!(shown.contains(&failed), "{shown}");
+}

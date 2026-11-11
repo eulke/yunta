@@ -38,6 +38,7 @@ use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
 use yunta_core::process::subprocess::{self, Launch, LineParser};
+use yunta_core::process::SearchPath;
 use yunta_core::rail::RailCommand;
 
 use crate::action::Checkout;
@@ -326,6 +327,7 @@ impl ClaudeCodeAdapter {
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
+            search_path: &req.search_path,
             args: planned.args,
             cwd: &req.cwd,
             env: &planned.env,
@@ -416,14 +418,14 @@ impl Adapter for ClaudeCodeAdapter {
         capabilities()
     }
 
-    async fn probe(&self) -> Result<ProbeReport> {
+    async fn probe(&self, search_path: &SearchPath) -> Result<ProbeReport> {
         if let Err(e) = &self.settings {
             return Err(AdapterError::Adapter {
                 adapter: ID.clone(),
                 message: e.to_string(),
             });
         }
-        Ok(subprocess::probe_version(&self.binary).await)
+        Ok(subprocess::probe_version(&self.binary, search_path).await)
     }
 
     fn own_config(&self) -> Vec<ScopeGlob> {

@@ -1,6 +1,7 @@
 //! What `yunta schema` shows a person: every kind of document Yunta reads
-//! and what each is for, or every key a workflow reads, each with the
-//! command that shows a shape and its JSON Schema.
+//! and what each is for, every key a workflow reads, or the annotated example
+//! of a document a node produces, each with the command that shows a shape and
+//! its JSON Schema where it has one.
 
 use surco::components::{Fields, Next};
 use surco::doc::{Block, Doc};
@@ -8,7 +9,7 @@ use surco::look::Look;
 use surco::surface::Surface;
 use surco::text::listed;
 use yunta_core::step::{Arg, NextStep};
-use yunta_core::{DocumentKind, NodeKind};
+use yunta_core::{ArtifactKind, DocumentKind, NodeKind};
 
 use super::Page;
 use crate::command;
@@ -17,15 +18,27 @@ use crate::command;
 const JSON_SCHEMA: &str = "the JSON Schema an editor validates against";
 
 /// What `schema` shows a person: the documents it can show the shape of, or
-/// every key a workflow reads.
+/// the shape of one.
 pub enum Schema {
     /// Every kind of document Yunta reads, with what each is for.
     Documents,
     /// Every key a workflow reads.
     WorkflowKeys,
+    /// The annotated example of a document a node produces, the text `yunta
+    /// schema <name>` prints.
+    Artifact(ArtifactKind),
 }
 
 impl Schema {
+    /// The shape of `kind`, as a page: a workflow's keys, or a document's annotated
+    /// example.
+    pub fn of(kind: DocumentKind) -> Schema {
+        match kind {
+            DocumentKind::Workflow => Schema::WorkflowKeys,
+            DocumentKind::Artifact(kind) => Schema::Artifact(kind),
+        }
+    }
+
     /// The shape a writer reads, as a control-plane client is handed it: a
     /// kind's annotated example, or the keys a workflow reads, as Markdown.
     pub fn shape(kind: DocumentKind) -> String {
@@ -44,6 +57,9 @@ impl Page for Schema {
         match self {
             Schema::Documents => list(),
             Schema::WorkflowKeys => workflow_keys(),
+            Schema::Artifact(kind) => {
+                Doc::new().with(Block::Markdown(yunta_core::shape::contract(*kind)))
+            }
         }
     }
 }

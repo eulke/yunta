@@ -9,7 +9,7 @@
 //! [`Deciding::in_front`] and hands back what it came to, through
 //! [`Deciding::replied`] and [`Deciding::left`]. Both turn the same way.
 
-use surco::components::PaneLaid;
+use surco::components::Laid;
 use surco::doc::Block;
 use surco::look::Look;
 use yunta_render::escalation::claim_words;
@@ -225,9 +225,9 @@ impl Answerable for Deciding {
     }
 
     /// What a surface laid out of the plan's pane, for its scroll keys.
-    fn laid(&mut self, pane: PaneLaid) {
+    fn laid(&mut self, laid: Laid) {
         if let Some(plan) = self.plan.as_mut() {
-            plan.desk.laid(pane);
+            plan.desk.laid(laid);
         }
     }
 }

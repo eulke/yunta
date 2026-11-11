@@ -19,7 +19,7 @@ use crate::workflow::{Effort, OnInterrupt};
 /// for by name — the role a workflow needs, `runner: planner`, which the
 /// project's config fills with the CLIs it has; an agent is a set of
 /// instructions the run owns, added to the CLI's own.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunnerCandidate {
     pub adapter: AdapterId,

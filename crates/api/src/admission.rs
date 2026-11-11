@@ -81,7 +81,8 @@ impl Project {
             .clone()
             .unwrap_or_else(|| frozen.manifest.workflow.first_mode());
         let shown = Arg::Given(self.workspace.shown(&path));
-        crate::machine::servable(&frozen.manifest, &mode, shown).await?;
+        let search_path = &self.workspace.env.path;
+        crate::machine::servable(&frozen.manifest, &mode, shown, search_path).await?;
         let reference = Arg::Given(self.workspace.shown(&request.workflow));
         let refused = |errors| Refused::Unchecked {
             workflow: reference.clone(),

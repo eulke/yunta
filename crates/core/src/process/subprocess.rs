@@ -12,7 +12,9 @@
 //! UTF-8, bounded in line length — into the adapter's own parser; its
 //! stderr is drained to the trace log; its prompt travels by stdin.
 //! `claude_code` and `codex` differ only in the arguments they build,
-//! the lines they parse and the settings they read.
+//! the lines they parse and the settings they read. A CLI named without a
+//! directory is found on the search path its launch or its probe is handed,
+//! the environment's, so the probe asks the CLI the session runs.
 
 use std::collections::VecDeque;
 use std::path::Path;
@@ -20,6 +22,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use crate::process::SearchPath;
 use crate::{AdapterError, AdapterId, Pid, Result};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
@@ -96,6 +99,8 @@ pub trait Held: Send + Sync {
 pub struct Launch<'a> {
     pub adapter: &'static AdapterId,
     pub binary: &'a Path,
+    /// Where `binary` is found when it names no directory.
+    pub search_path: &'a SearchPath,
     pub args: Vec<String>,
     pub cwd: &'a Path,
     /// Both maps reach the child's environment; only the values of
@@ -112,10 +117,15 @@ pub struct Launch<'a> {
     pub held: Option<Box<dyn Held>>,
 }
 
-/// `binary --version` under [`PROBE_TIMEOUT`]: its first answer as the
-/// version, or why the CLI could not be asked.
-pub async fn probe_version(binary: &Path) -> ProbeReport {
-    let asked = tokio::process::Command::new(binary)
+/// `binary --version` under [`PROBE_TIMEOUT`], found on `search_path`: its
+/// first answer as the version, or why the CLI could not be asked.
+pub async fn probe_version(binary: &Path, search_path: &SearchPath) -> ProbeReport {
+    let Some(program) = search_path.find(binary) else {
+        return ProbeReport::Unhealthy {
+            diagnostic: absent(binary),
+        };
+    };
+    let asked = tokio::process::Command::new(&program)
         .arg("--version")
         .stdin(Stdio::null())
         .kill_on_drop(true)
@@ -127,11 +137,6 @@ pub async fn probe_version(binary: &Path) -> ProbeReport {
         Ok(Ok(output)) => ProbeReport::Unhealthy {
             diagnostic: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         },
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound && missing(binary) => {
-            ProbeReport::Unhealthy {
-                diagnostic: absent(binary),
-            }
-        }
         Ok(Err(e)) => ProbeReport::Unhealthy {
             diagnostic: format!("`{}` could not be run: {e}", binary.display()),
         },
@@ -145,16 +150,8 @@ pub async fn probe_version(binary: &Path) -> ProbeReport {
     }
 }
 
-/// Whether a CLI the system could not start is not there at all. A path
-/// is checked; for a bare name the system searched `PATH` and found
-/// nothing it could start, which a script whose `#!` names a missing
-/// interpreter answers the same way, and this binary has no other word.
-fn missing(binary: &Path) -> bool {
-    binary.components().count() == 1 || !binary.exists()
-}
-
 /// Why a CLI that is not there cannot be asked: a bare name is on no
-/// directory of `PATH`, and a path names no file.
+/// directory of the environment's `PATH`, and a path names no file.
 fn absent(binary: &Path) -> String {
     match binary.components().count() {
         1 => format!("`{}` is not on PATH", binary.display()),

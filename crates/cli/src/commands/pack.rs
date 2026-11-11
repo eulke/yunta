@@ -49,7 +49,8 @@ pub async fn add(
         false => installed.shipped_cases(),
     };
     let needs = installed.needs(&project, &stop).await;
-    let at = surco::paths::shown(&installed.dir, &project.workspace.dir, None);
+    let at = project.workspace.shown(&installed.dir);
+    let unread = Needs::default();
     let page = |needs| Installed {
         manifest: &installed.manifest,
         commit: &installed.commit,
@@ -58,8 +59,8 @@ pub async fn add(
         needs,
     };
     // The pack is installed whatever stopped the reading of its needs.
-    let needs = needs.inspect_err(|_| show(look, &page(Needs::default())))?;
-    show(look, &page(needs));
+    let needs = needs.inspect_err(|_| show(look, &page(&unread)))?;
+    show(look, &page(&needs));
     Ok(Outcome::Success)
 }
 
@@ -141,7 +142,7 @@ pub async fn audit(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome
 pub async fn new_pack(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let workspace = shell.workspace();
     let scaffolded = workspace.packs().scaffold(pack).await?;
-    let at = surco::paths::shown(&scaffolded.dir, &workspace.dir, None);
+    let at = workspace.shown(&scaffolded.dir);
     let page = |checked| NewPack {
         pack,
         at: &at,

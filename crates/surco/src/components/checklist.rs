@@ -146,6 +146,11 @@ pub struct Checklist {
     /// The word the checks that hold fold into one row under, beside how
     /// many there are; every check has its own row when there is none.
     pub(crate) folded: Option<String>,
+    /// The subject of the row a person's pointer stands on, where the list is
+    /// moved through: a terminal draws the pointer in the row's margin, so
+    /// every row stands where it would without it; a file draws it before the
+    /// row.
+    pub(crate) pointed: Option<String>,
 }
 
 impl Checklist {
@@ -156,6 +161,17 @@ impl Checklist {
             aligned: subjects,
             ..Checklist::default()
         }
+    }
+
+    /// This list with the pointer on the row of `subject`.
+    pub fn pointing_at(mut self, subject: impl Into<String>) -> Self {
+        self.pointed = Some(subject.into());
+        self
+    }
+
+    /// Whether the pointer stands on `check`'s row.
+    pub(crate) fn points_at(&self, check: &Check) -> bool {
+        self.pointed.as_deref() == Some(check.subject.as_str())
     }
 
     /// This list with the checks that hold folded into one row that names

@@ -131,8 +131,8 @@ pub(crate) fn look() -> Look {
 /// terminal's loop hands it back.
 fn rows(desk: &mut PlanDesk) -> Vec<String> {
     let held = surco::surface::Terminal::on(look()).held(&desk.block(&look()), COLUMNS, ROWS);
-    if let Some(pane) = held.pane {
-        desk.laid(pane);
+    if let Some(laid) = held.laid {
+        desk.laid(laid);
     }
     held.lines.iter().map(|line| line.text()).collect()
 }

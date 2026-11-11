@@ -159,6 +159,7 @@ It holds no cell, pixel or color. `Markdown`, `Description` and `Html` draw it; 
 
    - **The palette** lists every act the stage offers and every act always there. Each one carries the command that does the same, spelled by render's `command`, so a person learns the CLI from it. Typed words filter it.
    - **Help** lists the keys.
+   - **A page taller than its region scrolls**, on every stage that shows one.
    - **A confirmation** stands before any act that stops, closes, removes or spends.
 
    **No stage, by nature:** `yunta mcp` is an agent's transport, `yunta rail` is what an agent's CLI runs, and `yunta completions` is a shell's script.
@@ -232,7 +233,7 @@ It holds no cell, pixel or color. `Markdown`, `Description` and `Html` draw it; 
   - each command's arguments, output mode and exit code, and its choice of which prompt to open;
   - spawning the system's opener for `yunta open`.
 - **What Surco gains:** the card and the desk as blocks, drawn by the terminal byte for byte as today, and by `Markdown` and `Html`.
-- **The desk's scroll comes back in as input.** The rows a surface laid out reach `update` as an input, so drawing changes nothing.
+- **What scrolls comes back in as input.** The rows a surface laid out of the desk's pane, or of a page's region, reach `update` as an input, so drawing changes nothing.
 - **The order of the work is the plan's:**
   1. the crate and the moves, each with what prints held unchanged;
   2. the blocks;

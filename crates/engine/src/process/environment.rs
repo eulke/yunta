@@ -1,7 +1,9 @@
 //! What the engine's commands run with: the shell every one of them is
 //! handed to, and the `PATH` that shell looks programs up in.
 
-use std::path::PathBuf;
+use std::ffi::OsStr;
+
+use yunta_core::process::SearchPath;
 
 /// The program every command the engine runs is handed to.
 pub(super) const SHELL: &str = "sh";
@@ -14,22 +16,24 @@ pub fn execution_environment(
     ambient: Option<&yunta_core::Env>,
 ) -> Option<yunta_core::events::ExecutionEnvironment> {
     let ambient = ambient?;
-    let path: Vec<PathBuf> = match ambient
+    let search_path = match ambient
         .subprocess_vars
         .iter()
         .rev()
         .find(|(name, _)| name == "PATH")
     {
-        Some((_, value)) => std::env::split_paths(value).collect(),
+        Some((_, value)) => SearchPath::of_var(OsStr::new(value)),
         None => ambient.path.clone(),
     };
-    let shell = path
-        .iter()
-        .map(|dir| dir.join(SHELL))
-        .find(|candidate| candidate.is_file())
+    let shell = search_path
+        .find(SHELL)
         .map_or_else(|| SHELL.to_string(), |found| found.display().to_string());
     Some(yunta_core::events::ExecutionEnvironment {
         shell,
-        path: path.iter().map(|dir| dir.display().to_string()).collect(),
+        path: search_path
+            .dirs()
+            .iter()
+            .map(|dir| dir.display().to_string())
+            .collect(),
     })
 }

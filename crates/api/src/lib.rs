@@ -33,11 +33,12 @@
 //!   [`RunNews`], which a [`FollowedRun`] folds, beside the [`RunRegistry`] its engine
 //!   keeps; `event_log`, the
 //!   [`EventLog`] a moving run's log is read through; and `history`, a
-//!   workflow's past runs as a [`WorkflowHistory`].
+//!   workflow's past runs as a [`WorkflowHistory`], read as a [`HistoryReading`].
 //! - What a workflow gets here: `workflow`, the file a reference names, read
 //!   as a [`WorkflowFile`] or audited whole as an [`AuditedWorkflow`];
 //!   `verdict`, the [`Verdict`] on whether it can run, as deep as
-//!   [`VerdictReach`] asks; and `admission`, a run's
+//!   [`VerdictReach`] asks, and the [`WorkflowCheck`] `check` answers with; and
+//!   `admission`, a run's
 //!   [`Admission`] of a [`RunRequest`], made a [`CreatedRun`] (`creation`),
 //!   held as a [`HeldRun`] (`hold`, a parked run taken back too), driven
 //!   here with the [`Ports`] a surface lends to a [`Driven`] run (`drive`),
@@ -96,7 +97,7 @@ pub use ending::ClosedRun;
 pub use error::{Error, Failure};
 pub use event_log::EventLog;
 pub use field::{offers_a_menu, FieldReach, FieldReading, Repository};
-pub use history::WorkflowHistory;
+pub use history::{HistoryReading, WorkflowHistory};
 pub use hold::HeldRun;
 pub use packs::{AuditedPack, FetchedPack, InstalledPack, Packs, ScaffoldedPack};
 pub use project::{config_layers, Project};
@@ -105,10 +106,10 @@ pub use run::{
     FollowedRun, Following, OpenedRun, RunNews, RunReading, RunRef, RunRegistry, StatsReading,
 };
 pub use setup::{
-    DetectedProject, InitializedProject, ProjectSetup, ProposedRunners, RunnerDeclaration,
-    WorkflowStem, WrittenWorkflow,
+    DetectedProject, InitializedProject, ProjectDraft, ProjectSetup, ProposedRunners, RunnerAnswer,
+    RunnerDeclaration, WorkflowStem, WrittenWorkflow,
 };
 pub use stop::Stop;
-pub use verdict::{ContextFiles, Judged, Verdict, VerdictReach};
+pub use verdict::{ContextFiles, Judged, Verdict, VerdictReach, WorkflowCheck};
 pub use workflow::{AuditedWorkflow, WorkflowFile};
 pub use workspace::Workspace;

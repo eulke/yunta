@@ -50,6 +50,10 @@ pub struct SessionSetup {
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: yunta_core::port::session::SessionEnv,
+    /// Where the session's CLI is found when its adapter names it without a
+    /// directory: the run's ambient `PATH`, which the CLI inherits. Empty in
+    /// a harness with no ambient environment.
+    pub search_path: yunta_core::process::SearchPath,
     /// The per-run MCP host plus the loop node's own id, present
     /// ONLY when the resolved adapter declared `run_tools` (the caller
     /// gates on the capability — this module never re-checks it). Each
@@ -134,6 +138,7 @@ impl SessionSetup {
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: yunta_core::port::session::SessionEnv::default(),
+            search_path: yunta_core::process::SearchPath::default(),
             run_tools: None,
             rail_command: Some(yunta_core::rail::RailCommand::new(PathBuf::from("yunta"))),
             agent: None,

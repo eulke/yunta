@@ -2,7 +2,10 @@
 //! terminal, a page and a desktop draw at the top of a run and at its foot.
 
 use super::*;
-use crate::components::{Attention, Card, CardBody, ChoiceRow, Choices, Legend, Ribbon, Stretch};
+use crate::components::{
+    Attention, Card, CardBody, Checklist, ChoiceRow, Choices, Fields, Found, Lead, Legend, Ribbon,
+    Section, Stretch,
+};
 
 /// A run's ribbon: two nodes finished, the one running with its plow, and the
 /// rest still ahead.
@@ -83,5 +86,44 @@ pub(super) fn on_a_screen() -> Vec<Block> {
         crate::components::desk::tests::plan().into(),
         crate::components::typed_answer::tests::named().into(),
         crate::components::choice_list::tests::shapes().into(),
+        moved_through(true).into(),
+        moved_through(false).into(),
+        installed().into(),
     ]
+}
+
+/// A list of checks a person moves through, the pointer on its second row.
+fn installed() -> Checklist {
+    let mut checks = Checklist::default().pointing_at("acme/review");
+    checks.push(
+        Found::Holds,
+        "acme/lint",
+        "v1.2.0 (3f9c2e1), as its lock records it",
+    );
+    checks.push(
+        Found::Caution,
+        "acme/review",
+        "v0.4.0 (91ab7d0), modified: its files no longer match its lock",
+    );
+    checks
+}
+
+/// A section of a list a person moves through, the pointer `on` it or not.
+fn moved_through(on: bool) -> Section {
+    let (name, does) = match on {
+        true => ("lint-fix", "a check, and an agent that fixes what it finds"),
+        false => (
+            "tasks",
+            "a plan of tasks, and an agent that works through them",
+        ),
+    };
+    Section {
+        lead: Some(Lead::Pointer { on }),
+        title: Line::new()
+            .push(Tone::Strong, name)
+            .plain(format!(": {does}")),
+        blocks: vec![Fields::new()
+            .push_if("run", format!("yunta run {name}"))
+            .into()],
+    }
 }

@@ -5,13 +5,15 @@
 //! Each interface lays a screen out its own way: a terminal in rows and
 //! columns, a desktop in boxes that flex, a page in a grid. Each draws the
 //! documents a screen holds with its own surface, a terminal's pane at
-//! [`Width::exact`](crate::look::Width::exact). A screen keeps no scroll
-//! position, width or size: an interface keeps where a person scrolled to and
-//! how wide each pane stands. Its parts are named by what they are, never by
-//! where they stand, so two interfaces that place them apart still show the
-//! same screen.
+//! [`Width::exact`](crate::look::Width::exact). A screen keeps no width or
+//! size: an interface keeps how wide each pane stands. What of each region a
+//! person asked to see is the region's [`Sight`], kept by whoever answers their
+//! keys; an interface that shows part of a region hands back what it laid out of
+//! each, a [`ScreenLaid`], for the next key to move from. Its parts are named by
+//! what they are, never by where they stand, so two interfaces that place them
+//! apart still show the same screen.
 
-use super::{Attention, Legend};
+use super::{Attention, Laid, Legend, Sight};
 use crate::doc::Doc;
 use crate::words::{Standing, NEED_YOU};
 
@@ -42,10 +44,22 @@ pub struct Count {
     pub runs: usize,
 }
 
-/// A part of a screen that holds a document, under its title.
+/// A part of a screen that holds a document, under its title, and what of it a
+/// person asked to see.
 pub struct Region {
     pub title: Option<String>,
     pub doc: Doc,
+    pub sight: Sight,
+}
+
+/// What a surface laid out of a screen's regions: of the main one, of the one beside it
+/// where it stands, and of what is open over them where something is. A region holding
+/// a desk is laid out as its pane.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScreenLaid {
+    pub main: Laid,
+    pub side: Option<Laid>,
+    pub overlay: Option<Laid>,
 }
 
 /// The region beside the main one, and whether the keys act on it rather
@@ -56,11 +70,12 @@ pub struct Side {
 }
 
 /// What opens over a screen and closes with `esc`: the palette, help, a
-/// confirmation.
+/// confirmation; and what of it a person asked to see.
 pub struct Overlay {
     pub title: String,
     pub doc: Doc,
     pub legend: Legend,
+    pub sight: Sight,
 }
 
 impl Screen {
@@ -152,14 +167,24 @@ impl Count {
 }
 
 impl Region {
-    /// A region that holds `doc`, with no title.
+    /// A region that holds `doc`, with no title, from its first line.
     pub fn new(doc: Doc) -> Self {
-        Region { title: None, doc }
+        Region {
+            title: None,
+            doc,
+            sight: Sight::default(),
+        }
     }
 
     /// This region under `title`.
     pub fn titled(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
+        self
+    }
+
+    /// This region with what of it `sight` asks to have in sight.
+    pub fn in_sight(mut self, sight: Sight) -> Self {
+        self.sight = sight;
         self
     }
 }
@@ -171,7 +196,14 @@ impl Overlay {
             title: title.into(),
             doc,
             legend: Legend::new(),
+            sight: Sight::default(),
         }
+    }
+
+    /// This overlay with what of it `sight` asks to have in sight.
+    pub fn in_sight(mut self, sight: Sight) -> Self {
+        self.sight = sight;
+        self
     }
 
     /// This overlay with `legend` for its keys.

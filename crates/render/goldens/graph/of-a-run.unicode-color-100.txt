@@ -1,16 +1,20 @@
 ␛[31m✗␛[0m ␛[1mworkflow checked of run 7E5PH4␛[0m␛[2m ·␛[0m␛[31m failed␛[0m
 
-  ␛[1mdiagram␛[0m
-    a diagram this terminal does not draw; it is drawn where Markdown is read
-    ␛[2m│ ␛[0mgraph TD
-    ␛[2m│ ␛[0m  build["build: finished: exit 0"]
-    ␛[2m│ ␛[0m  subgraph checks["checks: never ran"]
-    ␛[2m│ ␛[0m    lint["lint: failed: exit 101"]
-    ␛[2m│ ␛[0m    test["test: never ran"]
-    ␛[2m│ ␛[0m  end
-    ␛[2m│ ␛[0m  fix["fix: never ran"]
-    ␛[2m│ ␛[0m  ship["ship: never ran"]
-    ␛[2m│ ␛[0m  build --> checks
-    ␛[2m│ ␛[0m  checks --> ship
-    ␛[2m│ ␛[0m  lint -.-> fix
-    ␛[2m11 lines␛[0m
+               ┌─────────────────────────┐
+               │ build: finished: exit 0 │
+               └─────────────────────────┘
+                            │
+                            ▼
+  ┌─ checks: never ran ───────────────────────────────┐
+  │                                                   │
+  │ ┌────────────────────────┐    ┌─────────────────┐ │
+  │ │ lint: failed: exit 101 │    │ test: never ran │ │
+  │ └────────────────────────┘    └─────────────────┘ │
+  │              ┆                                    │
+  └──────────────┼──────────┬─────────────────────────┘
+                 ┆          └──────────┐
+                 ┆                     │
+                 ▼                     ▼
+        ┌────────────────┐    ┌─────────────────┐
+        │ fix: never ran │    │ ship: never ran │
+        └────────────────┘    └─────────────────┘

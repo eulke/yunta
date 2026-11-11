@@ -7,6 +7,9 @@ use super::{Answered, Console};
 
 /// Puts `alternatives` to the person and returns the value behind the one picked. What
 /// they answer is said above it, by the caller.
-pub(crate) fn choose<T>(console: &Console, alternatives: Vec<Alternative<T>>) -> Answered<T> {
+pub(crate) fn choose<T: Clone>(
+    console: &Console,
+    alternatives: Vec<Alternative<T>>,
+) -> Answered<T> {
     hold(console, &mut Picker::new(alternatives, console.escape()))
 }

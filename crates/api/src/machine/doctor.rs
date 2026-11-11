@@ -105,7 +105,7 @@ impl Project {
             let Some(adapter) = adapters.get(name) else {
                 continue;
             };
-            let health = health(adapter.probe().await);
+            let health = health(adapter.probe(&self.workspace.env.path).await);
             if matches!(health, AdapterHealth::Healthy { .. }) {
                 healthy.insert(name.clone());
             }
@@ -115,7 +115,9 @@ impl Project {
             });
         }
         let answered = match healthy.is_empty() {
-            true => MachineAdapters::probed(&super::probe_known_adapters().await),
+            true => MachineAdapters::probed(
+                &super::probe_known_adapters(&self.workspace.env.path).await,
+            ),
             false => MachineAdapters {
                 healthy: healthy.iter().cloned().collect(),
                 known: super::built_adapter_ids(),
@@ -136,7 +138,8 @@ impl Project {
             .iter()
             .flat_map(|(_, errors)| errors.iter().cloned())
             .collect();
-        let answered = MachineAdapters::probed(&super::probe_known_adapters().await);
+        let answered =
+            MachineAdapters::probed(&super::probe_known_adapters(&self.workspace.env.path).await);
         let detected = Detected {
             adapters: answered.clone(),
             ..Detected::default()

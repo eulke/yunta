@@ -39,6 +39,35 @@ impl Grid {
         }
     }
 
+    /// How many cells wide and how many tall the page is.
+    pub(crate) fn size(&self) -> (usize, usize) {
+        (self.width, self.cells.len())
+    }
+
+    /// `inner` set into the page with its top-left cell at `x`, `y`: each cell it
+    /// holds something in, as it holds it.
+    pub(crate) fn inlaid(&mut self, (x, y): (usize, usize), inner: &Grid) {
+        for (row, cells) in inner.cells.iter().enumerate() {
+            for (column, cell) in cells.iter().enumerate() {
+                if *cell == Cell::Empty {
+                    continue;
+                }
+                let target = self
+                    .cells
+                    .get_mut(y + row)
+                    .and_then(|r| r.get_mut(x + column));
+                if let Some(target) = target {
+                    *target = *cell;
+                }
+            }
+        }
+    }
+
+    /// Whether every one of `cells` holds nothing.
+    pub(crate) fn clear(&self, mut cells: impl Iterator<Item = (usize, usize)>) -> bool {
+        cells.all(|(x, y)| self.free(x, y))
+    }
+
     /// Whether the cell at `x`, `y` holds nothing.
     pub(crate) fn free(&self, x: usize, y: usize) -> bool {
         self.cells

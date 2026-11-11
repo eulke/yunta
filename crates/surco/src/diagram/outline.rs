@@ -1,14 +1,39 @@
 //! A flowchart as one line per chain: what a terminal says of a diagram
 //! it has no room to draw in boxes, which still reads in the order the
-//! chart flows.
+//! chart flows, then what each of its groups holds.
 
-use crate::diagram::{Flowchart, Link};
+use crate::diagram::{Flowchart, Group, Link};
 use crate::glyphs::Glyphs;
 
 /// Each chain of `chart` as a line — its boxes in the order the chart
 /// flows, a label on the link it is written on — then each box no link
-/// reaches.
+/// reaches and no group holds, then each group and what it holds.
 pub(crate) fn outline(chart: &Flowchart, glyphs: Glyphs) -> Vec<String> {
+    let mut lines = chains(chart, glyphs);
+    let linked = |at: usize| {
+        chart
+            .links
+            .iter()
+            .any(|link| link.from == at || link.to == at)
+    };
+    let grouped = |at: usize| {
+        chart
+            .groups
+            .iter()
+            .any(|group| group.node == at || group.members.contains(&at))
+    };
+    for (at, node) in chart.nodes.iter().enumerate() {
+        if !linked(at) && !grouped(at) {
+            lines.push(node.label.clone());
+        }
+    }
+    lines.extend(chart.groups.iter().map(|group| held(chart, group)));
+    lines
+}
+
+/// Each chain of `chart` as a line: its boxes in the order the chart flows, a
+/// label on the link it is written on.
+fn chains(chart: &Flowchart, glyphs: Glyphs) -> Vec<String> {
     let incoming = |node: usize| chart.links.iter().filter(|link| link.to == node).count();
     let outgoing = |node: usize| chart.links.iter().filter(|link| link.from == node).count();
     let mut drawn = vec![false; chart.links.len()];
@@ -37,12 +62,17 @@ pub(crate) fn outline(chart: &Flowchart, glyphs: Glyphs) -> Vec<String> {
         }
         lines.push(line);
     }
-    for (at, node) in chart.nodes.iter().enumerate() {
-        if incoming(at) == 0 && outgoing(at) == 0 {
-            lines.push(node.label.clone());
-        }
-    }
     lines
+}
+
+/// What `group` holds, as a line: its label, then each label it holds.
+fn held(chart: &Flowchart, group: &Group) -> String {
+    let held: Vec<&str> = group
+        .members
+        .iter()
+        .map(|member| chart.nodes[*member].label.as_str())
+        .collect();
+    format!("{}: {}", chart.nodes[group.node].label, held.join(", "))
 }
 
 /// One link, as it reads after the box it leaves: its arrow, its label

@@ -52,6 +52,8 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         cli_config: yunta_core::CliConfig::Inherit,
         confinement,
         env: SessionEnv::default(),
+        // A stub CLI is named by its path, which no search is needed for.
+        search_path: yunta_core::process::SearchPath::default(),
         fence: Fence::everything(Advice::ReportFinding),
         rail_command: Some(RailCommand::new(PathBuf::from("yunta"))),
         // Where a hook would reach the engine: nothing listens there, and

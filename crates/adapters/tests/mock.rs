@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use yunta_core::fence::{Advice, Fence, Verdict};
+use yunta_core::process::SearchPath;
 use yunta_core::rail::answer::{FormatAnswer, StopAnswer, WriteAnswer, WriteRefusal};
 use yunta_core::rail::{RailAct, RailCall, RailEndpoint};
 
@@ -215,7 +216,7 @@ async fn probe_reports_healthy() {
     let fixture =
         MockAdapter::from_yaml("dialect: claude-code\noutcome: { type: completed, summary: ok }")
             .unwrap();
-    let report = fixture.probe().await.unwrap();
+    let report = fixture.probe(&SearchPath::default()).await.unwrap();
     assert!(matches!(report, ProbeReport::Healthy { .. }), "{report:?}");
 }
 

@@ -9,7 +9,7 @@
 //! own.
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -72,12 +72,12 @@ pub struct Following {
     chain: PromotionChain,
     /// The run followed now, as far as it has been read.
     followed: FollowedRun,
-    /// The directory the run followed now keeps its manifest and documents in.
-    dir: PathBuf,
-    /// The registry the run followed now keeps beside it.
+    /// The registry the run followed now keeps beside it, in its directory.
     registry: RunRegistry,
     /// When the registry was last read: it is read again once a second has passed.
     registry_read_at: DateTime<Utc>,
+    /// When the run was last looked at, which the next look is spaced from.
+    looked_at: tokio::time::Instant,
     listening: Listening,
     heard: mpsc::UnboundedReceiver<Said>,
     /// What a look found and has not been handed back yet.
@@ -96,9 +96,11 @@ impl Project {
     /// Follows run `id` from here: its log read whole, and a following that hands back
     /// what comes, at one pace, until the run stops.
     pub async fn follow(&self, id: &RunId) -> Result<Following, Error> {
-        let open = self.run(id).await?;
         let log = self.event_log().await?;
+        // The runs standing before the run is read: a successor made while it is read
+        // is one the chain still finds.
         let chain = PromotionChain::starting_at(&log, id.clone()).await?;
+        let open = self.run(id).await?;
         let registry = open.registry();
         let followed =
             FollowedRun::read(open.id, open.manifest.doc, open.events, registry.engine());
@@ -108,9 +110,9 @@ impl Project {
             clock: Arc::clone(&self.workspace.clock),
             chain,
             followed,
-            dir: open.dir,
             registry,
             registry_read_at: self.workspace.clock.now(),
+            looked_at: tokio::time::Instant::now(),
             listening: Listening::handing_to(ear),
             heard,
             news: VecDeque::new(),
@@ -135,7 +137,11 @@ impl Following {
                 biased;
                 () = stop.work().cancelled() => return Err(Error::Stopped),
                 Some(said) = self.heard.recv() => return Ok(Some(RunNews::Said(said))),
-                () = Pace::every(READ_EVERY).beat() => self.look(stop).await?,
+                // Words handed back between looks never hold the next look back.
+                () = Pace::every(READ_EVERY).beat_after(self.looked_at) => {
+                    self.looked_at = tokio::time::Instant::now();
+                    self.look(stop).await?;
+                }
             }
         }
     }
@@ -148,7 +154,7 @@ impl Following {
 
     /// The directory the run followed now keeps its manifest and documents in.
     pub fn dir(&self) -> &Path {
-        &self.dir
+        self.registry.run_dir()
     }
 
     /// The registry the run followed now keeps beside it.
@@ -171,15 +177,18 @@ impl Following {
     /// a second old, the socket it names, and whether the run still moves. A run that
     /// closed promoted is followed onto its successor.
     async fn look(&mut self, stop: &Stop) -> Result<(), Error> {
-        let past = self
-            .log
-            .events_after(&self.followed.run, self.followed.last())
-            .await?;
+        // The registry before the log: an engine that wrote its last event and left
+        // between the two reads is read gone with that event, never as stalled.
+        let now = self.clock.now();
+        self.read_registry(now);
+        let run = &self.followed.run;
+        let past = match self.followed.last() {
+            Some(last) => self.log.events_after(run, last).await?,
+            None => self.log.events(run).await?,
+        };
         if !past.is_empty() {
             self.found(RunNews::Events(past));
         }
-        let now = self.clock.now();
-        self.read_registry(now);
         self.listening.on(self.followed.engine.words());
         let frame = self.followed.frame(now);
         let promoted = matches!(frame.phase, RunPhase::Promoted { .. });
@@ -230,12 +239,11 @@ impl Following {
     /// Follows `successor` from here on, beside the run it was promoted from, since the
     /// engine that promotes creates it under the runs root it works in.
     async fn go_on_with(&mut self, successor: RunId) -> Result<(), Error> {
-        let dir = self.dir.with_file_name(successor.as_str());
-        let manifest = read_manifest(&yunta_engine::run_dir::manifest_path(&dir))?.doc;
-        let events = self.log.events(&successor).await?;
         let registry = self.registry.of_successor(&successor);
+        let manifest_path = yunta_engine::run_dir::manifest_path(registry.run_dir());
+        let manifest = read_manifest(&manifest_path)?.doc;
+        let events = self.log.events(&successor).await?;
         let followed = FollowedRun::read(successor, manifest, events, registry.engine());
-        self.dir = dir;
         self.registry = registry;
         self.registry_read_at = self.clock.now();
         self.found(RunNews::Successor(Box::new(followed)));

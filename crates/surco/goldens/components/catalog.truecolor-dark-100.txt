@@ -66,6 +66,25 @@
   │ plan │──▶│ build │
   └──────┘   └───────┘
 
+         ┌───────┐
+         │ build │
+         └───────┘
+             └┐
+              ▼
+  ┌─ checks ─────────────┐
+  │                      │
+  │ ┌──────┐    ┌──────┐ │
+  │ │ lint │    │ test │ │
+  │ └──────┘    └──────┘ │
+  │     ┆                │
+  └─────┼─────┬──────────┘
+        ┆     └────┐
+       ┌┘          │
+       ▼           ▼
+    ┌─────┐    ┌──────┐
+    │ fix │    │ ship │
+    └─────┘    └──────┘
+
   ␛[1;38;2;255;255;255msrc/lib.rs␛[0m
     the change
 ␛[48;2;26;24;31m    ␛[0m␛[38;2;142;136;127;48;2;26;24;31m│ ␛[0m␛[38;2;147;169;215;48;2;26;24;31mpub␛[0m␛[48;2;26;24;31m ␛[0m␛[38;2;147;169;215;48;2;26;24;31mfn␛[0m␛[48;2;26;24;31m ␛[0m␛[38;2;159;212;202;48;2;26;24;31mgreet␛[0m␛[48;2;26;24;31m() {}␛[0m␛[48;2;26;24;31m␛[K␛[0m
@@ -175,3 +194,12 @@
   one-node  one command whose exit code is the check
 ␛[1;38;2;220;148;234;48;2;48;36;58m▸␛[0m␛[48;2;48;36;58m ␛[0m␛[1;38;2;255;255;255;48;2;48;36;58mlint-fix  ␛[0m␛[48;2;48;36;58ma check, and an agent that fixes what it finds␛[0m␛[48;2;48;36;58m␛[K␛[0m
 ␛[38;2;142;136;127m↑↓ move · type to filter · enter chooses · esc takes the first␛[0m
+
+  ␛[1;38;2;255;255;255m▸␛[0m ␛[1;38;2;255;255;255mlint-fix␛[0m: a check, and an agent that fixes what it finds
+    ␛[38;2;142;136;127mrun         ␛[0m yunta run lint-fix
+
+    ␛[1;38;2;255;255;255mtasks␛[0m: a plan of tasks, and an agent that works through them
+    ␛[38;2;142;136;127mrun         ␛[0m yunta run tasks
+
+  ␛[38;2;143;206;155m✓␛[0m ␛[1;38;2;255;255;255macme/lint␛[0m    v1.2.0 (3f9c2e1), as its lock records it
+␛[1;38;2;255;255;255m▸␛[0m ␛[38;2;232;192;99m▲␛[0m ␛[1;38;2;255;255;255macme/review␛[0m  v0.4.0 (91ab7d0), modified: its files no longer match its lock

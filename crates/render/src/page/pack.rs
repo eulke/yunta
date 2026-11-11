@@ -15,7 +15,7 @@ mod updated;
 pub use cases::Cases;
 pub use installed::{Installed, Need, Needs};
 pub use inventory::Inventory;
-pub use listed::{Listed, VendoredPack, VendoredTree};
+pub use listed::{Listed, PointedPacks, VendoredPack, VendoredTree};
 pub use new_pack::{NewPack, NewPackCheck};
 pub use removed::Removed;
 pub use updated::Updated;

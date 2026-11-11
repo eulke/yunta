@@ -25,13 +25,15 @@
 //! - [`Cancelled`] ([`CancelState`]), [`Closed`], [`Opened`]: what `cancel`,
 //!   `close` and `open` answer; [`GateAnswered`] ([`Resolution`]), [`Collected`] and
 //!   [`Review`]: what `resolve-gate`, `gc` and `review` answer.
-//! - [`Catalog`]: the workflows a repository offers, each an [`OfferedWorkflow`];
+//! - [`Catalog`]: the workflows a repository offers, each an [`OfferedWorkflow`],
+//!   and [`PointedCatalog`], the same with one pointed at;
 //!   [`Signpost`]: what `yunta` alone shows where it has no field to show.
 //! - [`Schema`]: every kind of document Yunta reads, or every key a workflow
 //!   reads.
 //! - [`Checked`]: the verdict on a workflow file, with what `check` diagnosed
 //!   ([`Diagnosis`], [`Unrunnable`]); [`NewWorkflow`]: what `new` wrote, and the
-//!   verdict on it; [`Initialized`]: what `init` wrote and detected.
+//!   verdict on it; [`Setup`]: what setting a project up found and would write;
+//!   [`Initialized`]: what `init` wrote and detected.
 //! - [`Tested`] and [`TestedCase`]: what `test` says as its cases run, each a
 //!   [`RanCase`] and how its run ended ([`CaseRun`]).
 //! - [`pack`]: a pack's pages: its inventory, and what `pack add`, `update`,
@@ -74,6 +76,7 @@ mod receipt;
 mod review;
 mod run;
 mod schema;
+mod setup;
 pub(crate) mod shown;
 mod signpost;
 pub(crate) mod spec;
@@ -83,7 +86,7 @@ mod verified;
 
 pub use answered::{GateAnswered, QuestionsAnswered, Resolution, RoundAnswer};
 pub use cancelled::{CancelState, Cancelled};
-pub use catalog::{Catalog, OfferedWorkflow, ReadableWorkflow, UnreadableWorkflow};
+pub use catalog::{Catalog, OfferedWorkflow, PointedCatalog, ReadableWorkflow, UnreadableWorkflow};
 pub use checked::{Checked, Diagnosis, Unrunnable};
 pub use closed::Closed;
 pub use collected::{Collected, Reclaim, Uncollected};
@@ -101,6 +104,7 @@ pub use receipt::Receipt;
 pub use review::Review;
 pub use run::{Places, Run, RunInABrowser, RunScope};
 pub use schema::Schema;
+pub use setup::Setup;
 pub use shown::Shown;
 pub use signpost::Signpost;
 pub use spec::Spec;

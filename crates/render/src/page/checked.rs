@@ -43,6 +43,7 @@ impl Unrunnable {
 /// What `check` diagnosed: why the workflow cannot run here, each problem
 /// quoted from its file, and what does not stop it but should be heard. Not
 /// surco's `Found`, the result of one check's row.
+#[derive(Debug, Clone)]
 pub struct Diagnosis {
     pub unrunnable: Unrunnable,
     /// Each warning, as the problem a page says it in.
@@ -74,6 +75,7 @@ impl Diagnosis {
 /// The verdict on a workflow file, as `check` prints it and `graph` beside
 /// its drawing: whether it can run here, what was found, and the check to
 /// run again once it is fixed.
+#[derive(Debug, Clone)]
 pub struct Checked {
     /// The workflow file the verdict is on.
     pub path: PathBuf,

@@ -66,6 +66,25 @@
   │ plan │──▶│ build │
   └──────┘   └───────┘
 
+         ┌───────┐
+         │ build │
+         └───────┘
+             └┐
+              ▼
+  ┌─ checks ─────────────┐
+  │                      │
+  │ ┌──────┐    ┌──────┐ │
+  │ │ lint │    │ test │ │
+  │ └──────┘    └──────┘ │
+  │     ┆                │
+  └─────┼─────┬──────────┘
+        ┆     └────┐
+       ┌┘          │
+       ▼           ▼
+    ┌─────┐    ┌──────┐
+    │ fix │    │ ship │
+    └─────┘    └──────┘
+
   ␛[1msrc/lib.rs␛[0m
     the change
     ␛[2m│ ␛[0mpub fn greet() {}
@@ -175,3 +194,12 @@
   one-node  one command whose exit code is the check
 ␛[1;35m▸␛[0m ␛[1mlint-fix  ␛[0ma check, and an agent that fixes what it finds
 ␛[2m↑↓ move · type to filter · enter chooses · esc takes the first␛[0m
+
+  ␛[1m▸␛[0m ␛[1mlint-fix␛[0m: a check, and an agent that fixes what it finds
+    ␛[2mrun         ␛[0m yunta run lint-fix
+
+    ␛[1mtasks␛[0m: a plan of tasks, and an agent that works through them
+    ␛[2mrun         ␛[0m yunta run tasks
+
+  ␛[32m✓␛[0m ␛[1macme/lint␛[0m    v1.2.0 (3f9c2e1), as its lock records it
+␛[1m▸␛[0m ␛[33m▲␛[0m ␛[1macme/review␛[0m  v0.4.0 (91ab7d0), modified: its files no longer match its lock

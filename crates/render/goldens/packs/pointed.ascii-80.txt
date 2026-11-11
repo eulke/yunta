@@ -1,0 +1,8 @@
++ packs ; 2 installed ; 1 thing worth a look
+................................................................................
+
+  + acme/lint    v1.0.0 (3f9c2e1a0b4d), as its lock records it
+* ^ acme/review  v1.0.0 (3f9c2e1a0b4d), modified: its files no longer match its
+                 lock
+
+  lock         .yunta/yunta.lock

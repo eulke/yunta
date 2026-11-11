@@ -14,7 +14,7 @@ use super::OpenedRun;
 /// at.
 ///
 /// Not render's stats page, which a person reads drawn from it.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct StatsReading {
     /// Where the run stands, which a page's headline reads.
     pub frame: RunFrame,

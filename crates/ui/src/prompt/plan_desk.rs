@@ -4,7 +4,7 @@
 //! Numbers choose, and `enter` confirms: in the card one key answers because a person is
 //! looking at the question; here they are reading with their hands on the keyboard.
 
-use surco::components::{ChoiceRow, DeskFoot, FootRow, Legend, PaneLaid};
+use surco::components::{ChoiceRow, DeskFoot, FootRow, Laid, Legend};
 use surco::doc::Block;
 use surco::look::Look;
 use yunta_render::page::desk::{Reading, Spot, View};
@@ -12,6 +12,7 @@ use yunta_render::prompt::desk::{self, DeskKeys};
 use yunta_render::prompt::Escape;
 
 use super::{Answerable, Press, Stroke};
+use crate::scroll::Scroll;
 
 /// The most options a number can name: one key each, since a second digit would have
 /// nothing to say the first has ended. The rest are on the card, and the keys say so.
@@ -60,8 +61,8 @@ pub struct PlanDesk {
     spot: Spot,
     /// The option a number asked for, waiting to be confirmed.
     confirming: Option<usize>,
-    /// What a surface last showed of the pane.
-    laid: PaneLaid,
+    /// Where the pane is scrolled to, and what a surface last showed of it.
+    scroll: Scroll,
 }
 
 impl PlanDesk {
@@ -81,11 +82,10 @@ impl PlanDesk {
             spot: Spot {
                 at: 0,
                 view: View::Stop,
-                top: 0,
                 choice: 0,
             },
             confirming: None,
-            laid: PaneLaid::default(),
+            scroll: Scroll::default(),
         }
     }
 
@@ -204,7 +204,7 @@ impl PlanDesk {
             Stroke::Insert('k') | Stroke::BackTab => self.walk(false),
             Stroke::Insert('p') => self.turn_proof(),
             Stroke::Insert('d') => self.turn_decisions(),
-            other => self.scroll(other),
+            other => self.scroll.pressed(other),
         }
     }
 
@@ -219,7 +219,7 @@ impl PlanDesk {
                 self.spot.view = View::Stop;
             }
         }
-        self.spot.top = 0;
+        self.scroll.rewound();
     }
 
     /// `p` turns the place over to its proof, or back to what it says. A place with no proof
@@ -232,7 +232,7 @@ impl PlanDesk {
             View::Proof => View::Stop,
             _ => View::Proof,
         };
-        self.spot.top = 0;
+        self.scroll.rewound();
     }
 
     /// `d` opens what was decided at this place, or closes it. A place that decided nothing
@@ -245,25 +245,7 @@ impl PlanDesk {
             View::Choices => View::Stop,
             _ => View::Choices,
         };
-        self.spot.top = 0;
-    }
-
-    /// Scrolls the pane by the keys that move through what is read, never past what the last
-    /// drawing showed to be the end. A page moves by what was in sight, which leaves out the
-    /// row that counts what is below, so a person who pages through it reads every line. A
-    /// key that scrolls nothing is left alone.
-    fn scroll(&mut self, stroke: Stroke) {
-        let PaneLaid { top, page, most } = self.laid;
-        let in_sight = page.saturating_sub(1).max(1);
-        self.spot.top = match stroke {
-            Stroke::Down => (top + 1).min(most),
-            Stroke::Up => top.saturating_sub(1),
-            Stroke::PageDown | Stroke::Insert(' ') => (top + in_sight).min(most),
-            Stroke::PageUp => top.saturating_sub(in_sight),
-            Stroke::Home => 0,
-            Stroke::End => most,
-            _ => return,
-        };
+        self.scroll.rewound();
     }
 }
 
@@ -285,6 +267,7 @@ impl Answerable for PlanDesk {
     fn block(&self, look: &Look) -> Block {
         Block::Desk(self.reading.desk(
             &self.spot,
+            self.scroll.top(),
             &self.title(),
             Some(self.edge()),
             self.foot(),
@@ -293,8 +276,8 @@ impl Answerable for PlanDesk {
     }
 
     /// What a surface last showed of the pane, which the scroll keys move from.
-    fn laid(&mut self, pane: PaneLaid) {
-        self.laid = pane;
+    fn laid(&mut self, laid: Laid) {
+        self.scroll.laid(laid);
     }
 
     /// What a stroke asks of the desk: a number waits for its confirmation, and every other

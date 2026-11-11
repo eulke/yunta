@@ -85,6 +85,17 @@ graph LR
   plan --> build
 ```
 
+```mermaid
+graph TD
+  subgraph checks
+    lint
+    test
+  end
+  build --> checks
+  checks --> ship
+  lint -.-> fix
+```
+
 `src/lib.rs`: the change
 
 ```rust
@@ -229,3 +240,14 @@ filter **n**
 - ▸ **lint-fix** a check, and an agent that fixes what it finds
 
 `↑↓` move · `type` to filter · `enter` chooses · `esc` takes the first
+
+## ▸ lint-fix: a check, and an agent that fixes what it finds
+
+- run: yunta run lint-fix
+
+## tasks: a plan of tasks, and an agent that works through them
+
+- run: yunta run tasks
+
+- ✓ **acme/lint** v1.2.0 (3f9c2e1), as its lock records it
+- ▸ ▲ **acme/review** v0.4.0 (91ab7d0), modified: its files no longer match its lock

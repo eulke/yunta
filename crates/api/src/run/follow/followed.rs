@@ -77,10 +77,10 @@ impl FollowedRun {
         crate::offers_a_menu(frame, &self.manifest, &self.state)
     }
 
-    /// The seq of the last event read; a run is never followed before its first event
-    /// is on the log.
-    pub(super) fn last(&self) -> Seq {
-        self.events.last().map_or(Seq::FIRST, |event| event.seq)
+    /// The seq of the last event read; none before its first event is on the log, as a
+    /// run whose directory stands before its creation is logged.
+    pub(super) fn last(&self) -> Option<Seq> {
+        self.events.last().map(|event| event.seq)
     }
 
     /// Folds one event into the state, deriving the whole log again when it does not

@@ -7,25 +7,38 @@
 //! and what only a surface can do, showing a page or leaving, comes back to it. The
 //! performer reads nothing of its process: everything comes from the workspace, so a
 //! test makes it as it makes a workspace.
+//!
+//! Each family of work is carried out in a module of its own: `run`, a run's
+//! readings, its stats and its graph among them, and its acts; `evidence`, what a run
+//! leaves; `workflow`, a workflow's check, past runs and graph, the cases and a new
+//! workflow; `pack`, the packs'; `machine`, what doctor checks of this machine and
+//! this project, and what upkeep collects of what runs left. What one piece of work finds that a later one takes stays
+//! with the performer, in `held`, under the ticket that found it: a repository's project detected for its
+//! setup, which is bound to the repository and written by the setup's own work. The
+//! state hands back only the ticket, and lets it go when the person leaves the stage
+//! that holds it.
 
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+mod evidence;
+mod held;
+mod machine;
+mod pack;
+mod run;
+mod workflow;
 
-use surco::doc::Depth;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
 use tokio::sync::mpsc::UnboundedSender;
-use yunta_api::{Error, Project, Remark, Remarks, RunRequest, Stop, Workspace};
-use yunta_core::events::Channel;
-use yunta_core::port::QuestionsReply;
-use yunta_core::{Answer, NodeId, RunId};
+use yunta_api::{Error, Project, ProjectSetup, Remark, Remarks, Stop, Workspace};
 
 use crate::{Input, News, Operation, Outcome, Request, Ticket};
+use held::{Found, Held};
 
 /// Carries out an [`Operation`] through `yunta-api`, against the workspace it was made
 /// with, and hands back what it says on the way and what it comes to as inputs.
 pub struct Performer {
     workspace: Workspace,
-    /// The stop of each piece of work under way, by its ticket.
-    stops: Arc<Mutex<BTreeMap<Ticket, Stop>>>,
+    /// What it holds for the work it was handed, by ticket.
+    held: Mutex<Held>,
 }
 
 impl Performer {
@@ -33,7 +46,7 @@ impl Performer {
     pub fn new(workspace: Workspace) -> Self {
         Performer {
             workspace,
-            stops: Arc::default(),
+            held: Mutex::default(),
         }
     }
 
@@ -46,8 +59,26 @@ impl Performer {
         operation: Operation,
         inputs: UnboundedSender<Input>,
     ) {
+        let stop = self.under_way(ticket);
+        self.performed(ticket, operation, inputs, stop).await;
+    }
+
+    /// The work under `ticket` held as under way, and the stop that stops it: held before
+    /// the work starts, so letting it go the moment after it was asked stops it.
+    fn under_way(&self, ticket: Ticket) -> Stop {
         let stop = Stop::new();
-        self.held().insert(ticket, stop.clone());
+        self.held().started(ticket, stop.clone());
+        stop
+    }
+
+    /// [`Performer::perform`], its work held as under way already under `stop`.
+    async fn performed(
+        &self,
+        ticket: Ticket,
+        operation: Operation,
+        inputs: UnboundedSender<Input>,
+        stop: Stop,
+    ) {
         let remarks = |remark: Remark| {
             // best-effort: a state that went away no longer reads what work says.
             let _ = inputs.send(Input::Remark(ticket, remark));
@@ -56,20 +87,22 @@ impl Performer {
             // best-effort: a state that went away no longer reads what work finds.
             let _ = inputs.send(Input::News(ticket, news));
         };
-        let outcome = match self.carried_out(operation, &remarks, &found, &stop).await {
+        let carried_out = self.carried_out(ticket, operation, &remarks, &found, &stop);
+        let outcome = match carried_out.await {
             Ok(outcome) => outcome,
             Err(Error::Refused(refused)) => Outcome::Refused(refused),
             Err(Error::Failed(failure)) => Outcome::Failed(failure.to_string()),
             Err(Error::Stopped) => Outcome::Stopped,
         };
-        self.held().remove(&ticket);
+        self.held().ended(ticket);
         // best-effort: a state that went away no longer reads what work came to.
         let _ = inputs.send(Input::Outcome(ticket, outcome));
     }
 
-    /// Takes `request`: work to do starts under its ticket, in a task of its own, and
-    /// hands what it comes to to `inputs`; work let go is stopped. What only a surface
-    /// can do, showing a page or leaving, comes back.
+    /// Takes `request`: work to do is held as under way, then starts under its ticket in
+    /// a task of its own, and hands what it comes to to `inputs`; work let go is stopped.
+    /// Work that breaks inside Yunta still answers its ticket, as failed. What only a
+    /// surface can do, showing a page or leaving, comes back.
     pub fn take(
         self: &Arc<Self>,
         request: Request,
@@ -77,8 +110,21 @@ impl Performer {
     ) -> Option<Request> {
         match request {
             Request::Perform(ticket, operation) => {
+                let stop = self.under_way(ticket);
+                let (performer, sent) = (Arc::clone(self), inputs.clone());
+                let work = tokio::spawn(async move {
+                    performer.performed(ticket, operation, sent, stop).await;
+                });
                 let (performer, inputs) = (Arc::clone(self), inputs.clone());
-                tokio::spawn(async move { performer.perform(ticket, operation, inputs).await });
+                tokio::spawn(async move {
+                    let Err(broke) = work.await else {
+                        return;
+                    };
+                    performer.held().ended(ticket);
+                    let said = yunta_render::screen::broke_inside(&broken_words(broke));
+                    // best-effort: a state that went away no longer reads what work came to.
+                    let _ = inputs.send(Input::Outcome(ticket, Outcome::Failed(said)));
+                });
                 None
             }
             Request::LetGo(ticket) => {
@@ -91,15 +137,14 @@ impl Performer {
 
     /// Stops the work under `ticket`, if it is under way, and drops what is held for it.
     pub fn let_go(&self, ticket: Ticket) {
-        if let Some(stop) = self.held().remove(&ticket) {
-            stop.stop();
-        }
+        self.held().let_go(ticket);
     }
 
-    /// What `operation` comes to, through the API, what it says on the way said
-    /// through `remarks` and what lasting work finds handed to `found`.
+    /// What `operation`, under `ticket`, comes to, through the API, what it says on the
+    /// way said through `remarks` and what lasting work finds handed to `found`.
     async fn carried_out(
         &self,
+        ticket: Ticket,
         operation: Operation,
         remarks: &dyn Remarks,
         found: &(dyn Fn(News) + Sync),
@@ -108,131 +153,104 @@ impl Performer {
         let project = self.workspace.project()?;
         match operation {
             Operation::ReadRepository => Ok(Outcome::Repository(project.repository(stop).await?)),
-            Operation::ReadCatalog => Ok(Outcome::Catalog(Box::new(
-                project.workspace.catalog().await,
-            ))),
-            Operation::Field { reach } => Ok(Outcome::Field {
-                reading: project.field(reach, stop).await?,
-                storage: project.storage_path.clone(),
-            }),
-            Operation::Follow { run } => followed(&project, &run, found, stop).await,
-            Operation::ReadPage { run } => {
-                let page = project.run(&run).await?;
-                Ok(Outcome::Page(Box::new(
-                    page.page(Depth::Glance, remarks).await?,
-                )))
+            Operation::DetectProject => self.detected(&project, ticket, stop).await,
+            Operation::WriteSetup { held, setup } => self.written(held, setup).await,
+            Operation::ReadCatalog => {
+                let catalog = project.workspace.catalog().await;
+                Ok(Outcome::Catalog(Box::new(catalog)))
             }
+            Operation::Workflow(work) => {
+                workflow::performed(&project, work, remarks, found, stop).await
+            }
+            Operation::Pack(work) => {
+                self.pack_performed(&project, ticket, work, remarks, stop)
+                    .await
+            }
+            Operation::Evidence(work) => evidence::performed(&project, work, remarks).await,
+            Operation::Doctor { sessions } => {
+                machine::doctor(&project, sessions, remarks, stop).await
+            }
+            Operation::Collect { dry_run } => {
+                machine::collected(&project, dry_run, remarks, stop).await
+            }
+            Operation::Field { reach } => run::field_read(&project, reach, stop).await,
+            Operation::Follow { run } => run::followed(&project, &run, found, stop).await,
+            Operation::ReadPage { run } => run::page_read(&project, &run, remarks).await,
             Operation::ReadNodePage { run, node } => {
-                let page = project.run(&run).await?.node_page(&node, remarks).await?;
-                Ok(Outcome::NodePage(Box::new(page)))
+                run::node_page_read(&project, &run, &node, remarks).await
             }
-            Operation::ReadQuestions { run } => {
-                let waiting = project.run(&run).await?.waiting_questions().await?;
-                Ok(Outcome::Questions(Box::new(waiting)))
+            Operation::ReadQuestions { run } => run::questions_read(&project, &run).await,
+            Operation::ReadDecision { run } => run::decision_read(&project, &run).await,
+            Operation::ReadStats { run } => run::stats_read(&project, &run).await,
+            Operation::ReadRunGraph { run } => run::graph_read(&project, run).await,
+            Operation::ReadHistory { workflow } => {
+                workflow::history_read(&project, &workflow).await
             }
-            Operation::ReadDecision { run } => {
-                let waiting = project.run(&run).await?.waiting_decision().await?;
-                Ok(Outcome::Decision(Box::new(waiting)))
-            }
+            Operation::ReadGraph { workflow } => workflow::graph_read(&project, &workflow),
             Operation::Decide { run, option, words } => {
-                project.run(&run).await?.decide(option, None, words).await?;
-                Ok(Outcome::Decided { run })
+                run::decided(&project, run, option, words).await
             }
             Operation::Answer { run, node, answers } => {
-                answered(&project, run, &node, answers).await
+                run::answered(&project, run, &node, answers).await
             }
-            Operation::Resume { run } => resumed(&project, run).await,
-            Operation::Cancel { run } => {
-                let state = project.run(&run).await?.cancel(remarks, stop).await?;
-                Ok(Outcome::Cancelled { run, state })
-            }
-            Operation::Close { runs } => closed(&project, runs, remarks, stop).await,
-            Operation::Start { request } => started(&project, request, remarks, stop).await,
+            Operation::Resume { run } => run::resumed(&project, run).await,
+            Operation::Cancel { run } => run::cancelled(&project, run, remarks, stop).await,
+            Operation::Close { runs } => run::closed(&project, runs, remarks, stop).await,
+            Operation::Start { request } => run::started(&project, request, remarks, stop).await,
         }
     }
 
-    /// The stops held, whatever a panicking holder left them as.
-    fn held(&self) -> std::sync::MutexGuard<'_, BTreeMap<Ticket, Stop>> {
-        self.stops.lock().unwrap_or_else(PoisonError::into_inner)
+    /// `project`'s repository as setting it up detects it, the project kept under
+    /// `ticket` for the setup to write; stopped where the ticket was let go first.
+    async fn detected(
+        &self,
+        project: &Project,
+        ticket: Ticket,
+        stop: &Stop,
+    ) -> Result<Outcome, Error> {
+        let detected = project.workspace.detect_project(false, stop).await?;
+        let draft = Box::new(detected.draft.clone());
+        match self.held().keep(ticket, Found::Project(Box::new(detected))) {
+            true => Ok(Outcome::Detected {
+                draft,
+                held: ticket,
+            }),
+            false => Err(Error::Stopped),
+        }
     }
-}
 
-/// `run` followed until it no longer moves: the run as its following reads it first,
-/// then what each look at it finds, handed to `found` as it comes.
-async fn followed(
-    project: &Project,
-    run: &RunId,
-    found: &(dyn Fn(News) + Sync),
-    stop: &Stop,
-) -> Result<Outcome, Error> {
-    let mut following = project.follow(run).await?;
-    found(News::Following(Box::new(following.followed().clone())));
-    while let Some(news) = following.next(stop).await? {
-        found(News::Run(news));
-    }
-    Ok(Outcome::Followed)
-}
-
-/// `answers` to the round `node` asked recorded on `run`, and the run handed on to a
-/// detached resume.
-async fn answered(
-    project: &Project,
-    run: RunId,
-    node: &NodeId,
-    answers: Vec<Answer>,
-) -> Result<Outcome, Error> {
-    // A person answers the application where it is drawn: on a terminal, as every
-    // surface of it does today.
-    let reply = QuestionsReply {
-        answers,
-        channel: Channel::Tty,
-        responder: None,
-    };
-    project.run(&run).await?.answer(node, reply).await?;
-    Ok(Outcome::Answered { run })
-}
-
-/// The run `request` asks for, admitted, created and started detached, as
-/// `yunta run --detach` starts it, what admission says said through `remarks`.
-async fn started(
-    project: &Project,
-    request: RunRequest,
-    remarks: &dyn Remarks,
-    stop: &Stop,
-) -> Result<Outcome, Error> {
-    let admission = project.admit(request, remarks, stop).await?;
-    let created = admission.create(remarks, stop).await?;
-    let run = created.start_detached(stop).await?;
-    Ok(Outcome::Started { run })
-}
-
-/// `run` handed back to a detached resume, refused where another engine drives it.
-async fn resumed(project: &Project, run: RunId) -> Result<Outcome, Error> {
-    let open = project.run(&run).await?;
-    open.refuse_if_driven().await?;
-    open.resume_detached().await?;
-    Ok(Outcome::Resumed { run })
-}
-
-/// Each of `runs` closed for good, why each refused one was refused kept beside the
-/// ones closed; any other failure ends the closing there.
-async fn closed(
-    project: &Project,
-    runs: Vec<RunId>,
-    remarks: &dyn Remarks,
-    stop: &Stop,
-) -> Result<Outcome, Error> {
-    let (mut closed, mut refused) = (Vec::new(), Vec::new());
-    for run in runs {
-        let closing = match project.run(&run).await {
-            Ok(open) => open.close(None, remarks, stop).await.map(drop),
-            Err(error) => Err(error),
+    /// `setup` written into the repository whose project is held under `held`; failed
+    /// where it was let go first.
+    async fn written(&self, held: Ticket, setup: ProjectSetup) -> Result<Outcome, Error> {
+        let detected = self.held().take_project(held);
+        let Some(detected) = detected else {
+            return Ok(Outcome::Failed(
+                yunta_render::screen::SETUP_LET_GO.to_string(),
+            ));
         };
-        match closing {
-            Ok(()) => closed.push(run),
-            Err(Error::Refused(why)) => refused.push(why),
-            Err(other) => return Err(other),
-        }
+        let initialized = detected.write(setup).await?;
+        Ok(Outcome::Initialized(Box::new(initialized)))
     }
-    Ok(Outcome::Closed { closed, refused })
+
+    /// What it holds, whatever a panicking holder left it as.
+    fn held(&self) -> MutexGuard<'_, Held> {
+        self.held.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
+
+/// What the work that broke said as it broke: its panic's message, where it gave one.
+fn broken_words(broke: tokio::task::JoinError) -> String {
+    let Ok(panic) = broke.try_into_panic() else {
+        return String::new();
+    };
+    match panic.downcast::<String>() {
+        Ok(said) => *said,
+        Err(panic) => panic
+            .downcast::<&str>()
+            .map(|said| (*said).to_string())
+            .unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,8 @@
+    greet: says hello
+    run          yunta run greet
+
+  ▸ lint-fix: a check, and an agent that fixes what it finds
+    run          yunta run lint-fix
+
+    broken
+    ✗ unreadable: no such file

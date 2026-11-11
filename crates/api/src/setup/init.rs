@@ -5,14 +5,19 @@
 //! skill are written. Every value is the best one detected; a caller that asks
 //! a person hands in what they answered instead, the runners included: each
 //! role a person put on an adapter with a model is written declared, and the
-//! rest stay proposed, commented, as `init` writes them unasked.
+//! rest stay proposed, commented, as `init` writes them unasked. The config's YAML is
+//! `config_yaml`'s.
+
+mod config_yaml;
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use yunta_core::refusal::SetupRefusal;
 use yunta_core::step::NextStep;
-use yunta_core::{ConfigKey, Detected, ProbedAdapter, RunnerCandidate, RunnerName, Workflow};
+use yunta_core::{
+    AdapterId, ConfigKey, Detected, ModelName, ProbedAdapter, RunnerCandidate, RunnerName, Workflow,
+};
 use yunta_engine::git::Cause;
 use yunta_engine::process::Supervision;
 use yunta_render::command;
@@ -21,6 +26,7 @@ use yunta_render::refusal::Refused;
 use super::skill::{self, MECHANISM_SKILL_DIR};
 use super::SetupUnwritten;
 use crate::{Error, Failure, Stop, Workspace};
+use config_yaml::config_yaml;
 
 impl Workspace {
     /// What `init` would write for the repository this workspace works in:
@@ -39,19 +45,23 @@ impl Workspace {
             .unwrap_or_else(|| "workflow-project".to_string());
         let base_branch = base_branch(&self.dir, self.supervision(stop)).await?;
         let detected = crate::machine::in_repo(self, &self.dir, stop).await?;
-        let probed = crate::machine::probe_known_adapters().await;
+        let probed = crate::machine::probe_known_adapters(&self.env.path).await;
         let workflows: Vec<Workflow> = self
             .catalog_workflows()
             .into_iter()
             .map(|(_, workflow)| workflow)
             .collect();
-        Ok(DetectedProject {
-            workspace: self.clone(),
+        let draft = ProjectDraft {
+            repo: self.dir.clone(),
             name,
             base_branch,
             detected,
             probed,
             proposed: ProposedRunners::of(&workflows),
+        };
+        Ok(DetectedProject {
+            workspace: self.clone(),
+            draft,
             force,
         })
     }
@@ -92,7 +102,7 @@ impl ProposedRunners {
 
 /// What a project is set up as: the name and base branch it is written under, and
 /// how its runners are written.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectSetup {
     pub name: String,
     pub base_branch: String,
@@ -100,7 +110,7 @@ pub struct ProjectSetup {
 }
 
 /// How setting a project up writes its runners.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunnerDeclaration {
     /// Commented out, each proposed role on the first adapter that answered, its
     /// model left blank: what `init` writes when nobody answers for them.
@@ -110,23 +120,110 @@ pub enum RunnerDeclaration {
     Declared(BTreeMap<RunnerName, RunnerCandidate>),
 }
 
-/// A repository's project as `init` would write it, before anything is
-/// written: the name and base branch it detected, what the repository runs, the
-/// adapters this machine answered for, and the runner roles it proposes.
+/// A repository's project as `init` would write it, bound to the repository it is
+/// written into: what was detected, and whether a config already there is written
+/// again. Not its [`ProjectDraft`], what was detected alone, which any holder can keep.
 pub struct DetectedProject {
     workspace: Workspace,
+    pub draft: ProjectDraft,
+    force: bool,
+}
+
+/// A repository's project as `init` would write it, before anything is written: the
+/// repository, the name and base branch it detected, what the repository runs, the
+/// adapters this machine answered for, and the runner roles it proposes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectDraft {
+    pub repo: PathBuf,
     pub name: String,
     pub base_branch: String,
     pub detected: Detected,
     pub probed: Vec<ProbedAdapter>,
     pub proposed: ProposedRunners,
-    force: bool,
+}
+
+/// What a person answered for one proposed runner: the adapter it runs on, and the
+/// model it runs, none where the line was left empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerAnswer {
+    pub runner: RunnerName,
+    pub adapter: AdapterId,
+    pub model: Option<ModelName>,
+}
+
+impl ProjectDraft {
+    /// The adapters this machine answered for, in the order they were probed: what a
+    /// runner's adapter is picked among, the first standing where none is picked. A
+    /// project whose machine answers for none is set up with every runner proposed.
+    pub fn answering(&self) -> Vec<&AdapterId> {
+        self.probed
+            .iter()
+            .filter(|adapter| adapter.healthy)
+            .map(|adapter| &adapter.id)
+            .collect()
+    }
+
+    /// The setup a person answers this draft with: the `name` and `base_branch` typed,
+    /// each left empty keeping what was detected; and each of `runners` declared on its
+    /// adapter where it has a model, staying proposed where it has none.
+    pub fn answered(
+        &self,
+        name: &str,
+        base_branch: &str,
+        runners: Vec<RunnerAnswer>,
+    ) -> ProjectSetup {
+        let kept = |typed: &str, detected: &str| match typed.is_empty() {
+            true => detected.to_string(),
+            false => typed.to_string(),
+        };
+        let declared: BTreeMap<RunnerName, RunnerCandidate> = runners
+            .into_iter()
+            .filter_map(|answer| {
+                let model = answer.model?;
+                let candidate = RunnerCandidate {
+                    adapter: answer.adapter,
+                    model,
+                    agent: None,
+                    effort: None,
+                };
+                Some((answer.runner, candidate))
+            })
+            .collect();
+        ProjectSetup {
+            name: kept(name, &self.name),
+            base_branch: kept(base_branch, &self.base_branch),
+            runners: match declared.is_empty() {
+                true => RunnerDeclaration::Proposed,
+                false => RunnerDeclaration::Declared(declared),
+            },
+        }
+    }
+
+    /// What setting the project up writes, by its path in the repository.
+    pub fn writes(&self) -> Vec<String> {
+        vec![
+            CONFIG_WRITTEN.to_string(),
+            GITIGNORE.to_string(),
+            mechanism_skill_written(),
+        ]
+    }
+}
+
+/// The project's config, as setting it up writes it, by its path in the repository.
+const CONFIG_WRITTEN: &str = ".yunta/config.yaml";
+
+/// The ignore file setting a project up adds Yunta's entries to.
+const GITIGNORE: &str = ".gitignore";
+
+/// The mechanism skill setting a project up writes, by its path in the repository.
+fn mechanism_skill_written() -> String {
+    format!("{MECHANISM_SKILL_DIR}/SKILL.md")
 }
 
 /// What `init` wrote, and what it left as it was, with what it detected, the
 /// adapters this machine answered for, the runners declared and those proposed
 /// and left undeclared.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct InitializedProject {
     pub wrote: Vec<String>,
     pub skipped: Vec<String>,
@@ -142,14 +239,15 @@ impl DetectedProject {
     /// parsed back before it is written; the ignore entries `init` adds once; and
     /// the mechanism skill, written again only under `force`.
     pub async fn write(self, setup: ProjectSetup) -> Result<InitializedProject, Error> {
-        let config_yaml = config_yaml(&setup, &self.probed, &self.detected, &self.proposed);
+        let draft = self.draft;
+        let config_yaml = config_yaml(&setup, &draft.probed, &draft.detected, &draft.proposed);
         let repo = &self.workspace.dir;
         let (wrote, skipped) = write_project(repo, config_yaml, self.force).await?;
         let declared = match setup.runners {
             RunnerDeclaration::Proposed => BTreeMap::new(),
             RunnerDeclaration::Declared(declared) => declared,
         };
-        let undeclared = self
+        let undeclared = draft
             .proposed
             .roles
             .into_iter()
@@ -158,8 +256,8 @@ impl DetectedProject {
         Ok(InitializedProject {
             wrote,
             skipped,
-            detected: self.detected,
-            probed: self.probed,
+            detected: draft.detected,
+            probed: draft.probed,
             declared,
             undeclared,
         })
@@ -196,147 +294,6 @@ async fn base_branch(repo: &Path, supervision: Supervision<'_>) -> Result<String
         return Ok("main".to_string());
     }
     Ok(name.to_string())
-}
-
-/// The project's config as `init` writes it: its name and base branch, what
-/// the repository was detected to run, and its runners, declared as `setup`
-/// says or proposed, with each adapter this machine answered for, healthy or
-/// not.
-fn config_yaml(
-    setup: &ProjectSetup,
-    probed: &[ProbedAdapter],
-    detected: &Detected,
-    proposed: &ProposedRunners,
-) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "# Written by `{}`: team-shared, commit this file.\n",
-        command::line(&NextStep::Init)
-    ));
-    out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
-    out.push_str("# config layer), never in this file.\n\n");
-    out.push_str("project:\n");
-    out.push_str(&format!("  name: {}\n", yaml_scalar(&setup.name)));
-    out.push_str(&format!("  base_branch: {}\n", setup.base_branch));
-    out.push_str("  branch_prefix: yunta/\n\n");
-    out.push_str(&detected_yaml(detected));
-
-    out.push_str("# `runners:` names roles your workflows' `runner:` fields reference,\n");
-    out.push_str("# each with one or more adapter candidates (first capable one wins).\n");
-    for adapter in probed {
-        if adapter.healthy {
-            out.push_str(&format!(
-                "# detected: {} ({})\n",
-                adapter.id, adapter.detail
-            ));
-        } else {
-            out.push_str(&format!(
-                "# not available: {} ({})\n",
-                adapter.id, adapter.detail
-            ));
-        }
-    }
-    let declared = match &setup.runners {
-        RunnerDeclaration::Declared(declared) if !declared.is_empty() => declared,
-        _ => {
-            out.push_str(&proposed_runners_yaml(probed, proposed));
-            return out;
-        }
-    };
-    out.push_str("runners:\n");
-    for role in &proposed.roles {
-        match declared.get(role) {
-            Some(candidate) => out.push_str(&declared_runner_yaml(role, candidate)),
-            None => out.push_str(&proposed_runner_yaml("  # ", role, probed)),
-        }
-    }
-    let default = proposed.roles.first().filter(|_| proposed.needs_default);
-    match default {
-        Some(role) if declared.contains_key(role) => {
-            out.push_str(&format!("defaults:\n  runner: {role}\n"));
-        }
-        Some(role) => out.push_str(&format!("# defaults:\n#   runner: {role}\n")),
-        None => {}
-    }
-    out
-}
-
-/// The runners `proposed` names, commented out, each on the first adapter that
-/// answered and its model left blank; and `defaults.runner`, commented, where a
-/// node names none.
-fn proposed_runners_yaml(probed: &[ProbedAdapter], proposed: &ProposedRunners) -> String {
-    let mut out = String::from("# runners:\n");
-    for role in &proposed.roles {
-        out.push_str(&proposed_runner_yaml("#   ", role, probed));
-    }
-    if let (true, Some(first)) = (proposed.needs_default, proposed.roles.first()) {
-        out.push_str(&format!("# defaults:\n#   runner: {first}\n"));
-    }
-    out
-}
-
-/// One proposed runner, commented out after `lead`: on the first adapter that
-/// answered, or the first this build knows when none did, its model blank.
-fn proposed_runner_yaml(lead: &str, runner: &RunnerName, probed: &[ProbedAdapter]) -> String {
-    let adapter = match probed.iter().find(|adapter| adapter.healthy) {
-        Some(healthy) => healthy.id.to_string(),
-        None => crate::machine::first_built_adapter().to_string(),
-    };
-    format!("{lead}{runner}:\n{lead}  - {{ adapter: {adapter}, model: <model-name> }}\n")
-}
-
-/// One declared runner, as a person answered it: on its adapter, with its model,
-/// which YAML reads back whole whatever it holds.
-fn declared_runner_yaml(runner: &RunnerName, candidate: &RunnerCandidate) -> String {
-    format!(
-        "  {runner}:\n    - adapter: {}\n      model: {}\n",
-        candidate.adapter,
-        yaml_scalar(candidate.model.as_str())
-    )
-}
-
-/// What `init` found in the repository, as config: the commands a
-/// workflow asks for by name, the suite a run measures when it reads the
-/// measurement, and the forge `origin` is on.
-fn detected_yaml(detected: &Detected) -> String {
-    let mut out = String::new();
-    if !detected.commands.is_empty() {
-        out.push_str("# What this project runs for each capability a workflow names\n");
-        out.push_str(&format!(
-            "# (`run: {{ command: lint }}`), as `{}` detected it.\n",
-            command::line(&NextStep::Init)
-        ));
-        out.push_str("commands:\n");
-        for (name, text) in &detected.commands {
-            out.push_str(&format!("  {name}: {}\n", yaml_string(text)));
-        }
-        out.push('\n');
-    }
-    if let Some(suite) = &detected.suite {
-        out.push_str("# Measured before a run's first node when the run reads it.\n");
-        out.push_str(&format!("baseline:\n  suite: {}\n\n", yaml_string(suite)));
-    }
-    if let Some(repo) = &detected.forge {
-        out.push_str("# Where a `pull_request` node opens its pull request.\n");
-        out.push_str(&format!(
-            "forge:\n  github:\n    repo: {repo}\n    token_env: GITHUB_TOKEN\n\n"
-        ));
-    }
-    out
-}
-
-/// `text` as YAML writes a string: as it is when nothing in it reads as
-/// anything else, quoted when a comment, a mapping or another type would cut
-/// or change it.
-fn yaml_scalar(text: &str) -> String {
-    yunta_core::yaml::to_string(&text)
-        .map(|written| written.trim_end().to_string())
-        .unwrap_or_else(|_| yaml_string(text))
-}
-
-/// `text` as a double-quoted YAML scalar.
-fn yaml_string(text: &str) -> String {
-    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// The line `init` writes above the entries it adds to `.gitignore`, and
@@ -390,7 +347,7 @@ async fn write_project(
 ) -> Result<(Vec<String>, Vec<String>), Error> {
     let mut wrote = Vec::new();
     let mut skipped = Vec::new();
-    let config_path = repo.join(".yunta/config.yaml");
+    let config_path = crate::project::repository_layer(repo);
     if let Some(parent) = config_path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -406,18 +363,19 @@ async fn write_project(
     tokio::fs::write(&config_path, config_yaml)
         .await
         .map_err(|source| unwritten("write", &config_path.display(), source))?;
-    wrote.push(".yunta/config.yaml".to_string());
+    wrote.push(CONFIG_WRITTEN.to_string());
 
     match write_gitignore(repo) {
-        Ok(true) => wrote.push(".gitignore".to_string()),
-        Ok(false) => skipped.push(".gitignore (already has yunta entries)".to_string()),
+        Ok(true) => wrote.push(GITIGNORE.to_string()),
+        Ok(false) => skipped.push(format!("{GITIGNORE} (already has yunta entries)")),
         Err(source) => return Err(unwritten("update", &".gitignore", source)),
     }
 
     match skill::write_mechanism_skill(repo, force) {
-        Ok(true) => wrote.push(format!("{MECHANISM_SKILL_DIR}/SKILL.md")),
+        Ok(true) => wrote.push(mechanism_skill_written()),
         Ok(false) => skipped.push(format!(
-            "{MECHANISM_SKILL_DIR}/SKILL.md (already exists, pass --force to rewrite)"
+            "{} (already exists, pass --force to rewrite)",
+            mechanism_skill_written()
         )),
         Err(source) => return Err(unwritten("write", &"the mechanism skill", source)),
     }
@@ -439,6 +397,3 @@ fn unwritten(verb: &'static str, what: &dyn std::fmt::Display, source: std::io::
 #[derive(Debug, thiserror::Error)]
 #[error("the generated config is not valid: {0}")]
 struct GeneratedConfigInvalid(String);
-
-#[cfg(test)]
-mod tests;

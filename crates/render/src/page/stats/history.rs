@@ -19,7 +19,7 @@ use yunta_replay::verification_effectiveness::VerificationFindings;
 pub struct History<'a> {
     pub name: &'a WorkflowName,
     pub history: &'a [RunSummary],
-    pub findings: Option<VerificationFindings>,
+    pub findings: Option<&'a VerificationFindings>,
 }
 
 impl Page for History<'_> {
@@ -33,11 +33,7 @@ impl Page for History<'_> {
             ]));
         }
         let mut doc = Doc::new().with(Block::Lines(history_lines(self.name, self.history, *look)));
-        if let Some(findings) = self
-            .findings
-            .as_ref()
-            .filter(|findings| !findings.is_empty())
-        {
+        if let Some(findings) = self.findings.filter(|findings| !findings.is_empty()) {
             doc = doc
                 .with(Block::Lines(vec![Line::new()]))
                 .with_all(findings.document(look).into_blocks());

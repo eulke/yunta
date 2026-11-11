@@ -1,6 +1,6 @@
 //! See [`crate`]. A workflow's history: every past run of it a project knows
-//! about, oldest first, each opened, and what an estimate or a check reads off
-//! them.
+//! about, oldest first, each opened, and what an estimate, a check or a person
+//! reads off them ([`HistoryReading`]).
 //!
 //! One walk over a project's runs answers every reader. Two readings once made
 //! it separately — a summary for the sparkline and the whole log for the
@@ -22,9 +22,22 @@ use crate::{OpenedRun, Project};
 /// Every past run of a workflow a project knows about, oldest first, each
 /// opened.
 ///
-/// Not render's history page, which a person reads drawn from it.
+/// Not render's history page, which a person reads drawn from a
+/// [`HistoryReading`] of it.
 pub struct WorkflowHistory<'p> {
     runs: Vec<OpenedRun<'p>>,
+}
+
+/// What a person reads of a workflow's history: one summary per past run, oldest
+/// first, and what their whole logs say about the checks of the workflow the
+/// latest one froze, none for a workflow that never ran. It borrows nothing, so it
+/// outlives the project that read it.
+///
+/// Not render's history page, which a person reads drawn from it.
+#[derive(Debug, Clone)]
+pub struct HistoryReading {
+    pub summaries: Vec<RunSummary>,
+    pub findings: Option<VerificationFindings>,
 }
 
 impl Project {
@@ -151,9 +164,14 @@ impl WorkflowHistory<'_> {
         VerificationFindings::of(workflow, &logs)
     }
 
-    /// The workflow the latest run froze: the shape the past runs exercised,
-    /// which is not necessarily the one on disk now.
-    pub fn latest_workflow(&self) -> Option<&Workflow> {
-        self.runs.last().map(|open| &open.manifest.doc.workflow)
+    /// What a person reads of it: each run's summary, and what the logs say about
+    /// the checks of the workflow the latest run froze, the shape the past runs
+    /// exercised, which is not necessarily the one on disk now.
+    pub fn reading(&self) -> HistoryReading {
+        let latest = self.runs.last().map(|open| &open.manifest.doc.workflow);
+        HistoryReading {
+            summaries: self.summaries(),
+            findings: latest.map(|workflow| self.findings(workflow)),
+        }
     }
 }

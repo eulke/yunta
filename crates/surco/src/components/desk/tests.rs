@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{Desk, DeskFoot, FootRow, Pane, RailGroup, RailRow};
-use crate::components::Legend;
+use crate::components::{Legend, Sight};
 use crate::diagram::Diagram;
 use crate::doc::{Block, Doc};
 use crate::golden::{assert_golden, ENVIRONMENTS, RICH};
@@ -103,8 +103,7 @@ fn proof() -> Pane {
                 .plain("             ")
                 .push(Tone::Strong, "test -f made.txt"),
         ])),
-        top: 0,
-        follows_pointer: false,
+        sight: Sight::default(),
     }
 }
 

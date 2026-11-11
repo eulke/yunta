@@ -42,6 +42,7 @@ use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
 use yunta_core::process::subprocess::{self, Launch, LineParser};
+use yunta_core::process::SearchPath;
 use yunta_core::rail::RailCommand;
 use yunta_core::{
     AdapterError, AdapterId, AdapterSettings, Capabilities, EditSandbox, FenceLevel, Result,
@@ -98,6 +99,7 @@ impl CodexAdapter {
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
+            search_path: &req.search_path,
             args: plan.args,
             cwd: &req.cwd,
             env: &plan.env,
@@ -383,7 +385,7 @@ impl Adapter for CodexAdapter {
         Some(&rail::CodexRailCodec)
     }
 
-    async fn probe(&self) -> Result<ProbeReport> {
+    async fn probe(&self, search_path: &SearchPath) -> Result<ProbeReport> {
         if let Err(e) = &self.settings {
             return Err(AdapterError::Adapter {
                 adapter: ID.clone(),
@@ -391,7 +393,7 @@ impl Adapter for CodexAdapter {
             });
         }
         Ok(profile::held_to_floor(
-            subprocess::probe_version(&self.binary).await,
+            subprocess::probe_version(&self.binary, search_path).await,
         ))
     }
 

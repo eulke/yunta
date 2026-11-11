@@ -95,23 +95,13 @@ pub(crate) async fn of_workflow(
 ) -> Result<Outcome, CliError> {
     let project = shell.workspace().project()?;
 
-    let past = project.history(workflow_name).await;
-    let history = past.summaries();
-    // A person with no history to show is told so, and nothing else is
-    // read: the findings are drawn from every past log, read against the
-    // workflow the latest run froze, and an empty history has none. A
-    // program gets the empty document all the same.
-    let findings = match output {
-        Mode::Human if history.is_empty() => None,
-        _ => past
-            .latest_workflow()
-            .map(|workflow| past.findings(workflow)),
-    };
+    let past = project.history(workflow_name).await.reading();
+    let findings = past.findings.as_ref();
     let answer = WorkflowAnswer {
-        json: WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref()),
+        json: WorkflowHistoryJson::from(workflow_name, &past.summaries, findings),
         page: History {
             name: workflow_name,
-            history: &history,
+            history: &past.summaries,
             findings,
         },
     };

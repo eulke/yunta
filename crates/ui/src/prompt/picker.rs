@@ -104,6 +104,15 @@ impl<T> Picker<T> {
         (!self.filter.is_empty()).then_some(self.filter.as_str())
     }
 
+    /// The first of every option, whatever was typed: what Escape takes on a list whose
+    /// Escape takes the first, the plainest.
+    pub fn first(&self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.choices.first().map(|choice| choice.value.clone())
+    }
+
     /// This list with its pointer on the option at `index`, among all of them.
     pub(crate) fn pointing_at(mut self, index: usize) -> Self {
         self.at = index;
@@ -119,10 +128,15 @@ impl<T> Picker<T> {
         };
     }
 
-    /// Takes the option the pointer is on, or stays when the filter leaves nothing.
-    fn answer(&mut self) -> Press<T> {
+    /// Takes the option the pointer is on, or stays when the filter leaves nothing. The
+    /// list keeps every option where it stood: a picker a person comes back to after
+    /// answering it lists what it listed.
+    fn answer(&self) -> Press<T>
+    where
+        T: Clone,
+    {
         match self.pointed() {
-            Some(index) => Press::Answer(self.choices.swap_remove(index).value),
+            Some(index) => Press::Answer(self.choices[index].value.clone()),
             None => Press::Stay,
         }
     }
@@ -152,7 +166,7 @@ fn holds_in_order(name: &str, typed: &str) -> bool {
     wanted.peek().is_none()
 }
 
-impl<T> Answerable for Picker<T> {
+impl<T: Clone> Answerable for Picker<T> {
     type Answer = T;
 
     /// The list as a block: what the filter leaves, what was typed, and the keys it

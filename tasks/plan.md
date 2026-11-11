@@ -65,8 +65,9 @@ impl State {
 /// What reaches the application.
 pub enum Input {
     Stroke(Stroke),
-    /// What a surface laid out of the desk's pane: its first line, a page, the last first line.
-    Laid(PaneLaid),
+    /// What a surface laid out of the screen's regions it shows in part: of each, its first
+    /// line, a page, the last first line.
+    Laid(ScreenLaid),
     Time(DateTime<Utc>),
     /// What a piece of work remarks while it works.
     Remark(Ticket, Remark),
@@ -171,7 +172,7 @@ pub trait Answerable {
     /// The prompt as it stands, as the block render words and Surco draws.
     fn block(&self, look: &Look) -> Block;
     /// What a surface laid out of it, for a prompt that scrolls by what was shown.
-    fn laid(&mut self, laid: PaneLaid) {}
+    fn laid(&mut self, laid: Laid) {}
 }
 ```
 
@@ -342,6 +343,7 @@ Inside a phase, each group of work ends green, with what it prints compared agai
   - the cases, each shown as it ends;
   - the packs: list, audit, add and update with the executors confirmed on the copy audited, remove, scaffold.
 - **Evidence, stats and the graph:** the receipt written, a run verified, its page shown in a browser; a run's stats and a workflow's history; a workflow's or a run's graph, a `parallel` group drawn as a box holding its nodes once Surco reads a `subgraph`.
+- **Scrolling:** a page taller than its region scrolls on every stage that shows one, by what a surface laid out of it, through the one owner the plan desk scrolls through.
 - **Doctor, upkeep and schema:** the findings, folded or whole; the sessions after a confirmation, each remark shown as it comes and stoppable; the dry run and then the collection; every document's shape.
 - **The dialogs:** the palette over every stage, filtered by typed words; help; every confirmation. The walk now covers every stage.
 - **The proof and the review:**

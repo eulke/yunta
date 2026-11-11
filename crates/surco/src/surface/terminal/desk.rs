@@ -4,7 +4,7 @@
 
 use super::card::Placed;
 use super::Terminal;
-use crate::components::{Desk, FootRow, Pane, PaneLaid};
+use crate::components::{Desk, FootRow, Laid, Pane};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
@@ -106,7 +106,7 @@ impl Desk {
             foot.remove(0);
         }
         let height = most.saturating_sub(head.len() + foot.len());
-        let (middle, top, page, pane_most) = self.middle(look, &measures, height);
+        let (middle, laid) = self.middle(look, &measures, height);
         let margin = " ".repeat(MARGIN);
         let mut lines: Vec<Line> = head
             .into_iter()
@@ -121,24 +121,15 @@ impl Desk {
         Placed {
             lines,
             cursor: None,
-            pane: Some(PaneLaid {
-                top,
-                page,
-                most: pane_most,
-            }),
+            laid: Some(laid),
         }
     }
 
     /// The rows between the head and the foot: the rail beside the pane, or the pane alone.
-    fn middle(
-        &self,
-        look: &Look,
-        measures: &Measures,
-        height: usize,
-    ) -> (Vec<Line>, usize, usize, usize) {
+    fn middle(&self, look: &Look, measures: &Measures, height: usize) -> (Vec<Line>, Laid) {
         let glyphs = look.glyphs;
         let has_rail = measures.rail.is_some();
-        let (pane, top, page, most) = pane_rows(&self.pane, look, measures.pane, height, has_rail);
+        let (pane, laid) = pane_rows(&self.pane, look, measures.pane, height, has_rail);
         let lines = match measures.rail {
             Some(cells) => {
                 let rule = format!(" {} ", glyphs.gutter());
@@ -155,7 +146,7 @@ impl Desk {
             }
             None => pane,
         };
-        (lines, top, page, most)
+        (lines, laid)
     }
 
     /// The head's rows: the title, what the plan is about and what was asked while the pane
@@ -333,93 +324,38 @@ fn pane_title_row(pane: &Pane, glyphs: Glyphs, cells: usize, has_rail: bool) -> 
 }
 
 /// The pane's rows in `height` rows: its title and a blank row, then the lines it is scrolled
-/// to, and a row that counts the lines below when they do not all fit. Returns the rows, the
-/// first line shown, the body's rows and the last first line a scroll can reach.
+/// to, and a row that counts the lines below when they do not all fit. Returns the rows and
+/// what was laid out of the pane.
 fn pane_rows(
     pane: &Pane,
     look: &Look,
     cells: usize,
     height: usize,
     has_rail: bool,
-) -> (Vec<Line>, usize, usize, usize) {
-    let glyphs = look.glyphs;
-    let lines = pane_lines(pane, look, cells);
+) -> (Vec<Line>, Laid) {
     let page = height.saturating_sub(PANE_HEAD);
-    let most = lines.len().saturating_sub(page);
-    let pointed = pane
-        .follows_pointer
-        .then(|| {
-            lines
-                .iter()
-                .position(|line| line.text().trim_start().starts_with(glyphs.pointer()))
-        })
-        .flatten();
-    let top = scroll_top(pane.top, pointed, most, page);
-    let mut rows = vec![pane_title_row(pane, glyphs, cells, has_rail), Line::new()];
-    rows.extend(pane_body(&lines, (top, page, most), cells, glyphs));
+    let (body, laid) = Terminal::on(measure(look, cells)).scrolled(&pane.doc, pane.sight, page);
+    let mut rows = vec![
+        pane_title_row(pane, look.glyphs, cells, has_rail),
+        Line::new(),
+    ];
+    rows.extend(body);
     rows.truncate(height);
     rows.resize(height, Line::new());
-    (rows, top, page, most)
+    (rows, laid)
 }
 
 /// What the pane holds, laid out at its measure of `cells`.
 fn pane_lines(pane: &Pane, look: &Look, cells: usize) -> Vec<Line> {
-    let measure = Look {
+    Terminal::on(measure(look, cells)).lines(&pane.doc)
+}
+
+/// `look` at the pane's measure of `cells`.
+fn measure(look: &Look, cells: usize) -> Look {
+    Look {
         width: Width::row(cells, None),
         ..*look
-    };
-    Terminal::on(measure).lines(&pane.doc)
-}
-
-/// The first line the pane shows: the one it was scrolled to, `top`, held within its last
-/// lines and moved so that the line a pointer stands on, `pointed`, is in sight.
-fn scroll_top(top: usize, pointed: Option<usize>, most: usize, page: usize) -> usize {
-    let top = top.min(most);
-    let Some(row) = pointed else {
-        return top;
-    };
-    // Past the last line every row of the body shows a line, so none is kept for a count.
-    let shown = if top == most {
-        page
-    } else {
-        page.saturating_sub(1)
-    };
-    if row < top || row >= top + shown {
-        row.min(most)
-    } else {
-        top
     }
-}
-
-/// The body rows of a pane scrolled to `top` (with its `page` rows and `most`), each cut to
-/// `cells`. When lines lie below the last one shown, the row that counts them takes its place.
-fn pane_body(
-    lines: &[Line],
-    (top, page, most): (usize, usize, usize),
-    cells: usize,
-    glyphs: Glyphs,
-) -> Vec<Line> {
-    if top == most {
-        return lines[top..]
-            .iter()
-            .map(|line| line.cut(cells, glyphs))
-            .collect();
-    }
-    if page == 0 {
-        return Vec::new();
-    }
-    let end = top + page - 1;
-    let more = format!(
-        "{} {}",
-        glyphs.ellipsis(),
-        counted(lines.len() - end, "more line")
-    );
-    let mut body: Vec<Line> = lines[top..end]
-        .iter()
-        .map(|line| line.cut(cells, glyphs))
-        .collect();
-    body.push(Line::new().push(Tone::Muted, more).cut(cells, glyphs));
-    body
 }
 
 mod rail;

@@ -239,7 +239,9 @@ async fn run_member(
     // Boxed for the indirect recursion `execute_run_at_depth` →
     // `execute_node` → here → `execute_run_at_depth`.
     let future: std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<super::super::RunReport, RunError>> + '_>,
+        Box<
+            dyn std::future::Future<Output = Result<super::super::RunReport, RunError>> + Send + '_,
+        >,
     > = Box::pin(super::super::execute_run_at_depth(
         super::super::RunEnv {
             run_id: &member.id,

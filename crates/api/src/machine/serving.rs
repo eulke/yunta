@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use yunta_core::port::ProbeReport;
+use yunta_core::process::SearchPath;
 use yunta_core::refusal::Unservable;
 use yunta_core::step::Arg;
 use yunta_core::{
@@ -25,6 +26,7 @@ pub async fn servable(
     manifest: &Manifest,
     mode: &ModeName,
     workflow: Arg<String>,
+    search_path: &SearchPath,
 ) -> Result<(), Error> {
     let pin = manifest.adapter.as_ref().and_then(RunAdapter::pinned);
     let children = frozen_children(manifest)?;
@@ -44,7 +46,8 @@ pub async fn servable(
     }
     refuse_sessionless(&reach.nodes, &adapters)?;
     refuse_unchecked(manifest, &reach, workflow)?;
-    refuse_unhealthy(&reached_adapters(manifest, &reach.nodes, pin, adapters)).await
+    let reached = reached_adapters(manifest, &reach.nodes, pin, adapters);
+    refuse_unhealthy(&reached, search_path).await
 }
 
 /// What a refused serving is, as the API hands it on.
@@ -104,14 +107,15 @@ pub(crate) fn refuse_sessionless(nodes: &[&Node], adapters: &Adapters) -> Result
     Ok(())
 }
 
-/// Health-checks every adapter a run would use — the binary there and
-/// answering `--version`, every setting read — and refuses before any
-/// checkout or token is spent if one comes back unhealthy. `doctor` probes
-/// the same adapters itself, reporting each as a check of its own.
-async fn refuse_unhealthy(adapters: &Adapters) -> Result<(), Error> {
+/// Health-checks every adapter a run would use — the binary there, found
+/// on `search_path` as the run's sessions find it, and answering
+/// `--version`, every setting read — and refuses before any checkout or token
+/// is spent if one comes back unhealthy. `doctor` probes the same adapters
+/// itself, reporting each as a check of its own.
+async fn refuse_unhealthy(adapters: &Adapters, search_path: &SearchPath) -> Result<(), Error> {
     let mut unhealthy = Vec::new();
     for (name, adapter) in adapters {
-        match adapter.probe().await {
+        match adapter.probe(search_path).await {
             Ok(ProbeReport::Healthy { .. }) => {}
             // An adapter that reports itself unhealthy without saying why
             // is listed by name alone.

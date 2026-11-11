@@ -43,21 +43,7 @@ impl Page for Initialized<'_> {
     /// install, or the runners to declare, because no agent node runs until
     /// its runner is.
     fn document(&self, _look: &Look) -> Doc {
-        let mut adapters = Checklist::default();
-        for adapter in self.probed {
-            match adapter.healthy {
-                true => adapters.push(
-                    Found::Holds,
-                    adapter.id.as_str(),
-                    format!("healthy ({})", adapter.detail),
-                ),
-                false => adapters.push(
-                    Found::Caution,
-                    adapter.id.as_str(),
-                    format!("unavailable ({})", adapter.detail),
-                ),
-            }
-        }
+        let adapters = adapters(self.probed);
         let suggestion = claude_md_suggestion();
         let headline = Headline::new(Mark::Done, command::line(&NextStep::Init), "done")
             .fact(format!("in {}", self.repo.display()));
@@ -145,10 +131,38 @@ fn declared_fields(declared: &BTreeMap<RunnerName, RunnerCandidate>) -> Fields {
 }
 
 /// What `init` wrote and detected, as the fields the page opens with: the
-/// files it wrote and the ones it left as they were, the ecosystem it found
-/// and its cache tip, and the forge `origin` is on.
+/// files it wrote and the ones it left as they were, then what it found.
 fn detected_fields(init: &Initialized<'_>) -> Fields {
-    let detected = init.detected;
+    let fields = Fields::new()
+        .push_if("wrote", init.wrote.join(", "))
+        .push_if("skipped", init.skipped.join(", "));
+    found(fields, init.detected)
+}
+
+/// Each adapter this machine answers for, as a check: healthy, or unavailable, with
+/// what probing it said.
+pub(super) fn adapters(probed: &[ProbedAdapter]) -> Checklist {
+    let mut adapters = Checklist::default();
+    for adapter in probed {
+        match adapter.healthy {
+            true => adapters.push(
+                Found::Holds,
+                adapter.id.as_str(),
+                format!("healthy ({})", adapter.detail),
+            ),
+            false => adapters.push(
+                Found::Caution,
+                adapter.id.as_str(),
+                format!("unavailable ({})", adapter.detail),
+            ),
+        }
+    }
+    adapters
+}
+
+/// `fields` with what a repository was found to have: the ecosystem and its cache
+/// tip, and the forge `origin` is on.
+pub(super) fn found(fields: Fields, detected: &Detected) -> Fields {
     let ecosystem = match &detected.ecosystem {
         Some(ecosystem) => format!(
             "{}: wrote {}{}",
@@ -163,9 +177,7 @@ fn detected_fields(init: &Initialized<'_>) -> Fields {
                  declare `commands:` and `baseline.suite` by hand"
             .to_string(),
     };
-    Fields::new()
-        .push_if("wrote", init.wrote.join(", "))
-        .push_if("skipped", init.skipped.join(", "))
+    fields
         .push_if("ecosystem", ecosystem)
         .push_if(
             "tip",

@@ -221,7 +221,7 @@ fn execute_kind<'a>(
     ctx: &'a RunCtx<'_>,
     node: &'a Node,
     cancel: &'a CancellationToken,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<NodeEnd, RunError>> + 'a>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<NodeEnd, RunError>> + Send + 'a>> {
     match &node.kind {
         NodeKind::Bash { run } => Box::pin(execute_bash(ctx, node, run, cancel)),
         NodeKind::Prompt { prompt } => Box::pin(execute_prompt(ctx, node, prompt, cancel)),

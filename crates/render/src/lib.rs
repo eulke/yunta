@@ -93,6 +93,7 @@ pub(crate) const INSTANT_FORMAT: &str = "%Y-%m-%d %H:%M UTC";
 #[cfg(test)]
 mod tests {
     mod cards;
+    mod catalog;
     mod cautions;
     mod claims;
     mod console_page;
@@ -107,8 +108,10 @@ mod tests {
     mod initialized;
     mod inputs;
     mod offers;
+    mod packs;
     mod publication;
     mod publication_text;
     mod retry;
     mod routes;
+    mod setup;
 }

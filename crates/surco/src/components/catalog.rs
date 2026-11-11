@@ -268,6 +268,9 @@ fn written() -> Vec<Block> {
                 .to_string(),
         ),
         Block::Diagram(Diagram::of("graph LR\n  plan --> build")),
+        Block::Diagram(Diagram::of(
+            "graph TD\n  subgraph checks\n    lint\n    test\n  end\n  build --> checks\n  checks --> ship\n  lint -.-> fix",
+        )),
         Code::whole(
             "src/lib.rs",
             Some("the change".to_string()),

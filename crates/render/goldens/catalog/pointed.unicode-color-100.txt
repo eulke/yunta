@@ -1,0 +1,8 @@
+    ␛[1mgreet␛[0m: says hello
+    ␛[2mrun         ␛[0m ␛[1myunta run greet␛[0m
+
+  ␛[1m▸␛[0m ␛[1mlint-fix␛[0m: a check, and an agent that fixes what it finds
+    ␛[2mrun         ␛[0m ␛[1myunta run lint-fix␛[0m
+
+    ␛[1mbroken␛[0m
+    ␛[31m✗␛[0m unreadable: no such file

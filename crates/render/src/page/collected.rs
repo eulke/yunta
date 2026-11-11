@@ -15,6 +15,7 @@ use yunta_core::RunId;
 
 /// What a pass did, row by row as it went, and how much it could not do: the
 /// page it says once it is over.
+#[derive(Debug, Clone)]
 pub struct Collected {
     /// Whether the pass only says what it would do.
     pub dry_run: bool,

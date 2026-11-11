@@ -36,7 +36,7 @@ async fn followed(bench: &Bench) -> FollowedRun {
         .into_iter()
         .find_map(|news| match news {
             News::Following(run) => Some(*run),
-            News::Run(_) => None,
+            News::Run(_) | News::CasesNamed(_) | News::Case(_) => None,
         })
         .expect("the following hands back the run as it reads first")
 }

@@ -157,7 +157,8 @@ async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> 
         if matches!(decision, Decision::MeasureBaseline { .. }) && aside.finish().await? {
             continue;
         }
-        let moved = moves_before(ctx, &state, &scheduling.policy, &aside, &decision).await?;
+        let measuring = !aside.idle();
+        let moved = moves_before(ctx, &state, &scheduling.policy, measuring, &decision).await?;
         if let Some(checkout) = moved {
             break Ok(Driven::Moved(checkout));
         }
@@ -199,18 +200,19 @@ async fn read_state(
 /// Moves the run, before it executes `decision`, into a checkout of its
 /// pool that already built the commit it stands at — the one its last
 /// unit worked in — when it is the moment to look for one, and says so on
-/// the log. Answers where the run works now; `None` when it stays.
+/// the log; never while a measurement is under way beside the run
+/// (`measuring`). Answers where the run works now; `None` when it stays.
 async fn moves_before(
     ctx: &RunCtx<'_>,
     state: &yunta_replay::RunState,
     policy: &schedule::Policy,
-    aside: &super::aside::Aside<'_>,
+    measuring: bool,
     decision: &Decision,
 ) -> Result<Option<PathBuf>, RunError> {
     let Decision::Execute(batch) = decision else {
         return Ok(None);
     };
-    if !aside.idle() || !schedule::follows_build(&ctx.manifest.workflow, state, policy, batch) {
+    if measuring || !schedule::follows_build(&ctx.manifest.workflow, state, policy, batch) {
         return Ok(None);
     }
     let supervision = ctx.root_supervision();
@@ -245,7 +247,7 @@ async fn take_step(
 }
 
 /// What a step answers: the report of a step that ended the invocation.
-type Stepped<'s> = Pin<Box<dyn Future<Output = Result<Option<RunReport>, RunError>> + 's>>;
+type Stepped<'s> = Pin<Box<dyn Future<Output = Result<Option<RunReport>, RunError>> + Send + 's>>;
 
 /// The step the scheduler decided, boxed apart by its kind: a run nested
 /// inside another run's step carries the frame of the one step it takes,

@@ -35,6 +35,7 @@ mod problem;
 mod ribbon;
 pub(in crate::surface) use problem::{HELP, REFUSED};
 mod runs;
+mod scrolled;
 mod table;
 
 /// A terminal stream, by how its lines look.
@@ -132,7 +133,7 @@ impl Terminal {
             block => Placed {
                 lines: self.block(block),
                 cursor: None,
-                pane: None,
+                laid: None,
             },
         }
     }
@@ -227,6 +228,10 @@ impl Terminal {
                 .push(Tone::of(mark), self.look.glyphs.mark(mark).to_string())
                 .plain(" "),
             Some(Lead::Ordinal(at)) => Line::new().push(Tone::Strong, format!("{at}  ")),
+            Some(Lead::Pointer { on: true }) => Line::new()
+                .push(Tone::Strong, self.look.glyphs.pointer().to_string())
+                .plain(" "),
+            Some(Lead::Pointer { on: false }) => Line::new().plain("  "),
             None => Line::new(),
         };
         let hang = " ".repeat(cell_width(&lead.text()));

@@ -1,0 +1,3 @@
+  ␛[1mBuild the whole workspace → the checks → Ship what was built → Tell everyone what shipped␛[0m
+  ␛[1mthe checks: Check the code is clean and formatted, Run every test the project has, Check every␛[0m
+    ␛[1mdocument still holds, Measure the binary against its ceiling␛[0m

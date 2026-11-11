@@ -13,9 +13,10 @@
 //! and the person goes back to where they came from; leaving goes back without
 //! recording anything.
 
-use surco::components::{Note, PaneLaid, Region, Screen, Side};
+use surco::components::{Laid, Note, Region, Screen, Side, Sight};
 use surco::doc::Doc;
 use surco::look::Look;
+use yunta_api::{WaitingDecision, WaitingQuestions};
 use yunta_core::{NodeId, RunId};
 use yunta_render::page::{Gate, Page};
 use yunta_render::prompt::Escape;
@@ -95,7 +96,7 @@ impl DecisionStage {
         if let Some(said) = &self.said {
             doc = doc.with(Note(said.clone()));
         }
-        let mut screen = Screen::new(Region { title: None, doc });
+        let mut screen = Screen::new(Region::new(doc).in_sight(Sight::following_pointer()));
         screen.trail = vec![
             yunta_render::screen::YUNTA.to_string(),
             self.run.handle().to_string(),
@@ -143,10 +144,10 @@ impl DecisionStage {
 
     /// What a surface laid out of the desk's pane, which the desk reads on the next
     /// stroke.
-    pub(crate) fn laid(&mut self, pane: PaneLaid) {
+    pub(crate) fn laid(&mut self, laid: Laid) {
         match &mut self.put {
-            Put::Decision(deciding) => deciding.laid(pane),
-            Put::Round { round, .. } => round.laid(pane),
+            Put::Decision(deciding) => deciding.laid(laid),
+            Put::Round { round, .. } => round.laid(laid),
             Put::ReadingTheRound | Put::ReadingTheDecision => {}
         }
     }
@@ -158,34 +159,17 @@ impl DecisionStage {
     pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
         let run = self.run.clone();
         match outcome {
-            Outcome::Questions(waiting) if waiting.questions.questions.is_empty() => {
-                vec![Want::Work(Operation::Answer {
-                    run,
-                    node: waiting.node,
-                    answers: Vec::new(),
-                })]
-            }
-            Outcome::Questions(waiting) => {
-                let round = Round::new(&waiting.node, &waiting.questions, Escape::LeavesWaiting);
-                self.put = Put::Round {
-                    node: waiting.node,
-                    round: Box::new(round),
-                };
-                Vec::new()
-            }
+            Outcome::Questions(waiting) => self.round_read(*waiting),
             Outcome::Refused(Refused::NoDecision { .. })
                 if matches!(self.put, Put::ReadingTheRound) =>
             {
                 self.put = Put::ReadingTheDecision;
                 vec![Want::Work(Operation::ReadDecision { run })]
             }
-            Outcome::Decision(waiting) => {
-                let put = DecisionPut::waiting(&run, &waiting);
-                let deciding = Deciding::put(&put, self.opens, Escape::LeavesWaiting);
-                self.put = Put::Decision(Box::new(deciding));
-                Vec::new()
+            Outcome::Decision(waiting) => self.decision_read(&waiting),
+            Outcome::Decided { run: decided } | Outcome::Answered { run: decided } => {
+                self.recorded(&decided)
             }
-            Outcome::Decided { .. } | Outcome::Answered { .. } => vec![Want::Back],
             Outcome::Refused(refused) => {
                 self.said = Some(refused.to_string());
                 Vec::new()
@@ -196,16 +180,62 @@ impl DecisionStage {
             }
             Outcome::Repository(_)
             | Outcome::Catalog(_)
+            | Outcome::Workflow(_)
+            | Outcome::Pack(_)
+            | Outcome::Evidence(_)
             | Outcome::Started { .. }
             | Outcome::Field { .. }
             | Outcome::Followed
             | Outcome::Page(_)
             | Outcome::NodePage(_)
+            | Outcome::Stats(_)
+            | Outcome::History(_)
+            | Outcome::Graph(_)
+            | Outcome::Doctor(_)
+            | Outcome::Collected(_)
             | Outcome::Resumed { .. }
             | Outcome::Cancelled { .. }
             | Outcome::Closed { .. }
+            | Outcome::Detected { .. }
+            | Outcome::Initialized(_)
             | Outcome::Stopped => Vec::new(),
         }
+    }
+
+    /// The decision the run waits on, put to the person.
+    fn decision_read(&mut self, waiting: &WaitingDecision) -> Vec<Want> {
+        let put = DecisionPut::waiting(&self.run, waiting);
+        let deciding = Deciding::put(&put, self.opens, Escape::LeavesWaiting);
+        self.put = Put::Decision(Box::new(deciding));
+        Vec::new()
+    }
+
+    /// What recording an answer for `decided` does: back to where the person came from
+    /// once it is this run's; another run's, recorded by a stage the person left, is said
+    /// where that run is, not here.
+    fn recorded(&self, decided: &RunId) -> Vec<Want> {
+        match *decided == self.run {
+            true => vec![Want::Back],
+            false => Vec::new(),
+        }
+    }
+
+    /// The round of questions the run is parked on, put to the person; a round with no
+    /// question in it answered with nothing.
+    fn round_read(&mut self, waiting: WaitingQuestions) -> Vec<Want> {
+        if waiting.questions.questions.is_empty() {
+            return vec![Want::Work(Operation::Answer {
+                run: self.run.clone(),
+                node: waiting.node,
+                answers: Vec::new(),
+            })];
+        }
+        let round = Round::new(&waiting.node, &waiting.questions, Escape::LeavesWaiting);
+        self.put = Put::Round {
+            node: waiting.node,
+            round: Box::new(round),
+        };
+        Vec::new()
     }
 }
 
@@ -218,10 +248,7 @@ fn beside_the_card(put: &DecisionPut, look: &Look) -> Option<Side> {
     }
     .document(look);
     (!above.blocks().is_empty()).then_some(Side {
-        region: Region {
-            title: None,
-            doc: above,
-        },
+        region: Region::new(above),
         focused: false,
     })
 }

@@ -219,7 +219,10 @@ pub(super) fn checklist(list: &Checklist) -> String {
         .fold()
         .map(|fold| fold_row(&fold.subject, &fold.names))
         .unwrap_or_default();
-    let rows: String = list.unfolded().map(check_row).collect();
+    let rows: String = list
+        .unfolded()
+        .map(|check| check_row(check, list.points_at(check)))
+        .collect();
     if folded.is_empty() && rows.is_empty() {
         return String::new();
     }
@@ -242,7 +245,11 @@ fn fold_row(subject: &str, names: &[&str]) -> String {
 /// One check with a row of its own: its mark, its subject and what it found,
 /// then what it means and how to make it hold, and each line of detail it has
 /// that is not blank.
-fn check_row(check: &Check) -> String {
+fn check_row(check: &Check, pointed: bool) -> String {
+    let pointer = match pointed {
+        true => format!("{} ", text::esc(&GLYPHS.pointer().to_string())),
+        false => String::new(),
+    };
     let details: String = check
         .details
         .iter()
@@ -255,7 +262,7 @@ fn check_row(check: &Check) -> String {
         false => format!(r#"<ul class="details">{details}</ul>"#),
     };
     format!(
-        r#"<li>{} <span class="subject">{}</span> <span>{}</span>{}{details}</li>"#,
+        r#"<li>{pointer}{} <span class="subject">{}</span> <span>{}</span>{}{details}</li>"#,
         text::mark(check.found.mark()),
         text::words(&crate::text::one_line(&check.subject)),
         text::words(&check.said),

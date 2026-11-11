@@ -1,4 +1,4 @@
-use surco::components::PaneLaid;
+use surco::components::Laid;
 use surco::doc::Block;
 use surco::look::Look;
 
@@ -25,5 +25,5 @@ pub trait Answerable {
     /// What a surface laid out of a pane it scrolls, handed back after it drew it: a
     /// prompt that scrolls by what was shown reads it on the next stroke. A prompt
     /// with no pane has nothing to read.
-    fn laid(&mut self, _pane: PaneLaid) {}
+    fn laid(&mut self, _laid: Laid) {}
 }

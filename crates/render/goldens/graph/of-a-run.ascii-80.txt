@@ -1,16 +1,20 @@
 ! workflow checked of run 7E5PH4 ; failed
 
-  diagram
-    a diagram this terminal does not draw; it is drawn where Markdown is read
-    | graph TD
-    |   build["build: finished: exit 0"]
-    |   subgraph checks["checks: never ran"]
-    |     lint["lint: failed: exit 101"]
-    |     test["test: never ran"]
-    |   end
-    |   fix["fix: never ran"]
-    |   ship["ship: never ran"]
-    |   build --> checks
-    |   checks --> ship
-    |   lint -.-> fix
-    11 lines
+               +-------------------------+
+               | build: finished: exit 0 |
+               +-------------------------+
+                            |
+                            v
+  +- checks: never ran -------------------------------+
+  |                                                   |
+  | +------------------------+    +-----------------+ |
+  | | lint: failed: exit 101 |    | test: never ran | |
+  | +------------------------+    +-----------------+ |
+  |              :                                    |
+  +--------------+----------+-------------------------+
+                 :          +----------+
+                 :                     |
+                 v                     v
+        +----------------+    +-----------------+
+        | fix: never ran |    | ship: never ran |
+        +----------------+    +-----------------+

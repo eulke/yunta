@@ -8,19 +8,20 @@
 //! confirmation first, closing naming every run it closes. Each act reads the field
 //! again once it is done. Opening the run pointed at, or the one that has waited
 //! longest on a person, opens its stage over the field, which is read again when the
-//! person comes back to it.
+//! person comes back to it; so do the workflows, with `w`, and doctor, with `m`.
 
 use std::path::PathBuf;
 
-use surco::components::{Attention, Count, Note, Region, Screen};
+use surco::components::{Attention, Count, Note, Region, Screen, Sight};
 use surco::doc::Depth;
 use surco::look::Look;
 use surco::words::Standing;
 use yunta_api::{FieldReach, FieldReading};
+use yunta_core::step::{NextStep, Reach};
 use yunta_core::RunId;
 use yunta_render::page::{Field, FieldGroup, Page};
 
-use super::{RunStage, Stage, Want};
+use super::{Act, CatalogStage, DoctorStage, RunStage, Stage, Want};
 use crate::dialog::Confirmation;
 use crate::prompt::Stroke;
 use crate::{Operation, Outcome};
@@ -113,7 +114,7 @@ impl FieldStage {
         if let Some(said) = &self.said {
             doc = doc.with(Note(said.clone()));
         }
-        let mut screen = Screen::new(Region { title: None, doc });
+        let mut screen = Screen::new(Region::new(doc).in_sight(Sight::following_pointer()));
         screen.trail = vec![yunta_render::screen::YUNTA.to_string()];
         screen.tally = TALLIED
             .into_iter()
@@ -166,7 +167,8 @@ impl FieldStage {
             Stroke::Insert('r') => self.act(|run| Want::Work(Operation::Resume { run })),
             Stroke::Insert('c') => self.act(|run| {
                 let asks = yunta_render::screen::cancelling(run.handle());
-                Want::Confirm(Confirmation::new(asks, Operation::Cancel { run }))
+                let same = vec![NextStep::Cancel { run: run.clone() }];
+                Want::Confirm(Confirmation::new(asks, same, Operation::Cancel { run }))
             }),
             Stroke::Insert('x') => self.closing(),
             Stroke::Insert('a') => {
@@ -184,9 +186,56 @@ impl FieldStage {
                 self.kept_to_listed();
                 Vec::new()
             }
+            Stroke::Insert('w') => vec![Want::Open(Stage::Catalog(CatalogStage::new()))],
+            Stroke::Insert('m') => vec![Want::Open(Stage::Doctor(DoctorStage::new()))],
             Stroke::Insert('q') | Stroke::Decline | Stroke::Interrupt => vec![Want::Leave],
             _ => Vec::new(),
         }
+    }
+
+    /// What the field offers, each with the key that takes it here: following the run
+    /// pointed at, resuming and cancelling it, closing what `x` closes where one command
+    /// does it, the run waiting on the person, the field as far again or with its closed
+    /// runs, the workflows and doctor.
+    pub(crate) fn offered(&self) -> Vec<Act> {
+        let on_the_run = self.pointed.iter().flat_map(|run| {
+            [
+                (Stroke::Enter, NextStep::Follow { run: run.clone() }),
+                (Stroke::Insert('r'), NextStep::Resume { run: run.clone() }),
+                (Stroke::Insert('c'), NextStep::Cancel { run: run.clone() }),
+            ]
+        });
+        let closing = self
+            .closed_by_one_command()
+            .map(|run| (Stroke::Insert('x'), NextStep::Close { run }));
+        let needs = (!self.reading.needing_a_person().is_empty())
+            .then_some((Stroke::Insert('n'), NextStep::Needs));
+        let reach = match self.reach {
+            FieldReach::Here => Reach::Machine,
+            FieldReach::Machine => Reach::Repository,
+        };
+        let closed = match self.depth.reaches(Depth::Full) {
+            true => Reach::Repository,
+            false => Reach::WithClosed,
+        };
+        let always = [
+            (Stroke::Insert('a'), NextStep::ListRuns { reach }),
+            (Stroke::Insert('d'), NextStep::ListRuns { reach: closed }),
+            (Stroke::Insert('w'), NextStep::List),
+            (
+                Stroke::Insert('m'),
+                NextStep::Doctor {
+                    sessions: false,
+                    full: false,
+                },
+            ),
+        ];
+        on_the_run
+            .chain(closing)
+            .chain(needs)
+            .chain(always)
+            .map(|(key, step)| Act::by(key, step))
+            .collect()
     }
 
     /// What the field asks for when a person comes back to it: itself, read again.
@@ -202,9 +251,13 @@ impl FieldStage {
                 self.reread(reading, storage);
                 Vec::new()
             }
-            Outcome::Closed { closed, refused } => {
+            Outcome::Closed {
+                closed,
+                refused,
+                failed,
+            } => {
                 self.marked.retain(|run| !closed.contains(run));
-                self.said = refused.first().map(ToString::to_string);
+                self.said = failed.or_else(|| refused.first().map(ToString::to_string));
                 vec![Want::Work(Operation::Field { reach: self.reach })]
             }
             Outcome::Resumed { .. } | Outcome::Cancelled { .. } => {
@@ -220,14 +273,24 @@ impl FieldStage {
             }
             Outcome::Repository(_)
             | Outcome::Catalog(_)
+            | Outcome::Workflow(_)
+            | Outcome::Pack(_)
+            | Outcome::Evidence(_)
             | Outcome::Started { .. }
             | Outcome::Followed
             | Outcome::Page(_)
             | Outcome::NodePage(_)
             | Outcome::Questions(_)
             | Outcome::Decision(_)
+            | Outcome::Stats(_)
+            | Outcome::History(_)
+            | Outcome::Graph(_)
+            | Outcome::Doctor(_)
+            | Outcome::Collected(_)
             | Outcome::Decided { .. }
             | Outcome::Answered { .. }
+            | Outcome::Detected { .. }
+            | Outcome::Initialized(_)
             | Outcome::Stopped => Vec::new(),
         }
     }
@@ -266,6 +329,17 @@ impl FieldStage {
         self.pointed.clone().map(act).into_iter().collect()
     }
 
+    /// The one run `x` closes, where it closes one: the run picked, or the one pointed
+    /// at where none is. Several picked are closed together, which no one command does,
+    /// so the palette offers that by its key alone.
+    fn closed_by_one_command(&self) -> Option<RunId> {
+        match self.marked.as_slice() {
+            [] => self.pointed.clone(),
+            [only] => Some(only.clone()),
+            _ => None,
+        }
+    }
+
     /// Closing the runs picked, or the one pointed at where none is, asked first with
     /// every run it closes named.
     fn closing(&self) -> Vec<Want> {
@@ -278,8 +352,13 @@ impl FieldStage {
         }
         let handles: Vec<&str> = runs.iter().map(RunId::handle).collect();
         let asks = yunta_render::screen::closing(&handles);
+        let same = runs
+            .iter()
+            .map(|run| NextStep::Close { run: run.clone() })
+            .collect();
         vec![Want::Confirm(Confirmation::new(
             asks,
+            same,
             Operation::Close { runs },
         ))]
     }

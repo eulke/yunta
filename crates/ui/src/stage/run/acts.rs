@@ -3,15 +3,19 @@
 //! waits on where it stopped on a menu of its own or on a round of questions, the step
 //! `resolve-gate` takes with no option. Stopping and closing ask a confirmation first; going on acts at once; the
 //! child a run waits on opens over it, and its decision and the plan it is on open in
-//! the decision stage. The receipt, verifying and the page for a browser are the
-//! evidence stage's.
+//! the decision stage. The receipt a finished run offers, the verification a broken
+//! one does, and the page for a browser every run offers open in the evidence stage;
+//! what it cost and its graph, which every run offers too, in the stats and the graph
+//! stages.
 
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::step::{Choice, NextStep};
 use yunta_render::command;
 use yunta_replay::frame::RunFrame;
 
-use super::super::{DecisionStage, RunStage, Stage, Want};
+use super::super::{
+    DecisionStage, Evidence, EvidenceStage, GraphStage, RunStage, Stage, StatsStage, Want,
+};
 use crate::dialog::Confirmation;
 use crate::prompt::Opens;
 use crate::Operation;
@@ -27,7 +31,8 @@ pub(super) struct Offered {
 /// What the run framed as `frame` offers here: answering what it waits on where it
 /// stopped on a menu of its own or on a round of questions (`answerable`), then each
 /// act its standing and `decision`, the decision its page says it stopped on, offer that
-/// a key here takes.
+/// a key here takes, then what every run offers: its page for a browser, what it cost
+/// and its graph.
 pub(super) fn offered(
     frame: &RunFrame,
     decision: Option<&GateWaitingPayload>,
@@ -50,7 +55,18 @@ pub(super) fn offered(
             step: action.step,
         })
     });
-    answering.into_iter().chain(actions).collect()
+    let run = &frame.run_id;
+    let always = [
+        ('o', NextStep::Open { run: run.clone() }),
+        ('s', NextStep::Stats { run: run.clone() }),
+        ('g', NextStep::RunGraph { run: run.clone() }),
+    ]
+    .map(|(key, step)| Offered {
+        key,
+        does: command::does(&step),
+        step,
+    });
+    answering.into_iter().chain(actions).chain(always).collect()
 }
 
 /// The key the act taking `step` is bound to here; none for an act another stage
@@ -63,27 +79,34 @@ fn bound(step: &NextStep) -> Option<char> {
         NextStep::Status { .. } => Some('w'),
         NextStep::Review { .. } => Some('p'),
         NextStep::ResolveGate { .. } => Some('a'),
+        NextStep::Receipt { .. } => Some('e'),
+        NextStep::Verify { .. } => Some('v'),
         _ => None,
     }
 }
 
 /// What taking `step` asks for: stopping and closing after a confirmation, going on at
-/// once, the run it waits on opened over this one, and its decision, or the plan it
-/// is on, opened in the decision stage.
+/// once, the run it waits on opened over this one, its decision, or the plan it is
+/// on, opened in the decision stage, and what it leaves, cost or is drawn as opened
+/// in a stage of its own.
 pub(super) fn taken(step: NextStep) -> Vec<Want> {
     match step {
         NextStep::Cancel { run } => {
             let asks = yunta_render::screen::cancelling(run.handle());
+            let same = vec![NextStep::Cancel { run: run.clone() }];
             vec![Want::Confirm(Confirmation::new(
                 asks,
+                same,
                 Operation::Cancel { run },
             ))]
         }
         NextStep::Resume { run } => vec![Want::Work(Operation::Resume { run })],
         NextStep::Close { run } => {
             let asks = yunta_render::screen::closing(&[run.handle()]);
+            let same = vec![NextStep::Close { run: run.clone() }];
             vec![Want::Confirm(Confirmation::new(
                 asks,
+                same,
                 Operation::Close { runs: vec![run] },
             ))]
         }
@@ -96,6 +119,16 @@ pub(super) fn taken(step: NextStep) -> Vec<Want> {
             run,
             Opens::ThePlan,
         )))],
+        NextStep::Receipt { run } => evidence(run, Evidence::Receipt),
+        NextStep::Verify { run } => evidence(run, Evidence::Verification),
+        NextStep::Open { run } => evidence(run, Evidence::PageForABrowser),
+        NextStep::Stats { run } => vec![Want::Open(Stage::Stats(StatsStage::of_run(run)))],
+        NextStep::RunGraph { run } => vec![Want::Open(Stage::Graph(GraphStage::of_run(run)))],
         _ => Vec::new(),
     }
+}
+
+/// `asked` of `run`, opened in the evidence stage over the run.
+fn evidence(run: yunta_core::RunId, asked: Evidence) -> Vec<Want> {
+    vec![Want::Open(Stage::Evidence(EvidenceStage::of(run, asked)))]
 }

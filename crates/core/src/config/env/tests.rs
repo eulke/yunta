@@ -10,31 +10,6 @@ impl SecretSource for Fixed {
     }
 }
 
-/// A command is found where a shell started in the environment would run
-/// it: the first directory of its `PATH` holding a file by that name; a
-/// directory by that name is no command.
-#[test]
-fn a_command_is_found_in_the_first_directory_of_the_path_that_holds_it() {
-    let root = tempfile::tempdir().unwrap();
-    let (empty, first, second) = (
-        root.path().join("empty"),
-        root.path().join("first"),
-        root.path().join("second"),
-    );
-    std::fs::create_dir_all(empty.join("cc")).unwrap();
-    for dir in [&first, &second] {
-        std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join("cc"), "").unwrap();
-    }
-    let env = Env {
-        path: vec![empty, first.clone(), second],
-        ..Env::default()
-    };
-
-    assert_eq!(env.find("cc"), Some(first.join("cc")));
-    assert_eq!(env.find("ld"), None);
-}
-
 #[test]
 fn a_secret_spelled_as_a_number_is_taken_out_of_the_number_field() {
     let redactor = Redactor::of(&["PORT".to_string()], &Fixed("1234"))
@@ -74,7 +49,7 @@ fn an_environment_handed_on_reads_back_as_itself() {
         home: Some(PathBuf::from("/home/u")),
         yunta_home: Some(PathBuf::from("/scratch/state")),
         org_config: None,
-        path: vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+        path: SearchPath::new(vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]),
         user: Some("ana".to_string()),
         terminal: BTreeMap::from([("TERM".to_string(), "xterm".to_string())]),
         service: BTreeMap::from([("HTTPS_PROXY".to_string(), "http://proxy".to_string())]),

@@ -31,7 +31,7 @@ pub async fn new_workflow(
     let shape = choose_shape(shape, interactive).await?;
     let workspace = shell.workspace();
     let written = workspace.new_workflow(&stem, shape, force).await?;
-    let at = surco::paths::shown(&written.path, &workspace.dir, None);
+    let at = workspace.shown(&written.path);
     let page = |diagnosis| NewWorkflow {
         name,
         shape: shape.label(),

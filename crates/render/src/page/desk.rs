@@ -6,7 +6,7 @@
 //! page draws whole, and the desk finds that plan among what a decision shows, with
 //! [`plan_among`], beside the documents it shows with it.
 
-use surco::components::{Desk, DeskFoot, Pane, RailGroup, RailRow};
+use surco::components::{Desk, DeskFoot, Pane, RailGroup, RailRow, Sight};
 use surco::diagram::Diagram;
 use surco::doc::Doc;
 use surco::look::Look;
@@ -64,8 +64,6 @@ pub struct Spot {
     pub at: usize,
     /// What the person is looking at there.
     pub view: View,
-    /// The first row of the pane, as the person has scrolled it.
-    pub top: usize,
     /// The decision they are on, among [`Reading::choices`].
     pub choice: usize,
 }
@@ -203,11 +201,13 @@ impl Reading {
         }
     }
 
-    /// The desk at `spot`. `title` is what opens its first row, to which the plan's
-    /// size is added; `edge` is what stands at the far end of it.
+    /// The desk at `spot`, its pane from the line `top` a person scrolled it to. `title`
+    /// is what opens its first row, to which the plan's size is added; `edge` is what
+    /// stands at the far end of it.
     pub fn desk(
         &self,
         spot: &Spot,
+        top: usize,
         title: &[String],
         edge: Option<String>,
         foot: DeskFoot,
@@ -221,7 +221,7 @@ impl Reading {
             gist: said(&review.plan.summary).map(str::to_string),
             asked: said(&review.asked).map(str::to_string),
             rail: self.rail(spot),
-            pane: self.pane(spot, look),
+            pane: self.pane(spot, top, look),
             foot,
         }
     }
@@ -378,17 +378,20 @@ impl Reading {
             .collect()
     }
 
-    /// The pane of a desk at `spot`: its title, what is at its far end, where it is,
-    /// what it holds, and whether the row a pointer stands on stays in sight.
-    fn pane(&self, spot: &Spot, look: &Look) -> Pane {
+    /// The pane of a desk at `spot`, from the line `top`: its title, what is at its far
+    /// end, where it is, what it holds, and whether the row a pointer stands on stays in
+    /// sight.
+    fn pane(&self, spot: &Spot, top: usize, look: &Look) -> Pane {
         let (title, edge, place) = self.heading(spot, look.glyphs.sep());
         Pane {
             title,
             edge,
             place,
             doc: self.pane_doc(spot, look),
-            top: spot.top,
-            follows_pointer: spot.view == View::Choices,
+            sight: Sight {
+                top,
+                follows_pointer: spot.view == View::Choices,
+            },
         }
     }
 

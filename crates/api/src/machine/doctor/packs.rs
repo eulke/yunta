@@ -68,7 +68,7 @@ fn check_gap(
     for program in gap
         .required_programs
         .iter()
-        .filter(|program| !env.finds(program))
+        .filter(|program| env.path.find(program).is_none())
     {
         findings.push(lacks(PackLack::Program {
             program: program.to_string(),

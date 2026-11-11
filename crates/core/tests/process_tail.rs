@@ -5,6 +5,7 @@ use std::time::Duration;
 use yunta_core::port::session::SessionEnv;
 use yunta_core::port::AgentEvent;
 use yunta_core::process::subprocess::{self, Launch, LineParser};
+use yunta_core::process::SearchPath;
 use yunta_core::AdapterId;
 
 #[tokio::test]
@@ -25,6 +26,7 @@ async fn a_launch_value_that_is_not_declared_stays_out_of_the_stderr_tail() {
     let mut session = subprocess::open(Launch {
         adapter: &ADAPTER,
         binary: Path::new("/bin/sh"),
+        search_path: &SearchPath::default(),
         args: vec!["-c".into(), "echo 'retry in 10 seconds' >&2".into()],
         cwd: dir.path(),
         env: &env,

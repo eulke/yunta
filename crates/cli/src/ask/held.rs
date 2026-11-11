@@ -90,8 +90,8 @@ fn redraw<P: Answerable>(
     let (columns, rows) = console.size();
     let look = console.look();
     let placed = Terminal::on(look).held(&prompt.block(&look), columns, rows);
-    if let Some(pane) = placed.pane {
-        prompt.laid(pane);
+    if let Some(laid) = placed.laid {
+        prompt.laid(laid);
     }
     place.draw(console, &placed, &look)
 }

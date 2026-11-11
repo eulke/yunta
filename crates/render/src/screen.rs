@@ -1,145 +1,74 @@
 //! What a screen of the application says around the pages it shows: the trail every
 //! screen starts at, each stage's keys, and what a confirmation asks before an act.
 //! The pages themselves are `page`'s.
+//!
+//! Each family of stages says its own in a module of its own: `field`, `catalog` (the
+//! workflows and the packs), `run` (a run and what it leaves and costs), `setup`,
+//! `start` (a run started, and the first one) and `machine` (doctor, upkeep and the
+//! shapes of the documents Yunta reads). What every
+//! screen shares stays here: the trail's start, a confirmation's, the palette's,
+//! help's, leaving, and the keys that scroll a page.
 
-use surco::components::Legend;
-use surco::line::{Line, Tone};
-use yunta_core::{InputName, InputSpec, NodeId};
+mod catalog;
+mod field;
+mod machine;
+mod run;
+mod setup;
+mod start;
+
+pub use catalog::{
+    auditing, cases_legend, catalog_legend, checking, executing, fetched_legend, fetching,
+    installing_pack, naming_legend, new_pack_asks, new_workflow_asks, over_the_workflows_legend,
+    pack_naming_legend, pack_page_legend, pack_reference_asks, pack_source_asks, packs_legend,
+    removing_pack, scaffolding, writing_workflow, CASES, CASES_STOPPED, INSTALL, NEW, PACKS,
+    PACK_LET_GO, READING_THE_PACKS, READING_THE_WORKFLOWS, RUNNING_THE_CASES, WORKFLOWS,
+};
+pub use field::{cancelling, closing, field_legend, READING_THE_RUNS};
+pub use machine::{
+    doctor_legend, shape_legend, upkeep_legend, DoctorChecks, CHECKING_THE_MACHINE, COLLECTING,
+    COLLECTING_ASKS, COLLECTION_STOPPED, DOCTOR, FINDING_WHAT_IT_RECLAIMS, OPENING_SESSIONS,
+    OPENING_SESSIONS_ASKS, SCHEMA, SESSIONS_STOPPED, UPKEEP, WHICH_DOCUMENT,
+};
+pub use run::{
+    opened_legend, over_the_run_legend, run_legend, stats_legend, DECISION, GRAPH, HISTORY, PAGE,
+    READING_THE_GRAPH, READING_THE_HISTORY, READING_THE_STATS, RECEIPT, STATS, VERIFICATION,
+    VERIFYING, WRITING_THE_PAGE, WRITING_THE_RECEIPT,
+};
+pub use setup::{
+    setup_legend, written_legend, FINDING_WHAT_IT_RUNS, SETUP, SETUP_LET_GO, WRITING_THE_SETUP,
+};
+pub use start::{
+    asked_for, first_run_asks, first_run_legend, input_asks, AS_THE_RUNNERS_SAY, START, STARTING,
+    WHICH_ADAPTER, WHICH_MODE, WHICH_WORKFLOW,
+};
+
+use surco::components::{Cell, Column, Holds, Legend, Row, Table};
+use surco::doc::Doc;
+use surco::glyphs::Glyphs;
 
 use crate::prompt::ESC;
 
 /// Where every screen's trail starts: the application itself.
 pub const YUNTA: &str = "yunta";
 
-/// What the application says while it reads the runs of the repository it opened in.
-pub const READING_THE_RUNS: &str = "reading this repository's runs";
-
-/// What the application says of a repository Yunta was never set up in.
-pub const NEVER_SET_UP_HERE: &str = "Yunta was never set up in this repository";
-
-/// Where starting a run stands on the trail.
-pub const START: &str = "start";
-
-/// What starting a run asks first: the workflow that builds what was asked for.
-pub const WHICH_WORKFLOW: &str = "Which workflow builds it?";
-
-/// What starting a run asks of a workflow that declares modes.
-pub const WHICH_MODE: &str = "Which mode does it start in?";
-
-/// What starting a run asks last: the adapter its sessions are pinned to.
-pub const WHICH_ADAPTER: &str = "Which adapter runs its sessions?";
-
-/// The adapter a run is started on when none is pinned: the one its runners name.
-pub const AS_THE_RUNNERS_SAY: &str = "as the runners in config.yaml say";
-
-/// What stands while a run is admitted, created and started.
-pub const STARTING: &str = "admitting and starting the run";
-
-/// What the first run asks: what the person wants built.
-pub fn first_run_asks() -> Line {
-    Line::new().push(Tone::Strong, "What do you want to build?")
+/// What a piece of work that broke inside Yunta comes to, with what it said as it
+/// broke, where it said anything.
+pub fn broke_inside(said: &str) -> String {
+    match said.is_empty() {
+        true => "this broke inside yunta".to_string(),
+        false => format!("this broke inside yunta: {said}"),
+    }
 }
-
-/// The keys of the first run.
-pub fn first_run_legend() -> Legend {
-    Legend::new()
-        .key("enter", "picks the workflow for it")
-        .key(ESC, "leaves yunta")
-}
-
-/// What a run being started was asked for, over the questions that start it.
-pub fn asked_for(request: &str) -> String {
-    format!("asked: {request}")
-}
-
-/// What starting a run asks of input `name`: what it is, whether it is required, and
-/// what the workflow says of it.
-pub fn input_asks(name: &InputName, spec: &InputSpec) -> Line {
-    let optionality = match spec.is_required() {
-        true => "required",
-        false => "optional",
-    };
-    let description = spec
-        .description()
-        .map(|description| format!(": {description}"))
-        .unwrap_or_default();
-    Line::new()
-        .push(Tone::Strong, name.to_string())
-        .plain(format!(
-            " ({}, {optionality}){description}",
-            crate::inputs::type_label(spec)
-        ))
-}
-
-/// Where a decision stands on a run's trail.
-pub const DECISION: &str = "decision";
 
 /// What a confirmation is titled, over the screen it stands on.
 pub const CONFIRM: &str = "confirm";
 
+/// What the command a confirmation names does: what is confirmed, at a shell.
+pub const DOES_THE_SAME: &str = "does the same at a shell";
+
 /// The keys of a screen with nothing to do but leave.
 pub fn leaving_legend() -> Legend {
     Legend::new().key("q", "leaves yunta")
-}
-
-/// The keys of the field of runs: moving through it, opening the run pointed at or the
-/// one waiting on the person, picking runs, the acts on the run pointed at or the ones
-/// picked, how far it reads (`machine` when every run on the machine is listed) and how
-/// deep (`closed` when the closed runs are), and leaving.
-pub fn field_legend(machine: bool, closed: bool) -> Legend {
-    let reach = match machine {
-        true => "this repository's runs",
-        false => "every run on this machine",
-    };
-    let depth = match closed {
-        true => "hides the closed",
-        false => "the closed too",
-    };
-    Legend::new()
-        .key("j k", "move")
-        .key("enter", "opens the run")
-        .key("n", "the run waiting on you")
-        .key("space", "picks")
-        .key("r", "resumes")
-        .key("c", "cancels")
-        .key("x", "closes")
-        .key("a", reach)
-        .key("d", depth)
-        .key("q", "leaves yunta")
-}
-
-/// The keys of a run: moving along its nodes and showing the page of the one `pointed`
-/// at, each act the run offers (`acts`, the key each is bound to and what it does, in
-/// the words `command` says it with), following it or not (`follows` when news of it
-/// comes), going back to the run's page from a node's (`picked`) or to the runs, and
-/// leaving.
-pub fn run_legend(
-    pointed: Option<&NodeId>,
-    acts: &[(char, &str)],
-    follows: bool,
-    picked: bool,
-) -> Legend {
-    let mut legend = Legend::new();
-    if let Some(node) = pointed {
-        legend = legend
-            .key("j k", "move along its nodes")
-            .key("enter", format!("the page of {node}"));
-    }
-    for (key, does) in acts {
-        legend = legend.key(key.to_string(), *does);
-    }
-    let following = match follows {
-        true => "stops following",
-        false => "follows",
-    };
-    let back = match picked {
-        true => "back to the run",
-        false => "back to the runs",
-    };
-    legend
-        .key("f", following)
-        .key(ESC, back)
-        .key("q", "leaves yunta")
 }
 
 /// The keys of a confirmation.
@@ -147,15 +76,74 @@ pub fn confirmation_legend() -> Legend {
     Legend::new().key("enter", "confirms").key(ESC, "goes back")
 }
 
-/// What closing `runs`, by the handles a person reads, asks before it does.
-pub fn closing(runs: &[&str]) -> String {
-    format!(
-        "close {} for good? A closed run is not resumed.",
-        surco::text::listed(runs.iter().copied())
+/// What the palette is titled, over the screen it stands on: every act from where the
+/// person stands, and every act always there.
+pub const PALETTE: &str = "what you can do here";
+
+/// `legend` with the keys every stage answers to after its own: the palette, and help.
+pub fn over_every_stage(legend: Legend) -> Legend {
+    legend
+        .key("/", "what you can do here")
+        .key("?", "the keys here")
+}
+
+/// What help is titled, over the screen it stands on.
+pub const HELP: &str = "the keys here";
+
+/// Every key `legend` names, each with what it does, then the keys every stage answers
+/// to, Ctrl-C leaving from anywhere: a row each, the keys spelled in `glyphs`.
+pub fn help(legend: &Legend, glyphs: Glyphs) -> Doc {
+    let every = over_every_stage(Legend::new()).key("ctrl-c", "leaves yunta");
+    let rows = legend
+        .0
+        .iter()
+        .chain(&every.0)
+        .map(|binding| Row {
+            mark: None,
+            cells: vec![
+                Cell::plain(binding.keys.spelled(glyphs)),
+                Cell::plain(binding.does.clone()),
+            ],
+        })
+        .collect();
+    let columns = vec![
+        Column {
+            title: "key",
+            holds: Holds::Id,
+        },
+        Column {
+            title: "what it does",
+            holds: Holds::Prose,
+        },
+    ];
+    Doc::new().with(Table { columns, rows })
+}
+
+/// The keys of help: scrolling it, and closing it.
+pub fn help_legend() -> Legend {
+    Legend::new().arrows("scroll").key(ESC, "closes it")
+}
+
+/// `legend` led by the keys that scroll a page taller than what shows of it: a line
+/// with the arrows, a page with PageUp and PageDown.
+pub fn scrolling(legend: Legend) -> Legend {
+    led_by(
+        Legend::new()
+            .arrows("scroll")
+            .key("pgup pgdn", "by the page"),
+        legend,
     )
 }
 
-/// What cancelling `run`, by its handle, asks before it does.
-pub fn cancelling(run: &str) -> String {
-    format!("cancel {run}? It stops, with everything under it.")
+/// `legend` led by the keys that scroll a run's page beside its nodes, the arrows
+/// moving along the nodes: a page with PageUp and PageDown.
+pub fn scrolling_beside(legend: Legend) -> Legend {
+    led_by(Legend::new().key("pgup pgdn", "scroll its page"), legend)
+}
+
+/// `rest` after the keys of `first`.
+fn led_by(first: Legend, rest: Legend) -> Legend {
+    let Legend(mut keys) = first;
+    keys.extend(rest.0);
+    Legend(keys)
 }

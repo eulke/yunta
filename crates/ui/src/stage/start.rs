@@ -6,13 +6,17 @@
 //! detached, what admission says standing on the screen, and then followed in its
 //! stage, which takes this one's place.
 //!
+//! Opened from the catalog, the workflow is picked already and no request was typed:
+//! the input the workflow reads its request from is asked as every other is.
+//!
 //! A refusal is said where the person stands, and the questions are asked again, to
-//! change what was refused. Escape goes back to the first run.
+//! change what was refused. Escape goes back to where the start was opened from: the
+//! first run, or the catalog.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use surco::components::{Note, Prose, Region, Screen};
+use surco::components::{Note, Prose, Region, Screen, Sight};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::{Remark, RunRequest};
@@ -27,8 +31,9 @@ use crate::{Operation, Outcome};
 /// A run being started.
 #[derive(Debug, Clone)]
 pub struct StartStage {
-    /// What the person asked for, typed at the first run.
-    request: String,
+    /// What the person asked for, typed at the first run; none where the start was
+    /// opened on a workflow picked off the catalog.
+    request: Option<String>,
     /// The workflows the repository can run.
     catalog: Box<Catalog>,
     /// What is chosen so far.
@@ -73,7 +78,7 @@ impl StartStage {
     pub(crate) fn asked(request: String, catalog: Box<Catalog>) -> Self {
         let asking = Asking::Workflow(workflows(&catalog));
         StartStage {
-            request,
+            request: Some(request),
             catalog,
             chosen: Chosen::default(),
             asking,
@@ -82,10 +87,30 @@ impl StartStage {
         }
     }
 
+    /// A run of the workflow `catalog` offers as `name`, picked already, with its
+    /// first question in front; none where the workflow does not read.
+    pub(crate) fn picked(catalog: Box<Catalog>, name: &str) -> Option<Self> {
+        readable(&catalog, name)?;
+        let asking = Asking::Workflow(workflows(&catalog));
+        let mut start = StartStage {
+            request: None,
+            catalog,
+            chosen: Chosen::default(),
+            asking,
+            remarked: Vec::new(),
+            said: None,
+        };
+        start.picked_workflow(name.to_string());
+        Some(start)
+    }
+
     /// The questions as a screen: what was asked for, the question in front, what
     /// admission said, and what refused it.
     pub(crate) fn screen(&self, look: &Look) -> Screen {
-        let mut doc = Doc::new().with(Prose(yunta_render::screen::asked_for(&self.request)));
+        let mut doc = Doc::new();
+        if let Some(request) = &self.request {
+            doc = doc.with(Prose(yunta_render::screen::asked_for(request)));
+        }
         doc = match &self.asking {
             Asking::Workflow(picker) => doc
                 .with(Prose(yunta_render::screen::WHICH_WORKFLOW.to_string()))
@@ -105,7 +130,8 @@ impl StartStage {
         if let Some(said) = &self.said {
             doc = doc.with(Note(said.clone()));
         }
-        let mut screen = Screen::new(Region { title: None, doc });
+        let mut screen =
+            Screen::new(Region::new(doc).in_sight(Sight::at_the_end_with_the_pointer()));
         screen.trail = vec![
             yunta_render::screen::YUNTA.to_string(),
             yunta_render::screen::START.to_string(),
@@ -168,22 +194,36 @@ impl StartStage {
     /// are asked again.
     pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
         match outcome {
-            Outcome::Started { run } => vec![Want::Replace(Stage::Run(RunStage::of(run)))],
+            // A run another start asked for, left before it started, is not this one's.
+            Outcome::Started { run } if matches!(self.asking, Asking::Starting) => {
+                vec![Want::Replace(Stage::Run(RunStage::of(run)))]
+            }
+            Outcome::Started { .. } => Vec::new(),
             Outcome::Refused(refused) => self.asked_again(refused.to_string()),
             Outcome::Failed(said) => self.asked_again(said),
             Outcome::Repository(_)
             | Outcome::Catalog(_)
+            | Outcome::Workflow(_)
+            | Outcome::Pack(_)
+            | Outcome::Evidence(_)
             | Outcome::Field { .. }
             | Outcome::Followed
             | Outcome::Page(_)
             | Outcome::NodePage(_)
             | Outcome::Questions(_)
             | Outcome::Decision(_)
+            | Outcome::Stats(_)
+            | Outcome::History(_)
+            | Outcome::Graph(_)
+            | Outcome::Doctor(_)
+            | Outcome::Collected(_)
             | Outcome::Decided { .. }
             | Outcome::Answered { .. }
             | Outcome::Resumed { .. }
             | Outcome::Cancelled { .. }
             | Outcome::Closed { .. }
+            | Outcome::Detected { .. }
+            | Outcome::Initialized(_)
             | Outcome::Stopped => Vec::new(),
         }
     }
@@ -196,12 +236,12 @@ impl StartStage {
         };
         let mut chosen = Chosen::default();
         for (input, spec) in &workflow.inputs {
-            match spec.is_request() {
-                true if !self.request.is_empty() => {
-                    chosen.inputs.insert(input.clone(), self.request.clone());
+            match (spec.is_request(), &self.request) {
+                (true, Some(request)) if !request.is_empty() => {
+                    chosen.inputs.insert(input.clone(), request.clone());
                 }
-                true => {}
-                false => chosen.pending.push(input.clone()),
+                (true, Some(_)) => {}
+                (true, None) | (false, _) => chosen.pending.push(input.clone()),
             }
         }
         chosen.workflow = Some((name, Box::new(workflow)));
@@ -260,7 +300,7 @@ impl StartStage {
 }
 
 /// What a question's `press` asks of the stage where it did not answer: going back to
-/// the first run for one left, and leaving for Ctrl-C.
+/// where the start was opened from for one left, and leaving for Ctrl-C.
 fn left<T>(press: Press<T>) -> Vec<Want> {
     match press {
         Press::Decline => vec![Want::Back],

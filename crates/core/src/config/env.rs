@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use crate::process::SearchPath;
 use crate::Secret;
 
 /// Rewrites `path` in place when it starts with `~`: `~` alone becomes
@@ -72,10 +73,10 @@ pub struct Env {
     pub yunta_home: Option<PathBuf>,
     /// `$YUNTA_ORG_CONFIG` — the org config path override.
     pub org_config: Option<PathBuf>,
-    /// `$PATH`, split into its directories in order — where every
-    /// command the run spawns is looked up, unless `subprocess_vars`
-    /// sets a `PATH` of its own.
-    pub path: Vec<PathBuf>,
+    /// `$PATH`: where every program started by its name is found, an
+    /// adapter's CLI among them, unless `subprocess_vars` sets a `PATH` of
+    /// its own for what a run's nodes start.
+    pub path: SearchPath,
     /// Where a session's hooks reach the engine
     /// (`crate::rail::URL_VAR`, `crate::rail::TOKEN_VAR`). Set only in
     /// the environment an adapter built for its child; every other
@@ -102,22 +103,6 @@ pub struct Env {
 }
 
 impl Env {
-    /// Whether `command` names a file in a directory of this environment's
-    /// `PATH`: the one a run started in it inherits.
-    pub fn finds(&self, command: &str) -> bool {
-        self.find(command).is_some()
-    }
-
-    /// Where `command` is in this environment's `PATH`: the first of its
-    /// directories that holds a file by that name, as a shell started in it
-    /// would run.
-    pub fn find(&self, command: &str) -> Option<std::path::PathBuf> {
-        self.path
-            .iter()
-            .map(|dir| dir.join(command))
-            .find(|candidate| candidate.is_file())
-    }
-
     /// The process environment, read once here, at the shell's edge, so
     /// nothing below reads it live: what core and the engine resolve
     /// against, the value of every name in `service` that is set, and the
@@ -134,7 +119,7 @@ impl Env {
             yunta_home: var("YUNTA_HOME").map(PathBuf::from),
             org_config: var("YUNTA_ORG_CONFIG").map(PathBuf::from),
             path: var("PATH")
-                .map(|path| std::env::split_paths(&path).collect())
+                .map(|path| SearchPath::of_var(&path))
                 .unwrap_or_default(),
             rail: var(crate::rail::URL_VAR)
                 .zip(var(crate::rail::TOKEN_VAR))
@@ -169,14 +154,11 @@ impl Env {
     pub fn handed_on(&self) -> Vec<(String, Option<OsString>)> {
         let path = |held: &Option<PathBuf>| held.as_ref().map(|path| path.into());
         let text = |held: &Option<String>| held.as_ref().map(OsString::from);
-        let search = (!self.path.is_empty())
-            .then(|| std::env::join_paths(&self.path).ok())
-            .flatten();
         let named = [
             ("HOME", path(&self.home)),
             ("YUNTA_HOME", path(&self.yunta_home)),
             ("YUNTA_ORG_CONFIG", path(&self.org_config)),
-            ("PATH", search),
+            ("PATH", self.path.joined()),
             ("USER", text(&self.user)),
             ("RUST_LOG", text(&self.rust_log)),
         ];

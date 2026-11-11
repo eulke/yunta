@@ -54,6 +54,21 @@ fn a_project_name_reads_back_whole() {
     }
 }
 
+/// A base branch reads back whole, as a name does: one a YAML comment or a mapping
+/// would cut is quoted.
+#[test]
+fn a_base_branch_reads_back_whole() {
+    for branch in ["#dev", "a: b", "yes", "042", "release/2.0"] {
+        let setup = ProjectSetup {
+            base_branch: branch.to_string(),
+            ..setup("web-app", RunnerDeclaration::Proposed)
+        };
+        let yaml = config_yaml(&setup, &[], &Detected::default(), &implementer());
+        let project = ConfigLayer::read(&yaml).unwrap().project.unwrap();
+        assert_eq!(project.base_branch.as_deref(), Some(branch), "{branch}");
+    }
+}
+
 /// A name nothing in YAML would cut is written as it is.
 #[test]
 fn a_plain_name_is_written_as_it_is() {

@@ -81,7 +81,7 @@ impl ToolsHost {
                 ),
                 process_registry: None,
                 subprocess_vars: Vec::new(),
-                search_path: Vec::new(),
+                search_path: yunta_core::process::SearchPath::default(),
                 environment: Some(tools_environment()),
                 worktree,
                 suite: None,

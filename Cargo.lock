@@ -3338,6 +3338,7 @@ dependencies = [
  "yunta-core",
  "yunta-render",
  "yunta-replay",
+ "yunta-storage",
  "yunta-surco",
  "yunta-testkit",
  "yunta-testkit-core",

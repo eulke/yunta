@@ -2,7 +2,10 @@
 //! that links to it, and each layer in the order that crosses the fewest
 //! links it can find. A link that spans layers passes through each one
 //! between, so it never runs through a box; a link that closes a cycle
-//! goes back along the side, so it never pushes a box below itself.
+//! goes back along the side, so it never pushes a box below itself. A link
+//! that leaves or reaches a group from a node inside it weighs where along
+//! the group's side that node stands, so what it links with stands on that
+//! side of what the group itself links with.
 
 use crate::diagram::Flowchart;
 
@@ -25,7 +28,7 @@ pub(crate) struct Route {
 
 /// The boxes of a chart by layer, the links that go forward, and those
 /// that close a cycle.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Layered {
     /// Each layer's elements, in the order they are drawn.
     pub layers: Vec<Vec<Element>>,
@@ -44,8 +47,24 @@ impl Layered {
     }
 }
 
-/// `chart` in layers.
-pub(crate) fn layered(chart: &Flowchart) -> Layered {
+/// Where along the sides of the boxes it joins each link leaves and reaches,
+/// each from -½ to ½ of its box's side: 0, the middle, for a box's own link,
+/// and where the node inside a group stands for a link that leaves or reaches
+/// one.
+pub(crate) type Sides = Vec<(f64, f64)>;
+
+/// One step of a forward route, from one element to the next in the layer
+/// after, with where along its side it leaves the first and reaches the second.
+struct Step {
+    from: Element,
+    to: Element,
+    leaves: f64,
+    reaches: f64,
+}
+
+/// `chart` in layers, each link weighed where `sides` says it leaves and
+/// reaches its boxes.
+pub(crate) fn layered(chart: &Flowchart, sides: &Sides) -> Layered {
     let closing = backward(chart);
     let forward: Vec<usize> = (0..chart.links.len()).filter(|at| !closing[*at]).collect();
     let depth = depths(chart, &forward);
@@ -67,10 +86,7 @@ pub(crate) fn layered(chart: &Flowchart) -> Layered {
             Route { link: *link, path }
         })
         .collect();
-    let steps: Vec<(Element, Element)> = routes
-        .iter()
-        .flat_map(|route| route.path.windows(2).map(|pair| (pair[0], pair[1])))
-        .collect();
+    let steps = steps(&routes, sides);
     // One sweep down and one up per layer is as settled as an order by
     // averages gets.
     for _ in 0..count {
@@ -86,6 +102,28 @@ pub(crate) fn layered(chart: &Flowchart) -> Layered {
         routes,
         back: (0..chart.links.len()).filter(|at| closing[*at]).collect(),
     }
+}
+
+/// Each step of `routes`, its first leaving and its last reaching where `sides`
+/// says its link leaves and reaches its boxes, every other one in the middle.
+fn steps(routes: &[Route], sides: &Sides) -> Vec<Step> {
+    routes
+        .iter()
+        .flat_map(|route| {
+            let (leaves, reaches) = sides.get(route.link).copied().unwrap_or_default();
+            let last = route.path.len() - 2;
+            route
+                .path
+                .windows(2)
+                .enumerate()
+                .map(move |(at, pair)| Step {
+                    from: pair[0],
+                    to: pair[1],
+                    leaves: if at == 0 { leaves } else { 0.0 },
+                    reaches: if at == last { reaches } else { 0.0 },
+                })
+        })
+        .collect()
 }
 
 /// Each box's layer: one past the deepest box a forward link reaches it
@@ -154,14 +192,9 @@ fn backward(chart: &Flowchart) -> Vec<bool> {
 
 /// `layers[layer]` ordered by the average place of what it links with in
 /// `layers[by]`: the layer after it when `after`, the one before
-/// otherwise. An element linked with nothing there keeps its place.
-fn reorder(
-    layers: &mut [Vec<Element>],
-    layer: usize,
-    by: usize,
-    steps: &[(Element, Element)],
-    after: bool,
-) {
+/// otherwise, each place nudged to where along its side the link joins it.
+/// An element linked with nothing there keeps its place.
+fn reorder(layers: &mut [Vec<Element>], layer: usize, by: usize, steps: &[Step], after: bool) {
     let place = |element: Element| {
         layers[by]
             .iter()
@@ -171,17 +204,21 @@ fn reorder(
         .iter()
         .enumerate()
         .map(|(at, element)| {
-            let linked: Vec<usize> = steps
+            let linked: Vec<f64> = steps
                 .iter()
-                .filter_map(|(from, to)| match after {
-                    true if from == element => place(*to),
-                    false if to == element => place(*from),
+                .filter_map(|step| match after {
+                    true if step.from == *element => {
+                        place(step.to).map(|at| at as f64 + step.reaches)
+                    }
+                    false if step.to == *element => {
+                        place(step.from).map(|at| at as f64 + step.leaves)
+                    }
                     _ => None,
                 })
                 .collect();
             let weight = match linked.is_empty() {
                 true => at as f64,
-                false => linked.iter().sum::<usize>() as f64 / linked.len() as f64,
+                false => linked.iter().sum::<f64>() / linked.len() as f64,
             };
             (*element, weight)
         })

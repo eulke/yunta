@@ -48,7 +48,6 @@ fn rail(reading: &Reading, at: usize) -> Vec<RailGroup> {
     reading.rail(&Spot {
         at,
         view: View::Stop,
-        top: 0,
         choice: 0,
     })
 }
@@ -83,7 +82,6 @@ fn the_change_is_what_the_author_wrote() {
     let spot = Spot {
         at: 0,
         view: View::Stop,
-        top: 0,
         choice: 0,
     };
     let rows = read(&reading, &spot);
@@ -108,7 +106,6 @@ fn a_card_has_no_tests_and_its_proof_has_them_whole() {
     let mut spot = Spot {
         at: 1,
         view: View::Stop,
-        top: 0,
         choice: 0,
     };
     let card = read(&reading, &spot);
@@ -155,7 +152,6 @@ fn what_was_decided_shows_one_decision_open() {
     let spot = Spot {
         at: 0,
         view: View::Choices,
-        top: 0,
         choice: 0,
     };
     let rows = read(&reading, &spot);
@@ -263,15 +259,11 @@ fn the_desk_matches_its_goldens() {
         ),
     ] {
         let look = look(118);
-        let spot = Spot {
-            at,
-            view,
-            top: 0,
-            choice,
-        };
+        let spot = Spot { at, view, choice };
         let laid = reading
             .desk(
                 &spot,
+                0,
                 &["plan", "EKPBGE", "fragua (standard)"].map(str::to_string),
                 Some("needs you  approve-plan".to_string()),
                 foot(keys),

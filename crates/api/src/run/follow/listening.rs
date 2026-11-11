@@ -2,10 +2,10 @@
 //! followed.
 //!
 //! The run's registry names its socket while an engine serves one, and a following
-//! reads the registry once a second. Each reading says what to listen on: a socket the
-//! registry names and nobody hears yet, or nothing when it names none. A refused
-//! connection, such as a socket a dead engine left, is no words, and the next reading
-//! tries again. What is heard is handed to the following, which hands it back as news
+//! reads the registry once a second. Each look at the run says what to listen on: the
+//! socket the registry last named, while nobody hears it, or nothing when it names none.
+//! A refused connection, such as a socket a dead engine left, is no words, and the next
+//! look tries again: a connection refused costs nothing worth spacing out. What is heard is handed to the following, which hands it back as news
 //! beside what the log says.
 
 use std::path::{Path, PathBuf};

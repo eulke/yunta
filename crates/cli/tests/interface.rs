@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use surco::surface::Markdown;
 use tokio::sync::mpsc;
 use yunta_api::Workspace;
+use yunta_core::process::SearchPath;
 use yunta_core::{Env, ProcessSecrets, SystemIdSource};
 use yunta_testkit_core::FixedClock;
 use yunta_ui::prompt::Stroke;
@@ -33,7 +34,7 @@ fn workspace(dir: &Path, home: &Path) -> Workspace {
         home: Some(home.to_path_buf()),
         yunta_home: Some(home.to_path_buf()),
         org_config: Some(home.join("org.yaml")),
-        path: vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+        path: SearchPath::new(vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]),
         user: Some("yunta-test".to_string()),
         ..Env::default()
     };

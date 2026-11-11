@@ -33,7 +33,7 @@ impl TypedAnswer {
                     .plain(after),
             ],
             cursor: Some(cursor),
-            pane: None,
+            laid: None,
         }
     }
 }
@@ -58,7 +58,7 @@ impl ChoiceList {
         Placed {
             lines,
             cursor: None,
-            pane: None,
+            laid: None,
         }
     }
 }

@@ -2,7 +2,7 @@
 //! can stand on and what the plan says of itself as a whole, what is being read, and what
 //! is being asked. Data: a surface lays it out for a size.
 
-use super::{ChoiceRow, Legend};
+use super::{ChoiceRow, Legend, Sight};
 use crate::diagram::Diagram;
 use crate::doc::Doc;
 
@@ -59,10 +59,8 @@ pub struct Pane {
     pub place: Option<String>,
     /// All of it, as a document: each surface lays it out at the pane's measure.
     pub doc: Doc,
-    /// The first of its lines, as a surface lays them out, a person asked to see.
-    pub top: usize,
-    /// Whether the line a pointer stands on has to be in sight, whatever `top` says.
-    pub follows_pointer: bool,
+    /// What of it a person asked to see.
+    pub sight: Sight,
 }
 
 /// What is being asked, under what is being read.
@@ -71,17 +69,6 @@ pub struct DeskFoot {
     pub row: FootRow,
     /// The keys it answers to, each with what it does.
     pub legend: Legend,
-}
-
-/// What a surface laid out of a desk's pane: the first of its lines it shows, how many
-/// lines a page of it holds, and the last first line a scroll can reach. What the person
-/// reading scrolls by, handed back to whoever holds the desk rather than kept by the
-/// drawing.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PaneLaid {
-    pub top: usize,
-    pub page: usize,
-    pub most: usize,
 }
 
 /// How the question stands.

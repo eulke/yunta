@@ -226,6 +226,7 @@ impl Page for TestedCase<'_> {
 
 /// The verdict under the rows it counts, as a run's closing comes under
 /// what it showed while it ran: how many cases ran, and how many failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tested {
     pub cases: usize,
     pub failures: usize,

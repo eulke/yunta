@@ -39,6 +39,7 @@ impl Page for NewPack<'_> {
 /// What the check `pack new` runs on the pack it wrote found: the problems
 /// that stop its example workflow, or, when none does, what the pack's own
 /// cases say.
+#[derive(Debug)]
 pub enum NewPackCheck {
     /// The example workflow, at `workflow` in the pack, does not check:
     /// each problem, as `check` says it.

@@ -1249,7 +1249,7 @@ Its groups, each green before the next: the values; watching; deciding; starting
 
 ### Checkpoint C: watching, deciding, starting
 - [x] The walk covers the signpost, the field, a run, a decision and a start; each works end to end against its sandbox.
-- [ ] The user reviews; the phase commits.
+- [x] The user reviews; the phase commits.
 
 ## Phase 4: every other stage, the dialogs, and the proof
 
@@ -1267,11 +1267,20 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 - `crates/ui/tests/setup.rs`: the answers become the `ProjectSetup` `init -i` would write;
 - render's goldens of `page::Setup`.
 
+**Found in its turn:**
+- **What was detected, apart from where it is written.** The API's `ProjectDraft` is what detecting found, a value any holder keeps (the repository, name, base branch, what it runs, the adapters probed, the runners proposed); `DetectedProject` binds it to its repository and writes it. `ProjectDraft::answered` holds `init -i`'s rules (an empty line keeps what was detected; a runner with no model stays proposed), so `yunta init -i` and the application answer through it; `writes()` says what setting up writes, from the same constants the write uses.
+- **What the performer holds.** `performer/held.rs` keeps the stops and the projects detected under one lock: a project is kept only while its ticket is held, so a detection let go as it ends leaves nothing, and `let_go` drops both. `Operation::WriteSetup { held, setup }` names the ticket the project was detected under; one let go fails with render's `SETUP_LET_GO`. `Stage::held` says what a stage holds, and the state lets it go on back, replace and leaving (`Request::LetGo` before `Request::Leave`).
+- **The questions, as `init -i` asks them.** The name and the base branch on `LineAsked`s that say what Enter keeps; Escape keeps what was detected, as `init -i`'s console. Where an adapter answers, each proposed runner's adapter on a `Picker` whose Escape takes the first, then its model; a model name refused is said and asked again. A refused or failed write finds the repository again and asks again, since writing takes the project.
+- **Where the application opens.** A repository never set up opens on its setup (the opening note that said so is gone); what was written is `page::Initialized`, and Enter goes on to the first run until packs join (Task 48).
+- **Sizes.** `init.rs` passed 500 lines: the config's YAML and its tests are `init/config_yaml.rs`. `DecisionStage::answered` passed 50 with the two outcomes: the round read is a function of its own, and the performer's decided and cancelled acts are functions as their siblings are.
+- **An adapter's CLI is found on the environment's `PATH`, never the process's.** Probing for setup found the machine's CLIs whatever the workspace said. Core's `process::SearchPath` is now where a program started by its name is found (a path names itself; a bare name is the first executable file by it), and `Env.path` is one. An adapter's probe takes the search path and a session's request carries the run's, so the probe asks the CLI the session runs: `init`, `doctor`, `check`'s suggestions and a run's admission probe on the workspace's. `git`, the shell a node runs in and a pack's required programs find theirs through it too, and `Env::find` is gone. `core/tests/cli_search_path.rs` fails with the probe searching the process's `PATH`.
+- **The walk** records a setup written in a repository of its own (`to_set_up`), with a stand-in `claude` on its `PATH`, and must reach the setup, a runner's adapter and model, and what it wrote: 2,528 states in about 3.6 s, the same on any machine.
+
 **Acceptance criteria:**
-- [ ] A setup left before writing writes nothing, and its detected project is dropped.
+- [x] A setup left before writing writes nothing, and its detected project is dropped.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test setup`, `cargo test -p yunta-render --features golden`
+- [x] Tests pass: `cargo test -p yunta-ui --test setup`, `cargo test -p yunta-render` (render's goldens run in its plain suite: it has no `golden` feature)
 
 **Dependencies:** Checkpoint C
 
@@ -1280,7 +1289,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Estimated scope:** M
 
 ### Group check: setup
-- [ ] The suite's groups green; the walk covers setup.
+- [x] The suite's groups green; the walk covers setup.
 
 ### Task 45: the catalog
 
@@ -1294,11 +1303,20 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Fails first:** `crates/ui/tests/catalog.rs`: a workflow that breaks a rule shows its check with the rule named.
 
+**Found in its turn:**
+- **`check` is the API's.** `yunta check`'s whole flow (the workflow read in one pass, the project's layers or one `--config` file, the verdict, what its past runs say) was the CLI command's own. It is `Project::check`, answering a `WorkflowCheck` (the `Checked` page, whether it passes, the history's findings); the command prints it unchanged (its 17 tests) and `Operation::Check` shows it. `Checked` and `Diagnosis` are `Debug` and `Clone`, as an outcome is.
+- **A pointer over sections.** Surco's `Lead::Pointer { on }`: a terminal keeps its place before every section of the list so the titles stand in line, as a list of runs keeps its pointer column; Markdown and HTML draw it before the one pointed at. In Surco's catalog of components, blessed.
+- **The catalog pointed at.** Render's `PointedCatalog` draws `Catalog`'s sections led by the pointer's place; `Catalog`, which `yunta list` and `list_workflows` print, carries none. Goldens in every environment, an unreadable workflow among them.
+- **Where it opens.** From the field, with `w` (its legend says so); the palette (Task 55) offers it too. `j`/`k` move around its ends, `c` checks the workflow pointed at (Escape lets the check go), Enter opens the start with it picked. A workflow that does not read starts nothing; its section says why.
+- **A start with no request typed.** `StartStage::picked` opens on a workflow picked off the catalog: the input it reads its request from is asked as every other is, and Escape goes back to the catalog.
+- **Its graph and its history** join with their stages (Task 51).
+- **The walk** records a check of `greet` and must reach the catalog and a check: 3,834 states in about 5 s.
+
 **Acceptance criteria:**
-- [ ] The check's page is the one `yunta check` prints.
+- [x] The check's page is the one `yunta check` prints.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test catalog`
+- [x] Tests pass: `cargo test -p yunta-ui --test catalog`
 
 **Dependencies:** Group check: setup
 
@@ -1316,11 +1334,17 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 - a workflow written in a sandbox;
 - two cases, each seen as it ends, the second stopped by `LetGo`.
 
+**Found in its turn:**
+- **A new workflow, as `new -i` asks it.** In the catalog, `n` asks the name on a `LineAsked`, then the shape on the list `new -i` offers (Escape takes the first, `one-node`). `Operation::NewWorkflow` parses the stem, writes the skeleton and checks it, as `yunta new` does; what stops the check is said beside the page, the file written whatever did (`NewWorkflowWritten.diagnosis`). Escape or Enter goes back to the workflows, read again with the new one pointed at. `yunta new` says where it wrote through `Workspace::shown`, as the application does.
+- **The cases, as they end.** `t` runs them: `Operation::RunCases` hands every name back first (`News::CasesNamed`), then each case as it ends (`News::Case`), what their runs say as remarks, and the tally last (`Outcome::Tested`). Each case ends once: one heard again is the one shown. Escape stops them, keeping what ended and saying they were stopped. The cases are a reading: leaving the catalog lets them go.
+- **A run on any thread.** Running the cases drives a run inside the performer's task, which a runtime may move between threads, so the engine's boxed futures say they are `Send` (the measurement aside, a step, a node's kind, a child run); `moves_before` takes whether a measurement is under way rather than holding the measurement across its awaits. `cases.rs`'s `running_the_cases_can_move_between_threads` holds it at compile time, the engine's run as what reaches it.
+- **The walk** binds `t` and runs on the testkit's deep stack, since its recordings run a case whole inside the test: 5,093 states in about 6.4 s, the new workflow named and written and the cases run and stopped among them.
+
 **Acceptance criteria:**
-- [ ] The skeleton and the cases' page are those `yunta new` and `yunta test` write.
+- [x] The skeleton and the cases' page are those `yunta new` and `yunta test` write.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test catalog`
+- [x] Tests pass: `cargo test -p yunta-ui --test catalog`
 
 **Dependencies:** Task 45
 
@@ -1337,11 +1361,18 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Fails first:** `crates/ui/tests/packs.rs`: a pack removed after its confirmation, and the listing read again.
 
+**Found in its turn:**
+- **The packs, pointed at.** From the catalog with `p`. Surco's `Checklist::pointing_at` draws the pointer in a row's margin, so every row stands where it would without it (a file draws it before the row); render's `PointedPacks` is `pack list`'s rows with the pointer on one, and `Listed` carries none. Goldens in every environment, and in Surco's catalog of components, blessed.
+- **The acts.** `a` audits the pack pointed at, its cases run (Escape lets the audit go); `x` asks a confirmation, then removes it, says so over the listing and reads it again; `n` asks the new pack's publisher and name, writes it and runs its case, as `pack new` does: a name that is no pack reference is refused as render's `InvalidId`, and what stops the check is said beside the page. `pack new` says where it wrote through `Workspace::shown`, as the application does.
+- **Shared pages.** A listing, an audit and a new pack's page are read whole and never changed, and some of their parts hold errors that do not clone: they travel in an `Arc`. `Listed`, `VendoredPack`, `NewPackCheck` and `AuditedPack` are `Debug`.
+- **Work in families.** `Operation` and `Outcome` nest a family that grows on its own under an enum of its own: `Operation::Workflow(WorkflowOperation)` and `Operation::Pack(PackOperation)`, answered as `Outcome::Workflow(WorkflowOutcome)` and `Outcome::Pack(PackOutcome)`. A stage that never asks for a family names it in one line, and the performer carries each family out in a module of its own (`performer/{run,workflow,pack}.rs`). `Operation::kind` is what kind of work it is, whatever it names, a family's included: what a reading asked again supersedes, and what the walk answers alike. The walk reaches the same 6,860 states before and after.
+- **The walk** records the packs none installed and one installed (`support::with_a_pack_installed`), its audit, its removal last, and a new pack named and named by nothing: 6,860 states in about 8.5 s.
+
 **Acceptance criteria:**
-- [ ] Each page is the one the matching `yunta pack` command prints.
+- [x] Each page is the one the matching `yunta pack` command prints.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test packs`
+- [x] Tests pass: `cargo test -p yunta-ui --test packs`
 
 **Dependencies:** Task 46
 
@@ -1363,11 +1394,17 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 - a local pack with an executor installed after its confirmation, from the commit its audit read;
 - a pack left unconfirmed leaves no temporary checkout.
 
+**Found in its turn:**
+- **Confirmed after the audit.** The API took the confirmation of what a pack executes when it fetched it (`--yes`). `FetchedPack::confirmed` gives it once a person read the audit, `updating_to` says the ref an update moves to, and `checkout` where the copy stands; the fetched pack and its install are `packs/fetched.rs`, which `packs.rs` (past 500 lines) no longer holds.
+- **The copy held.** `PackOperation::Fetch` and `FetchUpdate` keep the `FetchedPack` under their ticket: the performer's `held` keeps what work found as a `Found`, a project detected or a pack fetched, under one lock with the stops. `PackOperation::Install { held, confirmed }` takes that copy and vendors it, never fetching again; one let go fails with render's `PACK_LET_GO`. A stage lets a held copy go itself with `Want::Release`, and the state lets it go when the stage is left.
+- **On the screen.** `i` asks where a pack is and `u` the ref the one pointed at moves to (`PackAsked`); the inventory is `yunta pack add`'s and `update`'s; Enter installs, a confirmation naming the executors first where they wait on a person; Escape lets the copy go, and its temporary checkout with it. An update that ships no executor installs as soon as it is fetched, as `yunta pack update` does. What installing came to is `Installed`, with what the pack's workflows need, or `Updated`, and the packs are read again. The install flow is `packs/install.rs`.
+- **The walk** records a fetch of a pack with an executor, an update to a ref named by nothing, and an install from the copy one performer fetched: 7,832 states in about 9.5 s, the executors confirmed and a pack installed among them.
+
 **Acceptance criteria:**
-- [ ] What is installed is the commit the audit read, even where the source moved between the two.
+- [x] What is installed is the commit the audit read, even where the source moved between the two.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test packs`
+- [x] Tests pass: `cargo test -p yunta-ui --test packs`
 
 **Dependencies:** Task 47
 
@@ -1376,7 +1413,7 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Estimated scope:** M
 
 ### Group check: the catalog
-- [ ] The suite's groups green; the walk covers the catalog and the packs.
+- [x] The suite's groups green; the walk covers the catalog and the packs.
 
 ### Task 49: what a run leaves
 
@@ -1389,11 +1426,17 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Fails first:** `crates/ui/tests/evidence.rs`: a finished mock run's receipt written, and its page asked to be shown at the path the API wrote.
 
+**Found in its turn:**
+- **What a run leaves is a family.** `Operation::Evidence(EvidenceOperation)`: `WriteReceipt`, `Verify` and `WritePageForBrowser`, each a reading (it derives from the log and writes beside the run, changing neither), answered as `Outcome::Evidence(EvidenceOutcome)`; the performer's `evidence` module calls the API's `receipt`, `verification` and `page_for_a_browser`, which `yunta receipt`, `verify` and `open` call.
+- **Reached from the run.** The run stage binds the receipt a finished run offers to `e` and the verification a broken one offers to `v` (`RunFrame::actions`), and offers the page for a browser on `o` for every run, worded by `command::does`. Each opens `Stage::Evidence(EvidenceStage)` over the run; Escape goes back to it.
+- **A page shown by its surface.** `Want::Show` asks `Request::ShowPage` with the path the API wrote, as soon as it is written; the stage shows `Opened` (what opening it came to is the surface's), and Enter shows it again.
+- **The walk** records a finished run's receipt, verification and page, and binds `e`, `v` and `o`: 8,206 states in about 10 s, the receipt and the page among them.
+
 **Acceptance criteria:**
-- [ ] The receipt's two files and `page.html` are those `yunta receipt` and `yunta open` write.
+- [x] The receipt's two files and `page.html` are those `yunta receipt` and `yunta open` write.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test evidence`
+- [x] Tests pass: `cargo test -p yunta-ui --test evidence`
 
 **Dependencies:** Group check: the catalog
 
@@ -1413,11 +1456,19 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 - Surco's flowchart tests: a subgraph read with its nodes and the links to and from it; a link inside the group;
 - the terminal's goldens of a grouped chart, in every glyph set.
 
+**Found in its turn:**
+- **The reader reads groups.** `Flowchart.groups` holds each `Group { node, members }`: the node a `subgraph <id>[label]` names (a link may name it before it opens; a group opened twice is refused), the nodes named inside it until its `end`, a group inside another among them. A group's own `direction` is refused, so the chart keeps its source.
+- **A chart taken apart a level at a time** (`diagram::nest::Nest`): outside, a group is one node; inside, its own chart; a link from or to a node inside a group is the group's at the outer level, with the node it starts or ends at (`Ends`). A link between a group and a node it holds is drawn by no surface: the chart keeps its source.
+- **The terminal** places each level as it places a chart with no group, and draws a group as a box of lines titled on its top edge, its chart inlaid; a link crosses the edge from the node inside it, where the cells between are clear. **HTML** draws a dashed rect, its title, and the inner drawing translated inside. **Markdown** keeps the source.
+- **Layering weighs where along a group a link leaves or reaches** (`layer::Sides`): without it, a link from a node inside a group and the group's own link tie and merge in one column.
+- **What has no room** falls to the outline, which says each group and what it holds after the chains.
+- **`yunta graph`** prints Mermaid or DOT as before; `page::Graph` draws the box. The HTML layout's links moved to `layout/links.rs`, the reader's tests to `flowchart/tests.rs`.
+
 **Acceptance criteria:**
-- [ ] `page::Graph`'s grouped goldens draw the group; every other diagram golden is unchanged.
+- [x] `page::Graph`'s grouped goldens draw the group; every other diagram golden is unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco`, `cargo test -p yunta-render`, `cargo test -p yunta --test graph_cmd`
+- [x] Tests pass: `cargo test -p yunta-surco`, `cargo test -p yunta-render`, `cargo test -p yunta --test graph_cmd`
 
 **Dependencies:** Task 49
 
@@ -1435,11 +1486,20 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 - a finished mock run's stats;
 - its graph labelled with each node's word.
 
+**Found in its turn:**
+- **Four readings, as the steps name them.** `Operation::ReadStats`, `ReadHistory`, `ReadGraph` (a workflow the catalog offers, by the name it offers it under, read as `yunta graph <name>` reads it) and `ReadRunGraph` mirror `NextStep::Stats`, `History`, `Graph` and `RunGraph`; they are answered as `Outcome::Stats(StatsReading)`, `Outcome::History(HistoryReading)` and `Outcome::Graph(page::Graph)`, the page owning what it is drawn from as `Run` does.
+- **A workflow's history is read owned.** `WorkflowHistory` borrows the project, so the API reads it as a `HistoryReading` (`WorkflowHistory::reading`: each run's summary, and the findings of the workflow the latest run froze); `yunta stats --workflow` reads through it (its tests unchanged), and render's `History` borrows its findings.
+- **Reached from the run and the catalog.** Every run offers `s` (what it cost) and `g` (its graph) beside `o`, worded by `command::does`; the catalog binds `g` (the graph as written) and `h` (the past runs, by the name the workflow's file gives it, which its runs are kept under; nothing for one that does not read). Each opens a stage over the one it came from.
+- **`f` shows every row** of a run's stats, as `--full` does, and folds them again.
+- **The legends a page opened over another shows are named by what they are:** `over_the_run_legend` (was `evidence_legend`) and `over_the_workflows_legend` (was `checked_legend`).
+- **The walk** binds `s`, `g` and `h` and records each reading: 8,562 states in about 11 s, a run's stats and graph, a workflow's past runs (some and none) and its graph among them.
+- **Not done here: scrolling** (Task 52). The graph's row says a person scrolls it, but no stage's main region scrolls (a run's page, a receipt and a check are as tall); only the plan desk's pane does, through `PaneLaid`.
+
 **Acceptance criteria:**
-- [ ] The pages are those `yunta stats` and `yunta graph` draw.
+- [x] The pages are those `yunta stats` and `yunta graph` draw.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test stats_graph`
+- [x] Tests pass: `cargo test -p yunta-ui --test stats_graph`
 
 **Dependencies:** Task 50
 
@@ -1448,55 +1508,114 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 **Estimated scope:** M
 
 ### Group check: what a run leaves and costs
-- [ ] The suite's groups green; the walk covers evidence, stats and the graph.
+- [x] The suite's groups green; the walk covers evidence, stats and the graph.
 
-### Task 52: doctor
+### Task 52: a page taller than its region scrolls
+
+**Description:**
+- **What a person asked to see is the state's; what fits is the surface's.** Surco's `Region` gains `top`, the first of its lines a person asked to see, as a desk's `Pane` has. A surface that lays a region out at a height hands back what it laid out, as it hands back a desk's pane, through `Input::Laid`; `PaneLaid` becomes what a surface laid out of any region that scrolls, named for that. Markdown and HTML draw the whole page, as today.
+- **One owner of how a region scrolls.** What the plan desk does with what was laid out (a line, a page, the first and the last first line, never past the end) becomes one value of `yunta-ui`'s. The desk and every stage that shows a page hold it; nothing else moves a `top`.
+- **Every stage whose main region is a page scrolls with it:** a run's page and a node's, the receipt, a check, a run's stats and a workflow's past runs, the graph. The stages after this task (doctor, upkeep, schema) hold it from the start. A page read again, as a followed run's is, keeps the line a person scrolled to, as far as the new page reaches.
+- **The legend offers the scroll keys** where what was last laid out is taller than its region, in render's words.
+
+**Fails first:** `crates/ui/tests/scroll.rs`:
+- a run's graph laid out shorter than it is: PageDown moves its first line a page down, never past the last first line, and PageUp moves it back;
+- a followed run's page read again keeps the line scrolled to;
+- the plan desk's scroll tests pass unchanged.
+
+**Found in its turn:**
+- **Where a person scrolled to is the state's, against the screen's first word.** Surco's screen said an interface keeps where a person scrolled to; with the plan desk's mechanism chosen for every page, a region carries what of it a person asked to see, a `Sight` (its first line, and whether the line a pointer stands on stays in sight), and the screen's `//!` says so. The desk's `Pane` holds the same `Sight` in place of its two fields.
+- **What was laid out is `Laid`, and of a screen `ScreenLaid`.** `PaneLaid` is `surco::components::Laid` (`Placed::laid`, `Answerable::laid`). A run's page stands beside its nodes, not in the main region, so a screen's input is `Input::Laid(ScreenLaid { main, side })`, and each stage takes what it scrolls: a decision's desk and a page from `main`, a run's page from `side`.
+- **The terminal lays a scrolled region out in one place.** The desk's scroll rows are `Terminal::scrolled(doc, sight, rows)`, which the desk's pane calls and the TUI calls for each region; the desk's goldens are unchanged.
+- **One owner in `yunta-ui`:** `scroll::Scroll` keeps the line asked and the last `Laid`, moves by the arrows, PageUp, PageDown, the space bar, Home and End, and rewinds when its region holds another page. Render's desk `Spot` no longer keeps `top`; `Reading::desk` takes it.
+- **Where each stage stands.** Evidence, stats and the graph scroll their main region. The run scrolls its page beside by the page, the arrows moving along its nodes; it keeps the line when the same page is read again, and rewinds for a node's page, the run's again and a successor's. What a person watches a run by reads at its end (`Sight::at_the_end`). The field, the catalog, start, the first run, setup and a decision keep the row pointed at in sight (`Sight::following_pointer`).
+- **The legend** leads with render's `scrolling` (`↑↓ scroll`, `pgup pgdn by the page`), or for a run `scrolling_beside` (`pgup pgdn scroll its page`), once what was laid out is taller than its region.
+- **The walk** hands what an 80-by-4 terminal laid out of each state's screen as one more input, and tells states apart by where each region is scrolled to; `MUST_SCROLL` names the pages it must scroll (a run's page beside its nodes, its receipt, its stats, a workflow's past runs, a graph): 10,885 states in about 19 s. Laying the screen out after every input instead took 64 s.
+- **Proof:** four tests in `scroll.rs` and four in Surco's `scrolled/tests.rs`; ten mutations, each caught by the test that names it.
+
+**Acceptance criteria:**
+- [x] Every stage that shows a page scrolls by what a surface laid out of it, through the one owner the plan desk scrolls through.
+- [x] Markdown's and HTML's screens are unchanged.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-ui --test scroll`, `cargo test -p yunta-ui --test walk`, `cargo test -p yunta-surco`
+
+**Dependencies:** Group check: what a run leaves and costs
+
+**Files likely touched:** `crates/surco/src/components/{screen.rs,desk.rs}`, `crates/ui/src/{input.rs,stage.rs,prompt/plan_desk.rs}`, `crates/ui/src/stage/{run.rs,evidence.rs,stats.rs,graph.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/scroll.rs`
+
+**Estimated scope:** L
+
+### Group check: scrolling
+- [x] The suite's groups green; the walk scrolls every stage that shows a page.
+
+### Task 53: doctor
 
 **Description:**
 - **`Stage::Doctor(DoctorStage)`:** `Operation::Doctor { sessions: false }`, shown as `Doctor`, folded or every check.
 - **A session per binding** is opened after a confirmation that says it spends a prompt each. Its remarks show as they come, and a person can stop it.
 - **A checkouts finding over its budget** leads to upkeep.
+- **Its page scrolls** through `Scroll`, as every page does, and the walk's `MUST_SCROLL` names it.
 
 **Fails first:** `crates/ui/tests/doctor.rs`: the findings of a sandbox, unfolded; the sessions asked only after the confirmation.
 
+**Found in its turn:**
+- **Reached from the field with `m`** ("checks this machine" on its legend); the palette offers it too (Task 55). An empty field opens on the first run, so a test opens doctor over a field with a run.
+- **`Operation::Doctor { sessions }`**, a reading without sessions and an act with them (they spend), carried out by the performer's `machine` module through the API's `doctor`, which `yunta doctor` calls; answered as `Outcome::Doctor(Vec<Finding>)`. The page is render's `Doctor` over those findings, so a test compares against the findings the performer handed back: doctor's own checks differ between two calls (the free disk, a new binary's first run on macOS).
+- **A confirmed act goes back to the stage that asked for it** (`Stage::confirmed`): the state handed the operation straight to the performer, so the stage never knew its sessions ran. Each stage asks for the work itself; doctor stands as opening a session per binding, shows what the sessions remark as it comes, and Escape lets them go and says they were stopped (`SESSIONS_STOPPED`).
+- **Its page scrolls** through `Scroll`; the walk binds `m`, records both operations, reaches the findings, the confirmation and the sessions stopped, and scrolls the findings: 14,670 states in about 27 s.
+- **Not done here: a checkouts finding over its budget leading to upkeep**, whose stage is Task 54's; it is done there.
+- Four mutations of the stage, each caught by the test that names it.
+
 **Acceptance criteria:**
-- [ ] The page is the one `yunta doctor` and `--full` print.
+- [x] The page is the one `yunta doctor` and `--full` print.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test doctor`
+- [x] Tests pass: `cargo test -p yunta-ui --test doctor`
 
-**Dependencies:** Group check: what a run leaves and costs
+**Dependencies:** Group check: scrolling
 
 **Files likely touched:** `crates/ui/src/{stage/doctor.rs,performer.rs}`, `crates/ui/tests/doctor.rs`
 
 **Estimated scope:** M
 
-### Task 53: upkeep and the shape of a document
+### Task 54: upkeep and the shape of a document
 
 **Description:**
 - **`Stage::Upkeep(UpkeepStage)`:** `Operation::Collect { dry_run: true }`, shown as `Collected`. After a confirmation, `Operation::Collect { dry_run: false }`, its remarks shown as they come.
 - **`Stage::Schema(SchemaStage)`:** every document's shape, and the one picked, from core's `shape`, with no operation.
+- **Both pages scroll** through `Scroll`, as every page does, and the walk's `MUST_SCROLL` names them.
+- **Doctor leads here** where its checkouts finding is over its budget, or the disk under the part kept free (`u`, from Task 53), and reads its checks again when the person comes back.
 
 **Fails first:** `crates/ui/tests/upkeep_schema.rs`:
 - a sandbox's checkouts collected after the dry run's confirmation;
 - `tasks`' shape picked.
 
+**Found in its turn:**
+- **Render's `screen` is split by family of stages** (`field`, `catalog`, `run`, `setup`, `start`, `machine`), as it neared 500 lines; every item moved whole, compared item by item, and every caller's path stays `screen::<item>`.
+- **`Operation::Collect { dry_run }`**, a reading under a dry run and an act otherwise, carried out by the performer's `machine` module through the API's `collect`, which `yunta gc` calls; answered as `Outcome::Collected` (render's `Collected` now derives `Debug` and `Clone`).
+- **Upkeep is offered on doctor's `u` always**, not only past a budget: its dry run removes nothing, the finding's own fix still names `yunta gc`, and the walk's checkouts never pass one. Doctor checks again when the person comes back (`Stage::returned` takes the stage mutably).
+- **Collecting runs once confirmed** (`Stage::confirmed`), and Escape stops it. What a pass remarks stands above its page, as `yunta gc` says it before the page that counts "problems above"; doctor's remarks stand the same way.
+- **The shapes open from the workflows with `s`.** The documents are a picker, each row with what it is for in the words `yunta schema` lists, narrowed by typing: a person picks from them, so the list is not `yunta schema`'s page itself. The one picked is render's `Schema::of`: a workflow's keys, or a document's annotated example, the text `yunta schema <name>` prints (`Schema::Artifact`, drawn as Markdown).
+- **The walk** records both passes and reaches the dry run, the confirmation, the collection, the documents and a shape, scrolling upkeep and a shape: 17,908 states in about 33 s. Its time rises with each stage (11, 19, 27, 33 s).
+- Four tests, one per promise; six mutations, each caught by the test that names it.
+
 **Acceptance criteria:**
-- [ ] The pages are those `yunta gc --dry-run`, `yunta gc` and `yunta schema` print.
+- [x] The pages are those `yunta gc --dry-run`, `yunta gc` and `yunta schema` print.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test upkeep_schema`
+- [x] Tests pass: `cargo test -p yunta-ui --test upkeep_schema`
 
-**Dependencies:** Task 52
+**Dependencies:** Task 53
 
 **Files likely touched:** `crates/ui/src/{stage/upkeep.rs,stage/schema.rs,performer.rs}`, `crates/ui/tests/upkeep_schema.rs`
 
 **Estimated scope:** S
 
 ### Group check: the machine
-- [ ] The suite's groups green; the walk covers doctor, upkeep and schema.
+- [x] The suite's groups green; the walk covers doctor, upkeep and schema.
 
-### Task 54: the palette
+### Task 55: the palette
 
 **Description:**
 - **`Dialog::Palette(Palette)` over every stage,** opened by its key.
@@ -1504,14 +1623,24 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
   - Each row has its line from `command::line` and what it does from `command::does`.
   - The rows are a `Picker<NextStep>`, and typed words filter them.
 - **Choosing a row does what its key does on the stage**, or leads to the stage that does it.
+- **An overlay taller than its box scrolls, as a region does:** `Overlay` gains a `Sight`, and `ScreenLaid` what was laid out of it; the palette keeps the row pointed at in sight.
 
 **Fails first:** `crates/ui/tests/palette.rs`: on a parked run, the palette lists answering first and every always-there step after; "doc" filters to doctor.
 
+**Found in its turn:**
+- **Opened with `/`,** as the spike opened it, over any stage where nothing is typed: where words are typed, `/` is typed. Every stage's legend ends with it, through render's `over_every_stage`.
+- **A stage offers `Act`s,** each a step as a command line names it and the key that takes it there (`Stage::offered`): the field (following, resuming, cancelling and closing the run pointed at, the run waiting on the person, the field's reach and its closed runs, the workflows, doctor), a run (what its frame offers, answering first, then the page of the node pointed at), the catalog and its packs (`catalog/acts.rs`), a page for a browser written, doctor and upkeep. A stage whose prompt is the act (a decision's card, a question, a form) offers none of its own; nor does a new pack, whose command needs the name it is given.
+- **A row is taken by its key,** so choosing it does what pressing the key does (`Chosen::Pressed`); a test holds the two as one act. **What every stage offers** (`Stage::always`: the workflows, doctor, upkeep and the shapes) opens the stage that takes it (`Stage::opened_by`), and is not listed where the stage offers it already or is it (`Stage::showing`).
+- **Each row is its command, spelled by `command::line`, with `command::does`;** typed words narrow the rows by their command.
+- **An overlay has a `Sight`,** and `ScreenLaid` what a surface laid out of it: the palette keeps the row pointed at in sight, which a test holds on a terminal of four rows.
+- **The walk** opens the palette over every state and takes every row of each palette it has not met, as an input it holds: 28 palettes, and `MUST_OFFER` names a row of every stage that offers acts and those every stage offers. Opening it as a stroke of every state would have multiplied the states by its rows. 17,908 states in about 34 s.
+- Four tests; six mutations, each caught by the test that names it.
+
 **Acceptance criteria:**
-- [ ] The walk holds every row of every stage's palette.
+- [x] The walk holds every row of every stage's palette.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test palette --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test palette --test walk`
 
 **Dependencies:** Group check: the machine
 
@@ -1519,31 +1648,39 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Estimated scope:** M
 
-### Task 55: help, and every confirmation
+### Task 56: help, and every confirmation
 
 **Description:**
-- **`Dialog::Help`** lists the keys of the stage and those always there, worded by `render::screen`.
+- **`Dialog::Help`** lists the keys of the stage and those always there, worded by `render::screen`, and scrolls through `Scroll` where it is taller than its box.
 - **Every act that stops, closes, removes or spends stands behind `Dialog::Confirmation`,** saying what it does and the command that does the same. These are cancel, close, removing a pack, a pack's executors, doctor's sessions and collecting.
 - Escape leaves a dialog with nothing done.
 
 **Fails first:** `crates/ui/tests/dialogs.rs`: each of those acts asks before its operation, and Escape leaves it undone.
 
+**Found in its turn:**
+- **Which work needs confirming is the operation's** (`Operation::needs_confirming`): cancelling, closing, removing a pack, installing one whose executors were confirmed, a session per binding, collecting. The walk holds that a stroke asks such work only as Enter on a confirmation standing over the state (`walk/dialogs.rs`), the palette's rows too.
+- **A confirmation names the command that does the same**, spelled by `command::line` under what it asks (`Confirmation::new(asks, same, then)`, render's `DOES_THE_SAME`). A pack's install is confirmed against the command that fetched it (`PackFetched::installs_as`: `pack add` with its source, or `pack update` with its ref), which the performer knows and the stage did not.
+- **Help opens with `?`** over any stage where nothing is typed, and lists the keys of the screen under it, then those every stage answers to (`/`, `?`, Ctrl-C), as render's `help` table: it is built from that screen's legend, so it never says a key the screen does not take. It scrolls through `Scroll`, the overlay's `Sight` and what a surface laid out of it; Escape or `?` closes it. Every stage's legend ends with `/` and `?`.
+- **A broken run's verification had no proof in the application:** `v` is offered only on a run whose log stopped making sense, which no test built. `evidence.rs` now breaks a run's log behind the engine's back (a node finished that never started, through `yunta-storage`'s test feature, a dev-dependency) and holds that its evidence is verified as `yunta verify` says it.
+- **The walk** opens help over each legend it has not met and holds that it lists each key and closes with nothing done: 17,908 states, 28 palettes taken row by row and 64 helps opened, in about 36 s. Its dialogs moved to `walk/dialogs.rs`, its terminal to `walk/terminal.rs`.
+- Seven tests; seven mutations, each caught by the test that names it, the unconfirmed cancel by the walk as well.
+
 **Acceptance criteria:**
-- [ ] No operation that stops, closes, removes or spends is requested without a confirmation; the walk holds it.
+- [x] No operation that stops, closes, removes or spends is requested without a confirmation; the walk holds it.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test dialogs --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test dialogs --test walk`
 
-**Dependencies:** Task 54
+**Dependencies:** Task 55
 
 **Files likely touched:** `crates/ui/src/{dialog.rs,dialog/confirmation.rs,state.rs}`, `crates/render/src/screen.rs`, `crates/ui/tests/dialogs.rs`, `crates/ui/tests/walk.rs`
 
 **Estimated scope:** M
 
 ### Group check: the dialogs
-- [ ] The suite's groups green; the walk covers every stage and every dialog.
+- [x] The suite's groups green; the walk covers every stage and every dialog.
 
-### Task 56: the proof
+### Task 57: the proof
 
 **Description:**
 - The suite's count against the base's, by name: moved, renamed, new, and none gone without a reason.
@@ -1553,11 +1690,19 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Fails first:** none: a measurement.
 
+**Found in its turn:**
+- **The suite:** 4,751 against the base's 4,607. Of the 127 only in the base, 122 moved under another path with their names, five were renamed or split with what they hold (the desk's width to Surco, the search path to core, three of the chronicle's split by owner), each named in `after.txt`; none is gone without a reason. 149 are new.
+- **The goldens:** 208 of the base's, none gone; 76 new. Seven changed, Surco's catalog of every block (`components/catalog.*`, `markdown/catalog.md`, `html/catalog.html`), by lines added and no line of the base's changed but the page's table of contents: a chart with a group (Task 50), the card (Task 7), the desk (Task 8), the choice list (Task 9), sections led by the pointer (Task 45) and a pack's row (Task 47).
+- **The captures:** 155 views, nine differ. Eight say the version of Claude Code installed on this machine, 2.1.319 at the base and 2.1.322 now: the machine's. The ninth is `init -i` asking each runner's adapter and model (Task 29), with `prompt-init-i-declared.txt` new beside it. `resolve-gate` on a parked round asks the round and the run goes on (Task 23), where the base refused.
+- **The walk:** 17,908 states, 28 palettes taken row by row and 64 helps opened, in about 35 s.
+- **The release** on macOS is 28,433,584 bytes, 181,872 over the base's: its text grew 177,456 bytes, `yunta_core`, Surco, the API, `core` and `alloc` most, and `yunta_ui` new at 14,012; 275 names gained a copy, the clones of the event payloads and of a followed run that the application's outcomes clone among them. The static Linux binary is measured against its ceiling by CI on the pull request.
+- The suite's `cli-4` failed once in the dialogs group check, `session_ends`' `cancel_with_its_engine_alive_leaves_no_command` waiting past its ten seconds for a fake `codex`'s first lines, right after a relink; alone it passed five times and its target three, and `cli-4` passed whole again. The first log is kept beside the proof.
+
 **Acceptance criteria:**
-- [ ] Every difference from the base is one this list names; the static Linux binary stays under its ceiling.
+- [x] Every difference from the base is one this list names; the static Linux binary stays under its ceiling (CI measures it on the pull request).
 
 **Verification:**
-- [ ] Manual check: `after.txt` read whole.
+- [x] Manual check: `after.txt` read whole.
 
 **Dependencies:** Group check: the dialogs
 
@@ -1565,26 +1710,28 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Estimated scope:** S
 
-### Task 57: a real run at the end
+### Task 58: a real run at the end
 
 **Description:**
 - As Task 3, from the final tree's release binary: followed with `yunta status --follow`, its gates answered with `yunta resolve-gate`, its time read from `yunta stats`.
 
 **Fails first:** none: a measurement.
 
+**Found in its turn:** run `01M75FC961DHT02FC7JNJKJBFM` waited at `ship` after 166 s with nothing asked before it (the base's 211 s, Checkpoint B's 115 s); `between_secs` 0.529 s, the base's 0.556 and Checkpoint B's 0.541; 2.15M tokens, 1.50M cached. Its follower wrote 156 lines and ended where the run parked (exit 3). With ids, times, counts and what agents said masked (`followers.py`), 111 kinds of line stand in both; the rest is what each run's agents did (an implementer that edited where the base's wrote, a reviewer that read a file where the base's called its tools), none a line the follower says differently.
+
 **Acceptance criteria:**
-- [ ] The follower's lines equal the base's but ids and times; `between_secs` inside the base's spread.
+- [x] The follower's lines equal the base's but ids and times; `between_secs` inside the base's spread.
 
 **Verification:**
-- [ ] Manual check: the run's numbers beside the base's in `after.txt`.
+- [x] Manual check: the run's numbers beside the base's in `after.txt`.
 
-**Dependencies:** Task 56
+**Dependencies:** Task 57
 
 **Files likely touched:** `.plans/yunta-tui/proof/app-core/real-after*` (outside git)
 
 **Estimated scope:** S
 
-### Task 58: the review
+### Task 59: the review
 
 **Description:**
 - The module's diff, read in four parts by readers of their own:
@@ -1596,24 +1743,66 @@ Its groups, each green before the next: setup; the catalog; what a run leaves an
 
 **Fails first:** none: a review.
 
+**Found in its turn** (four readers, one part each; each finding checked against the code and the base):
+- **The moves to render and the prompts' split.**
+  - `init -i`'s two new questions: named in this list (Task 29); no change.
+  - A picker answered lost the option it answered, so the shapes' list came back without the document picked: fixed, the answer is the value pointed at and the list keeps every option (`upkeep_schema.rs`).
+  - A field row's reason and words match the same arms twice: moved as the base had them; not this module's to change.
+  - The prompts' look reads its motion from the terminal's environment: a prompt draws no motion; no change.
+- **The API's following, pages, questions and runners.**
+  - A session's words coming faster than a look reset the following's wait, so the log went unread: fixed, `Pace::beat_after` spaces a look from the last one (`pace.rs`'s test).
+  - A successor made while the run was read was missed: fixed, the promotion chain is read before the run.
+  - Events read before the registry could read a run that ended as stalled: fixed, the registry first, said at the line.
+  - A CLI named by a relative path with a directory was looked for from the process's directory and started from the session's: fixed, resolved against where the session runs (`cli_search_path.rs`).
+  - `init` wrote the base branch raw, so `#dev` read back empty: fixed, quoted as the name is (`config_yaml`'s test).
+  - A following started before the run's first event skipped it: fixed, the whole log is read until an event is.
+  - The successor's directory was worked out in the following and in the registry: fixed, `RunRegistry::run_dir` is the one.
+  - The listening's doc said a refused socket is tried again once a second: it is tried at each look, and the doc says so.
+  - `ProjectDraft::answered` takes any adapter, and `init -i` takes the detected default on a console that fails: every interface offers only adapters that answered, and the name and base branch are taken the same way; no change.
+- **`yunta-ui`'s values, performer and walk.**
+  - A reading asked again let go an act of its kind under way: doctor's sessions were dropped when doctor checked again on the way back from upkeep. Fixed: a reading supersedes only readings, and doctor checks nothing over its sessions (`state/tests.rs`, `doctor.rs`).
+  - A let-go that came before the work's task first ran found nothing to stop: fixed, `take` holds the work as under way before it spawns it (`performer/tests.rs`).
+  - Work that panicked never answered its ticket: fixed, it answers as failed, in render's words (`broke_inside`); no operation panics on demand, so no test drives it.
+  - An answer reached whatever stage stood: a decision went back on another run's decision, a start gave way to a run another start asked for, a run followed again on another run's going on. Fixed: each takes only its own (`stage/tests.rs`).
+  - A closing that failed partway lost what it had closed: fixed, `Outcome::Closed` carries the failure beside what closed, and the field is read again (`field.rs`).
+  - The walk's "a confirmation" matched other screens' words: it now matches what only a confirmation says.
+  - The walk never handed a remark: it hands one of each piece of work under way, beside the walk, which never panics and asks nothing (walked on, a stage that keeps remarks would never end); its clock standing still is said in its doc.
+  - Strokes tried only where one piece of work runs, states told apart by their screen, recordings answered by kind, HTML drawn but not compared, a confirmation's operation not compared with what it shows: the walk's bounds, each in its doc; an answer under a ticket let go is dropped by the state, which `field.rs`'s readings hold.
+  - The crate's doc said it names no store, which a test now does: it says the library.
+- **The stages and dialogs.**
+  - Leaving the packs did not read the workflows again: fixed (`packs.rs`).
+  - No page standing in the catalog's place scrolled: fixed, a workflow's check, the cases, a pack's audit, a fetched pack's inventory and what installing one came to scroll by their keys and start at their first line when another stands (`catalog/page.rs`; `scroll.rs`; the walk scrolls a pack's audit).
+  - Setup's and start's question could stand below what shows: fixed, their region reads from its end with the pointer in sight (`Sight::at_the_end_with_the_pointer`).
+  - The palette's close row named the run pointed at while `x` closed the runs picked: fixed, it names the one run `x` closes, and none where several are picked (`palette.rs`).
+  - Resuming asks no confirmation, and Escape stops a collection or the sessions with none: the acts confirmed are those this list names (Task 56), and stopping work under way is as Ctrl-C stops a command; no change.
+  - Escape's taking the first, written by hand in setup and a new workflow: both take the picker's `first`.
+  - A run followed again kept a node's page under "stops following": fixed with the routing.
+  - A collection stopped left the dry run's list on offer: fixed, the dry run runs again.
+  - Doctor's legend offered `s` while its checks ran: fixed (`DoctorChecks`).
+  - The dialogs' test presses `c` and `x` only: the walk holds the rule for every key.
+  - `LABEL_CELLS`' reason line: Surco's before this module; not changed here.
+- Eleven mutations of the fixes, each caught by the test that names it; the walk reaches 17,304 states in about 35 s.
+- **The release after the fixes**, captured again against the base: the same nine views differ (the machine's Claude Code version, and `init -i`'s runners), and it is 28,450,112 bytes, 198,400 over the base's; `after.txt` holds the final suite, goldens, walk, captures, size and real run.
+- **The suite after the fixes:** 4,765 green. `testkit-core`'s `a_pid_never_recorded_ends_the_wait_instead_of_hanging_it`, which this module does not touch, waited past its ten seconds once in the `crates` group; alone it passed five times and the group passed whole again. The first log is kept beside the proof.
+
 **Acceptance criteria:**
-- [ ] Every finding is recorded here with its decision.
+- [x] Every finding is recorded here with its decision.
 
 **Verification:**
-- [ ] Tests pass: the suite's groups after the fixes.
+- [x] Tests pass: the suite's groups after the fixes.
 
-**Dependencies:** Task 57
+**Dependencies:** Task 58
 
 **Files likely touched:** as the findings say
 
 **Estimated scope:** M
 
 ### Checkpoint D: the module
-- [ ] Every stage of the spec works end to end against its sandbox; the walk covers every stage and dialog; what prints is the base's but the two changes this list names.
-- [ ] The user reviews the proof and the review.
-- [ ] The phase commits and is pushed; Task 59 follows, then `cargo clean`.
+- [x] Every stage of the spec works end to end against its sandbox; the walk covers every stage and dialog; what prints is the base's but the two changes this list names.
+- [x] The user reviews the proof and the review.
+- [x] The phase commits and is pushed; Task 60 follows, then `cargo clean`.
 
-### Task 59: the pull request
+### Task 60: the pull request
 
 **Description:**
 - PR #30's body gains the module; CI on Linux and macOS.

@@ -3,7 +3,7 @@
 //! the words it is said with. Every row opens on the decision's edge and is
 //! tinted, and the row pointed at is set apart where a layer draws fills.
 
-use crate::components::{Card, CardBody, ChoiceRow, Choices, PaneLaid, TypedRow};
+use crate::components::{Card, CardBody, ChoiceRow, Choices, Laid, TypedRow};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
@@ -15,7 +15,7 @@ use crate::width::{cell_width, id_column, middle_cut, INDENT};
 pub struct Placed {
     pub lines: Vec<Line>,
     pub cursor: Option<(usize, usize)>,
-    pub pane: Option<PaneLaid>,
+    pub laid: Option<Laid>,
 }
 
 /// The cells the edge and the space after it take at the start of a row.
@@ -82,7 +82,7 @@ impl Card {
                 .map(|row| on_the_edge(row, look.glyphs))
                 .collect(),
             cursor: placed.cursor,
-            pane: None,
+            laid: None,
         }
     }
 
@@ -143,7 +143,7 @@ impl Card {
         Placed {
             lines,
             cursor,
-            pane: None,
+            laid: None,
         }
     }
 

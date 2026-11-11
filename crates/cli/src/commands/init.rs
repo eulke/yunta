@@ -9,11 +9,9 @@
 //! warning when stdin isn't a TTY: `init` must never hang waiting for input
 //! that isn't coming.
 
-use std::collections::BTreeMap;
-
 use surco::look::Look;
-use yunta_api::{DetectedProject, ProjectSetup, RunnerDeclaration};
-use yunta_core::{AdapterId, ModelName, RunnerCandidate, RunnerName};
+use yunta_api::{ProjectDraft, RunnerAnswer};
+use yunta_core::{AdapterId, ModelName, RunnerName};
 use yunta_render::page::Initialized;
 use yunta_render::prompt::{
     keeping, model_of, runs_on, Escape, BASE_BRANCH, PROJECT_NAME, USING_DETECTED_DEFAULTS,
@@ -35,22 +33,19 @@ pub async fn init(
     let workspace = shell.workspace();
     let detected = workspace.detect_project(force, &shell.stop()).await?;
     let console = open_console(interactive).await;
-    let defaults = (detected.name.clone(), detected.base_branch.clone());
+    let draft = &detected.draft;
+    let defaults = (draft.name.clone(), draft.base_branch.clone());
     let Some((name, base_branch)) = project_answers(console.as_ref(), defaults) else {
         return Ok(Outcome::interrupted());
     };
     let runners = match &console {
-        Some(console) => match runner_answers(console, &detected) {
+        Some(console) => match runner_answers(console, draft) {
             Some(runners) => runners,
             None => return Ok(Outcome::interrupted()),
         },
-        None => RunnerDeclaration::Proposed,
+        None => Vec::new(),
     };
-    let setup = ProjectSetup {
-        name,
-        base_branch,
-        runners,
-    };
+    let setup = draft.answered(&name, &base_branch, runners);
     let initialized = detected.write(setup).await?;
     let page = Initialized {
         repo: &workspace.dir,
@@ -102,37 +97,26 @@ fn project_answers(
     }
 }
 
-/// The runners a person declares on `console`: each one the repository proposes,
-/// on an adapter this machine answers for, the first standing, with the model
-/// typed. A runner whose model is left empty stays proposed, and with no adapter
-/// answering nothing is asked. `None` where a person stopped `init`.
-fn runner_answers(console: &Console, detected: &DetectedProject) -> Option<RunnerDeclaration> {
-    let answered: Vec<&AdapterId> = detected
-        .probed
-        .iter()
-        .filter(|adapter| adapter.healthy)
-        .map(|adapter| &adapter.id)
-        .collect();
-    let Some(first) = answered.first() else {
-        return Some(RunnerDeclaration::Proposed);
+/// What a person answers on `console` for each runner `draft` proposes: the adapter
+/// it runs on, picked among those this machine answers for, the first standing, and
+/// the model typed. With no adapter answering nothing is asked. `None` where a person
+/// stopped `init`.
+fn runner_answers(console: &Console, draft: &ProjectDraft) -> Option<Vec<RunnerAnswer>> {
+    let answering = draft.answering();
+    let Some(first) = answering.first() else {
+        return Some(Vec::new());
     };
-    let mut declared = BTreeMap::new();
-    for runner in &detected.proposed.roles {
-        let adapter = adapter_of(console, runner, &answered)?.unwrap_or_else(|| (*first).clone());
-        if let Some(model) = model_of_runner(console, runner)? {
-            let candidate = RunnerCandidate {
-                adapter,
-                model,
-                agent: None,
-                effort: None,
-            };
-            declared.insert(runner.clone(), candidate);
-        }
+    let mut answers = Vec::new();
+    for runner in &draft.proposed.roles {
+        let adapter = adapter_of(console, runner, &answering)?.unwrap_or_else(|| (*first).clone());
+        let model = model_of_runner(console, runner)?;
+        answers.push(RunnerAnswer {
+            runner: runner.clone(),
+            adapter,
+            model,
+        });
     }
-    Some(match declared.is_empty() {
-        true => RunnerDeclaration::Proposed,
-        false => RunnerDeclaration::Declared(declared),
-    })
+    Some(answers)
 }
 
 /// The adapter `runner` runs on, picked among those that `answered`: `Some(None)`

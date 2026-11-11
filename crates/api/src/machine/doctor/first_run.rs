@@ -23,7 +23,7 @@ pub(super) async fn first_run(env: &Env) -> Option<Finding> {
     if std::env::consts::OS != "macos" {
         return None;
     }
-    let compiler = env.find("cc")?;
+    let compiler = env.path.find("cc")?;
     let (first, then) = measured(&compiler).await?;
     Some(Finding::FirstRun {
         first,
@@ -83,7 +83,7 @@ mod tests {
     #[tokio::test]
     async fn a_workspace_whose_path_has_no_compiler_leaves_the_probe_out() {
         let env = Env {
-            path: Vec::new(),
+            path: yunta_core::process::SearchPath::default(),
             ..Env::default()
         };
         assert_eq!(first_run(&env).await, None);

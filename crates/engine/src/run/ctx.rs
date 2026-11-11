@@ -242,6 +242,14 @@ impl<'a> RunCtx<'a> {
         }
     }
 
+    /// Where a program this run starts by its name is found: its ambient
+    /// `PATH`, the one a session's CLI inherits. Empty in a harness with no
+    /// ambient environment.
+    pub(crate) fn search_path(&self) -> &yunta_core::process::SearchPath {
+        self.ambient
+            .map_or(&crate::process::UNSUPPLIED, |env| &env.path)
+    }
+
     /// The supervision every subprocess of this run gets: its registry,
     /// and `cancel` — a node's own token, or the run's root token.
     pub(crate) fn supervision<'s>(
@@ -252,7 +260,7 @@ impl<'a> RunCtx<'a> {
             registry: self.process_registry.as_deref(),
             cancel,
             env: &self.subprocess_vars,
-            path: self.ambient.map_or(&[][..], |env| &env.path[..]),
+            path: self.search_path(),
             clock: self.clock.as_ref(),
         }
     }

@@ -1,0 +1,12 @@
+. yunta init ; to write ; in /home/me/project
+................................................................................
+
+  name         project
+  base branch  main
+  writes       .yunta/config.yaml, .gitignore, .claude/skills/yunta/SKILL.md
+  ecosystem    none known (looked for Cargo.toml, package.json, go.mod,
+               pyproject.toml); declare `commands:` and `baseline.suite` by hand
+
+  + claude-code  healthy (2.1.0)
+
+  runners      `implementer`

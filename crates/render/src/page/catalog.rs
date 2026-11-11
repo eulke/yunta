@@ -4,11 +4,13 @@
 //! runs it, or why its file does not read — and each pack that does not
 //! read. `yunta list` draws it on a terminal, and the control plane's
 //! `list_workflows` tool answers with it as Markdown, so the two never
-//! drift. Reading it is its caller's.
+//! drift. Reading it is its caller's. The application moves through it with
+//! a workflow pointed at: [`PointedCatalog`], the same sections each led by
+//! the pointer's place.
 
 use std::path::PathBuf;
 
-use surco::components::{Fields, Marked, Prose, Section};
+use surco::components::{Fields, Lead, Marked, Prose, Section};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
@@ -61,11 +63,40 @@ pub enum UnreadableWorkflow {
     NotAWorkflow(Vec<surco::components::Problem>),
 }
 
+/// The catalog as a person moves through it at a screen: every workflow led
+/// by the pointer's place, the one `pointed` names carrying it. Not
+/// [`Catalog`] read whole, which `yunta list` prints with no pointer.
+pub struct PointedCatalog<'a> {
+    pub catalog: &'a Catalog,
+    /// The name of the workflow the pointer stands on.
+    pub pointed: &'a str,
+}
+
 impl Page for Catalog {
     /// Each broken pack, then each workflow; where there is neither, where
     /// the catalog looked. The look's glyphs draw each input's placeholder
     /// and the separators of an estimation.
     fn document(&self, look: &Look) -> Doc {
+        self.drawn(look, |_| None)
+    }
+}
+
+impl Page for PointedCatalog<'_> {
+    /// The catalog as `yunta list` prints it, each workflow led by the
+    /// pointer's place, and the one pointed at by the pointer.
+    fn document(&self, look: &Look) -> Doc {
+        self.catalog.drawn(look, |name| {
+            Some(Lead::Pointer {
+                on: name == self.pointed,
+            })
+        })
+    }
+}
+
+impl Catalog {
+    /// Each broken pack, then each workflow led by what `lead` gives its name;
+    /// where there is neither, where the catalog looked.
+    fn drawn(&self, look: &Look, lead: impl Fn(&str) -> Option<Lead>) -> Doc {
         let mut doc = Doc::new();
         if !self.broken_packs.is_empty() {
             doc = doc.with(Marked {
@@ -83,23 +114,32 @@ impl Page for Catalog {
             }
             return doc;
         }
+        self.offered.iter().fold(doc, |doc, offered| {
+            doc.with(offered.section(lead(&offered.name), look.glyphs))
+        })
+    }
+
+    /// The names of the workflows it offers, in its order: what a pointer
+    /// moves through.
+    pub fn names(&self) -> Vec<&str> {
         self.offered
             .iter()
-            .fold(doc, |doc, offered| doc.with(offered.section(look.glyphs)))
+            .map(|offered| offered.name.as_str())
+            .collect()
     }
 }
 
 impl OfferedWorkflow {
-    /// One workflow the catalog offers: its name and what it does, the
-    /// inputs it takes, how its past runs went, and the command that runs it
-    /// — or why it does not read.
-    fn section(&self, glyphs: surco::glyphs::Glyphs) -> Section {
+    /// One workflow the catalog offers, its title led by `lead`: its name and
+    /// what it does, the inputs it takes, how its past runs went, and the
+    /// command that runs it — or why it does not read.
+    fn section(&self, lead: Option<Lead>, glyphs: surco::glyphs::Glyphs) -> Section {
         let name = self.name.as_str();
         let readable = match &self.workflow {
             Ok(readable) => readable,
             Err(why) => {
                 return Section {
-                    lead: None,
+                    lead,
                     title: Line::new().push(Tone::Strong, name),
                     blocks: why.blocks(),
                 }
@@ -121,7 +161,7 @@ impl OfferedWorkflow {
             }),
         );
         Section {
-            lead: None,
+            lead,
             title,
             blocks: vec![fields.into()],
         }

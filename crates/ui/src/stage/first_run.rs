@@ -4,7 +4,7 @@
 //! workflow for it. A person who comes back once the repository has a run finds its
 //! field in place of the question.
 
-use surco::components::{Note, Region, Screen};
+use surco::components::{Note, Region, Screen, Sight};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::FieldReach;
@@ -57,7 +57,7 @@ impl FirstRunStage {
         if let Some(said) = &self.said {
             doc = doc.with(Note(said.clone()));
         }
-        let mut screen = Screen::new(Region { title: None, doc });
+        let mut screen = Screen::new(Region::new(doc).in_sight(Sight::following_pointer()));
         screen.trail = vec![yunta_render::screen::YUNTA.to_string()];
         screen.legend = yunta_render::screen::first_run_legend();
         screen
@@ -116,11 +116,21 @@ impl FirstRunStage {
             | Outcome::NodePage(_)
             | Outcome::Questions(_)
             | Outcome::Decision(_)
+            | Outcome::Stats(_)
+            | Outcome::History(_)
+            | Outcome::Graph(_)
+            | Outcome::Doctor(_)
+            | Outcome::Collected(_)
             | Outcome::Decided { .. }
             | Outcome::Answered { .. }
             | Outcome::Resumed { .. }
             | Outcome::Cancelled { .. }
             | Outcome::Closed { .. }
+            | Outcome::Detected { .. }
+            | Outcome::Initialized(_)
+            | Outcome::Workflow(_)
+            | Outcome::Pack(_)
+            | Outcome::Evidence(_)
             | Outcome::Stopped => Vec::new(),
         }
     }

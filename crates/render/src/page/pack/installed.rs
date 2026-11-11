@@ -20,7 +20,7 @@ pub struct Installed<'a> {
     /// Where the pack is vendored, as a reader in this directory names it.
     pub at: &'a str,
     pub cases: &'a Cases,
-    pub needs: Needs,
+    pub needs: &'a Needs,
 }
 
 impl Page for Installed<'_> {

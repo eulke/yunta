@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::STOPPED_EXIT_CODE;
 use yunta_core::process::exit::ExitWatch;
 use yunta_core::process::group::{force_kill_group, GroupError};
+use yunta_core::process::SearchPath;
 use yunta_core::{Clock, Pid};
 
 use crate::process_registry::{self, ProcessRegistry};
@@ -42,6 +43,10 @@ use spawn::{spawn_leader, start_pipes};
 pub use state::wait_for_deadline;
 use state::Waited;
 
+/// The search path of a supervision nothing supplies one to: empty, so a
+/// program is left to the child's own search.
+pub static UNSUPPLIED: SearchPath = SearchPath::new(Vec::new());
+
 /// The run context a governed subprocess runs under: who watches it — the
 /// run's registry, so `yunta cancel` finds it, and the token whose firing
 /// kills it — and the variables layered onto its environment (a run's
@@ -60,11 +65,11 @@ pub struct Supervision<'a> {
     /// than read from a mutated process. Empty leaves the child's
     /// environment inherited unchanged.
     pub env: &'a [(String, String)],
-    /// The directories a program is looked up in when `env` sets no `PATH`
-    /// of its own: the ones the environment reads for this process. Empty
-    /// when nothing supplies them, and the program is then left to the
-    /// child's own search.
-    pub path: &'a [PathBuf],
+    /// Where a program is looked up when `env` sets no `PATH` of its own:
+    /// the environment's. Empty when nothing supplies one
+    /// ([`UNSUPPLIED`]), and the program is then left to the child's own
+    /// search.
+    pub path: &'a SearchPath,
     /// What tells the time, for the one thing supervision does with it:
     /// judging whether a lock's holder is still the process that took
     /// it.
@@ -80,7 +85,7 @@ impl<'a> Supervision<'a> {
             registry: None,
             cancel,
             env: &[],
-            path: &[],
+            path: &UNSUPPLIED,
             clock,
         }
     }
@@ -93,7 +98,7 @@ impl<'a> Supervision<'a> {
 
     /// The same supervision, searching `path` for a program when its
     /// variables set no `PATH` of their own.
-    pub fn with_path(self, path: &'a [PathBuf]) -> Self {
+    pub fn with_path(self, path: &'a SearchPath) -> Self {
         Supervision { path, ..self }
     }
 }

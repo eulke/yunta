@@ -58,12 +58,15 @@ pub async fn in_repo(workspace: &Workspace, repo: &Path, stop: &Stop) -> Result<
     })
 }
 
-/// The adapters this machine answers for when `errors` name a runner the
-/// config lacks — the one suggestion that needs them — and none asked for
-/// otherwise.
-pub async fn adapters_for(errors: &[yunta_core::check::CheckError]) -> MachineAdapters {
+/// The adapters this machine answers for, found on `search_path`, when
+/// `errors` name a runner the config lacks — the one suggestion that needs
+/// them — and none asked for otherwise.
+pub async fn adapters_for(
+    errors: &[yunta_core::check::CheckError],
+    search_path: &yunta_core::process::SearchPath,
+) -> MachineAdapters {
     match wants_runner(errors) {
-        true => MachineAdapters::probed(&probe_known_adapters().await),
+        true => MachineAdapters::probed(&probe_known_adapters(search_path).await),
         false => MachineAdapters::default(),
     }
 }

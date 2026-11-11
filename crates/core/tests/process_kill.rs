@@ -6,6 +6,7 @@ use yunta_core::port::AgentEvent;
 use yunta_core::process::mark::SessionMark;
 use yunta_core::process::signal::{liveness, signal_process, Liveness, Signal};
 use yunta_core::process::subprocess::{self, Launch, LineParser};
+use yunta_core::process::SearchPath;
 use yunta_core::{AdapterId, Pid, RunId};
 use yunta_testkit_core::adapter::{child_pid_fifo, grandchild_pid, wait_until_gone};
 
@@ -30,6 +31,7 @@ async fn a_failed_reader_does_not_make_the_kill_of_a_closed_group_fail() {
     let mut session = subprocess::open(Launch {
         adapter: &ADAPTER,
         binary: Path::new("/bin/sh"),
+        search_path: &SearchPath::default(),
         args: vec!["-c".into(), "echo first; sleep 30".into()],
         cwd: dir.path(),
         env: &env,
@@ -102,6 +104,7 @@ async fn a_dropped_session_leaves_no_command_behind() {
     let session = subprocess::open(Launch {
         adapter: &ADAPTER,
         binary: Path::new("/bin/sh"),
+        search_path: &SearchPath::default(),
         args: vec!["-c".into(), starts_two_commands(&under, &orphaned)],
         cwd: dir.path(),
         env: &env,

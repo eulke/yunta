@@ -1,6 +1,7 @@
 //! A workflow's graph as a page, in every environment: as its file declares it,
-//! and as a run that failed on it leaves it. A graph with a group is kept as its
-//! source where a terminal reads no subgraph; one with none is drawn.
+//! and as a run that failed on it leaves it. A group is drawn as a box holding
+//! its nodes, the links to what it holds crossing its edge; a graph with none is
+//! drawn as its chain.
 
 use std::path::{Path, PathBuf};
 

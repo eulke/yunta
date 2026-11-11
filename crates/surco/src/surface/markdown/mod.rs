@@ -186,12 +186,13 @@ fn fields(fields: &Fields) -> String {
 }
 
 /// What leads a section's title, with the space that sets it apart: its
-/// mark, or its place in a numbered list
+/// mark, its place in a numbered list, or the pointer where it stands on it.
 fn lead(section: &Section) -> String {
     match section.lead {
         Some(Lead::Mark(mark)) => format!("{} ", GLYPHS.mark(mark)),
         Some(Lead::Ordinal(at)) => format!("{at}  "),
-        None => String::new(),
+        Some(Lead::Pointer { on: true }) => format!("{} ", GLYPHS.pointer()),
+        Some(Lead::Pointer { on: false }) | None => String::new(),
     }
 }
 
@@ -378,16 +379,27 @@ fn checklist(list: &Checklist) -> String {
         text::item(&head, "  ", &names.join(&sep))
     });
     fold.into_iter()
-        .chain(list.unfolded().map(check_item))
+        .chain(
+            list.unfolded()
+                .map(|check| check_item(check, list.points_at(check))),
+        )
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// One check as a list item: its mark, its subject and what it found,
-/// with what it means, how to make it hold and what says more under it.
-fn check_item(check: &Check) -> String {
+/// One check as a list item: the pointer where it is `pointed` at, its mark,
+/// its subject and what it found, with what it means, how to make it hold and
+/// what says more under it.
+fn check_item(check: &Check, pointed: bool) -> String {
     let subject = plain_text(&crate::text::one_line(&check.subject));
-    let head = format!("- {} **{subject}** ", GLYPHS.mark(check.found.mark()));
+    let pointer = match pointed {
+        true => format!("{} ", GLYPHS.pointer()),
+        false => String::new(),
+    };
+    let head = format!(
+        "- {pointer}{} **{subject}** ",
+        GLYPHS.mark(check.found.mark())
+    );
     let mut row = text::item(&head, "  ", &plain_text(&check.said));
     row.push_str(&hung(check.so.as_deref(), check.fix.as_ref()));
     for detail in check.details.iter().flat_map(|detail| detail.lines()) {

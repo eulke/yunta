@@ -65,7 +65,6 @@ fn what_else_a_decision_shows_is_a_stop_too() {
     let spot = Spot {
         at: 3,
         view: View::Stop,
-        top: 0,
         choice: 0,
     };
     assert!(holds(&read(&reading, &spot), "what was asked"));
@@ -96,7 +95,6 @@ fn what_a_decision_shows_before_its_plan_is_read_before_it() {
     let spot = Spot {
         at: 0,
         view: View::Stop,
-        top: 0,
         choice: 0,
     };
     assert!(holds(&read(&reading, &spot), "what was asked"));

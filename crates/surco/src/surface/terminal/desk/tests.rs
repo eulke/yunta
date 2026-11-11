@@ -2,7 +2,7 @@
 //! hand, and what a row ends in spaces is gone before it is compared.
 
 use crate::components::{
-    ChoiceRow, Desk, DeskFoot, FootRow, Legend, Pane, PaneLaid, RailGroup, RailRow,
+    ChoiceRow, Desk, DeskFoot, FootRow, Laid, Legend, Pane, RailGroup, RailRow, Sight,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::Glyphs;
@@ -35,7 +35,7 @@ fn pointing(rows: usize, at: usize) -> Desk {
     let mut lines = numbered(rows);
     lines[at] = Line::new().plain(format!("{} line {}", Glyphs::Unicode.pointer(), at + 1));
     let mut pointing = desk(lines);
-    pointing.pane.follows_pointer = true;
+    pointing.pane.sight.follows_pointer = true;
     pointing
 }
 
@@ -101,8 +101,7 @@ pub(super) fn desk(lines: Vec<Line>) -> Desk {
             edge: Some("step 1 of 2".to_string()),
             place: Some("task 1 of 2".to_string()),
             doc: Doc::new().with(Block::Lines(lines)),
-            top: 0,
-            follows_pointer: false,
+            sight: Sight::default(),
         },
         foot: DeskFoot {
             question: "Plan registered. Approve?".to_string(),
@@ -167,8 +166,8 @@ fn options_row(cells: usize) -> String {
 }
 
 /// What a desk drawn on a terminal laid out of its pane.
-fn laid_pane(laid: &Placed) -> PaneLaid {
-    laid.pane.expect("a desk lays its pane out")
+fn laid_pane(laid: &Placed) -> Laid {
+    laid.laid.expect("a desk lays its pane out")
 }
 
 #[test]
@@ -284,7 +283,7 @@ fn a_narrow_terminal_has_no_rail_and_the_pane_says_which_task() {
 #[test]
 fn the_pane_scrolls_and_counts_what_is_below_it() {
     let mut scrolled = desk(numbered(30));
-    scrolled.pane.top = 5;
+    scrolled.pane.sight.top = 5;
     let laid = scrolled.drawn(&look(Glyphs::Unicode, 100), 24);
     let text: Vec<String> = laid.lines.iter().map(Line::text).collect();
     let pane = laid_pane(&laid);
@@ -295,7 +294,7 @@ fn the_pane_scrolls_and_counts_what_is_below_it() {
     assert_eq!(pane.most, 16, "its last rows are all in sight from there");
     assert!(body("… 12 more lines"), "{text:#?}");
 
-    scrolled.pane.top = usize::MAX;
+    scrolled.pane.sight.top = usize::MAX;
     let last = scrolled.drawn(&look(Glyphs::Unicode, 100), 24);
     let at_end = laid_pane(&last).top;
     assert_eq!(at_end, 16, "a scroll past the end stops at the end");
@@ -314,7 +313,7 @@ fn the_row_a_pointer_stands_on_stays_in_sight() {
     assert_eq!(top(&pointing(60, 40)), 40);
     assert_eq!(top(&pointing(60, 3)), 0);
     let mut scrolled_past = pointing(60, 3);
-    scrolled_past.pane.top = 30;
+    scrolled_past.pane.sight.top = 30;
     assert_eq!(top(&scrolled_past), 3);
 }
 

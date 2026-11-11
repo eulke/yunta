@@ -79,6 +79,11 @@ pub struct SessionRequest {
     /// other way — and its secrets stay wrapped until the child process
     /// is spawned.
     pub env: SessionEnv,
+    /// Where the adapter finds its CLI when it names it without a
+    /// directory: the `PATH` of the environment the run resolves against,
+    /// which the CLI inherits. Empty in a harness with none, where only a
+    /// CLI named by its path is found.
+    pub search_path: crate::process::SearchPath,
     /// The scope the session's file-tool writes are judged against; what
     /// it may write beyond that is `confinement`. Always present. An
     /// adapter builds as much of it as its CLI can
@@ -280,11 +285,12 @@ pub trait Adapter: Send + Sync {
 
     fn capabilities(&self) -> Capabilities;
 
-    /// Whether the CLI is there and answers `--version` — with a version
-    /// this adapter supports — and every setting it is given is one it
-    /// reads. It opens no session, so it cannot tell whether the CLI's
-    /// credentials hold or it takes the flags a session launches with.
-    async fn probe(&self) -> Result<ProbeReport>;
+    /// Whether the CLI is there, found on `search_path` as a session's
+    /// launch finds it, and answers `--version` — with a version this
+    /// adapter supports — and every setting it is given is one it reads. It
+    /// opens no session, so it cannot tell whether the CLI's credentials
+    /// hold or it takes the flags a session launches with.
+    async fn probe(&self, search_path: &crate::process::SearchPath) -> Result<ProbeReport>;
 
     /// The worktree-relative paths a session opened for `req` writes
     /// for the adapter's own mechanics — a mount, a settings file —
