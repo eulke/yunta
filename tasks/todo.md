@@ -1519,7 +1519,7 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 ### Checkpoint C: the module
 - [x] The spec's ten success criteria, each with its evidence in `after.txt`.
 - [x] The user reviews the proof and the review. (Approved 2026-11-12, U2 left out as recommended.)
-- [ ] The phase commits and is pushed; Task 47 follows, then `cargo clean`.
+- [x] The phase commits and is pushed; Task 47 follows, then `cargo clean`. (Committed `ca951221` on the gate, pushed with Phases 1 and 2.)
 
 ### Task 47: the pull request
 
@@ -1531,10 +1531,10 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 **Found in its turn:** CI's `ci` and `test-macos` jobs were cancelled at their 30 minutes with no test failing: the module's two walks took 406 s on Linux, and 83% of a walk was drawing every reached state's screen to compare it, on one core while the runner's others sat idle. The user chose both: the walk expands the frontier's head on every core and takes what it came to in a one-at-a-time walk's order (the same 22,388 states, 30 palettes, 70 helps and 5,145 screens at each size; the interface's walk 55 s to 19 s and the terminal's 85 s to 44 s on this Mac), and the two jobs' limits rise to 45 minutes. What stayed on one thread in the terminal's walk was mostly Ratatui's constraint solver, whose cache is a feature of Ratatui the workspace had left off: at the user's word it is on (`layout-cache`, which brings `critical-section` 1.2.0, MIT or Apache-2.0, and `cargo deny check` passes), each layout solved once for its size: the terminal's walk takes 22 s, and a drawing at 200×60 0.20 ms where it took 0.45.
 
 **Acceptance criteria:**
-- [ ] CI green on Linux and macOS.
+- [x] CI green on Linux and macOS. (Run 43269266674 at `990e175e`: `ci` in 24 min, `test-macos` in 23.)
 
 **Verification:**
-- [ ] Manual check: `gh pr checks 30`: ci, musl-build, test-release and test-macos pass.
+- [x] Manual check: `gh pr checks 30`: ci, musl-build, test-release and test-macos pass.
 
 **Dependencies:** Checkpoint C
 
