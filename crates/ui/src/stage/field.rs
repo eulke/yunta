@@ -21,7 +21,7 @@ use yunta_core::step::{NextStep, Reach};
 use yunta_core::RunId;
 use yunta_render::page::{Field, FieldGroup, Page};
 
-use super::{Act, CatalogStage, DoctorStage, RunStage, Stage, Want};
+use super::{Act, Want};
 use crate::dialog::Confirmation;
 use crate::prompt::Stroke;
 use crate::{Operation, Outcome};
@@ -186,8 +186,11 @@ impl FieldStage {
                 self.kept_to_listed();
                 Vec::new()
             }
-            Stroke::Insert('w') => vec![Want::Open(Stage::Catalog(CatalogStage::new()))],
-            Stroke::Insert('m') => vec![Want::Open(Stage::Doctor(DoctorStage::new()))],
+            Stroke::Insert('w') => Want::taking(&NextStep::List),
+            Stroke::Insert('m') => Want::taking(&NextStep::Doctor {
+                sessions: false,
+                full: false,
+            }),
             Stroke::Insert('q') | Stroke::Decline | Stroke::Interrupt => vec![Want::Leave],
             _ => Vec::new(),
         }
@@ -364,9 +367,8 @@ impl FieldStage {
     }
 }
 
-/// `run`'s stage opened over the field, where there is a run.
+/// `run` followed in its stage, opened over the field, where there is a run.
 fn opened(run: Option<RunId>) -> Vec<Want> {
-    run.map(|run| Want::Open(Stage::Run(RunStage::of(run))))
-        .into_iter()
-        .collect()
+    run.map(|run| Want::taking(&NextStep::Follow { run }))
+        .unwrap_or_default()
 }

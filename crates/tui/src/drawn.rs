@@ -15,10 +15,6 @@ use surco::width::cell_width;
 use crate::cells;
 use crate::layout::{self, Areas, Beside, Holds, LEAST_COLUMNS, LEAST_ROWS};
 
-/// The cells a margin takes at each side of what is said on a terminal too small for the
-/// application, as on every screen it lays out.
-const ROOM_MARGIN: u16 = 1;
-
 /// `screen` drawn into `frame` in `look`'s glyphs, paint and motion, each part at the
 /// width of the area it stands in; what was laid out of each region and of what is open
 /// over them, for the next key to scroll from.
@@ -59,7 +55,7 @@ pub fn drawn(frame: &mut Frame, screen: &Screen, look: &Look) -> ScreenLaid {
 /// What `screen` holds that takes room on a terminal of `area`, measured from Surco's
 /// lines in `look`.
 fn holds(screen: &Screen, look: &Look, area: Rect) -> Holds {
-    let inner = area.width.saturating_sub(2);
+    let inner = layout::inner_columns(area.width);
     let about = screen
         .about
         .as_ref()
@@ -68,7 +64,7 @@ fn holds(screen: &Screen, look: &Look, area: Rect) -> Holds {
     let overlay = screen.overlay.as_ref().map(|overlay| {
         let columns = layout::box_columns(area.width);
         let whole = terminal(look, columns).boxed(overlay, usize::MAX);
-        cells_or_rows(whole.lines.len().saturating_sub(2))
+        cells_or_rows(whole.lines.len())
     });
     Holds {
         about: cells_or_rows(about),
@@ -145,7 +141,8 @@ fn room_needed(frame: &mut Frame, look: &Look) {
         (usize::from(LEAST_COLUMNS), usize::from(LEAST_ROWS)),
         (usize::from(area.width), usize::from(area.height)),
     );
-    let lines = terminal(look, area.width.saturating_sub(2 * ROOM_MARGIN)).lines(&said);
+    // Inside the margins every screen keeps.
+    let lines = terminal(look, layout::inner_columns(area.width)).lines(&said);
     let widest = lines.iter().map(|line| cell_width(&line.text())).max();
     let left = area.x
         + area

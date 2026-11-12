@@ -3,7 +3,7 @@
 //! edge cuts what passes it, a line past the edge goes on in the rows under it.
 
 use crate::components::{Lead, Section};
-use crate::doc::{Block, Doc};
+use crate::doc::{Block, Doc, Prompt};
 use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
 use crate::surface::Surface;
@@ -42,7 +42,8 @@ mod screen;
 mod scrolled;
 mod table;
 
-/// The cells between what stands at the two ends of a row, when both stand on it.
+/// The cells between what stands at the two ends of a row, when both stand on it: two, so
+/// the gap reads as a parting, where one would read as the space between two words.
 const APART: usize = 2;
 
 /// `left` at the start of `cells` cells and `right` at its far end, with the space between
@@ -150,18 +151,18 @@ impl Terminal {
     /// draws it. A desk lays out columns of its own across every cell it is given;
     /// everything else keeps to the measure of a line.
     fn held_in(&self, block: &Block, columns: usize, rows: usize) -> Placed {
-        match block {
-            Block::Card(card) => card.drawn(&self.look, rows),
-            Block::Desk(desk) => {
+        match block.prompt() {
+            Some(Prompt::Card(card)) => card.drawn(&self.look, rows),
+            Some(Prompt::Desk(desk)) => {
                 let whole = Look {
                     width: Width::exact(columns),
                     ..self.look
                 };
                 desk.drawn(&whole, rows)
             }
-            Block::TypedAnswer(asked) => asked.drawn(&self.look),
-            Block::ChoiceList(list) => list.drawn(&self.look, rows),
-            block => Placed {
+            Some(Prompt::TypedAnswer(asked)) => asked.drawn(&self.look),
+            Some(Prompt::ChoiceList(list)) => list.drawn(&self.look, rows),
+            None => Placed {
                 lines: self.block(block),
                 cursor: None,
                 laid: None,

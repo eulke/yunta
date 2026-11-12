@@ -61,7 +61,7 @@ pub use corpus::{
 pub use events::{
     accepted, baselines, status_changed_carrying, task_registered, task_status_changed, SourceLog,
 };
-pub use held::HeldRun;
+pub use held::{HeldRun, Hold};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use owner::Owner;

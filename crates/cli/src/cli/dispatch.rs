@@ -37,7 +37,7 @@ pub(super) async fn dispatch(
         Some(command) => route(&shell, command, started, output, look).await,
         None if application::opens_here() => {
             let opened = State::opened(shell.workspace().clock.now());
-            match application::opened(&shell, look, opened).await? {
+            match application::at_this_terminal(&shell, look, opened).await? {
                 Some(outcome) => Ok(outcome),
                 None => commands::list::field(&shell, look).await,
             }
@@ -66,7 +66,7 @@ async fn route(
         } => status_command(shell, run, node, depth.depth(), output, look).await,
         Command::Resume { run, .. } => resume_command(shell, run, output, look).await,
         Command::ResolveGate(args) => resolve_gate_command(shell, args, output, look).await,
-        Command::Review { run } => review_command(shell, run, output, look).await,
+        Command::Review { run } => review_command(shell, run, look).await,
         Command::Cancel { run, .. } => cancel_command(shell, run, output, look).await,
         Command::Close { run, by, .. } => close_command(shell, run, by, output, look).await,
         Command::List(args) => list_command(shell, args, output, look).await,
@@ -179,14 +179,10 @@ async fn resolve_gate_command(
     .await
 }
 
-/// `yunta review`: reads the plan the run it names waits on, and answers it.
-async fn review_command(
-    shell: &Shell,
-    run: RunArg,
-    output: Mode,
-    look: &Look,
-) -> Result<Outcome, CliError> {
-    commands::review::review(shell, &run.named(shell).await?, output, look).await
+/// `yunta review`: the plan the run it names waits on, opened in the application at a
+/// terminal, or printed.
+async fn review_command(shell: &Shell, run: RunArg, look: &Look) -> Result<Outcome, CliError> {
+    commands::review::review(shell, &run.named(shell).await?, look).await
 }
 
 /// `yunta cancel`: stops the run it names and its sessions.

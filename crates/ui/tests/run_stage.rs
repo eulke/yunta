@@ -141,9 +141,9 @@ fn going_back_to_the_runs_lets_the_run_go_and_reads_the_field_again() {
     );
 }
 
-/// The run stage open on `run` as `read` says it reads: what the state asked for the
-/// run's following, and the state.
-fn opened_on(read: &FollowedRun) -> (yunta_ui::Ticket, State) {
+/// The run `read` says, opened from the field and followed, as it reads first: the
+/// ticket the state asked its following under, and the state.
+fn followed_from_the_field(read: &FollowedRun) -> (yunta_ui::Ticket, State) {
     let mut state = on_the_field(vec![stopped(&read.run)]);
     let first = following(&state.update(Input::Stroke(Stroke::Enter)));
     state.update(Input::News(first, News::Following(Box::new(read.clone()))));
@@ -156,7 +156,7 @@ fn opened_on(read: &FollowedRun) -> (yunta_ui::Ticket, State) {
 async fn a_node_picked_shows_its_page_and_stops_following() {
     let bench = Bench::with_run_id("01M7N0DEP1CKED000000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let (first, mut state) = opened_on(&followed(&bench).await);
+    let (first, mut state) = followed_from_the_field(&followed(&bench).await);
 
     let asked = state.update(Input::Stroke(Stroke::Enter));
     assert!(asked.contains(&Request::LetGo(first)), "{asked:?}");
@@ -202,7 +202,7 @@ async fn a_node_named_past_the_side_keeps_its_one_row() {
     let named = "name: named\nnodes:\n  - { id: review-at-the-alternate-reviewer, kind: bash, run: \"true\" }\n  \
                  - { id: second, kind: bash, run: \"true\", depends_on: [review-at-the-alternate-reviewer] }\n";
     bench.run(named, NO_SESSIONS).await;
-    let (_, state) = opened_on(&followed(&bench).await);
+    let (_, state) = followed_from_the_field(&followed(&bench).await);
 
     let side = state
         .screen(&Look::plain())
@@ -243,7 +243,7 @@ async fn a_run_asking_at_its_terminal_offers_only_stopping() {
         }),
         words: None,
     };
-    let (_, mut state) = opened_on(&asking);
+    let (_, mut state) = followed_from_the_field(&asking);
 
     let about = state
         .screen(&Look::plain())
@@ -292,7 +292,7 @@ async fn the_ribbon_turns_only_on_a_look_that_moves() {
     running.events.truncate(2);
     running.state = RunState::replay(&running.events);
     running.engine = Engine::this(Pid::current());
-    let (_, state) = opened_on(&running);
+    let (_, state) = followed_from_the_field(&running);
 
     for (motion, plowed) in [(Motion::Moves, true), (Motion::Still, false)] {
         let look = Look {
@@ -317,7 +317,7 @@ async fn a_moving_runs_time_reads_a_second_more_each_time_it_is_handed_in() {
     running.events.truncate(2);
     running.state = RunState::replay(&running.events);
     running.engine = Engine::this(Pid::current());
-    let (_, mut state) = opened_on(&running);
+    let (_, mut state) = followed_from_the_field(&running);
     let across = |state: &State| {
         let about = state
             .screen(&Look::plain())

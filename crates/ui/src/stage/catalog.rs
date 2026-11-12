@@ -21,10 +21,11 @@ use surco::components::{Legend, Note, Region, Screen};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::{Remark, WorkflowCheck};
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::WorkflowName;
 use yunta_render::page::{Catalog, Page, PointedCatalog};
 
-use super::{GraphStage, SchemaStage, Stage, StartStage, StatsStage, Want};
+use super::{Stage, StartStage, Want};
 use crate::dialog::Confirmation;
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
@@ -241,7 +242,7 @@ impl CatalogStage {
             Stroke::Insert('c') => self.checked_asked(),
             Stroke::Insert('g') => self.drawn(),
             Stroke::Insert('h') => self.past_runs(),
-            Stroke::Insert('s') => vec![Want::Open(Stage::Schema(SchemaStage::new()))],
+            Stroke::Insert('s') => Want::taking(&NextStep::Schemas),
             Stroke::Insert('n') => {
                 self.shown = Shown::New(Box::new(NewWorkflowAsked::new()));
                 Vec::new()
@@ -296,7 +297,9 @@ impl CatalogStage {
         let Some(name) = self.pointed.clone() else {
             return Vec::new();
         };
-        vec![Want::Open(Stage::Graph(GraphStage::of_workflow(name)))]
+        Want::taking(&NextStep::Graph {
+            workflow: Arg::Given(name),
+        })
     }
 
     /// The past runs of the workflow pointed at, opened over the catalog, by the name
@@ -304,7 +307,7 @@ impl CatalogStage {
     /// read.
     fn past_runs(&self) -> Vec<Want> {
         match self.pointed_runs_kept_as() {
-            Some(workflow) => vec![Want::Open(Stage::Stats(StatsStage::of_workflow(workflow)))],
+            Some(workflow) => Want::taking(&NextStep::History { workflow }),
             None => Vec::new(),
         }
     }

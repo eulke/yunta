@@ -21,6 +21,7 @@
 //! it, then fail it. So the screen is drawn whole after a suspend by laying it out afresh
 //! at the terminal's size, not by Ratatui's clearing, which asks where the cursor stands.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::io::{self, stdout, Write};
 use std::path::Path;
@@ -29,6 +30,7 @@ use std::sync::{Arc, Mutex};
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use surco::components::ScreenLaid;
 use surco::look::{Look, Width};
@@ -42,6 +44,7 @@ use yunta_ui::{Input, Performer, Request, State};
 use crate::drawn::drawn;
 use crate::full_screen::FullScreen;
 use crate::keys;
+use crate::layout;
 
 /// The application at a terminal, with what it is handed to run: the performer that
 /// carries its work out, the look it draws in, the clock it reads the time from, and what
@@ -145,13 +148,16 @@ impl Application {
             inputs,
             drawing,
             laid: None,
+            on_screen: None,
         };
         if let Some(exit) = running.carried_out(&mut state, asked, false) {
             return Ok(exit);
         }
         tokio::pin!(asked_to_end);
         loop {
-            running.draw(&mut terminal, &mut state)?;
+            if let Some(exit) = running.draw(&mut terminal, &mut state, &mut stdout())? {
+                return Ok(exit);
+            }
             let arrived = tokio::select! {
                 ended = &mut asked_to_end => return Ok(Exit::AskedToEnd(ended)),
                 event = events.next() => match event {
@@ -189,12 +195,14 @@ enum Arrived {
 }
 
 /// The application while it runs: where the performer hands its answers, what a drawing
-/// writes, and what was last laid out of the screen.
+/// writes, what was last laid out of the screen, and the cells last written to the
+/// terminal, which a drawing that changes none of them leaves as they are.
 struct Running<'a> {
     application: &'a Application,
     inputs: UnboundedSender<Input>,
     drawing: Synchronized,
     laid: Option<ScreenLaid>,
+    on_screen: Option<Buffer>,
 }
 
 impl Running<'_> {
@@ -202,7 +210,7 @@ impl Running<'_> {
     /// the screen drawn whole after it, an input handed in; with each request carried out.
     /// How the application ended, where it did.
     fn arrived<E>(
-        &self,
+        &mut self,
         state: &mut State,
         arrived: Arrived,
         (full_screen, terminal): Held<'_>,
@@ -215,6 +223,8 @@ impl Running<'_> {
             Arrived::Event(Event::Key(key)) if keys::suspends(key) => {
                 full_screen.suspend()?;
                 drawn_afresh(terminal)?;
+                // The terminal cleared: the next drawing is written whole.
+                self.on_screen = None;
                 return Ok(None);
             }
             Arrived::Event(Event::Key(key)) => keys::stroke(key).into_iter().collect(),
@@ -231,17 +241,19 @@ impl Running<'_> {
         Ok(None)
     }
 
-    /// Each of `asked` carried out through the performer, a page shown and a failure to
-    /// show it handed back; how the application ended where one asked it to leave, after a
-    /// Ctrl-C where it was `interrupted`.
+    /// Each of `asked` carried out through the performer in the order it was asked, a page
+    /// shown and a failure to show it handed back, what that asks carried out after; how the
+    /// application ended where one asked it to leave, after a Ctrl-C where it was
+    /// `interrupted`. Leaving comes last: what the state asks before it, such as letting go
+    /// of the work under way, is carried out first.
     fn carried_out<E>(
         &self,
         state: &mut State,
         asked: Vec<Request>,
         interrupted: bool,
     ) -> Option<Exit<E>> {
-        let mut waiting = asked;
-        while let Some(request) = waiting.pop() {
+        let mut waiting = VecDeque::from(asked);
+        while let Some(request) = waiting.pop_front() {
             match self.application.performer.take(request, &self.inputs) {
                 Some(Request::Leave) => {
                     return Some(match interrupted {
@@ -260,26 +272,40 @@ impl Running<'_> {
         None
     }
 
-    /// The state's screen drawn, and what was laid out of it handed back where it changed,
-    /// drawn again with what that asks.
-    fn draw(&mut self, terminal: &mut Drawing, state: &mut State) -> io::Result<()> {
+    /// The state's screen drawn and written to `out` as one update, or nothing where it
+    /// changes no cell of what the terminal shows; and what was laid out of it handed back
+    /// where it changed, with what that asks carried out: how the application ended, where
+    /// that asked it to leave.
+    fn draw<E>(
+        &mut self,
+        terminal: &mut Drawing,
+        state: &mut State,
+        out: &mut impl Write,
+    ) -> io::Result<Option<Exit<E>>> {
         let look = self.application.look;
         let mut laid = ScreenLaid::default();
-        terminal.draw(|frame| {
-            let columns = usize::from(frame.area().width.saturating_sub(2));
+        let completed = terminal.draw(|frame| {
+            let columns = usize::from(layout::inner_columns(frame.area().width));
             let screen = state.screen(&Look {
                 width: Width::exact(columns),
                 ..look
             });
             laid = drawn(frame, &screen, &look);
         })?;
-        self.drawing.written(&mut stdout())?;
-        if self.laid != Some(laid) {
-            self.laid = Some(laid);
-            let asked = state.update(Input::Laid(laid));
-            let _: Option<Exit<()>> = self.carried_out(state, asked, false);
+        let cells = completed.buffer.clone();
+        match self.on_screen.as_ref() == Some(&cells) {
+            true => self.drawing.discarded(),
+            false => {
+                self.drawing.written(out)?;
+                self.on_screen = Some(cells);
+            }
         }
-        Ok(())
+        if self.laid == Some(laid) {
+            return Ok(None);
+        }
+        self.laid = Some(laid);
+        let asked = state.update(Input::Laid(laid));
+        Ok(self.carried_out(state, asked, false))
     }
 }
 
@@ -293,8 +319,8 @@ fn drawn_afresh(terminal: &mut Drawing) -> io::Result<()> {
 }
 
 /// What a drawing writes, held until it ends, then written to the terminal whole as one
-/// synchronized update, or nothing at all where the drawing changed no cell. The backend
-/// writes into it and the loop writes it out: two handles on one hold.
+/// synchronized update, or discarded where the drawing changed no cell. The backend writes
+/// into it and the loop writes it out: two handles on one hold.
 #[derive(Clone, Default)]
 struct Synchronized {
     drawing: Arc<Mutex<Vec<u8>>>,
@@ -316,6 +342,16 @@ impl Synchronized {
             .and_then(|()| out.flush())?;
         drawing.clear();
         Ok(())
+    }
+}
+
+impl Synchronized {
+    /// What the drawing held, dropped unwritten.
+    fn discarded(&self) {
+        self.drawing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
     }
 }
 

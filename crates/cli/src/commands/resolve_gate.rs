@@ -24,7 +24,7 @@ use yunta_render::document::GateAnswerDocument;
 use yunta_render::page::{GateAnswered, Page, QuestionsAnswered, Resolution, RoundAnswer};
 use yunta_render::prompt::Escape;
 use yunta_render::refusal::Refused;
-use yunta_ui::prompt::{DecisionPut, Opens};
+use yunta_ui::prompt::DecisionPut;
 
 use crate::ask::{Console, NoAnswer};
 use crate::error::CliError;
@@ -181,7 +181,7 @@ async fn answered_round(
 /// What a person at the menu did, carried through: recorded and handed back, or the page
 /// that says nothing was. Who the command line names stands over who answered at the
 /// menu, and the words typed at the menu over the command line's.
-pub(super) async fn settled(
+async fn settled(
     project: &Project,
     run_id: &RunId,
     chosen: Chosen,
@@ -285,20 +285,19 @@ async fn chosen(project: &Project, run_id: &RunId) -> Result<Chosen, CliError> {
     let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
         return Err(off_terminal(run_id, &waiting.escalation));
     };
-    chosen_on(&console, project, run_id, &waiting, Opens::TheCard)
+    chosen_on(&console, project, run_id, &waiting)
 }
 
 /// The option a person picks off the menu `run_id` waits on, put to them on `console`:
-/// the decision's documents above its card, opened the way `opens` says.
-pub(super) fn chosen_on(
+/// the decision's documents above its card, the plan's desk a key away.
+fn chosen_on(
     console: &Console,
     project: &Project,
     run_id: &RunId,
     waiting: &WaitingDecision,
-    opens: Opens,
 ) -> Result<Chosen, CliError> {
     let put = DecisionPut::waiting(run_id, waiting);
-    match crate::ask::decide(console, &project.workspace.env, &put, opens) {
+    match crate::ask::decide(console, &project.workspace.env, &put) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => Ok(Chosen::Not(Resolution::Declined)),
         Err(NoAnswer::Interrupted) => Ok(Chosen::Not(Resolution::Interrupted)),

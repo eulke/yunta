@@ -171,6 +171,30 @@ block_from!(
     Lines(Vec<Line>),
 );
 
+/// A block a person answers while it is held: what a terminal fits to the rows it has,
+/// with the cursor where it is typed into. Not [`Block`], which is whatever a document
+/// says; a block is one of these only as [`Block::prompt`] sees it.
+pub enum Prompt<'a> {
+    Card(&'a Card),
+    Desk(&'a Desk),
+    TypedAnswer(&'a TypedAnswer),
+    ChoiceList(&'a ChoiceList),
+}
+
+impl Block {
+    /// This block as the prompt a person answers, when it is one: a card, a desk, a typed
+    /// answer or a choice list.
+    pub fn prompt(&self) -> Option<Prompt<'_>> {
+        match self {
+            Block::Card(card) => Some(Prompt::Card(card)),
+            Block::Desk(desk) => Some(Prompt::Desk(desk)),
+            Block::TypedAnswer(asked) => Some(Prompt::TypedAnswer(asked)),
+            Block::ChoiceList(list) => Some(Prompt::ChoiceList(list)),
+            _ => None,
+        }
+    }
+}
+
 /// What a surface says: its blocks, in the order a reader reads them.
 #[derive(Default)]
 pub struct Doc {
@@ -212,16 +236,12 @@ impl Doc {
         })
     }
 
-    /// Where the prompt a person answers in this document stands: the first block a
-    /// terminal holds while it is answered, a card, a desk, a typed answer or a choice
-    /// list. A pane holds it fitted to the rows the other blocks leave.
+    /// Where the prompt a person answers in this document stands: its first block that is
+    /// a [`Prompt`]. A pane holds it fitted to the rows the other blocks leave.
     pub fn prompt_at(&self) -> Option<usize> {
-        self.blocks.iter().position(|block| {
-            matches!(
-                block,
-                Block::Card(_) | Block::Desk(_) | Block::TypedAnswer(_) | Block::ChoiceList(_)
-            )
-        })
+        self.blocks
+            .iter()
+            .position(|block| block.prompt().is_some())
     }
 
     /// What this document says, as blocks another document can hold.

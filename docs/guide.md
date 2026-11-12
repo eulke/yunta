@@ -680,6 +680,30 @@ optional: no mode drops it, but a project may have nothing to run for it. `yunta
 check` refuses `optional` on a child of a `parallel` group, and on a node another
 node the run keeps reroutes to or reads from.
 
+## The application at a terminal
+
+`yunta` alone, at a terminal that draws, opens Yunta's application on the field of the
+repository's runs, the run that needs you first. Through a pipe, or with `TERM=dumb`, it
+prints the field as `yunta list --runs` does. Outside a repository it opens on what to run
+instead; in a repository Yunta was never set up in, on its setup; in one with no run yet,
+on the first run, which asks what to build.
+
+The application follows runs and never runs one: a run it starts is handed to an engine
+of its own, as `yunta run --detach` hands it, and the application reads its log as
+`yunta status <run> --follow` does. Leaving leaves every run where it stands.
+
+The last row says the keys of the screen; `?` lists every key it takes, and `/` opens the
+palette: what can be done from here, each row the command that does the same at a shell,
+narrowed by what is typed, `enter` taking a row. On the field, `enter` opens the run
+pointed at, `w` the workflows and `m` doctor. On a run, `a` answers what it waits on and
+`p` reads the plan it waits on, where it does; `s` and `g` open its numbers and its graph,
+`o` its page in a browser, and `e` the receipt of a run that finished. `esc` goes back where you came from, and `q` leaves. Ctrl-C leaves with
+the code an interrupt exits with, and Ctrl-Z stops it as any program, `fg` bringing it
+back.
+
+It needs 60 columns by 14 rows, and says so under them. It never takes the mouse:
+selecting and copying text works as at the shell.
+
 ## Reviewing what a gate approves
 
 A gate can put what it asks about in front of you. `shows:` names artifacts the
@@ -783,8 +807,9 @@ forge the page ends on the question, what weighs on it and each option with what
 `abort` reads `Pause here`: nothing runs, and the decision stays open, so the next resume
 asks again.
 
-`r` opens the plan on the terminal's other screen, and `yunta review <run>` opens it on
-a run parked on the decision. `j` and `k` go from task to task, the arrows, `PgUp`,
+`r` opens the plan on the terminal's other screen, and `yunta review <run>` opens the
+application on it, over the run and the field, for a run parked on the decision: `esc`
+there goes back to the run, then the field. `j` and `k` go from task to task, the arrows, `PgUp`,
 `PgDn` and `space` move what is being read, and the mouse's wheel does too, with
 selecting text still working. `p` turns a task's card over to what proves it, and `d`
 shows what was decided, what the plan risks and what it leaves out. A number chooses an

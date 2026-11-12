@@ -11,9 +11,10 @@
 //! step before came to. What the terminal is told is Surco's escapes, as the CLI tells it;
 //! crossterm puts it in raw mode and back.
 //!
-//! A process in a group no shell controls is not stopped by `SIGTSTP`: the kernel discards
-//! it, and the application goes on at once, holding the terminal again. A test's process
-//! is in such a group; a shell's job is not.
+//! Under a shell's job control the process stops on `SIGTSTP` until `fg` sends it on. In a
+//! process group no shell controls the kernel discards the signal, and the application goes
+//! on at once, holding the terminal again. A test runs in either, so it sends what `fg`
+//! sends while it waits.
 
 use std::io::{stdout, Write};
 use std::panic::{self, PanicHookInfo};
@@ -65,6 +66,12 @@ impl Drop for FullScreen {
     fn drop(&mut self) {
         // best-effort: a terminal that cannot be given back has nobody left to tell.
         let _ = give_back();
+        // A thread a panic unwinds through may not touch the panic hook: the hook the
+        // holding installed stays, giving back a terminal already given back, then saying
+        // any later panic as the hook it found does.
+        if std::thread::panicking() {
+            return;
+        }
         if let Some(found) = self.found.take() {
             drop(panic::take_hook());
             panic::set_hook(Box::new(move |info| found(info)));

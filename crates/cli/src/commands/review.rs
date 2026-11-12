@@ -1,48 +1,45 @@
-//! `yunta review <run>`: reads the plan a run waits on a decision about, in full screen at
-//! a terminal, and answers it there the way `resolve-gate` does. Off a terminal it prints the
-//! plan and the commands that answer it.
+//! `yunta review <run>`: the plan a run waits on a decision about. At a terminal it opens the
+//! application on the plan, over the run and the field, as a person walks there, and the
+//! decision is answered there the way `resolve-gate` answers it. Off a terminal it prints the
+//! plan and the commands that answer it. Wherever it shows the plan, its checks come first:
+//! the run found, the decision it waits on read, a plan among what that decision shows.
 
 use surco::look::Look;
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
-use yunta_render::command;
 use yunta_render::page::{desk, Review};
-use yunta_render::prompt::Escape;
-use yunta_ui::prompt::Opens;
+use yunta_render::refusal::Refused;
+use yunta_ui::State;
 
-use super::resolve_gate::{chosen_on, settled};
-use crate::ask::Console;
+use crate::application;
 use crate::error::CliError;
-use crate::output::Mode;
 use crate::output::Outcome;
 use crate::shell::Shell;
-use crate::surface::Diagnostics;
 
-/// Reads and answers the plan `run_id` waits on.
-pub async fn review(
-    shell: &Shell,
-    run_id: &RunId,
-    output: Mode,
-    look: &Look,
-) -> Result<Outcome, CliError> {
+/// The plan `run_id` waits on, opened in the application at a terminal, or printed.
+pub async fn review(shell: &Shell, run_id: &RunId, look: &Look) -> Result<Outcome, CliError> {
     let project = shell.workspace().project()?;
     let waiting = project.run(run_id).await?.waiting_decision().await?;
     let Some((plan, _)) = desk::plan_among(&waiting.shown) else {
-        return Err(CliError::msg(format!(
-            "run {} waits on a decision that shows no plan; `{}` says what it does show",
-            run_id.handle(),
-            command::line(&NextStep::status(run_id))
-        )));
+        let run = run_id.clone();
+        return Err(Refused::NoPlan { run }.into());
     };
-    let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
-        let page = Review {
-            plan,
-            run_id,
-            escalation: &waiting.escalation,
+    if application::opens_here() {
+        let reviewed = NextStep::Review {
+            run: run_id.clone(),
         };
-        crate::output::show(look, &page);
-        return Ok(Outcome::Success);
+        let now = shell.workspace().clock.now();
+        if let Some(opened) = State::opened_on(now, &reviewed) {
+            if let Some(outcome) = application::at_this_terminal(shell, look, opened).await? {
+                return Ok(outcome);
+            }
+        }
+    }
+    let page = Review {
+        plan,
+        run_id,
+        escalation: &waiting.escalation,
     };
-    let chosen = chosen_on(&console, &project, run_id, &waiting, Opens::ThePlan)?;
-    settled(&project, run_id, chosen, None, None, output, look).await
+    crate::output::show(look, &page);
+    Ok(Outcome::Success)
 }

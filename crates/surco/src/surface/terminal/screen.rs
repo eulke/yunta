@@ -12,7 +12,8 @@ use crate::width::cell_width;
 impl Terminal {
     /// Where the person is, from the outermost place, the first strong and the rest
     /// plain, and the tally at the row's end, each count with its standing's mark, in its
-    /// tone. A row too short for both cuts the trail and keeps the tally whole.
+    /// tone. A row too short for both cuts the trail and keeps the tally whole where the
+    /// tally fits; a tally wider than the row is cut.
     pub fn trail(&self, trail: &[String], tally: &[Count]) -> Line {
         let glyphs = self.look.glyphs;
         let cells = self.look.width.cells();

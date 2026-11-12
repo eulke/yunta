@@ -265,20 +265,21 @@ impl Console {
         }
     }
 
-    /// Hides the cursor, once, so [`Console::restore`] knows there is one to put back.
-    pub(crate) fn hide_cursor(&self) -> std::io::Result<()> {
-        if !self.hidden.swap(true, Ordering::AcqRel) {
-            self.term.write_str(HIDE_CURSOR)?;
-        }
-        Ok(())
-    }
-
     /// Shows the cursor again, when it is hidden: one put-back for one taking-away.
     pub(crate) fn show_cursor(&self) -> std::io::Result<()> {
-        if self.hidden.swap(false, Ordering::AcqRel) {
-            self.term.write_str(SHOW_CURSOR)?;
+        self.term.write_str(self.cursor_escape(true))
+    }
+
+    /// What leaves the cursor shown where `shown` and hidden elsewhere, for a drawing to
+    /// write inside its own update, so a terminal never shows a frame with the cursor of the
+    /// one before: the escape where the cursor changes, nothing where it already stands so.
+    /// A cursor hidden is one [`Console::restore`] knows to put back.
+    pub(crate) fn cursor_escape(&self, shown: bool) -> &'static str {
+        match (shown, self.hidden.swap(!shown, Ordering::AcqRel)) {
+            (true, true) => SHOW_CURSOR,
+            (false, false) => HIDE_CURSOR,
+            _ => "",
         }
-        Ok(())
     }
 
     /// Puts the terminal on its other screen, once, with the cursor at its first cell and
@@ -418,9 +419,11 @@ mod tests {
     #[test]
     fn the_console_a_prompt_opened_is_handed_back_by_the_process_exactly_once() {
         let console = console();
-        console
-            .hide_cursor()
-            .expect("a test's stderr takes the cursor's hiding");
+        assert_eq!(
+            console.cursor_escape(false),
+            HIDE_CURSOR,
+            "a prompt hides it"
+        );
         *prompted_on() = Some(console.clone());
 
         restore_terminal();

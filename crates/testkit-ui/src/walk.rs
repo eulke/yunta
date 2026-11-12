@@ -1,9 +1,11 @@
-//! The walk: from the application as it opens, every stroke, what a terminal of a few
-//! rows laid out of the screen, each page a surface could not show, and every recorded
-//! piece of news and answer of each piece of work a state waits on, applied to every
-//! state it reaches, each state once by its
-//! screen and the kinds of work it waits on. Its clock stands still at one instant: what
-//! time changes on a screen is each stage's own tests'.
+//! The walk: from the application as it opens, and as it opens on each step the
+//! recordings answer the opening of ([`Recordings::opened_on`]), every stroke, what a
+//! terminal of a few rows laid out of the screen, each page a surface could not show, and
+//! every recorded piece of news and answer of each piece of work a state waits on, applied
+//! to every state it reaches. Each state is walked once, kept by its screen, the kinds of
+//! work it waits on, the rows its regions are scrolled to and the stages it has yet to
+//! open. Its clock stands still at one instant: what time changes on a screen is each
+//! stage's own tests'.
 //!
 //! The walk holds only what every walk needs: that it ends, that no input panics, and
 //! that every piece of work a state asks for is one the recordings answer. What a surface
@@ -110,15 +112,34 @@ impl<'r> Walk<'r> {
         }
     }
 
-    /// Every state reachable from the application as it opens, walked breadth first, each
-    /// held by `checks` as it is reached and as an input is handed to it; how many states
-    /// it reached. The frontier holds one ring of the walk at a time.
+    /// Every state reachable from the application as it opens, then from it opened on
+    /// each step the recordings name, each state held by `checks` as it is reached and as
+    /// an input is handed to it; how many states it reached. Each opening is walked whole
+    /// before the next: a state is kept by what shows, so walking them side by side would
+    /// let an opening on a step reach first a screen the opening reaches, with other
+    /// stages under it, and leave unwalked what only the opening's way on from it reaches.
     pub fn walked(mut self, checks: &mut impl Checks) -> usize {
-        let (opened, requests) = State::opened(now());
-        self.recordings.carried_out(&requests, &self.opening());
-        let first = self
-            .reached(&opened, None, "opened".to_string(), checks)
-            .expect("the application as it opens is the first state reached");
+        let opened_on = self.recordings.opened_on().iter().map(|step| {
+            let opened = State::opened_on(now(), step).expect("a stage takes the step");
+            (format!("opened on {step:?}"), opened)
+        });
+        let openings: Vec<_> = [("opened".to_string(), State::opened(now()))]
+            .into_iter()
+            .chain(opened_on)
+            .collect();
+        for (opening, (opened, requests)) in openings {
+            self.recordings
+                .carried_out(&requests, &self.opening(&opening));
+            if let Some(first) = self.reached(&opened, None, opening, checks) {
+                self.walked_from(first, opened, checks);
+            }
+        }
+        self.steps.len()
+    }
+
+    /// Every state reachable from `opened`, reached at `first`, walked breadth first. The
+    /// frontier holds one ring of the walk at a time.
+    fn walked_from(&mut self, first: usize, opened: State, checks: &mut impl Checks) {
         let mut frontier = VecDeque::from([(first, opened)]);
         while let Some((at, state)) = frontier.pop_front() {
             for input in self.inputs(&state) {
@@ -139,15 +160,14 @@ impl<'r> Walk<'r> {
                 }
             }
         }
-        self.steps.len()
     }
 
-    /// How the walk stands before the application opens.
-    fn opening(&self) -> Reached<'_> {
+    /// How the walk stands before the application opens as `opening` says.
+    fn opening(&self, opening: &str) -> Reached<'_> {
         Reached {
             steps: &self.steps,
             last: None,
-            then: vec!["opened".to_string()],
+            then: vec![opening.to_string()],
         }
     }
 
@@ -162,7 +182,8 @@ impl<'r> Walk<'r> {
 
     /// `state`, reached by `input` handed to the state at `from`, where it is new: its
     /// place among the steps, once `checks` hold it. Nothing where a state with the same
-    /// screen waiting on the same kinds of work was reached first.
+    /// screen, waiting on the same kinds of work, scrolled to the same rows, with the same
+    /// stages yet to open, was reached first.
     fn reached(
         &mut self,
         state: &State,
@@ -188,8 +209,11 @@ impl<'r> Walk<'r> {
             screen.main.sight.top,
             screen.side.as_ref().map(|side| side.region.sight.top),
         );
+        // The stages a step opened the application on, which no screen shows before it
+        // first stands somewhere: each opening's own.
+        let to_open = format!("{:?}", state.stages_to_open());
         let mut fingerprint = DefaultHasher::new();
-        (&markdown, kinds, tops).hash(&mut fingerprint);
+        (&markdown, kinds, tops, to_open).hash(&mut fingerprint);
         if !self.seen.insert(fingerprint.finish()) {
             return None;
         }

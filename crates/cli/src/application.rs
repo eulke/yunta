@@ -32,7 +32,7 @@ pub(crate) fn opens_here() -> bool {
 /// how the process exits once the person leaves or a signal asks it to end; none where the
 /// terminal would not be held, which is printed to instead. A terminal that failed once
 /// the application was open is the command's failure.
-pub(crate) async fn opened(
+pub(crate) async fn at_this_terminal(
     shell: &Shell,
     look: &Look,
     opened: (State, Vec<Request>),

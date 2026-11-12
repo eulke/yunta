@@ -12,8 +12,8 @@
 //! - `application`: the loop, as [`Application`]; how it ended, as [`Exit`], and how the
 //!   terminal failed it, as [`TerminalFailure`]: the terminal held, what arrives handed
 //!   in, the work carried out, the screen drawn.
-//! - `layout`: where each part of a screen stands on a terminal, by the reference's rules,
-//!   with Ratatui's `Layout`.
+//! - `layout`: where each part of a screen stands on a terminal, with Ratatui's `Layout`:
+//!   the rows from the trail to the legend, the margins, the side region and the box.
 //! - `cells`: Surco's lines written into Ratatui's cells, in the colors of Surco's one
 //!   table.
 //! - `keys`: what a key or a paste means to the application, by the CLI's table: a

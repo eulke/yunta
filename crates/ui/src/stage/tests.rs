@@ -1,9 +1,10 @@
 //! A stage takes what its own work came to, and leaves what another run's came to,
 //! which reaches it only because it stands where the person is when the answer comes.
 
+use yunta_core::step::NextStep;
 use yunta_core::RunId;
 
-use super::{DecisionStage, RunStage, Want};
+use super::{DecisionStage, RunStage, Stage, StatsStage, Want};
 use crate::prompt::Opens;
 use crate::Outcome;
 
@@ -39,4 +40,17 @@ fn a_run_follows_again_only_once_its_own_run_goes_on() {
     );
     let own = stage.answered(Outcome::Resumed { run: this_run() });
     assert_eq!(own.len(), 2, "its following and its page, read again");
+}
+
+/// A run's step opens the stage that shows what its command shows, through the one
+/// mapping every stage and every opening reads: `review` the run's decision open on its
+/// plan, `stats` the run's numbers.
+#[test]
+fn a_run_s_step_opens_the_stage_that_shows_it() {
+    let review = Stage::opened_by(&NextStep::Review { run: this_run() });
+    let on_its_plan = Stage::Decision(DecisionStage::of(this_run(), Opens::ThePlan));
+    assert_eq!(format!("{review:?}"), format!("{:?}", Some(on_its_plan)));
+    let stats = Stage::opened_by(&NextStep::Stats { run: this_run() });
+    let its_numbers = Stage::Stats(StatsStage::of_run(this_run()));
+    assert_eq!(format!("{stats:?}"), format!("{:?}", Some(its_numbers)));
 }

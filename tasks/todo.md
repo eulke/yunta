@@ -1038,7 +1038,7 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 Decided at the checkpoint:
 - A followed run's page keeps its head in sight; the chronicle's newest lines stand below it until the person scrolls.
 - The binary's growth stands; the performer's paths it carries are open work in `.agents/open.md`.
-- Opening asks git for the repository twice: its fix is Task 35a, in this list's next phase.
+- Opening looks the repository up twice, two git processes where the printed field runs one (said as four at the checkpoint): its fix is Task 35a, in this list's next phase.
 
 ## Phase 3: deciding, `review`, starting, every stage, and the proof
 
@@ -1059,11 +1059,15 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** `stage/tests.rs`: `opened_by` of a run's `Review` is the run's decision on its plan, and of `Stats` the run's stats; both are none at the base.
 
+**Found in its turn:**
+- Three more steps open a stage: `Follow`, which the field offers on a run and which the start's run is followed by; a workflow's `History`; and its `Graph`, when it names one. They join the mapping, and the field's `enter`, the start's run and the catalog's `g` and `h` route through it with `Want::opening`.
+- The start with a workflow picked stays built by the catalog and the first run: it needs the catalog already read, which no step carries.
+
 **Acceptance criteria:**
-- [ ] No stage builds a stage a step opens but through `opened_by`; every test passes unchanged, and the walk's counts equal Phase 2's.
+- [x] No stage builds a stage a step opens but through `opened_by`; every test passes unchanged, and the walk's counts equal Phase 2's (21,814 states, 30 palettes, 70 helps).
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui`
+- [x] Tests pass: `cargo test -p yunta-ui`
 
 **Dependencies:** Checkpoint B
 
@@ -1086,11 +1090,16 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 - `esc` reaches the run, and `esc` again the field;
 - opened on `Cancel`, it is none.
 
+**Found in its turn:**
+- The desk opened on `review` equals the desk a person reaches from the run with `p`, the run's own `review`, not through the card: there `esc` goes back to the card, here it leaves the run waiting. The test compares with that walk, which `yunta_testkit_ui::screens::walked_to` gives, the one way every screen of the screens' world is reached now.
+- Which run a step names is core's: `NextStep::run`, said for every step, so a new one has to say it.
+- The application stacks the stages a step opens over wherever it first stands: the field, the first run, the signpost or the setup.
+
 **Acceptance criteria:**
-- [ ] Opening on a step asks nothing `opened` and the stages' openings do not ask.
+- [x] Opening on a step asks nothing `opened` and the stages' openings do not ask: each stage opens over the last as a person's step opens it.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test state --test run_stage`
+- [x] Tests pass: `cargo test -p yunta-ui --test state --test run_stage`
 
 **Dependencies:** Task 32
 
@@ -1106,11 +1115,17 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** the walk, with the required lists grown before it opens on the step: it never reaches them.
 
+**Found in its turn:**
+- **The home had no run parked on a plan.** It gains one, `reviewing` (`…REV1EW`), standing apart as `deciding` and `asking` do, since every run the field lists multiplies the walk. The planned workflow, its planner and its config move from the screens' world to `planned.rs`, which both make their run with. Its decision is recorded, and the steps the application is opened on are the recordings' own (`Recordings::opened_on`), so every walk opens on the same ones.
+- **A state opened on a step looks like the plain opening until it first stands somewhere.** It shows the same screen and waits on the same work, so the walk kept only one of them. The state says how many stages it has yet to open (`State::stages_to_open`), and the walk counts it.
+- **Walked side by side, the openings lost states.** A state is kept by what shows, so the opening on `review` reached first some screens the plain opening reaches with other stages under them. About 300 screens the plain walk reaches, the start, the packs, upkeep and a workflow's history among them, went unwalked: 20,923 states. Each opening is now walked whole before the next.
+- Two required screens: the plan opened on `review`, whose `esc` leaves the run waiting, and that run's own screen reached back from it.
+
 **Acceptance criteria:**
-- [ ] The walk's counts are recorded beside Phase 2's.
+- [x] The walk's counts are recorded beside Phase 2's: 21,814 states at Phase 2; 22,199 with the plan's decision recorded; 22,388 opened on `review` as well. The terminal's walk draws 5,145 screens on each terminal, in 79 s.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test walk`, `cargo test -p yunta-tui --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test walk`, `cargo test -p yunta-tui --test walk`
 
 **Dependencies:** Task 33
 
@@ -1125,11 +1140,13 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** none: a move. Its guard is `plan_desk.rs`'s `review_refuses_a_run_that_waits_on_no_plan_and_says_what_serves` passing unchanged, and the captures.
 
+**Found in its turn:** the refusal is `Refused::NoPlan { run }`, worded beside `NoDecision`. A person's page and an agent's document are the ones a plain message drew: the sentence, no advice, no blocks, the same exit code.
+
 **Acceptance criteria:**
-- [ ] `review.rs` writes no sentence.
+- [x] `review.rs` writes no sentence.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test plan_desk`, `cargo test -p yunta-render`
+- [x] Tests pass: `cargo test -p yunta --test plan_desk`, `cargo test -p yunta-render`
 
 **Dependencies:** Task 34
 
@@ -1140,27 +1157,29 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 ### Task 35a: the repository asked once as the application opens
 
 **Description:**
-- **What happens now:** opening asks `Operation::ReadRepository`, whose `Project::repository` runs `Here::of`: `git rev-parse --git-common-dir`, then the run branches. Once the repository is set up it asks `Operation::Field`, whose `Project::field` runs `Here::of` again. Four git processes before the field shows, where the printed field runs two; a git costs about 8 ms here.
-- **What should happen:** the application's opening runs git as the printed field does, twice, and so does going back to the field.
+- **What happens now:** opening asks `Operation::ReadRepository`, whose `Project::repository` runs `Here::of`: where the repository's git directory is, which `.git` says without git, then the runs' branches, `git for-each-ref`. Once the repository is set up it asks `Operation::Field`, whose `Project::field` runs `Here::of` again. Two git processes before the field shows, where the printed field runs one; a git costs about 8 ms here.
+- **What should happen:** the application's opening runs git as the printed field does, once.
 - **Which assumption might be wrong:** that `repository` needs the run branches at all. It needs only to know whether there is a repository and whether Yunta's layer is in it.
-- The way is chosen in the task, the owner of the rule being the API: a reading of the field that says the repository it was asked in, or a lookup the field takes from the repository's answer. No git result is cached across readings, since a person may branch between two.
+- The owner is the API. No git result is cached across readings, since a person may branch between two.
 
-**Fails first:** `crates/ui/tests/state.rs` (or the performer's tests), on a workspace whose `PATH` has a git that counts its runs and hands each to the real git (`yunta_testkit::stubs`): from `State::opened` to the field on screen, git ran four times; it must run two.
+**Fails first:** `crates/ui/tests/state.rs`, on a workspace whose `PATH` has the testkit's `git` stub, which logs each run and hands it to the real git: from `State::opened` to the field on screen, git ran twice; it must run once.
+
+**Found in its turn:** Checkpoint B said four git processes where two would do. The git directory is read off `.git` without a process, so it was two where one would do. `Project::repository` now asks only for the git directory (`git_common_dir`, which `Here::of` reads too), and the runs' branches are the field's alone.
 
 **Acceptance criteria:**
-- [ ] Opening on the field runs git twice; the first screen's time, from a rest, is no slower than Checkpoint B's 73.7 ms.
+- [x] Opening on the field runs git once; the first screen's time, from a rest, is no slower than Checkpoint B's 73.7 ms: 65.7 and 65.1 ms against `yunta-watching`'s 73.8 and 73.1, alternating (`proof/tui/first-screen-step-1.txt`), and under the base's 70.7.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api -p yunta-ui`; `first_screen_shown.py` against `yunta-watching`.
+- [x] Tests pass: `cargo test -p yunta-api -p yunta-ui`; `first_screen_shown.py` against `yunta-watching`.
 
 **Dependencies:** Task 35
 
-**Files likely touched:** `crates/api/src/field.rs`, `crates/ui/src/{state.rs,operation.rs,performer.rs}`, a test of `crates/ui/tests/`
+**Files likely touched:** `crates/api/src/field.rs`, `crates/ui/tests/state.rs`
 
 **Estimated scope:** S
 
 ### Group check: opening on a step
-- [ ] The suite's groups green; the captures equal Phase 2's.
+- [x] The suite's groups green; the captures equal Phase 2's. (`group-step-1.txt`: 158 views, only bare `yunta` at a pty differs from the base, as at Phase 2; 247 goldens, the same 7 changed; 4,839 tests, none gone but the one the testkit's split moved.)
 
 ### Task 36: deciding in the application, at a pty against the mock
 
@@ -1172,11 +1191,16 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** each test seen red with the decision stage's answer dropped for the run: nothing reaches the log.
 
+**Found in its turn:**
+- The gate, the round, the plan with its planner and their configs now live once, in `yunta_testkit::workflows`: the interface's, the desk's and the walk's home's tests read them from there, each as it was. The walk's planned run stays in `testkit-ui`: its plan's words are the target frames'.
+- At 80 columns the desk has no rail of its tasks, as the CLI's desk on a narrow terminal: the test reads its keys.
+- A run's `events.jsonl` reaches its end after the store does: the tests read the log once it says `run_finished`, as the interface's do.
+
 **Acceptance criteria:**
-- [ ] Each answer reads back with `yunta status` as `resolve-gate` leaves it.
+- [x] Each answer reads back with `yunta status` as `resolve-gate` leaves it: on the log, and the run finished.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test application deciding`
+- [x] Tests pass: `cargo test -p yunta --test application deciding`
 
 **Dependencies:** Group check: opening on a step
 
@@ -1200,11 +1224,16 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** the new tests against the base's `review`: `esc` at the desk leaves the command instead of reaching the run.
 
+**Found in its turn:**
+- `review` takes no output mode: it has no `--json` or `--quiet`, and nothing it prints went through one once `settled` left it. Where no stage took its step, it would print as off a terminal, so it holds no `expect`.
+- Its help says it opens the application on the plan, over the run and the field.
+- A run parked on its plan reads `needs you` in `yunta status`.
+
 **Acceptance criteria:**
-- [ ] Off a terminal, `review` prints what the base prints; an unknown run is refused as the base refuses it.
+- [x] Off a terminal, `review` prints what the base prints; an unknown run is refused as the base refuses it. (The group check's captures: only `review` at a pty differs among `review`'s; it finds its run before it opens anything, as at the base.)
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test application review`, `cargo test -p yunta --test plan_desk`
+- [x] Tests pass: `cargo test -p yunta --test application review`, `cargo test -p yunta --test plan_desk`
 
 **Dependencies:** Task 36
 
@@ -1221,11 +1250,13 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** none: a parameter every caller passes the same. Its guard is `plan_desk.rs`'s card tests and `console_interaction`'s passing unchanged.
 
+**Found in its turn:** with `review` gone from them, `chosen_on` and `settled` are `resolve-gate`'s alone and private to it. `ask::decide` names `Opens::TheCard` once, where the CLI's card opens.
+
 **Acceptance criteria:**
-- [ ] No CLI caller names `Opens`.
+- [x] No CLI caller names `Opens`.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test plan_desk --test console_interaction`
+- [x] Tests pass: `cargo test -p yunta --test plan_desk --test console_interaction`
 
 **Dependencies:** Task 37
 
@@ -1234,7 +1265,7 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 **Estimated scope:** S
 
 ### Group check: deciding and `review`
-- [ ] The suite's groups green; every capture equal to the base's but bare `yunta` and `review` at a pty, each shown beside the base's.
+- [x] The suite's groups green; every capture equal to the base's but bare `yunta` and `review` at a pty, each shown beside the base's. (`group-decide.txt`, captures in `decide/`: 158 views, 4 differ, bare `yunta` and `review` at a pty, and `review` decides there and leaves with 0. The two `review` scenarios wait on one word, since a drawing skips the blank between two, and type `q` only where the process still reads; re-captured with them, the base equals base-1. 4,843 tests: `review`'s two pty tests moved from `plan_desk.rs` to `application/review.rs` under what they now hold, and one moved with the testkit's split.)
 
 ### Task 39: starting in the application, at a pty against the mock
 
@@ -1245,11 +1276,17 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** each test seen red with the start's work dropped for the run: no run is listed.
 
+**Found in its turn:**
+- **From the field a run starts through the catalog:** `w`, then `enter` on a workflow, which opens the start with it picked; `n` on the field is the run that waits on the person. Picked there, the start asks each input by its name.
+- **The first run answers what it asks once it read the repository's workflows**, which it shows under the question: an `enter` that comes before does nothing, so the test waits for them as a person sees them.
+- **The engine the application starts stays in the terminal's session**, as one `yunta run --detach` starts from a shell does: its standard streams are null and its log, and the terminal closes only once it ends. The harness tells the run's process ended apart from the terminal closing (`Terminal::exited`), and a guard lets the held run go however the test ends, so a failing test never hangs on it.
+- The requesting workflow lives once, in `yunta_testkit::workflows::GREETS`.
+
 **Acceptance criteria:**
-- [ ] Each run started is detached and listed by `yunta list`.
+- [x] Each run started is detached and listed by `yunta list`: an engine of its own, which goes on once the application leaves.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test application starting`
+- [x] Tests pass: `cargo test -p yunta --test application starting`
 
 **Dependencies:** Group check: deciding and `review`
 
@@ -1268,11 +1305,18 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** each test seen red with its stage's row taken out of the palette for the run.
 
+**Found in its turn:**
+- Over the field, `yunta list` is the field's own act (`w`), so taking the rows every stage offers out of the palette leaves it there. The red takes the catalog's and the shapes' steps out of the palette whole. Setup opens on its own, not from the palette; its red is its write dropped.
+- A row is reached by its whole name, which the palette ranks over any row it only starts: `yunta list` over the field's `yunta list --runs …`.
+- An `escape` that a letter follows at once reads as that letter with Alt, so the tests wait for the stage the escape goes back to before the next key.
+- `yunta schema` prints a shape's words as YAML's comments, which the application says as text: the test compares the words.
+- Setup escaped through writes what `yunta init` writes; `new` from the catalog writes what `yunta new` writes, its first shape `one-node`, as `new` picks off a terminal.
+
 **Acceptance criteria:**
-- [ ] What each stage writes reads back as its command writes it.
+- [x] What each stage writes reads back as its command writes it.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test application repository`
+- [x] Tests pass: `cargo test -p yunta --test application repository`
 
 **Dependencies:** Task 39
 
@@ -1294,11 +1338,18 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** each test seen red with its stage's row taken out of the palette, or its act unbound, for the run.
 
+**Found in its turn:**
+- **A page is unshown only when no opener can start:** the opener is spawned and not waited on. The application runs on a `PATH` that holds the real git and, where a page is shown, a stand-in opener that records it, so no test opens a browser (`stubs::path_opening_no_browser`).
+- Off a terminal, `yunta open` says where the page is; the page the application handed the opener is that one.
+- Upkeep has a run to collect only where the repository keeps its runs no day (`storage.retention_days: 0`), and the run collected is gone as `yunta gc` leaves it.
+- Over the field, doctor is the field's own act (`m`), as the catalog is: the red takes its step out of the palette whole. Doctor's findings are read by their headline, the rest falling below the region.
+- The test of the repository's git lookups counts through `stubs::git_counting`, which the testkit already had.
+
 **Acceptance criteria:**
-- [ ] The page shown is the one `yunta open` names; the page not shown is said in render's words.
+- [x] The page shown is the one `yunta open` names; the page not shown is said in render's words.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test application runs_left machine`
+- [x] Tests pass: `cargo test -p yunta --test application runs_left machine`
 
 **Dependencies:** Task 40
 
@@ -1307,7 +1358,7 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 **Estimated scope:** M
 
 ### Group check: starting and every stage
-- [ ] The suite's groups green; every stage reached in the application at a pty.
+- [x] The suite's groups green; every stage reached in the application at a pty. (`group-stages.txt`: 4,854 tests, none gone but the two `review` tests moved and the one the testkit's split moved; 158 views, the same four differ; 247 goldens, the same seven changed. At a pty: the signpost, setup, the first run, the field, a run, a decision on its card and at the desk, `review`, a start, a run's numbers, graph, receipt and page shown and not shown, the catalog with its check, a new workflow and the cases, the packs listed and audited, doctor, upkeep and its collection, and a document's shape.)
 
 ### Task 42: the docs
 
@@ -1321,11 +1372,13 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** none: the docs. `docs_sync.rs` holds the README's command table and every output the docs quote to the binary, and `doc_claims.rs` holds the reference to the schemas.
 
+**Found in its turn:** `.agents/architecture.md`'s rows for `yunta-tui` and `yunta-testkit-ui` already read true of the closed module, so it is unchanged. The map says what each module delivers, with no mark for a closed one: the `tui` row says what it delivered and what it added to `yunta-ui` and Surco.
+
 **Acceptance criteria:**
-- [ ] `cargo xtask docs --check` passes with every cap unchanged.
+- [x] `cargo xtask docs --check` passes with every cap unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test docs_sync --test doc_claims`; `cargo xtask docs --check`
+- [x] Tests pass: `cargo test -p yunta --test docs_sync --test doc_claims`; `cargo xtask docs --check`
 
 **Dependencies:** Group check: starting and every stage
 
@@ -1334,7 +1387,7 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 **Estimated scope:** S
 
 ### Group check: the docs
-- [ ] The suite's groups green; `cargo xtask docs --check` passes.
+- [x] The suite's groups green; `cargo xtask docs --check` passes. (Only docs changed since the group check before, whose groups are green: `docs_sync` and `doc_claims` green, `docs --check` and `smells --check` hold.)
 
 ### Task 43: the proof
 
@@ -1348,10 +1401,10 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 **Fails first:** none: a measurement.
 
 **Acceptance criteria:**
-- [ ] Every difference from the base is one this list names.
+- [x] Every difference from the base is one this list names. (`proof/tui/after.txt`: three base tests gone, each moved or rewritten under what it now holds; four views differ, bare `yunta` and `review` at a pty; seven goldens changed, Surco's catalog with its rows.)
 
 **Verification:**
-- [ ] Manual check: `after.txt` read whole.
+- [x] Manual check: `after.txt` read whole.
 
 **Dependencies:** Group check: the docs
 
@@ -1367,11 +1420,13 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** none: a measurement.
 
+**Found in its turn:** the quick mode's only gate is `ship`, answered `abort` on its card in the application as Task 30 answered it with `resolve-gate`: the log records it `by unverified:sandbox`, the pty's user (`follow_and_answer.py`).
+
 **Acceptance criteria:**
-- [ ] `between_secs` inside the base's spread; every gate answered in the application is on the run's log.
+- [x] `between_secs` inside the base's spread; every gate answered in the application is on the run's log. (0.562214 against the base's 0.559435.)
 
 **Verification:**
-- [ ] Manual check: the run's numbers in `after.txt`.
+- [x] Manual check: the run's numbers in `after.txt`.
 
 **Dependencies:** Task 43
 
@@ -1387,10 +1442,10 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 **Fails first:** none: measurements.
 
 **Acceptance criteria:**
-- [ ] A frame under 2 ms; the first screen within 20 ms of the base's; the binary under 40 MiB.
+- [x] A frame under 2 ms; the first screen within 20 ms of the base's; the binary under 40 MiB. (0.45 ms; 66 ms against the base's 70 to 72, from a rest; 30,583,392 bytes.)
 
 **Verification:**
-- [ ] Manual check: the numbers in `after.txt`.
+- [x] Manual check: the numbers in `after.txt`.
 
 **Dependencies:** Task 44
 
@@ -1410,11 +1465,50 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 
 **Fails first:** none: a review.
 
+**Found in its turn:** 35 findings; 26 fixed, 9 rejected with their reason, U2 by the user.
+- Surco:
+  - S1, a prompt short of rows took the rows of the blocks under it, where the doc said they stand whole. Fixed in the doc, not the rule: truncating the prompt instead, as first decided, hid the cursor of an open field under a long note, which the terminal's walk caught at 60×14. The pane's doc and its test now say what stands under a prompt gives way from its end when the prompt needs its rows (`what_stands_under_a_prompt_short_of_rows_gives_way_from_its_end`).
+  - S2, a choice list held in fewer rows than its least drew more: its keys now give way, then the list's end (`a_list_short_of_rows_keeps_to_them_and_its_keys_give_way`, red first).
+  - S3, a legend of one key wider than its row was not cut: it is now (`one_key_wider_than_its_row_is_cut`, red first).
+  - S4, the prompt kinds were listed in `prompt_at` and in `held_in`: `doc::Prompt`, which `Block::prompt` gives, is the one list, and `held_in` matches it whole.
+  - S5, S6, S8: the trail's doc says a tally wider than the row is cut; the box's says it takes at least its two sides; `APART` says why it is two.
+  - S7 rejected: `Paned` and `Placed` hold different frames (a pane's cursor counted from its top, a laid region always), each named apart in its doc.
+  - S9 rejected: both spellings reach the one item at its one path.
+- `yunta-tui`:
+  - T1, `carried_out` took the state's requests last first, so leaving ran before letting go of the work under way: in order now (`what_the_state_asks_is_carried_out_in_order_leaving_last`, red first).
+  - T2, a panic unwinding through the held terminal panicked again in its drop: the drop leaves the hook alone while unwinding (`a_panic_unwinding_through_the_holding_gives_the_terminal_back_and_goes_on`, red first).
+  - T3, a drawing that changed no cell still wrote the cursor's escapes every tick: the loop keeps the last buffer and discards a drawing equal to it (`a_drawing_that_changes_no_cell_writes_nothing`, without stripping escapes; a mutation that keeps the old buffer after a suspend fails `after_ctrl_z`).
+  - T4 rejected: the box hides what is under it, the attention row with the rest, and gives it back when it closes.
+  - T5: the colors' doc names the five of the terminal's sixteen Surco paints with.
+  - T6: `draw`'s doc says what a layout hands back carries out, and how it ends where that asks to leave; the dropped `Exit` is gone with T1's change.
+  - T7: one rule for the margin, `layout::inner_columns`, read by the loop and by the drawing, and one for the box's width, `box_columns`, read by `boxed`; `Holds::overlay` holds the box's whole rows, so its edges are counted in Surco alone.
+  - T8: `saturating_add` where what a screen is about takes its blank row.
+  - T9: the layout's docs say the rules themselves, and why the least terminal is 60×14, without naming a reference.
+- `yunta-ui` and the walk:
+  - U1, two openings with as many stages to open were one state to the walk, so the second was never walked: `stages_to_open` gives the stages, which the walk keeps each opening by (`openings_on_two_steps_differ_by_the_stages_they_have_yet_to_open`, red first).
+  - U2 rejected by the user at Checkpoint C: the stack under a stage is not in the walk's key, so a `Decline` from the second way to a screen is not walked. Measured: by kind, 22,388 states become 34,351 and the ui walk takes 97 s, not 55; by the stages whole, it passes its bound of 40,000. No check failed on the states it added, and going back the way a person walked is held by the state's and each stage's own tests.
+  - U3, U4: the misplaced doc of `laid` is back over it; the walk's doc names all four things it keeps a state by.
+  - U5: `Want::opening(step)` is `Want::taking(step)`, apart from `Stage::opening`, what a stage asks as it opens.
+  - U6 rejected: the test claims the screen's time at the state's cadence, and the loop reads the same constant.
+- The binary and its tests:
+  - B1: an interrupt from outside ends the application with 130 and a hang-up with 129 (two tests; a mutation mapping both to a terminate fails them).
+  - B2: the Ctrl-Z test under a shell's job control: the process stops for real there, so the tests send what `fg` sends while they wait (`Terminal::go_on`); proven under `bash -i`, where it hung before.
+  - B3: `FINISHES` has one home in the testkit's workflows; the palette's helper and following a closed run sit at the tests' root; `Hold`, in the testkit, is the marks a held run says and hears by, which `HeldRun` and the start from the field share, and which gives the word to go on when dropped.
+  - N1: `application::opened` is `application::at_this_terminal`.
+  - N2 rejected: `review` prints its page where the application does not open, as its help says.
+  - N3: the opener is reaped in a thread of its own (`openers_reaped.py`: one ended opener left behind before, none after).
+  - N4 rejected: the signal handlers outlive the application only for the moments before the process exits.
+  - N5 rejected: the stand-in opener names the system's opener as the binary does, and a difference fails the opener's tests loudly.
+  - N6: `process_id`'s doc says it once.
+  - N7 rejected: `EndSignal` is the shell's, which listens for it; the output maps it to a code.
+  - N8: a terminal a process the run started holds open fails the test at the deadline, in `ended` and in the drop (`a_terminal_a_process_the_run_started_holds_open_fails_rather_than_hangs`, red first).
+- Found by the group check after the fixes, in the base's code: the CLI's inline hold wrote the cursor's escape after its frame's synchronized update, so a terminal showed the new frame with the cursor of the one before, and `r_opens_the_desk_on_the_other_screen_and_esc_comes_back_to_the_card` failed under the batch's load. The frame now writes the cursor's state inside its own update (`Console::cursor_escape`): 3 of 80 runs failed from ten workers at once before (`stress_binary.py`), 0 of 80 after.
+
 **Acceptance criteria:**
-- [ ] Every finding is recorded here with its decision.
+- [x] Every finding is recorded here with its decision.
 
 **Verification:**
-- [ ] Tests pass: the suite's groups after the fixes.
+- [x] Tests pass: the suite's groups after the fixes. (4,865 tests, none failed, none aborted: the engine's groups once the fixes were in, `crates` and the CLI's again after the cursor's fix; fmt, clippy, smells and the docs check pass.)
 
 **Dependencies:** Task 45
 
@@ -1423,8 +1517,8 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 **Estimated scope:** M
 
 ### Checkpoint C: the module
-- [ ] The spec's ten success criteria, each with its evidence in `after.txt`.
-- [ ] The user reviews the proof and the review.
+- [x] The spec's ten success criteria, each with its evidence in `after.txt`.
+- [x] The user reviews the proof and the review. (Approved 2026-11-12, U2 left out as recommended.)
 - [ ] The phase commits and is pushed; Task 47 follows, then `cargo clean`.
 
 ### Task 47: the pull request

@@ -37,20 +37,30 @@ impl TypedAnswer {
 impl ChoiceList {
     /// The list in at most `rows` rows: what was typed over it and the options it leaves,
     /// in the rows the keys under it leave. A key line that wraps takes from the list.
+    /// Short of rows for the least of the list beside its keys, the keys give way, as a
+    /// card's do, and then the list's end.
     pub fn drawn(&self, look: &Look, rows: usize) -> Placed {
         let cells = look.width.cells();
         let keys = Line::new()
             .push(Tone::Muted, self.legend.spelled(look.glyphs))
             .wrap(cells);
-        let room = rows.saturating_sub(keys.len());
-        let mut lines = narrowed(
-            self.choices.as_ref(),
-            self.filter.as_deref(),
-            look,
-            cells,
-            room,
-        );
-        lines.extend(keys);
+        let listed = |budget| {
+            narrowed(
+                self.choices.as_ref(),
+                self.filter.as_deref(),
+                look,
+                cells,
+                budget,
+            )
+        };
+        let mut lines = listed(rows.saturating_sub(keys.len()));
+        match lines.len() + keys.len() <= rows {
+            true => lines.extend(keys),
+            false => {
+                lines = listed(rows);
+                lines.truncate(rows);
+            }
+        }
         Placed {
             lines,
             cursor: None,

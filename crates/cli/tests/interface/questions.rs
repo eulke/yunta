@@ -4,38 +4,17 @@
 
 use super::*;
 
+use yunta_testkit::workflows::{ASKS, EXECUTOR_ON_THE_MOCK, HANDS_ONE_QUESTION_OVER};
 use yunta_testkit::{full_run_id, run_id_from, runs_root, wait_until, yunta_at, Checkout};
-
-/// Every node runs on the mock adapter.
-const CONFIG: &str = "defaults:\n  isolation: none\nrunners:\n  executor:\n    \
-                      - { adapter: mock, model: mock-model }\n";
-
-/// A node that asks: its session hands a round of questions over and ends.
-const ASKS: &str = "name: asking\nnodes:\n  - id: ask\n    kind: prompt\n    runner: executor\n    \
-                    prompt: \"Ask what has to be known.\"\n    artifacts:\n      produces: [questions]\n";
-
-/// The session that hands one question over.
-const HANDS_THEM_OVER: &str = r#"
-dialect: claude-code
-sessions:
-  - steps:
-      - type: run_tool
-        tool: yunta_submit_questions
-        arguments:
-          document:
-            questions:
-              - { id: summary, text: "What changed?", answer_type: text, required: true }
-    outcome: { type: completed, summary: asked }
-"#;
 
 /// A run parked on its round, answered in the application, goes on to its end with
 /// the answer on its log.
 #[tokio::test]
 async fn a_parked_round_answered_is_resumed_with_its_answers() {
     let checkout = Checkout::new()
-        .config(CONFIG)
+        .config(EXECUTOR_ON_THE_MOCK)
         .workflow("wf", ASKS)
-        .file("fixture.yaml", HANDS_THEM_OVER)
+        .file("fixture.yaml", HANDS_ONE_QUESTION_OVER)
         .committed();
     let arguments = [
         "run",

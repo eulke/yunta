@@ -93,9 +93,10 @@ impl Project {
 
     /// The repository this project works in, as far as Yunta goes: what decides
     /// whether its field is that repository's runs, and whether Yunta was set up
-    /// in it.
+    /// in it. It reads only where the repository's git directory is, which `.git`
+    /// says without a git process; which runs have a branch there is the field's.
     pub async fn repository(&self, stop: &Stop) -> Result<Repository, Error> {
-        if Here::of(self, stop).await?.is_none() {
+        if git_common_dir(self, stop).await?.is_none() {
             return Ok(Repository::Absent);
         }
         let layer = crate::project::repository_layer(&self.workspace.dir);
@@ -151,18 +152,14 @@ struct Here {
 }
 
 impl Here {
-    /// The repository `project` is rooted in, or `None` outside one — where
-    /// every run is listed, since there is no project to narrow to. Only
-    /// git's own non-zero exit says so: a stopped or unstartable git is not
-    /// an answer.
+    /// The repository `project` is rooted in, with the runs that have a branch
+    /// there, or `None` outside one — where every run is listed, since there is
+    /// no project to narrow to.
     async fn of(project: &Project, stop: &Stop) -> Result<Option<Self>, Error> {
-        let workspace = &project.workspace;
-        let common = yunta_engine::git::common_dir(&workspace.dir, workspace.supervision(stop));
-        let git_common_dir = match common.await {
-            Ok(dir) => dir,
-            Err(error) if matches!(error.cause, Cause::Exit { .. }) => return Ok(None),
-            Err(error) => return Err(error.into()),
+        let Some(git_common_dir) = git_common_dir(project, stop).await? else {
+            return Ok(None);
         };
+        let workspace = &project.workspace;
         let branches = yunta_engine::git::run_branches(&workspace.dir, workspace.supervision(stop));
         let branches = match branches.await {
             Ok(branches) => branches,
@@ -183,6 +180,18 @@ impl Here {
             Some(project) => project == self.git_common_dir,
             None => self.branches.contains(run_id),
         }
+    }
+}
+
+/// The git directory the repository `project` works in shares with its worktrees, or
+/// none outside a repository. Only git's own non-zero exit says so: a stopped or
+/// unstartable git is not an answer.
+async fn git_common_dir(project: &Project, stop: &Stop) -> Result<Option<PathBuf>, Error> {
+    let workspace = &project.workspace;
+    match yunta_engine::git::common_dir(&workspace.dir, workspace.supervision(stop)).await {
+        Ok(dir) => Ok(Some(dir)),
+        Err(error) if matches!(error.cause, Cause::Exit { .. }) => Ok(None),
+        Err(error) => Err(error.into()),
     }
 }
 

@@ -7,6 +7,8 @@
 //!   instant every test stands at.
 //! - [`driving`]: a state driven with its performer until it waits on nothing.
 //! - [`home`]: the places the walk's recordings are made in.
+//! - `planned`: a run parked on its plan's gate, which the screens' world and the home
+//!   each make.
 //! - [`recorded`]: each kind of work the application asks for, performed once where it
 //!   reads something different, and what it found and came to.
 //! - [`walk`]: every state the application reaches, answered from the recordings, each
@@ -17,6 +19,7 @@
 
 pub mod driving;
 pub mod home;
+mod planned;
 pub mod recorded;
 pub mod sandbox;
 pub mod screens;

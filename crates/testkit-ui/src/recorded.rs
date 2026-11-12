@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::sync::mpsc;
 use yunta_api::{FieldReach, Repository, RunRequest, Workspace};
+use yunta_core::step::NextStep;
 use yunta_core::{
     Answer, InputName, NodeId, OptionId, PackRef, QuestionId, WorkflowName, WorkflowShape,
 };
@@ -21,8 +22,12 @@ use crate::home::{root_of, Home};
 use crate::sandbox::{now, workspace, workspace_on};
 use crate::walk::Reached;
 
-/// What each kind of operation found and came to where it was performed.
-pub struct Recordings(Vec<(OperationKind, Recorded)>);
+/// What each kind of operation found and came to where it was performed, and the steps
+/// the application is also opened on, whose openings they answer.
+pub struct Recordings {
+    kinds: Vec<(OperationKind, Recorded)>,
+    opened_on: Vec<NextStep>,
+}
 
 /// What operations of one kind found while they lasted, and what they came to.
 #[derive(Default)]
@@ -35,10 +40,22 @@ impl Recordings {
     /// Every kind of operation the application asks for, performed in `home`: every
     /// reading first, then the acts that change a run.
     pub async fn made(home: &Home) -> Recordings {
-        let mut made = Recordings(Vec::new());
+        let reviewed = NextStep::Review {
+            run: home.reviewing.run_id.clone(),
+        };
+        let mut made = Recordings {
+            kinds: Vec::new(),
+            opened_on: vec![reviewed],
+        };
         made.readings(home).await;
         made.acts(home).await;
         made
+    }
+
+    /// The steps the application is also opened on, beside its opening: `review` of the
+    /// home's run parked on its plan.
+    pub fn opened_on(&self) -> &[NextStep] {
+        &self.opened_on
     }
 
     /// Every reading the application asks for, performed where it reads something
@@ -166,6 +183,11 @@ impl Recordings {
             run: home.asking.run_id.clone(),
         };
         self.kept(performed(asking.0, asking.1, round).await);
+        let reviewing = (home.reviewing.worktree.as_path(), root_of(&home.reviewing));
+        let on_its_plan = Operation::ReadDecision {
+            run: home.reviewing.run_id.clone(),
+        };
+        self.kept(performed(reviewing.0, reviewing.1, on_its_plan).await);
         for (run, node) in [
             (home.worked.run_id.clone(), "only"),
             (home.parked.clone(), "approve"),
@@ -272,7 +294,7 @@ impl Recordings {
     /// Every page a piece of work wrote for a surface to show: what the walk tells each
     /// state a surface could not show.
     pub fn pages_written(&self) -> Vec<PathBuf> {
-        self.0
+        self.kinds
             .iter()
             .flat_map(|(_, recorded)| &recorded.outcomes)
             .filter_map(|outcome| match outcome {
@@ -298,7 +320,7 @@ impl Recordings {
 
     fn recorded(&self, operation: &Operation) -> Option<&Recorded> {
         let kind = operation.kind();
-        self.0
+        self.kinds
             .iter()
             .find(|(recorded, _)| *recorded == kind)
             .map(|(_, recorded)| recorded)
@@ -307,14 +329,18 @@ impl Recordings {
     /// What `operation` found and came to, kept under the operation's kind.
     fn kept(&mut self, (operation, news, outcome): (Operation, Vec<News>, Outcome)) {
         let kind = operation.kind();
-        let at = match self.0.iter().position(|(recorded, _)| *recorded == kind) {
+        let at = match self
+            .kinds
+            .iter()
+            .position(|(recorded, _)| *recorded == kind)
+        {
             Some(at) => at,
             None => {
-                self.0.push((kind, Recorded::default()));
-                self.0.len() - 1
+                self.kinds.push((kind, Recorded::default()));
+                self.kinds.len() - 1
             }
         };
-        let recorded = &mut self.0[at].1;
+        let recorded = &mut self.kinds[at].1;
         recorded.news.extend(news);
         recorded.outcomes.push(outcome);
     }

@@ -7,11 +7,8 @@ use super::*;
 
 use surco::components::Note;
 use surco::doc::Block;
+use yunta_testkit::workflows::GREETS;
 use yunta_testkit::{runs_root, stderr, wait_until, yunta_at, Checkout};
-
-/// A workflow that takes what was asked for as its request.
-const GREETS: &str = "name: greet\ninputs:\n  ask: { type: string, request: true }\nnodes:\n  \
-                      - { id: say, kind: bash, run: \"true\" }\n";
 
 /// A workflow that takes what was asked for, and whom to greet, which nothing defaults.
 const NAMES: &str = "name: named\ninputs:\n  ask: { type: string, request: true }\n  \

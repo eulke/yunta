@@ -303,7 +303,7 @@ Inside a phase, each group of work ends green before the next begins, with what 
   - `State::opened_on`, with one mapping from a step to its stage;
   - back past an opening to where the application opens;
   - each in the walk's required lists;
-  - the repository asked once as the application opens: two git processes, as the printed field runs, where Checkpoint B measured four.
+  - the repository asked once as the application opens: one git process, as the printed field runs, where it runs two.
 - **Decide:** a gate and a round answered in the application, in a pty against the mock.
 - **`review`:**
   - it opens the application on the plan, its checks first;

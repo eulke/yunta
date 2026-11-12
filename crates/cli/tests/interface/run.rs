@@ -61,7 +61,7 @@ async fn followed_through(
 /// file beside its markers, once it has opened its lines: the follower, and where it
 /// writes.
 fn followed_through_a_pipe(held: &HeldRun) -> (Child, PathBuf) {
-    let written = held.marks().join("followed.txt");
+    let written = held.hold.marks().join("followed.txt");
     let pipe = std::fs::File::create(&written).unwrap();
     let follower = held
         .checkout
@@ -93,7 +93,7 @@ async fn a_run_followed_to_its_end_says_each_moment_as_a_piped_follower_does() {
     let (mut state, _) = drive(opened, asked, &performer, &[]).await;
 
     let asked = state.update(Input::Stroke(Stroke::Enter));
-    followed_through(&mut state, asked, &performer, || held.let_go()).await;
+    followed_through(&mut state, asked, &performer, || held.hold.let_go()).await;
 
     assert!(process.wait().unwrap().success(), "the run finishes");
     assert!(

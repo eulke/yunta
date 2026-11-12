@@ -24,7 +24,9 @@ impl Terminal {
     /// `region` drawn in a pane `rows` high, at this look's width, which is the pane's. A
     /// region whose document holds a prompt draws the blocks under the prompt whole, the
     /// blocks above it in at most half of what those leave, giving way from their top, and
-    /// holds the prompt in the rest; any other region scrolls from its sight.
+    /// holds the prompt in the rest; a prompt that cannot be asked in the rest takes the
+    /// rows it needs from the blocks under it, which give way from their end. Any other
+    /// region scrolls from its sight.
     pub fn pane(&self, region: &Region, rows: usize) -> Paned {
         self.paned(&region.doc, region.sight, rows)
     }
@@ -54,6 +56,9 @@ impl Terminal {
             .cursor
             .map(|(row, cell)| (row + kept_above, cell))
             .filter(|(row, _)| *row < rows);
+        // A prompt given fewer rows than it can be asked in still draws those: what stands
+        // under it gives way from its end, since what a person answers, and the row they
+        // type on, stay in sight.
         let mut lines = above;
         lines.extend(held.lines);
         lines.extend(below);

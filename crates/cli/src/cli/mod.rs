@@ -132,8 +132,8 @@ enum Command {
     ResolveGate(ResolveGateArgs),
     /// Read the plan a parked run waits on, and answer it.
     ///
-    /// A full screen of the plan at a terminal: its tasks a key apart, what proves each and
-    /// what was decided. Off a terminal it prints the plan and the commands that answer it.
+    /// At a terminal it opens the application on the plan, over the run and the field. Off a
+    /// terminal it prints the plan and the commands that answer it.
     Review {
         #[command(flatten)]
         run: RunArg,

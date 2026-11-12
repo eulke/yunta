@@ -5,14 +5,12 @@
 use std::path::Path;
 
 use surco::paint::{ALT_SCREEN_OFF, ALT_SCREEN_ON};
+use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::{
     stdout, wait_until, yunta_in, yunta_on_terminal, yunta_on_terminal_sized, Checkout,
 };
 
 use super::{given_back, opened, THE_FIELD};
-
-/// One node that finishes, on no adapter.
-const FINISHES: &str = "name: done\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n";
 
 /// A word of the field, which a drawing writes whole: it moves the cursor over the spaces
 /// between words rather than write them.
@@ -53,6 +51,24 @@ fn a_terminate_ends_it_with_the_terminal_given_back() {
     assert_eq!(given_back(&mut terminal), Some(143));
 }
 
+/// An interrupt from outside, as `kill -INT` sends, ends it as Ctrl-C does.
+#[test]
+fn an_interrupt_from_outside_ends_it_with_the_code_an_interrupt_exits_with() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = opened(&with_a_run(root.path()));
+    terminal.interrupt();
+    assert_eq!(given_back(&mut terminal), Some(130));
+}
+
+/// The terminal hung up, as closing its window does: it ends with the terminal given back.
+#[test]
+fn a_hang_up_ends_it_with_the_terminal_given_back() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = opened(&with_a_run(root.path()));
+    terminal.hang_up();
+    assert_eq!(given_back(&mut terminal), Some(129));
+}
+
 #[test]
 fn a_resize_lays_it_out_again_and_too_little_room_says_what_it_needs() {
     let root = tempfile::tempdir().unwrap();
@@ -75,8 +91,8 @@ fn a_resize_lays_it_out_again_and_too_little_room_says_what_it_needs() {
 
 /// Ctrl-Z gives the terminal back before the process stops and holds it again after,
 /// drawing the field whole on the other screen, where the application goes on until it is
-/// left. Under the harness the process is in a group no shell controls, which the kernel
-/// stops on no `SIGTSTP`, so it goes on at once.
+/// left. The test sends what `fg` sends while it waits, which a shell's job control needs
+/// and a group no shell controls does not.
 #[test]
 fn ctrl_z_gives_the_terminal_back_and_holds_it_again() {
     let root = tempfile::tempdir().unwrap();
@@ -84,6 +100,7 @@ fn ctrl_z_gives_the_terminal_back_and_holds_it_again() {
     terminal.keys("\u{1a}");
     wait_until(
         || {
+            terminal.go_on();
             let held = terminal.drawn_on_the_other_screen();
             held.len() == 2 && held[1].contains(FIELD_WORD) && terminal.screen().alternate
         },

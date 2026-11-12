@@ -92,6 +92,37 @@ pub fn git_counting(dir: &Path, log: &Path) -> Vec<(String, String)> {
     vars
 }
 
+/// The system's opener a page for a browser is handed to, as `yunta open` and the
+/// application ask for it.
+pub const OPENER: &str = if cfg!(target_os = "macos") {
+    "open"
+} else {
+    "xdg-open"
+};
+
+/// A `PATH` on which no browser opens: one directory under `dir` holding the real git and,
+/// where `recorded` is given, a stand-in for the system's opener ([`OPENER`]) that appends
+/// each page it is handed to that file. With no opener on it, nothing can open a page.
+pub fn path_opening_no_browser(dir: &Path, recorded: Option<&Path>) -> String {
+    let script = recorded.map(|recorded| {
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n",
+            recorded.display()
+        )
+    });
+    let bin = match script {
+        Some(script) => install(dir, OPENER, &script),
+        None => {
+            let bin = dir.join("bin");
+            std::fs::create_dir_all(&bin).expect("create the stub directory");
+            bin
+        }
+    };
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(real_git(), bin.join("git")).expect("the real git, linked");
+    bin.display().to_string()
+}
+
 /// This process's own `PATH` with `first` looked up before everything on
 /// it — what a test hands a command it spawns to put a directory ahead
 /// of the real programs without changing what else it finds.

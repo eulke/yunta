@@ -17,7 +17,7 @@ use yunta_render::page::doctor::{Doctor, Finding};
 use yunta_render::page::Page;
 use yunta_render::screen;
 
-use super::{Act, Stage, UpkeepStage, Want};
+use super::{Act, Want};
 use crate::dialog::Confirmation;
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
@@ -153,9 +153,7 @@ impl DoctorStage {
                 };
                 vec![Want::Confirm(Confirmation::new(asks, vec![same], sessions))]
             }
-            Stroke::Insert('u') if !sessions => {
-                vec![Want::Open(Stage::Upkeep(UpkeepStage::new()))]
-            }
+            Stroke::Insert('u') if !sessions => Want::taking(&NextStep::Gc { dry_run: true }),
             other => {
                 self.scroll.pressed(other);
                 Vec::new()

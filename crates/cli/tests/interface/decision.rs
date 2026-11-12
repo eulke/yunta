@@ -7,14 +7,10 @@ use super::*;
 use surco::glyphs::Glyphs;
 use surco::look::{Look, Width};
 use surco::paint::Paint;
+use yunta_testkit::workflows::GATED;
 use yunta_testkit::{
     full_run_id, run_id_from, runs_root, wait_until, yunta_at, yunta_on_terminal, Checkout,
 };
-
-/// A gate, then a node once it is passed.
-const GATED: &str = "name: gated\nnodes:\n  - { id: approve, kind: gate, assignee: lead, \
-                     message: \"Go on?\", options: [go] }\n  \
-                     - { id: after, kind: bash, run: \"true\", depends_on: [approve] }\n";
 
 /// A run parked on its gate, answered at its card with its first option, is recorded
 /// and resumed detached, to its end.

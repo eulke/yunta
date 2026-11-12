@@ -7,6 +7,9 @@
 //! leaving a stage is never undone by a late answer. Work already under way is not
 //! asked twice, and a reading asked again lets go the one of its kind under way.
 //!
+//! Opened on a step, the application first stands where it would open, then opens over
+//! it the stages a person walks through to the step, so going back walks the same way.
+//!
 //! A stage opens over another, which the person comes back to; leaving a stage either
 //! way lets go the readings it waits on, and what the performer holds for it, while an
 //! act goes on and what it comes to is said where the person is. A stroke goes to the dialog standing over the stage when
@@ -20,6 +23,7 @@ use surco::components::{Note, Region, Screen};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::{FieldReach, Repository};
+use yunta_core::step::NextStep;
 
 use crate::dialog::confirmation::Confirmed;
 use crate::dialog::help::{self, Helped};
@@ -40,6 +44,9 @@ pub struct State {
     dialog: Option<Dialog>,
     /// What stopped the application learning where it stands, where something did.
     unopened: Option<String>,
+    /// The stages a step opened the application on, opened in order over where it
+    /// first stands, as a person walks there; none once they are.
+    opened_on: Vec<Stage>,
     /// The repository the application opened in, as far as Yunta went there, once it
     /// knows: what it opens on.
     repository: Option<Repository>,
@@ -65,6 +72,7 @@ impl State {
             under: Vec::new(),
             dialog: None,
             unopened: None,
+            opened_on: Vec::new(),
             repository: None,
             waiting: BTreeMap::new(),
             next: Ticket::first(),
@@ -72,6 +80,21 @@ impl State {
         };
         let asked = state.asked(Operation::ReadRepository);
         (state, asked)
+    }
+
+    /// The application as it opens at `now` on `step`, and what it asks first: it reads
+    /// where it stands as [`State::opened`] does and stands there, then opens over it the
+    /// run's stage, for a step of a run, and over that the stage `step` opens, as a person
+    /// walks there; going back walks the same way. None for a step no stage takes.
+    pub fn opened_on(now: DateTime<Utc>, step: &NextStep) -> Option<(State, Vec<Request>)> {
+        let opens = Stage::opened_by(step)?;
+        let (mut state, asked) = State::opened(now);
+        let run = step
+            .run()
+            .filter(|_| !matches!(opens, Stage::Run(_)))
+            .and_then(|run| Stage::opened_by(&NextStep::Follow { run: run.clone() }));
+        state.opened_on = run.into_iter().chain([opens]).collect();
+        Some((state, asked))
     }
 
     /// What `input` does: the state it leaves, and what it asks for.
@@ -123,6 +146,13 @@ impl State {
     /// in as typed text: anywhere else a paste answers nothing.
     pub fn typing(&self) -> bool {
         self.dialog.is_none() && self.stage.as_ref().is_some_and(Stage::typing)
+    }
+
+    /// The stages a step opened the application on, yet to open, outermost first: they
+    /// stand nowhere on screen until the application first stands somewhere, so two
+    /// states that show the same screen and wait on the same work can still differ by them.
+    pub fn stages_to_open(&self) -> &[Stage] {
+        &self.opened_on
     }
 
     /// The work the state waits on, each under its ticket, in the order it was asked.
@@ -209,17 +239,12 @@ impl State {
 
     /// What an answer the state waited on does: where the application opens, or what
     /// the stage makes of it. A repository Yunta was never set up in opens on its setup.
+    /// Where it first stands, the stages a step opened it on open over it.
     fn answered(&mut self, outcome: Outcome) -> Vec<Request> {
         let wants = match (outcome, self.stage.as_mut()) {
-            (Outcome::Repository(Repository::Absent), _) => {
-                self.stage = Some(Stage::Signpost);
-                Vec::new()
-            }
+            (Outcome::Repository(Repository::Absent), _) => self.stands_on(Stage::Signpost),
             (Outcome::Repository(Repository::NeverSetUp), _) => {
-                let stage = Stage::Setup(SetupStage::new());
-                let opening = stage.opening();
-                self.stage = Some(stage);
-                opening
+                self.stands_on(Stage::Setup(SetupStage::new()))
             }
             (Outcome::Repository(repository), _) => {
                 self.repository = Some(repository);
@@ -235,9 +260,7 @@ impl State {
                     true => Stage::FirstRun(FirstRunStage::new()),
                     false => Stage::Field(FieldStage::read(reading, storage, FieldReach::Here)),
                 };
-                let opening = stage.opening();
-                self.stage = Some(stage);
-                opening
+                self.stands_on(stage)
             }
             (Outcome::Refused(refused), None) => {
                 self.unopened = Some(refused.to_string());
@@ -251,6 +274,18 @@ impl State {
             (_, None) => Vec::new(),
         };
         self.wanted(wants)
+    }
+
+    /// The application standing on `stage`, where it first stands: what `stage` asks as
+    /// it opens, then each stage a step opened the application on, opened over it.
+    fn stands_on(&mut self, stage: Stage) -> Vec<Want> {
+        let opening = stage.opening();
+        self.stage = Some(stage);
+        let walked = std::mem::take(&mut self.opened_on);
+        opening
+            .into_iter()
+            .chain(walked.into_iter().map(Want::Open))
+            .collect()
     }
 
     /// What `stroke` does at `dialog`, standing over the stage: answered, it closes and

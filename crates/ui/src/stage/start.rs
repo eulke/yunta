@@ -20,11 +20,12 @@ use surco::components::{Note, Prose, Region, Screen, Sight};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::{Remark, RunRequest};
+use yunta_core::step::NextStep;
 use yunta_core::{AdapterId, InputName, ModeName, RunAdapter, Workflow};
 use yunta_render::page::Catalog;
 use yunta_render::prompt::Escape;
 
-use super::{RunStage, Stage, Want};
+use super::{Stage, Want};
 use crate::prompt::{Alternative, Answerable, LineAsked, Picker, Press, Stroke};
 use crate::{Operation, Outcome};
 
@@ -196,7 +197,8 @@ impl StartStage {
         match outcome {
             // A run another start asked for, left before it started, is not this one's.
             Outcome::Started { run } if matches!(self.asking, Asking::Starting) => {
-                vec![Want::Replace(Stage::Run(RunStage::of(run)))]
+                let followed = Stage::opened_by(&NextStep::Follow { run });
+                followed.map(Want::Replace).into_iter().collect()
             }
             Outcome::Started { .. } => Vec::new(),
             Outcome::Refused(refused) => self.asked_again(refused.to_string()),

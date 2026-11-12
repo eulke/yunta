@@ -1,6 +1,7 @@
 //! A region in a pane: a prompt held in the rows what stands around it leaves, with the
 //! cursor counted from the pane's top, what stands above it giving way from its top and
-//! what stands under it kept whole; any other region scrolled, as a document scrolls.
+//! what stands under it kept whole where the prompt fits beside it; any other region
+//! scrolled, as a document scrolls.
 
 use std::path::{Path, PathBuf};
 
@@ -111,6 +112,25 @@ fn what_stands_under_a_prompt_stays_whole_under_it() {
             "> yunta-tui",
             "",
             "  a project is already called that",
+        ]
+    );
+    assert_eq!(paned.cursor, Some((1, "> yunta-".len())));
+}
+
+/// Short of the rows a prompt is asked in, what stands under it gives way from its end: the
+/// question, and the row a person types on with the cursor on it, stay in sight.
+#[test]
+fn what_stands_under_a_prompt_short_of_rows_gives_way_from_its_end() {
+    let region = Region::new(Doc::new().with(named()).with_all(page(3).into_blocks()));
+    let paned = Terminal::on(pane_look(&ENVIRONMENTS[1])).pane(&region, 5);
+    assert_eq!(
+        texts(&paned.lines),
+        [
+            "project name (enter keeps `yunta`)",
+            "> yunta-tui",
+            "",
+            "line 1",
+            "line 2",
         ]
     );
     assert_eq!(paned.cursor, Some((1, "> yunta-".len())));

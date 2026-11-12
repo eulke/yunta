@@ -15,6 +15,9 @@ const HELD: &str = "the terminal is held";
 /// What it writes once it holds the terminal again after a stop.
 const HELD_AGAIN: &str = "the terminal is held again";
 
+/// What it writes once a panic that unwound through the holding is caught.
+const WENT_ON: &str = "went on after the panic";
+
 /// The binary run again in a pseudo-terminal, running the one test `holding`, which holds
 /// the terminal.
 fn holding(holding: &str) -> Terminal {
@@ -86,12 +89,19 @@ fn a_panic_gives_the_terminal_back_with_no_drop_run() {
 }
 
 /// A stop gives the terminal back before the process stands, and holds it again once it
-/// goes on. The binary runs again in a process group no shell controls, which the kernel
-/// stops on no `SIGTSTP`, so it goes on at once: what a test reads is the terminal given
-/// back between the two holdings. A shell's job control stops it for real.
+/// goes on: what a test reads is the terminal given back between the two holdings. Under a
+/// shell's job control the process stops for real, and the test sends what `fg` sends
+/// while it waits; in a group no shell controls it never stops.
 #[test]
 fn a_stop_gives_the_terminal_back_before_it_and_holds_it_again_after() {
     let mut terminal = holding("held_then_stopped");
+    yunta_testkit::wait_until(
+        || {
+            terminal.go_on();
+            terminal.drawn().contains(HELD_AGAIN)
+        },
+        || format!("never held again\n{}", terminal.drawn()),
+    );
     given_back(&mut terminal);
     let drawn = terminal.drawn();
     let first = drawn.find(HELD).expect("held first");
@@ -109,6 +119,35 @@ fn a_stop_gives_the_terminal_back_before_it_and_holds_it_again_after() {
         between.rfind(ALT_SCROLL_ON) > between.rfind(ALT_SCREEN_OFF),
         "held again after it"
     );
+}
+
+/// A panic that unwinds through the holding gives the terminal back, and the process goes
+/// on where the panic is caught: the holding dropped while a panic unwinds puts no panic
+/// hook back, which a panicking thread may not do.
+#[test]
+fn a_panic_unwinding_through_the_holding_gives_the_terminal_back_and_goes_on() {
+    let mut terminal = holding("held_then_unwound");
+    given_back(&mut terminal);
+    let drawn = terminal.drawn();
+    assert!(drawn.contains(WENT_ON), "the process went on\n{drawn}");
+    assert_eq!(terminal.exit_code(), Some(0), "{drawn}");
+}
+
+/// What `a_panic_unwinding_through_the_holding_gives_the_terminal_back_and_goes_on` runs
+/// in a pseudo-terminal: the terminal held, a panic unwound through the holding and
+/// caught, then the process going on.
+#[test]
+fn held_then_unwound() {
+    if !run_again_for("held_then_unwound") {
+        return;
+    }
+    let caught = std::panic::catch_unwind(|| {
+        let _held = FullScreen::held().expect("a terminal to hold");
+        said(HELD);
+        panic!("made to, while the terminal is held");
+    });
+    assert!(caught.is_err(), "the panic unwound to here");
+    said(WENT_ON);
 }
 
 /// What `leaving_gives_the_terminal_back` runs in a pseudo-terminal: the terminal held,

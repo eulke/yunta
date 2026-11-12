@@ -239,6 +239,15 @@ impl Terminal {
             .expect("the run is still reading its keyboard");
     }
 
+    /// What a shell's `fg` sends a job it stopped: a run stopped goes on, and one that never
+    /// stopped, or has ended, is left as it is. A run that stops itself, as on Ctrl-Z,
+    /// stops for real under a shell's job control and is never stopped in a process group
+    /// no shell controls, so a test sends this while it waits for the run to go on.
+    pub fn go_on(&self) {
+        // best-effort: a run that has ended has nothing to go on with.
+        let _ = kill(self.pid(), Signal::SIGCONT);
+    }
+
     /// Sends the run an interrupt from outside — what `kill -INT` does,
     /// and what a shell's Ctrl-C does to a run in its foreground group.
     pub fn interrupt(&self) {
@@ -271,7 +280,6 @@ impl Terminal {
         self.signal(Signal::SIGWINCH);
     }
 
-    /// The run's process.
     /// The id of the process at this terminal.
     pub fn process_id(&self) -> u32 {
         self.child.id()
@@ -348,19 +356,35 @@ impl Terminal {
         self.ended.and_then(|status| status.code())
     }
 
-    /// Waits for the run's process to end and returns everything it
-    /// drew. Fails, rather than hanging, on a run that never ends.
+    /// Whether the run's process ended, without waiting for the terminal to close: a
+    /// process it started in the terminal's session, such as a detached engine, keeps the
+    /// terminal open after the run itself ended.
+    pub fn exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
+    /// Waits for the run's process to end and the terminal to close, and returns everything
+    /// it drew. Fails, rather than hanging, on a run that never ends, and on a terminal a
+    /// process the run started in its session holds open.
     pub fn ended(&mut self) -> String {
         let Self { child, drawn, .. } = self;
+        let so_far = || drawn.lock().map(|d| d.clone()).unwrap_or_default();
         let ended = wait_for(
             || child.try_wait().ok().flatten(),
-            || {
-                let drawn = drawn.lock().map(|d| d.clone()).unwrap_or_default();
-                format!("the run never ended\ndrawn so far:\n{drawn}")
-            },
+            || format!("the run never ended\ndrawn so far:\n{}", so_far()),
         );
         self.ended = Some(ended);
         if let Some(reader) = self.reader.take() {
+            wait_until(
+                || reader.is_finished(),
+                || {
+                    format!(
+                        "the terminal never closed: a process the run started in its session \
+                         holds it\ndrawn so far:\n{}",
+                        so_far()
+                    )
+                },
+            );
             drop(reader.join());
         }
         self.drawn()
@@ -385,7 +409,18 @@ impl Drop for Terminal {
         drop(self.child.kill());
         drop(self.child.wait());
         if let Some(reader) = self.reader.take() {
-            drop(reader.join());
+            let deadline = Instant::now() + WAIT_DEADLINE;
+            while Instant::now() < deadline && !reader.is_finished() {
+                std::thread::yield_now();
+            }
+            match reader.is_finished() {
+                true => drop(reader.join()),
+                // A process the run started in the terminal's session holds it open: the
+                // reader is left to it, so the test ends rather than hangs.
+                false => eprintln!(
+                    "the terminal never closed: a process the run started in its session holds it"
+                ),
+            }
         }
     }
 }
@@ -415,3 +450,6 @@ fn collect(mut screen: std::fs::File, into: Arc<Mutex<String>>) -> std::thread::
 pub fn runs_root(home: &Path) -> PathBuf {
     home.join("runs")
 }
+
+#[cfg(test)]
+mod tests;

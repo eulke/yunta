@@ -26,7 +26,7 @@ crates/
   api       yunta-api       NEW: what can be asked of Yunta, with no terminal
   mcp       yunta-mcp       NEW: the MCP server an agent asks Yunta through, on the API, with no transport of its own
   ui        yunta-ui        NEW: the application with no terminal and no window: state, stages, screens, work
-  tui       yunta-tui       NEW: the only crate that knows Ratatui and crossterm
+  tui       yunta-tui       NEW: the application at a terminal, the only crate that knows Ratatui and crossterm
   cli       yunta           the binary: clap, output, attached view, inline prompts, the control plane on stdio, rail
   desktop   (later)         Tauri over yunta-ui, with Surco's Html surface
 ```
@@ -88,7 +88,7 @@ What moves:
 | `run-pages` | Every page in `yunta-render`, in one form; what a run offers next as actions; every command spelled once; the CLI printing exactly the same | `run-state` |
 | `control` | `yunta-api`, with the CLI and MCP mounted on it | `log-follow`, `run-state` |
 | `app-core` | `yunta-ui`: every stage a person works in (signpost, setup, first run, field, run, decision, start, evidence, stats, graph, catalog and packs, doctor, upkeep, schema), with the palette, help and confirmations over them; their screens, their work and its performer; the prompts' models moved; following a run, a run's page and the graph assembled once, below the surfaces; every sentence in `yunta-render`; setting a repository up declaring its runners, in every interface | `control`, `run-pages`, `surco-screen` |
-| `tui` | `yunta-tui`, bare `yunta` and `deny.toml`, laying out every stage `app-core` makes, in slices: watch, decide, start, then the others. It lays a screen out with Ratatui's `Layout`, draws each pane through Surco's terminal at `Width::exact`, and draws the overlay's box in Surco's glyphs; `surco-screen`'s `tui-reference` frames are its reference | `app-core`, `parked-answers` |
+| `tui` | `yunta-tui`: the application at a terminal, every stage `app-core` makes laid out in Ratatui's cells by the reference's rules and drawn in Surco's lines; bare `yunta` and `review` open it at a terminal, and print as before elsewhere; `deny.toml`'s exception for `foldhash` and skip of `itertools`. It added to `yunta-ui` the opening on a step (`State::opened_on`), one mapping from a step to the stage that takes it, the words for a terminal short of room and for a page not shown; to Surco a region drawn in a pane, a screen's rows (trail, rule, titles, edge, attention, legend), the box drawn over a screen, and rows cut at their edge (`Block::Rows`) | `app-core`, `parked-answers` |
 | `desktop` | Reserved only: no spec and no code yet | `app-core` |
 
 **Order:** `run-guard`, `parked-answers`, `log-follow`, `run-words`, `session-ends`, `surco-screen` and `run-state`, which do not depend on each other → `run-pages` and `control` → `app-core` → `tui`.

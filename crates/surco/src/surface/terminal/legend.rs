@@ -38,13 +38,15 @@ impl Terminal {
     /// The legend row a screen holds, at this look's width: every key where they all fit.
     /// Where they do not, the first keys that fit, a mark that more stand between, and the
     /// last key, which leads to the rest: what a screen offers last is the key that lists
-    /// every key. A last key too wide even for that leaves the first keys that fit, cut.
+    /// every key. A last key too wide even for that leaves the first keys that fit, cut,
+    /// and one key alone too wide for the row is cut.
     pub fn legend(&self, legend: &Legend) -> Line {
         let look = &self.look;
         let cells = look.width.cells();
-        let whole = legend.lines(look);
-        if whole.len() <= 1 {
-            return whole.into_iter().next().unwrap_or_default();
+        let mut whole = legend.lines(look).into_iter();
+        let first_cut = whole.next().unwrap_or_default().cut(cells, look.glyphs);
+        if whole.next().is_none() {
+            return first_cut;
         }
         let sep = separator(look);
         let Some((last, first)) = legend.0.split_last() else {
@@ -69,11 +71,7 @@ impl Terminal {
             row = joined;
         }
         match row.text().is_empty() {
-            true => whole
-                .into_iter()
-                .next()
-                .unwrap_or_default()
-                .cut(cells, look.glyphs),
+            true => first_cut,
             false => row.then(tail),
         }
     }

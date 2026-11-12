@@ -1,19 +1,18 @@
 //! The places the walk's recordings are made in: a directory in no repository, a
 //! repository never set up and another the walk sets up, one set up with a workflow and
-//! no run, a repository with
-//! runs, one finished and one parked on a gate, and two repositories of one run each, parked on a gate for the walk to decide
-//! and on a round of questions for it to answer. Those two stand apart, since every run
-//! the field lists multiplies the places a pointer and the picks can stand. Each stage that joins adds what its work reads: a plan, a questions node,
-//! packs.
+//! no run, a repository with runs, one finished and one parked on a gate, and three
+//! repositories of one run each: parked on a gate for the walk to decide, on a round of
+//! questions for it to answer, and on its plan's gate for the walk to open the application
+//! on. Those three stand apart, since every run the field lists multiplies the places a
+//! pointer and the picks can stand. Each stage that joins adds what its work reads: a
+//! plan, a questions node, packs.
 
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 use yunta_core::RunId;
+use yunta_testkit::workflows::{ASKS, FINISHES, GREETS, HANDS_ONE_QUESTION_OVER};
 use yunta_testkit::Bench;
-
-/// One node that finishes.
-const FINISHES: &str = "name: done\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n";
 
 /// A gate nobody answers: its run parks on it.
 const PARKS: &str = "name: gated\nnodes:\n  - { id: approve, kind: gate, assignee: lead, \
@@ -22,34 +21,12 @@ const PARKS: &str = "name: gated\nnodes:\n  - { id: approve, kind: gate, assigne
 /// The config a repository set up for Yunta holds.
 const SET_UP: &str = "defaults:\n  isolation: none\n";
 
-/// A workflow that takes what was asked for as its request.
-const GREETS: &str = "name: greet\ninputs:\n  ask: { type: string, request: true }\nnodes:\n  \
-                      - { id: say, kind: bash, run: \"true\" }\n";
-
 /// A mock fixture with no sessions: neither workflow opens one.
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 
 /// A case of the greeting workflow, which finishes.
 const GREETS_CASE: &str = "workflow: greet\ninputs: { ask: hello }\nfixture: fixtures/none.yaml\n\
                            expect: { final_state: finished }\n";
-
-/// A node that asks: its session hands a round of questions over and ends.
-const ASKS: &str = "name: asking\nnodes:\n  - id: ask\n    kind: prompt\n    runner: executor\n    \
-                    prompt: \"Ask what has to be known.\"\n    artifacts:\n      produces: [questions]\n";
-
-/// The session that hands one question over.
-const HANDS_THEM_OVER: &str = r#"
-dialect: claude-code
-sessions:
-  - steps:
-      - type: run_tool
-        tool: yunta_submit_questions
-        arguments:
-          document:
-            questions:
-              - { id: summary, text: "What changed?", answer_type: text, required: true }
-    outcome: { type: completed, summary: asked }
-"#;
 
 /// The scratch places.
 pub struct Home {
@@ -78,6 +55,10 @@ pub struct Home {
     pub deciding: Bench,
     /// A repository whose run is parked on a round of questions, which the walk answers.
     pub asking: Bench,
+    /// A repository whose run is parked on its plan's gate, which the walk opens the
+    /// application on with `review`. Its id ends its own handle, `REV1EW`, so the screens
+    /// it reaches are told apart.
+    pub reviewing: Bench,
 }
 
 impl Home {
@@ -102,7 +83,9 @@ impl Home {
         let deciding = Bench::with_run_id("01M7WALKDEC1DED00000000000");
         deciding.run(PARKS, NO_SESSIONS).await;
         let asking = Bench::with_run_id("01M7WALKASK1NG000000000000");
-        asking.run(ASKS, HANDS_THEM_OVER).await;
+        asking.run(ASKS, HANDS_ONE_QUESTION_OVER).await;
+        let reviewing = Bench::with_run_id("01M7WALKPLANNED00000REV1EW");
+        crate::planned::parked_on_its_plan(&reviewing).await;
         Home {
             root,
             outside,
@@ -116,6 +99,7 @@ impl Home {
             parked,
             deciding,
             asking,
+            reviewing,
         }
     }
 

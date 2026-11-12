@@ -1,7 +1,8 @@
 //! What is open over a screen, boxed: the palette, help or a confirmation drawn inside the
 //! edges of a box, its title in the top edge, its document drawn by the rule a region is
 //! drawn by. The box is as wide as the look and as tall as what it holds, up to the rows it
-//! is given; an engine of cells says where it stands.
+//! is given; an engine of cells says where it stands. A box takes at least its two sides,
+//! four cells: a look narrower than that still draws them, wider than the look.
 
 use super::{Paned, Terminal};
 use crate::components::Overlay;

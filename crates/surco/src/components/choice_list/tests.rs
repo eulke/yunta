@@ -7,6 +7,7 @@ use super::ChoiceList;
 use crate::components::{ChoiceRow, Choices, Legend};
 use crate::doc::Doc;
 use crate::golden::{assert_golden, ENVIRONMENTS, RICH};
+use crate::line::Line;
 use crate::look::Look;
 use crate::surface::{Html, Markdown, Surface, Terminal};
 
@@ -62,4 +63,22 @@ fn a_list_the_filter_empties_says_nothing_matches() {
     let look = Look::of(&ENVIRONMENTS[0]);
     let drawn = Terminal::on(look).draw(&doc);
     assert!(drawn.contains("nothing matches"), "{drawn}");
+}
+
+/// Held in fewer rows than the least of the list beside its keys, a list keeps to its rows:
+/// its keys give way, and the row pointed at stays.
+#[test]
+fn a_list_short_of_rows_keeps_to_them_and_its_keys_give_way() {
+    let look = Look::of(&ENVIRONMENTS[1]);
+    for rows in [1, 3] {
+        let drawn = shapes().drawn(&look, rows);
+        let text: Vec<String> = drawn.lines.iter().map(Line::text).collect();
+        assert!(drawn.lines.len() <= rows, "{rows} rows: {text:#?}");
+        if rows == 3 {
+            assert!(
+                text.iter().any(|line| line.contains("lint-fix")),
+                "{text:#?}"
+            );
+        }
+    }
 }

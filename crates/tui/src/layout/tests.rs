@@ -1,4 +1,5 @@
-//! The reference's rules, each with the numbers the target frames were written by.
+//! Where each part of a screen stands, each rule with the numbers of a terminal it is
+//! worked out on by hand.
 
 use ratatui::layout::Rect;
 
@@ -107,7 +108,7 @@ fn a_box_stands_centred_between_the_rule_and_the_legend() {
         80,
         24,
         Holds {
-            overlay: Some(4),
+            overlay: Some(6),
             ..a_run(2)
         },
     );
@@ -116,7 +117,7 @@ fn a_box_stands_centred_between_the_rule_and_the_legend() {
         60,
         14,
         Holds {
-            overlay: Some(30),
+            overlay: Some(32),
             ..a_run(2)
         },
     );

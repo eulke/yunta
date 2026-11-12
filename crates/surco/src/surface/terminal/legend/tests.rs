@@ -86,3 +86,15 @@ fn a_last_key_too_wide_leaves_the_first_keys_cut() {
     });
     assert_eq!(narrow.legend(&legend).text(), "q field, it…");
 }
+
+/// A legend of one key wider than its row is cut at the row's width, as a row of first keys
+/// is: the row a screen keeps for its keys is one row.
+#[test]
+fn one_key_wider_than_its_row_is_cut() {
+    let legend = Legend::new().key("q", "leaves, and the run keeps going");
+    let narrow = Terminal::on(Look {
+        width: Width::exact(12),
+        ..look(12)
+    });
+    assert_eq!(narrow.legend(&legend).text(), "q leaves, a…");
+}

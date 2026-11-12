@@ -26,16 +26,12 @@ const DESK_COLUMNS: usize = 40;
 /// read something between them.
 const DESK_ROWS: usize = 12;
 
-/// Puts the decision `put` to the person as a card held where it opens, on `opens`, and
-/// returns what they chose. `env` is the ambient identity the choice is attributed to.
-pub(crate) fn decide(
-    console: &Console,
-    env: &Env,
-    put: &DecisionPut,
-    opens: Opens,
-) -> Answered<HumanChoice> {
+/// Puts the decision `put` to the person as a card held where it opens, the plan's desk a
+/// key away, and returns what they chose. `env` is the ambient identity the choice is
+/// attributed to.
+pub(crate) fn decide(console: &Console, env: &Env, put: &DecisionPut) -> Answered<HumanChoice> {
     present(console, put)?;
-    let mut deciding = Deciding::put(put, opens, console.escape());
+    let mut deciding = Deciding::put(put, Opens::TheCard, console.escape());
     let answer = answered(console, put, &mut deciding)?;
     console.say_unless_chronicled(&card::chose(&answer.option, answer.words.as_deref()))?;
     if answer.folded {

@@ -1,6 +1,6 @@
 //! The walk laid out: every state `yunta_testkit_ui`'s walk reaches, drawn with
 //! [`yunta_tui::drawn`] on Ratatui's test backend at 80×24 in ASCII and at 60×14 in
-//! Unicode, holds the reference's layout. No drawing panics; nothing is written in a margin
+//! Unicode, holds the layout's rules. No drawing panics; nothing is written in a margin
 //! but the rule; the side region's edge stands whole on every row it spans; the legend is
 //! on the last row, the box's where a box is open, with the attention right above it; the
 //! cursor shows wherever a field is open, only where a prompt is held, and inside what is

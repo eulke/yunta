@@ -69,6 +69,8 @@ pub enum Refused {
     TooManyRuns { active: usize, cap: u32 },
     /// A decision asked of a run that waits on none.
     NoDecision { run: RunId },
+    /// A plan asked of a run whose decision shows none.
+    NoPlan { run: RunId },
     /// A node asked of a run that declares none by that name: the run, the
     /// name asked, and every node it declares.
     NoSuchNode {
@@ -310,6 +312,11 @@ impl Refused {
             Refused::TooManyRuns { active, cap } => super::words::too_many_runs(*active, *cap),
             Refused::NoDecision { run } => format!(
                 "run {} waits on no decision; `{}` says where it stands",
+                run.handle(),
+                command::line(&NextStep::status(run))
+            ),
+            Refused::NoPlan { run } => format!(
+                "run {} waits on a decision that shows no plan; `{}` says what it does show",
                 run.handle(),
                 command::line(&NextStep::status(run))
             ),

@@ -201,16 +201,14 @@ impl Place {
             }
             None => end,
         };
+        out.push_str(console.cursor_escape(cursor.is_some()));
         out.push_str(SYNC_END);
         console.term().write_str(&out)?;
         console.term().flush()?;
         self.below_top = below_top;
         self.widths = kept.to_vec();
         self.size = (columns, rows);
-        match cursor {
-            Some(_) => console.show_cursor(),
-            None => console.hide_cursor(),
-        }
+        Ok(())
     }
 
     /// Takes what was drawn off the screen, leaving the cursor where the first row

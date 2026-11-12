@@ -54,8 +54,8 @@ fn cell_style(style: paint::Style) -> Style {
     cell
 }
 
-/// A color of Surco's table, as a cell's: each of the sixteen the terminal draws in its own
-/// theme by its name, and 24 bits as they are.
+/// A color of Surco's table, as a cell's: each named color of the terminal's sixteen that
+/// Surco paints with, which the terminal draws in its own theme, and 24 bits as they are.
 fn cell_color(color: paint::Color) -> Color {
     match color {
         paint::Color::Ansi(Ansi::Red) => Color::Red,

@@ -49,10 +49,10 @@ use surco::components::{Screen, ScreenLaid};
 use surco::look::Look;
 
 use yunta_api::Remark;
-use yunta_core::step::NextStep;
+use yunta_core::step::{Arg, NextStep};
 
 use crate::dialog::Confirmation;
-use crate::prompt::Stroke;
+use crate::prompt::{Opens, Stroke};
 use crate::{News, Operation, Outcome, Ticket};
 
 /// Where a person is.
@@ -129,6 +129,14 @@ pub(crate) enum Want {
     Leave,
 }
 
+impl Want {
+    /// What taking `step` wants: the stage it opens ([`Stage::opened_by`]), opened over
+    /// this one; nothing where no stage takes it.
+    pub(crate) fn taking(step: &NextStep) -> Vec<Want> {
+        Stage::opened_by(step).map(Want::Open).into_iter().collect()
+    }
+}
+
 impl Stage {
     /// What every stage's palette offers after the stage's own acts, in their order:
     /// the workflows, doctor, upkeep and the shapes of the documents Yunta reads, each
@@ -145,18 +153,49 @@ impl Stage {
         ]
     }
 
-    /// The stage `step`, one of [`Stage::always`], opens; none for any other step.
+    /// The stage `step` opens: one of [`Stage::always`]; a run's step that shows or
+    /// follows the run, its decision on its card or on its plan, its evidence, its
+    /// numbers or its graph; or a workflow's past runs or its graph. None for a step that
+    /// is work or asks a confirmation first, which the stage it is taken on carries out.
+    /// The one mapping from a step to the stage that takes it: every stage and every
+    /// opening reads it.
     pub(crate) fn opened_by(step: &NextStep) -> Option<Stage> {
-        match step {
-            NextStep::List => Some(Stage::Catalog(CatalogStage::new())),
+        Some(match step {
+            NextStep::List => Stage::Catalog(CatalogStage::new()),
             NextStep::Doctor {
                 sessions: false,
                 full: false,
-            } => Some(Stage::Doctor(DoctorStage::new())),
-            NextStep::Gc { dry_run: true } => Some(Stage::Upkeep(UpkeepStage::new())),
-            NextStep::Schemas => Some(Stage::Schema(SchemaStage::new())),
-            _ => None,
-        }
+            } => Stage::Doctor(DoctorStage::new()),
+            NextStep::Gc { dry_run: true } => Stage::Upkeep(UpkeepStage::new()),
+            NextStep::Schemas => Stage::Schema(SchemaStage::new()),
+            NextStep::Status { run, .. } | NextStep::Follow { run } => {
+                Stage::Run(RunStage::of(run.clone()))
+            }
+            NextStep::ResolveGate { run, .. } => {
+                Stage::Decision(DecisionStage::of(run.clone(), Opens::TheCard))
+            }
+            NextStep::Review { run } => {
+                Stage::Decision(DecisionStage::of(run.clone(), Opens::ThePlan))
+            }
+            NextStep::Receipt { run } => {
+                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::Receipt))
+            }
+            NextStep::Verify { run } => {
+                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::Verification))
+            }
+            NextStep::Open { run } => {
+                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::PageForABrowser))
+            }
+            NextStep::Stats { run } => Stage::Stats(StatsStage::of_run(run.clone())),
+            NextStep::RunGraph { run } => Stage::Graph(GraphStage::of_run(run.clone())),
+            NextStep::History { workflow } => {
+                Stage::Stats(StatsStage::of_workflow(workflow.clone()))
+            }
+            NextStep::Graph {
+                workflow: Arg::Given(workflow),
+            } => Stage::Graph(GraphStage::of_workflow(workflow.clone())),
+            _ => return None,
+        })
     }
 
     /// The step of [`Stage::always`] whose command shows what this stage shows: a
@@ -345,9 +384,6 @@ impl Stage {
         }
     }
 
-    /// What a surface laid out of the screen's regions, which the stage reads on the
-    /// next stroke where it scrolls one: a decision's desk and a page in the main region,
-    /// a run's page beside its nodes.
     /// The page `page`, which this stage asked a surface to show, could not be shown: the
     /// evidence stage says so, the one stage that shows pages.
     pub(crate) fn unshown(&mut self, page: &std::path::Path) {
@@ -356,6 +392,9 @@ impl Stage {
         }
     }
 
+    /// What a surface laid out of the screen's regions, which the stage reads on the
+    /// next stroke where it scrolls one: a decision's desk and a page in the main region,
+    /// a run's page beside its nodes.
     pub(crate) fn laid(&mut self, laid: ScreenLaid) {
         match self {
             Stage::Decision(decision) => decision.laid(laid.main),

@@ -13,11 +13,8 @@ use yunta_core::step::{Choice, NextStep};
 use yunta_render::command;
 use yunta_replay::frame::RunFrame;
 
-use super::super::{
-    DecisionStage, Evidence, EvidenceStage, GraphStage, RunStage, Stage, StatsStage, Want,
-};
+use super::super::Want;
 use crate::dialog::Confirmation;
-use crate::prompt::Opens;
 use crate::Operation;
 
 /// An act a run offers here: the key it is bound to, the step it takes, and what it
@@ -86,9 +83,7 @@ fn bound(step: &NextStep) -> Option<char> {
 }
 
 /// What taking `step` asks for: stopping and closing after a confirmation, going on at
-/// once, the run it waits on opened over this one, its decision, or the plan it is
-/// on, opened in the decision stage, and what it leaves, cost or is drawn as opened
-/// in a stage of its own.
+/// once, and any other the stage it opens, opened over this one.
 pub(super) fn taken(step: NextStep) -> Vec<Want> {
     match step {
         NextStep::Cancel { run } => {
@@ -110,25 +105,6 @@ pub(super) fn taken(step: NextStep) -> Vec<Want> {
                 Operation::Close { runs: vec![run] },
             ))]
         }
-        NextStep::Status { run, .. } => vec![Want::Open(Stage::Run(RunStage::of(run)))],
-        NextStep::ResolveGate { run, .. } => vec![Want::Open(Stage::Decision(DecisionStage::of(
-            run,
-            Opens::TheCard,
-        )))],
-        NextStep::Review { run } => vec![Want::Open(Stage::Decision(DecisionStage::of(
-            run,
-            Opens::ThePlan,
-        )))],
-        NextStep::Receipt { run } => evidence(run, Evidence::Receipt),
-        NextStep::Verify { run } => evidence(run, Evidence::Verification),
-        NextStep::Open { run } => evidence(run, Evidence::PageForABrowser),
-        NextStep::Stats { run } => vec![Want::Open(Stage::Stats(StatsStage::of_run(run)))],
-        NextStep::RunGraph { run } => vec![Want::Open(Stage::Graph(GraphStage::of_run(run)))],
-        _ => Vec::new(),
+        other => Want::taking(&other),
     }
-}
-
-/// `asked` of `run`, opened in the evidence stage over the run.
-fn evidence(run: yunta_core::RunId, asked: Evidence) -> Vec<Want> {
-    vec![Want::Open(Stage::Evidence(EvidenceStage::of(run, asked)))]
 }

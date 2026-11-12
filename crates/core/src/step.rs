@@ -114,6 +114,46 @@ impl NextStep {
             depth: Depth::Glance,
         }
     }
+
+    /// The run this step names, where it names one.
+    pub fn run(&self) -> Option<&RunId> {
+        match self {
+            NextStep::Status { run, .. }
+            | NextStep::Follow { run }
+            | NextStep::Resume { run }
+            | NextStep::Cancel { run }
+            | NextStep::Close { run }
+            | NextStep::Review { run }
+            | NextStep::Open { run }
+            | NextStep::Receipt { run }
+            | NextStep::Stats { run }
+            | NextStep::RunGraph { run }
+            | NextStep::Verify { run }
+            | NextStep::ResolveGate { run, .. } => Some(run),
+            NextStep::Needs
+            | NextStep::History { .. }
+            | NextStep::Graph { .. }
+            | NextStep::Run { .. }
+            | NextStep::Check { .. }
+            | NextStep::List
+            | NextStep::ListRuns { .. }
+            | NextStep::Schemas
+            | NextStep::Schema { .. }
+            | NextStep::Doctor { .. }
+            | NextStep::Test { .. }
+            | NextStep::Init
+            | NextStep::NewWorkflow { .. }
+            | NextStep::PackAdd { .. }
+            | NextStep::PackUpdate { .. }
+            | NextStep::PackRemove { .. }
+            | NextStep::PackNew { .. }
+            | NextStep::PackList
+            | NextStep::PackAudit { .. }
+            | NextStep::Gc { .. }
+            | NextStep::Help
+            | NextStep::ShowCommit { .. } => None,
+        }
+    }
 }
 
 /// An argument of a command line: the value a reader types as it is, or a

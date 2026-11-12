@@ -1,7 +1,7 @@
-//! Where each part of a screen stands on a terminal, by the reference's rules, laid out
-//! with Ratatui's `Layout`. Pure: a terminal's size and what a screen holds that takes
-//! room go in, the area of each part comes out. What each part draws is Surco's, and how
-//! many rows what a screen is about takes is measured from Surco's lines by the caller.
+//! Where each part of a screen stands on a terminal, laid out with Ratatui's `Layout`.
+//! Pure: a terminal's size and what a screen holds that takes room go in, the area of each
+//! part comes out. What each part draws is Surco's, and how many rows what a screen is
+//! about takes is measured from Surco's lines by the caller.
 //!
 //! Rows, from the top: the trail with the tally, the rule, what the screen is about, a
 //! blank row under it, the regions' titles where a region has one, the regions, the
@@ -18,8 +18,8 @@ use ratatui::layout::{Constraint, Layout, Rect};
 /// the terminal's edge.
 const MARGIN: u16 = 1;
 
-/// The cells the side region takes: a node's mark, its name and how long it worked, as
-/// the reference lists a run's nodes.
+/// The cells the side region takes: a node's mark, its name and how long it worked, one
+/// node to a row, a longer name cut at the region's edge; what is left goes to the page.
 const SIDE: u16 = 22;
 
 /// The fewest cells the main region keeps before the side region gives way: under them a
@@ -32,9 +32,6 @@ const BOX_MOST: u16 = 60;
 /// The cells a box stands inside each edge of the terminal, where what is under it shows.
 const BOX_INSIDE: u16 = 2;
 
-/// The rows a box's edges take around what it holds.
-const BOX_EDGES: u16 = 2;
-
 /// The rows that stand on every screen whatever it holds: the trail, the rule and the
 /// legend.
 const ALWAYS: u16 = 3;
@@ -43,12 +40,14 @@ const ALWAYS: u16 = 3;
 /// pointer stands on, with one above it and one below.
 const LEAST_REGION: u16 = 3;
 
-/// The fewest columns the application lays a screen out on: the narrower terminal of the
-/// reference.
+/// The fewest columns the application lays a screen out on: every screen is checked laid
+/// out at 60 by 14, so a narrower terminal shows the room it needs rather than a screen
+/// nobody checked.
 pub(crate) const LEAST_COLUMNS: u16 = 60;
 
-/// The fewest rows the application lays a screen out on: the shorter terminal of the
-/// reference.
+/// The fewest rows the application lays a screen out on: every screen is checked laid out
+/// at 60 by 14, so a shorter terminal shows the room it needs rather than a screen nobody
+/// checked.
 pub(crate) const LEAST_ROWS: u16 = 14;
 
 /// What a screen holds that takes room on a terminal.
@@ -62,7 +61,8 @@ pub(crate) struct Holds {
     pub(crate) main_titled: bool,
     /// Whether something needs the person, which takes the row over the legend.
     pub(crate) attention: bool,
-    /// The rows what is open over the screen takes inside its box, where something is.
+    /// The rows the box of what is open over the screen takes, its edges with what it
+    /// holds, where something is.
     pub(crate) overlay: Option<u16>,
 }
 
@@ -132,7 +132,7 @@ pub(crate) fn areas(size: Rect, holds: Holds) -> Option<Areas> {
         main,
         attention: holds.attention.then(|| inside(attention)),
         legend: inside(legend),
-        boxed: holds.overlay.map(|inside_rows| boxed(size, inside_rows)),
+        boxed: holds.overlay.map(|rows| boxed(size, rows)),
     })
 }
 
@@ -148,14 +148,22 @@ impl Rows {
     fn of(height: u16, holds: Holds, titled: bool) -> Self {
         let taken = ALWAYS + u16::from(holds.attention) + u16::from(titled);
         let left = height.saturating_sub(taken);
-        let about_with_blank = if holds.about > 0 { holds.about + 1 } else { 0 };
+        let about_with_blank = if holds.about > 0 {
+            holds.about.saturating_add(1)
+        } else {
+            0
+        };
         let about = match left.saturating_sub(about_with_blank) >= LEAST_REGION {
             true => holds.about,
             // What the screen is about keeps what the regions' fewest rows leave, less the
             // blank row under it; none at all where that is no row.
             false => left.saturating_sub(LEAST_REGION).saturating_sub(1),
         };
-        let about_with_blank = if about > 0 { about + 1 } else { 0 };
+        let about_with_blank = if about > 0 {
+            about.saturating_add(1)
+        } else {
+            0
+        };
         Rows {
             about,
             regions: left.saturating_sub(about_with_blank),
@@ -180,13 +188,12 @@ fn beside(area: Rect, edge: Option<u16>) -> (Option<Rect>, Rect) {
     }
 }
 
-/// The box what is open over a terminal of `size` stands in, holding `inside` rows:
-/// centred, at most [`BOX_MOST`] cells and [`BOX_INSIDE`] inside each edge; between the
-/// rule and the legend row, its top a third of the way down the rows it leaves and never
-/// above the row under the rule.
-fn boxed(size: Rect, inside: u16) -> Rect {
-    let columns = BOX_MOST.min(size.width.saturating_sub(2 * BOX_INSIDE));
-    let rows = (inside + BOX_EDGES).min(size.height.saturating_sub(ALWAYS));
+/// The box what is open over a terminal of `size` stands in, `rows` high where they fit:
+/// centred, [`box_columns`] wide; between the rule and the legend row, its top a third of
+/// the way down the rows it leaves and never above the row under the rule.
+fn boxed(size: Rect, rows: u16) -> Rect {
+    let columns = box_columns(size.width);
+    let rows = rows.min(size.height.saturating_sub(ALWAYS));
     let top = ((size.height - rows) / 3).max(2);
     Rect::new(
         size.x + (size.width - columns) / 2,
@@ -196,8 +203,15 @@ fn boxed(size: Rect, inside: u16) -> Rect {
     )
 }
 
-/// The cells a box stands in on a terminal `columns` wide: what is open over it is laid
-/// out at that width, less its edges, before the box's rows are known.
+/// The cells inside the margins of a terminal `columns` wide: what each screen says is
+/// laid out at that width.
+pub(crate) fn inner_columns(columns: u16) -> u16 {
+    columns.saturating_sub(2 * MARGIN)
+}
+
+/// The cells a box stands in on a terminal `columns` wide, at most [`BOX_MOST`] and
+/// [`BOX_INSIDE`] inside each edge: what is open over it is laid out at that width, less
+/// its edges, before the box's rows are known.
 pub(crate) fn box_columns(columns: u16) -> u16 {
     BOX_MOST.min(columns.saturating_sub(2 * BOX_INSIDE))
 }

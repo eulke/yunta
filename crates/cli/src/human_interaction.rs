@@ -29,7 +29,7 @@ use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::port::{HumanInteraction, QuestionsReply};
 use yunta_core::{Env, QuestionsFile};
 use yunta_render::prompt::Escape;
-use yunta_ui::prompt::{DecisionPut, Opens};
+use yunta_ui::prompt::DecisionPut;
 
 use crate::ask::{answer, decide, Answered, Console, NoAnswer};
 use crate::output::{note, warn};
@@ -130,7 +130,7 @@ impl HumanInteraction for ConsoleInteraction {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         let put = DecisionPut::alone(escalation.clone());
         let env = self.env.clone();
-        self.prompted(move |console| decide(console, &env, &put, Opens::TheCard))
+        self.prompted(move |console| decide(console, &env, &put))
             .await
     }
 
@@ -144,7 +144,7 @@ impl HumanInteraction for ConsoleInteraction {
     ) -> Option<HumanChoice> {
         let put = DecisionPut::asked(escalation, asking);
         let env = self.env.clone();
-        self.prompted(move |console| decide(console, &env, &put, Opens::TheCard))
+        self.prompted(move |console| decide(console, &env, &put))
             .await
     }
 
