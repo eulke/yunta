@@ -1250,7 +1250,7 @@ dependencies = [
  "portable-atomic",
  "unicode-width",
  "unit-prefix",
- "vt100",
+ "vt100 0.16.2",
  "web-time",
 ]
 
@@ -3152,6 +3152,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vt100"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb05cdd19ae8707bf6a0a269972c07e6358103a7079faec749dec318a5b3dc23"
+dependencies = [
+ "itoa",
+ "unicode-width",
+ "vte",
+]
+
+[[package]]
 name = "vte"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3805,7 +3816,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
- "vt100",
+ "vt100 0.18.1",
  "yunta-adapters",
  "yunta-core",
  "yunta-engine",
