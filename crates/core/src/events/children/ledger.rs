@@ -25,6 +25,27 @@ pub struct ChildLink {
     pub terminal: Option<TerminalState>,
 }
 
+#[cfg(feature = "testkit")]
+impl ChildLink {
+    /// The link a `kind: workflow` node's child run leaves on the parent's
+    /// log, for a test: `node` is the node that bore it, and `terminal` is
+    /// how it closed — `None` while the parent's log has no close for it.
+    pub fn sample(
+        run_id: &RunId,
+        node: Option<&NodeId>,
+        terminal: Option<TerminalState>,
+    ) -> ChildLink {
+        ChildLink {
+            run_id: run_id.clone(),
+            node: node.cloned(),
+            // The child's frozen workflow, which a frame never renders: a
+            // fixture states the link, not the document behind it.
+            workflow_hash: crate::sha256_hex(run_id.as_str().as_bytes()),
+            terminal,
+        }
+    }
+}
+
 /// Every child this run bore, in the order it bore them, and what the
 /// loop that bore them reported.
 #[derive(Debug, Clone, PartialEq, Default)]

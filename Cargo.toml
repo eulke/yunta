@@ -4,12 +4,19 @@ members = [
     "crates/surco",
     "crates/core",
     "crates/storage",
+    "crates/replay",
     "crates/adapters",
+    "crates/mcp-protocol",
     "crates/engine",
     "crates/render",
+    "crates/api",
+    "crates/mcp",
+    "crates/ui",
+    "crates/tui",
     "crates/cli",
     "crates/testkit",
     "crates/testkit-core",
+    "crates/testkit-ui",
     "xtask",
 ]
 
@@ -28,14 +35,21 @@ repository = "https://github.com/eulke/yunta"
 yunta-surco = { path = "crates/surco", version = "0.0.5" }
 yunta-core = { path = "crates/core", version = "0.0.5" }
 yunta-storage = { path = "crates/storage", version = "0.0.5" }
+yunta-replay = { path = "crates/replay", version = "0.0.5" }
 yunta-adapters = { path = "crates/adapters", version = "0.0.5" }
+yunta-mcp-protocol = { path = "crates/mcp-protocol", version = "0.0.5" }
 yunta-engine = { path = "crates/engine", version = "0.0.5" }
 yunta-render = { path = "crates/render", version = "0.0.5" }
+yunta-api = { path = "crates/api", version = "0.0.5" }
+yunta-mcp = { path = "crates/mcp", version = "0.0.5" }
+yunta-ui = { path = "crates/ui", version = "0.0.5" }
+yunta-tui = { path = "crates/tui", version = "0.0.5" }
 # Test-support crate: a dev-dependency only (never published), but it
 # carries a version like the other internal crates so it is not a wildcard
 # path dependency.
 yunta-testkit = { path = "crates/testkit", version = "0.0.5" }
 yunta-testkit-core = { path = "crates/testkit-core", version = "0.0.5" }
+yunta-testkit-ui = { path = "crates/testkit-ui", version = "0.0.5" }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.23"
@@ -48,18 +62,24 @@ errno = "0.3"
 indexmap = "2"
 indicatif = "0.18"
 console = "0.16"
+crossterm = "0.29"
 nix = { version = "0.31", features = ["signal", "process"] }
 libc = "0.2"
 rustix = { version = "1.1", features = ["fs", "process"] }
 procfs = "0.18"
 libproc = "0.14.11"
+# Reads another process's environment on macOS, where `sysctl(KERN_PROCARGS2)`
+# would take `unsafe`; only its process reading is compiled.
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 proptest = "1"
+# Only the crossterm backend: a terminal application holds no other.
+ratatui = { version = "0.30", default-features = false }
 regex = "1"
 reqwest = { version = "0.13", default-features = false }
 rmcp = { version = "3.4", default-features = false }
 # Storage names the features it uses: the defaults add a wasm SQLite
 # backend, for a target this project never builds.
-rusqlite = { version = "0.40", default-features = false }
+rusqlite = { version = "0.41", default-features = false }
 schemars = "1"
 serde = "1"
 serde_json = "1"

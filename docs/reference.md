@@ -471,7 +471,7 @@ the catalog of workflows: it asks `list_workflows`, which is always current.
   document of each kind, so the kind identifies the document and there is no
   name to choose: declaring a kind twice is refused by `yunta check`, and the
   kind names are reserved as file names. Declaring a kind is all a node needs
-  to receive that document's shape in its context. `yunta schema <kind>`
+  to receive that document's shape in its context. `yunta schema <document>`
   prints the shape, and `--json` its JSON Schema.
 - **`inputs:`** maps a name to its spec, with `type:` choosing the shape:
   `string`, `number`, `boolean`, `enum`, `path` or `document`. Each type takes

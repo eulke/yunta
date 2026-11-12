@@ -15,13 +15,17 @@
 //! that may never come, at every start, and tells nothing about a pipe.
 //!
 //! This is the one place in the crate that writes an escape: an SGR color,
-//! a terminal link, the window's title, a synchronized update or a bell.
+//! a terminal link, the window's title, a synchronized update or a bell. The
+//! color an escape sets is read from [`style()`], which any other engine that
+//! draws Surco's lines reads too.
 
 use crate::line::{Fill, Line, Span, Tone};
-use crate::palette::{self, Rgb};
 
 mod control;
 pub use control::*;
+
+mod style;
+pub use style::{erase, page, style, Ansi, Color, Style};
 
 #[cfg(feature = "clap")]
 mod help;
@@ -243,17 +247,7 @@ impl Paint {
         let text = harmless(text);
         match self {
             Paint::Plain => text,
-            Paint::Color {
-                layer: Layer::Ansi16,
-                ..
-            } => match sgr(tone) {
-                Some(sgr) => format!("\x1b[{sgr}m{text}\x1b[0m"),
-                None => text,
-            },
-            Paint::Color {
-                layer: Layer::Truecolor(ground),
-                ..
-            } => truecolor(ground, tone, None, None, &text),
+            Paint::Color { layer, .. } => escaped(style(layer, tone, None, None), &text),
         }
     }
 
@@ -261,16 +255,10 @@ impl Paint {
     /// it carries or else `fill`, the line's; a link is written only where the
     /// paint has links on.
     fn span(self, span: &Span, fill: Option<Fill>) -> String {
+        let text = harmless(&span.text);
         let word = match self {
-            Paint::Color {
-                layer: Layer::Truecolor(ground),
-                ..
-            } => truecolor(ground, span.tone, span.fill, fill, &harmless(&span.text)),
-            Paint::Plain
-            | Paint::Color {
-                layer: Layer::Ansi16,
-                ..
-            } => self.word(span.tone, &span.text),
+            Paint::Plain => text,
+            Paint::Color { layer, .. } => escaped(style(layer, span.tone, span.fill, fill), &text),
         };
         match (self, &span.link) {
             // OSC 8: the text between the two sequences opens the target; a
@@ -287,16 +275,9 @@ impl Paint {
     /// when the line has no background to draw, which a pill's line never has.
     fn erase(self, fill: Option<Fill>) -> Option<String> {
         match self {
-            Paint::Plain
-            | Paint::Color {
-                layer: Layer::Ansi16,
-                ..
-            } => None,
-            Paint::Color {
-                layer: Layer::Truecolor(ground),
-                ..
-            } => {
-                let background = color_parameter(48, palette::fill(ground, fill?)?);
+            Paint::Plain => None,
+            Paint::Color { layer, .. } => {
+                let background = color_parameter(BACKGROUND, style::erase(layer, fill)?);
                 Some(format!("\x1b[{background}m\x1b[K\x1b[0m"))
             }
         }
@@ -315,114 +296,49 @@ pub(crate) fn harmless(text: &str) -> String {
     )
 }
 
-/// A color of the sixteen, which every terminal draws in its own theme.
-#[derive(Clone, Copy)]
-enum Ansi {
-    Red,
-    Green,
-    Yellow,
-    Magenta,
-    Cyan,
-}
+/// The SGR target that sets the text's color.
+const TEXT: u8 = 38;
 
-impl Ansi {
-    /// The SGR parameter that sets this color for text.
-    fn code(self) -> u8 {
-        match self {
-            Ansi::Red => 31,
-            Ansi::Green => 32,
-            Ansi::Yellow => 33,
-            Ansi::Magenta => 35,
-            Ansi::Cyan => 36,
-        }
-    }
-}
+/// The SGR target that sets the background's color.
+const BACKGROUND: u8 = 48;
 
-/// How `tone` is painted on sixteen colors: bold, dim, and the ANSI color
-/// it takes, so every terminal draws it in its own palette. The one table
-/// both the SGR escapes and clap's styles are written from.
-fn ansi(tone: Tone) -> (bool, bool, Option<Ansi>) {
-    match tone {
-        Tone::Plain => (false, false, None),
-        Tone::Strong | Tone::Command => (true, false, None),
-        Tone::Muted => (false, true, None),
-        // In sixteen colors faint is dim, as muted is: the layer has no
-        // step between them.
-        Tone::Faint => (false, true, None),
-        Tone::Done => (false, false, Some(Ansi::Green)),
-        Tone::Failed => (false, false, Some(Ansi::Red)),
-        Tone::Running => (false, false, Some(Ansi::Cyan)),
-        Tone::NeedsYou => (true, false, Some(Ansi::Magenta)),
-        Tone::Caution => (false, false, Some(Ansi::Yellow)),
-        Tone::Added => (false, false, Some(Ansi::Green)),
-        Tone::Removed => (false, false, Some(Ansi::Red)),
-        // Code's colors are material of the 24-bit layer: in the sixteen
-        // colors a word of code reads plain.
-        Tone::Code(_) => (false, false, None),
-    }
-}
-
-/// The SGR parameters `tone` is painted with, from [`ansi`].
-fn sgr(tone: Tone) -> Option<String> {
-    let (bold, dim, color) = ansi(tone);
-    let parameters: Vec<String> = [bold.then(|| "1".to_string()), dim.then(|| "2".to_string())]
-        .into_iter()
-        .flatten()
-        .chain(color.map(|color| color.code().to_string()))
-        .collect();
-    (!parameters.is_empty()).then(|| parameters.join(";"))
-}
-
-/// `text` in `tone` on `ground`, on the fill its span carries (`own`) or else
-/// the line's (`line`): its SGR parameters and a reset after it, or the text
-/// alone when nothing is drawn.
-fn truecolor(
-    ground: Ground,
-    tone: Tone,
-    own: Option<Fill>,
-    line: Option<Fill>,
-    text: &str,
-) -> String {
-    let parameters = truecolor_parameters(ground, tone, own, line);
+/// `text` in `style`: its SGR parameters, bold, dim, the text's color and the
+/// background's, and a reset after it; or the text alone when the style draws
+/// nothing.
+fn escaped(style: Style, text: &str) -> String {
+    let parameters: Vec<String> = [
+        style.bold.then(|| "1".to_string()),
+        style.dim.then(|| "2".to_string()),
+        style.fg.map(|color| color_parameter(TEXT, color)),
+        style.bg.map(|color| color_parameter(BACKGROUND, color)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     if parameters.is_empty() {
         return text.to_string();
     }
     format!("\x1b[{}m{text}\x1b[0m", parameters.join(";"))
 }
 
-/// The SGR parameters that draw `tone` on `ground`: bold where Ansi16 is
-/// bold, the text's color, and the background of the fill that paints it.
-/// A span's own fill wins over the line's. A pill is its tone's color with
-/// pill ink on it, in bold; a pill in a tone the palette leaves to the
-/// terminal has no color to paint, so it is its word on the line's fill.
-fn truecolor_parameters(
-    ground: Ground,
-    tone: Tone,
-    own: Option<Fill>,
-    line: Option<Fill>,
-) -> Vec<String> {
-    let bold = ansi(tone).0;
-    let text = palette::tone(ground, tone);
-    let (bold, text, background) = match (own, text) {
-        (Some(Fill::Pill), Some(color)) => (true, Some(palette::pill_ink(ground)), Some(color)),
-        _ => (
-            bold,
-            text,
-            own.and_then(|fill| palette::fill(ground, fill))
-                .or_else(|| line.and_then(|fill| palette::fill(ground, fill))),
-        ),
-    };
-    bold.then(|| "1".to_string())
-        .into_iter()
-        .chain(text.map(|color| color_parameter(38, color)))
-        .chain(background.map(|color| color_parameter(48, color)))
-        .collect()
+/// The SGR parameter that sets `color` for `target`, [`TEXT`] or
+/// [`BACKGROUND`]: one of the sixteen by its number, or 24 bits.
+fn color_parameter(target: u8, color: Color) -> String {
+    match color {
+        Color::Ansi(ansi) => (ansi_code(ansi) + target - TEXT).to_string(),
+        Color::Rgb(red, green, blue) => format!("{target};2;{red};{green};{blue}"),
+    }
 }
 
-/// The SGR parameter that sets `color` in 24 bits: the text's color when
-/// `target` is 38, the background's when it is 48.
-fn color_parameter(target: u8, Rgb(red, green, blue): Rgb) -> String {
-    format!("{target};2;{red};{green};{blue}")
+/// The SGR parameter that sets `ansi` for text; a background's is ten more.
+fn ansi_code(ansi: Ansi) -> u8 {
+    match ansi {
+        Ansi::Red => 31,
+        Ansi::Green => 32,
+        Ansi::Yellow => 33,
+        Ansi::Magenta => 35,
+        Ansi::Cyan => 36,
+    }
 }
 
 /// `text` with every SGR escape, every erase and every link taken out: what

@@ -11,7 +11,7 @@ use yunta_core::events::{
     Timed, Unchanged,
 };
 
-use crate::pause::RESET_FORMAT;
+use crate::INSTANT_FORMAT;
 
 /// A session that ended without a terminal event: whose it was, and how
 /// its process went when it had one of its own.
@@ -73,7 +73,7 @@ pub(crate) fn limit_sentence(limit: &AccountLimit) -> String {
         LimitSource::Forge => "the forge rate-limited its requests".to_string(),
     };
     let said = match &limit.resets_at {
-        Some(at) => format!("{who} until {}", at.format(RESET_FORMAT)),
+        Some(at) => format!("{who} until {}", at.format(INSTANT_FORMAT)),
         None => who,
     };
     text::detailed(said, &limit.message)

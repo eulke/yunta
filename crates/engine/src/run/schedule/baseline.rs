@@ -7,9 +7,9 @@
 //! taken beside it as soon as the run wakes owing it.
 
 use yunta_core::{NodeId, Workflow};
+use yunta_replay::RunState;
 
 use super::{Decision, Policy};
-use crate::replay::RunState;
 use crate::run::baseline::{waits_for_the_measurement, Owed};
 
 /// What of the measurement this run's lineage declared its log does not

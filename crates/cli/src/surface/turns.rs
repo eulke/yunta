@@ -129,9 +129,9 @@ impl Curtain {
 
 #[cfg(test)]
 mod tests {
+    use yunta_api::EventLog;
     use yunta_core::events::{EventPayload, NodeStartedPayload};
     use yunta_core::{CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, RunId};
-    use yunta_storage::AsyncStorage;
     use yunta_testkit::wait_until_async;
     use yunta_testkit_core::{Captured, FixedClock, Log};
 
@@ -219,7 +219,7 @@ mod tests {
         async fn open(delivery: Delivery, at: &std::path::Path) -> Self {
             let screen = Watched::sized(24, 80);
             let scrollback = Captured::default();
-            let storage = AsyncStorage::open(at.join("events.db"))
+            let log = EventLog::open(&at.join("events.db"))
                 .await
                 .expect("a store opens under the test's own directory");
             let manifest = manifest();
@@ -227,10 +227,11 @@ mod tests {
                 run_id: &RUN,
                 manifest: &manifest,
                 prior: None,
-                storage: &storage,
+                log: &log,
                 clock: Arc::new(FixedClock),
                 delivery,
                 glyphs: Glyphs::Ascii,
+                engine: crate::surface::EngineReading::This,
             };
             let draw = match delivery {
                 Delivery::Live => Draw::Live(Box::new(
@@ -292,6 +293,32 @@ mod tests {
             );
             self.painter.await.expect("the painter ran to its end");
         }
+    }
+
+    /// An event read off the log has no other copy to be recovered from, so
+    /// one handed to the surface waits for room rather than being dropped,
+    /// however long the painter has stood down.
+    #[tokio::test]
+    async fn events_handed_to_a_surface_are_never_dropped() {
+        let at = tempfile::tempdir().expect("a directory for this test's store");
+        let drawing = Drawing::open(Delivery::Lines { reason: "a test" }, at.path()).await;
+        let depth = crate::surface::QUEUE_DEPTH;
+        drawing.curtain.lower().await;
+        let events = (0..2 * depth)
+            .fold(Log::for_run(RUN.as_str()), |log, _| {
+                log.event(EventPayload::Node(NodeEvent::Started(
+                    NodeStartedPayload::attempt(1),
+                )))
+            })
+            .build();
+        for event in events {
+            assert!(drawing.feed.deliver(event).await, "the painter is there");
+        }
+        drawing.curtain.raise();
+        let scrollback = drawing.scrollback.clone();
+        drawing.drained().await;
+        // The first line says why the moments come as lines; one follows per event.
+        assert_eq!(scrollback.text().lines().skip(1).count(), 2 * depth);
     }
 
     #[tokio::test]

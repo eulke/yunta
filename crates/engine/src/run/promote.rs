@@ -201,7 +201,7 @@ async fn inherit_from_predecessor(
 ) -> Result<Inheritance, RunError> {
     // What the predecessor's own log says it held, so each inherited
     // artifact keeps the identity and the producer it had there.
-    let view = crate::replay::RunView::of(storage.events_for_run(predecessor.id.clone()).await?);
+    let view = crate::run_log::RunView::of(storage.events_for_run(predecessor.id.clone()).await?);
     let artifacts =
         read_inherited_artifacts(predecessor.run_dir, predecessor.id, &view.events).await?;
     // The successor keeps the predecessor's frozen inputs, so it copies their

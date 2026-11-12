@@ -59,7 +59,7 @@ pub(crate) async fn write_at_birth(
         return Ok(());
     };
     for (input, hash) in named_inputs(frozen) {
-        if !stored(&store, hash).await? {
+        if !stored(run_dir, hash).await? {
             return Err(FrozenError::Missing { input });
         }
     }
@@ -123,9 +123,9 @@ pub(crate) async fn object(
     })
 }
 
-/// Whether the store holds the object `hash` names.
-async fn stored(store: &ObjectStore<'_>, hash: &ContentHash) -> Result<bool, FrozenError> {
-    tokio::fs::try_exists(store.path_of(hash))
+/// Whether the run at `run_dir` holds the object `hash` names.
+async fn stored(run_dir: &Path, hash: &ContentHash) -> Result<bool, FrozenError> {
+    tokio::fs::try_exists(yunta_core::run_dir::object(run_dir, hash))
         .await
         .map_err(|source| FrozenError::Io {
             context: format!("look up object `{hash}`"),

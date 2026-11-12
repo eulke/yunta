@@ -26,7 +26,7 @@ pub fn inherited_findings(events: &[StoredEvent]) -> Vec<Finding> {
         .into_iter()
         .map(qualified)
         .collect();
-    crate::replay::dedup_findings(&standing)
+    yunta_replay::dedup_findings(&standing)
 }
 
 /// `posted`'s finding under an id no other node's finding shares: the

@@ -1,10 +1,11 @@
-//! The words of an input that does not resolve, as a reader sees them: the
-//! name it was given, what it said, and what the workflow declares. The
-//! engine names each problem by its kind and its fields; the words are here.
+//! The words of an input: what kind of value it takes, and, where it does
+//! not resolve, the name it was given, what it said, and what the workflow
+//! declares. The engine names each problem by its kind and its fields; the
+//! words are here.
 
 use surco::text;
 use yunta_core::inputs::InputsProblem;
-use yunta_core::InputName;
+use yunta_core::{InputName, InputSpec};
 
 /// The problem an input has, in the words a reader sees.
 pub fn problem(problem: &InputsProblem) -> String {
@@ -101,4 +102,16 @@ fn listed(names: &[InputName], separator: &str) -> String {
         .map(InputName::as_str)
         .collect::<Vec<_>>()
         .join(separator)
+}
+
+/// What kind of value an input `spec` declares takes, as a reader names it.
+pub(crate) fn type_label(spec: &InputSpec) -> &'static str {
+    match spec {
+        InputSpec::String { .. } => "string",
+        InputSpec::Number { .. } => "number",
+        InputSpec::Boolean { .. } => "boolean",
+        InputSpec::Enum { .. } => "enum",
+        InputSpec::Path { .. } => "path",
+        InputSpec::Document { .. } => "document",
+    }
 }

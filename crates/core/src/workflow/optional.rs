@@ -52,6 +52,19 @@ impl fmt::Display for Because {
     }
 }
 
+/// Whether a run of `workflow` under `config` reaches a `pull_request` node:
+/// one `config` leaves out never asks a forge for anything.
+pub fn opens_a_pull_request(workflow: &Workflow, config: &ConfigLayer) -> bool {
+    let left_out: Vec<NodeId> = left_out(workflow, config)
+        .into_iter()
+        .map(|left| left.node)
+        .collect();
+    workflow.iter_nodes_with_group().any(|(node, group)| {
+        matches!(node.kind, crate::NodeKind::PullRequest { .. })
+            && !left_out.contains(group.map_or(&node.id, |group| &group.id))
+    })
+}
+
 /// Every top-level node `workflow` leaves out under `config`: each
 /// optional one that needs a key `config` leaves unset — itself or, for
 /// a `parallel` group, any of its children — and then every node that

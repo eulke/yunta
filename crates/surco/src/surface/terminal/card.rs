@@ -3,18 +3,19 @@
 //! the words it is said with. Every row opens on the decision's edge and is
 //! tinted, and the row pointed at is set apart where a layer draws fills.
 
-use crate::components::{Card, CardBody, ChoiceRow, Choices, TypedRow};
+use crate::components::{Card, CardBody, ChoiceRow, Choices, Laid, TypedRow};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
 use crate::text::counted;
 use crate::width::{cell_width, id_column, middle_cut, INDENT};
 
-/// A prompt's lines, and where the cursor stands when a field is open: the row,
-/// counted from its first line, and the cell.
+/// A prompt's lines, where the cursor stands when a field is open (the row, counted
+/// from its first line, and the cell), and what was laid out of a pane it scrolls.
 pub struct Placed {
     pub lines: Vec<Line>,
     pub cursor: Option<(usize, usize)>,
+    pub laid: Option<Laid>,
 }
 
 /// The cells the edge and the space after it take at the start of a row.
@@ -36,7 +37,7 @@ const LEAST_TEXT: usize = 12;
 const HEAD_GAP: usize = 2;
 
 /// The cell the cursor needs past the last character of a field.
-const CURSOR_CELL: usize = 1;
+pub(super) const CURSOR_CELL: usize = 1;
 
 /// The cells the mark of a line that needs a person, or a refusal, and the space
 /// after it take: the rest of such a line wraps under them.
@@ -60,13 +61,12 @@ enum Keeping {
 }
 
 impl Card {
-    /// The card as a prompt draws it on a terminal of `rows` rows, with where the
-    /// cursor stands when a field is open. A short terminal keeps the question and
-    /// the row pointed at: the list gives way first, counting what it leaves out,
-    /// then what stands under the question and the route, and then the keys. A
-    /// terminal too short for a question and one row is too short to be asked on.
-    pub fn drawn(&self, look: &Look, rows: usize) -> Placed {
-        let most = rows.saturating_sub(1);
+    /// The card as a prompt draws it in at most `rows` rows, with where the cursor
+    /// stands when a field is open. Short of rows, it keeps the question and the row
+    /// pointed at: the list gives way first, counting what it leaves out, then what
+    /// stands under the question and the route, and then the keys. Fewer rows than a
+    /// question and one row are too few to be asked in.
+    pub fn drawn(&self, look: &Look, most: usize) -> Placed {
         let whole = self.laid_out(look, most, Keeping::Everything);
         let placed = [Keeping::WhatAnswers, Keeping::TheQuestion]
             .into_iter()
@@ -81,12 +81,13 @@ impl Card {
                 .map(|row| on_the_edge(row, look.glyphs))
                 .collect(),
             cursor: placed.cursor,
+            laid: None,
         }
     }
 
     /// The cells a field on a card may fill with `prompt` before it: what the card's
     /// edge, the prompt and the cell the cursor needs past the last character leave.
-    pub fn typed_room(look: &Look, prompt: &str) -> usize {
+    pub(crate) fn typed_room(look: &Look, prompt: &str) -> usize {
         look.width
             .cells()
             .saturating_sub(EDGE + cell_width(prompt) + CURSOR_CELL)
@@ -103,8 +104,7 @@ impl Card {
             }
         }
         head.push(Line::new());
-        let separator = format!(" {} ", look.glyphs.sep());
-        let keys = self.keys.join(separator.as_str());
+        let keys = self.legend.spelled(look.glyphs);
         let foot: Vec<Line> = match keys.is_empty() || keeping == Keeping::TheQuestion {
             true => Vec::new(),
             false => std::iter::once(Line::new())
@@ -139,7 +139,11 @@ impl Card {
         };
         let cursor = cursor.map(|(row, cell)| (head.len() + row, EDGE + cell));
         let lines = head.into_iter().chain(middle).chain(foot).collect();
-        Placed { lines, cursor }
+        Placed {
+            lines,
+            cursor,
+            laid: None,
+        }
     }
 
     /// The question under the mark of what needs a person, wrapped under itself,
@@ -190,15 +194,13 @@ fn saying(
     let mut lines = chosen.lines(true, cell_width(&chosen.name) + NAME_GAP, room, look.glyphs);
     lines.push(Line::new());
     lines.extend(Line::new().push(Tone::Strong, asks).wrap(room));
-    let cursor = (
-        lines.len(),
-        cell_width(&typed.prompt) + cell_width(&typed.before),
-    );
+    let (before, after) = typed.fitted(Card::typed_room(look, &typed.prompt));
+    let cursor = (lines.len(), cell_width(&typed.prompt) + cell_width(&before));
     lines.push(
         Line::new()
             .push(Tone::Muted, typed.prompt.as_str())
-            .plain(typed.before.as_str())
-            .plain(typed.after.as_str()),
+            .plain(before)
+            .plain(after),
     );
     if let Some(refused) = refused {
         lines.extend(marked(
@@ -386,4 +388,4 @@ mod round;
 pub use round::said_whole;
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

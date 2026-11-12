@@ -26,4 +26,4 @@ mod store;
 
 pub use async_storage::AsyncStorage;
 pub use error::{Cause, Result, StorageError};
-pub use store::{ChainVerification, Purge, RunListing, Storage};
+pub use store::{ChainVerification, Purge, RunHead, RunListing, Storage};

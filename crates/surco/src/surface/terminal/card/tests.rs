@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use crate::components::{Card, CardBody, ChoiceRow, Choices, TypedRow};
+use crate::components::{Card, CardBody, ChoiceRow, Choices, Legend, TypedRow};
 use crate::figures::files_moving;
 use crate::glyphs::Glyphs;
 use crate::golden::{assert_golden, ENVIRONMENTS, RICH};
@@ -41,18 +41,17 @@ fn rows() -> Vec<ChoiceRow> {
     ]
 }
 
-fn card(body: CardBody, glyphs: Glyphs) -> Card {
+pub(in crate::surface::terminal) fn card(body: CardBody, glyphs: Glyphs) -> Card {
     Card {
         question: "Plan and its tests registered. Approve?".to_string(),
         edge: Some(format!("approve-plan {} 3GQF5Q", glyphs.sep())),
         about: vec![files_moving("8 files".to_string(), 295, 73, glyphs)],
         body,
-        keys: vec![
-            format!("{} move", glyphs.up_down()),
-            "enter chooses".to_string(),
-            "n adds a note".to_string(),
-            "esc leaves it for later".to_string(),
-        ],
+        legend: Legend::new()
+            .arrows("move")
+            .key("enter", "chooses")
+            .key("n", "adds a note")
+            .key("esc", "leaves it for later"),
     }
 }
 
@@ -68,6 +67,7 @@ fn look(glyphs: Glyphs, cells: usize) -> Look {
         glyphs,
         paint: Paint::Plain,
         width: Width::row(cells, None),
+        motion: crate::motion::Motion::Moves,
     }
 }
 
@@ -162,7 +162,9 @@ fn a_field_opens_under_the_option_it_answers_with_the_cursor_on_it() {
         refused: None,
     };
     let mut card = card(body, Glyphs::Unicode);
-    card.keys = vec!["enter sends it".to_string(), "esc goes back".to_string()];
+    card.legend = Legend::new()
+        .key("enter", "sends it")
+        .key("esc", "goes back");
     let placed = card.drawn(&look(Glyphs::Unicode, 80), usize::MAX);
     let rows: Vec<String> = placed.lines.iter().map(|line| line.text()).collect();
     assert_eq!(
@@ -280,7 +282,7 @@ fn what_is_too_wide_for_the_line_is_held_to_it() {
     }
 }
 
-fn eight_rows() -> Vec<ChoiceRow> {
+pub(in crate::surface::terminal) fn eight_rows() -> Vec<ChoiceRow> {
     ["a", "b", "c", "d", "e", "f", "g", "h"]
         .map(|name| row(name, Some("does it"), None))
         .into()
@@ -298,7 +300,7 @@ fn on_a_short_terminal_the_list_gives_way_first() {
         then: Some("x → y".to_string()),
     };
     let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 10)
+        .drawn(&look(Glyphs::Unicode, 80), 9)
         .lines
         .iter()
         .map(|line| line.text())
@@ -331,7 +333,7 @@ fn shorter_still_only_the_question_the_row_and_the_keys_stay() {
         then: Some("x → y".to_string()),
     };
     let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 7)
+        .drawn(&look(Glyphs::Unicode, 80), 6)
         .lines
         .iter()
         .map(|line| line.text())
@@ -361,7 +363,7 @@ fn shortest_of_all_the_keys_give_way_before_the_question() {
         then: Some("x → y".to_string()),
     };
     let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 6)
+        .drawn(&look(Glyphs::Unicode, 80), 5)
         .lines
         .iter()
         .map(|line| line.text())
@@ -393,7 +395,7 @@ fn a_long_question_keeps_its_first_row_on_a_short_narrow_terminal() {
     asked.question =
         "Plan and its tests registered, with every change it makes and each risk it takes?"
             .to_string();
-    let placed = asked.drawn(&look(Glyphs::Unicode, 40), 10);
+    let placed = asked.drawn(&look(Glyphs::Unicode, 40), 9);
     let rows: Vec<String> = placed.lines.iter().map(|line| line.text()).collect();
     assert!(rows.len() <= 9, "{rows:#?}");
     assert!(rows[0].starts_with("▎ ◆ Plan and its tests"), "{rows:#?}");
@@ -451,5 +453,24 @@ fn a_card_matches_its_goldens_in_every_environment() {
             .map(|line| look.paint.line(line) + "\n")
             .collect();
         assert_golden(&environment.golden(&goldens, "choosing"), &drawn);
+    }
+}
+
+/// A card's keys read in one muted run, each key beside what it does and the
+/// glyph set's separator between two, in each glyph set.
+#[test]
+fn a_cards_legend_reads_as_its_keys_read() {
+    for (glyphs, foot) in [
+        (
+            Glyphs::Unicode,
+            "▎ ↑↓ move · enter chooses · n adds a note · esc leaves it for later",
+        ),
+        (
+            Glyphs::Ascii,
+            "| up/down move ; enter chooses ; n adds a note ; esc leaves it for later",
+        ),
+    ] {
+        let rows = drawn(&card(choosing(0, None), glyphs), &look(glyphs, 100));
+        assert_eq!(rows.last().map(String::as_str), Some(foot), "{rows:#?}");
     }
 }

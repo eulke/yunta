@@ -14,8 +14,8 @@ use surco::line::Tone;
 use surco::paint::Paint;
 use surco::width::{GAP, INDENT};
 use surco::words::RUNS_THAT_NEED_YOU_FIRST;
-
-use crate::commands::advice;
+use yunta_core::step::{Arg, NextStep, Reach};
+use yunta_render::command;
 
 /// What a person is doing, in the order they meet it, and the commands
 /// that do it. Every visible subcommand is in exactly one group.
@@ -42,14 +42,21 @@ pub(crate) const GROUPS: [(&str, &[&str]); 6] = [
 /// The first steps, each with what it does.
 fn examples() -> [(String, &'static str); 4] {
     [
-        (advice::init(), "prepare this repository"),
+        (command::line(&NextStep::Init), "prepare this repository"),
         (
-            advice::run(".yunta/workflows/lint-fix.yaml"),
+            command::line(&NextStep::Run {
+                workflow: Arg::Given(".yunta/workflows/lint-fix.yaml".to_string()),
+            }),
             "run a workflow from the catalog",
         ),
-        (advice::list_runs(), RUNS_THAT_NEED_YOU_FIRST),
         (
-            advice::status("needs"),
+            command::line(&NextStep::ListRuns {
+                reach: Reach::Repository,
+            }),
+            RUNS_THAT_NEED_YOU_FIRST,
+        ),
+        (
+            command::line(&NextStep::Needs),
             "the run waiting on you, and how to answer it",
         ),
     ]

@@ -1,12 +1,13 @@
 //! A plan's desk on a terminal of an exact size. Every row it draws stands inside a margin,
 //! so nothing reaches the last column, where a terminal decides on its own whether the next
-//! character wraps. It fills the rows it is given, less the one a prompt never draws on.
+//! character wraps. It fills the rows it is given.
 
 use super::card::Placed;
-use crate::components::{Desk, FootRow, Pane};
+use super::{at_ends, Terminal, APART};
+use crate::components::{Desk, FootRow, Laid, Pane};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Line, Tone};
-use crate::look::Look;
+use crate::look::{Look, Width};
 use crate::text::counted;
 use crate::width::cell_width;
 
@@ -30,22 +31,11 @@ const PANE_MOST: usize = 120;
 const ROOM_TO_READ: usize = 10;
 /// The rows they get before the rows left blank go too.
 const LEAST_TO_READ: usize = 5;
-/// The cells between what stands at the two ends of a row, when both stand on it.
-const APART: usize = 2;
 /// The fewest cells a title keeps when something stands at the far end of its row: under them
 /// what stands there goes instead.
 const LEAST_TITLE: usize = 20;
 /// The rows the pane's title and the blank row under it take.
 const PANE_HEAD: usize = 2;
-
-/// A desk drawn, with what a key that scrolls it has to know: the first row of the pane it
-/// shows, how many rows its body has, and the highest first row it can show.
-pub struct LaidDesk {
-    pub placed: Placed,
-    pub top: usize,
-    pub page: usize,
-    pub most: usize,
-}
 
 /// The columns of a desk on a terminal of some width, so the head, the pane and the foot
 /// cannot disagree about them.
@@ -80,12 +70,31 @@ impl Desk {
         Measures::of(look.width.cells()).pane
     }
 
-    /// The desk drawn in `rows` rows of a terminal, less the row a prompt never draws on. On
-    /// a short one the head gives up what was asked, then the gist, then its blank rows.
-    pub fn drawn(&self, look: &Look, rows: usize) -> LaidDesk {
+    /// The desk drawn whole, as a document holds it: every group of its rail and every line
+    /// of its pane in sight.
+    pub(crate) fn drawn_whole(&self, look: &Look) -> Vec<Line> {
+        self.drawn(look, self.whole_rows(look)).lines
+    }
+
+    /// The rows the desk takes with nothing given up: its whole head, the longer of its rail
+    /// and its pane, and its foot.
+    fn whole_rows(&self, look: &Look) -> usize {
+        let measures = Measures::of(look.width.cells());
+        let head = 2 + usize::from(self.gist.is_some()) + usize::from(self.asked.is_some());
+        let foot = self.foot_lines(look.glyphs, measures.whole).len();
+        let pane = PANE_HEAD + pane_lines(&self.pane, look, measures.pane).len();
+        let rail = measures
+            .rail
+            .map_or(0, |cells| rail_length(&self.rail, look, cells));
+        head + pane.max(rail).max(ROOM_TO_READ) + foot
+    }
+
+    /// The desk drawn in `most` rows, with what a key that scrolls it has to know of its
+    /// pane. Short of rows, the head gives up what was asked, then the gist, then its blank
+    /// rows.
+    pub fn drawn(&self, look: &Look, most: usize) -> Placed {
         let measures = Measures::of(look.width.cells());
         let glyphs = look.glyphs;
-        let most = rows.saturating_sub(1);
         let mut foot = self.foot_lines(glyphs, measures.whole);
         let mut head = self.head_lines(glyphs, measures.whole, most, foot.len());
         if most.saturating_sub(head.len() + foot.len()) < LEAST_TO_READ {
@@ -94,7 +103,7 @@ impl Desk {
             foot.remove(0);
         }
         let height = most.saturating_sub(head.len() + foot.len());
-        let (middle, top, page, pane_most) = self.middle(look, &measures, height);
+        let (middle, laid) = self.middle(look, &measures, height);
         let margin = " ".repeat(MARGIN);
         let mut lines: Vec<Line> = head
             .into_iter()
@@ -106,27 +115,18 @@ impl Desk {
             })
             .collect();
         lines.truncate(most);
-        LaidDesk {
-            placed: Placed {
-                lines,
-                cursor: None,
-            },
-            top,
-            page,
-            most: pane_most,
+        Placed {
+            lines,
+            cursor: None,
+            laid: Some(laid),
         }
     }
 
     /// The rows between the head and the foot: the rail beside the pane, or the pane alone.
-    fn middle(
-        &self,
-        look: &Look,
-        measures: &Measures,
-        height: usize,
-    ) -> (Vec<Line>, usize, usize, usize) {
+    fn middle(&self, look: &Look, measures: &Measures, height: usize) -> (Vec<Line>, Laid) {
         let glyphs = look.glyphs;
         let has_rail = measures.rail.is_some();
-        let (pane, top, page, most) = pane_rows(&self.pane, look, measures.pane, height, has_rail);
+        let (pane, laid) = pane_rows(&self.pane, look, measures.pane, height, has_rail);
         let lines = match measures.rail {
             Some(cells) => {
                 let rule = format!(" {} ", glyphs.gutter());
@@ -143,7 +143,7 @@ impl Desk {
             }
             None => pane,
         };
-        (lines, top, page, most)
+        (lines, laid)
     }
 
     /// The head's rows: the title, what the plan is about and what was asked while the pane
@@ -202,8 +202,7 @@ impl Desk {
         let mut lines = vec![Line::new(), question];
         // The keys stand at the far end of the answer's row when both fit, and under it when not.
         let left = self.answers();
-        let sep = format!(" {} ", glyphs.sep());
-        let keys = self.foot.keys.join(sep.as_str());
+        let keys = self.far(glyphs);
         let far = Line::new().push(Tone::Muted, keys.as_str());
         if keys.is_empty() {
             lines.push(left.cut(measure, glyphs));
@@ -216,12 +215,26 @@ impl Desk {
         lines
     }
 
+    /// What stands at the far end of the answer's row: the keys, then how many options
+    /// stand on the card past the last number, the separator between them.
+    fn far(&self, glyphs: Glyphs) -> String {
+        let more = match &self.foot.row {
+            FootRow::Options { more, .. } if *more > 0 => {
+                Some(format!("{} on the card", counted(*more, "more option")))
+            }
+            _ => None,
+        };
+        let keys = Some(self.foot.legend.spelled(glyphs)).filter(|keys| !keys.is_empty());
+        let sep = format!(" {} ", glyphs.sep());
+        keys.into_iter().chain(more).collect::<Vec<_>>().join(&sep)
+    }
+
     /// The answer as it stands: the options by their numbers, or the option about to be
     /// chosen with what it does.
     fn answers(&self) -> Line {
         match &self.foot.row {
-            FootRow::Options(names) => {
-                names
+            FootRow::Options { named, .. } => {
+                named
                     .iter()
                     .enumerate()
                     .fold(Line::new(), |line, (at, name)| {
@@ -238,16 +251,6 @@ impl Desk {
                 .then(option.text()),
         }
     }
-}
-
-/// `left` at the start of `cells` cells and `right` at its far end, with the space between
-/// them as wide as the row needs. Without a `right`, `left` stands alone.
-fn at_ends(left: Line, right: Option<Line>, cells: usize) -> Line {
-    let Some(right) = right else {
-        return left;
-    };
-    let gap = cells.saturating_sub(cell_width(&left.text()) + cell_width(&right.text()));
-    left.plain(" ".repeat(gap)).then(right)
 }
 
 /// The title's parts in `cells`: as many leading parts as fit stand whole, the first in
@@ -308,79 +311,42 @@ fn pane_title_row(pane: &Pane, glyphs: Glyphs, cells: usize, has_rail: bool) -> 
 }
 
 /// The pane's rows in `height` rows: its title and a blank row, then the lines it is scrolled
-/// to, and a row that counts the lines below when they do not all fit. Returns the rows, the
-/// first line shown, the body's rows and the last first line a scroll can reach.
+/// to, and a row that counts the lines below when they do not all fit. Returns the rows and
+/// what was laid out of the pane.
 fn pane_rows(
     pane: &Pane,
     look: &Look,
     cells: usize,
     height: usize,
     has_rail: bool,
-) -> (Vec<Line>, usize, usize, usize) {
-    let glyphs = look.glyphs;
+) -> (Vec<Line>, Laid) {
     let page = height.saturating_sub(PANE_HEAD);
-    let most = pane.lines.len().saturating_sub(page);
-    let top = scroll_top(pane, most, page);
-    let mut rows = vec![pane_title_row(pane, glyphs, cells, has_rail), Line::new()];
-    rows.extend(pane_body(&pane.lines, (top, page, most), cells, glyphs));
+    let (body, laid) = Terminal::on(measure(look, cells)).scrolled(&pane.doc, pane.sight, page);
+    let mut rows = vec![
+        pane_title_row(pane, look.glyphs, cells, has_rail),
+        Line::new(),
+    ];
+    rows.extend(body);
     rows.truncate(height);
     rows.resize(height, Line::new());
-    (rows, top, page, most)
+    (rows, laid)
 }
 
-/// The first line the pane shows: the one it was scrolled to, held within its last lines and
-/// moved so that the line a pointer stands on is in sight.
-fn scroll_top(pane: &Pane, most: usize, page: usize) -> usize {
-    let top = pane.top.min(most);
-    let Some(row) = pane.keep else {
-        return top;
-    };
-    // Past the last line every row of the body shows a line, so none is kept for a count.
-    let shown = if top == most {
-        page
-    } else {
-        page.saturating_sub(1)
-    };
-    if row < top || row >= top + shown {
-        row.min(most)
-    } else {
-        top
-    }
+/// What the pane holds, laid out at its measure of `cells`.
+fn pane_lines(pane: &Pane, look: &Look, cells: usize) -> Vec<Line> {
+    Terminal::on(measure(look, cells)).lines(&pane.doc)
 }
 
-/// The body rows of a pane scrolled to `top` (with its `page` rows and `most`), each cut to
-/// `cells`. When lines lie below the last one shown, the row that counts them takes its place.
-fn pane_body(
-    lines: &[Line],
-    (top, page, most): (usize, usize, usize),
-    cells: usize,
-    glyphs: Glyphs,
-) -> Vec<Line> {
-    if top == most {
-        return lines[top..]
-            .iter()
-            .map(|line| line.cut(cells, glyphs))
-            .collect();
+/// `look` at the pane's measure of `cells`.
+fn measure(look: &Look, cells: usize) -> Look {
+    Look {
+        width: Width::row(cells, None),
+        ..*look
     }
-    if page == 0 {
-        return Vec::new();
-    }
-    let end = top + page - 1;
-    let more = format!(
-        "{} {}",
-        glyphs.ellipsis(),
-        counted(lines.len() - end, "more line")
-    );
-    let mut body: Vec<Line> = lines[top..end]
-        .iter()
-        .map(|line| line.cut(cells, glyphs))
-        .collect();
-    body.push(Line::new().push(Tone::Muted, more).cut(cells, glyphs));
-    body
 }
 
 mod rail;
-use rail::rail_rows;
+use rail::{rail_length, rail_rows};
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

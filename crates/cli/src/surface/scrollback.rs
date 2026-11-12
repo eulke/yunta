@@ -54,9 +54,10 @@ impl Scrollback {
 
 #[cfg(test)]
 mod tests {
+    use yunta_core::events::NodeState;
     use yunta_core::{NodeId, RunId};
-    use yunta_engine::{NodeStanding, NodeState, RunFrame, RunPhase};
-    use yunta_testkit::{node_frame, run_frame};
+    use yunta_replay::frame::NodeFrame;
+    use yunta_replay::frame::{NodeStanding, RunFrame, RunPhase};
     use yunta_testkit_core::Captured;
 
     use crate::surface::region::Region;
@@ -77,19 +78,19 @@ mod tests {
         .expect("the region's row template parses")
     }
 
-    fn node(id: &'static str, state: NodeStanding) -> yunta_engine::NodeFrame {
-        node_frame(&NodeId::from_static(id), state)
+    fn node(id: &'static str, state: NodeStanding) -> yunta_replay::frame::NodeFrame {
+        NodeFrame::sample(&NodeId::from_static(id), state)
     }
 
-    fn running(id: &'static str) -> yunta_engine::NodeFrame {
+    fn running(id: &'static str) -> yunta_replay::frame::NodeFrame {
         node(id, NodeStanding::Reached(NodeState::Running { attempt: 1 }))
     }
 
-    fn frame(nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
+    fn frame(nodes: Vec<yunta_replay::frame::NodeFrame>) -> RunFrame {
         RunFrame {
             phase: RunPhase::Running,
             nodes,
-            ..run_frame(&RUN)
+            ..RunFrame::sample(&RUN)
         }
     }
 

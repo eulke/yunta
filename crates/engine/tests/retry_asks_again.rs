@@ -6,6 +6,7 @@
 use yunta_core::events::{
     CriterionResult, Escalation, EventPayload, NodeEvent, Precondition, Remedy, TaskStatus,
 };
+use yunta_core::refusal::GateRefusal;
 use yunta_core::reserved::ReservedOption;
 use yunta_engine::{awaits_decision, current_escalation, ResolveGateError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
@@ -65,7 +66,7 @@ async fn parked_menu(bench: &Bench) -> Escalation {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -157,8 +158,8 @@ const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 const ASKS_ONCE: &str = "name: asked\nnodes:\n  - id: approve\n    kind: gate\n    assignee: lead\n    message: \"Go?\"\n    options: [go, stop]\n";
 
 /// What a run parked on `approve` has recorded, as every later process reads it.
-fn state_of(bench: &Bench) -> yunta_engine::RunState {
-    yunta_engine::derive(&bench.storage.events_for_run(&bench.run_id).unwrap())
+fn state_of(bench: &Bench) -> yunta_replay::RunState {
+    yunta_replay::RunState::replay(&bench.storage.events_for_run(&bench.run_id).unwrap())
 }
 
 /// A decision answered while its run is parked is on offer to nobody until the resume it
@@ -173,7 +174,10 @@ async fn a_decision_answered_is_on_offer_to_nobody_until_its_resume_acts_on_it()
     answer_parked(&bench, "go").await.unwrap();
 
     let second = answer_parked(&bench, "stop").await.unwrap_err();
-    assert!(matches!(second, ResolveGateError::NotPaused), "{second:?}");
+    assert!(
+        matches!(second, ResolveGateError::Refused(GateRefusal::NotPaused)),
+        "{second:?}"
+    );
     let state = state_of(&bench);
     assert_eq!(awaits_decision(&manifest, &state), None);
     let offered = current_escalation(&manifest, &bench.run_dir(), &state)

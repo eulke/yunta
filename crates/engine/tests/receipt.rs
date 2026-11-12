@@ -1,10 +1,10 @@
 //! Verified Work Receipt.
 //!
 //! Two concerns, tested separately: the **formatters**
-//! (`render_markdown`/`render_json`) against a hand-built [`Receipt`] —
+//! (`render_markdown` and the JSON a program reads) against a hand-built [`Receipt`] —
 //! golden byte-for-byte output, kept as files under `goldens/receipt/`
 //! — and the **derivation**
-//! (`build_receipt`) against a real run's own log, executed end to end
+//! (`receipt::closed`) against a real run's own log, executed end to end
 //! with the mock adapter (same style `tests/run.rs` uses), asserted
 //! field by field rather than as one giant string so a fixture tweak
 //! doesn't need to reprint an entire golden blob.
@@ -18,13 +18,13 @@ use yunta_core::events::{
     NodeFailedPayload, NodeStartedPayload, RunEvent, RunFinishedPayload, RunMetrics, StoredEvent,
     TerminalState, TokenUsage,
 };
-use yunta_core::step::NextStep;
-use yunta_core::{ArtifactKind, NodeId, RunId};
-use yunta_engine::{
-    build_receipt, render_receipt_json, BaselineSummary, CostSummary, CriteriaSummary,
-    CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunReport,
-    RunnerUsage, ScopeSummary,
+use yunta_core::receipt::{
+    BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry, DiagnosticCount,
+    EventChainStatus, Receipt, RunnerUsage, ScopeSummary,
 };
+use yunta_core::{ArtifactKind, NodeId, RunId};
+use yunta_engine::RunReport;
+use yunta_replay::receipt;
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
 
@@ -34,7 +34,7 @@ mod from_a_log;
 #[path = "receipt/artifact_problems.rs"]
 mod artifact_problems;
 
-// --- derivation: build_receipt over a real run's own log --------------------
+// --- derivation: receipt::closed over a real run's own log -----------------
 
 const CONFIG: &str = r#"
 runners:
@@ -131,26 +131,10 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
 }
 
 /// The receipt as a file holds it.
-fn render_receipt_markdown(receipt: &yunta_engine::Receipt) -> String {
-    use surco::surface::Surface;
-    surco::surface::Markdown.draw(&yunta_render::receipt::document(
-        receipt,
-        &spell,
-        surco::glyphs::Glyphs::Unicode,
-    ))
-}
-
-/// The command words a receipt names, spelled the way the CLI accepts them.
-/// A receipt names only these two steps, so any other one is a regression.
-fn spell(step: &NextStep) -> String {
-    match step {
-        NextStep::Verify { run } => format!("yunta verify {}", run.handle()),
-        NextStep::Status {
-            run,
-            node: Some(node),
-        } => format!("yunta status {} --node {node}", run.handle()),
-        other => panic!("a receipt names no other step: {other:?}"),
-    }
+fn render_receipt_markdown(receipt: &yunta_core::receipt::Receipt) -> String {
+    use surco::surface::{Markdown, Surface};
+    use yunta_render::page::Page;
+    Markdown.draw(&yunta_render::page::Receipt { receipt }.document(&Markdown.look()))
 }
 
 /// The golden file `case` is checked against.
@@ -172,7 +156,7 @@ fn renders_the_markdown_receipt_byte_for_byte() {
 fn a_failed_run_s_receipt_says_what_failed() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 40 });
     receipt.terminal_state = Some(TerminalState::Failed);
-    receipt.failed = vec![yunta_engine::FailedNode {
+    receipt.failed = vec![yunta_core::receipt::FailedNode {
         node: NodeId::from("build"),
         failure: Failure::Message {
             outcome: "`cargo build` exited 101: cannot find value `x`".into(),
@@ -197,7 +181,7 @@ fn a_broken_event_chain_renders_as_a_visible_failure_not_a_silent_omission() {
 #[test]
 fn renders_the_json_receipt_as_pretty_printed_structured_data() {
     let receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
-    let json = render_receipt_json(&receipt).unwrap();
+    let json = serde_json::to_string_pretty(&receipt).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
     assert_eq!(parsed["run_id"], "run-2026-08-21-0001");

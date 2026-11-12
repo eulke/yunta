@@ -15,15 +15,13 @@ use yunta_core::events::{
     FindingSays, FindingSeverity, StoredEvent,
 };
 use yunta_core::fence::Coverage;
-use yunta_core::port::{Adapter, Forge};
+use yunta_core::port::{Adapter, Forge, HumanInteraction, RunObserver};
 use yunta_core::protected::Protected;
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Location, Manifest, NodeId, RunId, Seq};
 use yunta_storage::AsyncStorage;
 
-use crate::human_interaction::HumanInteraction;
-use crate::observer::RunObserver;
-use crate::replay::RunView;
 use crate::run_log::RunLog;
+use crate::run_log::RunView;
 use crate::task_cycle::Memo;
 
 use super::RunError;
@@ -103,6 +101,9 @@ pub(crate) struct RunCtx<'a> {
     /// borrowed: the run-tools host keeps a clone of it and outlives
     /// every borrow of ours.
     pub observer: Option<Arc<dyn RunObserver>>,
+    /// What this run's sessions said lately, held for whoever listens. One
+    /// for the invocation, shared by every context of the run.
+    pub(crate) voices: Arc<crate::said::Voices>,
     /// The checkout this node was given of its own, and the tree its
     /// work lands in once that work passes its audit. `None` for a node
     /// working in the run's own tree, whose work is committed there when
@@ -186,6 +187,7 @@ impl<'a> RunCtx<'a> {
             secrets: self.secrets.clone(),
             redactor: self.redactor.clone(),
             observer: self.observer.clone(),
+            voices: self.voices.clone(),
             landing: self.landing.clone(),
             awake: self.awake.clone(),
             protected: self.protected.clone(),
@@ -232,11 +234,20 @@ impl<'a> RunCtx<'a> {
             secrets: self.secrets.clone(),
             redactor: self.redactor.clone(),
             observer: self.observer.clone(),
+            voices: self.voices.clone(),
             landing: self.landing.clone(),
             awake: self.awake.clone(),
             protected: self.protected.clone(),
             unit: None,
         }
+    }
+
+    /// Where a program this run starts by its name is found: its ambient
+    /// `PATH`, the one a session's CLI inherits. Empty in a harness with no
+    /// ambient environment.
+    pub(crate) fn search_path(&self) -> &yunta_core::process::SearchPath {
+        self.ambient
+            .map_or(&crate::process::UNSUPPLIED, |env| &env.path)
     }
 
     /// The supervision every subprocess of this run gets: its registry,
@@ -249,7 +260,7 @@ impl<'a> RunCtx<'a> {
             registry: self.process_registry.as_deref(),
             cancel,
             env: &self.subprocess_vars,
-            path: self.ambient.map_or(&[][..], |env| &env.path[..]),
+            path: self.search_path(),
             clock: self.clock.as_ref(),
         }
     }
@@ -298,7 +309,7 @@ impl<'a> RunCtx<'a> {
 
     /// The run's log read and its state derived, together — the pairing
     /// every site that needs the current state goes through, so the load
-    /// and the `derive` live in one place rather than at each call.
+    /// and the replay live in one place rather than at each call.
     pub(crate) async fn run_view(&self) -> Result<RunView, RunError> {
         Ok(RunView::of(self.load_events().await?))
     }

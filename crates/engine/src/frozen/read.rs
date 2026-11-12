@@ -21,7 +21,6 @@ use super::{
     FrozenError,
 };
 use crate::agents::{self, AgentsError};
-use crate::artifacts::store::ObjectStore;
 use crate::catalog;
 use crate::skills;
 
@@ -115,7 +114,7 @@ impl<'a> Source<'a> {
                 String::from_utf8(bytes).map_err(|source| {
                     FrozenError::unresolved(AgentsError::Unreadable {
                         name: name.clone(),
-                        path: ObjectStore::at(run_dir).path_of(hash),
+                        path: yunta_core::run_dir::object(run_dir, hash),
                         source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
                     })
                 })?

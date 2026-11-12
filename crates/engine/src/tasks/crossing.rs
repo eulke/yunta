@@ -15,8 +15,8 @@ use yunta_core::events::{EventPayload, TaskEvent, TaskStatus};
 use yunta_core::{CommitSha, RunId, TaskId, TasksFile};
 
 use crate::process::Supervision;
-use crate::replay::RunView;
 use crate::run::RunError;
+use crate::run_log::RunView;
 
 /// What a source run's log leaves standing about the tasks it was given:
 /// which it finished, and where each one's work landed.

@@ -85,6 +85,17 @@ graph LR
   plan --> build
 ```
 
+```mermaid
+graph TD
+  subgraph checks
+    lint
+    test
+  end
+  build --> checks
+  checks --> ship
+  lint -.-> fix
+```
+
 `src/lib.rs`: the change
 
 ```rust
@@ -135,6 +146,9 @@ _new · 1 line_
 
 a line a page composed itself
 
+a row a pointer moves along, cut where it passes the edge it stands at  
+the next row
+
 | option | what it does | what happens | command |
 |---|---|---|---|
 | **approve** | builds the plan | its tasks run, a step at a time | `yunta resolve-gate 7E5PH4 approve` |
@@ -160,3 +174,83 @@ _the run holds its own state on disk._
 **next**
 
 - `yunta status 7E5PH4`: where it stands
+
+## on a screen
+
+grill finished · brief finished · plan running · build never ran · review never ran · lint never ran · ship never ran
+
+`↑↓` move · `enter` open · `n` new run · `x` close · `q` quit
+
+◆ needs you: `yunta resolve-gate 7E5PH4 approve` (the plan waits for approval)
+
+◆ **Q78GRR** needs you: the suite passed at baseline and now exits 101 · `a` go there
+
+◆ needs you: node `implement` asks at its terminal
+
+◆ **gate `ship` needs a decision** · approve KQERFD
+
+the change is reviewed and its findings settled
+
+- ▸ **approve** On to `pr`: opens the pull request
+- **abort** Pause here: nothing runs
+
+then pr, then the run finishes
+
+`↑↓` move · `enter` chooses · `esc` leaves the run waiting
+
+**plan** · A32BZY · reviewed-plan (default) · 2 tasks · needs you  approve-plan
+
+Make it
+
+you asked: a file the run is about
+
+- the change
+
+**steps**
+- ▸ 1 T001
+- T002
+
+**impact**
+- made.txt · T001
+- said.txt · T002
+
+**weighs**
+- decided 2 `d`
+- the suite is red at baseline
+- flowchart LR
+  n0["T001"]
+  n1["T002"]
+  n0 --> n1
+
+**proof · T001** · step 1 of 1
+
+tested by    the file exists  
+**test -f made.txt**
+
+◆ **Plan registered. Approve?**
+
+`1` approve · `2` adjust · `3` abort
+
+`j k` task · `p` the card · `esc` leaves the run waiting
+
+**project name** (enter keeps `yunta`)
+
+> yunta-tui
+
+filter **n**
+
+- **one-node** one command whose exit code is the check
+- ▸ **lint-fix** a check, and an agent that fixes what it finds
+
+`↑↓` move · `type` to filter · `enter` chooses · `esc` takes the first
+
+## ▸ lint-fix: a check, and an agent that fixes what it finds
+
+- run: yunta run lint-fix
+
+## tasks: a plan of tasks, and an agent that works through them
+
+- run: yunta run tasks
+
+- ✓ **acme/lint** v1.2.0 (3f9c2e1), as its lock records it
+- ▸ ▲ **acme/review** v0.4.0 (91ab7d0), modified: its files no longer match its lock

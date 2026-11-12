@@ -1,0 +1,18 @@
+//! What this machine and this binary answer for: the adapters it builds,
+//! each under the settings a config gives it, what a repository says about
+//! itself before anyone configures Yunta for it, and every check `doctor`
+//! makes of both (`doctor`).
+
+mod adapters;
+mod detection;
+mod doctor;
+mod fixture;
+mod serving;
+
+pub use adapters::{
+    built_adapter, built_adapter_ids, built_adapters, declared_facts, first_built_adapter,
+    real_adapters, scripts_sessions, service_vars, Adapters,
+};
+pub use detection::{adapters_for, fix_for, in_files, in_repo, probe_known_adapters, suggestions};
+pub use fixture::read_fixture;
+pub use serving::servable;

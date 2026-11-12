@@ -48,3 +48,19 @@ Not a tool, a channel or a context source by which one session addresses another
 passes through the engine and stays on the log: an artifact, the output a later node mounts, a finding, or the
 blackboard of a `coordination: blackboard` group, where a member reads only its own posts until the group joins. A
 message between live sessions would make a run's outcome depend on which session got there first.
+
+### No sequence check when the log appends
+Not a compare-and-set on a run's sequence in `append`. A run has one engine because `RunEnv` borrows a `RunHold`, so
+two writers do not reach the log on the path a check would guard, and a check would turn the race it finds into a
+failed run instead of a refused resume.
+
+### No flag that takes a run from its engine
+Not a `--force` on `resume`. It would put two engines on one run again, and each case has its way: `yunta cancel`
+stops an engine that lives, an engine that is gone is replaced with nothing to pass, and a lock nothing here can
+check names its file for a person to delete.
+
+### No hunt for a process nothing ties to its session
+Not a search by name, by working directory or by start time for what a session's CLI might have started. A
+session's end closes what still hangs from its CLI and what carries its mark; a process that cleared its
+environment and left the CLI's tree, or one the system starts at an agent's request, such as a service, keeps
+neither link. A guess could close one of the person's own processes, which a run must never touch.

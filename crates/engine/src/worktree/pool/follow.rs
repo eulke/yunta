@@ -49,7 +49,7 @@ impl CheckoutPool {
         let Some(tree_lease) = held else {
             return Ok(None);
         };
-        let branch = crate::worktree::run_branch(run_id);
+        let branch = run_id.branch();
         let Some(at) = on_branch(&tree, &branch, supervision).await? else {
             return Ok(None);
         };

@@ -16,11 +16,13 @@ use super::{AccountLimit, Failure, RefusalCause, RunnerRefusal, Unchanged};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Remedy {
     pub option: ReservedOption,
-    /// The input a `retry` waits for; always set on one. Other options may leave it `None`.
+    /// The input a `retry` waits for. A capped loop's retry waits for none, since its next
+    /// attempt starts its count over. Other options may leave it `None`.
     pub precondition: Option<Precondition>,
 }
 
 /// What must change before a retry can end differently: the tree, something outside it, or the named input.
+/// Older logs hold `cap_lifted`, which no failure offers now: a capped loop's retry waits for nothing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Precondition {
@@ -111,7 +113,7 @@ impl Failure {
             Failure::GateChose { .. } | Failure::TestsAccepted { .. } => {
                 Outlook::Stuck(Stuck::Final)
             }
-            Failure::LoopCapped { .. } => retry(Precondition::CapLifted),
+            Failure::LoopCapped { .. } => count_starts_over(),
             Failure::ScopeOwed { .. } => owed_scope_outlook(facts),
             Failure::SessionRefused { session_refused } => {
                 cause_outlook(&session_refused.cause, facts)
@@ -124,16 +126,12 @@ impl Failure {
             Failure::ScopeRequested { .. } => scope_outlook(facts),
             Failure::Exited { .. } => retry(exited_precondition(facts)),
             Failure::RunnerUnresolved { runner_refusal, .. } => runner_outlook(runner_refusal),
-            Failure::ChildFailed {
-                child_failure: Some(child),
-                ..
-            } => child.remedies(facts),
-            Failure::ChildFailed {
-                child_failure: None,
-                ..
-            } => outside(),
+            Failure::ChildFailed { child_failure, .. } => {
+                child_outlook(child_failure.as_deref(), facts)
+            }
             Failure::SessionNotStopped { .. } | Failure::TimedOut { .. } => outside(),
-            Failure::TokenBudget { .. } | Failure::ArtifactUnreadable { .. } => outside(),
+            Failure::TokenBudget { .. } => past_the_cap(),
+            Failure::ArtifactUnreadable { .. } => outside(),
             Failure::MountUnreachable { .. } | Failure::EngineFailed { .. } => outside(),
             Failure::SessionDied { .. } | Failure::Message { .. } => outside(),
             Failure::ChildrenFailed { .. } | Failure::Uncertain { .. } => outside(),
@@ -148,6 +146,34 @@ impl Failure {
 /// The outlook of one retry waiting for `precondition`: the only option a cause with a named input offers.
 fn retry(precondition: Precondition) -> Outlook {
     Outlook::Choose(vec![retry_remedy(precondition)])
+}
+
+/// What a loop stopped on its iteration cap leaves open: its next attempt starts its count
+/// over and goes on from the tasks done, so nothing else has to change first.
+fn count_starts_over() -> Outlook {
+    Outlook::Choose(vec![Remedy {
+        option: ReservedOption::Retry,
+        precondition: None,
+    }])
+}
+
+/// What a session cut at its share of the token cap leaves open: its next attempt gets
+/// the same share and fails the same way, so what moves the run is going past the cap.
+fn past_the_cap() -> Outlook {
+    Outlook::Choose(vec![Remedy {
+        option: ReservedOption::Continue,
+        precondition: None,
+    }])
+}
+
+/// What a failed child leaves open: what its own failure leaves, when the log names one.
+/// Not going past a cap, though: a child's cap is its own, and lifting its parent's does
+/// not lift it.
+fn child_outlook(child: Option<&Failure>, facts: &Facts) -> Outlook {
+    match child {
+        Some(Failure::TokenBudget { .. }) | None => outside(),
+        Some(child) => child.remedies(facts),
+    }
 }
 
 /// The outlook of a retry that waits for something outside the run's tree to change.

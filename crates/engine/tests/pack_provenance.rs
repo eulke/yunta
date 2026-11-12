@@ -200,3 +200,59 @@ async fn a_pack_whose_lock_cannot_be_read_keeps_its_provenance_and_names_the_loc
         .file
         .ends_with(".yunta/yunta.lock"));
 }
+
+/// A lock a newer binary wrote is read as the API reads it: refused whole,
+/// never parsed into a shape that happens to fit. The provenance keeps the
+/// pack it knows, trusts no commit from that lock, and names it as a gap.
+#[tokio::test]
+async fn a_lock_a_newer_binary_wrote_is_a_gap_and_names_no_commit() {
+    let owner = Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let pack_dir = repo.path().join(".yunta/packs/acme/review-pack");
+    write(
+        &pack_dir.join("pack.yaml"),
+        "name: review-pack\npublisher: acme\nversion: 1.2.3\ndeclares:\n  \
+         permissions: read-only\ncontents:\n  workflows: [review.yaml]\n",
+    );
+    write(&pack_dir.join("review.yaml"), LEAF);
+    write(
+        &repo.path().join(".yunta/yunta.lock"),
+        "schema_version: 99\npacks:\n  acme/review-pack:\n    publisher: acme\n    \
+         name: review-pack\n    source: https://example.invalid/acme/review-pack\n    \
+         ref: v1.2.3\n    commit: abcdef0123456789abcdef0123456789abcdef01\n    \
+         content_hash: 4862f447f2c7f272fa2f4aaf89dadb3b1ac09105bd5864f8d1a0c9452bb0a226\n",
+    );
+
+    let workflow = yunta_core::Workflow::parse(LEAF).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &ConfigLayer::default(),
+        &pack_dir,
+        repo.path(),
+        &HashMap::new(),
+        owner.supervision(),
+        None,
+    )
+    .await
+    .unwrap()
+    .manifest;
+
+    let provenance = manifest
+        .pack
+        .expect("the pack manifest reads, so the pack is known");
+    assert!(
+        provenance.commit.is_none(),
+        "a newer lock's commit is not trusted: {:?}",
+        provenance.commit
+    );
+    assert_eq!(
+        manifest.provenance_gaps.len(),
+        1,
+        "{:?}",
+        manifest.provenance_gaps
+    );
+    assert!(manifest.provenance_gaps[0]
+        .file
+        .ends_with(".yunta/yunta.lock"));
+}

@@ -78,7 +78,7 @@ pub(super) fn strokes(nodes: &[Standing], cells: usize, apart: bool, look: &Look
 /// `line` with the stroke of a node at `standing`, `takes` cells long:
 /// plowed in the tone of its word, or faint where it never ran or the run
 /// leaves it out.
-fn stroke(line: Line, standing: Standing, takes: usize, look: &Look) -> Line {
+pub(super) fn stroke(line: Line, standing: Standing, takes: usize, look: &Look) -> Line {
     let (plow, tone) = match standing {
         Standing::Skipped => (Plow::Skipped, Tone::Faint),
         Standing::NeverRan => (Plow::Ahead, Tone::Faint),

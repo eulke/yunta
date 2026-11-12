@@ -7,11 +7,13 @@ use std::time::Duration;
 
 use surco::golden::assert_golden;
 use yunta_adapters::{MockForge, MockForgeState};
+use yunta_core::check::CheckError;
 use yunta_core::events::{
     EngineError, EngineStep, EventPayload, Failure, NodeEvent, PauseReason, StoredEvent,
 };
 use yunta_core::{ConfigKey, ConfigLayer, Workflow};
-use yunta_engine::{derive, CheckError, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_replay::RunState;
 use yunta_testkit::{bare_origin, git_output, Bench, INITIAL_BRANCH, MOCK_CONFIG};
 
 const FORGE: &str = "forge:\n  github: { repo: acme/web, token_env: ACME_TOKEN }\n";
@@ -40,10 +42,7 @@ fn opened(events: &[StoredEvent]) -> Vec<u64> {
 
 fn forged() -> (Bench, MockForgeState) {
     let state = MockForgeState::new();
-    let bench = Bench::new().with_forge(Arc::new(MockForge::new(
-        state.clone(),
-        yunta_testkit_core::spell(),
-    )));
+    let bench = Bench::new().with_forge(Arc::new(MockForge::new(state.clone())));
     bare_origin(&bench.worktree);
     (bench, state)
 }
@@ -170,7 +169,7 @@ async fn optional_it_is_left_out_without_a_forge() {
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    let left: Vec<String> = derive(&bench.events())
+    let left: Vec<String> = RunState::replay(&bench.events())
         .run
         .left_out()
         .iter()
@@ -270,10 +269,8 @@ async fn a_pull_request_carries_the_receipt_of_the_run_that_opened_it() {
 #[tokio::test]
 async fn the_pull_request_body_reads_as_its_golden() {
     let state = MockForgeState::new();
-    let bench = Bench::with_run_id("run-pr-golden").with_forge(Arc::new(MockForge::new(
-        state.clone(),
-        yunta_testkit_core::spell(),
-    )));
+    let bench =
+        Bench::with_run_id("run-pr-golden").with_forge(Arc::new(MockForge::new(state.clone())));
     bare_origin(&bench.worktree);
     let RunReport { terminal, .. } = bench
         .run_with_config(

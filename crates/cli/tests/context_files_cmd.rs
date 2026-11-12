@@ -64,6 +64,10 @@ fn run_refuses_a_file_nothing_before_its_reader_can_write_and_creates_no_run() {
             && said.contains("stops there every time"),
         "{said}"
     );
+    assert!(
+        said.contains("the workflow fails `yunta check reads.yaml`"),
+        "the refusal names the check to run again, on the workflow it refused: {said}"
+    );
     let runs = checkout.home.join("runs");
     assert!(
         !runs.exists() || std::fs::read_dir(&runs).unwrap().next().is_none(),

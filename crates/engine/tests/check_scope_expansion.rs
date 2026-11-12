@@ -4,8 +4,9 @@
 //! project's `permissions.paths.deny`, and the refusal says so. A mode above
 //! `permissions.scope_expansion.max_mode` fails it too.
 
+use yunta_core::check::CheckError;
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::{check as check_against, CheckError};
+use yunta_engine::check as check_against;
 
 /// The rules under test here are about the workflow, not about which adapter
 /// would run it: these check against a binary that builds none.

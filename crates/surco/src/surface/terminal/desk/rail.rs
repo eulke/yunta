@@ -1,13 +1,13 @@
 //! The rail of a plan's desk: the places a person can stand on, and what the plan says of
 //! itself as a whole. What gives way on a short terminal is decided here, a group at a time.
 
-use super::APART;
 use crate::components::{RailGroup, RailRow};
 use crate::diagram::outline::outline;
 use crate::diagram::Diagram;
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
+use crate::surface::terminal::APART;
 use crate::width::{cell_width, middle_cut};
 
 /// The fewest cells a step's number takes: one digit and a space, and a row with no number keeps
@@ -40,6 +40,15 @@ pub(super) fn rail_rows(
     let mut lines = window(kept_lines(groups, &drawn, height), height);
     lines.resize(height, Line::new());
     lines.iter().map(|line| fit(line, cells, glyphs)).collect()
+}
+
+/// The rows the rail needs to keep every group, laid out in `cells`: each group's rows and
+/// the blank row after it, as [`kept_lines`] counts what a group costs.
+pub(super) fn rail_length(groups: &[RailGroup], look: &Look, cells: usize) -> usize {
+    groups
+        .iter()
+        .map(|group| group_lines(group, look.glyphs, cells).len() + 1)
+        .sum()
 }
 
 /// The lines of the groups the rail keeps, with a blank row between two of them. A group with
@@ -258,3 +267,6 @@ fn fit(line: &Line, cells: usize, glyphs: Glyphs) -> Line {
     let spare = cells.saturating_sub(cell_width(&cut.text()));
     cut.plain(" ".repeat(spare))
 }
+
+#[cfg(test)]
+mod tests;

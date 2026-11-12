@@ -12,7 +12,7 @@ use yunta_core::events::{
 use yunta_core::expansion::Waiting;
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{NodeId, NonEmpty, Seq};
-use yunta_engine::derive;
+use yunta_replay::RunState;
 use yunta_testkit_core::Log;
 
 /// An option of a menu, with no words of its own.
@@ -99,7 +99,7 @@ fn a_task_answer_after_the_retry_leaves_the_retry_as_the_choice_after_the_failur
         .node("loop", answer(ReservedOption::Deny))
         .build();
 
-    let state = derive(&events);
+    let state = RunState::replay(&events);
     assert!(state.broken.is_none(), "the log replays whole");
     let (at, choice) = state
         .choice_after_failure(&NodeId::from("loop"))
@@ -117,7 +117,7 @@ fn a_task_answer_after_a_failure_is_no_choice_about_the_failure() {
         .node("loop", answer(ReservedOption::Deny))
         .build();
 
-    let state = derive(&events);
+    let state = RunState::replay(&events);
     assert!(state.broken.is_none(), "the log replays whole");
     assert!(state.choice_after_failure(&NodeId::from("loop")).is_none());
 }
@@ -131,7 +131,7 @@ fn a_task_answer_after_a_failure_does_not_run_the_node_again() {
         .node("loop", answer(ReservedOption::Grant))
         .build();
 
-    let state = derive(&events);
+    let state = RunState::replay(&events);
     assert!(state.broken.is_none(), "the log replays whole");
     assert_eq!(state.run_again_chosen(&NodeId::from("loop")), None);
 }
@@ -147,7 +147,7 @@ fn a_task_answer_after_the_retry_leaves_the_retry_as_the_run_again_choice() {
         .node("loop", answer(ReservedOption::Deny))
         .build();
 
-    let state = derive(&events);
+    let state = RunState::replay(&events);
     assert!(state.broken.is_none(), "the log replays whole");
     assert_eq!(
         state.run_again_chosen(&NodeId::from("loop")),

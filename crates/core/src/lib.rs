@@ -8,13 +8,21 @@
 //!   `agent`, `template`, `policy`, `schema` and `schema_range`, entering
 //!   through `yaml` and judged by `shape` and `diagnostic`.
 //! - The log and what a run is frozen with: `events`, `manifest`, `hash`,
-//!   `persisted`, and `receipt`, built from the log alone.
+//!   `persisted`, and `receipt`, built from the log alone; `run_dir`, where a
+//!   reader finds what a run holds under its directory.
 //! - What a session may call and write: `port`, `capabilities`, `run_tool`,
 //!   `confinement`, `protected`, `glob`, `fence`, `rail` and `expansion`.
+//! - What Yunta found by reading, for a page to say: `pack_audit`, what a
+//!   pack's own workflows would do, and `detected`, what a repository and the
+//!   machine it is on answer for.
 //! - What a person is shown and may answer: `shown`, `reserved`, `step` and
 //!   `caution`; `best_effort` names a step a run carries on past.
+//! - What Yunta refuses, as data a surface says: `check`, what `yunta check`
+//!   finds in a workflow, and `refusal`, a decision, a reply or a close a run
+//!   will not take, and a pack, a file or a case a project will not.
 //! - Boundaries a decision is handed rather than reaching for: `clock`,
-//!   `id_source`, `process`, `disk`, `durable` and `secret`.
+//!   `id_source`, `process`, `disk`, `durable` and `secret`; and `pace`, how
+//!   long a poll over state another process owns waits between looks.
 //! - Values every crate shares: `ids`, `nonempty`, `graph`, `units`, `shell`,
 //!   `commit_message` and `error`.
 
@@ -37,10 +45,12 @@ pub mod agent;
 pub mod best_effort;
 mod capabilities;
 pub mod caution;
+pub mod check;
 mod clock;
 pub mod commit_message;
 mod config;
 pub mod confinement;
+mod detected;
 pub mod diagnostic;
 pub mod disk;
 pub mod durable;
@@ -57,7 +67,9 @@ mod ids;
 pub mod inputs;
 mod manifest;
 mod nonempty;
+pub mod pace;
 mod pack;
+mod pack_audit;
 pub mod persisted;
 pub mod policy;
 pub mod port;
@@ -66,7 +78,9 @@ pub mod protected;
 mod questions;
 pub mod rail;
 pub mod receipt;
+pub mod refusal;
 pub mod reserved;
+pub mod run_dir;
 mod run_tool;
 pub mod schema;
 mod schema_range;
@@ -83,7 +97,7 @@ pub mod workflow;
 pub mod yaml;
 
 pub use capabilities::{Capabilities, Capability, FenceLevel, ToolNaming};
-pub use clock::{Clock, SystemClock};
+pub use clock::{Clock, SystemClock, SETTLE_AFTER_SUSPENSION};
 pub use config::{
     network_asked, permission_layer_conflicts, user_knowledge_dir, user_state_root,
     AdapterSettings, BaselineConfig, CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig,
@@ -95,9 +109,10 @@ pub use config::{
     MIN_SECRET_CHARS, REDACTED,
 };
 pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
+pub use detected::{Detected, Ecosystem, MachineAdapters, ProbedAdapter};
 pub use diagnostic::{
-    ArtifactFailure, Diagnostic, DocumentRef, Fault, FileProblem, Named, Problem, Report, Rule,
-    RuleCode, RuleWords, RunFault, Subject,
+    ArtifactFailure, Diagnostic, DocumentKind, DocumentRef, Fault, FileProblem, Named, Problem,
+    Report, Rule, RuleCode, RuleWords, RunFault, Subject, UnknownDocument,
 };
 pub use error::{describe, with_causes, AdapterError, Result, Unbuildable};
 pub use events::Unredactable;
@@ -127,6 +142,7 @@ pub use pack::{
     stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
     PackManifestError, PackRequires, RequiredRunner,
 };
+pub use pack_audit::{NodeAudit, PackAudit, PromptText, UnreadFile, WorkflowAudit, WorkflowUnread};
 pub use policy::{ScopeCeiling, ScopeExpansionMode};
 pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionFault, QuestionsFile};
 pub use run_tool::RunTool;
@@ -138,15 +154,15 @@ pub use tasks::{
     TasksFile,
 };
 pub use workflow::{
-    followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
-    ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Ask, Because, CheckBuiltin,
+    followers, left_out, node_commands, opens_a_pull_request, reroute_sources, ArtifactContextRef,
+    ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Ask, Because, CheckBuiltin,
     CleanupTarget, CliConfig, ContextFile, ContextSpec, Coordination, DistillArtifact, Effort,
     ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer,
     KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact,
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
     NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
-    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownDocument,
-    Workflow, WorkflowFault, ARTIFACTS_DIR, OBJECTS_DIR,
+    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, Workflow,
+    WorkflowFault, WorkflowShape,
 };
 
 /// The schema major this binary speaks — what a

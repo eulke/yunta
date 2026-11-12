@@ -21,7 +21,7 @@
 //! published gate, or unanswered questions) and
 //! `skipped` is the render-side reading of a mode-excluded node (the
 //! filter here + `status`'s own display), and what an included node
-//! waits on under that mode comes from `crate::modes`. `on_interrupt` covers every
+//! waits on under that mode comes from `yunta_replay::modes`. `on_interrupt` covers every
 //! policy — `resume_session` orphans re-Execute exactly
 //! like `restart_node` ones from this function's point of view; the
 //! *dispatch* path (`node_exec`) is what continues the recorded session
@@ -32,8 +32,9 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{NodeWait, PauseReason, ResumePolicy};
+use yunta_core::events::{NodeState, NodeWait, PauseReason, ResumePolicy};
 use yunta_core::{Node, NodeId, NodeKind, OnInterrupt, Workflow};
+use yunta_replay::modes;
 
 mod baseline;
 mod decision;
@@ -52,9 +53,7 @@ pub use follow::follows_build;
 pub(crate) use policy::person_may_grant_scope;
 pub use policy::{next_mode_after, Policy};
 use ready::ready_batch;
-
-use crate::modes::dependencies_in_mode;
-use crate::replay::{NodeState, RunState};
+use yunta_replay::RunState;
 
 /// Whether `node`'s `kind` is `gate` — the one kind whose "ready"/
 /// "orphaned" handling never goes through the generic `Execute` path:
@@ -162,7 +161,7 @@ impl<'a> Board<'a> {
             .iter()
             .filter(|n| mode_nodes.is_none_or(|set| set.contains(&n.id)))
             .collect();
-        let dependencies = dependencies_in_mode(workflow, mode_nodes);
+        let dependencies = modes::dependencies(workflow, mode_nodes);
         let reroute_only = reroute_only_targets(&nodes, &dependencies);
         Board {
             nodes,

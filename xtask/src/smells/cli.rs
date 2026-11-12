@@ -28,7 +28,7 @@ pub(super) fn count_exit_failure_in_cli(root: &Path) -> usize {
 /// skips them. Only production code counts: a test module's output is not
 /// what a person reads.
 pub(super) fn count_cli_print_outside_output(root: &Path) -> usize {
-    const OWNERS: [&str; 1] = ["crates/cli/src/output.rs"];
+    const OWNERS: [&str; 1] = ["crates/cli/src/output/mod.rs"];
     let marks = [
         Macro("print!"),
         Macro("println!"),
@@ -58,7 +58,7 @@ mod tests {
             "cli-print",
             &[
                 (
-                    "crates/cli/src/output.rs",
+                    "crates/cli/src/output/mod.rs",
                     "pub fn say(text: &str) {\n    println!(\"{text}\");\n}\n",
                 ),
                 (

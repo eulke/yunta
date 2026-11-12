@@ -22,20 +22,24 @@ pub enum Place {
     Distill,
 }
 
+/// Where the node `id` is declared in a workflow file, from its root.
+pub(crate) fn declared_node(id: &NodeId) -> Pointer {
+    Pointer::root().key("nodes").node(id.as_str())
+}
+
 impl Place {
     /// Where the place is in the workflow file, from its root.
     pub fn pointer(&self) -> Pointer {
-        let node = |id: &NodeId| Pointer::root().key("nodes").node(id.as_str());
         match self {
-            Place::Read { node: id, read } => node(id).key(match read {
+            Place::Read { node: id, read } => declared_node(id).key(match read {
                 ReadSite::Context => "context",
                 ReadSite::Mount => "mounts",
                 ReadSite::Shows => "shows",
             }),
-            Place::LoopTasks { node: id } => node(id),
-            Place::ExternalGate { node: id } => node(id).key("external"),
+            Place::LoopTasks { node: id } => declared_node(id),
+            Place::ExternalGate { node: id } => declared_node(id).key("external"),
             Place::Field { node: id, field } => {
-                node(id).key(field.split(':').next().unwrap_or(field.as_str()).trim())
+                declared_node(id).key(field.split(':').next().unwrap_or(field.as_str()).trim())
             }
             Place::Distill => Pointer::root().key("on_finish"),
         }

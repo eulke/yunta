@@ -249,16 +249,42 @@ After a suspension, no session opens until the host has been awake for two
 minutes, so a session is not lost to a laptop that wakes briefly and sleeps
 again.
 
-A session the engine ends before its own end, on a cancel or at its budget, is
-interrupted and then killed, with its whole process group. If the adapter's
-`kill` fails, the engine cannot tell the session stopped, and its process group
-may still run. The node then fails with `session_not_stopped` and runs no close:
-nothing of its tree is judged, landed or committed, because the session may
-still be writing it. The failure records the tokens the session reported, and a
-run cancelled from outside records it too. The group stays in the run's
-`scratch/engine.json` for as long as it runs, past the engine that kept it:
-`yunta close` settles it once that engine is gone, and `yunta cancel` signals it
-while the run is still open.
+A session ends with nothing its CLI started left running. One that finishes its
+turn is killed as soon as its last line is read, with no interrupt; one the
+engine ends before its own end, on a cancel, at its timeout or at its budget, is
+interrupted and then killed. A Codex turn ends on `turn.completed` or
+`turn.failed`, as Codex decides: the `error` line Codex prints while it retries a
+lost connection ends nothing, and the run does not record it.
+
+Every end, the interrupt included, closes three things in order. First, the
+process groups under the CLI's own, found by following parent links while the
+CLI still lives: both CLIs start each tool command in a group of its own, which
+a signal to the CLI's group never reaches. Then the CLI's own group. Last, every
+process of yours that carries the session's mark: `YUNTA_SESSION_MARK`, a value
+in the CLI's environment that names the run and is unique to the session. Every
+command the CLI starts inherits it, so a command whose parent left is closed
+too. The mark is not a secret; it opens nothing. Codex also receives it through
+`shell_environment_policy.set`, which it applies after its own filters. A
+`shell_environment_policy.include_only` of your own drops every variable it does
+not name, the mark included, so name `YUNTA_SESSION_MARK` there. On macOS, the
+system can hide the environment of its own binaries — `/bin/sleep`, `sh`, `zsh`,
+`perl`, `ruby` — from every other process: a Mac with System Integrity Protection on was
+measured hiding them. Where it does, a command running one of them whose parent left before the
+end is not found; one still hanging from the CLI is. Linux shows every process
+of the user.
+
+If the adapter's `kill` fails — the CLI's group, or anything under it or
+carrying its mark, would not close — the engine cannot tell the session
+stopped, and those processes may still run. The node then fails with
+`session_not_stopped` and runs no close: nothing of its tree is judged, landed
+or committed, because the session may still be writing it. The failure records
+the tokens the session reported, and a run cancelled from outside records it
+too. Each group the kill named stays in the run's `scratch/engine.json` beside
+the CLI's, for as long as it runs, past the engine that kept it. `yunta close`
+settles them once that engine is gone, and `yunta cancel` closes them while the
+run is still open. Both close what a dead engine's sessions left in the same
+order: the groups under each registered group, the registered groups, then
+whatever carries a mark of the run's sessions.
 
 ## `mock`: not a test helper, a first-class adapter
 
@@ -294,7 +320,9 @@ that one's id.
 A fixture's session can script `kill: refuse`. Its `kill` then fails, and the
 session keeps running for as long as the script still plays; once the script
 has ended, `kill` answers as it does for any session. That is how a session the
-engine cannot stop is reproduced without a real CLI.
+engine cannot stop is reproduced without a real CLI. `kill: leave_behind` ends
+the session, but a process of the mock's own runs on in a group of its own, and
+`kill` fails naming that group: a finished session whose end is refused.
 
 A fixture's session can end on the account's limit:
 `outcome: { type: limited, resets_at: <Unix seconds> }`. It closes the way its
@@ -358,7 +386,11 @@ stop on it; with none, it is a `▲`. The same holds for a forge whose
 token variable is not set: `doctor` fails for it only when a workflow in the
 catalog opens a pull request, since a gate published to the forge asks on the
 console without one. `yunta init` ends with the same runner step, and `yunta
-check` adds it under a workflow that names a runner the config lacks.
+check` adds it under a workflow that names a runner the config lacks. `yunta
+init -i` declares the runners instead: it asks each one the repository's
+workflows name, or `implementer` when they name none, on an adapter this
+machine answers for, with the model you type, and writes it uncommented, with
+`defaults.runner` where a node names no runner.
 
 It also validates every installed pack's own `requires:` against your merged
 config: a `runners:` entry the merged `runners:` doesn't define (or defines with zero

@@ -1,0 +1,5 @@
+  Build the whole workspace → the checks → Ship what was
+    built → Tell everyone what shipped
+  the checks: Check the code is clean and formatted, Run
+    every test the project has, Check every document still
+    holds, Measure the binary against its ceiling

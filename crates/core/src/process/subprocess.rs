@@ -1,11 +1,20 @@
 //! The one way an adapter runs its CLI. A session's subprocess is born
-//! in its own process group, owned by the session that opened it, and
-//! killed with its whole tree when that session is killed or dropped.
+//! in its own process group, with the session's mark in its environment,
+//! and owned by the session that opened it. Every end of the session (its
+//! `kill`, its `exit`, its drop, and the interrupt that begins an end)
+//! closes three things in order. First, the groups the CLI made under its
+//! own, walked while the CLI still lives ([`tree`](super::tree)). Then the
+//! CLI's own group. Last, every process carrying the mark, wherever its
+//! parent is ([`mark`](super::mark)). A `kill` or `exit` that leaves any of
+//! them running answers [`AdapterError::NotClosed`], naming each group that
+//! may still run; the drop does one pass of each and answers nothing.
 //! Its stdout is read line by line — tolerant of bytes that are not
 //! UTF-8, bounded in line length — into the adapter's own parser; its
 //! stderr is drained to the trace log; its prompt travels by stdin.
 //! `claude_code` and `codex` differ only in the arguments they build,
-//! the lines they parse and the settings they read.
+//! the lines they parse and the settings they read. A CLI named without a
+//! directory is found on the search path its launch or its probe is handed,
+//! the environment's, so the probe asks the CLI the session runs.
 
 use std::collections::VecDeque;
 use std::path::Path;
@@ -13,6 +22,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use crate::process::SearchPath;
 use crate::{AdapterError, AdapterId, Pid, Result};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
@@ -23,7 +33,9 @@ use tokio::task::JoinHandle;
 use crate::events::{SessionEnd, SessionExit};
 use crate::port::session::SessionEnv;
 use crate::port::{AgentEvent, AgentSession, ProbeReport};
+use crate::process::mark::{MarkError, SessionMark};
 use crate::process::signal::{signal_group, Signal};
+use crate::process::tree::TreeError;
 
 mod launch;
 
@@ -87,11 +99,16 @@ pub trait Held: Send + Sync {
 pub struct Launch<'a> {
     pub adapter: &'static AdapterId,
     pub binary: &'a Path,
+    /// Where `binary` is found when it names no directory.
+    pub search_path: &'a SearchPath,
     pub args: Vec<String>,
     pub cwd: &'a Path,
     /// Both maps reach the child's environment; only the values of
     /// `secret` are taken out of its stderr tail.
     pub env: &'a SessionEnv,
+    /// What every process of the session carries, set by the launch itself
+    /// so no adapter can leave it out.
+    pub mark: &'a crate::process::mark::SessionMark,
     pub prompt: &'a str,
     pub parser: Box<dyn LineParser>,
     /// What the launch set up for the session, given back when the session
@@ -100,10 +117,15 @@ pub struct Launch<'a> {
     pub held: Option<Box<dyn Held>>,
 }
 
-/// `binary --version` under [`PROBE_TIMEOUT`]: its first answer as the
-/// version, or why the CLI could not be asked.
-pub async fn probe_version(binary: &Path) -> ProbeReport {
-    let asked = tokio::process::Command::new(binary)
+/// `binary --version` under [`PROBE_TIMEOUT`], found on `search_path`: its
+/// first answer as the version, or why the CLI could not be asked.
+pub async fn probe_version(binary: &Path, search_path: &SearchPath) -> ProbeReport {
+    let Some(program) = search_path.find(binary) else {
+        return ProbeReport::Unhealthy {
+            diagnostic: absent(binary),
+        };
+    };
+    let asked = tokio::process::Command::new(&program)
         .arg("--version")
         .stdin(Stdio::null())
         .kill_on_drop(true)
@@ -115,11 +137,6 @@ pub async fn probe_version(binary: &Path) -> ProbeReport {
         Ok(Ok(output)) => ProbeReport::Unhealthy {
             diagnostic: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         },
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound && missing(binary) => {
-            ProbeReport::Unhealthy {
-                diagnostic: absent(binary),
-            }
-        }
         Ok(Err(e)) => ProbeReport::Unhealthy {
             diagnostic: format!("`{}` could not be run: {e}", binary.display()),
         },
@@ -133,16 +150,8 @@ pub async fn probe_version(binary: &Path) -> ProbeReport {
     }
 }
 
-/// Whether a CLI the system could not start is not there at all. A path
-/// is checked; for a bare name the system searched `PATH` and found
-/// nothing it could start, which a script whose `#!` names a missing
-/// interpreter answers the same way, and this binary has no other word.
-fn missing(binary: &Path) -> bool {
-    binary.components().count() == 1 || !binary.exists()
-}
-
 /// Why a CLI that is not there cannot be asked: a bare name is on no
-/// directory of `PATH`, and a path names no file.
+/// directory of the environment's `PATH`, and a path names no file.
 fn absent(binary: &Path) -> String {
     match binary.components().count() {
         1 => format!("`{}` is not on PATH", binary.display()),
@@ -168,6 +177,16 @@ pub struct SubprocessSession {
     /// What the launch set up, taken back by [`AgentSession::release`] or,
     /// failing that, when the session is dropped.
     held: Option<Box<dyn Held>>,
+    /// What every process of the session carries, swept at its end.
+    mark: SessionMark,
+    /// When the CLI was started: no process older can carry its mark.
+    started: std::time::SystemTime,
+    /// The sweep closed everything carrying the mark, so the drop need not
+    /// sweep again.
+    swept: bool,
+    /// What the interrupt's walk could not close. It may still run once the
+    /// CLI has left and no parent link leads to it, so the end answers for it.
+    unclosed: Option<TreeError>,
 }
 
 impl SubprocessSession {
@@ -202,6 +221,62 @@ impl SubprocessSession {
             tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal after group cleanup failed");
         }
         Err(cleanup)
+    }
+
+    /// Closes every group under the CLI's, while the CLI still lives: the
+    /// groups it made for its tool commands. A reaped CLI's group id may
+    /// belong to someone else, so nothing is walked under it. What an earlier
+    /// walk could not close is answered for when this one closes everything.
+    async fn close_under(&mut self) -> std::result::Result<(), TreeError> {
+        let earlier = self.unclosed.take().map_or(Ok(()), Err);
+        if self.reaped {
+            return earlier;
+        }
+        super::tree::close_groups_under(self.pgid)
+            .await
+            .and(earlier)
+    }
+
+    /// Closes every process carrying the session's mark, wherever its
+    /// parent is.
+    async fn close_marked(&mut self) -> std::result::Result<(), MarkError> {
+        let swept = super::mark::close_marked(&self.mark.marks(self.started)).await;
+        self.swept = swept.is_ok();
+        swept
+    }
+
+    /// The end of a session's three closings, as one answer. The CLI's own
+    /// group alone failing answers as it always has; anything under it or
+    /// carrying its mark that would not close answers
+    /// [`AdapterError::NotClosed`], naming every group that may still run.
+    fn closed(
+        &self,
+        under: std::result::Result<(), TreeError>,
+        own: Result<()>,
+        marked: std::result::Result<(), MarkError>,
+    ) -> Result<()> {
+        let mut groups = Vec::new();
+        let mut details = Vec::new();
+        if let Err(error) = &under {
+            groups.extend(error.groups());
+            details.push(error.to_string());
+        }
+        if let Err(error) = &marked {
+            groups.extend(groups_of(&error.pids()));
+            details.push(error.to_string());
+        }
+        if details.is_empty() {
+            return own;
+        }
+        if let Err(error) = own {
+            groups.insert(0, self.pgid);
+            details.insert(0, error.to_string());
+        }
+        Err(AdapterError::NotClosed {
+            adapter: self.adapter.clone(),
+            groups,
+            detail: details.join("; "),
+        })
     }
 
     /// The readers hold the pipes; dropping them before the wait means
@@ -262,6 +337,9 @@ impl AgentSession for SubprocessSession {
         if self.reaped {
             return Ok(());
         }
+        // A CLI that leaves at the interrupt leaves no parent link to a
+        // command in a group of its own, so that is closed first.
+        self.unclosed = self.close_under().await.err();
         signal_group(self.pgid, Signal::SIGINT).map_err(|e| e.into_adapter_error(self.adapter))
     }
 
@@ -276,7 +354,10 @@ impl AgentSession for SubprocessSession {
     }
 
     async fn kill(&mut self) -> Result<()> {
-        let group = self.close_group().await;
+        let under = self.close_under().await;
+        let own = self.close_group().await;
+        let marked = self.close_marked().await;
+        let group = self.closed(under, own, marked);
         if let Err(error) = self.child.start_kill() {
             tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal to the session leader failed");
         }
@@ -314,6 +395,7 @@ impl AgentSession for SubprocessSession {
         // on its way out is the whole point of the question, and a pipe
         // whose only writer is a dead process ends by itself. The status
         // is collected last, a wait bounded by a process already dead.
+        let under = self.close_under().await;
         let cleanup = self.force_kill_group().await;
         if cleanup.is_err() {
             if let Err(error) = self.kill_group_now() {
@@ -324,6 +406,8 @@ impl AgentSession for SubprocessSession {
             }
         }
         let pipes = self.finish_readers(cleanup.is_err()).await;
+        let marked = self.close_marked().await;
+        let cleanup = self.closed(under, cleanup, marked);
         let status = match self.child.wait().await {
             Ok(status) => {
                 self.reaped = true;
@@ -382,10 +466,27 @@ fn end_of(status: std::process::ExitStatus) -> SessionEnd {
 /// group is what must die, whether the session ended or was abandoned.
 impl Drop for SubprocessSession {
     fn drop(&mut self) {
+        if !self.reaped {
+            super::tree::signal_groups_under_now(self.pgid);
+        }
         if let Err(e) = self.kill_group_now() {
             tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to kill a dropped session's process group");
+        }
+        if !self.swept {
+            super::mark::signal_marked_now(&self.mark.marks(self.started));
         }
         self.reader.abort();
         self.stderr_drain.abort();
     }
+}
+
+/// The process group of each of `pids` that still has one above 1: what a
+/// process carrying a session's mark that would not die may still run in.
+fn groups_of(pids: &[Pid]) -> Vec<Pid> {
+    pids.iter()
+        .filter_map(|pid| rustix::process::Pid::from_raw(pid.as_i32()))
+        .filter_map(|pid| rustix::process::getpgid(Some(pid)).ok())
+        .filter_map(|group| Pid::try_from(group.as_raw_pid() as u32).ok())
+        .filter(|group| group.as_i32() > 1)
+        .collect()
 }

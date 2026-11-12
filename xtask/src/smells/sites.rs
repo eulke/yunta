@@ -42,6 +42,10 @@ pub const COUNTERS: &[Counter] = &[
         count_system_clock_outside_boundary,
     ),
     ("env_read_outside_boundary", count_env_read_outside_boundary),
+    (
+        "process_read_below_the_shell",
+        count_process_read_below_the_shell,
+    ),
     ("env_mutation_in_tests", count_env_mutation_in_tests),
     (
         "sleep_outside_mock_latency",
@@ -78,9 +82,10 @@ pub const COUNTERS: &[Counter] = &[
 pub(super) enum Mark {
     /// The line carries this text anywhere on it.
     Text(&'static str),
-    /// The line carries this text anywhere on it, except in the char literal
-    /// `except`. A check such as `contains('\x1b')` names the byte that way,
-    /// and the counter does not read it.
+    /// The line carries this text anywhere on it, outside the text `except`.
+    /// A check such as `contains('\x1b')` names the byte as a char literal,
+    /// and an `impl` block names its type before the brace; the counter reads
+    /// neither.
     TextExcept(&'static str, &'static str),
     /// The line carries this text followed by a lowercase letter, the way a
     /// message spells a command or a flag: `--input` and `yunta gc` match,
@@ -167,8 +172,9 @@ const ESCAPES: [Mark; 2] = [
 /// (`\x1b]`, which is how a link opens) are read through the byte. The owners
 /// are the paint module, paint.rs and the files under paint/ with their tests
 /// (clap's styles among them); the files that send a terminal a control that
-/// is not paint, the testkit's terminal, which sends the keys and the cursor
-/// and row controls of a real one; the CLI's integration tests, which send
+/// is not paint, the testkit's terminal and the files under terminal/, which
+/// send the keys and the cursor and row controls of a real one and read what
+/// it drew without its paint; the CLI's integration tests, which send
 /// keys to a terminal or check its paint; and the golden that writes what a
 /// surface printed.
 fn count_escape_outside_paint(root: &Path) -> usize {
@@ -182,6 +188,7 @@ fn count_escape_outside_paint(root: &Path) -> usize {
             "crates/surco/src/paint/",
             "crates/cli/tests/",
             "crates/testkit/src/terminal.rs",
+            "crates/testkit/src/terminal/",
             // A golden writes the paint a surface printed where a
             // reviewer can read it, and its test paints to prove that.
             "crates/surco/src/golden.rs",
@@ -221,8 +228,8 @@ pub(super) fn owned(path: &Path, owners: &[&str]) -> bool {
 ///
 /// Driving the engine by hand repeats the setup the owners perform — the
 /// store, the clock, the process registry — and a repeat drifts from it.
-/// The engine's run module owns the run's own steps, and the command
-/// registry owns the call from a command.
+/// The engine's run module owns the run's own steps, and the API's drive owns
+/// the call for every interface, a project's cases among them.
 fn count_execute_run_outside_testkit(root: &Path) -> usize {
     outside(
         root,
@@ -230,7 +237,7 @@ fn count_execute_run_outside_testkit(root: &Path) -> usize {
         &[
             "crates/testkit/",
             "crates/engine/src/run/",
-            "crates/cli/src/commands/registry.rs",
+            "crates/api/src/drive.rs",
         ],
     )
 }
@@ -239,8 +246,8 @@ fn count_execute_run_outside_testkit(root: &Path) -> usize {
 ///
 /// Creating a run is where the plan is frozen and the baseline taken; a
 /// second site that does it by hand freezes a different one. The engine's
-/// run module creates a run, and the command registry is the one command
-/// path that does it for a person.
+/// run module creates a run, and the API's creation is the one path that does
+/// it for every interface.
 fn count_create_run_outside_testkit(root: &Path) -> usize {
     outside(
         root,
@@ -248,7 +255,7 @@ fn count_create_run_outside_testkit(root: &Path) -> usize {
         &[
             "crates/testkit/",
             "crates/engine/src/run/",
-            "crates/cli/src/commands/registry.rs",
+            "crates/api/src/creation.rs",
         ],
     )
 }
@@ -279,7 +286,7 @@ fn count_system_clock_outside_boundary(root: &Path) -> usize {
     outside(
         root,
         &[Text("SystemClock"), Text("Utc::now")],
-        &["crates/core/src/clock.rs", "crates/cli/src/context.rs"],
+        &["crates/core/src/clock.rs", "crates/cli/src/shell.rs"],
     )
 }
 
@@ -303,6 +310,29 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             // reading that request is what the module is for.
             "crates/surco/src/golden.rs",
         ],
+    )
+}
+
+/// The process read below the shell: its directory, its binary, its
+/// arguments, or a handler of its signals.
+///
+/// What an invocation knows of its process enters once, at the shell, and
+/// every operation below takes it from the workspace the shell hands in. Read
+/// deeper, it is an input nothing declares: an interface built on the API
+/// could not hand a directory of its own, and a test could not set one. A
+/// child process's directory, set on its command, is no read; a test stages
+/// the process it needs.
+fn count_process_read_below_the_shell(root: &Path) -> usize {
+    outside(
+        root,
+        &[
+            Text("env::current_dir"),
+            Text("env::current_exe"),
+            Text("env::args"),
+            Text("signal::unix::signal("),
+            Text("signal::ctrl_c("),
+        ],
+        &["crates/cli/src/shell.rs", "crates/*/tests/", "/tests.rs"],
     )
 }
 
@@ -330,7 +360,7 @@ fn count_sleep_outside_mock_latency(root: &Path) -> usize {
         &[
             "crates/adapters/src/mock/script.rs",
             "crates/testkit*/src/wait.rs",
-            "crates/engine/src/pace.rs",
+            "crates/core/src/pace.rs",
         ],
     )
 }
@@ -370,7 +400,8 @@ fn count_bench_struct_outside_testkit(root: &Path) -> usize {
 fn count_session_request_literal_outside_plan(root: &Path) -> usize {
     outside(
         root,
-        &[Text("SessionRequest {")],
+        // A method of the type, wherever it is written, builds no request.
+        &[TextExcept("SessionRequest {", "impl SessionRequest {")],
         &[
             "crates/engine/src/run/session_plan.rs",
             // The type's own declaration, and the request the adapters'

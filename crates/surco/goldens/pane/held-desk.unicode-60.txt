@@ -1,0 +1,14 @@
+ plan · EKPBGE · harvest            needs you  approve-plan
+
+ Store packs                      task 1 of 2 · step 1 of 2
+
+ line 1
+ line 2
+ line 3
+ line 4
+ line 5
+ line 6
+ … 24 more lines
+
+ ◆ Plan registered. Approve?
+ 1 approve   2 adjust         j k task · p proof · esc back

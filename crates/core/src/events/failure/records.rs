@@ -15,7 +15,8 @@ use crate::hash::ContentHash;
 use crate::ids::{AdapterId, ExecutorName, NodeId, RunId, SkillName};
 use crate::inputs::InputsProblem;
 use crate::protected::Protection;
-use crate::workflow::{ArtifactKind, ArtifactRefId, ReservedIdentity, OBJECTS_DIR};
+use crate::run_dir::OBJECTS_DIR;
+use crate::workflow::{ArtifactKind, ArtifactRefId, ReservedIdentity};
 
 use super::{CommandExit, Failure, SessionDeath, SessionExit};
 

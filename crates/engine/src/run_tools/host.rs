@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{CriterionUnpassablePayload, ExecutionEnvironment};
+use yunta_core::process::SearchPath;
 use yunta_core::protected::Protected;
 use yunta_core::{
     ArtifactSpec, Coordination, NodeId, NodeKind, RunId, ScopeExpansionMode, ScopeGlob, Task,
@@ -23,11 +24,11 @@ use yunta_core::{
 };
 use yunta_storage::AsyncStorage;
 
-use crate::observer::RunObserver;
 use crate::process::Supervision;
 use crate::process_registry::ProcessRegistry;
 use crate::task_cycle::Memo;
 use crate::worktree::Unit;
+use yunta_core::port::RunObserver;
 
 /// What every listener of one run shares: its own handle on the log
 /// (the listener outlives any borrow of the engine's), the run
@@ -56,9 +57,9 @@ pub struct HostOf {
     pub process_registry: Option<Arc<ProcessRegistry>>,
     /// The variables the run sets on every subprocess it starts.
     pub subprocess_vars: Vec<(String, String)>,
-    /// The directories a command the run starts is looked up in when its
-    /// variables set no `PATH`: the ones its ambient environment reads.
-    pub search_path: Vec<PathBuf>,
+    /// Where a command the run starts is looked up when its variables set no
+    /// `PATH`: its ambient environment's.
+    pub search_path: SearchPath,
     /// What those subprocesses run with, so an answer about a command
     /// that could not run can say where it was looked for.
     pub environment: Option<ExecutionEnvironment>,
@@ -147,9 +148,9 @@ pub struct RunToolsHost {
     process_registry: Option<Arc<ProcessRegistry>>,
     /// What the run sets on every subprocess it starts.
     subprocess_vars: Vec<(String, String)>,
-    /// The directories a command the run starts searches when its variables
-    /// set no `PATH`.
-    search_path: Vec<PathBuf>,
+    /// Where a command the run starts is looked up when its variables set no
+    /// `PATH`.
+    search_path: SearchPath,
     /// What every subprocess the run starts runs with.
     pub(super) environment: Option<ExecutionEnvironment>,
     /// The run's own tree.

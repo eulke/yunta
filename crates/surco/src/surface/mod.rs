@@ -5,6 +5,13 @@
 //! a browser, a page. Every surface draws every block,
 //! and draws the words a block says whole — the word carries the meaning,
 //! so no medium may drop it.
+//!
+//! Markdown, the description and a page also draw a whole
+//! [`Screen`](crate::components::Screen), in the order a reader takes its
+//! parts. The terminal draws no screen: an engine of cells lays one out and
+//! draws each region here in its pane ([`Terminal::pane`]) at
+//! [`Width::exact`](crate::look::Width::exact), where a line past the pane's edge goes
+//! on in the rows under it.
 
 mod diff;
 mod html;
@@ -15,7 +22,7 @@ mod terminal;
 pub(crate) use html::tests::visible;
 pub use html::Html;
 pub use markdown::{Description, Leaves, Markdown};
-pub use terminal::{narrowed, said_whole, LaidDesk, Placed, Terminal};
+pub use terminal::{narrowed, said_whole, Paned, Placed, Terminal};
 
 use crate::components::Code;
 use crate::doc::Doc;

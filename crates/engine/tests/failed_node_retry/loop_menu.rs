@@ -2,6 +2,7 @@
 //! offers, and the stop it records as data.
 
 use super::*;
+use yunta_core::refusal::GateRefusal;
 
 /// A loop whose one task needs `made.txt`: the plan writes the task, and
 /// only a session that creates the file meets its criterion.
@@ -38,7 +39,9 @@ sessions:
 ";
 
 fn status_of(bench: &Bench, task: &str) -> Option<yunta_core::events::TaskStatus> {
-    yunta_engine::derive(&bench.events()).tasks.status(task)
+    yunta_replay::RunState::replay(&bench.events())
+        .tasks
+        .status(task)
 }
 
 #[tokio::test]
@@ -52,7 +55,7 @@ async fn a_blocked_task_says_what_its_attempt_left_red() {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -91,7 +94,9 @@ async fn a_blocked_loop_offers_no_retry_on_the_tree_it_failed_on() {
     assert!(
         matches!(
             answer_parked(&bench, "retry").await,
-            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+            Err(yunta_engine::ResolveGateError::Refused(
+                GateRefusal::UnknownOption { .. }
+            ))
         ),
         "no retry is offered on the tree the loop blocked on"
     );
@@ -159,7 +164,7 @@ async fn options(bench: &Bench) -> Vec<String> {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()

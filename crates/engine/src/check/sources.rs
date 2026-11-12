@@ -12,55 +12,6 @@ use yunta_core::events::ArtifactId;
 use yunta_core::workflow::reads::{artifact_reads, ReadSite};
 use yunta_core::{ArtifactKind, ArtifactRefId, ContextSpec, ModeName, MountSpec};
 
-/// A read nothing in the run can answer: what it asks for, and who asks.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum Unanswerable {
-    /// A loop works through the run's tasks document, and nothing in
-    /// the graph a run of this workflow can be gives it one.
-    #[error("unanswerable_loop_without_tasks")]
-    LoopWithoutTasks {
-        node: NodeId,
-        mode: Option<yunta_core::ModeName>,
-    },
-
-    /// A reference that names the node it reads from reaches that
-    /// node's artifacts and nothing else, and the node does not declare
-    /// this one.
-    #[error("unanswerable_artifact_not_declared")]
-    ArtifactNotDeclared {
-        place: Place,
-        node: NodeId,
-        artifact: yunta_core::events::ArtifactId,
-    },
-
-    /// A reference that asks the run for an artifact, whichever node
-    /// produced it, and nothing in the run can hold one.
-    #[error("unanswerable_artifact_from_nowhere")]
-    ArtifactFromNowhere {
-        place: Place,
-        artifact: yunta_core::events::ArtifactId,
-        mode: Option<yunta_core::ModeName>,
-    },
-
-    /// A run started in a mode reads from a node the mode leaves out:
-    /// only a run promoted into the mode would hold what that node made.
-    #[error("unanswerable_source_left_out")]
-    SourceLeftOut {
-        place: Place,
-        from: NodeId,
-        mode: ModeName,
-    },
-
-    /// Only a `kind: bash` node captures the output a `node-output:`
-    /// source reads.
-    #[error("unanswerable_node_output_of_non_bash")]
-    NodeOutputOfNonBash {
-        node: NodeId,
-        referenced: NodeId,
-        kind: Option<&'static str>,
-    },
-}
-
 /// What a run holds before any node of its own runs: the documents its
 /// inputs bring, and what the parent that composed it mounts.
 pub(crate) struct Birth {
@@ -116,7 +67,7 @@ fn variants(workflow: &Workflow) -> Vec<Variant<'_>> {
     let mut earlier: Vec<&Node> = Vec::new();
     let mut found = Vec::new();
     for mode in modes.keys() {
-        let nodes = keeps(crate::modes::mode_included_nodes(workflow, mode).as_ref());
+        let nodes = keeps(yunta_replay::modes::included(workflow, mode).as_ref());
         found.push(Variant {
             mode: Some(mode),
             nodes: nodes.clone(),

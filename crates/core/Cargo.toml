@@ -70,6 +70,9 @@ ulid.workspace = true
 # crate is already in the workspace graph through `rmcp`, with the same
 # `chrono` support. `indexmap2` describes `modes:`, an ordered map.
 schemars = { workspace = true, features = ["chrono04", "indexmap2"] }
+# A session's mark is a random v4 id beside its run's: unique to the session
+# and tied to nothing else. The crate is already in the graph through the engine.
+uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs.workspace = true
@@ -78,6 +81,8 @@ procfs.workspace = true
 libc.workspace = true
 errno.workspace = true
 libproc.workspace = true
+# The one reader of another process's environment there: a session's mark.
+sysinfo.workspace = true
 
 [features]
 # Unchecked `From<&str>`/`From<String>` for identifiers, so a test can

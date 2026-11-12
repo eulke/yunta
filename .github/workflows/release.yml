@@ -170,6 +170,8 @@ jobs:
         run: cargo publish -p yunta-core --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: wait for yunta-core to index
         run: ./scripts/wait-for-crate-index.sh yunta-core "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-core") | .version')"
+      - name: publish yunta-replay
+        run: cargo publish -p yunta-replay --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: publish yunta-render
         run: cargo publish -p yunta-render --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: publish yunta-storage
@@ -178,8 +180,9 @@ jobs:
         run: ./scripts/wait-for-crate-index.sh yunta-render "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-render") | .version')"
       - name: publish yunta-adapters
         run: cargo publish -p yunta-adapters --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: wait for yunta-storage and yunta-adapters to index
+      - name: wait for yunta-replay, yunta-storage and yunta-adapters to index
         run: |
+          ./scripts/wait-for-crate-index.sh yunta-replay "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-replay") | .version')"
           ./scripts/wait-for-crate-index.sh yunta-storage "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-storage") | .version')"
           ./scripts/wait-for-crate-index.sh yunta-adapters "$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | select(.name=="yunta-adapters") | .version')"
       - name: publish yunta-engine

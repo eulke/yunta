@@ -103,7 +103,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     let chain = EventChainStatus::Intact {
         events: events.len(),
     };
-    let receipt = build_receipt(&bench.run_id, &manifest, &events, chain).unwrap();
+    let receipt = receipt::closed(&bench.run_id, &manifest, &events, chain).unwrap();
 
     assert_eq!(receipt.terminal_state, Some(TerminalState::Done));
 
@@ -126,7 +126,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     );
     assert!(receipt.scope.files_touched > 0);
 
-    let groups = yunta_render::receipt::fan_out_groups(&receipt.runners);
+    let groups = receipt.fan_out_groups();
     assert_eq!(groups.len(), 1);
     let (base, members) = &groups[0];
     assert_eq!(base, "review");
@@ -135,7 +135,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     assert_eq!(receipt.cost.reroutes, 1, "lint failed once, then rerouted");
     assert!(receipt.cost.cptv.is_some(), "one task reached done");
 
-    // The formatters accept whatever build_receipt derived without
+    // The formatters accept whatever receipt::closed derived without
     // panicking or needing extra data — same contract a real `pr` node
     // relies on.
     let markdown = render_receipt_markdown(&receipt);
@@ -143,7 +143,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
         markdown.contains("by 2 independent runners"),
         "got: {markdown}"
     );
-    render_receipt_json(&receipt).unwrap();
+    serde_json::to_string_pretty(&receipt).unwrap();
 }
 
 #[tokio::test]
@@ -164,7 +164,7 @@ nodes:
 
     let manifest = bench.manifest();
     let events = bench.events();
-    let err = build_receipt(
+    let err = receipt::closed(
         &bench.run_id,
         &manifest,
         &events,
@@ -173,7 +173,7 @@ nodes:
         },
     )
     .unwrap_err();
-    assert!(matches!(err, ReceiptError::NotFinished(_)));
+    assert!(matches!(err, receipt::ReceiptError::NotFinished(_)));
     assert_eq!(
         err.to_string(),
         format!(

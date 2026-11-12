@@ -57,7 +57,7 @@ pub async fn release_run_checkout(
         lease.keep();
         return Ok(());
     }
-    let branch = super::super::run_branch(run_id);
+    let branch = run_id.branch();
     let status = git::tree_state(&tree, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
     let lets_go = status.clean && status.branch.as_deref() == Some(branch.as_str());
     if lets_go {
@@ -83,8 +83,8 @@ pub async fn still_the_runs(
 ) -> Result<bool, WorktreeError> {
     let status = git::tree_state(tree, &[], supervision).await?;
     let on = status.branch.as_deref().unwrap_or_default();
-    Ok(on == super::super::run_branch(run_id)
-        || !(on.is_empty() || on.starts_with(&format!("{}/", super::super::RUN_BRANCHES)))
+    Ok(on == run_id.branch()
+        || !(on.is_empty() || on.starts_with(&format!("{}/", yunta_core::RunId::BRANCHES)))
             && !super::super::is_legacy_unit_branch(on))
 }
 
@@ -96,7 +96,7 @@ pub async fn hand_over_run_checkout(
     successor: &yunta_core::RunId,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
-    let branch = super::super::run_branch(successor);
+    let branch = successor.branch();
     git::change(
         tree,
         Effect::Metadata,

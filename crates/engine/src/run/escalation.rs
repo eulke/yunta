@@ -10,20 +10,20 @@
 use std::sync::Arc;
 
 use yunta_core::events::{
-    Asks, Claim, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu, GateOption,
-    GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal, Remedy, Withheld,
+    Claim, DecisionOn, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu,
+    GateOption, GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal,
+    Remedy,
 };
 use yunta_core::protected::Protected;
+use yunta_core::refusal::GateRefusal;
 use yunta_core::reserved::ReservedOption;
-use yunta_core::{
-    Manifest, ModeName, NodeId, NonEmpty, OptionId, Redactor, RunId, Seq, TaskId, Workflow,
-};
+use yunta_core::{Manifest, ModeName, NodeId, NonEmpty, Redactor, RunId, Seq, TaskId, Workflow};
+use yunta_replay::RunState;
 
 use super::schedule::{self, Decision};
 use super::{RunCtx, RunError};
-use crate::replay::RunState;
 use crate::run_log::RunLog;
-use yunta_core::events::GateEvent;
+use yunta_core::events::{GateEvent, PauseReason};
 
 /// The escalation object for a node whose reroutes are exhausted: retry once
 /// more, abort, or — when `modes:` has somewhere later to go — promote. The
@@ -131,8 +131,11 @@ fn named_options(remedies: &[Remedy]) -> Vec<ReservedOption> {
 /// does the work of building the decision — that's a computation, not
 /// a persisted fact, until a human actually answers).
 ///
-/// `None` covers every pause this function's three cases don't: a failed
-/// gate node, a budget cap, a cancellation, an
+/// A run stopped on its token cap rebuilds its menu from that pause, and the decision is
+/// the run's.
+///
+/// `None` covers every pause these cases don't: a failed
+/// gate node, a cancellation, an
 /// external gate degraded to console for lack of a forge (deliberately
 /// out of scope here — whether a forge is reachable depends on the
 /// calling machine's own environment, not on the log, so it isn't a
@@ -141,16 +144,44 @@ fn named_options(remedies: &[Remedy]) -> Vec<ReservedOption> {
 /// It also covers a decision already answered, that the resume it was handed to has not
 /// acted on yet.
 ///
-/// The `NodeId` alongside the object is the node the decision belongs
+/// The [`DecisionOn`] alongside the object is what the decision belongs
 /// to — `resolve_gate` needs it to record `gate_waiting`/`gate_resolved`
-/// against the right node, the same one the live pause path would have
-/// used.
+/// against the right node, or none for the run's own, the same as the live
+/// pause path would have.
 ///
 /// A gate's menu is built from the documents it shows, read from
 /// `run_dir` as the run holds them — the same reading the live prompt
 /// makes, so the menu a later process rebuilds is the one a person was
 /// put.
 pub async fn current_escalation(
+    manifest: &Manifest,
+    run_dir: &std::path::Path,
+    state: &RunState,
+) -> Result<Option<(DecisionOn, Escalation)>, RunError> {
+    if let Some(escalation) = cap_escalation(state) {
+        return Ok(Some((DecisionOn::Run, escalation)));
+    }
+    Ok(node_escalation(manifest, run_dir, state)
+        .await?
+        .map(|(node, escalation)| (DecisionOn::Node(node), escalation)))
+}
+
+/// The decision a run standing on its token cap waits on, rebuilt from the pause,
+/// which holds what its menu says. It comes before any node's: nothing a node's answer
+/// starts can spend until the run is past the cap.
+fn cap_escalation(state: &RunState) -> Option<Escalation> {
+    if state.answer_awaits_its_resume() {
+        return None;
+    }
+    let (PauseReason::BudgetExhausted { spent, cap }, _) = state.run.paused()? else {
+        return None;
+    };
+    let (escalation, _) = super::budget::over_budget_escalation(state.run_id()?, *spent, *cap);
+    Some(escalation)
+}
+
+/// The escalation a node of a parked run waits on, if one does.
+async fn node_escalation(
     manifest: &Manifest,
     run_dir: &std::path::Path,
     state: &RunState,
@@ -182,14 +213,18 @@ pub async fn current_escalation(
 /// reading what its gate shows: whether a run needs someone, not what it
 /// asks them. It names a node exactly when [`current_escalation`] builds
 /// that node's menu, so no surface offers a choice the menu does not hold.
-pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<NodeId> {
+pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<DecisionOn> {
+    if cap_escalation(state).is_some() {
+        return Some(DecisionOn::Run);
+    }
     let mode_name = state.run.mode().clone();
     // Which node waits does not depend on what the set protects, and no
     // document is read here, so the empty set decides the same node.
-    match current_decision(manifest, state, &mode_name, Arc::default())? {
-        Decision::ResolveInternalGate { node } => Some(node),
-        decision => menu_of(manifest, &mode_name, decision).map(|(node, _)| node),
-    }
+    let node = match current_decision(manifest, state, &mode_name, Arc::default())? {
+        Decision::ResolveInternalGate { node } => node,
+        decision => menu_of(manifest, &mode_name, decision).map(|(node, _)| node)?,
+    };
+    Some(DecisionOn::Node(node))
 }
 
 /// The menu of a decision that reads no document: a node's reroutes
@@ -278,35 +313,39 @@ pub async fn resolve_gate(
     choice: HumanChoice,
     redactor: &Redactor,
 ) -> Result<(), ResolveGateError> {
-    let state = crate::replay::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
+    let state = crate::run_log::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
     if !state.tail_paused() {
-        return Err(ResolveGateError::NotPaused);
+        return Err(ResolveGateError::Refused(GateRefusal::NotPaused));
     }
-    let Some((node, escalation)) = current_escalation(manifest, run_dir, &state)
+    let Some((on, escalation)) = current_escalation(manifest, run_dir, &state)
         .await
         .map_err(Box::new)?
     else {
-        return Err(ResolveGateError::NothingToResolve);
+        return Err(ResolveGateError::Refused(GateRefusal::NothingToResolve));
     };
     escalation
         .accepts(&choice)
         .map_err(|refused| match refused {
-            Refusal::OffMenu { chosen, offered } => ResolveGateError::UnknownOption {
-                chosen,
-                declared: offered,
-            },
-            Refusal::Unsaid { chosen, asks } => ResolveGateError::Unsaid { chosen, asks },
-            Refusal::Withheld { withheld } => ResolveGateError::Withheld {
+            Refusal::OffMenu { chosen, offered } => {
+                ResolveGateError::Refused(GateRefusal::UnknownOption {
+                    chosen,
+                    declared: offered,
+                })
+            }
+            Refusal::Unsaid { chosen, asks } => {
+                ResolveGateError::Refused(GateRefusal::Unsaid { chosen, asks })
+            }
+            Refusal::Withheld { withheld } => ResolveGateError::Refused(GateRefusal::Withheld {
                 chosen: withheld.option.clone(),
                 withheld,
-            },
+            }),
         })?;
     let resolution = GateResolvedPayload::Chosen(choice);
     let log = RunLog::new(storage, run_id, clock, redactor);
     let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())));
-    log.record(Some(&node), waiting).await?;
+    log.record(on.node(), waiting).await?;
     let resolved = EventPayload::Gates(GateEvent::Resolved(resolution));
-    log.record(Some(&node), resolved).await?;
+    log.record(on.node(), resolved).await?;
     Ok(())
 }
 
@@ -384,30 +423,12 @@ pub(super) async fn decided(
     Ok(Some((choice, resolved)))
 }
 
-/// Why a run's decision cannot be answered. Each variant's display is its
-/// code; the words a reader sees are the caller's to write.
+/// Why a run's decision is not recorded: a refusal, or what failed below.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveGateError {
-    /// The run is not stopped at a pause: a live process may drive it,
-    /// or it already finished.
-    #[error("not_paused")]
-    NotPaused,
-    /// The run is paused for a reason with no menu of options to answer.
-    #[error("nothing_to_resolve")]
-    NothingToResolve,
-    /// The chosen option is not on the menu; `declared` lists the options it holds.
-    #[error("unknown_option")]
-    UnknownOption { chosen: OptionId, declared: String },
-    /// The option sends the run back to a session, and the words it asks for
-    /// are the one thing that session would get.
-    #[error("unsaid")]
-    Unsaid { chosen: OptionId, asks: Asks },
-    /// The gate does not offer the option, and `withheld` says why.
-    #[error("withheld")]
-    Withheld {
-        chosen: OptionId,
-        withheld: Withheld,
-    },
+    /// What the run, or the decision put to it, makes Yunta refuse.
+    #[error(transparent)]
+    Refused(#[from] GateRefusal),
     #[error("storage")]
     Storage(#[from] yunta_storage::StorageError),
     /// What the gate shows could not be read, so its menu cannot be

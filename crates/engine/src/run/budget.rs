@@ -3,18 +3,20 @@
 //! checked before every token-spending scheduler step. Exhaustion is never
 //! a silent pause — it's an escalation (`continue`/`abort`) first, and only
 //! degrades to a `run_paused` with `budget_exhausted` when no surface can
-//! answer.
+//! answer. That pause rebuilds the same menu, so any process can answer it.
 //!
-//! Authorization is **per invocation, in memory** — deliberately not
-//! derived from the log: every new invocation spends new money, so a
-//! resume re-asks; the decision it gets is still audited in the log as a
-//! run-level gate pair (`node_id: None`).
+//! **One answer pays for one engine.** The lift lives in memory, in the
+//! engine that took the answer, because every new invocation spends new
+//! money. An answer from another process counts only while it stands after
+//! the cap's pause with no `run_resumed` after it, so one engine takes it,
+//! and with none waiting a resume asks again. Whoever answers, the decision
+//! is audited in the log as a run-level gate pair (`node_id: None`).
 
 use yunta_core::events::{
     BudgetCap, Claim, Escalation, EventPayload, GateEvent, GateOption, GateResolvedPayload,
     LoopCap, Menu, PauseReason,
 };
-use yunta_core::NonEmpty;
+use yunta_core::{NonEmpty, RunId};
 
 use super::{RunCtx, RunError};
 use yunta_core::reserved::ReservedOption;
@@ -67,14 +69,41 @@ pub async fn escalate(
     }
 }
 
+/// Takes the answer about the token cap this engine woke to, from `state`, the log as
+/// it stood before the engine said it resumed, which is what spends the run's answer.
+/// `continue`, on the run or on a node a session was cut on, lifts the cap for this
+/// invocation. `abort` on the run stops it where it stood, and its report is what the
+/// invocation ends on. With no answer waiting, nothing changes, and the cap asks when a
+/// step would spend.
+pub(super) async fn take_cap_answer(
+    ctx: &RunCtx<'_>,
+    state: &yunta_replay::RunState,
+) -> Result<Option<super::RunReport>, RunError> {
+    if state.past_the_cap_chosen() {
+        lift_the_cap(ctx);
+    }
+    let (Some(choice), Some((reason, _))) = (state.cap_answer(), state.run.paused()) else {
+        return Ok(None);
+    };
+    if ReservedOption::of(&choice.option) == Some(ReservedOption::Continue) {
+        lift_the_cap(ctx);
+        return Ok(None);
+    }
+    Ok(Some(super::pause(ctx, reason.clone()).await?))
+}
+
+/// Lifts the token cap for the rest of this invocation.
+pub(super) fn lift_the_cap(ctx: &RunCtx<'_>) {
+    ctx.budget_lifted
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The escalation object and pause reason for an exhausted run token budget:
 /// the claim names the run, and the menu holds the cap and the spend it is
 /// about. Its options are the engine's own, worded where the decision is shown.
-pub fn over_budget_escalation(ctx: &RunCtx<'_>, spent: u64, cap: u64) -> (Escalation, PauseReason) {
+pub fn over_budget_escalation(run: &RunId, spent: u64, cap: u64) -> (Escalation, PauseReason) {
     let escalation = Escalation::new(
-        Claim::TokensSpent {
-            run: ctx.run_id.clone(),
-        },
+        Claim::TokensSpent { run: run.clone() },
         Menu::Budget(BudgetCap { cap, spent }),
         NonEmpty::from((
             GateOption::reserved(ReservedOption::Continue),
@@ -187,8 +216,8 @@ impl RunCtx<'_> {
 
     /// How many of the nodes this run reaches are short of a terminal —
     /// what the remaining cap is shared among.
-    fn nodes_still_owed(&self, state: &crate::replay::RunState) -> usize {
-        crate::modes::reached_nodes(
+    fn nodes_still_owed(&self, state: &yunta_replay::RunState) -> usize {
+        yunta_replay::modes::reached(
             &self.manifest.workflow,
             state.run.mode(),
             state.run.left_out(),
@@ -197,7 +226,7 @@ impl RunCtx<'_> {
         .filter(|node| {
             !matches!(
                 state.nodes.state(&node.id),
-                Some(crate::replay::NodeState::Finished { .. })
+                Some(yunta_core::events::NodeState::Finished { .. })
             )
         })
         .count()

@@ -67,7 +67,7 @@ pub struct ScriptedAnswers {
 }
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for ScriptedAnswers {
+impl yunta_core::port::HumanInteraction for ScriptedAnswers {
     async fn resolve(
         &self,
         _escalation: &yunta_core::events::GateWaitingPayload,
@@ -78,8 +78,8 @@ impl yunta_engine::HumanInteraction for ScriptedAnswers {
         &self,
         _node: &yunta_core::NodeId,
         _questions: &yunta_core::QuestionsFile,
-    ) -> Option<yunta_engine::QuestionsReply> {
-        Some(yunta_engine::QuestionsReply {
+    ) -> Option<yunta_core::port::QuestionsReply> {
+        Some(yunta_core::port::QuestionsReply {
             answers: self.answers.clone(),
             channel: yunta_core::events::Channel::Tty,
             responder: Some("eulke".into()),
@@ -533,7 +533,7 @@ sessions:
 /// instead of hanging a test).
 pub struct SequencedInteraction {
     choices: std::sync::Mutex<std::collections::VecDeque<yunta_core::events::HumanChoice>>,
-    shown: std::sync::Mutex<Vec<Vec<yunta_engine::ShownDocument>>>,
+    shown: std::sync::Mutex<Vec<Vec<yunta_core::shown::ShownDocument>>>,
 }
 
 impl SequencedInteraction {
@@ -559,13 +559,13 @@ impl SequencedInteraction {
     }
 
     /// The documents each decision was asked with, oldest first.
-    pub fn shown(&self) -> Vec<Vec<yunta_engine::ShownDocument>> {
+    pub fn shown(&self) -> Vec<Vec<yunta_core::shown::ShownDocument>> {
         self.shown.lock().unwrap().clone()
     }
 }
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for SequencedInteraction {
+impl yunta_core::port::HumanInteraction for SequencedInteraction {
     async fn resolve(
         &self,
         _escalation: &yunta_core::events::GateWaitingPayload,
@@ -576,7 +576,7 @@ impl yunta_engine::HumanInteraction for SequencedInteraction {
     async fn resolve_in(
         &self,
         escalation: &yunta_core::events::GateWaitingPayload,
-        asking: &yunta_engine::Asking<'_>,
+        asking: &yunta_core::port::DecisionAsked<'_>,
     ) -> Option<yunta_core::events::HumanChoice> {
         self.shown.lock().unwrap().push(asking.shown.to_vec());
         self.resolve(escalation).await
@@ -995,13 +995,6 @@ pub fn node_failed(node: &str) -> yunta_core::events::Claim {
 /// The claim an escalation makes in the words of whoever escalated.
 pub fn written(text: &str) -> yunta_core::events::Claim {
     yunta_core::events::Claim::Written(text.to_string())
-}
-
-/// The failure a node ends with when its lint command fails.
-pub fn lint_failure() -> Failure {
-    Failure::Message {
-        outcome: "lint failed".into(),
-    }
 }
 
 /// The node an exhausted reroute of a failed node goes to, when its menu names one.

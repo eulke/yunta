@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use yunta_core::events::{EventPayload, Failure, NodeEvent, RedCheck};
+use yunta_core::refusal::GateRefusal;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{write, Bench, MOCK_CONFIG};
 
@@ -131,7 +132,9 @@ async fn a_regression_offers_abort_alone_on_the_tree_it_failed_on() {
     assert!(
         matches!(
             answer_parked(&bench, "retry").await,
-            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+            Err(yunta_engine::ResolveGateError::Refused(
+                GateRefusal::UnknownOption { .. }
+            ))
         ),
         "a retry the menu does not offer is refused"
     );
@@ -151,7 +154,7 @@ async fn a_regression_offers_abort_alone_on_the_tree_it_failed_on() {
 
 /// A person who writes the tree back and a wake that finds the change
 /// offer the retry again, and choosing it runs the suite once more.
-/// Reached by: `crates/engine/src/run/escalation.rs`, `crates/engine/src/replay/tree.rs`,
+/// Reached by: `crates/engine/src/run/escalation.rs`, `crates/replay/src/tree.rs`,
 /// `crates/engine/src/run/steps.rs`, `crates/engine/src/run/wake.rs`,
 /// `crates/engine/src/run/schedule/failure.rs`, `crates/core/src/events/failure/remedy.rs`
 #[tokio::test]
@@ -233,7 +236,9 @@ async fn a_coverage_gate_on_an_unchanged_tree_offers_no_retry_and_runs_no_more()
     assert!(
         matches!(
             answer_parked(&bench, "retry").await,
-            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+            Err(yunta_engine::ResolveGateError::Refused(
+                GateRefusal::UnknownOption { .. }
+            ))
         ),
         "no retry is offered on the tree the gate failed on"
     );

@@ -46,6 +46,7 @@ use yunta_core::port::{
     Adapter, AgentSession, ProbeReport, RailCodec, RunToolsEndpoint, SessionRequest,
 };
 use yunta_core::process::subprocess::{Held, LineParser};
+use yunta_core::process::SearchPath;
 use yunta_core::{
     AdapterError, AdapterId, AdapterSettings, AgentName, Capabilities, ConfigLayer, EditSandbox,
     FenceLevel, ModelName, Result, ScopeGlob, SessionId,
@@ -201,8 +202,9 @@ impl Adapter for MockAdapter {
     }
 
     /// The settings are read the way the fixture's CLI reads them, so a key
-    /// it does not know is an error here, as it is for the real adapter.
-    async fn probe(&self) -> Result<ProbeReport> {
+    /// it does not know is an error here, as it is for the real adapter. The
+    /// fixture is the CLI, so nothing is looked up on the search path.
+    async fn probe(&self, _search_path: &SearchPath) -> Result<ProbeReport> {
         typed_settings::<serde::de::IgnoredAny>(
             &ID,
             self.settings.adapter_settings.as_ref(),

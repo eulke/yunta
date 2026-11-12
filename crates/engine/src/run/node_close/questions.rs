@@ -30,7 +30,7 @@ pub(super) async fn ask_round(
     // the bytes the close happened to hold: the round that
     // follows resolves the same acceptance, and one number that
     // came from two places is one that can disagree with itself.
-    let crate::replay::RunView { events, state } = ctx.run_view().await?;
+    let crate::run_log::RunView { events, state } = ctx.run_view().await?;
     let questions_hash = held_questions(ctx, &events, &node.id)?;
     // Whether the round waits is the workflow's to say, under the
     // mode the run was created in.

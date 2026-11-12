@@ -5,8 +5,9 @@
 
 use std::path::Path;
 
+use yunta_core::check::CheckError;
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::{check_workflow_refs, origin_of, CheckError};
+use yunta_engine::{check_workflow_refs, origin_of};
 
 fn write(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {

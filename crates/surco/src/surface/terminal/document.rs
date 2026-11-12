@@ -365,6 +365,7 @@ mod tests {
             glyphs: Glyphs::Ascii,
             paint: Paint::ANSI16,
             width: Look::plain().width.within(70),
+            motion: crate::motion::Motion::Moves,
         };
         let painted: Vec<String> = widened()
             .lines(&look)

@@ -33,7 +33,7 @@ sessions:
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()

@@ -13,7 +13,7 @@
 
 use yunta_core::events::{EventDraft, EventPayload, NodeEvent, NodeStartedPayload, RunEvent};
 use yunta_core::Isolation;
-use yunta_engine::{run_branch, RunError, RunReport, RunTerminal, WorktreeError};
+use yunta_engine::{RunError, RunReport, RunTerminal, WorktreeError};
 use yunta_testkit::{git, git_output, Bench, MOCK_CONFIG};
 use yunta_testkit_core::FixedClock;
 
@@ -201,7 +201,7 @@ async fn a_worktree_moved_to_an_unrelated_branch_leaves_the_run_broken() {
         "the diagnostic names the base commit it looked for: {diagnostic}"
     );
     assert!(
-        diagnostic.contains(&run_branch(&bench.run_id)),
+        diagnostic.contains(&bench.run_id.branch()),
         "the remedy names the run's own branch: {diagnostic}"
     );
 }
@@ -226,7 +226,7 @@ async fn a_worktree_that_is_gone_is_an_error_that_says_how_to_bring_it_back() {
     let message = error.to_string();
     assert!(
         message.contains(&bench.worktree.display().to_string())
-            && message.contains(&run_branch(&bench.run_id)),
+            && message.contains(&bench.run_id.branch()),
         "the error names the path and the branch to recreate it from: {message}"
     );
     assert!(
@@ -263,7 +263,7 @@ async fn an_isolation_none_checkout_reset_behind_the_base_commit_leaves_the_run_
         "the remedy is the one for a run that works on your own checkout: {diagnostic}"
     );
     assert!(
-        !diagnostic.contains(&run_branch(&bench.run_id)),
+        !diagnostic.contains(&bench.run_id.branch()),
         "a run with no worktree of its own has no run branch to send anyone to: {diagnostic}"
     );
 }

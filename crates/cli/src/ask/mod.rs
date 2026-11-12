@@ -27,68 +27,29 @@ use surco::paint::{
 };
 use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::{Env, Pid, Responder};
+use yunta_render::prompt::Escape;
 
-use crate::error::warn;
+use crate::output::warn;
 use crate::surface::{Diagnostics, TerminalEnv};
 
-/// What `--interactive` says when there is no terminal to ask on, before
-/// the `fallback` the command takes instead.
+/// Warns that `--interactive` has no terminal to ask on, before the `fallback` the
+/// command takes instead.
 pub(crate) fn no_terminal(fallback: &str) {
-    warn(format!(
-        "--interactive given but there is no terminal to ask on; {fallback}"
-    ));
+    warn(yunta_render::prompt::no_terminal(fallback));
 }
 
-mod card;
+mod choose;
 mod decision;
-mod desk;
-mod field;
-mod form;
 mod held;
 mod keyboard;
 mod keys;
-mod menu;
+mod line;
+mod round;
 
-pub(crate) use decision::{decide, Ask, Opens};
-pub(crate) use field::ask_line;
-pub(crate) use form::answer;
-pub(crate) use menu::{choose, Choice};
-
-/// What Escape ends a prompt with, which is not the same thing
-/// everywhere: a prompt a run stopped on parks that run, and a prompt
-/// in a command with no run behind it leaves the value the command
-/// worked out on its own. One enum, because the gesture is one gesture
-/// and only its consequence differs — and it is said wherever a prompt
-/// opens, so a person never has to guess which of the two they are in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Escape {
-    /// The run this prompt belongs to parks with its state intact.
-    Parks,
-    /// The run, parked already, keeps waiting with nothing recorded.
-    LeavesWaiting,
-    /// The value the command detected for itself stands.
-    KeepsDefault,
-    /// A choice with no detected value: Escape takes the first, the
-    /// plainest of them.
-    TakesTheFirst,
-}
-
-impl Escape {
-    /// The phrase, as every prompt says it.
-    pub(crate) fn said(self) -> &'static str {
-        match self {
-            Escape::Parks => "esc leaves it for later",
-            Escape::LeavesWaiting => "esc leaves the run waiting",
-            Escape::KeepsDefault => "esc keeps the detected default",
-            Escape::TakesTheFirst => "esc takes the first",
-        }
-    }
-}
-
-/// What marks a line an answer is given on, typed or echoed back, so a
-/// person reads a round as answers under the things that asked for
-/// them.
-pub(super) const ANSWER: &str = "> ";
+pub(crate) use choose::choose;
+pub(crate) use decision::decide;
+pub(crate) use line::ask_line;
+pub(crate) use round::answer;
 
 /// The console the last prompt opened on this process's terminal, or
 /// `None` in a process where no prompt opened one.
@@ -297,26 +258,28 @@ impl Console {
     /// its rows in place.
     pub(crate) fn look(&self) -> surco::look::Look {
         surco::look::Look {
-            glyphs: crate::render::glyphs(),
-            paint: crate::render::stderr_paint(),
-            width: crate::render::row_width(usize::from(self.term.size().1)),
+            glyphs: crate::output::glyphs(),
+            paint: crate::output::stderr_paint(),
+            width: crate::output::row_width(usize::from(self.term.size().1)),
+            motion: crate::surface::TerminalEnv::settled().motion,
         }
-    }
-
-    /// Hides the cursor, once, so [`Console::restore`] knows there is one to put back.
-    pub(crate) fn hide_cursor(&self) -> std::io::Result<()> {
-        if !self.hidden.swap(true, Ordering::AcqRel) {
-            self.term.write_str(HIDE_CURSOR)?;
-        }
-        Ok(())
     }
 
     /// Shows the cursor again, when it is hidden: one put-back for one taking-away.
     pub(crate) fn show_cursor(&self) -> std::io::Result<()> {
-        if self.hidden.swap(false, Ordering::AcqRel) {
-            self.term.write_str(SHOW_CURSOR)?;
+        self.term.write_str(self.cursor_escape(true))
+    }
+
+    /// What leaves the cursor shown where `shown` and hidden elsewhere, for a drawing to
+    /// write inside its own update, so a terminal never shows a frame with the cursor of the
+    /// one before: the escape where the cursor changes, nothing where it already stands so.
+    /// A cursor hidden is one [`Console::restore`] knows to put back.
+    pub(crate) fn cursor_escape(&self, shown: bool) -> &'static str {
+        match (shown, self.hidden.swap(!shown, Ordering::AcqRel)) {
+            (true, true) => SHOW_CURSOR,
+            (false, false) => HIDE_CURSOR,
+            _ => "",
         }
-        Ok(())
     }
 
     /// Puts the terminal on its other screen, once, with the cursor at its first cell and
@@ -424,17 +387,13 @@ async fn handed_mode(diagnostics: &Diagnostics) -> Option<Termios> {
 /// Names the identity the answer is about to be recorded under, and
 /// returns it.
 ///
-/// Nothing at a console prompt authenticates who is typing, so what the
-/// log gets is the shell's own ambient identity, marked unverified.
-/// Saying so at the moment it is recorded is what keeps an unsigned
-/// decision from reading like a signed one. A run's own history says it
-/// in the identity it records, marked `unverified:`, so a console whose
-/// run keeps one leaves it to that.
+/// Whom an answer is recorded as: nothing at a console prompt authenticates who is
+/// typing, so the log gets the shell's own ambient identity, marked unverified, and
+/// says so. A run's own history says it in the identity it records, marked
+/// `unverified:`, so a console whose run keeps one leaves it to that.
 fn attributed(console: &Console, env: &Env) -> std::io::Result<Responder> {
-    let responder = crate::identity::responder(None, env.user.as_deref());
-    console.say_unless_chronicled(&format!(
-        "attributed to `{responder}`: unsigned, nothing here authenticates who typed"
-    ))?;
+    let responder = Responder::answering(None, env.user.as_deref());
+    console.say_unless_chronicled(&yunta_render::prompt::attributed(&responder))?;
     Ok(responder)
 }
 
@@ -460,9 +419,11 @@ mod tests {
     #[test]
     fn the_console_a_prompt_opened_is_handed_back_by_the_process_exactly_once() {
         let console = console();
-        console
-            .hide_cursor()
-            .expect("a test's stderr takes the cursor's hiding");
+        assert_eq!(
+            console.cursor_escape(false),
+            HIDE_CURSOR,
+            "a prompt hides it"
+        );
         *prompted_on() = Some(console.clone());
 
         restore_terminal();

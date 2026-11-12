@@ -1,0 +1,14 @@
+
+
+
+
+
+   the application needs a terminal of 60 by 14 at least,
+   and this one is 59 by 14: make it larger, or press q to
+   leave
+
+
+
+
+
+

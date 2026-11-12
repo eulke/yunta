@@ -22,12 +22,28 @@
 # - $CLAUDE_STUB_CHILD_PID_FILE, if set: spawns a background blocker of
 #   its own and records its pid — a grandchild the adapter's kill() must
 #   also reach, since the whole process tree must die together.
+# - $CLAUDE_STUB_GROUP_CHILD, if set: starts `sleep` in a process group of
+#   its own under this process, as a CLI starts a tool command, and writes
+#   its pid to the fifo the knob names: what a signal to this process's
+#   group never reaches.
+# - $CLAUDE_STUB_ORPHAN_CHILD, if set: starts `python3` sleeping in a group of
+#   its own from a shell that exits at once, so its parent is gone, and
+#   writes its pid to the fifo the knob names. `python3`, because macOS
+#   can hide the environment of its own binaries, such as `sleep`, from every
+#   other process. Neither child writes to this process's stdout, as a
+#   real tool command's output goes to a pipe of the CLI instead. This
+#   process goes on only once each child is in its group and has written
+#   its pid, so a session that ends at its last line never closes this
+#   process's group while a child is still leaving it.
 # - streams the JSON lines from $CLAUDE_STUB_LINES_FILE if set, else from
 #   .claude-stub-lines.jsonl relative to the working directory the
 #   adapter launched it in — real yunta runs don't route test scaffolding
 #   through SessionRequest.env (the engine fills that field with the
 #   session's shared directories and declared secrets), so a caller that
 #   only controls the worktree still has a way to script a session.
+# - $CLAUDE_STUB_SAID_FILE, if set: a file written once every line is printed.
+#   Past it nothing more goes to the stream, so a test may kill the engine
+#   reading it without the next write killing this process.
 # - (if $CLAUDE_STUB_HANG is set) ignores SIGINT and blocks afterwards —
 #   exercising the kill fallback a session that ignores interrupt needs.
 # - (if $CLAUDE_STUB_LINGER is set) blocks until interrupted, then exits —
@@ -77,6 +93,26 @@ if [ -n "$CLAUDE_STUB_CHILD_PID_FILE" ]; then
   echo $! > "$CLAUDE_STUB_CHILD_PID_FILE"
 fi
 
+# Each child opens `ready`, a fifo beside the one its knob names, once it is
+# in its group and its pid is written; reading it to its end is the
+# rendezvous. Beside the test's own fifo, it goes with the test's directory
+# however this process ends, and no two stubs meet on one name.
+if [ -n "$CLAUDE_STUB_GROUP_CHILD" ]; then
+  ready="${CLAUDE_STUB_GROUP_CHILD}.ready"
+  mkfifo "$ready"
+  perl -e 'setpgrp(0, 0); open(my $f, ">", $ARGV[0]) or die; print $f $$; close $f; open(my $r, ">", $ARGV[1]) or die; close $r; exec "sleep", "600"' "$CLAUDE_STUB_GROUP_CHILD" "$ready" < /dev/null > /dev/null 2>&1 &
+  cat "$ready" > /dev/null
+  rm -f "$ready"
+fi
+
+if [ -n "$CLAUDE_STUB_ORPHAN_CHILD" ]; then
+  ready="${CLAUDE_STUB_ORPHAN_CHILD}.ready"
+  mkfifo "$ready"
+  sh -c 'python3 -c "import os, sys, time; os.setpgrp(); f = open(sys.argv[1], \"w\"); f.write(str(os.getpid())); f.close(); open(sys.argv[2], \"w\").close(); time.sleep(600)" "$0" "$1" < /dev/null > /dev/null 2>&1 &' "$CLAUDE_STUB_ORPHAN_CHILD" "$ready"
+  cat "$ready" > /dev/null
+  rm -f "$ready"
+fi
+
 lines_file="${CLAUDE_STUB_LINES_FILE:-.claude-stub-lines.jsonl}"
 if [ -f "$lines_file" ]; then
   # The most stop turns in a row the stream prints; zero prints them all.
@@ -102,6 +138,10 @@ if [ -f "$lines_file" ]; then
     # `\n` in a string into two lines, and neither half is this protocol.
     printf '%s\n' "$line"
   done < "$lines_file"
+fi
+
+if [ -n "$CLAUDE_STUB_SAID_FILE" ]; then
+  : > "$CLAUDE_STUB_SAID_FILE"
 fi
 
 if [ -n "$CLAUDE_STUB_HANG" ]; then

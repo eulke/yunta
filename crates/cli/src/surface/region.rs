@@ -4,6 +4,10 @@
 //! node at work, and a footer that always says whether the run needs
 //! them.
 //!
+//! It is the one place on a terminal that keeps what a session said, by
+//! render's [`Heard`], and draws render's watched rows: the row that asks,
+//! each working node's rows, and the footer.
+//!
 //! It takes no alternate screen, no raw mode and no mouse capture, which
 //! is why the reader keeps their scrollback, their text selection, and a
 //! typed Ctrl-C that still reaches the one cancellation bridge. Nothing
@@ -25,11 +29,13 @@ use surco::glyphs::Glyphs;
 use surco::line::Line;
 use surco::motion::Motion;
 use surco::paint::Paint;
+use yunta_core::port::Said;
 use yunta_core::RunId;
-use yunta_engine::RunFrame;
+use yunta_render::watched::{self, Heard};
+use yunta_replay::frame::RunFrame;
 
 use super::scrollback::Scrollback;
-use super::{view, Screen};
+use super::Screen;
 
 /// The region's rows carry text, and beside the footer's words the run's
 /// furrow: no bar of one quantity and no percentage. The furrow is where each
@@ -67,6 +73,10 @@ pub(super) struct Region {
     bell: bool,
     /// Whether the window's title says a person is being asked.
     told: bool,
+    /// What a session of each working node, or of one yet to start, said
+    /// last. Only a region keeps it, so nothing said reaches a surface
+    /// that is not a terminal.
+    heard: Heard,
 }
 
 impl Region {
@@ -99,6 +109,7 @@ impl Region {
             motion: Motion::default(),
             bell: false,
             told: false,
+            heard: Heard::default(),
         })
     }
 
@@ -114,27 +125,31 @@ impl Region {
         self
     }
 
+    /// Keeps what a session said, for the row of its node while the node
+    /// works. The next redraw shows it.
+    pub(super) fn hear(&mut self, said: Said) {
+        self.heard.hear(said);
+    }
+
     /// Redraws the region from `frame`, sending up the nodes that stopped
     /// working since the last redraw.
     ///
     /// `answerable` says whether the run stopped on a menu of its own —
     /// which decides the command the attention row offers, and which
-    /// only the run's frozen manifest can answer.
+    /// only the run's frozen manifest can answer. When the engine asks at
+    /// its own terminal, as a process that follows the run reads it off the
+    /// registry, the row says so instead.
     pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
-        let attention =
-            view::attention(frame, run_id, answerable, self.glyphs).map(|line| self.fit(&line));
+        self.heard.kept_to(frame, run_id);
+        let rows = watched::rows(frame, run_id, answerable, &self.heard, &self.look());
+        let attention = rows.attention.map(|line| self.fit(&line));
         self.attend(attention);
-        let rows: Vec<String> = view::working(frame)
-            .into_iter()
-            .flat_map(|node| view::node_rows(frame, node, &self.look(), self.motion))
-            .map(|row| self.fit(&row))
-            .collect();
-        self.resize(rows.len());
-        for (bar, text) in self.body.iter().zip(rows) {
+        let nodes: Vec<String> = rows.nodes.iter().map(|row| self.fit(row)).collect();
+        self.resize(nodes.len());
+        for (bar, text) in self.body.iter().zip(nodes) {
             bar.set_message(text);
         }
-        self.footer
-            .set_message(self.fit(&view::footer(frame, &self.look())));
+        self.footer.set_message(self.fit(&rows.footer));
     }
 
     /// Tells the window a person is being asked, as a prompt takes the terminal:
@@ -144,7 +159,7 @@ impl Region {
             return;
         }
         self.told = true;
-        let title = view::title(frame, run_id, self.glyphs);
+        let title = watched::title(frame, run_id, self.glyphs);
         let bell = if self.bell { surco::paint::BELL } else { "" };
         // A terminal that refuses the sequence is a terminal nothing could be
         // reported on either.
@@ -235,7 +250,8 @@ impl Region {
         surco::look::Look {
             glyphs: self.glyphs,
             paint: self.paint,
-            width: crate::render::row_width(usize::from(self.screen.width())),
+            width: crate::output::row_width(usize::from(self.screen.width())),
+            motion: self.motion,
         }
     }
 
@@ -267,7 +283,7 @@ impl Region {
     /// row wraps, which is the tear [`Region::fit`] exists to prevent.
     /// Asked on every redraw, so a window resized mid-run is followed.
     fn width(&self) -> usize {
-        crate::render::row_width(usize::from(self.screen.width())).cells()
+        crate::output::row_width(usize::from(self.screen.width())).cells()
     }
 }
 

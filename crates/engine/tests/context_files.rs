@@ -9,9 +9,10 @@ use std::path::Path;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::caution::{Caution, MissingContextFile};
+use yunta_core::check::CheckError;
 use yunta_core::{CommitSha, Isolation, NodeId, Workflow};
 use yunta_engine::process::Supervision;
-use yunta_engine::{check_context_files, CheckError, ContextFilesCheck, RunTreeOrigin};
+use yunta_engine::{check_context_files, ContextFilesCheck, RunTreeOrigin};
 use yunta_testkit::{git, git_output, init_repo, write};
 use yunta_testkit_core::FixedClock;
 

@@ -4,20 +4,26 @@
 //! each from the palette, for a light ground and for a dark one. What a reader
 //! chooses is a command, on a button that copies it: a page runs nothing.
 
+mod asked;
 mod blocks;
+mod card;
 mod code;
 mod decision;
+mod desk;
 mod diagram;
 mod markdown;
 mod notices;
 mod page;
+mod screen;
 mod style;
 mod tables;
 mod text;
 
+use crate::components::Screen;
 use crate::doc::Doc;
 use crate::glyphs::Glyphs;
 use crate::look::{Look, Width};
+use crate::motion::Motion;
 use crate::paint::Paint;
 use crate::surface::Surface;
 
@@ -39,12 +45,20 @@ impl Html {
         page::body(doc)
     }
 
-    /// The look a document is built with for a page.
+    /// A screen as what a page's body holds, without what dresses it, as
+    /// [`Html::body`] is: a golden holds it, and a page lays it out in a grid.
+    pub fn screen(&self, screen: &Screen) -> String {
+        screen::screen(screen)
+    }
+
+    /// The look a document is built with for a page, which is read rather
+    /// than watched, so nothing on it turns.
     pub fn look(&self) -> Look {
         Look {
             glyphs: GLYPHS,
             paint: Paint::Plain,
             width: Width::of(Some(CELLS), None),
+            motion: Motion::Still,
         }
     }
 }

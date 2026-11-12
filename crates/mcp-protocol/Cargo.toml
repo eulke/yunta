@@ -1,0 +1,20 @@
+[package]
+name = "yunta-mcp-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "How Yunta speaks MCP: the shape every MCP server of Yunta answers in."
+
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The protocol's own types: a tool, a list of tools and its cache hints.
+rmcp.workspace = true

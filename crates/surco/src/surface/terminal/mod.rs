@@ -1,17 +1,20 @@
 //! A document on a terminal: each block laid out in columns at the
-//! stream's width, with its glyph set, painted by its paint.
+//! stream's width, with its glyph set, painted by its paint. In a pane, whose
+//! edge cuts what passes it, a line past the edge goes on in the rows under it.
 
 use crate::components::{Lead, Section};
-use crate::doc::{Block, Doc};
+use crate::doc::{Block, Doc, Prompt};
 use crate::line::{Line, Tone};
-use crate::look::Look;
+use crate::look::{Look, Width};
 use crate::surface::Surface;
 use crate::width::{cell_width, INDENT};
 use crate::words::Standing;
 
+mod asked;
+mod attention;
+mod boxed;
 mod card;
 pub use card::{narrowed, said_whole, Placed};
-pub use desk::LaidDesk;
 mod checklist;
 pub(in crate::surface) use checklist::{FIX, SO};
 mod concern;
@@ -23,14 +26,35 @@ mod document;
 mod evidence;
 mod fields;
 mod headline;
+mod legend;
 pub(in crate::surface) mod markdown;
 mod next;
+mod pane;
+pub use pane::Paned;
+mod typed;
 pub(in crate::surface) use next::{NEXT, OR};
 mod page;
 mod problem;
+mod ribbon;
 pub(in crate::surface) use problem::{HELP, REFUSED};
 mod runs;
+mod screen;
+mod scrolled;
 mod table;
+
+/// The cells between what stands at the two ends of a row, when both stand on it: two, so
+/// the gap reads as a parting, where one would read as the space between two words.
+const APART: usize = 2;
+
+/// `left` at the start of `cells` cells and `right` at its far end, with the space between
+/// them as wide as the row needs. Without a `right`, `left` stands alone.
+fn at_ends(left: Line, right: Option<Line>, cells: usize) -> Line {
+    let Some(right) = right else {
+        return left;
+    };
+    let gap = cells.saturating_sub(cell_width(&left.text()) + cell_width(&right.text()));
+    left.plain(" ".repeat(gap)).then(right)
+}
 
 /// A terminal stream, by how its lines look.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,14 +78,20 @@ impl Terminal {
     }
 
     /// `doc` laid out for this stream, unpainted, in the rhythm a page
-    /// keeps: a blank line between two blocks, except the furrow and the
-    /// gist, which hang from the headline, and a block under a heading,
+    /// keeps: a blank line between two blocks, except the furrow, the ribbon
+    /// and the gist, which hang from the headline, and a block under a heading,
     /// which hangs from it. It opens on what it says: there is nothing
     /// above the first line, and no blank line is doubled.
     pub fn lines(&self, doc: &Doc) -> Vec<Line> {
+        self.in_rhythm(doc.blocks())
+    }
+
+    /// `blocks` laid out for this stream in the rhythm a page keeps, as [`Terminal::lines`]
+    /// lays out a document's.
+    fn in_rhythm(&self, blocks: &[Block]) -> Vec<Line> {
         let mut lines: Vec<Line> = Vec::new();
         let mut headed = false;
-        for block in doc.blocks() {
+        for block in blocks {
             let mut drawn = self.block(block);
             // What hangs from a heading starts on the line under it.
             if headed && drawn.first().is_some_and(|line| line.text().is_empty()) {
@@ -70,7 +100,8 @@ impl Terminal {
             let Some(first) = drawn.first() else {
                 continue;
             };
-            let hangs = headed || matches!(block, Block::Furrow(_) | Block::Gist(_));
+            let hangs =
+                headed || matches!(block, Block::Furrow(_) | Block::Ribbon(_) | Block::Gist(_));
             let spaced =
                 first.text().is_empty() || lines.last().is_none_or(|line| line.text().is_empty());
             if !hangs && !spaced {
@@ -92,12 +123,60 @@ impl Terminal {
         blocks.iter().flat_map(|block| self.block(block)).collect()
     }
 
-    /// One block laid out for this stream.
+    /// One block laid out for this stream; in a pane, each line that passes
+    /// its edge goes on in the rows under it.
     pub fn block(&self, block: &Block) -> Vec<Line> {
+        let drawn = self.laid(block);
+        let width = self.look.width;
+        match width.cuts() {
+            true => drawn
+                .into_iter()
+                .flat_map(|line| line.rows_within(width.cells()))
+                .collect(),
+            false => drawn,
+        }
+    }
+
+    /// `block` held on a terminal `columns` wide and `rows` high while a person
+    /// answers it where they are: fitted to the rows over the terminal's last, the row
+    /// the cursor is left on, so drawing it never scrolls what stands above it; a list
+    /// under the question its caller said above it, which stays in sight.
+    pub fn held(&self, block: &Block, columns: usize, rows: usize) -> Placed {
+        let said_above = usize::from(matches!(block, Block::ChoiceList(_)));
+        self.held_in(block, columns, rows.saturating_sub(1 + said_above))
+    }
+
+    /// `block` held in `rows` rows `columns` wide: a prompt's block fitted to them, with
+    /// where the cursor stands when it is typed into, and any other block as a document
+    /// draws it. A desk lays out columns of its own across every cell it is given;
+    /// everything else keeps to the measure of a line.
+    fn held_in(&self, block: &Block, columns: usize, rows: usize) -> Placed {
+        match block.prompt() {
+            Some(Prompt::Card(card)) => card.drawn(&self.look, rows),
+            Some(Prompt::Desk(desk)) => {
+                let whole = Look {
+                    width: Width::exact(columns),
+                    ..self.look
+                };
+                desk.drawn(&whole, rows)
+            }
+            Some(Prompt::TypedAnswer(asked)) => asked.drawn(&self.look),
+            Some(Prompt::ChoiceList(list)) => list.drawn(&self.look, rows),
+            None => Placed {
+                lines: self.block(block),
+                cursor: None,
+                laid: None,
+            },
+        }
+    }
+
+    /// One block as its own layout draws it, at the stream's width.
+    fn laid(&self, block: &Block) -> Vec<Line> {
         let look = &self.look;
         match block {
             Block::Headline(block) => block.lines(look),
             Block::Furrow(block) => block.lines(look),
+            Block::Ribbon(block) => block.lines(look),
             Block::Gist(block) => block.lines(look),
             Block::Fields(block) => block.lines(look),
             Block::Table(block) => block.lines(look),
@@ -108,10 +187,18 @@ impl Terminal {
             Block::Paths(block) => block.lines(look),
             Block::Diffstat(block) => block.lines(look),
             Block::Decision(block) => block.lines(look),
+            // In a document a card takes the rows it needs: only a prompt held on a
+            // terminal fits one to the rows it has.
+            Block::Card(block) => block.drawn(look, usize::MAX).lines,
+            Block::Desk(block) => block.drawn_whole(look),
+            Block::TypedAnswer(block) => block.drawn(look).lines,
+            Block::ChoiceList(block) => block.drawn(look, usize::MAX).lines,
             Block::Checklist(block) => block.lines(look),
             Block::Problem(block) => block.lines(look),
             Block::Refusal(block) => block.lines(look),
             Block::Next(block) => block.lines(look),
+            Block::Legend(block) => block.lines(look),
+            Block::Attention(block) => block.lines(look),
             Block::Heading(title) => std::iter::once(Line::new())
                 .chain(
                     crate::width::wrap_unbroken(title, look.width.cells())
@@ -130,6 +217,10 @@ impl Terminal {
             Block::Diagram(block) => block.lines(look),
             Block::Code(block) => block.lines(look),
             Block::Lines(lines) => lines.clone(),
+            Block::Rows(rows) => rows
+                .iter()
+                .map(|row| row.cut(look.width.cells(), look.glyphs))
+                .collect(),
         }
     }
 }
@@ -173,6 +264,10 @@ impl Terminal {
                 .push(Tone::of(mark), self.look.glyphs.mark(mark).to_string())
                 .plain(" "),
             Some(Lead::Ordinal(at)) => Line::new().push(Tone::Strong, format!("{at}  ")),
+            Some(Lead::Pointer { on: true }) => Line::new()
+                .push(Tone::Strong, self.look.glyphs.pointer().to_string())
+                .plain(" "),
+            Some(Lead::Pointer { on: false }) => Line::new().plain("  "),
             None => Line::new(),
         };
         let hang = " ".repeat(cell_width(&lead.text()));

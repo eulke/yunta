@@ -13,6 +13,10 @@ use crate::blocks::{departure_words, remedy_words, reroute_words};
 /// The label of an option that pauses the run with its decision open.
 pub(crate) const PAUSE_HERE: &str = "Pause here";
 
+/// What going on past the token cap does, wherever it is offered.
+pub(crate) const LIFTS_THE_CAP: &str =
+    "Lifts the cap for this invocation only; a later resume will ask again before spending more";
+
 /// What going on past a gate does when no node waits on it.
 const NOTHING_WAITS: &str = "nothing in the workflow waits on it";
 
@@ -158,11 +162,7 @@ fn over_budget(id: ReservedOption) -> Option<(String, Option<String>)> {
     match id {
         ReservedOption::Continue => Some((
             "Continue past the cap".to_string(),
-            Some(
-                "Lifts the cap for this invocation only; a later resume will ask again before \
-                 spending more"
-                    .to_string(),
-            ),
+            Some(LIFTS_THE_CAP.to_string()),
         )),
         _ => None,
     }

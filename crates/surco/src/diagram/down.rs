@@ -1,11 +1,13 @@
 //! A layered chart drawn reading down the page: each layer a row of
 //! boxes centered on the widest, each link dropping through the channel
 //! below its box on a lane of its own, and each link that goes back
-//! climbing a lane at the right of everything.
+//! climbing a lane at the right of everything. A link that leaves or
+//! reaches a node inside a group drops from it or onto it, across the
+//! group's edge, where nothing inside the group stands in its way.
 
 use crate::diagram::grid::Grid;
 use crate::diagram::layer::Element;
-use crate::diagram::place::{centered, Laid, GAP};
+use crate::diagram::place::{centered, Laid, Placed, GAP};
 use crate::glyphs::Glyphs;
 
 /// Where everything sits on the page.
@@ -23,21 +25,19 @@ struct Frame {
 }
 
 /// `laid` drawn reading down, in at most `width` cells.
-pub(super) fn drawn(laid: &Laid, width: usize, glyphs: Glyphs) -> Option<Grid> {
+pub(super) fn drawn(laid: &Laid, width: usize, glyphs: Glyphs) -> Option<Placed> {
     let frame = frame(laid);
     if frame.width > width {
         return None;
     }
     let mut grid = Grid::new(frame.width, frame.height);
+    let mut boxes = vec![(0, 0); laid.sizes.len()];
     for (layer, elements) in laid.layered.layers.iter().enumerate() {
         for (at, element) in elements.iter().enumerate() {
             if let Element::Node(node) = element {
-                laid.draw_box(
-                    &mut grid,
-                    *node,
-                    (frame.xs[layer][at], frame.rows[layer].0),
-                    glyphs,
-                );
+                let corner = (frame.xs[layer][at], frame.rows[layer].0);
+                laid.draw_box(&mut grid, *node, corner, glyphs);
+                boxes[*node] = corner;
             }
         }
     }
@@ -53,7 +53,11 @@ pub(super) fn drawn(laid: &Laid, width: usize, glyphs: Glyphs) -> Option<Grid> {
             glyphs,
         )?;
     }
-    Some(grid)
+    Some(Placed {
+        grid,
+        boxes,
+        sizes: laid.sizes.clone(),
+    })
 }
 
 /// Where the layers, the channels and the elements in each layer sit.
@@ -130,6 +134,54 @@ impl Frame {
         let (top, tall) = self.channels[channel];
         (top + laid.lanes.channels[channel].runs, top + tall - 1)
     }
+
+    /// The top-left cell of box `node`, in `layer`.
+    fn corner(&self, laid: &Laid, layer: usize, node: usize) -> (usize, usize) {
+        let at = laid.layered.layers[layer]
+            .iter()
+            .position(|e| *e == Element::Node(node));
+        (self.xs[layer][at.unwrap_or_default()], self.rows[layer].0)
+    }
+
+    /// Where a link leaves box `node`, in `layer`: the column it drops down and
+    /// the row it starts from, the box's middle and its last row; or, from
+    /// `member` inside the group `node` is, that member's, where nothing inside
+    /// stands between it and the group's bottom edge.
+    fn leaving(
+        &self,
+        (laid, grid): (&Laid, &Grid),
+        (layer, node): (usize, usize),
+        member: Option<usize>,
+    ) -> Option<(usize, usize)> {
+        let (x, y) = self.corner(laid, layer, node);
+        let (wide, high) = laid.sizes[node];
+        let Some(((mx, my), (mw, mh))) = member.and_then(|m| laid.member(node, m)) else {
+            return Some((x + wide / 2, y + high - 1));
+        };
+        let (column, bottom) = (x + mx + mw / 2, y + my + mh - 1);
+        let below = (bottom + 1..y + high - 1).map(|row| (column, row));
+        grid.clear(below).then_some((column, bottom))
+    }
+
+    /// Where a link reaches box `node`, in `layer`: the column it drops down and
+    /// the row its head points from, the box's middle on `head`, the last row of
+    /// the channel above it; or, at `member` inside the group `node` is, the row
+    /// over that member, where nothing inside stands between it and the group's
+    /// top edge.
+    fn reaching(
+        &self,
+        (laid, grid): (&Laid, &Grid),
+        (layer, node): (usize, usize),
+        (member, head): (Option<usize>, usize),
+    ) -> Option<(usize, usize)> {
+        let (x, y) = self.corner(laid, layer, node);
+        let Some(((mx, my), (mw, _))) = member.and_then(|m| laid.member(node, m)) else {
+            return Some((x + laid.sizes[node].0 / 2, head));
+        };
+        let (column, over) = (x + mx + mw / 2, y + my - 1);
+        let above = (y + 1..=over).map(|row| (column, row));
+        grid.clear(above).then_some((column, over))
+    }
 }
 
 /// One forward route, step by step through the channels it crosses.
@@ -141,6 +193,7 @@ fn forward(
     glyphs: Glyphs,
 ) -> Option<()> {
     let stroke = laid.stroke(route.link);
+    let ends = laid.ends[route.link];
     let first = laid.layered.layer_of(laid.chart.links[route.link].from);
     for (step, pair) in route.path.windows(2).enumerate() {
         let (from, to) = (first + step, first + step + 1);
@@ -150,20 +203,27 @@ fn forward(
                 .position(|e| *e == element);
             frame.middle(laid, layer, at.unwrap_or_default(), element)
         };
-        let (sx, tx) = (place(from, pair[0]), place(to, pair[1]));
+        let (sx, start) = match pair[0] {
+            Element::Node(node) => frame.leaving((laid, grid), (from, node), ends.from)?,
+            through => (place(from, through), frame.bottom(laid, from, through)),
+        };
         let run = frame.channels[to].0 + lanes[step];
-        grid.vertical(sx, frame.bottom(laid, from, pair[0]), run, stroke);
-        grid.horizontal(run, sx, tx, stroke);
         let (label_row, head_row) = frame.ends(laid, to);
+        let (tx, head) = match pair[1] {
+            Element::Node(node) => frame.reaching((laid, grid), (to, node), (ends.to, head_row))?,
+            through => (place(to, through), head_row),
+        };
+        grid.vertical(sx, start, run, stroke);
+        grid.horizontal(run, sx, tx, stroke);
         match pair[1] {
             Element::Through(_) => {
                 let (top, high) = frame.rows[to];
                 grid.vertical(tx, run, top + high - 1, stroke);
             }
             Element::Node(_) => {
-                grid.vertical(tx, run, head_row, stroke);
+                grid.vertical(tx, run, head, stroke);
                 if stroke.points() {
-                    grid.put(tx, head_row, glyphs.head(true));
+                    grid.put(tx, head, glyphs.head(true));
                 }
                 labelled(grid, laid.label(route.link), (tx, label_row))?;
             }
@@ -183,31 +243,21 @@ fn back(
     glyphs: Glyphs,
 ) -> Option<()> {
     let stroke = laid.stroke(link);
+    let ends = laid.ends[link];
     let (from, to) = (laid.chart.links[link].from, laid.chart.links[link].to);
     let (low, high) = (laid.layered.layer_of(from), laid.layered.layer_of(to));
-    let place = |layer: usize, node: usize| {
-        let element = Element::Node(node);
-        let at = laid.layered.layers[layer]
-            .iter()
-            .position(|e| *e == element);
-        frame.middle(laid, layer, at.unwrap_or_default(), element)
-    };
-    let (sx, tx) = (place(low, from), place(high, to));
+    let (label_row, head_row) = frame.ends(laid, high);
+    let (sx, start) = frame.leaving((laid, grid), (low, from), ends.from)?;
+    let (tx, head) = frame.reaching((laid, grid), (high, to), (ends.to, head_row))?;
     let out = frame.channels[low + 1].0 + leaving;
     let into = frame.channels[high].0 + arriving;
-    grid.vertical(
-        sx,
-        frame.bottom(laid, low, Element::Node(from)),
-        out,
-        stroke,
-    );
+    grid.vertical(sx, start, out, stroke);
     grid.horizontal(out, sx, lane, stroke);
     grid.vertical(lane, into, out, stroke);
     grid.horizontal(into, tx, lane, stroke);
-    let (label_row, head_row) = frame.ends(laid, high);
-    grid.vertical(tx, into, head_row, stroke);
+    grid.vertical(tx, into, head, stroke);
     if stroke.points() {
-        grid.put(tx, head_row, glyphs.head(true));
+        grid.put(tx, head, glyphs.head(true));
     }
     labelled(grid, laid.label(link), (tx, label_row))
 }

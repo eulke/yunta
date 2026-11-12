@@ -50,10 +50,7 @@ pub(super) async fn send_back(
             Some(&node.id),
             &format!("{}-unprovable-{attempt}-{at}", node.id),
             FindingSeverity::Blocking,
-            Location::run(
-                RelativePath::of([crate::artifacts::shown::view_of(plan)]),
-                None,
-            ),
+            Location::run(RelativePath::of([yunta_core::run_dir::view_of(plan)]), None),
             FindingCause::Unprovable { flaw: flaw.clone() },
         )
         .await?;

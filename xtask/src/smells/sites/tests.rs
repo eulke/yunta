@@ -1,6 +1,37 @@
 //! Tests of the counters that read where a capability is written.
 
 use super::*;
+use crate::smells::corpus::scratch_tree;
+
+/// The process is read once, at the shell: its directory, its binary, its
+/// arguments or its signals read anywhere else count, and the shell and the
+/// tests do not. A child process's directory, set on its command, is no read.
+#[test]
+fn the_process_read_below_the_shell_counts_and_the_shell_does_not() {
+    let root = scratch_tree(
+        "process-read",
+        &[
+            (
+                "crates/cli/src/shell.rs",
+                "let dir = std::env::current_dir()?;\nlet binary = std::env::current_exe();\n",
+            ),
+            (
+                "crates/api/src/workspace.rs",
+                "let dir = std::env::current_dir()?;\n",
+            ),
+            ("crates/engine/src/spawn.rs", "command.current_dir(&cwd);\n"),
+            (
+                "crates/cli/src/interrupt.rs",
+                "let signals = tokio::signal::unix::signal(kind)?;\n",
+            ),
+            (
+                "crates/cli/tests/flow.rs",
+                "let here = std::env::current_dir()?;\n",
+            ),
+        ],
+    );
+    assert_eq!(count_process_read_below_the_shell(&root), 2);
+}
 
 #[test]
 fn a_text_mark_reads_the_spelling_the_code_writes() {

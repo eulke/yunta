@@ -1,5 +1,5 @@
 //! `ConsoleInteraction` — the terminal implementation of
-//! `yunta_engine::HumanInteraction`, and the border where a prompt that
+//! `yunta_core::port::HumanInteraction`, and the border where a prompt that
 //! produced no answer becomes a line a person reads.
 //!
 //! It never auto-decides. Without a console to prompt on (piped,
@@ -19,7 +19,6 @@
 //! own cancellation, so a run stopped from outside stops waiting on a
 //! person who is no longer being asked anything.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -27,11 +26,13 @@ use async_trait::async_trait;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
+use yunta_core::port::{HumanInteraction, QuestionsReply};
 use yunta_core::{Env, QuestionsFile};
-use yunta_engine::{HumanInteraction, QuestionsReply};
+use yunta_render::prompt::Escape;
+use yunta_ui::prompt::DecisionPut;
 
-use crate::ask::{answer, decide, Answered, Ask, Console, Escape, NoAnswer, Opens};
-use crate::error::{note, warn};
+use crate::ask::{answer, decide, Answered, Console, NoAnswer};
+use crate::output::{note, warn};
 use crate::surface::{Curtain, Diagnostics};
 
 /// The console surface of one invocation, holding what a prompt has to
@@ -127,24 +128,10 @@ impl HumanInteraction for ConsoleInteraction {
     }
 
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
-        let escalation = escalation.clone();
+        let put = DecisionPut::alone(escalation.clone());
         let env = self.env.clone();
-        self.prompted(move |console| {
-            decide(
-                console,
-                &env,
-                Ask {
-                    escalation: &escalation,
-                    shown: None,
-                    changed: None,
-                    routes: BTreeMap::new(),
-                    node: None,
-                    called: None,
-                    opens: Opens::TheCard,
-                },
-            )
-        })
-        .await
+        self.prompted(move |console| decide(console, &env, &put))
+            .await
     }
 
     /// The decision, held as a card: the documents it is about drawn above it, what
@@ -153,33 +140,12 @@ impl HumanInteraction for ConsoleInteraction {
     async fn resolve_in(
         &self,
         escalation: &GateWaitingPayload,
-        asking: &yunta_engine::Asking<'_>,
+        asking: &yunta_core::port::DecisionAsked<'_>,
     ) -> Option<HumanChoice> {
-        let routes =
-            yunta_render::gate::routes(escalation, asking.workflow, asking.left_out, asking.node);
-        let called = Some(crate::render::called(&asking.workflow.name, asking.mode));
-        let escalation = escalation.clone();
-        let shown = asking.shown.to_vec();
-        let run = asking.run.clone();
-        let changed = asking.changed.cloned();
-        let node = asking.node.cloned();
+        let put = DecisionPut::asked(escalation, asking);
         let env = self.env.clone();
-        self.prompted(move |console| {
-            decide(
-                console,
-                &env,
-                Ask {
-                    escalation: &escalation,
-                    shown: Some((&run, &shown)),
-                    changed: changed.as_ref(),
-                    routes,
-                    node: node.as_ref(),
-                    called,
-                    opens: Opens::TheCard,
-                },
-            )
-        })
-        .await
+        self.prompted(move |console| decide(console, &env, &put))
+            .await
     }
 
     /// Question by question, each answered the way its own

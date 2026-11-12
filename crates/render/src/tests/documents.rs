@@ -1,6 +1,8 @@
 //! The documents a decision shows — a plan as the run judges it, a spec —
 //! drawn whole on every surface and held to their goldens.
 
+mod spec;
+
 use std::path::{Path, PathBuf};
 
 use surco::golden::{assert_golden, Environment, ENVIRONMENTS};
@@ -11,10 +13,9 @@ use yunta_core::shown::{
     TaskReview,
 };
 use yunta_core::{RunId, SpecFile, TasksFile};
-use yunta_testkit_core::spell;
 
 use super::console_page::{assert_fits, unpainted};
-use crate::plan::{document, Form};
+use crate::page::{Form, Page, Plan};
 
 pub(super) fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/document")
@@ -23,6 +24,16 @@ pub(super) fn goldens() -> PathBuf {
 /// The run the goldens name: its handle is the one they print.
 pub(super) fn run() -> RunId {
     RunId::from_static("7E5PH4")
+}
+
+/// `review`'s page in `form`, read in [`run`], built with `look`.
+pub(super) fn plan_page(review: &PlanReview, form: Form, look: &Look) -> surco::doc::Doc {
+    Plan {
+        review,
+        run: &run(),
+        form,
+    }
+    .document(look)
 }
 
 const PLAN: &str = r#"
@@ -234,7 +245,7 @@ pub(super) fn global_packs() -> PlanReview {
 
 /// `review` drawn in `form` at a plain terminal.
 pub(super) fn read(review: &PlanReview, form: Form) -> String {
-    Terminal::on(Look::plain()).draw(&document(review, &run(), form, &*spell()))
+    Terminal::on(Look::plain()).draw(&plan_page(review, form, &Look::plain()))
 }
 
 /// `review` as the plan a gate shows: the run's tasks document, at the path
@@ -277,7 +288,7 @@ fn head_of(environment: &Environment) -> &'static [&'static str] {
 /// golden in each one.
 #[test]
 fn a_plan_under_review_matches_its_goldens() {
-    let doc = document(&global_packs(), &run(), Form::Review, &*spell());
+    let doc = plan_page(&global_packs(), Form::Review, &Look::plain());
     for environment in &ENVIRONMENTS {
         let head = head_of(environment);
         let plain = Terminal::on(unpainted(environment)).draw(&doc);
@@ -293,7 +304,7 @@ fn a_plan_under_review_matches_its_goldens() {
 
 #[test]
 fn a_whole_plan_as_a_file_matches_its_golden() {
-    let doc = document(&global_packs(), &run(), Form::Whole, &*spell());
+    let doc = plan_page(&global_packs(), Form::Whole, &Look::plain());
     assert_golden(&goldens().join("plan.md"), &Markdown.draw(&doc));
 }
 
@@ -325,7 +336,7 @@ fn a_plan_under_review_reads_as_its_change_and_its_proof_a_line_a_task() {
 /// no line is too narrow to hold them.
 #[test]
 fn the_head_says_how_big_the_plan_is_and_what_the_person_asked() {
-    let drawn = Markdown.draw(&document(&global_packs(), &run(), Form::Review, &*spell()));
+    let drawn = Markdown.draw(&plan_page(&global_packs(), Form::Review, &Markdown.look()));
     let head = drawn.lines().next().unwrap_or_default();
     for fact in [
         "plan",
@@ -350,7 +361,7 @@ fn the_steps_name_every_task_whole_and_draw_the_order_they_wait_in() {
         width: Look::plain().width.within(60),
         ..Look::plain()
     };
-    let drawn = Terminal::on(look).draw(&document(&review, &run(), Form::Review, &*spell()));
+    let drawn = Terminal::on(look).draw(&plan_page(&review, Form::Review, &look));
     let steps =
         &drawn[drawn.find("\n  steps\n").expect(&drawn)..drawn.find("step 1 of 3").unwrap()];
     let said = steps.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -395,7 +406,7 @@ fn forms_say_their_risks_where_their_decision_is() {
     assert!(!reviewed.contains("Global lock state"), "{reviewed}");
     let whole = read(&review, Form::Whole);
     assert_eq!(whole.matches("Global lock state").count(), 1, "{whole}");
-    let file = Markdown.draw(&document(&review, &run(), Form::Whole, &*spell()));
+    let file = Markdown.draw(&plan_page(&review, Form::Whole, &Markdown.look()));
     assert!(file.starts_with("# plan: "), "{file}");
     let summary = file.split("\n\n").nth(1).unwrap_or_default();
     assert_eq!(
@@ -472,27 +483,4 @@ fn the_description_is_read_whole_with_its_drawing() {
         drawn.contains("A goodbye follows the greeting, on its own line."),
         "{drawn}"
     );
-}
-
-/// A spec's page shows a long file to its cut, and where the rest is: the
-/// page of the node that wrote it. With no node, the file is shown whole.
-#[test]
-fn a_spec_page_cuts_a_long_file_and_says_where_the_rest_is() {
-    let mut spec: SpecFile = yunta_core::yaml::parse(SPEC).unwrap();
-    spec.specs[0].files[0].content = (1..=80).map(|n| format!("// line {n}\n")).collect();
-    let node: yunta_core::NodeId = "specify".into();
-    let draw = |node: Option<&yunta_core::NodeId>| {
-        let doc = crate::spec::document(&spec, ("", node), &run(), Form::Review, &*spell());
-        Terminal::on(Look::plain()).draw(&doc)
-    };
-    let cut = draw(Some(&node));
-    assert!(
-        cut.contains("// line 60") && !cut.contains("// line 61"),
-        "{cut}"
-    );
-    assert!(
-        cut.contains("20 lines more: yunta status 7E5PH4 --node specify"),
-        "{cut}"
-    );
-    assert!(draw(None).contains("// line 80"), "no node, the file whole");
 }

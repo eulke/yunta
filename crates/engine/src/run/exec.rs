@@ -33,7 +33,9 @@ use yunta_core::Location;
 /// Both sides boxed: a run starts once, so the allocation is nothing
 /// beside carrying either side's weight in every move of the other.
 enum Startup<'a> {
-    Finished(Box<RunReport>),
+    /// The invocation has nothing to drive: the run's log already ended, or an answer
+    /// waiting on it stopped the run where it stood.
+    Over(Box<RunReport>),
     Ready(Box<Ready<'a>>),
 }
 
@@ -65,7 +67,7 @@ pub(crate) async fn execute_run_at_depth(
     depth: u32,
 ) -> Result<RunReport, RunError> {
     let ready = match start(env, depth).await? {
-        Startup::Finished(report) => return Ok(*report),
+        Startup::Over(report) => return Ok(*report),
         Startup::Ready(ready) => *ready,
     };
     // The run's clock is read every second for as long as the loop
@@ -155,7 +157,8 @@ async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> 
         if matches!(decision, Decision::MeasureBaseline { .. }) && aside.finish().await? {
             continue;
         }
-        let moved = moves_before(ctx, &state, &scheduling.policy, &aside, &decision).await?;
+        let measuring = !aside.idle();
+        let moved = moves_before(ctx, &state, &scheduling.policy, measuring, &decision).await?;
         if let Some(checkout) = moved {
             break Ok(Driven::Moved(checkout));
         }
@@ -183,8 +186,8 @@ async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> 
 async fn read_state(
     ctx: &RunCtx<'_>,
     scheduling: &mut Scheduling,
-) -> Result<Box<crate::replay::RunState>, RunError> {
-    let crate::replay::RunView { events, state } = ctx.run_view().await?;
+) -> Result<Box<yunta_replay::RunState>, RunError> {
+    let crate::run_log::RunView { events, state } = ctx.run_view().await?;
     let accepted = protected::accepted_spec(&state.artifacts).map(|held| held.content_hash.clone());
     if accepted != scheduling.spec {
         ctx.renew_protected(protected::of(ctx, &events).await?);
@@ -197,18 +200,19 @@ async fn read_state(
 /// Moves the run, before it executes `decision`, into a checkout of its
 /// pool that already built the commit it stands at — the one its last
 /// unit worked in — when it is the moment to look for one, and says so on
-/// the log. Answers where the run works now; `None` when it stays.
+/// the log; never while a measurement is under way beside the run
+/// (`measuring`). Answers where the run works now; `None` when it stays.
 async fn moves_before(
     ctx: &RunCtx<'_>,
-    state: &crate::replay::RunState,
+    state: &yunta_replay::RunState,
     policy: &schedule::Policy,
-    aside: &super::aside::Aside<'_>,
+    measuring: bool,
     decision: &Decision,
 ) -> Result<Option<PathBuf>, RunError> {
     let Decision::Execute(batch) = decision else {
         return Ok(None);
     };
-    if !aside.idle() || !schedule::follows_build(&ctx.manifest.workflow, state, policy, batch) {
+    if measuring || !schedule::follows_build(&ctx.manifest.workflow, state, policy, batch) {
         return Ok(None);
     }
     let supervision = ctx.root_supervision();
@@ -230,7 +234,7 @@ async fn moves_before(
 /// the run, saying how to make some.
 async fn take_step(
     ctx: &RunCtx<'_>,
-    state: &crate::replay::RunState,
+    state: &yunta_replay::RunState,
     mode_name: &ModeName,
     decision: Decision,
 ) -> Result<Option<RunReport>, RunError> {
@@ -243,7 +247,7 @@ async fn take_step(
 }
 
 /// What a step answers: the report of a step that ended the invocation.
-type Stepped<'s> = Pin<Box<dyn Future<Output = Result<Option<RunReport>, RunError>> + 's>>;
+type Stepped<'s> = Pin<Box<dyn Future<Output = Result<Option<RunReport>, RunError>> + Send + 's>>;
 
 /// The step the scheduler decided, boxed apart by its kind: a run nested
 /// inside another run's step carries the frame of the one step it takes,
@@ -251,7 +255,7 @@ type Stepped<'s> = Pin<Box<dyn Future<Output = Result<Option<RunReport>, RunErro
 /// composition.
 fn step<'s>(
     ctx: &'s RunCtx<'_>,
-    state: &'s crate::replay::RunState,
+    state: &'s yunta_replay::RunState,
     mode: &'s ModeName,
     decision: Decision,
 ) -> Stepped<'s> {
@@ -361,7 +365,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     if view.state.run.finished().is_some() {
         // Re-executing a finished run is a no-op, not an error — the log
         // already has its ending.
-        return Ok(Startup::Finished(Box::new(RunReport {
+        return Ok(Startup::Over(Box::new(RunReport {
             terminal: RunTerminal::Finished,
             state: *view.state,
         })));
@@ -373,6 +377,9 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
         // holding, so what separates the two is what the log says
         // happened, never how much of it there is.
         super::wake::resume(&ctx, &view).await?;
+        if let Some(stopped) = super::budget::take_cap_answer(&ctx, &view.state).await? {
+            return Ok(Startup::Over(Box::new(stopped)));
+        }
         // What earlier invocations answered stays answered for the trees
         // they named, as long as the commands still run as they did.
         let woken = ctx.run_view().await?;
@@ -412,7 +419,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
 /// accepted spec the set was read from.
 async fn scheduling_of(
     ctx: &RunCtx<'_>,
-    view: &crate::replay::RunView,
+    view: &crate::run_log::RunView,
     mode_name: &ModeName,
 ) -> Result<Scheduling, RunError> {
     ctx.renew_protected(protected::of(ctx, &view.events).await?);

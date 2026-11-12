@@ -4,8 +4,8 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
+use yunta_core::port::HumanInteraction;
 use yunta_core::{OptionId, Responder};
-use yunta_engine::HumanInteraction;
 
 /// Resolves every gate with one fixed choice, recording the option ids it
 /// was shown on each call so a test can assert what the engine offered.

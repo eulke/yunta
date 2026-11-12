@@ -4,8 +4,7 @@
 
 use yunta_core::events::{ArtifactId, Respecified};
 use yunta_core::{ArtifactKind, TaskId};
-
-use crate::replay::RunState;
+use yunta_replay::RunState;
 
 /// Every task whose tests a person accepted are wrong and that the node
 /// writing them has not written again since: the node accepted no spec

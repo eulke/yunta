@@ -15,13 +15,15 @@
 
 use std::io::Write;
 
-use surco::figures::duration;
 use surco::glyphs::Glyphs;
 use surco::look::Look;
+use surco::motion::Motion;
 use surco::paint::Paint;
-use yunta_engine::Moment;
+use yunta_core::RunId;
+use yunta_render::chronicle;
+use yunta_replay::frame::Moment;
 
-use super::{chronicle, write_line};
+use super::write_line;
 
 /// One line per event, written as the event arrives.
 pub(super) struct Lines {
@@ -40,7 +42,7 @@ impl Lines {
         );
         Self {
             out,
-            paint: crate::render::stderr_paint(),
+            paint: crate::output::stderr_paint(),
         }
     }
 
@@ -61,21 +63,22 @@ impl Lines {
     /// Every moment that says anything, not only the ones a watched terminal keeps: a
     /// reader who arrives after the fact has no region to have watched,
     /// so the log is all there is and it is all written.
-    pub(super) fn moment(&mut self, moment: &Moment, run: &str, glyphs: Glyphs) {
+    pub(super) fn moment(&mut self, moment: &Moment, run: &RunId, glyphs: Glyphs) {
         if !chronicle::says_anything(&moment.happening) {
             return;
         }
         let look = Look {
             glyphs,
             paint: self.paint,
-            width: crate::render::stderr_width(),
+            width: crate::output::stderr_width(),
+            // One line per moment, nothing redrawn: nothing on a pipe turns.
+            motion: Motion::Still,
         };
-        let said = self.paint.line(&chronicle::line(moment, &look));
         write_line(
             &mut self.out,
-            &format!("[{}] {said}", duration(moment.elapsed)),
+            &self.paint.line(&chronicle::logged(moment, &look)),
         );
-        for line in chronicle::evidence(moment, run, &look) {
+        for line in crate::output::blocks_lines(&chronicle::evidence(moment, run), &look) {
             write_line(&mut self.out, &self.paint.line(&line));
         }
     }
@@ -93,11 +96,11 @@ mod pause_reason_tests {
         Claim, Escalation, Failure, PauseReason, PublishedGate, RunEvent, RunPausedPayload,
     };
     use yunta_core::{NodeId, QuestionId, RunId};
-    use yunta_engine::WaitingOn;
+    use yunta_replay::frame::WaitingOn;
 
-    use crate::commands::advice;
+    use yunta_render::chronicle;
 
-    use super::super::chronicle;
+    use super::super::draw::kept;
     use super::Lines;
 
     /// One of every reason a run parks on. The `match` is what keeps it
@@ -249,15 +252,19 @@ mod pause_reason_tests {
                 NodeFailedPayload::new(failure, TokenUsage::default()),
             ))),
         };
-        let moments = yunta_engine::chronicle(&[event]);
+        let moments = yunta_replay::frame::chronicle(&[event]);
         let moment = moments.first().expect("one moment per event");
         let written = yunta_testkit_core::Captured::default();
         let mut lines = Lines {
             out: Box::new(written.clone()),
             paint: surco::paint::Paint::Plain,
         };
-        lines.moment(moment, "Y0P5", surco::glyphs::Glyphs::Unicode);
-        (written.text(), chronicle::kept(&moment.happening))
+        lines.moment(
+            moment,
+            &RunId::from_static("01JQ0000000000000000000000"),
+            surco::glyphs::Glyphs::Unicode,
+        );
+        (written.text(), kept(&moment.happening))
     }
 
     /// A person choosing an option that goes back is no failure on any surface: the node's
@@ -293,9 +300,11 @@ mod pause_reason_tests {
             assert_eq!(payload.pause, reason);
 
             let said = chronicle::say(
-                &yunta_testkit::moment(
+                &yunta_replay::frame::Moment::sample(
                     None,
-                    yunta_engine::Happening::Run((&RunEvent::Paused(payload.clone())).into()),
+                    yunta_replay::frame::Happening::Run(
+                        (&RunEvent::Paused(payload.clone())).into(),
+                    ),
                 ),
                 surco::glyphs::Glyphs::Unicode,
             );
@@ -320,59 +329,8 @@ mod pause_reason_tests {
                 reason: payload.pause.clone(),
             };
             let one_line = surco::text::one_line(&sentence);
-            assert_eq!(advice::parked_on(&waiting), one_line);
-            assert_eq!(advice::parked_in_full(&waiting), one_line);
+            assert_eq!(yunta_render::pause::parked_on(&waiting), one_line);
+            assert_eq!(yunta_render::pause::parked_in_full(&waiting), one_line);
         }
-    }
-}
-
-/// The line a promotion says when its log names neither a cause nor a
-/// sentence: the mode alone, on the chronicle line every surface writes.
-#[cfg(test)]
-mod promotion_tests {
-    use yunta_core::events::{run, Evidence, Failure, PromotionCause};
-
-    use super::super::chronicle;
-
-    #[test]
-    fn a_promotion_with_no_cause_recorded_reads_as_the_mode_alone() {
-        let promoted = yunta_engine::Happening::Run(run::happening::Happening::PromotionSignaled {
-            to: "ship".into(),
-            cause: None,
-            legacy_reason: None,
-            evidence: Evidence::none(),
-        });
-        let said = chronicle::say(
-            &yunta_testkit::moment(None, promoted),
-            surco::glyphs::Glyphs::Unicode,
-        );
-        assert_eq!(said.text, "run promoted to `ship`");
-    }
-
-    /// The failure a promotion carries is read beside the node whose
-    /// reroutes ran out, after the node and the mode it moves to.
-    #[test]
-    fn a_promotion_says_the_failure_that_exhausted_its_re_routes() {
-        let cause = PromotionCause {
-            node: "lint".into(),
-            goto: "fix-lint".into(),
-            failure: Some(Failure::Message {
-                outcome: "exit 1".into(),
-            }),
-        };
-        let promoted = yunta_engine::Happening::Run(run::happening::Happening::PromotionSignaled {
-            to: "ship".into(),
-            cause: Some(cause),
-            legacy_reason: None,
-            evidence: Evidence::none(),
-        });
-        let said = chronicle::say(
-            &yunta_testkit::moment(None, promoted),
-            surco::glyphs::Glyphs::Unicode,
-        );
-        assert_eq!(
-            said.text,
-            "run promoted to `ship`: node `lint` exhausted its reroutes to `fix-lint` (exit 1)"
-        );
     }
 }

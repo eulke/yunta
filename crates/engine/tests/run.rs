@@ -4,15 +4,16 @@
 //! findings and the birth of a run, all derived from the event log alone.
 
 use yunta_core::RunId;
-use yunta_engine::{current_escalation, NodeState, RunError, RunReport, RunTerminal};
+use yunta_engine::{current_escalation, RunError, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
 use yunta_core::events::{
-    ArtifactEvent, EventDraft, EventPayload, Failure, NodeEvent, NodeFailedPayload, PauseReason,
-    RecordedOrigin, RunEvent, RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
+    ArtifactEvent, EventDraft, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeState,
+    PauseReason, RecordedOrigin, RunEvent, RunFinishedPayload, RunMetrics, TerminalState,
+    TokenUsage,
 };
 
 #[path = "run/failures.rs"]
@@ -998,7 +999,7 @@ fn assert_frozen_as_its_hash(
 /// registered.
 fn assert_tasks_registered_at_birth(events: &[yunta_core::events::StoredEvent]) {
     assert_eq!(
-        yunta_engine::derive(events)
+        yunta_replay::RunState::replay(events)
             .tasks
             .iter()
             .map(|(id, record)| (id.clone(), record.status))
@@ -1105,7 +1106,7 @@ nodes:
     until: all_tasks_complete
     prompt: "Read your task from the tasks document and implement it."
 "#,
-        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+        view = yunta_core::run_dir::artifacts(&bench.run_dir()).display()
     );
     let fixture = r#"
 dialect: claude-code

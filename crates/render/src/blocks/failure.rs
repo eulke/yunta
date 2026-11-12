@@ -194,6 +194,9 @@ pub(crate) fn remedy_words(
     option: ReservedOption,
 ) -> Option<(String, Option<String>)> {
     match option {
+        ReservedOption::Retry if matches!(menu.failure, Failure::LoopCapped { .. }) => {
+            Some(loop_retry_words(menu.attempt))
+        }
         ReservedOption::Retry => {
             let waits = retry_waits(menu)?;
             Some(retry_words(menu.attempt, &waits))
@@ -201,10 +204,30 @@ pub(crate) fn remedy_words(
         ReservedOption::Grant => Some(grant_words(menu)),
         ReservedOption::Deny => Some(deny_words()),
         ReservedOption::ContinueWork => Some(continue_words(menu.attempt)),
+        ReservedOption::Continue => Some(past_the_cap_words(menu.attempt)),
         ReservedOption::Accept => Some(departed_words(menu.attempt, true)),
         ReservedOption::SendBack => Some(departed_words(menu.attempt, false)),
         _ => None,
     }
+}
+
+/// The words of running a capped loop again, chosen by its failure so that a menu an older
+/// log holds, which waits for a person to lift the cap, says what a retry does.
+fn loop_retry_words(attempt: u32) -> (String, Option<String>) {
+    (
+        format!("Run it again (attempt {attempt}): its iteration count starts over"),
+        Some(format!(
+            "{RETRY_STARTS}. It stops at the cap again if tasks remain"
+        )),
+    )
+}
+
+/// The words of running a node again past the token cap that cut its session.
+fn past_the_cap_words(attempt: u32) -> (String, Option<String>) {
+    (
+        format!("Run it again past the cap (attempt {attempt})"),
+        Some(crate::offers::LIFTS_THE_CAP.to_string()),
+    )
 }
 
 /// The words of refusing an owed scope request: the choice is kept as the

@@ -1,6 +1,6 @@
 //! What the painter is told, and by whom.
 //!
-//! Two things reach it. The engine hands every append to
+//! Three things reach it. The engine hands every append to
 //! [`RunObserver::observe`] inline, on its own task, while the run
 //! waits: nothing here may make it wait, so a full queue drops the
 //! frame instead, because the frame is a copy of an event the log
@@ -8,7 +8,12 @@
 //! stream, and a seq that stays missing is what sends the painter back
 //! to the log.
 //!
-//! The other is the run itself. A line it has to say to the person
+//! What a session said comes the same way, through
+//! [`RunObserver::said`], or off the run's socket for a follower in
+//! another process. A full queue drops it too, and nothing brings it
+//! back: words are not evidence, and the next thing said replaces it.
+//!
+//! The third is the run itself. A line it has to say to the person
 //! watching — an interrupt on its way to the run's cancellation, and
 //! anything else raised while the region is on the terminal — goes the
 //! same way an event does, because it lands in the same place: above the
@@ -24,7 +29,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use yunta_core::events::{EventBody, StoredEvent};
-use yunta_engine::{Observed, RunObserver};
+use yunta_core::port::{Observed, RunObserver, Said};
 
 /// One thing the painter is told, in the order it was told.
 pub(super) enum Beat {
@@ -33,6 +38,8 @@ pub(super) enum Beat {
     /// A line the run has to say to the person watching it, to be
     /// written above the region rather than around it.
     Note(String),
+    /// What a session said, for the row of its node.
+    Said(Box<Said>),
     /// Nothing more is coming: fold what is queued ahead of this, then
     /// take the region down.
     Close,
@@ -66,6 +73,13 @@ impl Feed {
         self.beats.send(beat).await.is_ok()
     }
 
+    /// Hands the painter an event read off the log, waiting for room as
+    /// [`Feed::tell`] does: the observer's copy can be dropped because the
+    /// log holds it, and this one came from the log.
+    pub(super) async fn deliver(&self, event: StoredEvent) -> bool {
+        self.tell(Beat::Event(Box::new(event))).await
+    }
+
     /// Whether the painter has taken every beat sent so far off the
     /// queue — where a test that asserts on what the painter did with a
     /// beat waits for it to have done it.
@@ -82,6 +96,15 @@ impl RunObserver for Feed {
             // The queue's policy, not a failure: the frame copies an
             // event the log already holds, so the painter recovers it by
             // reading the log rather than by this call waiting here.
+            Err(TrySendError::Full(_) | TrySendError::Closed(_)) => {}
+        }
+    }
+
+    fn said(&self, said: &Said) {
+        match self.beats.try_send(Beat::Said(Box::new(said.clone()))) {
+            Ok(()) => {}
+            // Words are not evidence: a frame with no room is let go, and
+            // the next thing said takes its row.
             Err(TrySendError::Full(_) | TrySendError::Closed(_)) => {}
         }
     }
@@ -138,7 +161,7 @@ impl Diagnostics {
             None => false,
         };
         if !taken {
-            crate::error::note(line);
+            crate::output::note(line);
         }
     }
 }

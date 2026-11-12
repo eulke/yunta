@@ -3,9 +3,10 @@
 //! it refuses — placed on the value when the value is what is wrong, so a
 //! surface quotes the part a person fixes.
 
+use yunta_core::check::CheckError;
 use yunta_core::yaml::{Location, SourceMap};
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::{check, CheckError};
+use yunta_engine::check;
 
 /// The workflow `text` declares, checked against `config`, every refusal
 /// with the place in `text` it points to.

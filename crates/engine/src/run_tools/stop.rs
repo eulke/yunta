@@ -31,7 +31,7 @@ use yunta_core::{ContentHash, RunTool, SessionId, TaskId};
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
 use super::words;
-use crate::replay::RunView;
+use crate::run_log::RunView;
 use crate::scope::ScopeCheckResult;
 use crate::scope_expansion::{read_request, GrantWindow, ScopeExpansionRequest};
 use crate::task_cycle::{

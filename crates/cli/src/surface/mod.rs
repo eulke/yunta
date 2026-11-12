@@ -2,21 +2,24 @@
 //!
 //! Three surfaces over two derivations and one vocabulary. The engine
 //! derives from the log where each thing stands
-//! ([`RunFrame`](yunta_engine::RunFrame)) and what happened, in order
-//! ([`yunta_engine::chronicle`]); this module's own `chronicle` chooses
-//! a moment's words once; each surface only lays them out. The region
+//! ([`RunFrame`](yunta_replay::frame::RunFrame)) and what happened, in order
+//! ([`yunta_replay::frame::chronicle`]); render's `chronicle` chooses a
+//! moment's words once; each surface only lays them out. The region
 //! draws what is open, the history above it keeps what closed or asked,
 //! and the append-only surface writes every moment. A reader moving
 //! between them meets the same facts in the same words.
 //!
-//! **The events come from the engine, not from the log.** The engine
-//! hands every append to the observer in the moment it writes it
-//! ([`RunObserver`]), so the process drawing a run never asks storage for
-//! what it wrote an instant earlier. The log stays the truth: what
-//! the surface holds is the cache of one invocation, and every hole in it
-//! is closed by reading the log.
+//! **The events come from whoever has them first.** In the process that
+//! drives a run, the engine hands every append to the observer in the moment
+//! it writes it ([`RunObserver`]), so that process never asks storage for what
+//! it wrote an instant earlier. A process that follows a run another one drives
+//! reads the log past what it holds and hands each event over itself
+//! ([`Surface::deliver`]), with the process driving it read from the run's
+//! registry ([`EngineReading`]). The log stays the truth: what the surface holds is the
+//! cache of one invocation, and every hole in it is closed by reading the log.
+//! What a session says is on no log: the driving process gets it from the
+//! observer, a follower off the run's socket, and only the region draws it.
 
-mod chronicle;
 mod closing;
 mod draw;
 mod feed;
@@ -28,7 +31,6 @@ mod screen;
 mod scrollback;
 pub(crate) mod terminal;
 mod turns;
-mod view;
 
 use std::io::Write;
 use std::sync::Arc;
@@ -38,9 +40,13 @@ use console::Term;
 use indicatif::TermLike;
 use tokio::task::JoinHandle;
 
+use yunta_api::{EventLog, RunRegistry};
+use yunta_core::events::StoredEvent;
+use yunta_core::port::RunObserver;
+use yunta_core::Pid;
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{PriorEstimation, RunObserver};
-use yunta_storage::{AsyncStorage, StorageError};
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::registry::Engine;
 
 use surco::glyphs::Glyphs;
 
@@ -49,12 +55,11 @@ use lines::Lines;
 use painter::{Draw, Painter};
 use region::Region;
 
-pub(crate) use closing::{Closing, ClosingEnv, Outline};
+pub(crate) use closing::{Closing, ClosingEnv};
 pub(crate) use feed::Diagnostics;
 pub(crate) use screen::Screen;
 pub(crate) use terminal::TerminalEnv;
 pub(crate) use turns::Curtain;
-pub(crate) use view::{child_row, children_by_node};
 
 /// Why the live region stood down, in the words the reader is given.
 /// Each one names a property of the environment this process was handed,
@@ -118,6 +123,43 @@ impl Delivery {
     }
 }
 
+/// Where the frame a surface draws reads the process driving its run from.
+///
+/// The process that drives a run is alive, and asks its own terminal, so it
+/// reads itself. A process that follows a run another one drives reads the
+/// run's registry, which is what says that engine is asking at its terminal or
+/// is gone.
+#[derive(Debug, Clone)]
+pub(crate) enum EngineReading {
+    /// This process drives the run.
+    This,
+    /// Another process drives it: the run's registry says which.
+    Registry(RunRegistry),
+}
+
+impl EngineReading {
+    /// The same reading for `successor`, the run a promotion handed the work
+    /// to. This process drives a successor as it drove its predecessor; a
+    /// successor's registry sits beside its predecessor's, since the engine
+    /// that promotes creates it under the runs root it works in.
+    pub(crate) fn of_successor(&self, successor: &RunId) -> Self {
+        match self {
+            EngineReading::This => EngineReading::This,
+            EngineReading::Registry(registry) => {
+                EngineReading::Registry(registry.of_successor(successor))
+            }
+        }
+    }
+
+    /// The process driving the run, as this reading says now.
+    pub(crate) fn read(&self) -> Engine {
+        match self {
+            EngineReading::This => Engine::this(Pid::current()),
+            EngineReading::Registry(registry) => registry.engine(),
+        }
+    }
+}
+
 /// Everything the surface needs of the run it draws.
 pub(crate) struct SurfaceEnv<'a> {
     pub(crate) run_id: &'a RunId,
@@ -128,13 +170,15 @@ pub(crate) struct SurfaceEnv<'a> {
     /// comparison. `None` below the history floor.
     pub(crate) prior: Option<&'a PriorEstimation>,
     /// Where a hole in the delivered stream is closed.
-    pub(crate) storage: &'a AsyncStorage,
+    pub(crate) log: &'a EventLog,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) delivery: Delivery,
     /// The characters this process may draw with, read once by the
     /// invocation so the region and the block that closes it cannot
     /// disagree — and so an unusable override is reported once.
     pub(crate) glyphs: Glyphs,
+    /// Where the frame reads the process driving the run from.
+    pub(crate) engine: EngineReading,
 }
 
 /// The live surface of one invocation: the observer the engine feeds and
@@ -149,22 +193,23 @@ pub(crate) struct Surface {
 }
 
 impl Surface {
-    /// Opens the surface for `env.run_id`, seeded with the log as it
-    /// stands: the run's creation is written before any observer exists,
-    /// so the first thing a surface knows it reads once, here.
-    pub(crate) async fn open(env: SurfaceEnv<'_>) -> Result<Self, StorageError> {
+    /// Opens the surface for `env.run_id`, seeded with `seed`, the run's log
+    /// as the caller read it. The caller reads it because what comes next is
+    /// its to hand over: the engine's appends to the process that drives the
+    /// run, and the log past the seed's last seq to a process that follows it.
+    pub(crate) fn open(env: SurfaceEnv<'_>, seed: Vec<StoredEvent>) -> Self {
         let draw = match env.delivery {
             Delivery::Quiet => {
-                return Ok(Self {
+                return Self {
                     feed: None,
                     painter: None,
                     curtain: Curtain::none(),
-                })
+                }
             }
             Delivery::Lines { reason } => Draw::Lines(Lines::open(stderr(), reason)),
             Delivery::Live => {
                 let screen = Screen::watched(Term::buffered_stderr());
-                match Region::open(screen, env.glyphs, crate::render::stderr_paint(), stderr()) {
+                match Region::open(screen, env.glyphs, crate::output::stderr_paint(), stderr()) {
                     Ok(region) => Draw::Live(Box::new(
                         region
                             .moving(TerminalEnv::settled().motion)
@@ -174,15 +219,26 @@ impl Surface {
                 }
             }
         };
-        let seed = env.storage.events_for_run(env.run_id.clone()).await?;
         let (feed, beats) = Feed::open();
         let (curtain, standby) = Curtain::open();
         let painter = Painter::seeded(&env, draw, seed);
-        Ok(Self {
+        Self {
             feed: Some(feed),
             painter: Some(tokio::spawn(painter::paint(painter, beats, standby))),
             curtain,
-        })
+        }
+    }
+
+    /// Hands the surface an event read off the log, waiting for room in its
+    /// queue rather than dropping it: the log is where a dropped event is
+    /// recovered from, so one read from there has no other copy. Answers
+    /// whether the painter took it; nothing draws under `--quiet`, and that
+    /// is taking it too.
+    pub(crate) async fn deliver(&self, event: StoredEvent) -> bool {
+        match &self.feed {
+            Some(feed) => feed.deliver(event).await,
+            None => true,
+        }
     }
 
     /// Where a diagnostic raised while this run is drawn goes out.
@@ -234,7 +290,7 @@ impl Surface {
                 // The painter only ever draws, so a run is unaffected by
                 // one that stopped early — but a reader who saw progress
                 // freeze deserves to know it was not the run.
-                crate::error::warn(format!("the task drawing this run stopped early: {e}"));
+                crate::output::warn(format!("the task drawing this run stopped early: {e}"));
             }
         }
     }

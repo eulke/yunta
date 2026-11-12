@@ -35,6 +35,14 @@
 //! mid-turn `error` item aren't tool calls at all and aren't surfaced
 //! either, for lack of a clear precedent either way — narrower than it
 //! could be, not wider than what's confirmed.
+//!
+//! **Only `turn.completed` and `turn.failed` end a turn.** The top-level
+//! `error` line is no event: the CLI prints it for a retry it goes on from
+//! (its `StreamError`, sent with `will_retry: true`, a flag `exec --json`
+//! drops) as well as for the error a turn then fails with, and a turn that
+//! fails always ends with `turn.failed` carrying the same message. A stream
+//! that stops after an `error` line with neither is a session that died,
+//! as for every adapter; nothing reads the line back as its failure.
 
 use serde_json::Value;
 use yunta_core::{RunTool, SessionId};
@@ -65,8 +73,10 @@ enum ThreadEvent {
     TurnCompleted(Value),
     #[serde(rename = "turn.failed")]
     TurnFailed { error: Option<Value> },
+    /// A retry the CLI goes on from, or the error a `turn.failed` then
+    /// carries: the line ends nothing, so nothing of it is read.
     #[serde(rename = "error")]
-    Error(Value),
+    Error,
     #[serde(other)]
     Unknown,
 }
@@ -87,7 +97,10 @@ pub(super) fn parse_line(
         ThreadEvent::ItemCompleted(value) => item_completed(&value, checkout),
         ThreadEvent::TurnCompleted(value) => turn_completed(&value, last_message),
         ThreadEvent::TurnFailed { error } => vec![failed(error.as_ref(), "turn failed")],
-        ThreadEvent::Error(value) => vec![failed(Some(&value), "the CLI reported an error")],
+        // Not an end: the CLI prints this line for a retry it goes on from as
+        // well as before the `turn.failed` of a turn that fails, which
+        // carries the same message and is what ends the turn.
+        ThreadEvent::Error => Vec::new(),
         ThreadEvent::Unknown => Vec::new(),
     }
 }
@@ -298,8 +311,8 @@ pub(crate) fn failure_cause(message: &str) -> FailureCause {
     }
 }
 
-/// `turn.failed` and the top-level `error` both carry a `message`, and the
-/// message is what refused the turn.
+/// `turn.failed` carries a `message`, and the message is what refused the
+/// turn.
 fn failed(carrier: Option<&Value>, fallback: &str) -> AgentEvent {
     let message = carrier
         .and_then(|carrier| carrier.get("message"))
@@ -318,6 +331,26 @@ fn failed(carrier: Option<&Value>, fallback: &str) -> AgentEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Codex prints a top-level `error` line both for a retry it goes on
+    /// from and before the `turn.failed` of a turn that fails, so the line
+    /// itself ends nothing, whatever it says.
+    #[test]
+    fn an_error_line_is_no_event() {
+        let checkout = Checkout::at(std::path::Path::new("/"));
+        for message in [
+            "Reconnecting... 2/5 (unexpected status 503 Service Unavailable)",
+            "stream disconnected before completion",
+            "You've hit your usage limit. Try again later.",
+        ] {
+            let line = serde_json::json!({ "type": "error", "message": message }).to_string();
+            assert_eq!(
+                parse_line(&line, "", &Coverage::Exact, &checkout),
+                Vec::new(),
+                "{message}"
+            );
+        }
+    }
 
     #[test]
     fn both_apostrophes_are_codex_limit_phrases() {

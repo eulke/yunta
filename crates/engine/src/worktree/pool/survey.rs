@@ -20,7 +20,8 @@ pub(super) struct Slot {
     pub(super) path: PathBuf,
     /// Where it stands, as the repository lists it — `None` for a
     /// directory git does not list as a checkout: one a crash left half
-    /// added, or one gone from git's records.
+    /// added, one gone from git's records, or one git still marks as being
+    /// added, whose add was cut off.
     pub(super) standing: Option<Standing>,
     pub(super) held: Option<Held>,
     pub(super) built: Option<Built>,
@@ -45,7 +46,7 @@ pub(super) async fn survey(
     let listing = crate::git::read(repo, &["worktree", "list", "--porcelain"], supervision).await?;
     let mut listed = HashMap::new();
     for checkout in crate::worktree::checkouts(&listing) {
-        if checkout.prunable {
+        if checkout.prunable || checkout.being_added {
             continue;
         }
         let path = tokio::fs::canonicalize(&checkout.path)

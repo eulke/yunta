@@ -1,12 +1,21 @@
-//! The detail that qualifies the word a node is called by.
+//! What a run and its nodes are said as, beyond the word each is called by:
+//! the detail that qualifies a node's word, how a node got its documents
+//! accepted ([`handed`]), what a run is called on a page, the one sentence
+//! that sums a run up ([`gist`]), and what every page about a run says of a
+//! log it reads only in part. A page and a document about the run read
+//! these here, so both say the same.
 //!
 //! The words themselves are Surco's ([`surco::words::Standing`]), and the
-//! engine decides which one a node is called by; this module says what
+//! frame decides which one a node is called by; this module says what
 //! qualifies it — the outcome it finished with, why it failed, which
 //! attempt runs, what it waits on.
 
-use surco::words::Standing;
-use yunta_core::events::{NodeState, NodeWait};
+use surco::text::counted;
+use surco::words::{Standing, NOTHING_NEEDS_YOU};
+use yunta_core::events::{Failure, NodeState, NodeWait, UnknownKindCount};
+use yunta_core::NodeId;
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase};
+use yunta_replay::RunState;
 
 /// A node's state as a surface shows it: the word that carries the
 /// meaning, and the detail that qualifies it.
@@ -89,11 +98,113 @@ impl NodeDisplay {
     }
 }
 
+impl From<&NodeFrame> for NodeDisplay {
+    /// How a node of a frame reads: the word the frame decided for it, and
+    /// what qualifies it.
+    fn from(node: &NodeFrame) -> Self {
+        match &node.state {
+            NodeStanding::Skipped => NodeDisplay::skipped(),
+            NodeStanding::LeftOut(because) => NodeDisplay::left_out(&because.to_string()),
+            NodeStanding::ToGo => NodeDisplay::of(node.standing, None),
+            NodeStanding::Paused { attempt } => NodeDisplay::held(node.standing, *attempt),
+            NodeStanding::Reached(state) => NodeDisplay::of(node.standing, Some(state)),
+        }
+    }
+}
+
+/// What a run is called on a page: the workflow it follows and the mode it
+/// follows it in.
+pub fn called(workflow: impl std::fmt::Display, mode: impl std::fmt::Display) -> String {
+    format!("{workflow} ({mode})")
+}
+
 /// `text` on one line, or `None` when it says nothing — an empty
 /// modifier would leave a line ending in a colon that introduces nothing.
 fn detail(text: &str) -> Option<String> {
     let text = surco::text::one_line(text);
     (!text.is_empty()).then_some(text)
+}
+
+/// How a partially interpreted run says so, on the receipt and on every
+/// page about the run: every event kind this binary does not know, with
+/// how many events carried it. `None` when the log is interpreted in full.
+pub fn unknown_kinds(counts: &[UnknownKindCount]) -> Option<String> {
+    if counts.is_empty() {
+        return None;
+    }
+    let kinds: Vec<String> = counts
+        .iter()
+        .map(|count| format!("`{}` {}", count.kind, counted(count.events, "time")))
+        .collect();
+    Some(format!(
+        "{} this binary does not know, interpreted partially: {}",
+        counted(counts.len(), "event kind"),
+        kinds.join(", ")
+    ))
+}
+
+/// The sentence under a page's headline: what the run comes to, as a person reads it. `None`
+/// for a run whose word says it all.
+pub fn gist(frame: &RunFrame) -> Option<String> {
+    let blocking = frame.blocking_findings;
+    Some(match (frame.standing, &frame.phase) {
+        (Standing::Stalled, _) => crate::engine::STALLED.to_string(),
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => match &frame.asking {
+            Some(asking) => crate::engine::asking_claim(asking),
+            None => format!("it {}", Standing::NeedsYou.word()),
+        },
+        (_, RunPhase::Waiting { on }) => crate::pause::parked_claim(on),
+        (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
+        (
+            _,
+            RunPhase::Failed {
+                failure: Some(failure),
+            },
+        ) => failed_claim(frame, failure),
+        // The work is done and nobody has accepted it.
+        (_, RunPhase::Finished) if blocking > 0 => format!(
+            "finished holding {}",
+            surco::text::counted(blocking, "blocking finding")
+        ),
+        (_, RunPhase::Promoted { to: Some(mode) }) => format!("promoted to `{mode}`"),
+        (_, RunPhase::Created | RunPhase::Running) => {
+            format!("{NOTHING_NEEDS_YOU}: it is moving")
+        }
+        (
+            _,
+            RunPhase::Finished
+            | RunPhase::Failed { failure: None }
+            | RunPhase::Cancelled
+            | RunPhase::Promoted { to: None },
+        ) => return None,
+    })
+}
+
+/// The failure that closed the run, said as the node it happened to.
+fn failed_claim(frame: &RunFrame, failure: &Failure) -> String {
+    let headline = crate::failure::headline(failure);
+    match frame.failed().find(|(_, found)| *found == failure) {
+        Some((node, _)) => format!("node `{}` failed: {headline}", node.id),
+        None => headline,
+    }
+}
+
+/// How node `id` got its documents accepted once it finished, when that
+/// took more than one handover: what it took is part of what it did.
+pub fn handed(state: &RunState, id: &NodeId) -> Option<String> {
+    if !matches!(state.nodes.state(id), Some(NodeState::Finished { .. })) {
+        return None;
+    }
+    let refused = state
+        .artifacts
+        .handed_over_by(id)
+        .filter(|handed| handed.refusals > 0)
+        .max_by_key(|handed| handed.submissions)?;
+    Some(format!(
+        "accepted on its {} handover ({} refused)",
+        surco::text::ordinal(refused.submissions),
+        refused.refusals
+    ))
 }
 
 #[cfg(test)]

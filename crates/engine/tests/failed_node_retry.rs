@@ -8,6 +8,7 @@ use yunta_core::events::{
     EventPayload, Failure, GateEvent, NodeEvent, PauseReason, Stuck, TaskCause, TaskEvent,
     TaskStatus, TaskStop,
 };
+use yunta_core::refusal::GateRefusal;
 use yunta_core::ConfigKey;
 use yunta_engine::{current_escalation, RunReport, RunTerminal};
 use yunta_testkit::{write, Bench, MOCK_CONFIG};
@@ -58,12 +59,12 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     let (node, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
     .expect("a failed node is a pause with a menu");
-    assert_eq!(node.as_str(), "broken");
+    assert_eq!(node, yunta_core::events::DecisionOn::Node("broken".into()));
     assert_eq!(escalation.summary(), &node_failed("broken"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
@@ -87,12 +88,12 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
     let (node, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
     .expect("a failed node is a pause with a menu");
-    assert_eq!(node.as_str(), "gate");
+    assert_eq!(node, yunta_core::events::DecisionOn::Node("gate".into()));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["abort"]);
     let menu = escalation
@@ -119,7 +120,9 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
     assert!(
         matches!(
             refused,
-            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+            Err(yunta_engine::ResolveGateError::Refused(
+                GateRefusal::UnknownOption { .. }
+            ))
         ),
         "{refused:?}"
     );
@@ -142,7 +145,7 @@ async fn a_plain_failure_retried_after_its_cause_is_fixed_finishes() {
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("broken"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
     assert_eq!(attempts(&bench, "broken"), 2);
 }
@@ -197,7 +200,7 @@ async fn a_retry_that_fails_again_asks_again_for_the_next_attempt() {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -217,7 +220,7 @@ async fn a_person_who_fixes_the_cause_while_asked_retries_in_the_same_invocation
         fix: std::path::PathBuf,
     }
     #[async_trait::async_trait]
-    impl yunta_engine::HumanInteraction for FixThenRetry {
+    impl yunta_core::port::HumanInteraction for FixThenRetry {
         async fn resolve(
             &self,
             escalation: &yunta_core::events::GateWaitingPayload,
@@ -247,7 +250,7 @@ async fn a_person_who_fixes_the_cause_while_asked_retries_in_the_same_invocation
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("broken"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
     assert_eq!(attempts(&bench, "broken"), 2);
     assert_eq!(
@@ -290,7 +293,7 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
     assert!(current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()

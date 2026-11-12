@@ -49,9 +49,8 @@ use crate::git::{self, Effect, BRANCH_DELETED};
 use crate::lock::{self, Acquired, Contention, LockError, LockOwner, SystemProbe};
 
 use crate::process::Supervision;
-pub(crate) use branches::RUN_BRANCHES;
+pub use branches::UnitRef;
 pub(crate) use branches::{is_legacy_unit_branch, legacy_unit_branches_of, LEGACY_UNIT_BRANCHES};
-pub use branches::{run_branch, UnitRef};
 pub(crate) use capture::capture_for_commit;
 pub use capture::{capture_tree, head_tree};
 pub use commit::{commit_tree, restore, Captured};
@@ -149,7 +148,7 @@ async fn add_worktree(
     match git::change_held(&held, repo, &add, supervision).await {
         Ok(_) => Ok(WorktreePrepared::Ready),
         Err(stopped) if stopped.cancelled() => {
-            undo_half_added(&held, repo, worktree_path, branch_name, supervision).await;
+            undo_half_added(&held, repo, worktree_path, Some(branch_name), supervision).await;
             Err(stopped.into())
         }
         Err(other) => Err(other.into()),
@@ -316,10 +315,16 @@ pub async fn remove_checkout(
 }
 
 /// Undoes a `worktree add` a cancellation killed in the middle: the
-/// directory it was writing into and the branch it may already have
-/// created. Best effort throughout — what it is undoing was killed with
-/// no chance to say how far it got, so every step is allowed to find
-/// nothing to do.
+/// directory it was writing into, git's record of it, and the branch
+/// `made`, when the add was cutting one. Best effort throughout — what it
+/// is undoing was killed with no chance to say how far it got, so every
+/// step is allowed to find nothing to do.
+///
+/// An add killed half way leaves its checkout marked as being added, the
+/// lock git takes for the add, which `remove` refuses and `prune` keeps:
+/// it is unlocked first. A checkout whose record was never finished does
+/// not pass the check `remove` makes, so its directory is removed and then
+/// its record pruned.
 ///
 /// It runs under a token of its own: the token that killed the `add`
 /// would kill the undo before it started, and the caller asked to stop
@@ -329,7 +334,7 @@ pub(super) async fn undo_half_added(
     held: &crate::git::MutationLock,
     repo: &Path,
     worktree_path: &Path,
-    branch_name: &str,
+    made: Option<&str>,
     supervision: Supervision<'_>,
 ) {
     let undo = CancellationToken::new();
@@ -337,26 +342,36 @@ pub(super) async fn undo_half_added(
         .with_env(supervision.env)
         .with_path(supervision.path);
     let path = worktree_path.display().to_string();
-    for args in [
-        ["worktree", "remove", "--force", &path].as_slice(),
-        // A directory git never registered is not a worktree it can
-        // remove, and the metadata of one it half-registered is what
-        // `prune` is for.
-        ["worktree", "prune"].as_slice(),
-        // `-D`, not `-d`: this branch was born a moment ago pointing at
-        // the base commit, and nothing has been committed on it.
-        ["branch", "-D", branch_name].as_slice(),
-    ] {
-        match tokio::time::timeout(UNDO_BOUND, git::change_held(held, repo, args, undo)).await {
-            Ok(Ok(_)) => {}
-            Ok(Err(error)) => {
-                tracing::debug!(%error, ?args, "a step of the undo found nothing to undo");
-            }
-            Err(_) => tracing::debug!(?args, "a step of the undo outlasted its bound"),
-        }
-    }
+    undo_step(held, repo, &["worktree", "unlock", &path], undo).await;
+    undo_step(held, repo, &["worktree", "remove", "--force", &path], undo).await;
     if let Err(error) = tokio::fs::remove_dir_all(worktree_path).await {
         tracing::debug!(%error, path = %worktree_path.display(), "nothing left of the tree to remove");
+    }
+    // A directory git never registered is not a worktree it can remove, and
+    // the record of one it half registered, or never finished, is what
+    // `prune` is for once the directory is gone.
+    undo_step(held, repo, &["worktree", "prune"], undo).await;
+    // `-D`, not `-d`: this branch was born a moment ago pointing at the
+    // base commit, and nothing has been committed on it.
+    if let Some(branch) = made {
+        undo_step(held, repo, &["branch", "-D", branch], undo).await;
+    }
+}
+
+/// One step of an undo: git run with `args` under the undo's own token and
+/// bound, finding nothing to do allowed.
+async fn undo_step(
+    held: &crate::git::MutationLock,
+    repo: &Path,
+    args: &[&str],
+    undo: Supervision<'_>,
+) {
+    match tokio::time::timeout(UNDO_BOUND, git::change_held(held, repo, args, undo)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => {
+            tracing::debug!(%error, ?args, "a step of the undo found nothing to undo");
+        }
+        Err(_) => tracing::debug!(?args, "a step of the undo outlasted its bound"),
     }
 }
 
@@ -448,19 +463,4 @@ fn main_repo_of(common_dir: &Path) -> Result<PathBuf, WorktreeError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_common_dir_without_a_parent_names_no_main_repo() {
-        let err = main_repo_of(Path::new("/")).unwrap_err();
-        assert!(
-            matches!(err, WorktreeError::NoMainRepo { .. }),
-            "got: {err:?}"
-        );
-        assert_eq!(
-            main_repo_of(Path::new("/srv/repo/.git")).unwrap(),
-            PathBuf::from("/srv/repo")
-        );
-    }
-}
+mod tests;

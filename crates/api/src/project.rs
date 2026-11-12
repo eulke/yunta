@@ -1,0 +1,285 @@
+//! See [`crate`]. A project: the config layers it is read from and the roots
+//! its runs, checkouts and log live under, resolved from a workspace.
+//!
+//! Layers, most specific first: `.yunta/config.yaml` in the current
+//! repo, then the user root's `config.yaml`, then the org layer
+//! (`/etc/yunta/config.yaml`, overridable via `YUNTA_ORG_CONFIG`). The
+//! user root is `~/.yunta`, or `$YUNTA_HOME` when set — the state-root
+//! override for ephemeral environments; it moves the user config layer
+//! and all execution state (runs, event log DB) together.
+
+use std::path::{Path, PathBuf};
+
+use yunta_core::{ConfigLayer, Isolation, Manifest, RunId};
+use yunta_storage::AsyncStorage;
+
+use crate::{Error, Failure, Workspace};
+
+/// A project: the config layers it is read from, the roots its runs,
+/// checkouts and log live under, and the workspace it was resolved from,
+/// which everything asked of it reads where it works, its clock and its
+/// environment from.
+pub struct Project {
+    pub config: ConfigLayer,
+    pub runs_root: PathBuf,
+    pub worktrees_root: PathBuf,
+    pub storage_path: PathBuf,
+    /// The user state root it was resolved under, where the built-in default
+    /// runs root lies.
+    pub user_root: PathBuf,
+    /// The workspace it was resolved from, working where it is rooted.
+    pub workspace: Workspace,
+}
+
+impl Project {
+    /// The store this project's runs log their events in, opened.
+    pub(crate) async fn storage(&self) -> Result<AsyncStorage, Error> {
+        AsyncStorage::open(&self.storage_path)
+            .await
+            .map_err(|failed| Failure::new(failed).into())
+    }
+
+    /// Finds an existing run's directory, in search order: (a) this
+    /// project's current runs root, (b) the built-in default under the
+    /// user state root. The single rule `status`, `stats`, `receipt`,
+    /// `cancel`, `list` and `gc` all locate a run by — once the manifest
+    /// inside is open, everything else reads its *frozen* paths, so this
+    /// search only exists because finding the manifest needs somewhere to
+    /// look first. A run created under roots that no longer appear in any
+    /// layer needs `YUNTA_HOME` pointing there — a documented limit: a
+    /// global index would make derived state the source of truth, which
+    /// this design avoids.
+    pub fn run_dir(&self, run_id: &str) -> Option<PathBuf> {
+        let mut candidates = vec![self.runs_root.clone()];
+        candidates.push(self.user_root.join("runs"));
+        candidates
+            .into_iter()
+            .map(|root| root.join(run_id))
+            .find(|run_dir| yunta_engine::run_dir::manifest_path(run_dir).exists())
+    }
+
+    /// The worktrees root a run's checkout lives under: the one *frozen*
+    /// in its manifest, so a `paths.*` change after the run was created
+    /// never loses its worktree; a manifest with no `paths:` falls back
+    /// to this project's current root. The one place `resume` and `gc`
+    /// derive a run's worktree location from.
+    pub fn worktrees_root_for(&self, manifest: &Manifest) -> PathBuf {
+        manifest
+            .paths
+            .as_ref()
+            .map(|paths| paths.worktrees_root().to_path_buf())
+            .unwrap_or_else(|| self.worktrees_root.clone())
+    }
+
+    /// The tree run `run_id` works in: the checkout of its own its log
+    /// names — `bound` — or, for a log that names none, the one named after
+    /// it under the worktrees root its manifest froze; for a run that
+    /// isolates nothing, the checkout this invocation runs in, `cwd`.
+    pub fn run_tree(
+        &self,
+        manifest: &Manifest,
+        bound: Option<&Path>,
+        run_id: &RunId,
+        cwd: &Path,
+    ) -> PathBuf {
+        match manifest.isolation {
+            Isolation::Worktree => bound
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| self.worktrees_root_for(manifest).join(run_id.as_str())),
+            Isolation::None => cwd.to_path_buf(),
+        }
+    }
+}
+
+/// Why a project could not be resolved; the API hands it on as a failure.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ProjectError {
+    #[error("failed to read config layer `{path}`: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse config layer `{path}`: {detail}")]
+    Parse { path: PathBuf, detail: String },
+    #[error("no home directory and no YUNTA_HOME set: cannot place state")]
+    NoStateRoot,
+    #[error("failed to create state directory `{path}`: {source}")]
+    CreateStateDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// A layer declaring a `version:` this binary doesn't read is
+    /// refused up front — parsing on regardless could silently misread
+    /// a newer format.
+    #[error(
+        "config layer `{path}` declares `version: {declared}` but this binary reads \
+         version {supported}"
+    )]
+    UnsupportedVersion {
+        path: PathBuf,
+        declared: u32,
+        supported: u32,
+    },
+}
+
+fn user_root(env: &yunta_core::Env) -> Result<PathBuf, ProjectError> {
+    yunta_core::user_state_root(env).ok_or(ProjectError::NoStateRoot)
+}
+
+fn load_layer(path: &Path, home: Option<&Path>) -> Result<Option<ConfigLayer>, ProjectError> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ProjectError::Read {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    let mut layer: ConfigLayer = ConfigLayer::read(&contents).map_err(|e| ProjectError::Parse {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
+    })?;
+    layer.expand_home(home).map_err(|e| ProjectError::Parse {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
+    })?;
+    if let Some(declared) = layer.version {
+        if declared != CONFIG_VERSION {
+            return Err(ProjectError::UnsupportedVersion {
+                path: path.to_path_buf(),
+                declared,
+                supported: CONFIG_VERSION,
+            });
+        }
+    }
+    Ok(Some(layer))
+}
+
+/// The project's config layers as actually present on disk, org first —
+/// named so `permissions` conflicts can cite which layer tried to loosen
+/// which. Shared by [`resolve`] and by `yunta check`'s layered path.
+pub(crate) fn load_named_layers(
+    cwd: &Path,
+    env: &yunta_core::Env,
+) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
+    let user_root = user_root(env)?;
+    let org = env
+        .org_config
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("/etc/yunta/config.yaml"));
+    let candidates = [
+        ("org", org),
+        ("user", user_root.join("config.yaml")),
+        ("repo", repository_layer(cwd)),
+    ];
+
+    let mut layers = Vec::new();
+    for (name, path) in candidates {
+        if let Some(layer) = load_layer(&path, env.home.as_deref())? {
+            layers.push((name, layer));
+        }
+    }
+    Ok(layers)
+}
+
+/// The repository's own config layer, in the directory `dir` a project works
+/// in: what `init` writes, and what says Yunta was set up there.
+pub(crate) fn repository_layer(dir: &Path) -> PathBuf {
+    dir.join(".yunta/config.yaml")
+}
+
+/// `version:` a layer may declare — the one this binary reads.
+const CONFIG_VERSION: u32 = 1;
+
+/// Resolves the merged config and state paths for a project rooted where
+/// `workspace` works. Missing layers are simply absent — an empty config is
+/// valid; a malformed one is an error, never silently skipped.
+pub(crate) fn resolve(workspace: Workspace) -> Result<Project, ProjectError> {
+    let user_root = user_root(&workspace.env)?;
+
+    // merge_layers folds most-specific-last, so feed org → user → repo.
+    let layers = load_named_layers(&workspace.dir, &workspace.env)?
+        .into_iter()
+        .map(|(_, layer)| layer);
+    let config = ConfigLayer::merge_layers(layers);
+
+    let runs_root = config
+        .paths
+        .as_ref()
+        .and_then(|paths| paths.runs.clone())
+        .unwrap_or_else(|| user_root.join("runs"));
+    let worktrees_root = config
+        .paths
+        .as_ref()
+        .and_then(|paths| paths.worktrees.clone())
+        .unwrap_or_else(|| user_root.join("worktrees"));
+    let storage_path = config
+        .storage
+        .as_ref()
+        .and_then(|storage| storage.path.clone())
+        .unwrap_or_else(|| user_root.join("yunta.db"));
+
+    // First use creates the state root — SQLite creates files, never
+    // directories.
+    if let Some(parent) = storage_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| ProjectError::CreateStateDir {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+
+    Ok(Project {
+        config,
+        runs_root,
+        worktrees_root,
+        storage_path,
+        user_root,
+        workspace,
+    })
+}
+
+/// The config layers present on disk for a project at `dir`, org first, each
+/// named so a `permissions` conflict can cite which layer tried to loosen
+/// which: what `yunta check` reads layer by layer.
+pub fn config_layers(
+    dir: &Path,
+    env: &yunta_core::Env,
+) -> Result<Vec<(&'static str, ConfigLayer)>, Error> {
+    load_named_layers(dir, env).map_err(|failed| Error::Failed(Failure::new(failed)))
+}
+
+impl Workspace {
+    /// The one merged config file at `path`, read through core's reader of a
+    /// config layer: what `check --config` judges a workflow against instead
+    /// of the project's layers. A path written relative is the workspace's,
+    /// and is named as it was written.
+    pub fn read_config(&self, path: &Path) -> Result<ConfigLayer, Error> {
+        let path = path.to_path_buf();
+        let text = match std::fs::read_to_string(self.dir.join(&path)) {
+            Ok(text) => text,
+            Err(source) => return Err(Failure::new(ConfigUnread::Read { path, source }).into()),
+        };
+        ConfigLayer::read(&text)
+            .map_err(|error| Failure::new(ConfigUnread::Parse { path, error }).into())
+    }
+}
+
+/// A config file named by path that did not read: the disk refused it, or
+/// its text is no config layer.
+#[derive(Debug, thiserror::Error)]
+enum ConfigUnread {
+    #[error("failed to read config at {}: {source}", path.display())]
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("failed to parse config at {}: {error}", path.display())]
+    Parse {
+        path: PathBuf,
+        error: yunta_core::yaml::YamlError,
+    },
+}

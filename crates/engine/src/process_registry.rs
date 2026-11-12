@@ -10,6 +10,12 @@
 //! The file then names only those groups, so `yunta cancel` and `yunta
 //! close` can signal them and the checkout pool keeps their checkout.
 //!
+//! While its engine lives, the file also names the socket that engine
+//! serves the run's words on ([`crate::said`]), and the registry holds that
+//! socket open: clearing the registry at a terminal closes it and takes its
+//! file away, so a reader never finds a socket named for an engine that
+//! stopped. A registry kept for a group names none.
+//!
 //! Registration is best-effort bookkeeping around processes that are
 //! already owned and killed by the in-process paths: a failed write
 //! here degrades to a `tracing` warning, never to a failed run — but it
@@ -22,7 +28,8 @@ use serde::{Deserialize, Serialize};
 use yunta_core::persisted::Persisted;
 use yunta_core::process::group::group_runs;
 use yunta_core::process::signal::Liveness;
-use yunta_core::{NodeId, Pid, RelativePath};
+use yunta_core::{Pid, RelativePath};
+use yunta_replay::registry::{Engine, Prompt};
 
 impl Persisted for EngineProcessFile {
     /// The version this binary writes; a newer one is refused, never guessed at.
@@ -55,20 +62,16 @@ pub struct EngineProcessFile {
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
     pub process_groups: Vec<Pid>,
-    /// The person this engine is asking at its terminal, while it asks:
+    /// The question this engine holds at its terminal, while it asks one:
     /// a question asked live leaves nothing on the log until it is
     /// answered, and a reader elsewhere has to be able to tell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asking: Option<Asked>,
-}
-
-/// What an engine asks a person at its terminal: the node that asks,
-/// when one does, and since when.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Asked {
+    pub asking: Option<Prompt>,
+    /// The socket this engine serves what the run's sessions say on, while
+    /// it serves one. An engine older than the socket names none, and a
+    /// reader of such a run hears nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node: Option<NodeId>,
-    pub since: DateTime<Utc>,
+    pub words: Option<PathBuf>,
 }
 
 mod write;
@@ -147,107 +150,27 @@ impl EngineProcessFile {
     }
 }
 
-/// Whether a live engine is driving a run, as far as the run's own
-/// registry can prove.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EngineLiveness {
-    /// The process the registry names is the one that wrote it.
-    Alive,
-    /// The registry names a process that is gone, or a number the host
-    /// has since given to another process: nothing drives the run.
-    Dead,
-    /// No registry. No engine is driving the run now — one deletes it on
-    /// every way out, a pause included — or one is about to write it: a
-    /// run handed to a detached process has none for an instant.
-    Unrecorded,
-    /// A registry this binary cannot read, or a process the host cannot
-    /// tell about.
-    Unknown,
-}
-
-/// What the registry under `run_dir` says about the engine driving it.
+/// What the registry under `run_dir` says about the process driving the
+/// run: one read of the file and one probe of its process, so a reading
+/// never joins what two instants said.
 ///
-/// Only [`EngineLiveness::Dead`] is proof that nothing drives the run: an
-/// absent registry is also what a run being handed between processes
-/// looks like, and a reader that called that stalled would be wrong for
-/// the instant it lasts.
-pub fn engine_liveness(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> EngineLiveness {
+/// Only [`Engine::Dead`] is proof that nothing drives the run: an absent
+/// registry is also what a run being handed between processes looks like,
+/// and a reader that called that stalled would be wrong for the instant it
+/// lasts.
+pub fn read_engine(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> Engine {
     match read_registry(run_dir) {
-        Registry::Absent => EngineLiveness::Unrecorded,
-        Registry::Corrupt(_) => EngineLiveness::Unknown,
+        Registry::Absent => Engine::Unrecorded,
+        Registry::Corrupt(_) => Engine::Unknown,
         Registry::Read(registry) => match registry.doc.liveness(probe) {
-            Liveness::Alive => EngineLiveness::Alive,
-            Liveness::Dead => EngineLiveness::Dead,
-            Liveness::Unknown => EngineLiveness::Unknown,
+            Liveness::Alive => Engine::Alive {
+                pid: registry.doc.engine_pid,
+                prompt: registry.doc.asking.clone(),
+                words: registry.doc.words.clone(),
+            },
+            Liveness::Dead => Engine::Dead,
+            Liveness::Unknown => Engine::Unknown,
         },
-    }
-}
-
-/// A person a live engine is asking at its terminal: the node that asks,
-/// since when, and the process whose terminal holds the question.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Prompt {
-    pub node: Option<NodeId>,
-    pub since: DateTime<Utc>,
-    pub pid: Pid,
-}
-
-/// Whom the engine driving the run under `run_dir` is asking at its
-/// terminal; `None` when it asks no one, or no live engine drives it.
-pub fn engine_prompt(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> Option<Prompt> {
-    let Registry::Read(registry) = read_registry(run_dir) else {
-        return None;
-    };
-    if registry.doc.liveness(probe) != Liveness::Alive {
-        return None;
-    }
-    let asked = registry.doc.asking.clone()?;
-    Some(Prompt {
-        node: asked.node,
-        since: asked.since,
-        pid: registry.doc.engine_pid,
-    })
-}
-
-/// The engine driving a run, as the run's registry says at an instant:
-/// whether it lives, whom it is asking at its terminal, and when the
-/// registry was read.
-///
-/// A frame takes it the way it takes `now` — an input its caller read —
-/// so the word a run and a node are called by is decided with it, once,
-/// and never corrected after by the surface that draws it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Engine {
-    pub liveness: EngineLiveness,
-    pub prompt: Option<Prompt>,
-    /// When the registry was read: what a question has been waiting from.
-    pub at: DateTime<Utc>,
-}
-
-impl Engine {
-    /// What the registry under `run_dir` says at `at`.
-    pub fn read(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe, at: DateTime<Utc>) -> Self {
-        Engine {
-            liveness: engine_liveness(run_dir, probe),
-            prompt: engine_prompt(run_dir, probe),
-            at,
-        }
-    }
-
-    /// The process reading the run is the engine driving it: alive, and
-    /// asking no one a reader elsewhere could answer.
-    pub fn this(at: DateTime<Utc>) -> Self {
-        Engine {
-            liveness: EngineLiveness::Alive,
-            prompt: None,
-            at,
-        }
-    }
-
-    /// Whether the engine driving the run is asking a person about `node`
-    /// at its terminal.
-    pub fn asks_about(&self, node: &NodeId) -> bool {
-        self.prompt.as_ref().and_then(|prompt| prompt.node.as_ref()) == Some(node)
     }
 }
 
@@ -257,212 +180,4 @@ pub fn child_pid(child: &tokio::process::Child) -> Option<Pid> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lock::OwnerProbe;
-    use yunta_testkit_core::AtClock;
-
-    /// A host whose process table holds one process, started at a fixed
-    /// instant, under every pid.
-    struct Host {
-        alive: Liveness,
-        started: Option<DateTime<Utc>>,
-    }
-
-    impl OwnerProbe for Host {
-        fn liveness(&self, _pid: Pid) -> Liveness {
-            self.alive
-        }
-        fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
-            self.started
-        }
-    }
-
-    /// A host that cannot say when a pid started: the clock is then the
-    /// only reading, so a record says what the test chose.
-    const SILENT: Host = Host {
-        alive: Liveness::Unknown,
-        started: None,
-    };
-
-    /// A registry the way a crashed engine leaves one: written, and never
-    /// cleared.
-    fn left_behind(run_dir: &Path, started_at: DateTime<Utc>) {
-        let pid = Pid::try_from(4321u32).expect("a pid");
-        std::fs::create_dir_all(registry_path(run_dir).parent().expect("a parent")).unwrap();
-        std::mem::forget(
-            ProcessRegistry::create(run_dir, pid, &SILENT, &AtClock(started_at)).expect("registry"),
-        );
-    }
-
-    /// The registry states when its engine started as the process table
-    /// reads it, not as the run's clock does: a reader compares the record
-    /// against that table, so an engine whose clock is frozen still reads
-    /// as the live engine it is.
-    #[test]
-    fn a_registry_under_a_frozen_clock_names_its_live_engine() {
-        let run = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
-        let frozen = DateTime::from_timestamp(1_600_000_000, 0).unwrap();
-        let host = Host {
-            alive: Liveness::Alive,
-            started: Some(DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
-        };
-        let _registry = ProcessRegistry::create(
-            run.path(),
-            Pid::try_from(1u32).unwrap(),
-            &host,
-            &AtClock(frozen),
-        )
-        .unwrap();
-        assert_eq!(engine_liveness(run.path(), &host), EngineLiveness::Alive);
-    }
-
-    #[test]
-    fn an_engine_record_naming_a_process_that_exited_reads_as_dead() {
-        let run = tempfile::tempdir().unwrap();
-        left_behind(
-            run.path(),
-            DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
-        );
-        let gone = Host {
-            alive: Liveness::Dead,
-            started: None,
-        };
-        assert_eq!(engine_liveness(run.path(), &gone), EngineLiveness::Dead);
-    }
-
-    #[test]
-    fn a_reused_pid_that_started_after_the_record_reads_as_dead() {
-        let run = tempfile::tempdir().unwrap();
-        let recorded = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
-        left_behind(run.path(), recorded);
-        let stranger = Host {
-            alive: Liveness::Alive,
-            started: Some(recorded + chrono::Duration::hours(1)),
-        };
-        assert_eq!(engine_liveness(run.path(), &stranger), EngineLiveness::Dead);
-        let engine = Host {
-            alive: Liveness::Alive,
-            started: Some(recorded),
-        };
-        assert_eq!(engine_liveness(run.path(), &engine), EngineLiveness::Alive);
-    }
-
-    #[test]
-    fn a_run_with_no_engine_record_is_never_called_dead() {
-        let run = tempfile::tempdir().unwrap();
-        let gone = Host {
-            alive: Liveness::Dead,
-            started: None,
-        };
-        assert_eq!(
-            engine_liveness(run.path(), &gone),
-            EngineLiveness::Unrecorded
-        );
-    }
-
-    #[test]
-    fn a_registry_that_does_not_read_proves_nothing() {
-        let run = tempfile::tempdir().unwrap();
-        let path = registry_path(run.path());
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "not json").unwrap();
-        let gone = Host {
-            alive: Liveness::Dead,
-            started: None,
-        };
-        assert_eq!(engine_liveness(run.path(), &gone), EngineLiveness::Unknown);
-    }
-
-    #[test]
-    fn concurrent_registrations_leave_every_group_on_disk() {
-        let run = tempfile::tempdir().unwrap();
-        let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
-        // `create` writes under `scratch/`, which a run creates and a bare directory does not have.
-        std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
-        for round in 0..200u32 {
-            let registry = ProcessRegistry::create(
-                run.path(),
-                Pid::try_from(1u32).unwrap(),
-                &SILENT,
-                &AtClock(started),
-            )
-            .unwrap();
-            // Ids no process holds: a registry keeps the groups that still run
-            // past its engine, so these are the ones that stay out of the next round.
-            let groups: Vec<Pid> = (1..=16u32)
-                .map(|n| Pid::try_from(2_000_000_000 + round * 16 + n).unwrap())
-                .collect();
-            std::thread::scope(|scope| {
-                for &group in &groups {
-                    let registry = &registry;
-                    scope.spawn(move || registry.add(group));
-                }
-            });
-            let Registry::Read(doc) = read_registry(run.path()) else {
-                panic!("round {round}: unreadable")
-            };
-            assert_eq!(
-                doc.doc.process_groups.len(),
-                16,
-                "round {round}: an older snapshot is on disk"
-            );
-            assert!(
-                groups.iter().all(|g| doc.doc.process_groups.contains(g)),
-                "round {round}: a group is lost"
-            );
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_registry_file_is_private_to_its_owner() {
-        use std::os::unix::fs::PermissionsExt;
-        let run = tempfile::tempdir().unwrap();
-        let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
-        std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
-        let _registry = ProcessRegistry::create(
-            run.path(),
-            Pid::try_from(1u32).unwrap(),
-            &SILENT,
-            &AtClock(started),
-        )
-        .unwrap();
-        let mode = std::fs::metadata(registry_path(run.path()))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600, "engine.json is readable by others");
-    }
-
-    /// A group whose leader exited and was reaped is kept while a child the
-    /// leader left in it runs: the leader's pid names no process, so the
-    /// group is read through its members.
-    #[cfg(unix)]
-    #[test]
-    fn running_groups_keeps_a_group_whose_leader_exited_while_a_child_runs() {
-        use std::os::unix::process::CommandExt;
-        use std::process::{Command, Stdio};
-        use yunta_core::process::signal::{signal_group, Signal};
-
-        let mut leader = Command::new("sh")
-            .args(["-c", "sleep 30 & exit 0"])
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let group = Pid::try_from(leader.id()).unwrap();
-        leader.wait().unwrap();
-
-        assert_eq!(
-            running_groups(&[group]),
-            vec![group],
-            "the sleep the leader left behind runs in the group"
-        );
-        // The sleep is killed, so the test leaves no process behind.
-        signal_group(group, Signal::SIGKILL).unwrap();
-    }
-}
+mod tests;

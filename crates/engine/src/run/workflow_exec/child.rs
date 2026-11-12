@@ -10,13 +10,14 @@ use yunta_core::events::{
     EngineStep, EventPayload, Failure, NodeOutcome, PauseReason, TerminalState, TokenUsage,
 };
 use yunta_core::{Isolation, Manifest, ModeName, Node, RunId};
+use yunta_replay::RunState;
 
 use super::super::node_close::{close_node, fail, fail_with, ChildRun, Close};
 use super::super::node_exec::{cancelled_end, NodeEnd};
 use super::super::promote::PromotionSuccessor;
 use super::super::{RunCtx, RunError, RunTerminal};
 use super::{ended, runs_root, worktrees_root, Step};
-use crate::replay::{RunState, RunView};
+use crate::run_log::RunView;
 
 /// Re-enters an existing, unfinished child run — everything it needs is
 /// its own frozen truth (manifest + paths + log), never re-resolved.
@@ -227,15 +228,25 @@ async fn run_member(
     cancel: &CancellationToken,
     member: &Member,
 ) -> Result<super::super::RunReport, RunError> {
+    // A person can resume a child by its id, so its parent claims it like any run.
+    let hold = crate::run_hold::hold_run(
+        &member.run_dir,
+        crate::lock::Contention::Refuse,
+        &*ctx.clock,
+        cancel,
+    )
+    .await?;
     // Boxed for the indirect recursion `execute_run_at_depth` →
     // `execute_node` → here → `execute_run_at_depth`.
     let future: std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<super::super::RunReport, RunError>> + '_>,
+        Box<
+            dyn std::future::Future<Output = Result<super::super::RunReport, RunError>> + Send + '_,
+        >,
     > = Box::pin(super::super::execute_run_at_depth(
         super::super::RunEnv {
             run_id: &member.id,
             manifest: &member.manifest,
-            run_dir: &member.run_dir,
+            hold: &hold,
             worktree: &member.tree,
             adapters: ctx.adapters,
             storage: ctx.storage,

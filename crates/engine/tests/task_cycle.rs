@@ -37,6 +37,7 @@ mod mid_stream_cap;
 /// the checkout it measures.
 fn bare_setup(run_dir: &std::path::Path) -> yunta_engine::SessionSetup {
     yunta_engine::SessionSetup::bare(
+        yunta_core::RunId::from("01HZYXW8M6D4V2T0R9Q7P5N3K2"),
         run_dir.to_path_buf(),
         yunta_core::NodeId::from_static("build"),
         yunta_core::RunnerCandidate {
@@ -180,7 +181,7 @@ fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
             })),
         )
         .build();
-    yunta_engine::derive(&events).tasks
+    yunta_replay::RunState::replay(&events).tasks
 }
 
 /// The governance a cycle test runs under when governance is not what

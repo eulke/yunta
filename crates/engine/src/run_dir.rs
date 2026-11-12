@@ -1,5 +1,8 @@
-//! The run directory's own layout: the names the engine writes under it,
-//! in one place, so writing a path and reading it back cannot disagree.
+//! The engine's working space under a run's directory: the names it writes
+//! there and reads back itself, in one place, so writing a path and reading
+//! it back cannot disagree. What a reader resolves under the directory — the
+//! objects a run holds and the view of each artifact — is
+//! `yunta_core::run_dir`'s, which this layout writes into.
 //!
 //! Two of the run's directories answer different questions and are
 //! deliberately separate. `artifacts/` is the view: the run writes it
@@ -27,6 +30,17 @@ const STAGING_DIR: &str = "staging";
 /// runners it resolves against, which limits it is held to.
 pub fn manifest_path(run_dir: &Path) -> PathBuf {
     run_dir.join("manifest.yaml")
+}
+
+/// The lock that names the process driving the run, under the scratch.
+pub fn engine_lock(run_dir: &Path) -> PathBuf {
+    run_dir.join(SCRATCH_DIR).join("engine.lock")
+}
+
+/// Where the run's socket goes under the scratch, when its path fits what a
+/// socket's address holds.
+pub fn words_socket(run_dir: &Path) -> PathBuf {
+    run_dir.join(SCRATCH_DIR).join("live.sock")
 }
 
 /// Where a session's own transcript directory goes, under the scratch.
@@ -86,12 +100,6 @@ pub fn index_for(run_dir: &Path, who: &UnitId) -> PathBuf {
 /// and the run that holds the bytes.
 pub fn baseline_capture(run_dir: &Path) -> PathBuf {
     baseline_dir(run_dir).join("suite.out")
-}
-
-/// The run's view of what it holds: one file per artifact, written from
-/// the acceptance that named it.
-pub fn artifacts_view(run_dir: &Path) -> PathBuf {
-    run_dir.join(yunta_core::ARTIFACTS_DIR)
 }
 
 /// Where every node's staging sits, one directory per node id.

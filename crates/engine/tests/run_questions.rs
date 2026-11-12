@@ -101,7 +101,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("ask"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
 
     let events = bench.events();
@@ -216,7 +216,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     assert!(
         matches!(
             first_state.nodes.state("ask"),
-            Some(yunta_engine::NodeState::Waiting { .. })
+            Some(yunta_core::events::NodeState::Waiting { .. })
         ),
         "got {:?}",
         first_state.nodes.state("ask")
@@ -237,7 +237,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     assert_eq!(resumed_terminal, RunTerminal::Finished);
     assert!(matches!(
         resumed_state.nodes.state("ask"),
-        Some(yunta_engine::NodeState::Finished { .. })
+        Some(yunta_core::events::NodeState::Finished { .. })
     ));
     let raw = String::from_utf8(bench.projection(Some("ask"), "answers.yaml").unwrap()).unwrap();
     let parsed: yunta_core::AnswersFile = yunta_core::yaml::parse(&raw).unwrap();

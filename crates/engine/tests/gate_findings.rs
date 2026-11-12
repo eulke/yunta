@@ -9,7 +9,8 @@ mod common;
 
 use common::*;
 use yunta_core::events::{EventPayload, Finding, FindingAnswer, FindingSays, GateEvent};
-use yunta_engine::{RunReport, RunTerminal, ShownContent};
+use yunta_core::shown::ShownContent;
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 /// Two reviewers, a fix that answers, and a gate showing the run's
@@ -198,12 +199,12 @@ fn blocking(bench: &Bench, workflow: &str) -> usize {
     let workflow: yunta_core::Workflow = yunta_core::yaml::parse(workflow).unwrap();
     let events = bench.events();
     let at = events.last().unwrap().timestamp;
-    yunta_engine::run_frame(
+    yunta_replay::frame::RunFrame::of(
         &bench.run_id,
         &workflow,
-        &events,
+        &yunta_replay::RunState::replay(&events),
         None,
-        &yunta_engine::Engine::this(at),
+        &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         at,
     )
     .blocking_findings

@@ -1,5 +1,7 @@
 //! A decision held in place at a terminal, and the list it is answered from.
 
+use super::Legend;
+
 /// A question a person answers here and now, with keys.
 pub struct Card {
     /// What is asked.
@@ -10,7 +12,7 @@ pub struct Card {
     pub about: Vec<String>,
     pub body: CardBody,
     /// The keys it answers to, each with what it does: `enter chooses`.
-    pub keys: Vec<String>,
+    pub legend: Legend,
 }
 
 /// What a card holds: its options, or the words one of them is said with.
@@ -53,9 +55,10 @@ pub struct ChoiceRow {
 pub struct TypedRow {
     /// What opens the row: `> `.
     pub prompt: String,
-    /// What the row shows of the words before the cursor.
+    /// The words before the cursor, whole: a surface shows what fits, as a
+    /// terminal's row does with [`TypedRow::fitted`].
     pub before: String,
-    /// What it shows after the cursor.
+    /// The words after the cursor, whole.
     pub after: String,
 }
 
@@ -91,3 +94,6 @@ pub enum RoundStanding {
     /// Still to be answered.
     Ahead,
 }
+
+#[cfg(test)]
+mod tests;

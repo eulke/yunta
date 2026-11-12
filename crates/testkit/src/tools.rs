@@ -57,7 +57,7 @@ impl ToolsHost {
         let root = tempfile::tempdir().expect("tempdir");
         let storage = Storage::open(&root.path().join("yunta.db")).expect("open storage");
         let run_id = RunId::from("run-tools-1");
-        let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
+        let workflow = Workflow::parse(workflow_yaml).expect("parse workflow");
         let run_dir = born_run_dir(root.path());
         let worktree = born_tree(root.path());
         let host = Arc::new(RunToolsHost::new(
@@ -81,7 +81,7 @@ impl ToolsHost {
                 ),
                 process_registry: None,
                 subprocess_vars: Vec::new(),
-                search_path: Vec::new(),
+                search_path: yunta_core::process::SearchPath::default(),
                 environment: Some(tools_environment()),
                 worktree,
                 suite: None,
@@ -297,7 +297,7 @@ impl ToolsHost {
 fn born_run_dir(root: &std::path::Path) -> PathBuf {
     let run_dir = root.join("run");
     for dir in [
-        yunta_core::ARTIFACTS_DIR,
+        yunta_core::run_dir::ARTIFACTS_DIR,
         yunta_engine::run_dir::SCRATCH_DIR,
     ] {
         std::fs::create_dir_all(run_dir.join(dir)).expect("create the run's own directories");

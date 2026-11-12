@@ -680,6 +680,30 @@ optional: no mode drops it, but a project may have nothing to run for it. `yunta
 check` refuses `optional` on a child of a `parallel` group, and on a node another
 node the run keeps reroutes to or reads from.
 
+## The application at a terminal
+
+`yunta` alone, at a terminal that draws, opens Yunta's application on the field of the
+repository's runs, the run that needs you first. Through a pipe, or with `TERM=dumb`, it
+prints the field as `yunta list --runs` does. Outside a repository it opens on what to run
+instead; in a repository Yunta was never set up in, on its setup; in one with no run yet,
+on the first run, which asks what to build.
+
+The application follows runs and never runs one: a run it starts is handed to an engine
+of its own, as `yunta run --detach` hands it, and the application reads its log as
+`yunta status <run> --follow` does. Leaving leaves every run where it stands.
+
+The last row says the keys of the screen; `?` lists every key it takes, and `/` opens the
+palette: what can be done from here, each row the command that does the same at a shell,
+narrowed by what is typed, `enter` taking a row. On the field, `enter` opens the run
+pointed at, `w` the workflows and `m` doctor. On a run, `a` answers what it waits on and
+`p` reads the plan it waits on, where it does; `s` and `g` open its numbers and its graph,
+`o` its page in a browser, and `e` the receipt of a run that finished. `esc` goes back where you came from, and `q` leaves. Ctrl-C leaves with
+the code an interrupt exits with, and Ctrl-Z stops it as any program, `fg` bringing it
+back.
+
+It needs 60 columns by 14 rows, and says so under them. It never takes the mouse:
+selecting and copying text works as at the shell.
+
 ## Reviewing what a gate approves
 
 A gate can put what it asks about in front of you. `shows:` names artifacts the
@@ -783,8 +807,9 @@ forge the page ends on the question, what weighs on it and each option with what
 `abort` reads `Pause here`: nothing runs, and the decision stays open, so the next resume
 asks again.
 
-`r` opens the plan on the terminal's other screen, and `yunta review <run>` opens it on
-a run parked on the decision. `j` and `k` go from task to task, the arrows, `PgUp`,
+`r` opens the plan on the terminal's other screen, and `yunta review <run>` opens the
+application on it, over the run and the field, for a run parked on the decision: `esc`
+there goes back to the run, then the field. `j` and `k` go from task to task, the arrows, `PgUp`,
 `PgDn` and `space` move what is being read, and the mouse's wheel does too, with
 selecting text still working. `p` turns a task's card over to what proves it, and `d`
 shows what was decided, what the plan risks and what it leaves out. A number chooses an
@@ -844,6 +869,25 @@ The live view `yunta run` draws changes nothing about that. It reads the run; it
 never part of it. A gate waits on the event log, so one raised by a run whose view is
 gone — piped, detached, or in a terminal that closed — is answered exactly the
 same way, from anywhere.
+
+`yunta status <run> --follow` draws that view in any other terminal, read from the
+run's log: a run started with `--detach`, or one another terminal drives. It shows
+the run asking at its terminal when it does, follows a promotion onto the run that
+succeeds it, and ends where `yunta run` would, with the same closing block and exit
+code. A follower only reads, so any number of them change nothing, and Ctrl-C stops
+the follower alone.
+
+While a node works, its row in the live view carries the first sentence of what its
+session said last, `says: First I read the parser.`, or `T001 says:` when the
+session works a task; it changes each time the session says something new and goes
+when the node stops working. `yunta status <run> --follow` draws the same row, heard
+off the run's socket, which the run's registry names while an engine drives it. A
+secret the run declares, and every token minted for the session, read `[redacted]`.
+The row is for a person at a terminal and nowhere else: nothing a session says
+while it works reaches a pipe, CI, `TERM=dumb`, a detached run's `detached.log`,
+`--json` or a file. The log keeps what it always did: the size and digest of each
+note, and the summary a session ends with as its node's outcome, which `yunta status
+--full` shows. What a session says while it works is never evidence of anything.
 
 ## The Verified Work Receipt
 
@@ -1053,6 +1097,6 @@ and publishing your own.
 This guide covers what's needed to write and reason about a workflow. See
 [the documentation index](README.md) for adapters, troubleshooting, and the
 compatibility policy. Every key of the config and the workflow language, each
-with a value, is in [the reference](reference.md); `yunta schema <kind>` prints
+with a value, is in [the reference](reference.md); `yunta schema <document>` prints
 each document a session hands over, and `yunta check` says which rule a
 workflow breaks.

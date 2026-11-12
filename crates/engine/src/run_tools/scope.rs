@@ -22,8 +22,8 @@ use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::json;
 use super::words;
-use crate::replay::RunView;
 use crate::run::scope_record::{self, AskedFor, Recording, Subject};
+use crate::run_log::RunView;
 use crate::scope_expansion::{
     standing_refusal, write_request, Recorded, RequestError, ScopeExpansionRequest,
 };

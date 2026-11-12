@@ -6,7 +6,8 @@
 use std::path::Path;
 use std::process::Output;
 
-use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in, INITIAL_BRANCH};
+use yunta_core::process::signal::Signal;
+use yunta_testkit::{git, init_repo, stderr, stdout, unwrapped, yunta_in, INITIAL_BRANCH};
 
 /// Builds a minimal, valid pack repo at `dir`: `pack.yaml` (declarative,
 /// no executors) plus one workflow file it lists in `contents`.
@@ -69,6 +70,122 @@ fn setup() -> (
     (root, upstream, repo, home)
 }
 
+/// Two `pack add` of different packs started at once both stand in the lock.
+/// What holds them apart is the API's: its own test makes an install wait on
+/// packs another holds.
+#[test]
+fn two_adds_at_once_both_stand_in_the_lock() {
+    let (root, upstream, repo, home) = setup();
+    let notes = root.path().join("notes");
+    std::fs::create_dir_all(notes.join("workflows")).unwrap();
+    init_repo(&notes);
+    std::fs::write(
+        notes.join("pack.yaml"),
+        "name: notes-pack\n\
+         publisher: acme\n\
+         version: 1.0.0\n\
+         description: notes\n\
+         declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [workflows/notes.yaml]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        notes.join("workflows/notes.yaml"),
+        "name: notes\nnodes:\n  - id: noop\n    kind: bash\n    run: \"true\"\n",
+    )
+    .unwrap();
+    commit_all(&notes, "v1");
+
+    let add = |source: &Path| yunta_in!(&repo, &home, &["pack", "add", source.to_str().unwrap()]);
+    let (first, second) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| add(&upstream));
+        let second = scope.spawn(|| add(&notes));
+        (first.join().unwrap(), second.join().unwrap())
+    });
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(second.status.success(), "{}", stderr(&second));
+
+    let listed = yunta_in!(&repo, &home, &["pack", "list"]);
+    let said = stdout(&listed);
+    assert!(
+        said.contains("acme/review-pack") && said.contains("acme/notes-pack"),
+        "{said}"
+    );
+}
+
+/// A `pack add` a person interrupts, here while another command holds the
+/// packs, exits as a shell reports any process SIGINT ended, with no failure
+/// of its own said. Wherever the interrupt lands after the inventory (the
+/// git it asks, or the wait for the packs) the stop is the person's.
+#[test]
+fn an_add_a_person_interrupts_exits_as_interrupted() {
+    let (root, upstream, repo, home) = setup();
+    let held = Held::packs_of(&repo);
+    let log = root.path().join("add.log");
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.args(["pack", "add", upstream.to_str().unwrap()]);
+    let adding = yunta_testkit::CliChild::spawn(command, Some(&log)).unwrap();
+    yunta_testkit::wait_until(
+        || {
+            std::fs::read_to_string(&log)
+                .unwrap_or_default()
+                .contains("installing")
+        },
+        || "the add never showed what it installs".to_string(),
+    );
+
+    yunta_core::process::signal::signal_process(adding.pid(), Signal::SIGINT).unwrap();
+    let ended = adding.wait_with_output().unwrap();
+    drop(held);
+
+    assert_eq!(ended.status.code(), Some(130), "{}", stderr(&ended));
+    assert!(
+        !stderr(&ended).contains("interrupted by a person"),
+        "{}",
+        stderr(&ended)
+    );
+    assert!(!repo.join(".yunta/yunta.lock").exists());
+}
+
+/// A repository's packs held by the test, as another pack command would hold
+/// them; dropped, they are let go.
+struct Held {
+    path: std::path::PathBuf,
+    owner: yunta_engine::lock::LockOwner,
+}
+
+impl Held {
+    /// Holds the packs of the repository at `repo`.
+    fn packs_of(repo: &Path) -> Held {
+        use yunta_engine::lock::{acquire, Acquired, Contention, SystemProbe};
+        let path = repo.join(".yunta/yunta.lock.held");
+        std::fs::create_dir_all(repo.join(".yunta")).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let acquired = runtime.block_on(acquire(
+            &path,
+            Contention::Refuse,
+            &SystemProbe,
+            &yunta_testkit_core::FixedClock,
+            &tokio_util::sync::CancellationToken::new(),
+            &|_| false,
+        ));
+        let Ok(Acquired::Fresh(owner)) = acquired else {
+            panic!("nothing held the packs before the test");
+        };
+        Held { path, owner }
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        yunta_engine::lock::release(&self.path, &self.owner).unwrap();
+    }
+}
+
 #[test]
 fn add_vendors_the_pack_and_writes_a_lock_entry() {
     let (_root, upstream, repo, home) = setup();
@@ -122,10 +239,14 @@ fn add_refuses_a_pack_already_installed() {
 
     let second = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(!second.status.success());
+    // The refusal is drawn at a page's width, which wraps it wherever the
+    // path it names happens to end.
+    let refusal = unwrapped(&stderr(&second));
+    assert!(refusal.contains("already installed"), "{refusal}");
     assert!(
-        stderr(&second).contains("already installed"),
-        "{}",
-        stderr(&second)
+        refusal.contains("`yunta pack update acme/review-pack <ref>`")
+            && refusal.contains("`yunta pack remove acme/review-pack`"),
+        "the refusal names the lines that change the installed pack: {refusal}"
     );
 }
 
@@ -245,7 +366,12 @@ fn update_on_an_uninstalled_pack_is_refused() {
         &["pack", "update", "acme/review-pack", "v2.0.0"]
     );
     assert!(!out.status.success());
-    assert!(stderr(&out).contains("isn't installed"), "{}", stderr(&out));
+    let refusal = unwrapped(&stderr(&out));
+    assert!(refusal.contains("isn't installed"), "{refusal}");
+    assert!(
+        refusal.contains("`yunta pack add <source>` it first"),
+        "{refusal}"
+    );
 }
 
 #[test]
@@ -576,7 +702,11 @@ fn pack_new_produces_a_pack_that_passes_check_and_test() {
 
     let pack = repo.join("demo");
     assert!(pack.join("pack.yaml").is_file(), "pack.yaml is written");
-    assert!(pack.join("README.md").is_file(), "a README is written");
+    let readme = std::fs::read_to_string(pack.join("README.md")).expect("a README is written");
+    assert!(
+        readme.contains("scaffolded by `yunta pack new acme/demo`"),
+        "the README names the line that made it: {readme}"
+    );
     assert!(
         pack.join(".yunta/workflows/example.yaml").is_file(),
         "a workflow is written"

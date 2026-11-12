@@ -19,6 +19,7 @@ use surco::surface::{Description, Surface};
 use yunta_core::port::{ForgeError, PublishRequest, PullRequestRequest};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
+use yunta_render::page::{self, Page};
 use yunta_render::published::{self, Publication};
 
 /// What a reviewer answers a gate on.
@@ -55,20 +56,14 @@ pub(crate) fn marked(body: &str, run_id: &str) -> bool {
 /// The body a run's pull request opens with: the body its author wrote, then the run's
 /// receipt drawn as a description, then the marker, within what the forge keeps. A receipt
 /// that does not fit is left out, and an author's words that do not fit even alone are cut:
-/// a note says so, and the marker is never what gives. `spell` writes the commands they name.
-pub(crate) fn pull_request_body(
-    req: &PullRequestRequest,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> String {
+/// a note says so, and the marker is never what gives.
+pub(crate) fn pull_request_body(req: &PullRequestRequest) -> String {
     let receipt = req.receipt.as_ref().map(|receipt| {
         // A description, not a page: the forge's title already heads the pull
-        // request, so the receipt draws no title of its own. Its separators are
-        // the Unicode set whatever look the terminal chose.
-        Description::default().draw(&yunta_render::receipt::document(
-            receipt,
-            spell,
-            Glyphs::Unicode,
-        ))
+        // request, so the receipt draws no title of its own, in the forge's look
+        // whatever look the terminal chose.
+        let description = Description::default();
+        description.draw(&page::Receipt { receipt }.document(&description.look()))
     });
     let author = req.body.trim();
     let marker = run_marker(&req.run_id);
@@ -76,9 +71,7 @@ pub(crate) fn pull_request_body(
     if whole.len() <= BODY_LIMIT {
         return whole;
     }
-    let command = receipt
-        .as_ref()
-        .and_then(|_| receipt_command(&req.run_id, spell));
+    let command = receipt.as_ref().and_then(|_| receipt_command(&req.run_id));
     if receipt.is_some() {
         let note = left_out("the run's receipt", command.as_deref());
         let kept = body_of(&[author, note.as_str()], &marker);
@@ -114,11 +107,11 @@ fn body_of(parts: &[&str], marker: &str) -> String {
     }
 }
 
-/// The command that prints the run's receipt, as `spell` writes it; `None` when `run_id`
-/// does not parse as a run id, and the note then names the receipt without a command.
-fn receipt_command(run_id: &str, spell: &dyn Fn(&NextStep) -> String) -> Option<String> {
+/// The command that prints the run's receipt; `None` when `run_id` does not parse as a
+/// run id, and the note then names the receipt without a command.
+fn receipt_command(run_id: &str) -> Option<String> {
     let run = run_id.parse::<RunId>().ok()?;
-    Some(spell(&NextStep::Receipt { run }))
+    Some(yunta_render::command::line(&NextStep::Receipt { run }))
 }
 
 /// What a body leaves out and where it is whole, said where a reviewer reads it. `receipt`
@@ -151,13 +144,10 @@ fn cut_to(author: &str, room: usize) -> String {
 }
 
 /// The forge a gate's pull request is drawn for, and the limit its description keeps.
-fn publication(spell: &dyn Fn(&NextStep) -> String) -> Publication<'_> {
-    Publication {
-        forge: FORGE,
-        body_limit: BODY_LIMIT,
-        spell,
-    }
-}
+const PUBLICATION: Publication<'static> = Publication {
+    forge: FORGE,
+    body_limit: BODY_LIMIT,
+};
 
 /// The title a gate's pull request opens with and is redrawn with: the change
 /// the plan shown says it makes, or else the question the gate asks.
@@ -169,15 +159,12 @@ pub(crate) fn gate_title(req: &PublishRequest) -> String {
 /// answers the gate and what each answer does, then the run's marker. A body
 /// drawn longer than the forge keeps is refused, so the forge is never asked
 /// for it.
-pub(crate) fn gate_body(
-    req: &PublishRequest,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Result<String, ForgeError> {
-    let page = publication(spell);
-    let body = published::body(req, &page, &run_marker(req.run_id.as_str()));
-    match body.len() > page.body_limit {
+pub(crate) fn gate_body(req: &PublishRequest) -> Result<String, ForgeError> {
+    let publication = PUBLICATION;
+    let body = published::body(req, &publication, &run_marker(req.run_id.as_str()));
+    match body.len() > publication.body_limit {
         true => Err(ForgeError::BodyTooLong {
-            limit: page.body_limit,
+            limit: publication.body_limit,
             len: body.len(),
         }),
         false => Ok(body),
@@ -185,11 +172,8 @@ pub(crate) fn gate_body(
 }
 
 /// Every file a gate's pull request carries, each at its path in the gate's folder.
-pub(crate) fn gate_files(
-    req: &PublishRequest,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Vec<(String, Vec<u8>)> {
-    published::files(req, spell)
+pub(crate) fn gate_files(req: &PublishRequest) -> Vec<(String, Vec<u8>)> {
+    published::files(req)
 }
 
 /// Whether two drawn texts are the same text. A forge may return a description

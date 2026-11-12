@@ -1,7 +1,6 @@
-//! Every branch and ref name the engine composes.
+//! Every ref name the engine composes for the units of a run.
 //!
-//! A run's own branch, under `refs/heads`, and the refs that keep the
-//! work of units, under `refs/yunta`, where no list of branches shows
+//! The refs that keep the work of units, under `refs/yunta`, where no list of branches shows
 //! them. Units once kept their work on branches of their own; that
 //! family's name is kept only to take such a branch's work in.
 
@@ -9,23 +8,12 @@ use yunta_core::RunId;
 
 use super::UnitId;
 
-/// Where a run's own branches live.
-pub(crate) const RUN_BRANCHES: &str = "yunta/run";
 /// Where units kept their work on branches, before refs outside
 /// `refs/heads` kept it. Read only to take such a branch's work in.
 pub(crate) const LEGACY_UNIT_BRANCHES: &str = "yunta/unit";
 /// Where the refs that keep units' work live: outside `refs/heads`, so no
 /// list of a person's branches shows them.
 const UNIT_REFS: &str = "refs/yunta/unit";
-
-/// The branch a run's own commits live on: the branch its worktree is
-/// created on, what `{{run.branch}}` renders, what the run's cleanup
-/// deletes, and what a diagnostic names when the checkout has to be
-/// brought back. One name, composed here, so every one of those is the
-/// same string.
-pub fn run_branch(run_id: &RunId) -> String {
-    format!("{RUN_BRANCHES}/{run_id}")
-}
 
 /// The ref that keeps the work of one attempt by one unit of work. The
 /// unit works on no branch; what it commits is kept by this ref until it
@@ -133,6 +121,6 @@ mod tests {
             UnitRef::of(&RunId::from(RUN), &UnitId::Task("T001".into()), 2)
         );
         assert!(is_legacy_unit_branch(&branch));
-        assert!(UnitRef::of_legacy(&run_branch(&RunId::from(RUN))).is_none());
+        assert!(UnitRef::of_legacy(&RunId::from(RUN).branch()).is_none());
     }
 }

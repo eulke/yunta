@@ -252,7 +252,7 @@ async fn make_run_dir(runs_root: &Path, run_dir: &Path) -> Result<(), RunError> 
         }
     }
     for dir in [
-        crate::run_dir::artifacts_view(run_dir),
+        yunta_core::run_dir::artifacts(run_dir),
         run_dir.join(crate::run_dir::SCRATCH_DIR),
     ] {
         tokio::fs::create_dir(&dir)

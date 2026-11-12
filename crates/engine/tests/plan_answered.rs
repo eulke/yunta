@@ -6,8 +6,8 @@
 use std::sync::Mutex;
 
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
-use yunta_core::shown::Answered;
-use yunta_engine::{RunReport, RunTerminal, ShownContent, ShownDocument};
+use yunta_core::shown::{Answered, ShownContent, ShownDocument};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 mod common;
@@ -74,7 +74,7 @@ sessions:
 struct Answering(Mutex<Vec<Vec<ShownDocument>>>);
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for Answering {
+impl yunta_core::port::HumanInteraction for Answering {
     async fn resolve(&self, _escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         None
     }
@@ -82,7 +82,7 @@ impl yunta_engine::HumanInteraction for Answering {
     async fn resolve_in(
         &self,
         _escalation: &GateWaitingPayload,
-        asking: &yunta_engine::Asking<'_>,
+        asking: &yunta_core::port::DecisionAsked<'_>,
     ) -> Option<HumanChoice> {
         self.0.lock().unwrap().push(asking.shown.to_vec());
         None
@@ -92,8 +92,8 @@ impl yunta_engine::HumanInteraction for Answering {
         &self,
         _node: &yunta_core::NodeId,
         _questions: &yunta_core::QuestionsFile,
-    ) -> Option<yunta_engine::QuestionsReply> {
-        Some(yunta_engine::QuestionsReply {
+    ) -> Option<yunta_core::port::QuestionsReply> {
+        Some(yunta_core::port::QuestionsReply {
             answers: vec![answer("environment", "staging")],
             channel: yunta_core::events::Channel::Tty,
             responder: Some("lead".into()),

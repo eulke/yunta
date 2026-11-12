@@ -21,9 +21,9 @@ use yunta_core::events::{
     RunEvent,
 };
 use yunta_core::{CommandName, ContentHash, RunId};
+use yunta_replay::RunState;
 
 use super::{RunCtx, RunError};
-use crate::replay::RunState;
 
 /// The suite a run of `manifest` measures — `baseline.suite` — when its
 /// workflow reads the measurement at all; `None` otherwise.

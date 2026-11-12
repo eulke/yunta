@@ -75,8 +75,13 @@ impl RunLine {
             columns.name,
             look.glyphs,
         );
+        let held = |on: bool, glyph: char| match on {
+            true => Line::new().push(Tone::Strong, glyph.to_string()),
+            false => Line::new().plain(" "),
+        };
         let mut line = Line::new()
-            .plain(INDENT)
+            .then(held(self.pointed, look.glyphs.pointer()))
+            .then(held(self.marked, look.glyphs.picked()))
             .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
             .plain(" ")
             .push(
@@ -103,3 +108,6 @@ impl RunLine {
             .then(edge)
     }
 }
+
+#[cfg(test)]
+mod tests;

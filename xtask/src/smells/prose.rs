@@ -92,7 +92,8 @@ fn exempt(path: &Path, list: &[&str]) -> bool {
 /// the fold, is what the word is for. `role:` is the retired spelling of
 /// `runner:`; `driver` and `backend` are what an adapter is not, except
 /// in `crates/storage`, which really does choose between database
-/// backends; `plugin` is what a pack and an executor are not; `subagente`
+/// backends, and in `crates/tui`, where a backend is what Ratatui draws a
+/// frame on; `plugin` is what a pack and an executor are not; `subagente`
 /// is what a named agent is not; `fence hook`, `fencehook` and
 /// `yunta fence` are the old names of the rail; and a word with a hyphen
 /// in `re-route` is the old spelling of `reroute`.
@@ -102,15 +103,15 @@ pub fn banned_vocabulary(root: &Path) -> usize {
         .filter(|path| !exempt(path, EXEMPT_DOCUMENTS))
         .map(|path| {
             let text = super::read_corpus(path);
-            let storage = exempt(path, &["crates/storage"]);
+            let wraps_a_backend = exempt(path, &["crates/storage", "crates/tui"]);
             text.lines()
-                .filter(|line| names_by_a_retired_word(line, storage))
+                .filter(|line| names_by_a_retired_word(line, wraps_a_backend))
                 .count()
         })
         .sum()
 }
 
-fn names_by_a_retired_word(line: &str, in_storage: bool) -> bool {
+fn names_by_a_retired_word(line: &str, wraps_a_backend: bool) -> bool {
     let low = line.to_lowercase();
     if low.contains("role:") || low.contains("re-rout") || ledger_names_the_tasks(&low) {
         return true;
@@ -123,7 +124,7 @@ fn names_by_a_retired_word(line: &str, in_storage: bool) -> bool {
         "yunta fence",
     ]
     .to_vec();
-    if !in_storage {
+    if !wraps_a_backend {
         words.extend(["driver", "backend"]);
     }
     words.iter().any(|word| contains_word(&low, word))
@@ -331,8 +332,13 @@ mod tests {
         assert!(names_by_a_retired_word("    role: planner", false));
         assert!(names_by_a_retired_word("//! a pack is not a plugin", false));
         assert!(names_by_a_retired_word("the only backend is sqlite", false));
-        // `crates/storage` is where a database backend is the subject.
+        // `crates/storage` is where a database backend is the subject, and
+        // `crates/tui` where a frame is drawn on Ratatui's.
         assert!(!names_by_a_retired_word("the only backend is sqlite", true));
+        assert!(!names_by_a_retired_word(
+            "use ratatui::backend::TestBackend;",
+            true
+        ));
         // `runner:` is the spelling, and `roles` in prose is not `role:`.
         assert!(!names_by_a_retired_word("    runner: planner", false));
         assert!(!names_by_a_retired_word("dos roles y un adapter", false));

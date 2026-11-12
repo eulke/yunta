@@ -384,14 +384,10 @@ pub(super) fn repo() -> GitHubRepo {
 }
 
 pub(super) fn forge_at(addr: SocketAddr) -> GitHubForge {
-    GitHubForge::configure(
-        repo(),
-        Secret::new("token".to_string()),
-        yunta_testkit_core::spell(),
-    )
-    .base_url(format!("http://{addr}"))
-    .build()
-    .unwrap()
+    GitHubForge::configure(repo(), Secret::new("token".to_string()))
+        .base_url(format!("http://{addr}"))
+        .build()
+        .unwrap()
 }
 
 /// The marker a pull request opened before the comment form carries,

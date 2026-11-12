@@ -13,7 +13,8 @@ use yunta_core::events::{
 };
 use yunta_core::protected::Protected;
 use yunta_core::{CommitSha, ContentHash, DefaultOnFailure, NodeId, OnInterrupt, Workflow};
-use yunta_engine::{decide, derive, Decision, SchedulingPolicy};
+use yunta_engine::{decide, Decision, SchedulingPolicy};
+use yunta_replay::RunState;
 
 fn workflow() -> Workflow {
     yunta_core::yaml::parse(
@@ -87,7 +88,7 @@ fn a_run_owing_a_baseline_is_told_to_measure_it_before_any_node() {
     };
 
     assert_eq!(
-        decide(&workflow(), &derive(&events), &policy),
+        decide(&workflow(), &RunState::replay(&events), &policy),
         Decision::MeasureBaseline {
             owed: yunta_engine::OwedMeasurement::suite("cargo test")
         },
@@ -131,12 +132,12 @@ nodes:
     ]);
 
     assert_eq!(
-        decide(&workflow, &derive(&fresh), &policy),
+        decide(&workflow, &RunState::replay(&fresh), &policy),
         Decision::Execute(vec![(NodeId::from("plan"), 1)]),
         "`plan` reads nothing the suite measures"
     );
     assert_eq!(
-        decide(&workflow, &derive(&planned), &policy),
+        decide(&workflow, &RunState::replay(&planned), &policy),
         Decision::MeasureBaseline {
             owed: yunta_engine::OwedMeasurement::suite("cargo test")
         },
@@ -161,7 +162,7 @@ fn a_gate_showing_a_plan_waits_for_the_measurement() {
         measures_aside: true,
         ..policy()
     };
-    let planned = derive(&log(vec![
+    let planned = RunState::replay(&log(vec![
         (None, created()),
         (
             Some("plan"),
@@ -217,7 +218,7 @@ fn a_run_born_holding_a_baseline_is_never_told_to_measure() {
 
     assert!(
         !matches!(
-            decide(&workflow(), &derive(&events), &policy),
+            decide(&workflow(), &RunState::replay(&events), &policy),
             Decision::MeasureBaseline { .. }
         ),
         "a run born holding its lineage's measurement owes nothing"
@@ -247,7 +248,7 @@ nodes:
         measures_aside: true,
         ..policy()
     };
-    let planned = derive(&log(vec![
+    let planned = RunState::replay(&log(vec![
         (None, created()),
         (
             Some("plan"),

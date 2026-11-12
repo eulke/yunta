@@ -14,9 +14,9 @@ use yunta_core::events::{
     EventDraft, EventPayload, Failure, FindingEvent, FindingSeverity, GateEvent,
     GateResolvedPayload, GateWaitingPayload, HumanChoice, NodeEvent, SessionEvent, WhyWithheld,
 };
+use yunta_core::refusal::GateRefusal;
 use yunta_engine::{current_escalation, ResolveGateError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
-use yunta_testkit_core::spell;
 use yunta_testkit_core::FixedClock;
 
 mod common;
@@ -152,7 +152,7 @@ impl Reading {
 }
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for Reading {
+impl yunta_core::port::HumanInteraction for Reading {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         self.0.lock().unwrap().push(escalation.clone());
         None
@@ -197,7 +197,7 @@ async fn rebuilt(bench: &Bench) -> GateWaitingPayload {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -252,7 +252,7 @@ async fn a_withheld_option_is_refused_with_why_when_it_is_answered_from_elsewher
 
     let refused = answer_parked(&bench, "approve").await;
 
-    let Err(ResolveGateError::Withheld { chosen, withheld }) = refused else {
+    let Err(ResolveGateError::Refused(GateRefusal::Withheld { chosen, withheld })) = refused else {
         panic!("approving a plan that cannot be proven is refused: {refused:?}");
     };
     assert_eq!(chosen.as_str(), "approve");
@@ -303,7 +303,7 @@ async fn an_approval_seeded_before_the_plan_was_found_unprovable_is_asked_again(
     assert!(
         !matches!(
             state.nodes.state("approve-plan"),
-            Some(yunta_engine::NodeState::Finished { .. })
+            Some(yunta_core::events::NodeState::Finished { .. })
         ),
         "the plan is not approved: {:?}",
         state.nodes.state("approve-plan")
@@ -313,7 +313,7 @@ async fn an_approval_seeded_before_the_plan_was_found_unprovable_is_asked_again(
 #[tokio::test]
 async fn a_forge_gate_sends_an_unprovable_plan_back_without_publishing_it() {
     let forge = MockForgeState::new();
-    let bench = Bench::new().with_forge(Arc::new(MockForge::new(forge.clone(), spell())));
+    let bench = Bench::new().with_forge(Arc::new(MockForge::new(forge.clone())));
 
     let RunReport { terminal, .. } = bench
         .run(

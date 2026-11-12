@@ -1,0 +1,7 @@
+␛[32m✓␛[0m ␛[1mpacks␛[0m␛[2m ·␛[0m␛[32m 2 installed ␛[0m␛[2m· 1 thing worth a look␛[0m
+␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+
+  ␛[32m✓␛[0m ␛[1macme/lint␛[0m    v1.0.0 (3f9c2e1a0b4d), as its lock records it
+␛[1m▸␛[0m ␛[33m▲␛[0m ␛[1macme/review␛[0m  v1.0.0 (3f9c2e1a0b4d), modified: its files no longer match its lock
+
+  ␛[2mlock        ␛[0m .yunta/yunta.lock

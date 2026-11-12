@@ -28,14 +28,18 @@ pub(super) fn build_ctx(
     // every append this invocation makes takes the same values back out,
     // and a run that declares no secret builds an empty one and pays nothing.
     let redactor = yunta_core::Redactor::of(&env.manifest.config.secret_names(), &*env.secrets)?;
-    let (registry, registry_error) = open_registry(env.run_dir, &*env.clock);
+    let (registry, registry_error) = open_registry(env.hold.run_dir(), &*env.clock);
+    let voices = Arc::new(crate::said::Voices::new());
+    if let Some(registry) = &registry {
+        serve_words(registry, env.hold.run_dir(), env.run_id, &voices);
+    }
     // One cache of criterion results per invocation, read by every task
     // cycle and by every check a task session asks for through the host.
     let memo = Arc::new(Memo::new(env.manifest.config_hash.clone()));
     let pool = crate::worktree::CheckoutPool::of_run(
-        &crate::run_dir::worktrees_root(env.manifest, env.run_dir),
+        &crate::run_dir::worktrees_root(env.manifest, env.hold.run_dir()),
         env.worktree,
-        env.run_dir,
+        env.hold.run_dir(),
         env.manifest,
         env.clock.clone(),
     );
@@ -44,7 +48,7 @@ pub(super) fn build_ctx(
     let RunEnv {
         run_id,
         manifest,
-        run_dir,
+        hold,
         worktree,
         adapters,
         storage,
@@ -58,6 +62,7 @@ pub(super) fn build_ctx(
         observer,
         rail_command,
     } = env;
+    let run_dir = hold.run_dir();
     let awake = Arc::new(crate::wakefulness::Wakefulness::new(clock.clone()));
     let ctx = RunCtx {
         rail_command,
@@ -82,6 +87,7 @@ pub(super) fn build_ctx(
         secrets,
         redactor,
         observer,
+        voices,
         unit: None,
         landing: Arc::new(tokio::sync::Mutex::new(())),
         awake,
@@ -112,6 +118,29 @@ fn open_registry(
     }
 }
 
+/// Opens the run's socket and has the registry serve it. A run whose socket
+/// has nowhere to go, or does not bind, goes on, and nobody elsewhere hears
+/// what its sessions say.
+fn serve_words(
+    registry: &crate::process_registry::ProcessRegistry,
+    run_dir: &Path,
+    run_id: &yunta_core::RunId,
+    voices: &Arc<crate::said::Voices>,
+) {
+    let Some(path) = crate::said::socket_path(&crate::run_dir::words_socket(run_dir), run_id)
+    else {
+        tracing::warn!("the run's socket has no private place to go on this host");
+        return;
+    };
+    let uid = yunta_core::process::user::uid();
+    match crate::said::Socket::bind(&path, Arc::clone(voices), uid) {
+        Ok(socket) => registry.serve_words(socket),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "the run's socket did not bind")
+        }
+    }
+}
+
 /// The per-run MCP host, built beside the context it outlives. It outlives
 /// every borrow of this invocation, so it owns a clone of each value it reads:
 /// the one injected clock and the one display surface reach the listener's
@@ -134,7 +163,7 @@ fn mcp_host(
             run_id: env.run_id.clone(),
             clock: env.clock.clone(),
             observer: env.observer.clone(),
-            run_dir: env.run_dir.to_path_buf(),
+            run_dir: env.hold.run_dir().to_path_buf(),
             max_artifact_bytes: env
                 .manifest
                 .config

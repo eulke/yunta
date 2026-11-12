@@ -75,12 +75,14 @@ pub(crate) async fn resolve_setup(
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         env: SessionSetup::secrets_env(&ctx.manifest.config, &*ctx.secrets),
+        search_path: ctx.search_path().clone(),
         run_tools,
         rail_command: ctx.rail_command.clone(),
         agent,
         cli_config: super::session_policy::cli_config(ctx, node),
         network: yunta_core::network_asked(node.network, ctx.manifest.config.network_permissions()),
         run_dir: ctx.run_dir.to_path_buf(),
+        run: ctx.run_id.clone(),
         node: node.id.clone(),
         chosen: chosen.clone(),
         artifact_dir: crate::run::node_exec::artifact_dir(ctx, node),
@@ -278,6 +280,7 @@ pub(crate) async fn open_session(
         cli_config: setup.cli_config,
         confinement,
         env: setup.env.clone(),
+        search_path: setup.search_path.clone(),
         fence,
         rail_command: setup.rail_command.clone(),
         rail: run_tools.as_ref().map(RunToolsSession::rail_endpoint),
@@ -290,6 +293,7 @@ pub(crate) async fn open_session(
         // told where it belongs.
         artifact_dir: setup.artifact_dir.clone(),
         scratch_dir,
+        mark: yunta_core::process::mark::SessionMark::new(&setup.run),
     };
     record_staged(&held_to, adapter, &request)?;
     Ok(OpenedSession { request, run_tools })

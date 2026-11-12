@@ -20,9 +20,13 @@ use nix::sys::signal::{kill, Signal};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, LocalFlags, SetArg};
 use nix::unistd::Pid;
 
-use surco::paint::{HIDE_CURSOR, SHOW_CURSOR, SYNC_BEGIN, SYNC_END};
+use surco::paint::{ALT_SCREEN_OFF, ALT_SCREEN_ON, HIDE_CURSOR, SHOW_CURSOR};
 
 use crate::wait::{wait_for, wait_until, WAIT_DEADLINE};
+
+pub(crate) mod screen;
+
+use screen::{unpainted, Screen};
 
 /// What a run writes to clear a row, which this harness reads a drawing by.
 const CLEAR_ROW: &str = "\u{1b}[2K";
@@ -138,31 +142,33 @@ impl Terminal {
         )
     }
 
+    /// What the run drew on the other screen, one entry each time it held it: from its
+    /// holding to its giving back, or to now. Read where the screen a person sees cannot
+    /// tell a fresh drawing from what the other screen kept of the last one.
+    pub fn drawn_on_the_other_screen(&self) -> Vec<String> {
+        let drawn = self.drawn();
+        drawn
+            .split(ALT_SCREEN_ON)
+            .skip(1)
+            .map(|held| {
+                held.split(ALT_SCREEN_OFF)
+                    .next()
+                    .unwrap_or(held)
+                    .to_string()
+            })
+            .collect()
+    }
+
     /// What a person sees on this terminal now: every row as the screen holds
     /// it, whatever was drawn over what on the way there. A drawing still on its
     /// way is out of sight, as a terminal that takes one whole keeps it, so what a
     /// test reads after waiting for one row of a drawing holds all of its rows.
     pub fn screen(&self) -> Screen {
-        let mut parser = vt100::Parser::new(self.rows, self.columns, 0);
-        parser.process(
-            drawn_whole(
-                &self
-                    .drawn
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner),
-            )
-            .as_bytes(),
-        );
-        let screen = parser.screen();
-        Screen {
-            rows: screen
-                .rows(0, self.columns)
-                .map(|row| row.trim_end().to_string())
-                .collect(),
-            cursor: screen.cursor_position(),
-            cursor_hidden: screen.hide_cursor(),
-            alternate: screen.alternate_screen(),
-        }
+        let drawn = self
+            .drawn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Screen::of(&drawn, (self.columns, self.rows))
     }
 
     /// Waits until `needle` stands on the screen, failing with `what` and the
@@ -213,6 +219,18 @@ impl Terminal {
         tcsetattr(&self.keyboard, SetArg::TCSANOW, &termios).expect("the pty takes raw mode");
     }
 
+    /// The card on this terminal pointed down past each of `below` to `option`, which is
+    /// chosen.
+    pub fn choose(&mut self, below: &[&str], option: &str) {
+        for next in below.iter().chain([&option]) {
+            if !self.screen().holds(&format!("▸ {next}")) {
+                self.keys("\u{1b}[B");
+            }
+            self.wait_on_screen(&format!("▸ {next}"), "the card never pointed there");
+        }
+        self.keys("\r");
+    }
+
     /// Types `keys`, exactly as a keyboard delivers them.
     pub fn keys(&mut self, keys: &str) {
         self.keyboard
@@ -221,11 +239,59 @@ impl Terminal {
             .expect("the run is still reading its keyboard");
     }
 
+    /// What a shell's `fg` sends a job it stopped: a run stopped goes on, and one that never
+    /// stopped, or has ended, is left as it is. A run that stops itself, as on Ctrl-Z,
+    /// stops for real under a shell's job control and is never stopped in a process group
+    /// no shell controls, so a test sends this while it waits for the run to go on.
+    pub fn go_on(&self) {
+        // best-effort: a run that has ended has nothing to go on with.
+        let _ = kill(self.pid(), Signal::SIGCONT);
+    }
+
     /// Sends the run an interrupt from outside — what `kill -INT` does,
     /// and what a shell's Ctrl-C does to a run in its foreground group.
     pub fn interrupt(&self) {
-        kill(Pid::from_raw(self.child.id() as i32), Signal::SIGINT)
-            .expect("the run is alive to be interrupted");
+        self.signal(Signal::SIGINT);
+    }
+
+    /// Asks the run to end — what `kill` does by default.
+    pub fn terminate(&self) {
+        self.signal(Signal::SIGTERM);
+    }
+
+    /// Tells the run its terminal hung up — what closing the window it runs in does.
+    pub fn hang_up(&self) {
+        self.signal(Signal::SIGHUP);
+    }
+
+    /// Gives this terminal `columns` by `rows`, and tells the run, as a terminal whose
+    /// window is resized tells the program in front: the run is no session's leader here,
+    /// so the harness sends the signal the line discipline would.
+    pub fn resized(&mut self, columns: u16, rows: u16) {
+        let size = rustix::termios::Winsize {
+            ws_row: rows,
+            ws_col: columns,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        rustix::termios::tcsetwinsize(&self.keyboard, size).expect("the pty takes a size");
+        self.columns = columns;
+        self.rows = rows;
+        self.signal(Signal::SIGWINCH);
+    }
+
+    /// The id of the process at this terminal.
+    pub fn process_id(&self) -> u32 {
+        self.child.id()
+    }
+
+    fn pid(&self) -> Pid {
+        Pid::from_raw(self.process_id() as i32)
+    }
+
+    /// `signal` sent to the run.
+    fn signal(&self, signal: Signal) {
+        kill(self.pid(), signal).expect("the run is alive to be signalled");
     }
 
     /// Whether this terminal still reads a line at a time and echoes
@@ -290,46 +356,38 @@ impl Terminal {
         self.ended.and_then(|status| status.code())
     }
 
-    /// Waits for the run's process to end and returns everything it
-    /// drew. Fails, rather than hanging, on a run that never ends.
+    /// Whether the run's process ended, without waiting for the terminal to close: a
+    /// process it started in the terminal's session, such as a detached engine, keeps the
+    /// terminal open after the run itself ended.
+    pub fn exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
+    /// Waits for the run's process to end and the terminal to close, and returns everything
+    /// it drew. Fails, rather than hanging, on a run that never ends, and on a terminal a
+    /// process the run started in its session holds open.
     pub fn ended(&mut self) -> String {
         let Self { child, drawn, .. } = self;
+        let so_far = || drawn.lock().map(|d| d.clone()).unwrap_or_default();
         let ended = wait_for(
             || child.try_wait().ok().flatten(),
-            || {
-                let drawn = drawn.lock().map(|d| d.clone()).unwrap_or_default();
-                format!("the run never ended\ndrawn so far:\n{drawn}")
-            },
+            || format!("the run never ended\ndrawn so far:\n{}", so_far()),
         );
         self.ended = Some(ended);
         if let Some(reader) = self.reader.take() {
+            wait_until(
+                || reader.is_finished(),
+                || {
+                    format!(
+                        "the terminal never closed: a process the run started in its session \
+                         holds it\ndrawn so far:\n{}",
+                        so_far()
+                    )
+                },
+            );
             drop(reader.join());
         }
         self.drawn()
-    }
-}
-
-/// A terminal's screen at one moment, as a person reads it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Screen {
-    /// Every row, with what it ends in spaces gone.
-    pub rows: Vec<String>,
-    /// The row and the column the cursor stands on.
-    pub cursor: (u16, u16),
-    pub cursor_hidden: bool,
-    /// Whether the terminal is on its other screen.
-    pub alternate: bool,
-}
-
-impl Screen {
-    /// Whether any row holds `needle`.
-    pub fn holds(&self, needle: &str) -> bool {
-        self.rows.iter().any(|row| row.contains(needle))
-    }
-
-    /// How many rows hold `needle`.
-    pub fn count(&self, needle: &str) -> usize {
-        self.rows.iter().filter(|row| row.contains(needle)).count()
     }
 }
 
@@ -340,7 +398,7 @@ impl Drop for Terminal {
         // leaves its nodes running in their own groups, and the reader
         // below waits on them for as long as they run.
         if self.ended.is_none() && matches!(self.child.try_wait(), Ok(None)) {
-            if let Err(error) = kill(Pid::from_raw(self.child.id() as i32), Signal::SIGINT) {
+            if let Err(error) = kill(self.pid(), Signal::SIGINT) {
                 eprintln!("could not interrupt the run while dropping its terminal: {error}");
             }
             let deadline = Instant::now() + WAIT_DEADLINE;
@@ -351,7 +409,18 @@ impl Drop for Terminal {
         drop(self.child.kill());
         drop(self.child.wait());
         if let Some(reader) = self.reader.take() {
-            drop(reader.join());
+            let deadline = Instant::now() + WAIT_DEADLINE;
+            while Instant::now() < deadline && !reader.is_finished() {
+                std::thread::yield_now();
+            }
+            match reader.is_finished() {
+                true => drop(reader.join()),
+                // A process the run started in the terminal's session holds it open: the
+                // reader is left to it, so the test ends rather than hangs.
+                false => eprintln!(
+                    "the terminal never closed: a process the run started in its session holds it"
+                ),
+            }
         }
     }
 }
@@ -376,39 +445,6 @@ fn collect(mut screen: std::fs::File, into: Arc<Mutex<String>>) -> std::thread::
     })
 }
 
-/// `drawn` without a drawing that has opened and not ended: what a terminal that takes
-/// each drawing whole has shown so far.
-fn drawn_whole(drawn: &str) -> &str {
-    match (drawn.rfind(SYNC_BEGIN), drawn.rfind(SYNC_END)) {
-        (Some(begin), Some(end)) if end > begin => drawn,
-        (Some(begin), _) => &drawn[..begin],
-        _ => drawn,
-    }
-}
-
-/// `text` without the sequences that paint it (`ESC [ … m`).
-fn unpainted(text: &str) -> String {
-    const INTRODUCER: &str = "\u{1b}[";
-    let mut kept = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(at) = rest.find(INTRODUCER) {
-        kept.push_str(&rest[..at]);
-        let after = &rest[at + INTRODUCER.len()..];
-        let parameters = after
-            .find(|character: char| !(character.is_ascii_digit() || character == ';'))
-            .unwrap_or(after.len());
-        rest = match after[parameters..].strip_prefix('m') {
-            Some(painted) => painted,
-            None => {
-                kept.push_str(INTRODUCER);
-                after
-            }
-        };
-    }
-    kept.push_str(rest);
-    kept
-}
-
 /// Where a run under [`Terminal`] keeps its runs, so a test can read
 /// what one produced: `YUNTA_HOME/runs/<id>/`.
 pub fn runs_root(home: &Path) -> PathBuf {
@@ -416,16 +452,4 @@ pub fn runs_root(home: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn paint_is_dropped_and_what_moves_the_cursor_is_kept() {
-        let drawn =
-            format!("\u{1b}[1mdecision\u{1b}[0m: \u{1b}[35mneeds you\u{1b}[0m{CLEAR_ROW}\u{1b}[2A");
-        assert_eq!(
-            unpainted(&drawn),
-            format!("decision: needs you{CLEAR_ROW}\u{1b}[2A")
-        );
-    }
-}
+mod tests;

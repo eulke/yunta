@@ -5,6 +5,11 @@
 
 use chrono::{DateTime, Utc};
 
+/// How long a host that slept has to stay awake, by [`Clock::awake`], before a
+/// session opens on it: longer than the wakes a laptop makes for maintenance,
+/// short next to the sleep it follows.
+pub const SETTLE_AFTER_SUSPENSION: std::time::Duration = std::time::Duration::from_secs(120);
+
 pub trait Clock: Send + Sync {
     /// Wall time: when something happened, as a person reads it.
     fn now(&self) -> DateTime<Utc>;

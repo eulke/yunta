@@ -17,12 +17,14 @@ use crate::process::lines::LineReader;
 use crate::process::stream::StreamGuard;
 use crate::{AdapterError, AdapterId, Pid, Redactor, Result};
 
-/// Starts the CLI and hands back the session that owns it. The readers
-/// run before the prompt is written, so a CLI that talks before it
-/// listens cannot deadlock the exchange.
+/// Starts the CLI, found on the launch's search path, and hands back the
+/// session that owns it. The readers run before the prompt is written, so a
+/// CLI that talks before it listens cannot deadlock the exchange.
 pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
     let adapter = launch.adapter;
-    let mut child = spawn_child(&launch)?;
+    let started = std::time::SystemTime::now();
+    let program = program(&launch)?;
+    let mut child = spawn_child(&launch, &program)?;
     let pgid = child
         .id()
         .and_then(|id| Pid::try_from(id).ok())
@@ -58,16 +60,38 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
         stderr_tail,
         receiver: Some(rx),
         held: launch.held,
+        mark: launch.mark.clone(),
+        started,
+        swept: false,
+        unclosed: None,
     };
     write_prompt(stdin, launch.prompt, adapter).await?;
     Ok(Box::new(session))
 }
 
-/// The CLI's process, with its arguments and environment and its three
-/// pipes open, in a process group of its own. Killed with the session that
-/// holds it.
-fn spawn_child(launch: &Launch<'_>) -> Result<Child> {
-    let mut std_cmd = std::process::Command::new(launch.binary);
+/// Where the launch's CLI runs from: its binary, found on its search path, or, named
+/// by a path relative to where the session runs, the file there, started by that whole
+/// path so the process it starts reads it as it was found; refused where it is not
+/// there.
+fn program(launch: &Launch<'_>) -> Result<std::path::PathBuf> {
+    let binary = match launch.binary.components().count() > 1 && launch.binary.is_relative() {
+        true => launch.cwd.join(launch.binary),
+        false => launch.binary.to_path_buf(),
+    };
+    launch
+        .search_path
+        .find(&binary)
+        .ok_or_else(|| AdapterError::Adapter {
+            adapter: launch.adapter.clone(),
+            message: super::absent(launch.binary),
+        })
+}
+
+/// The CLI's process, `program`, with its arguments and environment and its
+/// three pipes open, in a process group of its own. Killed with the session
+/// that holds it.
+fn spawn_child(launch: &Launch<'_>, program: &std::path::Path) -> Result<Child> {
+    let mut std_cmd = std::process::Command::new(program);
     std_cmd
         .args(&launch.args)
         .current_dir(launch.cwd)
@@ -79,12 +103,15 @@ fn spawn_child(launch: &Launch<'_>) -> Result<Child> {
                 .iter()
                 .map(|(name, value)| (name, value.expose())),
         )
+        .env(crate::process::mark::MARK_VAR, launch.mark.as_str())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // The whole session's tree dies together: a group-targeted signal
-    // reaches every descendant the CLI spawns, its own tool
-    // subprocesses included, not just the CLI process itself.
+    // A group of its own, so a group-targeted signal reaches the CLI and
+    // every descendant that stays in its group. A CLI starts its tool
+    // commands in groups of their own, which that signal misses: the
+    // session's end walks them (`tree`) and sweeps what carries the
+    // session's mark (`mark`).
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use surco::text;
 use yunta_core::events::{AskedScope, Cleaned, DistillStep, FindingCause, FindingSays, ScopeAsker};
 use yunta_core::expansion::Denial;
-use yunta_core::{listed_globs, AdapterId, OBJECTS_DIR};
+use yunta_core::run_dir::OBJECTS_DIR;
+use yunta_core::{listed_globs, AdapterId};
 
 /// The title and the detail a reader meets a finding with.
 pub fn said(says: &FindingSays) -> (String, String) {

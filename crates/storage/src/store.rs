@@ -18,9 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, Transaction};
-use yunta_core::events::{
-    EventBody, EventDraft, EventPayload, EventShapeError, StoredEvent, KIND_VERSION,
-};
+use yunta_core::events::{EventDraft, EventPayload, KIND_VERSION};
 use yunta_core::ContentHash;
 use yunta_core::{Clock, NodeId, RunId, Seq};
 
@@ -29,7 +27,9 @@ use yunta_core::events::RunEvent;
 
 mod chain;
 mod opening;
+mod reading;
 pub use chain::ChainVerification;
+pub use reading::RunHead;
 
 /// The schema migration, embedded in the binary rather than shipped as a
 /// file — the schema is a few tables, so there is nothing a migration runner
@@ -331,82 +331,6 @@ impl Storage {
         Ok(())
     }
 
-    /// All events for a run, ordered by `seq` ascending — the order
-    /// replay depends on. A row under a `kind` this binary does not know
-    /// comes back as [`EventBody::Unknown`], kept verbatim; a row under a
-    /// known kind whose payload is not that kind's shape is corrupt.
-    pub fn events_for_run(&self, run_id: &RunId) -> Result<Vec<StoredEvent>> {
-        let read_err = |error| StorageError::Read {
-            run_id: run_id.clone(),
-            source: cause(error),
-        };
-
-        let conn = lock(&self.conn);
-        let mut stmt = conn
-            .prepare(
-                "SELECT seq, ts, node_id, payload_json, schema_version
-                 FROM events WHERE run_id = ?1 ORDER BY seq ASC",
-            )
-            .map_err(read_err)?;
-
-        let rows = stmt
-            .query_map(params![run_id.as_str()], |row| {
-                let seq: i64 = row.get(0)?;
-                let ts: String = row.get(1)?;
-                let node_id: Option<String> = row.get(2)?;
-                let payload_json: String = row.get(3)?;
-                let schema_version: u32 = row.get(4)?;
-                Ok((seq, ts, node_id, payload_json, schema_version))
-            })
-            .map_err(read_err)?;
-
-        let mut events = Vec::new();
-        for row in rows {
-            let (seq, ts, node_id, payload_json, schema_version) = row.map_err(read_err)?;
-            let seq = Seq::try_from(seq).map_err(|source| StorageError::CorruptSeq {
-                run_id: run_id.clone(),
-                source,
-            })?;
-            let corrupt = |source: EventShapeError| StorageError::CorruptPayload {
-                run_id: run_id.clone(),
-                seq,
-                source,
-            };
-            let object = match serde_json::from_str::<serde_json::Value>(&payload_json) {
-                Ok(serde_json::Value::Object(object)) => object,
-                Ok(_) => return Err(corrupt(EventShapeError::NotAnObject)),
-                Err(source) => return Err(corrupt(EventShapeError::Json { source })),
-            };
-            let body = EventBody::from_object(object, schema_version).map_err(corrupt)?;
-
-            let timestamp = chrono::DateTime::parse_from_rfc3339(&ts)
-                .map_err(|source| StorageError::CorruptTimestamp {
-                    run_id: run_id.clone(),
-                    seq,
-                    source,
-                })?
-                .with_timezone(&chrono::Utc);
-
-            let node_id = node_id
-                .map(NodeId::try_from)
-                .transpose()
-                .map_err(|source| StorageError::CorruptNodeId {
-                    run_id: run_id.clone(),
-                    seq,
-                    source,
-                })?;
-
-            events.push(StoredEvent {
-                run_id: run_id.clone(),
-                seq,
-                timestamp,
-                node_id,
-                body,
-            });
-        }
-        Ok(events)
-    }
-
     /// Deletes every row for `run_id` — the database side of
     /// `storage.retention_days`. The one deliberate exception to the
     /// append-only discipline, and the *caller* (`yunta gc`) owns the
@@ -436,39 +360,5 @@ impl Storage {
         .map_err(purge_err)?;
         tx.commit().map_err(purge_err)?;
         Ok(Purge { rows })
-    }
-
-    /// Every run with at least one event, oldest first by the timestamp
-    /// of its first event (then by id), for `yunta list --runs`.
-    pub fn list_runs(&self) -> Result<Vec<RunListing>> {
-        let list_err = |error| StorageError::ListRuns {
-            source: cause(error),
-        };
-        let conn = lock(&self.conn);
-        let mut stmt = conn
-            .prepare("SELECT run_id, ts FROM events WHERE seq = 1 ORDER BY ts ASC, run_id ASC")
-            .map_err(list_err)?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(list_err)?;
-
-        let mut runs = Vec::new();
-        for row in rows {
-            let (run_id, ts) = row.map_err(list_err)?;
-            let run_id =
-                RunId::try_from(run_id).map_err(|source| StorageError::CorruptRunId { source })?;
-            let created_at = chrono::DateTime::parse_from_rfc3339(&ts)
-                .map_err(|source| StorageError::CorruptTimestamp {
-                    run_id: run_id.clone(),
-                    seq: Seq::FIRST,
-                    source,
-                })?
-                .with_timezone(&chrono::Utc);
-            runs.push(RunListing { run_id, created_at });
-        }
-        Ok(runs)
     }
 }

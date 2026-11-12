@@ -1,0 +1,237 @@
+//! What the frame says where a run stops: a parked node carries the sentence
+//! its pause recorded, a run that moves again quotes no pause, a paused run
+//! with no parked node names the reason the log recorded, a failed run carries
+//! its failure, and a promoted run names the mode its signal suggested.
+
+use super::*;
+
+/// A run moves while it is created or running under an engine that lives;
+/// parked, ended, promoted, or stalled under an engine that is gone, it
+/// does not.
+#[test]
+fn a_run_moves_while_it_runs_under_an_engine_that_lives() {
+    let frame = |phase: RunPhase, standing: Standing| RunFrame {
+        phase,
+        standing,
+        ..RunFrame::sample(&yunta_core::RunId::from_static("run-1"))
+    };
+    assert!(frame(RunPhase::Created, Standing::Running).moves());
+    assert!(frame(RunPhase::Running, Standing::Running).moves());
+    assert!(!frame(RunPhase::Running, Standing::Stalled).moves());
+    assert!(!frame(RunPhase::Finished, Standing::Finished).moves());
+    assert!(!frame(RunPhase::Cancelled, Standing::Stopped).moves());
+    assert!(!frame(RunPhase::Promoted { to: None }, Standing::Promoted).moves());
+}
+
+/// A run handed to a detached process has no registry for an instant, and
+/// a follower that read that as a stall would end on a run about to move.
+/// Only an engine its registry names, and that is gone, stalls it.
+#[test]
+fn an_absent_registry_is_not_a_stall() {
+    let under = |engine: Engine| {
+        let nodes = vec![yunta_replay::frame::NodeFrame::sample(
+            &NodeId::from_static("build"),
+            NodeStanding::Reached(NodeState::Running { attempt: 1 }),
+        )];
+        let phase = RunPhase::Running;
+        RunFrame {
+            standing: yunta_replay::frame::run_standing(&phase, &nodes, 0, &engine),
+            phase,
+            nodes,
+            ..RunFrame::sample(&yunta_core::RunId::from_static("run-1"))
+        }
+    };
+    assert!(under(Engine::Unrecorded).moves());
+    assert!(!under(Engine::Dead).moves());
+}
+
+#[test]
+fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
+    // A node id names *which* node stopped; only the sentence the engine
+    // wrote when it stopped the run names *what* that node asked for. A
+    // surface that had to read the log again for it could print a
+    // sentence the frame beside it does not agree with.
+    let workflow = chain();
+    let asked = "node `plan` asked 1 question: `what-changed`";
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("plan"), started(1)),
+        (2, Some("plan"), gate_waiting(None)),
+        (
+            3,
+            None,
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Recorded {
+                    sentence: asked.into(),
+                },
+            ))),
+        ),
+    ]);
+
+    assert_eq!(
+        frame(&workflow, &events, 100).phase,
+        RunPhase::Waiting {
+            on: WaitingOn::Node {
+                node: "plan".into(),
+                on: NodeWait::Gate { external_ref: None },
+                reason: Some(PauseReason::Recorded {
+                    sentence: asked.into(),
+                }),
+            }
+        }
+    );
+}
+
+#[test]
+fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
+    // The run resumed after its last pause, so that sentence describes a
+    // stop the run has already left behind. The node is still parked and
+    // the frame says so, quoting nothing rather than the wrong thing.
+    let workflow = chain();
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("plan"), started(1)),
+        (2, Some("plan"), gate_waiting(None)),
+        (
+            3,
+            None,
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Recorded {
+                    sentence: "token budget exceeded".into(),
+                },
+            ))),
+        ),
+        (
+            4,
+            None,
+            EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
+                checkout: None,
+                policies: Vec::new(),
+                environment: None,
+                tree: None,
+            })),
+        ),
+        (5, Some("build"), started(1)),
+    ]);
+
+    assert_eq!(
+        frame(&workflow, &events, 100).phase,
+        RunPhase::Waiting {
+            on: WaitingOn::Node {
+                node: "plan".into(),
+                on: NodeWait::Gate { external_ref: None },
+                reason: None,
+            }
+        }
+    );
+}
+
+#[test]
+fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
+    let workflow = chain();
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("build"), started(1)),
+        (2, Some("build"), failed("out of budget")),
+        (
+            3,
+            None,
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Recorded {
+                    sentence: "token budget exceeded".into(),
+                },
+            ))),
+        ),
+    ]);
+
+    assert_eq!(
+        frame(&workflow, &events, 100).phase,
+        RunPhase::Waiting {
+            on: WaitingOn::Run {
+                reason: PauseReason::Recorded {
+                    sentence: "token budget exceeded".into(),
+                },
+            }
+        }
+    );
+}
+
+#[test]
+fn a_failed_run_carries_the_failure_its_last_node_failed_recorded() {
+    let workflow = chain();
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("build"), started(1)),
+        (2, Some("build"), failed("criteria still red")),
+        (3, None, run_finished(TerminalState::Failed)),
+    ]);
+
+    assert_eq!(
+        frame(&workflow, &events, 100).phase,
+        RunPhase::Failed {
+            failure: Some(Failure::Message {
+                outcome: "criteria still red".into()
+            }),
+        }
+    );
+}
+
+#[test]
+fn a_promoted_run_names_the_mode_its_signal_suggested() {
+    let workflow = chain();
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("build"), started(1)),
+        (2, Some("build"), finished()),
+        (
+            3,
+            None,
+            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload::new(
+                PromotionCause {
+                    node: "build".into(),
+                    goto: "fix".into(),
+                    failure: Some(Failure::Message {
+                        outcome: "criteria still red".into(),
+                    }),
+                },
+                vec![Fact::bare("criteria still red")].into(),
+                "beta".into(),
+            ))),
+        ),
+        (4, None, run_finished(TerminalState::Promoted)),
+    ]);
+
+    assert_eq!(
+        frame(&workflow, &events, 100).phase,
+        RunPhase::Promoted {
+            to: Some("beta".into()),
+        }
+    );
+}
+
+#[test]
+fn a_parked_phase_says_what_it_waits_on_and_a_moving_one_nothing() {
+    let on = WaitingOn::Run {
+        reason: PauseReason::BudgetExhausted { spent: 5, cap: 4 },
+    };
+    let parked = RunPhase::Waiting { on: on.clone() };
+    assert_eq!(parked.waiting_on(), Some(&on));
+    assert_eq!(RunPhase::Running.waiting_on(), None);
+    assert_eq!(RunPhase::Finished.waiting_on(), None);
+}
+
+#[test]
+fn a_run_paused_on_a_reset_names_its_node_and_the_moment_it_resumes() {
+    let at = Utc.with_ymd_and_hms(2026, 10, 13, 12, 0, 0).unwrap();
+    let phase = RunPhase::Waiting {
+        on: WaitingOn::Run {
+            reason: PauseReason::AwaitingReset {
+                node: NodeId::from_static("build"),
+                at,
+            },
+        },
+    };
+    let (node, resumes) = phase.reset_wait().expect("a run paused on a reset");
+    assert_eq!((node.as_str(), resumes), ("build", at));
+    assert!(RunPhase::Running.reset_wait().is_none());
+}

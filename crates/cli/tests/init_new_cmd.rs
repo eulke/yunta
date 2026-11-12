@@ -24,9 +24,12 @@ fn init_writes_config_gitignore_and_the_mechanism_skill() {
 
     assert!(repo.join(".yunta/config.yaml").is_file());
     assert!(repo.join(".gitignore").is_file());
-    assert!(repo
-        .join(".yunta/skills/yunta-mechanism/SKILL.md")
-        .is_file());
+    let skill =
+        std::fs::read_to_string(repo.join(".yunta/skills/yunta-mechanism/SKILL.md")).unwrap();
+    assert!(
+        skill.contains("`yunta schema <document>`, or `yunta schema` to list them"),
+        "the skill names a document's shape the way `yunta schema` takes it: {skill}"
+    );
 
     let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
     let parsed: yunta_core::yaml::Value = yunta_core::yaml::parse(&config).unwrap();
@@ -294,6 +297,27 @@ fn new_lint_fix_runs_the_projects_lint() {
     assert!(
         written.contains("run: { command: lint }"),
         "the lint step runs the command the project declares: {written}"
+    );
+}
+
+/// A skeleton names the runner the project's config declares, uncommented, as it
+/// runs the `lint` the config declares; a role it does not declare stays
+/// commented, to uncomment once it does.
+#[test]
+fn new_names_the_runner_the_config_declares() {
+    let (_root, repo, home) = runnable_setup();
+    let result = yunta_in!(&repo, &home, &["new", "planned", "--shape", "tasks"]);
+    assert!(result.status.success(), "{}", stderr(&result));
+    let written = std::fs::read_to_string(repo.join(".yunta/workflows/planned.yaml")).unwrap();
+    assert!(
+        written
+            .lines()
+            .any(|line| line.trim_start().starts_with("runner: implementer")),
+        "the declared runner is named: {written}"
+    );
+    assert!(
+        written.contains("# runner: planner  # uncomment once runners: defines this role"),
+        "a runner the config does not declare stays commented: {written}"
     );
 }
 

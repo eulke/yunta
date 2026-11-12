@@ -1,0 +1,12 @@
+␛[2m◌␛[0m ␛[1myunta init␛[0m␛[2m ·␛[0m␛[2m to write ␛[0m␛[2m· in /home/me/project␛[0m
+␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+
+  ␛[2mname        ␛[0m project
+  ␛[2mbase branch ␛[0m main
+  ␛[2mwrites      ␛[0m .yunta/config.yaml, .gitignore, .claude/skills/yunta/SKILL.md
+  ␛[2mecosystem   ␛[0m none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml); declare
+               `commands:` and `baseline.suite` by hand
+
+  ␛[33m▲␛[0m ␛[1mclaude-code␛[0m  unavailable (not on PATH)
+
+  ␛[2mrunners     ␛[0m `implementer`

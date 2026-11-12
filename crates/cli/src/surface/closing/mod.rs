@@ -1,5 +1,5 @@
 //! What a run leaves on the terminal once it stops: the run's page in its
-//! harvest form, drawn by [`RunPage`].
+//! harvest form, render's `page::Run` in its closing scope.
 //!
 //! The page says how the run ended and what holds it, the evidence of
 //! what failed, the facts of the harvest — what it took, where its work
@@ -14,66 +14,41 @@
 //!
 //! This module gathers what the page reads from a stopped run.
 
-use std::path::{Path, PathBuf};
-
 use chrono::{DateTime, Utc};
 use surco::doc::Depth;
+use yunta_core::events::DecisionOn;
 use yunta_core::events::GateWaitingPayload;
-use yunta_core::{Isolation, NodeId, RunId, Workflow};
-use yunta_engine::{run_frame_of, PriorEstimation, RunFrame, RunState, ShownDocument};
+use yunta_core::shown::ShownDocument;
+use yunta_core::{RunId, Workflow};
+use yunta_render::escalation::Decision;
+use yunta_render::page::{Places, Run, RunScope};
+use yunta_replay::frame::RunFrame;
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::RunState;
 
-use crate::commands::status::decision::Beside;
-use crate::error::Outcome;
-use crate::run_page::{failed, Decided, RunPage, Scope};
-
-/// Where the run lived and what it took — what the closing block reports
-/// that the run's own log does not carry.
-#[derive(Clone, Copy)]
-pub(crate) struct Outline<'a> {
-    pub(crate) run_dir: &'a Path,
-    pub(crate) worktree: &'a Path,
-    /// The branch the run started from, as its manifest froze it.
-    pub(crate) base_branch: &'a str,
-    pub(crate) isolation: Isolation,
-    /// Where paths are shown from: the directory this was run in, and
-    /// the home `~` stands for.
-    pub(crate) cwd: &'a Path,
-    pub(crate) home: Option<&'a Path>,
-}
+use crate::output::Outcome;
 
 /// Everything the block needs, gathered from the log as it finally stands.
 pub(crate) struct ClosingEnv<'a> {
     pub(crate) run_id: &'a RunId,
     pub(crate) workflow: &'a Workflow,
     /// The run as its log derives it, once the run has stopped.
-    pub(crate) state: &'a RunState,
+    pub(crate) state: RunState,
     pub(crate) prior: Option<&'a PriorEstimation>,
     pub(crate) now: DateTime<Utc>,
     /// The decision a parked run stopped on, rebuilt from the manifest and
     /// the log. `None` for a pause with no menu to rebuild, and for a run
     /// that is not parked at all.
-    pub(crate) decision: Option<(NodeId, GateWaitingPayload)>,
+    pub(crate) decision: Option<(DecisionOn, GateWaitingPayload)>,
     /// The documents that decision shows, as the run holds them.
     pub(crate) shown: Vec<ShownDocument>,
-    pub(crate) outline: Outline<'a>,
+    pub(crate) places: Places,
 }
 
-/// A stopped run as a person reads it. It owns what its page is drawn from,
-/// so a page can borrow it for as long as a document needs.
+/// A stopped run as a person reads it: its page in the closing scope, which
+/// owns what it is drawn from.
 pub(crate) struct Closing {
-    run_id: RunId,
-    state: RunState,
-    frame: RunFrame,
-    decision: Option<(NodeId, GateWaitingPayload)>,
-    shown: Vec<ShownDocument>,
-    run_dir: PathBuf,
-    worktree: PathBuf,
-    base_branch: String,
-    isolation: Isolation,
-    cwd: PathBuf,
-    home: Option<PathBuf>,
-    /// The process that drove the run is this one, which asks no one.
-    engine: yunta_engine::Engine,
+    page: Run,
 }
 
 impl Closing {
@@ -82,46 +57,31 @@ impl Closing {
     /// from whatever the surface managed to see.
     pub(crate) fn of(env: ClosingEnv<'_>) -> Self {
         // The block is drawn by the process that drove the run.
-        let frame = run_frame_of(
+        let frame = RunFrame::of(
             env.run_id,
             env.workflow,
-            env.state,
+            &env.state,
             env.prior,
-            &yunta_engine::Engine::this(env.now),
+            &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
             env.now,
         );
-        Self::framed(
-            env.run_id,
-            frame,
-            env.state.clone(),
-            env.now,
-            (env.decision, env.shown),
-            &env.outline,
-        )
-    }
-
-    /// The block for `frame`, as the run's log derived it.
-    fn framed(
-        run_id: &RunId,
-        frame: RunFrame,
-        state: RunState,
-        now: DateTime<Utc>,
-        (decision, shown): (Option<(NodeId, GateWaitingPayload)>, Vec<ShownDocument>),
-        outline: &Outline<'_>,
-    ) -> Self {
+        let exit_code = crate::output::exit(frame.standing).code();
+        let decision = env.decision.map(|(on, escalation)| Decision {
+            on,
+            escalation,
+            shown: env.shown,
+        });
         Self {
-            run_id: run_id.clone(),
-            state,
-            frame,
-            decision,
-            shown,
-            run_dir: outline.run_dir.to_path_buf(),
-            worktree: outline.worktree.to_path_buf(),
-            base_branch: outline.base_branch.to_string(),
-            isolation: outline.isolation,
-            cwd: outline.cwd.to_path_buf(),
-            home: outline.home.map(Path::to_path_buf),
-            engine: yunta_engine::Engine::this(now),
+            page: Run {
+                scope: RunScope::Closing { exit_code },
+                depth: Depth::Glance,
+                run_id: env.run_id.clone(),
+                frame,
+                state: env.state,
+                places: env.places,
+                decision,
+                plans: Vec::new(),
+            },
         }
     }
 
@@ -129,45 +89,11 @@ impl Closing {
     /// does: a paused, failed, cancelled or promoted run ran to a stop
     /// that needs a decision, and its detail is already on this block.
     pub(crate) fn outcome(&self) -> Outcome {
-        crate::render::exit(self.frame.standing)
+        crate::output::exit(self.page.frame.standing)
     }
 
     /// The page this block is drawn from.
-    pub(crate) fn page(&self) -> RunPage<'_> {
-        RunPage {
-            scope: Scope::Closing,
-            depth: Depth::Glance,
-            run_id: &self.run_id,
-            engine: self.engine.clone(),
-            frame: &self.frame,
-            state: &self.state,
-            paths: Outline {
-                run_dir: &self.run_dir,
-                worktree: &self.worktree,
-                base_branch: &self.base_branch,
-                isolation: self.isolation,
-                cwd: &self.cwd,
-                home: self.home.as_deref(),
-            },
-            decision: self.decided(),
-            plans: Vec::new(),
-        }
-    }
-
-    /// The decision a parked run stopped on, with what the page says beside
-    /// it already: the record a failed node's evidence quotes.
-    fn decided(&self) -> Option<Decided> {
-        let (node, escalation) = self.decision.as_ref()?;
-        Some(Decided {
-            node: node.clone(),
-            escalation: escalation.clone(),
-            shown: self.shown.clone(),
-            beside: Beside {
-                evidence: failed(&self.frame).any(|(failed_node, _)| failed_node.id == *node),
-            },
-        })
+    pub(crate) fn page(&self) -> &Run {
+        &self.page
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -52,11 +52,12 @@ async fn read_pack_manifest(
     let text = tokio::fs::read_to_string(repo.join(file))
         .await
         .map_err(|error| gap(file, &error))?;
-    yunta_core::yaml::parse::<yunta_core::PackManifest>(&text).map_err(|error| gap(file, &error))
+    yunta_core::PackManifest::read(&text).map_err(|error| gap(file, &error))
 }
 
 /// The commit the lock pins the pack to. A repository with no lock says
-/// nothing about commits, which is not a gap; a lock that cannot be read is.
+/// nothing about commits, which is not a gap; a lock that cannot be read, or
+/// one a newer binary wrote, is.
 async fn locked_commit(
     repo: &Path,
     publisher: &Publisher,
@@ -68,9 +69,10 @@ async fn locked_commit(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (None, None),
         Err(error) => return (None, Some(gap(file, &error))),
     };
-    match yunta_core::yaml::parse::<yunta_core::PackLock>(&text) {
+    match yunta_core::PackLock::read(text.as_bytes()) {
         Ok(lock) => {
             let commit = lock
+                .doc
                 .packs
                 .get(&PackRef::new(publisher.clone(), pack_name.clone()))
                 .map(|entry| entry.commit.clone());

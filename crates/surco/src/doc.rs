@@ -10,8 +10,9 @@
 //! surface already builds, and changes none of them.
 
 use crate::components::{
-    Checklist, Code, Concern, Decision, Diffstat, Evidence, Fields, Furrow, Gist, Headline, Marked,
-    Next, NodeTable, Note, Paths, Problem, Prose, Refusal, Runs, Said, Section, Table,
+    Attention, Card, Checklist, ChoiceList, Code, Concern, Decision, Desk, Diffstat, Evidence,
+    Fields, Furrow, Gist, Headline, Legend, Marked, Next, NodeTable, Note, Paths, Problem, Prose,
+    Refusal, Ribbon, Runs, Said, Section, Table, TypedAnswer,
 };
 use crate::line::Line;
 
@@ -48,11 +49,14 @@ impl Depth {
     }
 }
 
-/// One part of a document.
+/// One part of a document. Not a [`Screen`](crate::components::Screen),
+/// which holds documents, each in its place.
 pub enum Block {
     Headline(Headline),
     /// Where each node of the run stands, under the headline.
     Furrow(Furrow),
+    /// Where each node of the run stands, under its name: a screen's signature.
+    Ribbon(Ribbon),
     /// The page's gist, under the headline.
     Gist(Gist),
     Fields(Fields),
@@ -71,12 +75,27 @@ pub enum Block {
     /// What a change came to, file by file.
     Diffstat(Diffstat),
     Decision(Decision),
+    /// A decision put to a person while they answer it: its question, then its
+    /// options with one pointed at, the words being said for the one chosen, or
+    /// a round of questions; and its keys.
+    Card(Card),
+    /// A plan read at its desk while a person decides on it: what it is, the places
+    /// they can stand on, what is being read, and what is being asked.
+    Desk(Desk),
+    /// A line asked of a person and the answer typed under it.
+    TypedAnswer(TypedAnswer),
+    /// A list a person picks one value from, narrowed by what they type.
+    ChoiceList(ChoiceList),
     Checklist(Checklist),
     /// A problem found in a text, pointed at in its line.
     Problem(Problem),
     /// What a command would not do.
     Refusal(Refusal),
     Next(Next),
+    /// The keys of what is on screen, each with what it does.
+    Legend(Legend),
+    /// What needs a person, and how they answer it.
+    Attention(Attention),
     /// What a whole document is, before anything it says: its name and
     /// the facts beside it.
     Title(crate::components::Title),
@@ -100,6 +119,10 @@ pub enum Block {
     Code(Code),
     /// Lines a surface composed itself, each span carrying its role.
     Lines(Vec<Line>),
+    /// Lines a surface composed, one to a row, which a pointer moves along: a row that
+    /// passes the edge it is drawn at is cut there with the ellipsis, never folded onto
+    /// the row under it. Not [`Block::Lines`], which a pane's edge folds.
+    Rows(Vec<Line>),
 }
 
 macro_rules! block_from {
@@ -115,6 +138,7 @@ macro_rules! block_from {
 block_from!(
     Headline(Headline),
     Furrow(Furrow),
+    Ribbon(Ribbon),
     Gist(Gist),
     Fields(Fields),
     Table(Table),
@@ -125,10 +149,16 @@ block_from!(
     Paths(Paths),
     Diffstat(Diffstat),
     Decision(Decision),
+    Card(Card),
+    Desk(Desk),
+    TypedAnswer(TypedAnswer),
+    ChoiceList(ChoiceList),
     Checklist(Checklist),
     Problem(Problem),
     Refusal(Refusal),
     Next(Next),
+    Legend(Legend),
+    Attention(Attention),
     Title(crate::components::Title),
     Section(Section),
     Fold(crate::components::Fold),
@@ -140,6 +170,30 @@ block_from!(
     Code(Code),
     Lines(Vec<Line>),
 );
+
+/// A block a person answers while it is held: what a terminal fits to the rows it has,
+/// with the cursor where it is typed into. Not [`Block`], which is whatever a document
+/// says; a block is one of these only as [`Block::prompt`] sees it.
+pub enum Prompt<'a> {
+    Card(&'a Card),
+    Desk(&'a Desk),
+    TypedAnswer(&'a TypedAnswer),
+    ChoiceList(&'a ChoiceList),
+}
+
+impl Block {
+    /// This block as the prompt a person answers, when it is one: a card, a desk, a typed
+    /// answer or a choice list.
+    pub fn prompt(&self) -> Option<Prompt<'_>> {
+        match self {
+            Block::Card(card) => Some(Prompt::Card(card)),
+            Block::Desk(desk) => Some(Prompt::Desk(desk)),
+            Block::TypedAnswer(asked) => Some(Prompt::TypedAnswer(asked)),
+            Block::ChoiceList(list) => Some(Prompt::ChoiceList(list)),
+            _ => None,
+        }
+    }
+}
 
 /// What a surface says: its blocks, in the order a reader reads them.
 #[derive(Default)]
@@ -180,6 +234,14 @@ impl Doc {
                 .any(|inner| matches!(inner, Block::Decision(_))),
             _ => false,
         })
+    }
+
+    /// Where the prompt a person answers in this document stands: its first block that is
+    /// a [`Prompt`]. A pane holds it fitted to the rows the other blocks leave.
+    pub fn prompt_at(&self) -> Option<usize> {
+        self.blocks
+            .iter()
+            .position(|block| block.prompt().is_some())
     }
 
     /// What this document says, as blocks another document can hold.

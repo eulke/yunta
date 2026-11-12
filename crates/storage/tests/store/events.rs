@@ -159,3 +159,121 @@ fn purging_a_run_reports_the_rows_it_removed() {
         Purge { rows: 0 }
     );
 }
+
+/// What a reader that already folded a run up to `seq` has not seen: the log past `seq`, in
+/// order, read the way the whole run is read.
+#[test]
+fn events_after_returns_what_events_for_run_returns_past_the_seq() {
+    let (_dir, storage) = open_temp();
+    let run_id = RunId::from("run-1");
+    storage
+        .append(&created_draft("run-1"), &FixedClock)
+        .unwrap();
+    for reason in ["a", "b", "c", "d"] {
+        storage
+            .append(&paused_draft("run-1", reason), &FixedClock)
+            .unwrap();
+    }
+    storage
+        .append(&created_draft("run-2"), &FixedClock)
+        .unwrap();
+
+    let whole = storage.events_for_run(&run_id).unwrap();
+    for seq in whole.iter().map(|event| event.seq) {
+        let past: Vec<_> = whole
+            .iter()
+            .filter(|event| event.seq > seq)
+            .cloned()
+            .collect();
+        assert_eq!(storage.events_after(&run_id, seq).unwrap(), past, "{seq}");
+    }
+    let last = whole.last().unwrap().seq;
+    assert!(storage.events_after(&run_id, last).unwrap().is_empty());
+    let nobody = RunId::from("run-none");
+    assert!(storage
+        .events_after(&nobody, Seq::FIRST)
+        .unwrap()
+        .is_empty());
+}
+
+/// A kind a newer binary wrote, past the seq, comes back as it was written.
+#[test]
+fn events_after_keeps_an_unknown_kind_past_the_seq_verbatim() {
+    let (dir, storage) = open_temp();
+    storage
+        .append(&created_draft("run-1"), &FixedClock)
+        .unwrap();
+    let conn = rusqlite::Connection::open(dir.path().join("yunta.db")).unwrap();
+    conn.execute(
+        "INSERT INTO events (run_id, seq, ts, node_id, kind, payload_json, schema_version, \
+         event_hash) VALUES ('run-1', 2, '2026-09-02T10:00:00+00:00', 'plan', 'future_kind', \
+         '{\"kind\":\"future_kind\",\"novel\":true}', 3, 'unverified')",
+        [],
+    )
+    .unwrap();
+
+    let past = storage
+        .events_after(&RunId::from("run-1"), Seq::FIRST)
+        .unwrap();
+    assert_eq!(past.len(), 1);
+    let EventBody::Unknown(unknown) = &past[0].body else {
+        panic!("the unknown kind is kept: {:?}", past[0].body);
+    };
+    assert_eq!(unknown.kind, "future_kind");
+    assert_eq!(unknown.payload["novel"], serde_json::Value::Bool(true));
+}
+
+/// A corrupt row fails the read that reaches it, as it fails the whole run's, and a read
+/// that starts past it never meets it.
+#[test]
+fn a_corrupt_row_fails_events_after_only_when_it_is_past_the_seq() {
+    let (dir, storage) = open_temp();
+    storage
+        .append(&created_draft("run-1"), &FixedClock)
+        .unwrap();
+    let conn = rusqlite::Connection::open(dir.path().join("yunta.db")).unwrap();
+    conn.execute(
+        "INSERT INTO events (run_id, seq, ts, node_id, kind, payload_json, schema_version, \
+         event_hash) VALUES ('run-1', 2, '2026-09-02T10:00:00+00:00', NULL, 'run_paused', \
+         '{\"kind\":\"run_paused\"}', 1, 'unverified')",
+        [],
+    )
+    .unwrap();
+    storage
+        .append(&paused_draft("run-1", "after"), &FixedClock)
+        .unwrap();
+    let run_id = RunId::from("run-1");
+
+    let reaching = storage.events_after(&run_id, Seq::FIRST);
+    assert!(
+        matches!(reaching, Err(StorageError::CorruptPayload { ref seq, .. }) if seq.get() == 2),
+        "{reaching:?}"
+    );
+    let past = storage.events_after(&run_id, Seq::FIRST.next()).unwrap();
+    assert_eq!(past.len(), 1);
+    assert_eq!(past[0].seq.get(), 3);
+}
+
+/// The async store answers what the store answers.
+#[tokio::test]
+async fn async_events_after_answers_what_the_store_answers() {
+    let (dir, storage) = open_temp();
+    storage
+        .append(&created_draft("run-1"), &FixedClock)
+        .unwrap();
+    storage
+        .append(&paused_draft("run-1", "a"), &FixedClock)
+        .unwrap();
+    let run_id = RunId::from("run-1");
+    let handle = AsyncStorage::open(dir.path().join("yunta.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        handle
+            .events_after(run_id.clone(), Seq::FIRST)
+            .await
+            .unwrap(),
+        storage.events_after(&run_id, Seq::FIRST).unwrap()
+    );
+}

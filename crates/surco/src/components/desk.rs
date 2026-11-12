@@ -2,9 +2,9 @@
 //! can stand on and what the plan says of itself as a whole, what is being read, and what
 //! is being asked. Data: a surface lays it out for a size.
 
-use super::ChoiceRow;
+use super::{ChoiceRow, Legend, Sight};
 use crate::diagram::Diagram;
-use crate::line::Line;
+use crate::doc::Doc;
 
 /// One screen of a plan.
 pub struct Desk {
@@ -57,12 +57,10 @@ pub struct Pane {
     pub edge: Option<String>,
     /// Where it is among the places a person can stand on, said where no rail says it.
     pub place: Option<String>,
-    /// All of it, laid out for the pane's measure.
-    pub lines: Vec<Line>,
-    /// The first of `lines` a person asked to see.
-    pub top: usize,
-    /// One of `lines` that has to be in sight, whatever `top` says.
-    pub keep: Option<usize>,
+    /// All of it, as a document: each surface lays it out at the pane's measure.
+    pub doc: Doc,
+    /// What of it a person asked to see.
+    pub sight: Sight,
 }
 
 /// What is being asked, under what is being read.
@@ -70,13 +68,17 @@ pub struct DeskFoot {
     pub question: String,
     pub row: FootRow,
     /// The keys it answers to, each with what it does.
-    pub keys: Vec<String>,
+    pub legend: Legend,
 }
 
 /// How the question stands.
 pub enum FootRow {
-    /// Open, with its options in the order their numbers pick them.
-    Options(Vec<String>),
+    /// Open, with the options a number picks, in the order their numbers
+    /// pick them, and how many more stand on the card past the last number.
+    Options { named: Vec<String>, more: usize },
     /// One of them about to be chosen, with what it does and what it costs.
     Confirming(ChoiceRow),
 }
+
+#[cfg(test)]
+pub(crate) mod tests;

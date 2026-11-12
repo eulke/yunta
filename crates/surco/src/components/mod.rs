@@ -8,9 +8,16 @@
 //! reader who learned it on one reads it on the next. A block with
 //! nothing to say draws nothing — no heading over an empty list, no row
 //! with an empty value.
+//!
+//! A [`Screen`] is no block: it holds documents in its regions, with what
+//! needs the person and the keys, and each interface lays it out its own
+//! way. The keys a card, a desk or a screen answers to are one [`Legend`],
+//! so a key is said one way wherever a person presses it.
 
+mod attention;
 mod card;
 mod checklist;
+mod choice_list;
 mod concern;
 mod decision;
 mod desk;
@@ -19,16 +26,23 @@ mod document;
 mod evidence;
 mod fields;
 mod headline;
+mod legend;
 mod next;
 mod node_table;
 mod page;
 mod problem;
+mod ribbon;
 mod runs;
 mod said;
+mod screen;
+mod scroll;
 mod table;
+mod typed_answer;
 
+pub use attention::{Answer, Attention};
 pub use card::{Card, CardBody, ChoiceRow, Choices, RoundRow, RoundStanding, TypedRow};
 pub use checklist::{Check, Checklist, Fix, Found};
+pub use choice_list::ChoiceList;
 pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};
 pub use desk::{Desk, DeskFoot, FootRow, Pane, RailGroup, RailRow};
@@ -37,13 +51,18 @@ pub use document::{Against, Code, Fold, Lead, Marked, Marks, Note, Part, Prose, 
 pub use evidence::{Evidence, Whole};
 pub use fields::{Fields, Reads};
 pub use headline::Headline;
+pub use legend::{Binding, Keys, Legend};
 pub use next::Next;
 pub use node_table::{Branch, NodeRow, NodeTable};
 pub use page::{Furrow, Gist};
 pub use problem::{Place, Problem, Refusal, Severity};
+pub use ribbon::{Ribbon, Stretch};
 pub use runs::{Edge, RunLine, Runs};
 pub use said::{PathNote, Paths, Said};
+pub use screen::{Count, Overlay, Region, Screen, ScreenLaid, Side};
+pub use scroll::{Laid, Sight};
 pub use table::{Cell, Column, Holds, Row, Table};
+pub use typed_answer::TypedAnswer;
 
 #[cfg(test)]
 mod catalog;

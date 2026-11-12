@@ -41,7 +41,7 @@ impl RunCtx<'_> {
                 .await?
             }
         };
-        let asking = crate::Asking {
+        let asking = yunta_core::port::DecisionAsked {
             shown: &shown,
             run: self.run_id,
             changed: state.current_change(),
@@ -87,7 +87,7 @@ impl RunCtx<'_> {
             .await?;
         }
         if let Some(registry) = &self.process_registry {
-            registry.asking(Some(crate::process_registry::Asked {
+            registry.asking(Some(yunta_replay::registry::Prompt {
                 node: node.cloned(),
                 since: self.clock.now(),
             }));

@@ -9,9 +9,9 @@
 
 use yunta_core::events::NodeState;
 use yunta_core::{Isolation, Node, NodeId, NodeKind, Workflow};
+use yunta_replay::RunState;
 
 use super::Policy;
-use crate::replay::RunState;
 
 /// Whether the batch `batch` is the moment for the run to look for the
 /// checkout its last unit built in: the run works in a checkout of its

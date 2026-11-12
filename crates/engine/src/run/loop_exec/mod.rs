@@ -23,8 +23,7 @@ mod unstopped;
 
 use yunta_core::events::{Failure, TokenUsage};
 use yunta_core::{Node, NodeKind, PromptSource, ScopeExpansionMode, TasksFile};
-
-use crate::replay::RunState;
+use yunta_replay::RunState;
 
 use super::node_close::fail;
 use super::node_exec::{render_or_fail, NodeEnd};

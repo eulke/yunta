@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::{CommitSha, Isolation, RunId};
 
-use super::{head_commit, run_branch, WorktreeError};
+use super::{head_commit, WorktreeError};
 use crate::git::{self, IS_ANCESTOR};
 use crate::process::Supervision;
 
@@ -157,7 +157,7 @@ impl WorktreeIntegrity {
                  where the run left it). If those commits are gone for good, start a new run \
                  against the tree as it is now.",
                 path = self.path.display(),
-                branch = run_branch(&self.run_id),
+                branch = self.run_id.branch(),
                 base = self.base_commit,
             ),
             Isolation::None => format!(
@@ -205,7 +205,7 @@ async fn require_working_tree(
     Err(match run.isolation {
         Isolation::Worktree => WorktreeError::RunWorktreeLost {
             path: run.path.to_path_buf(),
-            branch: run_branch(run.run_id),
+            branch: run.run_id.branch(),
             detail,
         },
         Isolation::None => WorktreeError::NotACheckout {

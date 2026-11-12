@@ -42,7 +42,7 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
         )
         .build();
 
-    let state = derive(&events);
+    let state = RunState::replay(&events);
     assert!(
         matches!(state.nodes.state("grill"), Some(NodeState::Failed { .. })),
         "a node that failed is failed, whatever artifacts it holds: got {:?}",

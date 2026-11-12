@@ -7,7 +7,8 @@ use yunta_core::events::{
     StoredEvent, TokenUsage,
 };
 use yunta_core::events::{NodeEvent, RunEvent};
-use yunta_engine::{derive, render_events_jsonl};
+use yunta_engine::render_events_jsonl;
+use yunta_replay::RunState;
 use yunta_testkit_core::Log;
 
 fn sample_events() -> Vec<StoredEvent> {
@@ -96,8 +97,8 @@ fn deriving_from_the_jsonl_round_trip_matches_deriving_from_the_original_events(
             "the events themselves round-trip byte-for-byte"
         );
         assert_eq!(
-            derive(&round_tripped),
-            derive(&original),
+            RunState::replay(&round_tripped),
+            RunState::replay(&original),
             "RunState derived from the JSONL must match RunState derived from the DB's events"
         );
     }

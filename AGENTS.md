@@ -14,7 +14,7 @@ root's `//!` maps its crate. When you know a change by its subject and not yet b
 | You are changing | Open |
 |---|---|
 | event kinds, payload fields | `crates/core/src/events/mod.rs` |
-| replay, the log store | `crates/engine/src/replay.rs`, `crates/storage/src/lib.rs` |
+| replay, the log store | `crates/replay/src/lib.rs`, `crates/storage/src/lib.rs` |
 | workflow keys, node kinds, config keys | `crates/core/src/workflow/mod.rs`, `crates/core/src/config/mod.rs` |
 | document shapes | `crates/core/src/shape/mod.rs` |
 | the run loop, gates, child workflows | `crates/engine/src/run/mod.rs` |
@@ -22,7 +22,8 @@ root's `//!` maps its crate. When you know a change by its subject and not yet b
 | scope, scope expansion | `crates/engine/src/scope.rs`, `crates/engine/src/scope_expansion.rs` |
 | the fence, the rail | `crates/core/src/fence.rs`, `crates/core/src/rail/mod.rs` |
 | protected paths, confinement | `crates/core/src/protected.rs`, `crates/core/src/confinement.rs` |
-| run tools, the control plane | `crates/engine/src/run_tools/mod.rs`, `crates/cli/src/commands/mcp.rs` |
+| what can be asked of Yunta | `crates/api/src/lib.rs` |
+| run tools, the control plane | `crates/engine/src/run_tools/mod.rs`, `crates/mcp/src/lib.rs` |
 | the port, capabilities | `crates/core/src/port/mod.rs`, `crates/core/src/capabilities.rs` |
 | adapters | `crates/adapters/src/lib.rs` |
 | Surco, a state word, a glyph, an escape, a block, surface | `crates/surco/src/lib.rs` |

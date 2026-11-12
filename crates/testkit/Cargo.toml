@@ -49,3 +49,5 @@ tokio-util.workspace = true
 # watched on it (`signal`) — the only way a test reaches the behaviors
 # that exist only at a terminal.
 nix = { workspace = true, features = ["term", "signal"] }
+# The size a test gives the pty when it resizes it, set without `unsafe`.
+rustix = { workspace = true, features = ["termios"] }

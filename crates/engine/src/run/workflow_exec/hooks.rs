@@ -12,8 +12,8 @@ use yunta_core::{InputName, MountSpec, Node, Workflow};
 
 use crate::frozen::read::{ChildWorkflow, Source};
 use crate::frozen::FrozenError;
-use crate::replay::RunView;
 use crate::run::BirthArtifact;
+use crate::run_log::RunView;
 
 use super::super::node_close::{fail, fail_with};
 use super::super::node_exec::template_vars;
@@ -162,7 +162,7 @@ fn check_child(
         &|adapter| {
             ctx.adapters
                 .get(adapter)
-                .map(|adapter| crate::check::AdapterFacts {
+                .map(|adapter| yunta_core::check::AdapterFacts {
                     capabilities: adapter.capabilities(),
                     edit_sandbox: adapter.edit_sandbox(),
                 })

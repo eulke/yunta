@@ -116,7 +116,7 @@ fn reach(
         return Reach::EarlierNodeMay;
     }
 
-    let dependencies = crate::modes::dependencies_in_mode(workflow, mode_nodes);
+    let dependencies = yunta_replay::modes::dependencies(workflow, mode_nodes);
     let top = group.map_or(&node.id, |group| &group.id);
     let mut earlier = ancestors(&dependencies, top);
     if let Some(on_failure) = &node.on_failure {

@@ -41,12 +41,20 @@ pub struct Section {
 }
 
 /// What leads a section's title: the mark its subject carries — a
-/// finding's severity — or its place in a numbered list. A title too long
-/// for its line goes on past it.
+/// finding's severity — its place in a numbered list, or the pointer of
+/// sections a person moves through. A title too long for its line goes on
+/// past it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lead {
     Mark(Mark),
     Ordinal(usize),
+    /// The pointer, drawn where it is `on`: a terminal keeps its place before
+    /// every other section of the list so their titles stand in line, as the
+    /// pointer of a list of runs does; a file draws it before the one pointed
+    /// at alone.
+    Pointer {
+        on: bool,
+    },
 }
 
 /// A paragraph, wrapped to the line by whoever draws it.

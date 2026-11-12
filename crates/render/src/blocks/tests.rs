@@ -4,7 +4,6 @@ use surco::components::DecisionOption;
 use surco::golden::assert_golden;
 use surco::look::Look;
 use yunta_core::RunId;
-use yunta_testkit_core::spell;
 
 fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/blocks")
@@ -26,7 +25,7 @@ fn a_decision_prints_one_command_per_option_with_the_handle() {
             asks: Some("what to change".to_string()),
         },
     ];
-    let decision = super::decision::here(&RunId::from_static("7E5PH4"), options, &*spell());
+    let decision = super::decision::here(&RunId::from_static("7E5PH4"), options);
     let look = Look::plain();
     let drawn: Vec<String> = surco::surface::Terminal::on(look)
         .block(&decision.into())

@@ -1,0 +1,4 @@
+␛[38;2;142;136;127mfilter ␛[0m␛[1;38;2;255;255;255mn␛[0m
+  one-node  one command whose exit code is the check
+␛[1;38;2;220;148;234;48;2;48;36;58m▸␛[0m␛[48;2;48;36;58m ␛[0m␛[1;38;2;255;255;255;48;2;48;36;58mlint-fix  ␛[0m␛[48;2;48;36;58ma check, and an agent that fixes what it finds␛[0m␛[48;2;48;36;58m␛[K␛[0m
+␛[38;2;142;136;127m↑↓ move · type to filter · enter chooses · esc takes the first␛[0m

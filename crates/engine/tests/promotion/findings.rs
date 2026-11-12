@@ -84,7 +84,7 @@ fn inherited_findings_dedup_the_way_the_frame_counts_them() {
             .into_iter()
             .map(|posted| posted.finding)
             .collect();
-    let counted: Vec<String> = yunta_engine::dedup_findings(&standing)
+    let counted: Vec<String> = yunta_replay::dedup_findings(&standing)
         .iter()
         .map(written_title)
         .collect();
@@ -136,7 +136,7 @@ async fn a_successor_holds_its_predecessors_unsettled_findings_as_the_runs_own()
         "the run's own, so its gates show it and a person can settle it"
     );
     assert!(
-        !yunta_engine::derive(&events).woken(),
+        !yunta_replay::RunState::replay(&events).woken(),
         "holding what it was born with is no wake"
     );
 }

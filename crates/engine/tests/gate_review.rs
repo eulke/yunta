@@ -9,8 +9,10 @@
 use yunta_core::events::{
     ArtifactId, Asks, Claim, EventPayload, GateEvent, NodeEvent, Refusal, SessionEvent, Shown,
 };
+use yunta_core::refusal::GateRefusal;
+use yunta_core::shown::ShownContent;
 use yunta_core::{ArtifactKind, HeldEntry};
-use yunta_engine::{current_escalation, RunError, RunReport, RunTerminal, ShownContent};
+use yunta_engine::{current_escalation, RunError, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
 mod common;
@@ -94,7 +96,7 @@ fn held_plan(bench: &Bench) -> Shown {
     let tasks = ArtifactId::Interpreted {
         kind: ArtifactKind::Tasks,
     };
-    let state = yunta_engine::derive(&bench.events());
+    let state = yunta_replay::RunState::replay(&bench.events());
     let held = state
         .artifacts
         .latest(&tasks, Some(&"plan".into()))
@@ -185,7 +187,7 @@ async fn an_option_that_sends_the_plan_back_asks_what_should_change() {
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
+        &yunta_replay::RunState::replay(&bench.events()),
     )
     .await
     .unwrap()
@@ -228,7 +230,12 @@ async fn a_correction_without_words_is_refused_wherever_it_comes_from() {
     let bench = parked(REVIEWED_PLAN, PLANNER).await;
     let refused = answer_parked(&bench, "adjust").await;
     assert!(
-        matches!(refused, Err(yunta_engine::ResolveGateError::Unsaid { .. })),
+        matches!(
+            refused,
+            Err(yunta_engine::ResolveGateError::Refused(
+                GateRefusal::Unsaid { .. }
+            ))
+        ),
         "{refused:?}"
     );
 

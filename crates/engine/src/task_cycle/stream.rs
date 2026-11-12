@@ -4,6 +4,10 @@
 //! here — appended as the stream carries it, so a concurrent `status` sees
 //! the live session rather than a summary written at the end. The terminal
 //! outcome the fold returns is what ends the read loop.
+//!
+//! A note leaves by two doors: the log gets its size and digest, and its
+//! words, with every secret the session holds taken out, go to whoever
+//! watches the run ([`crate::said`]) and to nothing that lasts.
 
 use std::time::Duration;
 
@@ -90,6 +94,8 @@ pub(super) struct AgentEventCtx<'a> {
     pub(super) rails: Option<&'a SessionRails>,
     /// What the session was opened to reach, recorded with the session.
     pub(super) confinement: yunta_core::events::ConfinementRecord,
+    /// What takes every secret the session holds out of what it says.
+    pub(super) redactor: &'a yunta_core::Redactor,
 }
 
 /// What one session's stream is read against: the adapter its events come
@@ -104,6 +110,9 @@ pub(super) struct Terms<'a> {
     /// Whether the adapter counts the token cap while the session runs, as
     /// `counts_tokens_mid_session` answers it once for the session.
     pub(super) counts_cap_mid_session: bool,
+    /// What takes every secret the session holds out of what it says,
+    /// built from its request before the request is handed to the adapter.
+    pub(super) redactor: yunta_core::Redactor,
 }
 
 /// What a session's stream folds into while it is read.
@@ -155,6 +164,7 @@ pub(super) async fn read_stream(
         arrivals: opening.arrivals.unwrap_or(&no_run_tools),
         rails: opening.rails,
         confinement: terms.confinement.clone(),
+        redactor: &terms.redactor,
     };
     let mut stream = session.events();
     loop {
@@ -351,29 +361,46 @@ async fn tool_use(
 }
 
 /// Records a note the session wrote, as its size and digest and never its
-/// content.
+/// content, then hands its words, redacted, to whoever watches the run. A
+/// dispatch with no observer records nothing and hands nothing over.
 async fn note(ctx: &AgentEventCtx<'_>, text: String) -> Result<(), DispatchError> {
-    emit_audit(
-        ctx.audit,
-        EventPayload::Session(SessionEvent::Message(
-            yunta_core::events::AgentMessagePayload {
-                message_type: yunta_core::events::AgentMessageType::Note,
-                tool_name: None,
-                action: None,
-                target: None,
-                input_tokens: None,
-                output_tokens: None,
-                cached_input_tokens: None,
-                // A mechanical size+digest summary, never the content —
-                // the log must not be able to carry a secret the note
-                // contained.
-                note: Some(yunta_core::events::NoteDigest::of(&text)),
-                text: None,
-            },
-        )),
-    )
-    .await
-    .map_err(DispatchError::Audit)
+    let Some((observer, node_id)) = ctx.audit else {
+        return Ok(());
+    };
+    let seq = observer
+        .record(
+            node_id,
+            EventPayload::Session(SessionEvent::Message(
+                yunta_core::events::AgentMessagePayload {
+                    message_type: yunta_core::events::AgentMessageType::Note,
+                    tool_name: None,
+                    action: None,
+                    target: None,
+                    input_tokens: None,
+                    output_tokens: None,
+                    cached_input_tokens: None,
+                    // A mechanical size+digest summary, never the content —
+                    // the log must not be able to carry a secret the note
+                    // contained.
+                    note: Some(yunta_core::events::NoteDigest::of(&text)),
+                    text: None,
+                },
+            )),
+        )
+        .await
+        .map_err(DispatchError::Audit)?;
+    // The stream guard fails any line before the opening, so a note always
+    // has its session.
+    if let Some(session_id) = ctx.opened.clone() {
+        let spoken = crate::said::Spoken {
+            session_id,
+            task_id: ctx.task.cloned(),
+            seq,
+            text: ctx.redactor.text(&text),
+        };
+        observer.said(node_id, spoken);
+    }
+    Ok(())
 }
 
 /// Records what the CLI reported it spent and folds it into the running

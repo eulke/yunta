@@ -19,8 +19,9 @@ use yunta_core::events::{
     BaselineOrigin, Failure, FindingCause, FindingEvent, FindingSays, RunEvent, ScopeAsker,
     TaskEvent,
 };
+use yunta_core::port::HumanInteraction;
 use yunta_core::ModeName;
-use yunta_engine::{BirthArtifact, BirthOrigin, HumanInteraction, RunReport, RunTerminal};
+use yunta_engine::{BirthArtifact, BirthOrigin, RunReport, RunTerminal};
 use yunta_testkit::{baselines, Bench, ScriptedInteraction};
 use yunta_testkit_core::{FixedClock, Log, SeqIdSource};
 

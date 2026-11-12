@@ -1,10 +1,9 @@
 //! What is ready to run, and what it means when nothing is.
 
-use yunta_core::events::PauseReason;
+use yunta_core::events::{NodeState, PauseReason};
 use yunta_core::{DefaultOnFailure, NodeId};
 
 use super::{is_gate, Board, Decision};
-use crate::replay::NodeState;
 
 /// What is ready now, and what it means when nothing is: every node
 /// finished closes the run, and anything else is stuck behind something

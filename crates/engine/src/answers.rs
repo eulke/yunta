@@ -16,6 +16,7 @@ use yunta_core::events::{
     ArtifactId, Channel, EventPayload, QuestionsAnsweredPayload, QuestionsAskedPayload,
     RecordedOrigin, StoredEvent,
 };
+use yunta_core::refusal::AnswersRefusal;
 use yunta_core::{
     Answer, AnswersFile, ArtifactKind, Clock, ContentHash, NodeId, QuestionsFile, Redactor,
     Responder, RunId,
@@ -163,26 +164,36 @@ async fn write(
     })
 }
 
-/// Why a reply from outside the run did not reach its log.
+/// Why a reply from outside the run did not reach its log: what the run
+/// refuses, or what failed below.
 #[derive(Debug, thiserror::Error)]
 pub enum AnswerQuestionsError {
-    /// The node has no open round. Either it never asked, or its
-    /// questions are already answered — and a surface answering a round
-    /// that closed would be recording a second reply to it.
-    #[error(
-        "node `{node}` is not waiting on questions: it asked none, or the ones it asked are \
-         already answered"
-    )]
-    NothingAsked { node: NodeId },
+    /// What the run, or the reply, makes Yunta refuse.
+    #[error(transparent)]
+    Refused(#[from] AnswersRefusal),
     /// The run no longer holds the document the round asked from, or
     /// holds different bytes under that identity. A reply then answers
     /// a different document than the one that was asked.
     #[error("{0}")]
     Unreadable(String),
-    #[error(transparent)]
-    Answers(#[from] AnswersError),
+    #[error("the answers could not be written")]
+    Write(#[source] AcceptError),
+    #[error("the answers could not be rendered")]
+    Render(#[source] yunta_core::yaml::YamlError),
     #[error(transparent)]
     Storage(#[from] yunta_storage::StorageError),
+}
+
+/// A reply `record` refused is the run's refusal; one it could not write or
+/// render failed below it.
+impl From<AnswersError> for AnswerQuestionsError {
+    fn from(error: AnswersError) -> Self {
+        match error {
+            AnswersError::Refused(report) => AnswersRefusal::Rejected(report).into(),
+            AnswersError::Write(source) => AnswerQuestionsError::Write(source),
+            AnswersError::Render(source) => AnswerQuestionsError::Render(source),
+        }
+    }
 }
 
 /// Records a reply to `node`'s open questions from a process that never
@@ -214,6 +225,19 @@ pub async fn answer_questions(
     Ok(record(&log, run_dir, node, &questions, reply).await?)
 }
 
+/// The questions `node` asked and nobody has answered, read from the document
+/// it asked from: what a surface puts to a person who answers the round from
+/// another process.
+pub async fn asked_questions(
+    run_dir: &Path,
+    events: &[StoredEvent],
+    node: &NodeId,
+) -> Result<QuestionsFile, AnswerQuestionsError> {
+    asked_from(run_dir, events, node)
+        .await
+        .map(|(_, questions)| questions)
+}
+
 /// The round `node` is waiting on and the document it asked from, as the
 /// run holds it.
 ///
@@ -228,7 +252,7 @@ pub(crate) async fn asked_from(
     node: &NodeId,
 ) -> Result<(QuestionsAskedPayload, QuestionsFile), AnswerQuestionsError> {
     let asked = open_round(events, node)
-        .ok_or_else(|| AnswerQuestionsError::NothingAsked { node: node.clone() })?;
+        .ok_or_else(|| AnswersRefusal::NothingAsked { node: node.clone() })?;
     let held = RunArtifacts::of(run_dir, events);
     let identity = ArtifactId::Interpreted {
         kind: ArtifactKind::Questions,
@@ -252,7 +276,7 @@ pub(crate) async fn asked_from(
         ))
     })?;
     let file = yunta_core::shape::read::<QuestionsFile>(&bytes, crate::artifacts::describe(found))
-        .map_err(|report| AnswerQuestionsError::Answers(AnswersError::Refused(report)))?;
+        .map_err(|report| AnswerQuestionsError::from(AnswersRefusal::Rejected(report)))?;
     Ok((asked, file))
 }
 

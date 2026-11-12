@@ -1,0 +1,14 @@
+ yunta                                        ◆ 1 needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆┌ confirm ─────────────────────────────────────────────┐
+ ┄│   cancel Q78GRR? It stops, with everything under it. │┄
+  │                                                      │
+ n│ next                                                 │
+ ▸│   yunta cancel Q78GRR   does the same at a shell     │s
+  └──────────────────────────────────────────────────────┘
+   the newest closed 0s ago
+
+ next
+ … 3 more lines
+ ◆ Q78GRR needs you: yunta status Q78GRR (Plan registered.…
+ enter confirms · esc goes back

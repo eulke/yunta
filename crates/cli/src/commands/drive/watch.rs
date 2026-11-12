@@ -6,9 +6,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::CliError;
 use crate::output::Mode;
-use crate::surface::{Curtain, Diagnostics, Surface, SurfaceEnv};
+use crate::surface::{Curtain, Diagnostics, EngineReading, Surface, SurfaceEnv};
 
 use super::{Driving, Presentation};
+use yunta_api::HeldRun;
 
 /// Everything this invocation holds while the run is being drawn: the
 /// surface the progress goes on, the observer the engine feeds it
@@ -21,10 +22,8 @@ use super::{Driving, Presentation};
 /// and a run with no surface has none of it.
 pub(super) struct Watching {
     pub(super) surface: Option<Surface>,
-    pub(super) observer: Option<std::sync::Arc<dyn yunta_engine::RunObserver>>,
+    pub(super) observer: Option<std::sync::Arc<dyn yunta_core::port::RunObserver>>,
     pub(super) asking: crate::human_interaction::ConsoleInteraction,
-    /// The invocation's first stage, which this run answers to.
-    pub(super) cancel: CancellationToken,
     /// The task that tells the person their interrupt arrived. Kept so
     /// it dies with the arrangement it belongs to.
     announcing: Option<JoinHandle<()>>,
@@ -58,27 +57,36 @@ impl Drop for Watching {
 /// The order is the arrangement's own: what announces the interrupt is
 /// armed once there is a surface for it to say so through, because the
 /// line it raises belongs above the region rather than around it.
-pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Watching, CliError> {
+pub(super) async fn watch(
+    env: &Driving<'_>,
+    held: &HeldRun<'_>,
+    shown: &Presentation,
+) -> Result<Watching, CliError> {
     let surface = if env.output == Mode::Json {
         None
     } else {
-        Some(
-            Surface::open(SurfaceEnv {
-                run_id: &env.prepared.run_id,
-                manifest: env.manifest,
-                prior: env.prior.as_ref(),
-                storage: env.storage,
-                clock: std::sync::Arc::new(env.ctx.clock),
+        // The run's creation is written before any observer exists, so the
+        // first thing the surface knows is read once, here.
+        let log = env.project.event_log().await?;
+        let seed = log.events(&held.id).await?;
+        Some(Surface::open(
+            SurfaceEnv {
+                run_id: &held.id,
+                manifest: &held.manifest,
+                prior: held.prior.as_ref(),
+                log: &log,
+                clock: std::sync::Arc::clone(&env.project.workspace.clock),
                 delivery: shown.delivery,
                 glyphs: shown.glyphs,
-            })
-            .await?,
-        )
+                engine: EngineReading::This,
+            },
+            seed,
+        ))
     };
-    // The token is the invocation's, installed when its `Context`
-    // loaded; what this arranges is the line the person reads when they
+    // The token is the invocation's, installed when the shell read the
+    // process; what this arranges is the line the person reads when they
     // press Ctrl-C, which belongs above the region the surface pins.
-    let cancel = env.ctx.cancellation().clone();
+    let cancel = env.stop.work().clone();
     Ok(Watching {
         observer: surface.as_ref().and_then(Surface::observer),
         asking: crate::human_interaction::ConsoleInteraction::new(
@@ -89,16 +97,15 @@ pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Wat
                 .as_ref()
                 .map_or_else(Diagnostics::none, Surface::diagnostics),
             cancel.clone(),
-            env.ctx.env.clone(),
+            env.project.workspace.env.clone(),
             surface.as_ref().is_some_and(Surface::chronicles),
         ),
         announcing: Some(announce(
             surface
                 .as_ref()
                 .map_or_else(Diagnostics::none, Surface::diagnostics),
-            cancel.clone(),
+            cancel,
         )),
-        cancel,
         surface,
     })
 }
@@ -114,7 +121,7 @@ fn announce(diagnostics: Diagnostics, cancel: CancellationToken) -> JoinHandle<(
     tokio::spawn(async move {
         cancel.cancelled().await;
         diagnostics
-            .raise("interrupt received: stopping the run (sessions get interrupt, then kill)")
+            .raise(yunta_render::ending::STOPPING_AT_INTERRUPT)
             .await;
     })
 }

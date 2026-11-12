@@ -15,9 +15,13 @@ use crate::NonEmpty;
 /// variant's display is its code; the words a reader sees are the caller's.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Refusal {
-    /// The option is not on the menu, and `offered` lists the options it holds.
+    /// The option is not on the menu, and `offered` lists the options it holds,
+    /// in the order it offers them.
     #[error("off_menu")]
-    OffMenu { chosen: OptionId, offered: String },
+    OffMenu {
+        chosen: OptionId,
+        offered: Vec<OptionId>,
+    },
     /// The option asks for words, and the answer has none.
     #[error("unsaid")]
     Unsaid { chosen: OptionId, asks: Asks },
@@ -264,5 +268,23 @@ impl std::ops::Deref for Escalation {
 
     fn deref(&self) -> &GateWaitingPayload {
         &self.0
+    }
+}
+
+/// Whom a parked run's decision belongs to: a node, or the run itself. Not an
+/// `Option<NodeId>`: beside a decision that may not exist, `None` would read as none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionOn {
+    Node(NodeId),
+    Run,
+}
+
+impl DecisionOn {
+    /// The node the decision is recorded against, when one owns it.
+    pub fn node(&self) -> Option<&NodeId> {
+        match self {
+            DecisionOn::Node(node) => Some(node),
+            DecisionOn::Run => None,
+        }
     }
 }

@@ -13,12 +13,11 @@
 //! cargo test runs the stubs only.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use yunta_core::commit_message::CommitMessage;
 
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use yunta_core::step::Spell;
+use yunta_core::commit_message::CommitMessage;
 use yunta_core::{CommitSha, GitHubRepo, Responder, Secret};
 
 use yunta_core::port::{
@@ -48,7 +47,6 @@ pub struct GitHubForge {
     repo: GitHubRepo,
     token: Secret<String>,
     base_url: String,
-    pub(super) spell: Spell,
 }
 
 /// How a [`GitHubForge`] is built: the public API and the default
@@ -59,7 +57,6 @@ pub struct GitHubForgeBuilder {
     token: Secret<String>,
     base_url: String,
     timeout: Duration,
-    spell: Spell,
 }
 
 impl GitHubForgeBuilder {
@@ -88,7 +85,6 @@ impl GitHubForgeBuilder {
             repo: self.repo,
             token: self.token,
             base_url: self.base_url.trim_end_matches('/').to_string(),
-            spell: self.spell,
         })
     }
 }
@@ -102,20 +98,19 @@ pub(super) struct OpenPr {
 }
 
 impl GitHubForge {
-    /// A builder for a forge that writes its next steps with `spell`.
-    pub fn configure(repo: GitHubRepo, token: Secret<String>, spell: Spell) -> GitHubForgeBuilder {
+    /// A builder for a forge on `repo`, which `token` reaches.
+    pub fn configure(repo: GitHubRepo, token: Secret<String>) -> GitHubForgeBuilder {
         GitHubForgeBuilder {
             repo,
             token,
             base_url: "https://api.github.com".to_string(),
             timeout: REQUEST_TIMEOUT,
-            spell,
         }
     }
 
     /// Against the public API, with the default patience.
-    pub fn new(repo: GitHubRepo, token: Secret<String>, spell: Spell) -> Result<Self, ForgeError> {
-        Self::configure(repo, token, spell).build()
+    pub fn new(repo: GitHubRepo, token: Secret<String>) -> Result<Self, ForgeError> {
+        Self::configure(repo, token).build()
     }
 
     pub(super) fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
@@ -327,7 +322,7 @@ impl Forge for GitHubForge {
         let run_id = req.run_id.as_str();
         // Drawn before anything is read or committed, so a description the forge
         // would refuse leaves the branch as it was.
-        let body = super::gate_body(req, &*self.spell)?;
+        let body = super::gate_body(req)?;
         let existing = self.find_open_pr(&req.branch, run_id).await?;
         if existing.is_none() {
             let base_sha = self.base_branch_sha(&req.base_branch).await?;
@@ -335,7 +330,7 @@ impl Forge for GitHubForge {
         }
         // Every lap commits what it decides on, so a pull request reused
         // after a request for changes shows the correction.
-        for (path, content) in super::gate_files(req, &*self.spell) {
+        for (path, content) in super::gate_files(req) {
             let message =
                 CommitMessage::of_published(&req.run_id, &req.decision.node, &path).text();
             self.commit_artifact(&path, &content, &req.branch, &message)

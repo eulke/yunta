@@ -2,7 +2,8 @@
 //! to. The pure half of the node-level scope check; the imperative call
 //! site lives in `run::node_close`.
 
-use yunta_engine::{audits, node_scope_in_force, RunState};
+use yunta_engine::{audits, node_scope_in_force};
+use yunta_replay::RunState;
 
 /// What `node` is held to on a run whose log granted it nothing and
 /// recorded no start.

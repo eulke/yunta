@@ -1,0 +1,24 @@
+ yunta                                                            ? 1 needs you
+................................................................................
+ ? runs of this repository ; 1 needs you ; 1 closed
+ ..............................................................................
+
+ needs you, oldest first
+ * ? Q78GR+ confirm -------------------------------------------------+       0s
+          |   cancel Q78GRR? It stops, with everything under it.     |
+   the new|                                                          |
+          | next                                                     |
+ next     |   yunta cancel Q78GRR   does the same at a shell         |
+   yunta s+----------------------------------------------------------+
+   yunta list --runs --full   lists the closed runs too
+
+
+
+
+
+
+
+
+
+ ? Q78GRR needs you: yunta status Q78GRR (Plan registered. Approve?)
+ enter confirms ; esc goes back

@@ -2,7 +2,7 @@
 //! binary, same style `stats_cmd.rs`/`run_flow.rs` use — this is what
 //! proves the CLI wiring (writing `receipt.md`/`receipt.json` to
 //! `run.dir`, the `--json` flag, refusing a non-terminal run) on top of
-//! `yunta_engine::receipt`'s own unit-tested derivation.
+//! `yunta_replay::receipt`'s own unit-tested derivation.
 
 use yunta_testkit::{handle, init_repo, run_id_from, stderr, stdout, unwrapped, write, yunta_in};
 
@@ -90,6 +90,45 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
     let parsed: serde_json::Value = serde_json::from_str(&written_json).unwrap();
     assert_eq!(parsed["run_id"], run_id);
     assert_eq!(parsed["terminal_state"], "done");
+}
+
+/// The `receipt.md` beside a run is a Markdown file whatever terminal asked
+/// for it: a later node hands it to a forge as the pull request's body, which
+/// draws the receipt with the Unicode set, so the file says what the run
+/// removed with that set's minus too, not the hyphen an ASCII terminal reads.
+#[test]
+fn the_receipt_file_is_the_same_whatever_terminal_asks_for_it() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    write(&repo.join("kept.txt"), "one\ntwo\n");
+    yunta_testkit::git(&repo, &["add", "kept.txt"]);
+    yunta_testkit::git(&repo, &["commit", "-q", "-m", "a file to cut"]);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/workflows/cut.yaml"),
+        "name: cut\nnodes:\n  - id: cut\n    kind: bash\n    run: \"printf 'one\\\\n' > kept.txt\"\n",
+    );
+    let run_out = yunta_in!(&repo, &home, &["run", ".yunta/workflows/cut.yaml"]);
+    assert!(run_out.status.success(), "{}", stderr(&run_out));
+    let run_id = run_id_from(&run_out);
+    let written = |glyphs: &str| {
+        let vars = [("YUNTA_GLYPHS".to_string(), glyphs.to_string())];
+        let out = yunta_in!(&repo, &home, &["receipt", &run_id], &vars);
+        assert!(out.status.success(), "{}", stderr(&out));
+        let run_dir = home.join("runs").join(&run_id);
+        std::fs::read_to_string(run_dir.join("receipt.md")).unwrap()
+    };
+
+    let unicode = written("unicode");
+    assert!(
+        unicode
+            .lines()
+            .any(|line| line == "- changed: 1 file, \u{2212}1"),
+        "the file says the line the run removed with the Unicode minus:\n{unicode}"
+    );
+    assert_eq!(written("ascii"), unicode);
 }
 
 #[test]

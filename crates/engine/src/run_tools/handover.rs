@@ -24,10 +24,11 @@ use std::path::{Path, PathBuf};
 use yunta_core::diagnostic::{Diagnostic, Named, Problem, RunFault, Subject};
 use yunta_core::events::{ExecutionEnvironment, TaskProbe};
 use yunta_core::{CommitSha, Spec, SpecFile, Task, TaskId, TasksFile};
+use yunta_replay::RunState;
 
 use super::session::{RunToolError, SessionTools};
 use super::words;
-use crate::replay::{RunState, RunView};
+use crate::run_log::RunView;
 use crate::task_cycle::{probe, CriterionRun};
 
 /// What a spec's handover found: every rule it breaks, and how each test

@@ -1,29 +1,45 @@
 //! A plan's desk on a terminal of an exact size. Every expected row here is written by
 //! hand, and what a row ends in spaces is gone before it is compared.
 
-use crate::components::{ChoiceRow, Desk, DeskFoot, FootRow, Pane, RailGroup, RailRow};
+use crate::components::{
+    ChoiceRow, Desk, DeskFoot, FootRow, Laid, Legend, Pane, RailGroup, RailRow, Sight,
+};
+use crate::doc::{Block, Doc};
 use crate::glyphs::Glyphs;
 use crate::line::{Fill, Line};
 use crate::look::{Look, Width};
 use crate::paint::Paint;
+use crate::surface::Placed;
+use crate::surface::Terminal;
 use crate::width::cell_width;
 
-fn look(glyphs: Glyphs, cells: usize) -> Look {
+pub(super) fn look(glyphs: Glyphs, cells: usize) -> Look {
     Look {
         glyphs,
         paint: Paint::Plain,
-        width: Width::whole(cells),
+        width: Width::exact(cells),
+        motion: crate::motion::Motion::Moves,
     }
 }
 
 /// Rows of the pane, numbered, as many as asked.
-fn numbered(rows: usize) -> Vec<Line> {
+pub(in crate::surface::terminal) fn numbered(rows: usize) -> Vec<Line> {
     (1..=rows)
         .map(|at| Line::new().plain(format!("line {at}")))
         .collect()
 }
 
-fn stop(lead: &str, name: &str, pointed: bool) -> RailRow {
+/// A desk whose pane has `rows` numbered rows and a pointer on the row at `at`, which
+/// it keeps in sight.
+fn pointing(rows: usize, at: usize) -> Desk {
+    let mut lines = numbered(rows);
+    lines[at] = Line::new().plain(format!("{} line {}", Glyphs::Unicode.pointer(), at + 1));
+    let mut pointing = desk(lines);
+    pointing.pane.sight.follows_pointer = true;
+    pointing
+}
+
+pub(super) fn stop(lead: &str, name: &str, pointed: bool) -> RailRow {
     RailRow::Stop {
         lead: lead.to_string(),
         name: name.to_string(),
@@ -68,7 +84,7 @@ fn rail() -> Vec<RailGroup> {
     ]
 }
 
-fn desk(lines: Vec<Line>) -> Desk {
+pub(in crate::surface::terminal) fn desk(lines: Vec<Line>) -> Desk {
     Desk {
         title: vec![
             "plan".to_string(),
@@ -84,25 +100,26 @@ fn desk(lines: Vec<Line>) -> Desk {
             title: "Store packs".to_string(),
             edge: Some("step 1 of 2".to_string()),
             place: Some("task 1 of 2".to_string()),
-            lines,
-            top: 0,
-            keep: None,
+            doc: Doc::new().with(Block::Lines(lines)),
+            sight: Sight::default(),
         },
         foot: DeskFoot {
             question: "Plan registered. Approve?".to_string(),
-            row: FootRow::Options(vec!["approve".to_string(), "adjust".to_string()]),
-            keys: vec![
-                "j k task".to_string(),
-                "p proof".to_string(),
-                "esc back".to_string(),
-            ],
+            row: FootRow::Options {
+                named: vec!["approve".to_string(), "adjust".to_string()],
+                more: 0,
+            },
+            legend: Legend::new()
+                .key("j k", "task")
+                .key("p", "proof")
+                .key("esc", "back"),
         },
     }
 }
 
-fn drawn(desk: &Desk, look: &Look, rows: usize) -> Vec<String> {
-    desk.drawn(look, rows)
-        .placed
+/// `desk` as a terminal `rows` high holds it, over its last row: each row's text.
+pub(super) fn drawn(desk: &Desk, look: &Look, rows: usize) -> Vec<String> {
+    desk.drawn(look, rows - 1)
         .lines
         .iter()
         .map(|row| row.text().trim_end().to_string())
@@ -149,6 +166,11 @@ fn options_row(cells: usize) -> String {
     )
 }
 
+/// What a desk drawn on a terminal laid out of its pane.
+fn laid_pane(laid: &Placed) -> Laid {
+    laid.laid.expect("a desk lays its pane out")
+}
+
 #[test]
 fn a_wide_terminal_has_the_head_the_rail_the_pane_and_the_foot() {
     let rows = drawn(&desk(numbered(3)), &look(Glyphs::Unicode, 100), 24);
@@ -192,16 +214,16 @@ fn the_panes_measure_follows_the_terminal() {
     assert_eq!(cells(300), 120, "and it is never wider than a line is read");
 }
 
-/// The rows it was asked for, less the one a prompt never draws on, whatever it holds.
+/// The rows it was asked for, whatever it holds.
 #[test]
 fn it_fills_the_rows_it_is_given_and_nothing_reaches_the_last_column() {
     let desks = [desk(Vec::new()), desk(numbered(500))];
     for desk in &desks {
         for cells in [20, 40, 60, 89, 90, 100, 118, 200, 300] {
-            for rows in 2..=60 {
+            for rows in 1..=59 {
                 let drawn = desk.drawn(&look(Glyphs::Unicode, cells), rows);
-                assert_eq!(drawn.placed.lines.len(), rows - 1, "{cells}x{rows}");
-                for line in &drawn.placed.lines {
+                assert_eq!(drawn.lines.len(), rows, "{cells}x{rows}");
+                for line in &drawn.lines {
                     let width = cell_width(&line.text());
                     assert!(width < cells, "{cells}x{rows}: {} {width}", line.text());
                 }
@@ -235,23 +257,6 @@ fn a_short_terminal_keeps_the_pointer_the_pane_and_the_question() {
     );
 }
 
-/// A rail longer than the terminal keeps the row pointed at in sight.
-#[test]
-fn a_long_rail_follows_the_pointer() {
-    let mut long = desk(numbered(1));
-    long.rail = vec![RailGroup {
-        title: Some("steps".to_string()),
-        rows: (0..40)
-            .map(|at| stop("", &format!("task-{at}"), at == 30))
-            .collect(),
-    }];
-    let rows = drawn(&long, &look(Glyphs::Unicode, 100), 14);
-    assert!(
-        rows.iter().any(|row| row.contains("▸ task-30")),
-        "{rows:#?}"
-    );
-}
-
 /// Below ninety columns the pane has the screen, and says where it is, which the rail
 /// says when there is one.
 #[test]
@@ -279,20 +284,22 @@ fn a_narrow_terminal_has_no_rail_and_the_pane_says_which_task() {
 #[test]
 fn the_pane_scrolls_and_counts_what_is_below_it() {
     let mut scrolled = desk(numbered(30));
-    scrolled.pane.top = 5;
-    let laid = scrolled.drawn(&look(Glyphs::Unicode, 100), 24);
-    let text: Vec<String> = laid.placed.lines.iter().map(Line::text).collect();
+    scrolled.pane.sight.top = 5;
+    let laid = scrolled.drawn(&look(Glyphs::Unicode, 100), 23);
+    let text: Vec<String> = laid.lines.iter().map(Line::text).collect();
+    let pane = laid_pane(&laid);
     let body = |row: &str| text.iter().any(|line| line.ends_with(row));
     assert!(body("line 6") && !body("line 5"), "{text:#?}");
-    assert_eq!(laid.top, 5);
-    assert_eq!(laid.page, 14, "the rows the pane's body has");
-    assert_eq!(laid.most, 16, "its last rows are all in sight from there");
+    assert_eq!(pane.top, 5);
+    assert_eq!(pane.page, 14, "the rows the pane's body has");
+    assert_eq!(pane.most, 16, "its last rows are all in sight from there");
     assert!(body("… 12 more lines"), "{text:#?}");
 
-    scrolled.pane.top = usize::MAX;
-    let last = scrolled.drawn(&look(Glyphs::Unicode, 100), 24);
-    assert_eq!(last.top, 16, "a scroll past the end stops at the end");
-    let text: Vec<String> = last.placed.lines.iter().map(Line::text).collect();
+    scrolled.pane.sight.top = usize::MAX;
+    let last = scrolled.drawn(&look(Glyphs::Unicode, 100), 23);
+    let at_end = laid_pane(&last).top;
+    assert_eq!(at_end, 16, "a scroll past the end stops at the end");
+    let text: Vec<String> = last.lines.iter().map(Line::text).collect();
     assert!(
         text.iter().any(|line| line.ends_with("line 30")),
         "{text:#?}"
@@ -303,13 +310,12 @@ fn the_pane_scrolls_and_counts_what_is_below_it() {
 /// One row of the pane can be asked to stay in sight: a pointer the person moved.
 #[test]
 fn the_row_a_pointer_stands_on_stays_in_sight() {
-    let mut kept = desk(numbered(60));
-    kept.pane.keep = Some(40);
-    assert_eq!(kept.drawn(&look(Glyphs::Unicode, 100), 24).top, 40);
-    kept.pane.keep = Some(3);
-    assert_eq!(kept.drawn(&look(Glyphs::Unicode, 100), 24).top, 0);
-    kept.pane.top = 30;
-    assert_eq!(kept.drawn(&look(Glyphs::Unicode, 100), 24).top, 3);
+    let top = |desk: &Desk| laid_pane(&desk.drawn(&look(Glyphs::Unicode, 100), 23)).top;
+    assert_eq!(top(&pointing(60, 40)), 40);
+    assert_eq!(top(&pointing(60, 3)), 0);
+    let mut scrolled_past = pointing(60, 3);
+    scrolled_past.pane.sight.top = 30;
+    assert_eq!(top(&scrolled_past), 3);
 }
 
 /// A choice about to be made says what it does and how to make it.
@@ -321,7 +327,9 @@ fn a_choice_being_confirmed_says_what_it_does() {
         said: Some("On to `implement`".to_string()),
         cost: Some("resolves this gate".to_string()),
     });
-    confirming.foot.keys = vec!["enter confirms".to_string(), "esc goes back".to_string()];
+    confirming.foot.legend = Legend::new()
+        .key("enter", "confirms")
+        .key("esc", "goes back");
     let rows = drawn(&confirming, &look(Glyphs::Unicode, 100), 24);
     assert_eq!(
         rows.last().map(String::as_str),
@@ -343,7 +351,9 @@ fn a_choice_being_confirmed_says_what_it_does() {
 #[test]
 fn keys_that_do_not_fit_beside_the_options_go_under_them() {
     let mut crowded = desk(numbered(1));
-    crowded.foot.keys = vec!["a very long way to say what a key does".to_string(); 3];
+    crowded.foot.legend = (0..3).fold(Legend::new(), |legend, _| {
+        legend.key("a", "very long way to say what a key does")
+    });
     let rows = drawn(&crowded, &look(Glyphs::Unicode, 100), 24);
     let at = rows
         .iter()
@@ -358,7 +368,7 @@ fn keys_that_do_not_fit_beside_the_options_go_under_them() {
 fn ascii_draws_it_with_what_ascii_has() {
     let mut plain = desk(numbered(3));
     plain.title = vec!["plan".to_string(), "EKPBGE".to_string()];
-    plain.foot.keys = vec!["j k task".to_string(), "p proof".to_string()];
+    plain.foot.legend = Legend::new().key("j k", "task").key("p", "proof");
     let rows = drawn(&plain, &look(Glyphs::Ascii, 100), 24);
     assert!(rows.iter().all(|row| row.is_ascii()), "{rows:#?}");
     assert!(
@@ -431,47 +441,12 @@ fn a_title_gives_up_whole_parts_from_its_end() {
     );
 }
 
-/// A step's number wider than its place widens every row of its group, so the pointer stays
-/// in one column.
-#[test]
-fn the_pointer_keeps_its_column_past_nine_steps() {
-    let mut long = desk(numbered(1));
-    long.rail[0].rows = vec![stop("9", "ninth", false), stop("10", "tenth", true)];
-    let rows = drawn(&long, &look(Glyphs::Unicode, 100), 24);
-    assert!(
-        rows.iter().any(|row| row.contains(" 9    ninth")),
-        "{rows:#?}"
-    );
-    assert!(
-        rows.iter().any(|row| row.contains(" 10 ▸ tenth")),
-        "{rows:#?}"
-    );
-}
-
-/// A count of any size leaves its key in sight.
-#[test]
-fn a_big_count_keeps_its_key() {
-    let mut big = desk(numbered(1));
-    big.rail[1].rows[0] = RailRow::Tally {
-        what: "decided for you".to_string(),
-        count: 120,
-        key: Some('d'),
-    };
-    let rows = drawn(&big, &look(Glyphs::Unicode, 100), 24);
-    assert!(
-        rows.iter()
-            .any(|row| row.contains("decided for you         120  d")),
-        "{rows:#?}"
-    );
-}
-
 /// A pointed row is set apart across the rail where a layer draws fills, and the fill
 /// stops at the rule.
 #[test]
 fn the_row_pointed_at_is_set_apart_up_to_the_rule() {
-    let laid = desk(numbered(3)).drawn(&look(Glyphs::Unicode, 100), 24);
+    let laid = desk(numbered(3)).drawn(&look(Glyphs::Unicode, 100), 23);
     let pointed = laid
-        .placed
         .lines
         .iter()
         .find(|line| line.text().contains("▸ storage"))
@@ -485,4 +460,19 @@ fn the_row_pointed_at_is_set_apart_up_to_the_rule() {
     };
     assert!(filled("storage"), "{:?}", pointed.spans());
     assert!(!filled("│"), "{:?}", pointed.spans());
+}
+
+/// Held, a desk takes every cell the terminal has, past the measure a line of text
+/// gets, and still leaves its last column alone.
+#[test]
+fn a_held_desk_is_as_wide_as_the_terminal() {
+    let line = look(Glyphs::Unicode, 100);
+    let held = Terminal::on(line).held(&Block::Desk(desk(numbered(3))), 180, 30);
+    let widest = held
+        .lines
+        .iter()
+        .map(|row| cell_width(&row.text()))
+        .max()
+        .unwrap_or(0);
+    assert!(widest > line.width.cells() && widest < 180, "{widest}");
 }

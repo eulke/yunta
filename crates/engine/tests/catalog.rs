@@ -5,10 +5,10 @@
 
 use std::path::Path;
 
+use yunta_core::check::{CheckError, Composition};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{
-    check_workflow_refs, origin_of, resolve_workflow, CatalogError, CheckError, Composition,
-    WorkflowOrigin,
+    check_workflow_refs, origin_of, resolve_workflow, CatalogError, WorkflowOrigin,
 };
 
 fn write(path: &Path, contents: &str) {

@@ -275,11 +275,9 @@ fn declaring_packs(
                 })
             }
         };
-        let manifest = yunta_core::yaml::parse::<PackManifest>(&manifest_text).map_err(|e| {
-            CatalogError::Malformed {
-                path: manifest_path,
-                detail: e.to_string(),
-            }
+        let manifest = PackManifest::read(&manifest_text).map_err(|e| CatalogError::Malformed {
+            path: manifest_path,
+            detail: e.to_string(),
         })?;
         for declared in &manifest.contents.workflows {
             let stem_matches = Path::new(declared)
@@ -328,7 +326,7 @@ pub fn packs_for_publisher(repo_root: &Path, publisher: &Publisher) -> Publisher
                 continue;
             }
         };
-        match yunta_core::yaml::parse::<PackManifest>(&manifest_text) {
+        match PackManifest::read(&manifest_text) {
             Ok(manifest) => packs.installed.push((pack_dir, manifest)),
             Err(e) => packs.broken.push(CatalogError::Malformed {
                 path: manifest_path,

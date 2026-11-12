@@ -3,17 +3,18 @@
 //! `commands/`. Its map:
 //!
 //! - Commands: `cli` parses and routes, `commands` holds one module per
-//!   subcommand, `context` opens each one, `help` prints the help, `graph`
-//!   draws a workflow's graph, `pack` installs and lists packs, `project`
-//!   resolves the project and its config, and `detect` reads what a repository
-//!   says about itself.
-//! - What a person sees and answers: `output` owns what a command writes,
-//!   `surface` and `render` draw a run as it happens, `run_page` draws where a
-//!   run stands, `ask` and `human_interaction` take a person's answers, and
-//!   `identity` names who decided.
-//! - For machines and the process: `json` is the versioned JSON the CLI emits,
-//!   `error` is the one error a command hands back, and `interrupt` is what
-//!   trips cancellation.
+//!   subcommand, `help` prints the help, and `graph` draws a workflow's
+//!   graph; `application` opens the application at a terminal, which bare
+//!   `yunta` does.
+//! - What a person sees and answers: every page a command shows is render's,
+//!   filled with what the command read; `output` owns what a command writes,
+//!   the streams it is drawn to and the code it exits with, `remarks` says what
+//!   the API says while it works, `surface` draws a run as it happens,
+//!   `ask` and `human_interaction` take a person's answers, and `browser`
+//!   shows a page in the system's browser.
+//! - The process: `shell` reads it once, into the workspace every command
+//!   takes; `error` is the one error a command hands back, and `interrupt` is
+//!   what trips cancellation.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.
@@ -30,28 +31,23 @@
 // separate crates neither reaches.
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
+mod application;
 mod ask;
+mod browser;
 mod cli;
 mod commands;
-mod context;
-mod detect;
 mod error;
 mod graph;
 mod help;
 mod human_interaction;
-mod identity;
 mod interrupt;
-mod json;
 mod output;
-mod pack;
-mod project;
-mod render;
-mod run_page;
+mod remarks;
+mod shell;
 mod surface;
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
-use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -59,19 +55,20 @@ use clap::{FromArgMatches, ValueEnum};
 use surco::paint::ColorWhen;
 use yunta_core::Env;
 
-use crate::error::{CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Outcome;
 
 fn main() -> ExitCode {
     let started = Instant::now();
 
     // The process environment, read once here at the shell's edge: every
     // color, glyph, width, terminal and log decision below reads this value.
-    let env = project::process_env();
+    let env = shell::environment();
     // The arguments, read once. The help and the usage errors clap refuses
     // are painted before clap parses them, each rendered by a command built
     // in the paint of the stream it goes to; `help::exit` writes what that
     // command rendered.
-    let args: Vec<OsString> = std::env::args_os().collect();
+    let args: Vec<OsString> = shell::arguments();
     let policy = policy_from_args(&env, &args);
     let stdout_paint = policy.paint(std::io::stdout().is_terminal());
     let stderr_paint = policy.paint(std::io::stderr().is_terminal());
@@ -79,20 +76,20 @@ fn main() -> ExitCode {
         help::parse(&args, stdout_paint, stderr_paint).unwrap_or_else(|error| help::exit(&error));
     let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|error| help::exit(&error));
     init_tracing(&env);
-    render::settle_color(
+    output::settle_color(
         color_policy(&env, cli.color),
         set_var(&env, surco::paint::LOOK_VAR),
     );
-    render::settle_columns(columns(&env));
-    render::settle_glyphs(&glyph_env(&env));
+    output::settle_columns(columns(&env));
+    output::settle_glyphs(&glyph_env(&env));
     surface::terminal::settle(&env);
     // Read once the settling above is done, so every line this process
     // writes to stdout takes the same color, width and glyphs.
-    let look = render::stdout_look();
+    let look = output::stdout_look();
     let mode = cli.mode();
     tracing::debug!("starting");
 
-    let outcome = drive(cli, started, mode, &look);
+    let outcome = drive(cli, env, started, mode, &look);
     // Last, because a prompt this run abandoned mid-key left a thread
     // that is still reading the terminal and still turning raw mode on
     // between its own reads. Nothing runs after this, so nothing takes
@@ -106,7 +103,9 @@ fn main() -> ExitCode {
 const FAILED: ExitCode = ExitCode::FAILURE;
 
 /// The status a command's outcome leaves the process with. A refused error
-/// is written to the reader first, in the mode and look the command ran with.
+/// is written to the reader first, in the mode and look the command ran with;
+/// the stop a person asked for is told by its code alone, as a shell tells
+/// it of any process SIGINT ended.
 fn exit_status(
     outcome: Result<Outcome, CliError>,
     mode: output::Mode,
@@ -114,6 +113,7 @@ fn exit_status(
 ) -> ExitCode {
     match outcome {
         Ok(outcome) => ExitCode::from(outcome.code()),
+        Err(CliError::Stopped) => ExitCode::from(Outcome::interrupted().code()),
         Err(error) => {
             output::refused(&error, mode, look);
             FAILED
@@ -253,6 +253,7 @@ fn columns(env: &Env) -> Option<usize> {
 /// and handed to whichever command runs.
 fn drive(
     cli: cli::Cli,
+    env: Env,
     started: Instant,
     mode: output::Mode,
     look: &surco::look::Look,
@@ -261,67 +262,9 @@ fn drive(
         .enable_all()
         .build()
         .map_err(|source| CliError::io("build the runtime for", "this command", source))?;
-    let outcome = runtime.block_on(cli.run(started, mode, look));
+    let outcome = runtime.block_on(cli.run(env, started, mode, look));
     runtime.shutdown_background();
     outcome
-}
-
-/// The run manifest at `path`, read through the one door every
-/// persisted document goes through — so a manifest from a newer binary
-/// is refused naming both versions, and a key this one does not know
-/// comes back on the document instead of being dropped.
-pub(crate) fn load_manifest(
-    path: &Path,
-) -> Result<yunta_core::persisted::PersistedDoc<yunta_core::Manifest>, CliError> {
-    let bytes = std::fs::read(path)
-        .map_err(|source| CliError::io("read run manifest at", path.display(), source))?;
-    yunta_core::persisted::PersistedDoc::read(&bytes)
-        .map_err(|error| CliError::msg(yunta_core::describe(&error)))
-}
-
-/// The workflow at `path`, read through the one door that holds it to
-/// its own rules — never the bare parser, which would hand back a graph
-/// nobody checked.
-pub(crate) fn load_workflow(path: &Path) -> Result<yunta_core::Workflow, CliError> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|source| CliError::io("read workflow at", path.display(), source))?;
-    yunta_core::workflow::read::read(&contents, path).map_err(|report| CliError::Document {
-        report,
-        text: Some(contents.clone()),
-    })
-}
-
-/// The workflow at `path` read in one pass: every problem the file has,
-/// and the workflow it declares once the keys nothing reads are taken
-/// out, when what is left reads. `yunta check` judges that workflow too,
-/// so a person fixes every problem in one round; nothing runs it.
-pub(crate) fn audit_workflow(
-    path: &Path,
-) -> Result<
-    (
-        Option<yunta_core::Workflow>,
-        yunta_core::diagnostic::Report,
-        String,
-    ),
-    CliError,
-> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|source| CliError::io("read workflow at", path.display(), source))?;
-    let (workflow, report) = yunta_core::workflow::read::read_all(&contents, path);
-    Ok((workflow, report, contents))
-}
-
-/// Reads and parses a YAML file into `T`, naming what it was reading and
-/// where when it can't — the loader for everything that is neither a
-/// workflow nor a persisted document.
-pub(crate) fn load_yaml<T: serde::de::DeserializeOwned>(
-    path: &Path,
-    what: &str,
-) -> Result<T, CliError> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|source| CliError::io(&format!("read {what} at"), path.display(), source))?;
-    yunta_core::yaml::parse(&contents)
-        .map_err(|e| CliError::msg(format!("failed to parse {what} at {}: {e}", path.display())))
 }
 
 #[cfg(test)]

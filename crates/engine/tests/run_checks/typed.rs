@@ -121,7 +121,7 @@ nodes:
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
-    let Some(yunta_engine::NodeState::Failed {
+    let Some(yunta_core::events::NodeState::Failed {
         failure: Failure::Exited { exited },
         ..
     }) = state.nodes.state("broken")

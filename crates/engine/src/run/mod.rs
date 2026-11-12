@@ -79,15 +79,13 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{Failure, PauseReason};
-use yunta_core::port::{Adapter, Forge, ForgeError};
+use yunta_core::port::{Adapter, Forge, ForgeError, HumanInteraction, RunObserver};
 use yunta_core::{
     AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId, WorkflowName,
 };
+use yunta_replay::RunState;
 use yunta_storage::{AsyncStorage, StorageError};
 
-use crate::human_interaction::HumanInteraction;
-use crate::observer::RunObserver;
-use crate::replay::RunState;
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
 pub use baseline::{BirthBaseline, Owed as OwedMeasurement};
@@ -138,7 +136,7 @@ pub async fn read_manifest(
             path: path.to_path_buf(),
             source,
         })?;
-    yunta_core::persisted::PersistedDoc::read(&bytes).map_err(|source| ManifestReadError::Parse {
+    Manifest::read_frozen(&bytes).map_err(|source| ManifestReadError::Parse {
         path: path.to_path_buf(),
         source,
     })
@@ -389,7 +387,9 @@ impl RunReport {
 pub struct RunEnv<'a> {
     pub run_id: &'a RunId,
     pub manifest: &'a Manifest,
-    pub run_dir: &'a Path,
+    /// Proof that this process drives the run, and where the run lives: a hold
+    /// names its run's directory, so a run is never driven under another's claim.
+    pub hold: &'a crate::run_hold::RunHold,
     pub worktree: &'a Path,
     pub adapters: &'a HashMap<AdapterId, Arc<dyn Adapter>>,
     pub storage: &'a AsyncStorage,

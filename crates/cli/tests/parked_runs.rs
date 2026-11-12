@@ -14,8 +14,17 @@ use yunta_testkit::{
     git, handle, run_id_from, stderr, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG,
 };
 
+#[path = "parked_runs/cap.rs"]
+mod cap;
+
 #[path = "parked_runs/checkout.rs"]
 mod checkout;
+
+#[path = "parked_runs/child.rs"]
+mod child;
+
+#[path = "parked_runs/handoff.rs"]
+mod handoff;
 
 #[path = "parked_runs/menu.rs"]
 mod menu;
@@ -361,8 +370,8 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
 /// Four nodes in a chain under a 100-token cap. Each session may spend an
 /// equal share of the cap across the nodes still owed, and no more than the
 /// cap has left: the first three sessions spend 25, 33 and 42 tokens, which
-/// is the whole cap. The run parks before the fourth on its budget, which has
-/// no menu to rebuild.
+/// is the whole cap. The run parks before the fourth on its budget, and asks
+/// whether to go on past it.
 const OVER_BUDGET: &str = r#"
 name: over-budget
 nodes:
@@ -388,7 +397,7 @@ nodes:
 "#;
 
 /// One script per session of [`OVER_BUDGET`], in the order the chain runs
-/// them, each spending exactly the share its session is given.
+/// them, each of the first three spending exactly the share its session is given.
 const OVER_BUDGET_FIXTURE: &str = r#"
 dialect: claude-code
 sessions:
@@ -401,18 +410,20 @@ sessions:
   - steps:
       - { type: usage, input_tokens: 42, output_tokens: 0 }
     outcome: { type: completed, summary: spent }
+  - steps:
+      - { type: usage, input_tokens: 10, output_tokens: 0 }
+    outcome: { type: completed, summary: spent }
 "#;
 
 /// A run of [`OVER_BUDGET`] parked on its cap, and the repository and
 /// home it ran under.
 fn parked_over_budget(root: &Path) -> (PathBuf, PathBuf, String) {
-    let repo = repo_with(
-        root,
-        &[
-            ("over-budget", OVER_BUDGET),
-            ("fixture", OVER_BUDGET_FIXTURE),
-        ],
-    );
+    parked_over_budget_on(root, OVER_BUDGET, OVER_BUDGET_FIXTURE)
+}
+
+/// [`parked_over_budget`], with `workflow` for its chain and `fixture` for its sessions.
+fn parked_over_budget_on(root: &Path, workflow: &str, fixture: &str) -> (PathBuf, PathBuf, String) {
+    let repo = repo_with(root, &[("over-budget", workflow), ("fixture", fixture)]);
     let home = root.join("state");
     write(
         &repo.join(".yunta/config.yaml"),
@@ -436,21 +447,36 @@ fn parked_over_budget(root: &Path) -> (PathBuf, PathBuf, String) {
     (repo, home, run_id)
 }
 
+/// A parent whose child stopped on a gate, and the repository and home it ran under.
+fn parked_on_a_child(root: &Path) -> (PathBuf, PathBuf, String) {
+    let repo = Checkout::under(root)
+        .file(
+            ".yunta/workflows/gated.yaml",
+            "name: gated\nnodes:\n  - { id: approve, kind: gate, assignee: lead }\n",
+        )
+        .workflow(
+            "parent",
+            "name: parent\nnodes:\n  - { id: feat, kind: workflow, use: gated }\n",
+        )
+        .committed()
+        .repo;
+    let home = root.join("state");
+    let run = yunta_in!(&repo, &home, &["run", "parent.yaml"]);
+    let run_id = run_id_from(&run);
+    (repo, home, run_id)
+}
+
 #[test]
 fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
-    // Three shapes reconstruct a menu — a failed node, an exhausted
-    // reroute and an unresolved internal gate. A budget cap is none of
-    // them, and the page says so rather than leaving the reader to wonder
+    // What a parent whose child stopped waits on stands on the child's log, so its own
+    // pause rebuilds no menu. The page says so rather than leaving the reader to wonder
     // where the options went.
     let root = tempfile::tempdir().unwrap();
-    let (repo, home, run_id) = parked_over_budget(root.path());
+    let (repo, home, run_id) = parked_on_a_child(root.path());
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
 
-    assert!(
-        text.contains("its token budget is spent (100 tokens"),
-        "{text}"
-    );
+    assert!(text.contains("child run"), "{text}");
     assert!(
         text.contains("no option answers this pause here"),
         "the absent menu is named, not silently missing: {text}"
@@ -545,6 +571,64 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
             "line uses an ANSI escape code, not colorless: {line:?}"
         );
     }
+
+    write(&worktree.join("go.txt"), "go");
+    let finished = running.wait().expect("the running run exits");
+    assert!(finished.success());
+}
+
+/// A listing's document is what a program reads, and a program reads one
+/// document whatever terminal asked for it: a running run's row, whose words
+/// a person's terminal draws with its own glyphs, writes them as every run's
+/// document writes them.
+#[test]
+fn a_listing_document_reads_the_same_whatever_glyphs_the_terminal_asks_for() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo_with(root.path(), &[("holds-open", HOLDS_OPEN)]);
+    let home = root.path().join("state");
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    let mut running = command
+        .args(["run", "holds-open.yaml"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to run the yunta binary");
+    let worktree = wait_for(
+        || {
+            yunta_testkit::pool_checkouts(&home)
+                .into_iter()
+                .find(|checkout| checkout.join("started.txt").exists())
+        },
+        || "the holding node never started".to_string(),
+    );
+
+    let listed = |glyphs: Option<&str>| {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+        yunta_testkit::hermetic(&mut command, &repo, &home);
+        if let Some(glyphs) = glyphs {
+            command.env("YUNTA_GLYPHS", glyphs);
+        }
+        let out = command
+            .args(["list", "--runs", "--json"])
+            .output()
+            .expect("failed to run the yunta binary");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&out.stdout).expect("the listing is one JSON document");
+        // How long a run has stood is read at each listing.
+        for row in document["rows"].as_array_mut().into_iter().flatten() {
+            row["age_secs"] = serde_json::Value::Null;
+        }
+        document
+    };
+    assert_eq!(listed(None), listed(Some("ascii")));
 
     write(&worktree.join("go.txt"), "go");
     let finished = running.wait().expect("the running run exits");

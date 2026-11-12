@@ -131,6 +131,15 @@ pub struct ConfigLayer {
 }
 
 impl ConfigLayer {
+    /// A config layer as its file's `text` holds it.
+    ///
+    /// Every crate that reads a layer reads it through here: the generic
+    /// reader is built in each crate that names it, so one concrete reader
+    /// keeps one copy of what reads a layer in the binary.
+    pub fn read(text: &str) -> Result<ConfigLayer, crate::yaml::YamlError> {
+        crate::yaml::parse(text)
+    }
+
     /// Every `format:` rule, in the order a file is matched against them.
     pub fn format_rules(&self) -> &[FormatRule] {
         self.format.as_deref().unwrap_or_default()

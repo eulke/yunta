@@ -1,0 +1,440 @@
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+use yunta_core::events::{
+    AgentMessagePayload, BaselineCapturedPayload, BaselineOrigin, BaselineResults,
+    CapabilityDegradedPayload, CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload,
+    Evidence, Failure, Finding, FindingPostedPayload, FindingSays, FindingSeverity, NodeEvent,
+    NodeFinishedPayload, NodeOutcome, NodeReroutedPayload, Phase, PromotionCause,
+    PromotionSignaledPayload, RerouteOrigin, RunEvent, SessionEvent, StoredEvent,
+};
+use yunta_core::events::{Claim, Escalation, FailureMenu, GateEvent, GateOption, Menu};
+use yunta_core::events::{FindingEvent, RailFailedPayload, RailSummaryPayload, TokenUsage};
+use yunta_core::rail::hook::RailFailureCause;
+use yunta_core::rail::timing::Histogram;
+use yunta_core::rail::RailEvent;
+use yunta_core::reserved::ReservedOption;
+use yunta_core::NonEmpty;
+use yunta_replay::frame::chronicle as derive_chronicle;
+
+use super::*;
+
+/// What a surface says for one event, through the one derivation
+/// every surface reads: the log, folded, then the words.
+fn said_for(payload: EventPayload) -> String {
+    let events = vec![StoredEvent {
+        seq: 1.into(),
+        run_id: "01JQ0000000000000000000000".into(),
+        node_id: None,
+        timestamp: chrono::DateTime::UNIX_EPOCH,
+        body: EventBody::Known(payload),
+    }];
+    let moments = derive_chronicle(&events);
+    say(
+        moments.first().expect("one moment per event"),
+        Glyphs::Unicode,
+    )
+    .text
+}
+
+/// A log this binary reads back was written by some other
+/// invocation: nothing guarantees the free text on a payload says
+/// anything, and words built for it must not promise that it does.
+fn rerouted(cause: &str) -> EventPayload {
+    EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+        "fix-lint".into(),
+        Failure::Message {
+            outcome: cause.into(),
+        },
+        RerouteOrigin::GateChoice,
+        None,
+        None,
+    )))
+}
+
+/// A child that failed or that a person stopped is not marked as one
+/// that finished: the mark repeats how it closed.
+#[test]
+fn a_closed_child_is_marked_by_how_it_closed() {
+    use yunta_core::events::{ChildEvent, ChildRunFinishedPayload, TerminalState};
+    for (terminal, mark) in [
+        (TerminalState::Done, Mark::Done),
+        (TerminalState::Failed, Mark::Failed),
+        (TerminalState::Cancelled, Mark::Stopped),
+        (TerminalState::Promoted, Mark::Reroute),
+    ] {
+        let events = vec![StoredEvent {
+            seq: 1.into(),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: Some("compose".into()),
+            timestamp: chrono::DateTime::UNIX_EPOCH,
+            body: EventBody::Known(EventPayload::Children(ChildEvent::Finished(
+                ChildRunFinishedPayload {
+                    child_run_id: "01JQ0000000000000000000001".into(),
+                    child_workflow_hash: yunta_core::sha256_hex(b"child"),
+                    terminal_state: terminal,
+                    tokens: TokenUsage::default(),
+                },
+            ))),
+        }];
+        let moments = derive_chronicle(&events);
+        let said = say(moments.first().expect("one moment"), Glyphs::Unicode);
+        assert_eq!(said.mark, Some(mark), "{terminal:?}: {}", said.text);
+    }
+}
+
+#[test]
+fn a_reroute_with_a_cause_reads_as_the_target_and_the_cause() {
+    assert_eq!(
+        said_for(rerouted("exit 1")),
+        "run rerouted to `fix-lint`: exit 1"
+    );
+}
+
+#[test]
+fn a_red_post_check_names_each_red_criterion_with_the_last_line_it_printed() {
+    let result = |cmd: &str, exit_code: i32, tail: &[&str]| CriterionResult {
+        cmd: cmd.to_string(),
+        exit_code,
+        r#type: None,
+        reused: false,
+        duration_ms: None,
+        output: None,
+        tail: tail.iter().map(|line| line.to_string()).collect(),
+        tree: None,
+        head: None,
+        conclusion: None,
+    };
+    let payload = EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+        task_id: "T001".into(),
+        phase: Phase::Post,
+        results: vec![
+            result("cargo test", 101, &["failures:", "test result: FAILED", ""]),
+            result("cargo fmt --check", 0, &[]),
+            result("test -f made.txt", 1, &[]),
+        ],
+        waiting: Vec::new(),
+    }));
+    assert_eq!(
+        said_for(payload),
+        "run: T001 post: 3 criteria · red: `cargo test` exit 101 (test result: FAILED); \
+         `test -f made.txt` exit 1"
+    );
+}
+
+#[test]
+fn a_check_answer_says_how_long_it_took_and_what_stands_between_the_task_and_done() {
+    let answered = |closes: bool, exit_code: i32, outside: &[&str]| {
+        EventPayload::Tasks(yunta_core::events::TaskEvent::CheckAnswered(
+            yunta_core::events::TaskCheckAnsweredPayload {
+                task_id: "T001".into(),
+                closes,
+                results: vec![CriterionResult {
+                    cmd: "cargo test".to_string(),
+                    exit_code,
+                    r#type: None,
+                    reused: false,
+                    duration_ms: Some(221_000),
+                    output: None,
+                    tail: Vec::new(),
+                    tree: None,
+                    head: None,
+                    conclusion: None,
+                }],
+                outside_scope: outside.iter().map(|path| path.into()).collect(),
+                denied: Vec::new(),
+                duration_ms: 222_400,
+                waiting: Vec::new(),
+            },
+        ))
+    };
+    assert_eq!(
+        said_for(answered(true, 0, &[])),
+        "run: T001 checked in 3m42s: it would close"
+    );
+    assert_eq!(
+        said_for(answered(false, 101, &[])),
+        "run: T001 checked in 3m42s: 1 of its criteria red"
+    );
+    assert_eq!(
+        said_for(answered(false, 0, &["notes.md"])),
+        "run: T001 checked in 3m42s: its work reaches paths it may not change"
+    );
+}
+
+#[test]
+fn a_reroute_with_no_cause_recorded_reads_as_the_target_alone() {
+    assert_eq!(said_for(rerouted("")), "run rerouted to `fix-lint`");
+}
+
+#[test]
+fn a_promotion_names_the_node_whose_reroutes_ran_out() {
+    let cause = PromotionCause {
+        node: "lint".into(),
+        goto: "fix-lint".into(),
+        failure: None,
+    };
+    let promoted = PromotionSignaledPayload::new(cause, Evidence::none(), "ship".into());
+    assert_eq!(
+        said_for(EventPayload::Run(RunEvent::PromotionSignaled(promoted))),
+        "run promoted to `ship`: node `lint` exhausted its reroutes to `fix-lint`"
+    );
+}
+
+/// The claim of a failed node reads as that node failing, in the words the
+/// claim sentence gives.
+#[test]
+fn an_escalation_whose_claim_is_a_failed_node_reads_as_that_node_failed() {
+    let menu = FailureMenu {
+        attempt: 1,
+        failure: Failure::Message {
+            outcome: "exit 1".into(),
+        },
+        remedies: Vec::new(),
+        stuck: None,
+        reroute: None,
+    };
+    let escalation = Escalation::new(
+        Claim::NodeFailed { node: "x".into() },
+        Menu::Failure(Box::new(menu)),
+        NonEmpty::from((GateOption::reserved(ReservedOption::Retry), Vec::new())),
+    );
+    let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())));
+    assert_eq!(said_for(waiting), "run node `x` failed");
+}
+
+fn baseline(exit_code: i32) -> EventPayload {
+    EventPayload::Run(RunEvent::BaselineCaptured(BaselineCapturedPayload {
+        command: "make test".to_string(),
+        results: BaselineResults {
+            exit_code,
+            summary: String::new(),
+        },
+        hash: yunta_core::sha256_hex(b""),
+        origin: BaselineOrigin::Measured,
+        tree: None,
+        duration_ms: None,
+    }))
+}
+
+/// A person watching a run learns the machine slept, that the time is
+/// not counted as work, and why no session opens for a while.
+#[test]
+fn a_host_suspension_says_how_long_and_why_no_session_opens() {
+    let payload = EventPayload::Run(RunEvent::HostSuspended(
+        yunta_core::events::HostSuspendedPayload::slept(std::time::Duration::from_secs(38 * 60)),
+    ));
+    assert_eq!(
+        said_for(payload),
+        "run: host suspended for 38m00s, which durations leave out; new sessions wait \
+         until it has been awake 2m00s"
+    );
+}
+
+#[test]
+fn a_baseline_measured_green_reads_as_measured() {
+    assert_eq!(said_for(baseline(0)), "run: baseline measured");
+}
+
+/// A person watching learns, before any comparison passes, that none
+/// could have failed.
+#[test]
+fn a_baseline_measured_red_says_no_comparison_can_find_a_regression() {
+    assert_eq!(
+        said_for(baseline(101)),
+        "run: baseline measured, already red (exit 101): no comparison can find a \
+         regression, and no task is held to it"
+    );
+}
+
+#[test]
+fn a_finding_with_no_title_reads_as_its_severity_alone() {
+    let payload = EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+        finding: Finding {
+            id: "f1".into(),
+            severity: FindingSeverity::Minor,
+            says: FindingSays::Written {
+                title: String::new(),
+                detail: String::new(),
+            },
+            location: "src/lib.rs".into(),
+            proposed_criterion: None,
+        },
+    }));
+    assert_eq!(said_for(payload), "run: finding f1 minor");
+}
+
+/// A note reads as its size and the head of its digest, whether the log kept
+/// the digest or an older log kept the note's words.
+#[test]
+fn a_note_reads_its_size_and_its_digest() {
+    let read = |note: serde_json::Value| {
+        let payload: AgentMessagePayload = serde_json::from_value(note).expect("a note");
+        said_for(EventPayload::Session(SessionEvent::Message(payload)))
+    };
+    let digest = serde_json::json!({
+        "message_type": "note",
+        "note": { "bytes": 135, "sha256": "2eb6d565235b" },
+    });
+    let stored = serde_json::json!({
+        "message_type": "note",
+        "text": "135 bytes, sha256 2eb6d565235b",
+    });
+    let words = "run: note: 135 bytes, sha256 2eb6d565235b";
+    assert_eq!(read(digest), words);
+    assert_eq!(read(stored), words);
+}
+
+#[test]
+fn a_node_that_finished_saying_nothing_is_still_said_to_have_finished() {
+    let payload = EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+        NodeOutcome::Summary(String::new()),
+        TokenUsage::default(),
+    )));
+    assert_eq!(said_for(payload), "run finished");
+}
+
+/// A degradation whose recorded policy is an empty sentence, as an
+/// older log stores it, says what was missing and claims nothing
+/// about what was done instead.
+#[test]
+fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
+    let degraded = CapabilityDegradedPayload {
+        capability: yunta_core::Capability::RunTools,
+        adapter: "codex".into(),
+        policy: yunta_core::port::PolicyApplied::Recorded("".into()),
+    };
+    let payload = EventPayload::Session(SessionEvent::CapabilityDegraded(degraded));
+    assert_eq!(said_for(payload), "run: run_tools not declared by codex");
+}
+
+#[test]
+fn every_kind_earns_its_words_once() {
+    // One sentence per kind, and every one of them a sentence: a
+    // kind nothing says words for would reach a reader as a bare
+    // subject, and a `Debug` spelling would reach them as a Rust
+    // identifier.
+    for payload in yunta_testkit_core::all_kinds() {
+        let kind = payload.kind_name();
+        let said = said_for(payload);
+        assert!(
+            said != "run",
+            "`{kind}` says nothing beyond its subject: {said:?}"
+        );
+        assert!(
+            !said.contains('{') && !said.contains("::"),
+            "`{kind}` reached a reader as a Rust value: {said:?}"
+        );
+    }
+}
+
+/// A formatter the engine stopped at its bound is a stopped command, not a
+/// failed one: its recorded code is the one a stopped command gets, so the
+/// line says it was stopped and names no exit code.
+#[test]
+fn a_formatter_stopped_at_its_bound_reads_as_stopped_not_as_a_failed_exit() {
+    let stopped = yunta_core::events::WriteFormattedPayload {
+        session_id: "s1".into(),
+        run: "fmt".into(),
+        paths: vec!["a.rs".into()],
+        changed: Vec::new(),
+        exit_code: -2,
+        duration_ms: 5_000,
+        output: None,
+        timed_out: true,
+    };
+    assert_eq!(
+        said_for(EventPayload::Session(SessionEvent::WriteFormatted(stopped))),
+        "run: `fmt` was stopped while formatting what it wrote"
+    );
+}
+
+/// A failed call of the rail says the moment it was for and the cause the
+/// log closed it under.
+#[test]
+fn a_rail_failure_says_its_moment_and_cause() {
+    let failed = EventPayload::Session(SessionEvent::RailFailed(RailFailedPayload {
+        session_id: Some("s1".into()),
+        event: Some(RailEvent::BeforeWrite),
+        cause: RailFailureCause::Timeout,
+    }));
+    assert_eq!(
+        said_for(failed),
+        "run: rail failed before a write: no answer within its window"
+    );
+
+    let unread = EventPayload::Session(SessionEvent::RailFailed(RailFailedPayload {
+        session_id: None,
+        event: None,
+        cause: RailFailureCause::Decode,
+    }));
+    assert_eq!(
+        said_for(unread),
+        "run: rail failed: a call the engine could not read"
+    );
+}
+
+/// What the rail heard of a session is a record, not a failure: it says how
+/// many calls it answered and the model it heard.
+#[test]
+fn a_rail_summary_says_its_calls_and_model() {
+    let observed = |calls: u32| {
+        let mut histogram = Histogram::default();
+        for _ in 0..calls {
+            histogram.observe(Duration::from_millis(3));
+        }
+        histogram
+    };
+    let summary = EventPayload::Session(SessionEvent::RailSummary(RailSummaryPayload {
+        session_id: "s1".into(),
+        model: Some("claude-haiku-4-5".into()),
+        moments: BTreeMap::from([
+            (RailEvent::BeforeWrite, observed(4)),
+            (RailEvent::AfterWrite, observed(3)),
+        ]),
+    }));
+    assert_eq!(
+        said_for(summary),
+        "run: the rail answered 7 calls, model claude-haiku-4-5"
+    );
+}
+
+mod calls;
+mod promotion;
+
+/// The chronicle as a document logs every moment that says anything, in order, each on
+/// the line a pipe writes for it: the run's own clock, its mark, then its words.
+#[test]
+fn the_chronicle_told_logs_each_moment_on_the_line_a_pipe_writes() {
+    let events: Vec<StoredEvent> = [(0, "exit 1"), (5, "exit 2")]
+        .into_iter()
+        .enumerate()
+        .map(|(at, (seconds, cause))| StoredEvent {
+            seq: (at as u64 + 1).into(),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: None,
+            timestamp: chrono::DateTime::UNIX_EPOCH + chrono::Duration::seconds(seconds),
+            body: EventBody::Known(rerouted(cause)),
+        })
+        .collect();
+    let moments = derive_chronicle(&events);
+    let doc = told(
+        &moments,
+        &RunId::from("01JQ0000000000000000000000"),
+        &Look::plain(),
+    );
+    let [Block::Lines(lines)] = doc.blocks() else {
+        panic!("one run of lines, nothing failed");
+    };
+    let written: Vec<String> = lines
+        .iter()
+        .map(|line| surco::paint::Paint::Plain.line(line))
+        .collect();
+    assert_eq!(
+        written,
+        [
+            "[0s] @ run rerouted to `fix-lint`: exit 1",
+            "[5s] @ run rerouted to `fix-lint`: exit 2"
+        ]
+    );
+}

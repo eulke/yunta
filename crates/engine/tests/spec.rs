@@ -234,7 +234,7 @@ async fn a_gate_that_shows_a_spec_shows_its_tests() {
 
     assert_eq!(terminal, RunTerminal::Finished);
     let shown = interaction.shown();
-    let yunta_engine::ShownContent::Spec(file) = &shown[0][0].content else {
+    let yunta_core::shown::ShownContent::Spec(file) = &shown[0][0].content else {
         panic!("a spec is shown as its tests: {shown:?}");
     };
     assert_eq!(file.specs[0].tests[0].proves, "the greeting says hello");

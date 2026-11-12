@@ -8,6 +8,7 @@
 //! approximation.
 
 use std::path::{Path, PathBuf};
+use yunta_replay::RunState;
 
 use crate::git::GitError;
 use crate::process::Supervision;
@@ -15,8 +16,6 @@ use yunta_core::events::{ConfinementRecord, FindingCause};
 use yunta_core::fence::Coverage;
 use yunta_core::protected::{Closing, Pathspecs, Protected, Protection, Trespass};
 use yunta_core::{Location, NodeScope, RelativePath, ScopeGlob, TreeId};
-
-use crate::replay::RunState;
 
 use thiserror::Error;
 

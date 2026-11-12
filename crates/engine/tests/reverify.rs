@@ -12,7 +12,8 @@ use yunta_core::events::{
 };
 use yunta_core::protected::Protected;
 use yunta_core::{CommitSha, ContentHash, DefaultOnFailure, OnInterrupt, TreeId, Workflow};
-use yunta_engine::{decide, derive, Decision, SchedulingPolicy};
+use yunta_engine::{decide, Decision, SchedulingPolicy};
+use yunta_replay::RunState;
 
 const T1: &str = "a1a1a1a";
 const T2: &str = "b2b2b2b";
@@ -124,7 +125,7 @@ fn next(yaml: &str, attempts: Vec<Vec<(&'static str, EventPayload)>>) -> Decisio
             body: EventBody::Known(payload),
         })
         .collect();
-    decide(&workflow(yaml), &derive(&events), &policy())
+    decide(&workflow(yaml), &RunState::replay(&events), &policy())
 }
 
 fn runs(node: &str, attempt: u32) -> Decision {

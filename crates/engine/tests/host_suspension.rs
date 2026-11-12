@@ -10,7 +10,8 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     EventPayload, NodeEvent, PauseReason, RunEvent, SessionEvent, StoredEvent,
 };
-use yunta_engine::{RunReport, RunTerminal, SETTLE_AFTER_SUSPENSION};
+use yunta_core::SETTLE_AFTER_SUSPENSION;
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{wait_until_async, Bench, WAIT_DEADLINE};
 use yunta_testkit_core::HostClock;
 

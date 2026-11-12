@@ -8,11 +8,9 @@
 use std::sync::Arc;
 
 use yunta_adapters::{MockAdapter, MockFixture, RunPaths};
+use yunta_core::port::{HumanInteraction, NoInteraction};
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::{
-    create_run, execute_run, BirthArtifact, CreateRunParams, HumanInteraction, NoInteraction,
-    RunEnv, RunReport,
-};
+use yunta_engine::{create_run, execute_run, BirthArtifact, CreateRunParams, RunEnv, RunReport};
 
 use super::{Bench, Driven, KnownSecrets, MOCK_CONFIG};
 
@@ -309,8 +307,8 @@ impl Bench {
         between: impl FnOnce(),
         secrets: Arc<dyn yunta_core::SecretSource>,
     ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
-        let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
-        let config: ConfigLayer = yunta_core::yaml::parse(config_yaml).expect("parse config");
+        let workflow = Workflow::parse(workflow_yaml).expect("parse workflow");
+        let config = ConfigLayer::read(config_yaml).expect("parse config");
         let frozen = self.freeze(&workflow, &config).await?;
         // A `type: document` input is born as an artifact, so the run a
         // bench creates holds what its `inputs:` named alongside
@@ -445,10 +443,17 @@ impl Bench {
         if let Some(driven) = self.driven.lock().expect("the bench's own lock").as_mut() {
             driven.tree = tree.clone();
         }
+        let hold = yunta_engine::hold_run(
+            &run_dir,
+            yunta_engine::lock::Contention::Refuse,
+            &*self.clock,
+            &self.cancel,
+        )
+        .await?;
         let report = execute_run(RunEnv {
             run_id: &self.run_id,
             manifest: &manifest,
-            run_dir: &run_dir,
+            hold: &hold,
             worktree: &tree,
             adapters: &adapters,
             storage: &self.storage.async_handle(),

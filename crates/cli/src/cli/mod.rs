@@ -9,10 +9,12 @@ use clap::{Args, Parser, Subcommand};
 use surco::look::Look;
 use yunta_core::{AdapterId, ModeName, OptionId, Responder};
 
-use crate::commands::run_ref::{RunArg, RunRef};
-use crate::error::{CliError, Outcome};
+use crate::commands::run_ref::RunArg;
+use crate::error::CliError;
 use crate::graph;
 use crate::output::Mode;
+use crate::output::Outcome;
+use yunta_api::RunRef;
 
 /// Yunta: a deterministic workflow engine for code agents.
 #[derive(Parser)]
@@ -37,6 +39,8 @@ pub struct Cli {
 mod depth;
 mod dispatch;
 mod pack;
+#[cfg(test)]
+mod tests;
 
 use depth::DepthArg;
 use dispatch::dispatch;
@@ -58,11 +62,12 @@ impl Cli {
     /// decided them.
     pub async fn run(
         self,
+        env: yunta_core::Env,
         started: Instant,
         output: Mode,
         look: &Look,
     ) -> Result<Outcome, CliError> {
-        dispatch(self.command, started, output, look).await
+        dispatch(self.command, env, started, output, look).await
     }
 }
 
@@ -94,6 +99,10 @@ enum Command {
         node: Option<yunta_core::NodeId>,
         #[command(flatten)]
         depth: DepthArg,
+        /// Follows the run while it moves, from any process, and exits with the
+        /// code its stop gives, as `yunta run` would.
+        #[arg(long, conflicts_with_all = ["json", "node", "full", "dig"])]
+        follow: bool,
     },
     /// Resume a run from its event log.
     ///
@@ -123,8 +132,8 @@ enum Command {
     ResolveGate(ResolveGateArgs),
     /// Read the plan a parked run waits on, and answer it.
     ///
-    /// A full screen of the plan at a terminal: its tasks a key apart, what proves each and
-    /// what was decided. Off a terminal it prints the plan and the commands that answer it.
+    /// At a terminal it opens the application on the plan, over the run and the field. Off a
+    /// terminal it prints the plan and the commands that answer it.
     Review {
         #[command(flatten)]
         run: RunArg,
@@ -277,6 +286,7 @@ enum Command {
         /// The run: its handle, its id or any part that starts or ends it,
         /// `last` (this repository's newest) or `needs` (the one waiting on
         /// you).
+        #[arg(required_unless_present = "workflow")]
         run: Option<RunRef>,
         /// Aggregates every past run of this workflow instead of one run.
         #[arg(long, conflicts_with = "run")]

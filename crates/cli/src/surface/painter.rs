@@ -8,10 +8,12 @@ use std::time::Duration;
 use surco::glyphs::Glyphs;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
+use yunta_api::EventLog;
 use yunta_core::events::{StoredEvent, TerminalState};
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{derive, run_frame_of, PriorEstimation, RunFrame, RunState};
-use yunta_storage::AsyncStorage;
+use yunta_replay::frame::RunFrame;
+use yunta_replay::history::PriorEstimation;
+use yunta_replay::RunState;
 
 pub(super) use super::draw::Draw;
 use super::feed::Beat;
@@ -40,7 +42,7 @@ pub(super) struct Painter {
     manifest: Manifest,
     folded: Folded,
     draw: Draw,
-    storage: AsyncStorage,
+    log: EventLog,
     clock: Arc<dyn Clock>,
     prior: Option<PriorEstimation>,
     /// Whether the hole in the stream was already there at the last beat.
@@ -61,6 +63,8 @@ pub(super) struct Painter {
     written: usize,
     /// The glyph set every moment this painter puts out is marked with.
     glyphs: Glyphs,
+    /// Where the frame reads the process driving the run from.
+    engine: super::EngineReading,
     /// The diagnostics raised while the terminal was somebody else's,
     /// in the order they were raised. A line a person is owed is not a
     /// repaint: it waits rather than being dropped.
@@ -76,13 +80,14 @@ impl Painter {
             manifest: env.manifest.clone(),
             folded: Folded::default(),
             draw,
-            storage: env.storage.clone(),
+            log: env.log.clone(),
             clock: Arc::clone(&env.clock),
             prior: env.prior.cloned(),
             stale_gap: false,
             standing: Standing::Drawing,
             written: 0,
             glyphs: env.glyphs,
+            engine: env.engine.clone(),
             held: Vec::new(),
         };
         painter.attach_to(seed);
@@ -140,9 +145,9 @@ impl Painter {
             glyphs,
             ..
         } = self;
-        let moments = yunta_engine::chronicle(folded.settled());
+        let moments = yunta_replay::frame::chronicle(folded.settled());
         for moment in moments.iter().skip(*written) {
-            draw.record(moment, run_id.handle(), *glyphs);
+            draw.record(moment, run_id, *glyphs);
         }
         *written = moments.len();
     }
@@ -195,7 +200,7 @@ impl Painter {
             return;
         }
         let successor = {
-            let state = derive(self.folded.settled());
+            let state = RunState::replay(self.folded.settled());
             foreign.into_iter().find(|id| succeeds(&state, id))
         };
         if let Some(successor) = successor {
@@ -203,17 +208,17 @@ impl Painter {
         }
     }
 
-    /// The run's state and its frame as they stand at this instant.
+    /// The run's state and its frame, with what drives it, as they stand at
+    /// this instant.
     fn reading(&self) -> (RunState, RunFrame) {
-        let state = derive(self.folded.settled());
+        let state = RunState::replay(self.folded.settled());
         let now = self.clock.now();
-        // The live region is drawn by the engine driving the run.
-        let frame = run_frame_of(
+        let frame = RunFrame::of(
             &self.run_id,
             &self.manifest.workflow,
             &state,
             self.prior.as_ref(),
-            &yunta_engine::Engine::this(now),
+            &self.engine.read(),
             now,
         );
         (state, frame)
@@ -226,11 +231,7 @@ impl Painter {
             return;
         }
         let (state, frame) = self.reading();
-        // Only a parked run has a menu to rebuild, and rebuilding one is
-        // a walk of the run's state — asked exactly when the answer changes
-        // what the attention row says.
-        let answerable = matches!(frame.phase, yunta_engine::RunPhase::Waiting { .. })
-            && yunta_engine::awaits_decision(&self.manifest, &state).is_some();
+        let answerable = yunta_api::offers_a_menu(&frame, &self.manifest, &state);
         if let Draw::Live(region) = &mut self.draw {
             region.show(&frame, &self.run_id, answerable);
         }
@@ -249,7 +250,7 @@ impl Painter {
     /// dropped comes back. The log is the truth; this is the surface
     /// admitting its copy is behind.
     async fn reread(&mut self) {
-        let Ok(events) = self.storage.events_for_run(self.run_id.clone()).await else {
+        let Ok(events) = self.log.events(&self.run_id).await else {
             // A read that failed leaves the surface exactly as behind as
             // it was, and the next beat asks again.
             return;
@@ -261,6 +262,7 @@ impl Painter {
     /// Moves onto a promotion successor: a run of its own, with its own
     /// log, drawn as this same invocation carrying on.
     async fn follow(&mut self, run_id: RunId) {
+        self.engine = self.engine.of_successor(&run_id);
         self.run_id = run_id;
         self.folded = Folded::default();
         self.stale_gap = false;
@@ -340,6 +342,12 @@ impl Painter {
                     self.absorb(std::mem::take(&mut events)).await;
                     self.note(line);
                 }
+                // Only a region draws what a session said; lines never do.
+                Beat::Said(said) => {
+                    if let Draw::Live(region) = &mut self.draw {
+                        region.hear(*said);
+                    }
+                }
                 Beat::Close => closing = true,
             }
         }
@@ -399,79 +407,4 @@ pub(super) async fn paint(mut painter: Painter, mut beats: Receiver<Beat>, stand
 }
 
 #[cfg(test)]
-mod tests {
-    use yunta_core::events::{ChildEvent, EventPayload, RunEvent};
-    use yunta_core::events::{
-        ChildRunCreatedPayload, NodeStartedPayload, RunFinishedPayload, RunMetrics, TokenUsage,
-    };
-    use yunta_core::ContentHash;
-    use yunta_testkit_core::Log;
-
-    use super::*;
-    use yunta_core::events::NodeEvent;
-
-    const DRAWN: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P5";
-    const OTHER: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P6");
-
-    fn started() -> EventPayload {
-        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1)))
-    }
-
-    fn closed(terminal: TerminalState) -> EventPayload {
-        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
-            terminal_state: terminal,
-            metrics: RunMetrics {
-                cptv: None,
-                tokens: TokenUsage::default(),
-            },
-            closed_by: None,
-        }))
-    }
-
-    fn bore(child: &RunId) -> EventPayload {
-        EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
-            child_run_id: child.clone(),
-            child_workflow_hash: ContentHash::sha256(b"child"),
-        }))
-    }
-
-    #[test]
-    fn a_run_still_moving_has_no_successor() {
-        let log = Log::for_run(DRAWN).node("build", started()).build();
-        assert!(!succeeds(&derive(&log), &OTHER));
-    }
-
-    #[test]
-    fn a_run_that_closed_any_other_way_has_no_successor() {
-        for terminal in [
-            TerminalState::Done,
-            TerminalState::Failed,
-            TerminalState::Cancelled,
-        ] {
-            let log = Log::for_run(DRAWN)
-                .node("build", started())
-                .event(closed(terminal))
-                .build();
-            assert!(!succeeds(&derive(&log), &OTHER), "{terminal:?}");
-        }
-    }
-
-    #[test]
-    fn the_run_appending_after_a_promoted_close_is_the_successor() {
-        let log = Log::for_run(DRAWN)
-            .node("build", started())
-            .event(closed(TerminalState::Promoted))
-            .build();
-        assert!(succeeds(&derive(&log), &OTHER));
-    }
-
-    #[test]
-    fn a_child_this_run_bore_is_never_mistaken_for_its_successor() {
-        let log = Log::for_run(DRAWN)
-            .node("build", started())
-            .event(bore(&OTHER))
-            .event(closed(TerminalState::Promoted))
-            .build();
-        assert!(!succeeds(&derive(&log), &OTHER));
-    }
-}
+mod tests;

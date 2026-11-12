@@ -172,6 +172,7 @@ async fn dispatch(
             detail,
             release,
             tokens,
+            ..
         } => TaskCycleError::NotStopped {
             task: params.task.id.clone(),
             detail,

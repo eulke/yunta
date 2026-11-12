@@ -20,6 +20,7 @@
 //! is not.
 
 use console::Key;
+use yunta_ui::prompt::Stroke;
 
 /// The parameters of the sequence a terminal opens a paste with.
 const PASTE_BEGIN: &str = "200";
@@ -33,40 +34,6 @@ const PASTE_END: &str = "201";
 /// rather than reading the terminal's own traffic as parameters
 /// forever.
 const PARAMETER_LIMIT: usize = 16;
-
-/// What one keystroke asks of the line being typed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Stroke {
-    /// A character at the cursor.
-    Insert(char),
-    /// The answer is finished.
-    Enter,
-    /// A line break inside pasted text: the paste continues and the
-    /// answer stays one line.
-    PastedBreak,
-    Backspace,
-    Delete,
-    Left,
-    Right,
-    Home,
-    End,
-    /// The page above, for a reader that moves by pages.
-    PageUp,
-    /// The page below, the way PageUp is the one above.
-    PageDown,
-    /// Escape: this prompt is declined.
-    Decline,
-    /// Ctrl-C: the run is to be stopped.
-    Interrupt,
-    Up,
-    Down,
-    /// The next row of a list, the way Down is.
-    Tab,
-    /// The row before, the way Up is.
-    BackTab,
-    /// Nothing the line acts on.
-    Ignored,
-}
 
 /// The reading of the key stream: the escape sequence being followed,
 /// if any, and whether the terminal has said it is pasting.

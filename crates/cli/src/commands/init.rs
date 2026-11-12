@@ -1,242 +1,161 @@
-//! `yunta init`: prepares a repo for Yunta once — detects ecosystem,
-//! test command, base branch and available adapter CLIs (`probe()`,
-//! same call `doctor`/`run` use), writes `.yunta/config.yaml` and
-//! defensive `.gitignore` entries, installs the mechanism skill, and
-//! offers (never writes) a CLAUDE.md line. Non-interactive by default:
-//! every step picks the best answer it can detect and reports it;
-//! `-i/--interactive` only adds confirmation prompts, and degrades to
-//! non-interactive with a warning when stdin isn't a TTY — `init` must
-//! never hang waiting for input that isn't coming.
+//! `yunta init`: prepares a repo for Yunta once, through the API, which
+//! detects its ecosystem, test command, base branch, the adapter CLIs this
+//! machine answers for and the runners its workflows propose, and writes
+//! `.yunta/config.yaml`, defensive `.gitignore` entries and the mechanism
+//! skill. Non-interactive by default: every step picks the best answer it can
+//! detect and reports it, and the runners stay proposed, commented;
+//! `-i/--interactive` asks the name and base branch, and each runner's adapter
+//! and model, which writes it declared. It degrades to non-interactive with a
+//! warning when stdin isn't a TTY: `init` must never hang waiting for input
+//! that isn't coming.
 
-mod skill;
-
-use skill::MECHANISM_SKILL_DIR;
-use std::path::Path;
-
-use surco::components::{Checklist, Fields, Found, Furrow, Headline, Next, Said};
-use surco::doc::{Block, Doc};
-use surco::glyphs::Mark;
-use surco::line::{Line, Tone};
 use surco::look::Look;
-use yunta_engine::process::Supervision;
+use yunta_api::{ProjectDraft, RunnerAnswer};
+use yunta_core::{AdapterId, ModelName, RunnerName};
+use yunta_render::page::Initialized;
+use yunta_render::prompt::{
+    keeping, model_of, runs_on, Escape, BASE_BRANCH, PROJECT_NAME, USING_DETECTED_DEFAULTS,
+};
+use yunta_ui::prompt::Alternative;
 
-use crate::ask::{ask_line, Console, Escape};
-use crate::error::{CliError, Outcome};
-use crate::interrupt::Interrupt;
-use crate::render::RunExit;
+use crate::ask::{ask_line, choose, Console, NoAnswer};
+use crate::error::CliError;
+use crate::output::Outcome;
+use crate::shell::Shell;
 use crate::surface::Diagnostics;
 
-/// The base branch a project starts from: the remote's default, else the
-/// branch checked out here, else `main`. Only git's "no remote HEAD" answer
-/// falls through to the next probe. Any other failure stops `init`, since a
-/// base read from a git that never answered would be written as if found.
-async fn detect_base_branch(repo: &Path, supervision: Supervision<'_>) -> Result<String, CliError> {
-    // `-q` makes git exit 1, silently, when there is no remote HEAD to read.
-    let remote = yunta_engine::git::read(
-        repo,
-        &["symbolic-ref", "-q", "refs/remotes/origin/HEAD"],
-        supervision,
-    )
-    .await;
-    match remote {
-        Ok(raw) => {
-            if let Some(branch) = raw.trim().strip_prefix("refs/remotes/origin/") {
-                if !branch.is_empty() {
-                    return Ok(branch.to_string());
-                }
-            }
-        }
-        Err(error)
-            if matches!(
-                error.cause,
-                yunta_engine::git::Cause::Exit { code: Some(1), .. }
-            ) => {}
-        Err(error) => return Err(yunta_engine::RunError::from(error).into()),
-    }
-    let current = yunta_engine::git::read(repo, &["branch", "--show-current"], supervision)
-        .await
-        .map_err(|error| CliError::from(yunta_engine::RunError::from(error)))?;
-    let name = current.trim();
-    if name.is_empty() {
-        return Ok("main".to_string());
-    }
-    Ok(name.to_string())
-}
-
-fn render_config_yaml(
-    project_name: &str,
-    base_branch: &str,
-    probed: &[crate::detect::ProbedAdapter],
-    detected: &crate::detect::Detected,
-) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "# Written by `{}`: team-shared, commit this file.\n",
-        super::advice::init()
-    ));
-    out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
-    out.push_str("# config layer), never in this file.\n\n");
-    out.push_str("project:\n");
-    out.push_str(&format!("  name: {project_name}\n"));
-    out.push_str(&format!("  base_branch: {base_branch}\n"));
-    out.push_str("  branch_prefix: yunta/\n\n");
-    out.push_str(&render_detected(detected));
-
-    out.push_str("# `runners:` names roles your workflows' `runner:` fields reference,\n");
-    out.push_str("# each with one or more adapter candidates (first capable one wins).\n");
-    for adapter in probed {
-        if adapter.healthy {
-            out.push_str(&format!(
-                "# detected: {} ({})\n",
-                adapter.id, adapter.detail
-            ));
-        } else {
-            out.push_str(&format!(
-                "# not available: {} ({})\n",
-                adapter.id, adapter.detail
-            ));
-        }
-    }
-    out.push_str("# runners:\n");
-    out.push_str("#   implementer:\n");
-    if let Some(healthy) = probed.iter().find(|a| a.healthy) {
-        out.push_str(&format!(
-            "#     - {{ adapter: {}, model: <model-name> }}\n",
-            healthy.id
-        ));
-    } else {
-        out.push_str(&format!(
-            "#     - {{ adapter: {}, model: <model-name> }}\n",
-            super::first_built_adapter()
-        ));
-    }
-    out
-}
-
-/// What `init` found in the repository, as config: the commands a
-/// workflow asks for by name, the suite a run measures when it reads the
-/// measurement, and the forge `origin` is on.
-fn render_detected(detected: &crate::detect::Detected) -> String {
-    let mut out = String::new();
-    if !detected.commands.is_empty() {
-        out.push_str("# What this project runs for each capability a workflow names\n");
-        out.push_str(&format!(
-            "# (`run: {{ command: lint }}`), as `{}` detected it.\n",
-            super::advice::init()
-        ));
-        out.push_str("commands:\n");
-        for (name, text) in &detected.commands {
-            out.push_str(&format!("  {name}: {}\n", yaml_string(text)));
-        }
-        out.push('\n');
-    }
-    if let Some(suite) = &detected.suite {
-        out.push_str("# Measured before a run's first node when the run reads it.\n");
-        out.push_str(&format!("baseline:\n  suite: {}\n\n", yaml_string(suite)));
-    }
-    if let Some(repo) = &detected.forge {
-        out.push_str("# Where a `pull_request` node opens its pull request.\n");
-        out.push_str(&format!(
-            "forge:\n  github:\n    repo: {repo}\n    token_env: GITHUB_TOKEN\n\n"
-        ));
-    }
-    out
-}
-
-/// `text` as a double-quoted YAML scalar.
-fn yaml_string(text: &str) -> String {
-    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-/// The line `init` writes above the entries it adds to `.gitignore`, and
-/// finds again so a second `init` adds nothing.
-fn gitignore_marker() -> String {
-    format!("# added by `{}`", super::advice::init())
-}
-
-/// Defensive only — `paths.runs`/`paths.worktrees` default to `~/.yunta`,
-/// outside the repo entirely, so none of this exists in a repo with
-/// default config. It's here for the day someone points `paths:` back
-/// into the repo on purpose.
-fn gitignore_block() -> String {
-    format!(
-        "\n{marker}: only matters if `paths:` ever points inside \
-         this repo (defaults keep run state in ~/.yunta):\n.yunta/runs/\n\
-         .yunta/worktrees/\n.yunta/*.db\n.yunta/*.db-*\n",
-        marker = gitignore_marker()
-    )
-}
-
-fn write_gitignore(repo: &Path) -> std::io::Result<bool> {
-    let path = repo.join(".gitignore");
-    // An absent `.gitignore` is the create case; any *other* read error
-    // (unreadable, not UTF-8, a directory) is propagated, never swallowed
-    // as "empty" — appending to an empty string would then overwrite a
-    // file whose real content we failed to read.
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(e),
+pub async fn init(
+    shell: &Shell,
+    interactive: bool,
+    force: bool,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    let workspace = shell.workspace();
+    let detected = workspace.detect_project(force, &shell.stop()).await?;
+    let console = open_console(interactive).await;
+    let draft = &detected.draft;
+    let defaults = (draft.name.clone(), draft.base_branch.clone());
+    let Some((name, base_branch)) = project_answers(console.as_ref(), defaults) else {
+        return Ok(Outcome::interrupted());
     };
-    if existing.contains(&gitignore_marker()) {
-        return Ok(false);
-    }
-    let mut updated = existing;
-    updated.push_str(&gitignore_block());
-    std::fs::write(&path, updated)?;
-    Ok(true)
-}
-
-/// What this repository's CLAUDE.md could say, a line at a time as a
-/// person pastes it.
-fn claude_md_suggestion() -> Vec<String> {
-    vec![
-        "This repo uses Yunta for verified workflows. Before implementing".to_string(),
-        format!(
-            "something ad hoc, check `{}` (or the `list_workflows` MCP",
-            super::advice::list()
-        ),
-        "tool) for an existing verified workflow that already covers it.".to_string(),
-    ]
+    let runners = match &console {
+        Some(console) => match runner_answers(console, draft) {
+            Some(runners) => runners,
+            None => return Ok(Outcome::interrupted()),
+        },
+        None => Vec::new(),
+    };
+    let setup = draft.answered(&name, &base_branch, runners);
+    let initialized = detected.write(setup).await?;
+    let page = Initialized {
+        repo: &workspace.dir,
+        wrote: &initialized.wrote,
+        skipped: &initialized.skipped,
+        detected: &initialized.detected,
+        probed: &initialized.probed,
+        declared: &initialized.declared,
+        undeclared: &initialized.undeclared,
+    };
+    crate::output::show(look, &page);
+    Ok(Outcome::Success)
 }
 
 /// One setting asked for on `console`, or `default` when nobody
 /// answers.
 ///
 /// Answered on the one line every prompt in this binary is answered on
-/// — same editing, same Escape, same Ctrl-C, same terminal handed back
-/// — so a person who has answered a run answers `init` the same way.
-/// An empty line takes the default, and so does Escape: "not me, not
-/// now" about a setting that already has a detected value is that
-/// value. `None` where Ctrl-C stopped `init`.
+/// (same editing, same Escape, same Ctrl-C, same terminal handed back), so
+/// a person who has answered a run answers `init` the same way. An empty
+/// line takes the default, and so does Escape: "not me, not now" about a
+/// setting that already has a detected value is that value. `None` where
+/// Ctrl-C stopped `init`.
 fn asked(console: &Console, prompt: &str, default: &str) -> Option<String> {
-    let asking = Line::new()
-        .push(Tone::Strong, prompt)
-        .push(Tone::Muted, format!(" (enter keeps `{default}`)"));
-    ask_line(console, &asking, default)
+    ask_line(console, &keeping(prompt, default), default)
 }
 
 /// The project's name and base branch, as `init` answers them: asked on
 /// `console` when there is one, each prompt keeping its detected value when
-/// it is left empty, and the detected values as they stand otherwise. `None`
-/// where a person stopped `init` at one of them: nothing more is asked.
+/// it is left empty, and the detected `defaults` as they stand otherwise.
+/// `None` where a person stopped `init` at one of them: nothing more is
+/// asked.
 fn project_answers(
     console: Option<&Console>,
-    default_name: String,
-    default_branch: String,
+    (default_name, default_branch): (String, String),
 ) -> Option<(String, String)> {
     match console {
         Some(console) => {
             // What Escape does, said once above the prompts it applies
-            // to — the same place every other surface says it.
+            // to: the same place every other surface says it.
             // best-effort: the notice informs only; a refused write falls back to the defaults.
-            let _ = console.say(console.escape().said());
+            let _ = console.say(&console.escape().said());
             Some((
-                asked(console, "project name", &default_name)?,
-                asked(console, "base branch", &default_branch)?,
+                asked(console, PROJECT_NAME, &default_name)?,
+                asked(console, BASE_BRANCH, &default_branch)?,
             ))
         }
         None => Some((default_name, default_branch)),
+    }
+}
+
+/// What a person answers on `console` for each runner `draft` proposes: the adapter
+/// it runs on, picked among those this machine answers for, the first standing, and
+/// the model typed. With no adapter answering nothing is asked. `None` where a person
+/// stopped `init`.
+fn runner_answers(console: &Console, draft: &ProjectDraft) -> Option<Vec<RunnerAnswer>> {
+    let answering = draft.answering();
+    let Some(first) = answering.first() else {
+        return Some(Vec::new());
+    };
+    let mut answers = Vec::new();
+    for runner in &draft.proposed.roles {
+        let adapter = adapter_of(console, runner, &answering)?.unwrap_or_else(|| (*first).clone());
+        let model = model_of_runner(console, runner)?;
+        answers.push(RunnerAnswer {
+            runner: runner.clone(),
+            adapter,
+            model,
+        });
+    }
+    Some(answers)
+}
+
+/// The adapter `runner` runs on, picked among those that `answered`: `Some(None)`
+/// where nothing was picked and the first stands, `None` where a person stopped
+/// `init`.
+fn adapter_of(
+    console: &Console,
+    runner: &RunnerName,
+    answered: &[&AdapterId],
+) -> Option<Option<AdapterId>> {
+    let alternatives = answered
+        .iter()
+        .map(|adapter| Alternative::named(adapter.as_str(), (*adapter).clone()))
+        .collect();
+    // best-effort: the question informs only; the list is asked either way.
+    let _ = console.say(&runs_on(runner));
+    match choose(console, alternatives) {
+        Ok(adapter) => Some(Some(adapter)),
+        Err(NoAnswer::Interrupted) => None,
+        Err(_) => Some(None),
+    }
+}
+
+/// The model `runner` runs, as typed: `Some(None)` where the line was left empty,
+/// and asked again where what was typed is no model name; `None` where a person
+/// stopped `init`.
+fn model_of_runner(console: &Console, runner: &RunnerName) -> Option<Option<ModelName>> {
+    loop {
+        let typed = ask_line(console, &model_of(runner), "")?;
+        if typed.is_empty() {
+            return Some(None);
+        }
+        match typed.parse::<ModelName>() {
+            Ok(model) => return Some(Some(model)),
+            Err(refused) => {
+                // best-effort: the refusal informs only; the model is asked again.
+                let _ = console.say(&refused.to_string());
+            }
+        }
     }
 }
 
@@ -251,204 +170,7 @@ async fn open_console(interactive: bool) -> Option<Console> {
         false => None,
     };
     if interactive && console.is_none() {
-        crate::ask::no_terminal("using detected defaults");
+        crate::ask::no_terminal(USING_DETECTED_DEFAULTS);
     }
     console
-}
-
-pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome, CliError> {
-    let repo = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    // `init` is the command that makes a project, so there is no
-    // `Context` to resolve yet — and its probes still spawn git, so it
-    // owns the interruption itself, like any other invocation.
-    let interrupt = Interrupt::ctrl_c()
-        .map_err(|source| CliError::io("install the interrupt handler for", "init", source))?;
-    let clock = crate::context::process_clock();
-    let env = crate::project::process_env();
-    let supervision = Supervision::outside_any_run(interrupt.stop(), clock).with_path(&env.path);
-
-    let config_path = repo.join(".yunta/config.yaml");
-    if config_path.exists() && !force {
-        return Err(CliError::msg(format!(
-            "{} already exists; pass --force to overwrite",
-            config_path.display()
-        )));
-    }
-
-    let console = open_console(interactive).await;
-
-    let default_name = repo
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "workflow-project".to_string());
-    let default_branch = detect_base_branch(&repo, supervision).await?;
-    let detected = crate::detect::Detected::in_repo(&repo, supervision).await?;
-
-    let Some((project_name, base_branch)) =
-        project_answers(console.as_ref(), default_name, default_branch)
-    else {
-        return Ok(RunExit::Interrupted.outcome());
-    };
-
-    let probed = crate::detect::probe_known_adapters().await;
-    let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);
-    let (wrote, skipped) = write_project(&repo, &config_path, config_yaml, force).await?;
-
-    let init = Wrote {
-        repo: &repo,
-        wrote: &wrote,
-        skipped: &skipped,
-        detected: &detected,
-        probed: &probed,
-    };
-    crate::output::document(look, report(&init));
-    Ok(Outcome::Success)
-}
-
-/// Writes what `init` puts in the project: the config first, then the
-/// ignore entries and the mechanism skill. Answers what it wrote, and what
-/// it left as it was.
-async fn write_project(
-    repo: &Path,
-    config_path: &Path,
-    config_yaml: String,
-    force: bool,
-) -> Result<(Vec<String>, Vec<String>), CliError> {
-    let mut wrote = Vec::new();
-    let mut skipped = Vec::new();
-
-    if let Some(parent) = config_path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|source| CliError::io("create", parent.display(), source))?;
-    }
-    // Never write a config this binary can't read back: parse the
-    // generated text into a real `ConfigLayer` first, so a broken template
-    // fails here instead of leaving an unreadable file — the more so under
-    // `--force`, which would otherwise overwrite a good config with a bad
-    // one.
-    yunta_core::yaml::parse::<yunta_core::ConfigLayer>(&config_yaml)
-        .map_err(|e| CliError::msg(format!("the generated config is not valid: {e}")))?;
-    tokio::fs::write(config_path, config_yaml)
-        .await
-        .map_err(|source| CliError::io("write", config_path.display(), source))?;
-    wrote.push(".yunta/config.yaml".to_string());
-
-    match write_gitignore(repo) {
-        Ok(true) => wrote.push(".gitignore".to_string()),
-        Ok(false) => skipped.push(".gitignore (already has yunta entries)".to_string()),
-        Err(source) => return Err(CliError::io("update", ".gitignore", source)),
-    }
-
-    match skill::write_mechanism_skill(repo, force) {
-        Ok(true) => wrote.push(format!("{MECHANISM_SKILL_DIR}/SKILL.md")),
-        Ok(false) => skipped.push(format!(
-            "{MECHANISM_SKILL_DIR}/SKILL.md (already exists, pass --force to rewrite)"
-        )),
-        Err(source) => return Err(CliError::io("write", "the mechanism skill", source)),
-    }
-    Ok((wrote, skipped))
-}
-
-/// What `init` did and found, for the report it ends with.
-struct Wrote<'a> {
-    repo: &'a Path,
-    wrote: &'a [String],
-    skipped: &'a [String],
-    detected: &'a crate::detect::Detected,
-    probed: &'a [crate::detect::ProbedAdapter],
-}
-
-/// What `init` wrote and detected, as the fields the page opens with: the
-/// files it wrote and the ones it left as they were, the ecosystem it found
-/// and its cache tip, and the forge `origin` is on.
-fn detected_fields(init: &Wrote<'_>) -> Fields {
-    let detected = init.detected;
-    let ecosystem = match &detected.ecosystem {
-        Some(ecosystem) => format!(
-            "{}: wrote {}{}",
-            ecosystem.name,
-            surco::text::counted(detected.commands.len(), "project command"),
-            match detected.suite {
-                Some(_) => " and the suite a run measures",
-                None => "",
-            }
-        ),
-        None => "none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml); \
-                 declare `commands:` and `baseline.suite` by hand"
-            .to_string(),
-    };
-    Fields::new()
-        .push_if("wrote", init.wrote.join(", "))
-        .push_if("skipped", init.skipped.join(", "))
-        .push_if("ecosystem", ecosystem)
-        .push_if(
-            "tip",
-            detected
-                .ecosystem
-                .as_ref()
-                .map(|ecosystem| ecosystem.cache_tip.to_string())
-                .unwrap_or_default(),
-        )
-        .push_if(
-            "forge",
-            detected
-                .forge
-                .as_ref()
-                .map(|repo| {
-                    format!("github {repo}, from `origin`; its token is read from `GITHUB_TOKEN`")
-                })
-                .unwrap_or_default(),
-        )
-}
-
-/// The page `init` ends with: what it wrote and detected, as fields; each
-/// adapter this machine answers for, as a check; the lines to paste into
-/// the project's CLAUDE.md; and the runner to declare, because no agent
-/// node runs until one is.
-fn report(init: &Wrote<'_>) -> Doc {
-    let mut adapters = Checklist::default();
-    for adapter in init.probed {
-        match adapter.healthy {
-            true => adapters.push(
-                Found::Holds,
-                adapter.id.as_str(),
-                format!("healthy ({})", adapter.detail),
-            ),
-            false => adapters.push(
-                Found::Caution,
-                adapter.id.as_str(),
-                format!("unavailable ({})", adapter.detail),
-            ),
-        }
-    }
-    let suggestion = claude_md_suggestion();
-    // The config is written with its runners commented out: a probe
-    // names an adapter and never a model, and the model is the project's
-    // to choose. Until a runner is declared, no agent node can run, so
-    // that is the step this ends with.
-    let runner = crate::detect::runner_step(&[], true, &crate::detect::healthy(init.probed));
-    let headline = Headline::new(Mark::Done, super::advice::init(), "done")
-        .fact(format!("in {}", init.repo.display()));
-    Doc::new()
-        .with(headline)
-        .with(Furrow(Vec::new()))
-        .with(detected_fields(init))
-        .with(adapters)
-        .with(Block::Heading(
-            "for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file"
-                .to_string(),
-        ))
-        .with(Said(suggestion))
-        .with(Block::Heading(
-            "no runner is declared, so a workflow's agent nodes cannot run until one is"
-                .to_string(),
-        ))
-        .with_all(runner.blocks())
-        .with(Next {
-            steps: vec![(
-                super::advice::doctor(),
-                "confirms everything above is usable",
-            )],
-        })
 }

@@ -27,7 +27,7 @@ use crate::run::{BirthArtifact, BirthOrigin};
 
 /// Why the inputs a run was handed do not resolve to its workflow's declared
 /// inputs: the core's account of each problem, whose display is a code.
-pub use yunta_core::inputs::InputsProblem as InputsError;
+use yunta_core::inputs::InputsProblem;
 
 /// What a workflow's `inputs:` resolve to: the value of every declared
 /// input, and the documents that entered as one.
@@ -59,7 +59,7 @@ pub async fn resolve_inputs(
     specs: &BTreeMap<InputName, InputSpec>,
     provided: &HashMap<InputName, String>,
     base_dir: &Path,
-) -> Result<ResolvedInputs, InputsError> {
+) -> Result<ResolvedInputs, InputsProblem> {
     let mut unknown: Vec<InputName> = provided
         .keys()
         .filter(|name| !specs.contains_key(*name))
@@ -67,7 +67,7 @@ pub async fn resolve_inputs(
         .collect();
     if !unknown.is_empty() {
         unknown.sort();
-        return Err(InputsError::Unknown {
+        return Err(InputsProblem::Unknown {
             names: unknown,
             declared: specs.keys().cloned().collect(),
         });
@@ -79,7 +79,7 @@ pub async fn resolve_inputs(
             Some(value) => value.clone(),
             None => match default_as_string(spec) {
                 Some(default) => default,
-                None => return Err(InputsError::Missing { name: name.clone() }),
+                None => return Err(InputsProblem::Missing { name: name.clone() }),
             },
         };
         let value = match validate(name, spec, &raw, base_dir).await? {
@@ -115,24 +115,25 @@ async fn read_document(
     kind: ArtifactKind,
     raw: &str,
     base_dir: &Path,
-) -> Result<BirthArtifact, InputsError> {
+) -> Result<BirthArtifact, InputsProblem> {
     let path = base_dir.join(raw);
     if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
-        return Err(InputsError::PathNotFound {
+        return Err(InputsProblem::PathNotFound {
             name: name.clone(),
             path: raw.to_string(),
         });
     }
-    let bytes = tokio::fs::read(&path)
-        .await
-        .map_err(|source| InputsError::DocumentUnreadable {
-            name: name.clone(),
-            path: raw.to_string(),
-            label: kind.label().to_string(),
-            detail: source.to_string(),
-        })?;
+    let bytes =
+        tokio::fs::read(&path)
+            .await
+            .map_err(|source| InputsProblem::DocumentUnreadable {
+                name: name.clone(),
+                path: raw.to_string(),
+                label: kind.label().to_string(),
+                detail: source.to_string(),
+            })?;
     let canonical = crate::artifacts::canonical_document(kind, &bytes, raw).map_err(|report| {
-        InputsError::DocumentRefused {
+        InputsProblem::DocumentRefused {
             name: name.clone(),
             report,
         }
@@ -173,7 +174,7 @@ async fn validate(
     spec: &InputSpec,
     raw: &str,
     base_dir: &Path,
-) -> Result<Resolved, InputsError> {
+) -> Result<Resolved, InputsProblem> {
     let value = match spec {
         InputSpec::String {
             pattern,
@@ -184,7 +185,7 @@ async fn validate(
         InputSpec::Boolean { .. } => match raw {
             "true" | "false" => raw.to_string(),
             other => {
-                return Err(InputsError::InvalidBoolean {
+                return Err(InputsProblem::InvalidBoolean {
                     name: name.clone(),
                     value: other.to_string(),
                 })
@@ -192,7 +193,7 @@ async fn validate(
         },
         InputSpec::Enum { values, .. } => {
             if !values.iter().any(|v| v == raw) {
-                return Err(InputsError::NotInEnum {
+                return Err(InputsProblem::NotInEnum {
                     name: name.clone(),
                     value: raw.to_string(),
                     values: values.clone(),
@@ -205,7 +206,7 @@ async fn validate(
         // is the cheap place to do it.
         InputSpec::Path { .. } => {
             if !base_dir.join(raw).exists() {
-                return Err(InputsError::PathNotFound {
+                return Err(InputsProblem::PathNotFound {
                     name: name.clone(),
                     path: raw.to_string(),
                 });
@@ -229,10 +230,10 @@ fn validate_string(
     raw: &str,
     pattern: Option<&str>,
     min_length: Option<u32>,
-) -> Result<String, InputsError> {
+) -> Result<String, InputsProblem> {
     if let Some(min_length) = min_length {
         if raw.chars().count() < min_length as usize {
-            return Err(InputsError::TooShort {
+            return Err(InputsProblem::TooShort {
                 name: name.clone(),
                 min_length,
                 actual: raw.chars().count(),
@@ -240,13 +241,13 @@ fn validate_string(
         }
     }
     if let Some(pattern) = pattern {
-        let re = regex::Regex::new(pattern).map_err(|e| InputsError::InvalidPattern {
+        let re = regex::Regex::new(pattern).map_err(|e| InputsProblem::InvalidPattern {
             name: name.clone(),
             pattern: pattern.to_string(),
             detail: e.to_string(),
         })?;
         if !re.is_match(raw) {
-            return Err(InputsError::PatternMismatch {
+            return Err(InputsProblem::PatternMismatch {
                 name: name.clone(),
                 pattern: pattern.to_string(),
                 value: raw.to_string(),
@@ -261,24 +262,24 @@ fn validate_number(
     raw: &str,
     min: Option<f64>,
     max: Option<f64>,
-) -> Result<String, InputsError> {
+) -> Result<String, InputsProblem> {
     let value: f64 = raw
         .parse()
         .ok()
         .filter(|number: &f64| number.is_finite())
-        .ok_or_else(|| InputsError::InvalidNumber {
+        .ok_or_else(|| InputsProblem::InvalidNumber {
             name: name.clone(),
             value: raw.to_string(),
         })?;
     if let Some(min) = min.filter(|min| value < *min) {
-        return Err(InputsError::BelowMin {
+        return Err(InputsProblem::BelowMin {
             name: name.clone(),
             value,
             min,
         });
     }
     if let Some(max) = max.filter(|max| value > *max) {
-        return Err(InputsError::AboveMax {
+        return Err(InputsProblem::AboveMax {
             name: name.clone(),
             value,
             max,

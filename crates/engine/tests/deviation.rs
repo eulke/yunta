@@ -282,7 +282,7 @@ async fn a_node_reading_the_departures_sees_each_one_and_its_answer_and_nothing_
 struct GrantsScopeOnly;
 
 #[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for GrantsScopeOnly {
+impl yunta_core::port::HumanInteraction for GrantsScopeOnly {
     async fn resolve(
         &self,
         escalation: &yunta_core::events::GateWaitingPayload,
@@ -375,7 +375,7 @@ async fn a_plan_shown_after_its_work_carries_the_departures_a_person_accepted() 
     assert_eq!(terminal, RunTerminal::Finished);
     let shown = interaction.shown();
     let at_ship = shown.last().expect("the gate was asked");
-    let yunta_engine::ShownContent::Tasks(review) = &at_ship[0].content else {
+    let yunta_core::shown::ShownContent::Tasks(review) = &at_ship[0].content else {
         panic!("the plan is shown as its tasks: {at_ship:?}");
     };
     let [departure] = review.departed.as_slice() else {

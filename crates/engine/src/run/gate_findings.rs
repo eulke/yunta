@@ -11,9 +11,9 @@ use yunta_core::durable::{self, Durability};
 use yunta_core::events::findings::RunFindings;
 use yunta_core::events::{ArtifactId, EventPayload, FindingEvent, FindingSettledPayload, Shown};
 use yunta_core::{ArtifactContextRef, ArtifactKind, ContentHash, Node, Seq};
+use yunta_replay::RunState;
 
 use super::{RunCtx, RunError};
-use crate::replay::RunState;
 
 /// The identity the view is shown under.
 fn findings() -> ArtifactId {
@@ -65,7 +65,7 @@ pub(crate) async fn keep(ctx: &RunCtx<'_>, state: &RunState) -> Result<(), RunEr
         artifact: findings(),
         content_hash: hash,
     };
-    let path = ctx.run_dir.join(crate::artifacts::shown::view_of(&shown));
+    let path = ctx.run_dir.join(yunta_core::run_dir::view_of(&shown));
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await

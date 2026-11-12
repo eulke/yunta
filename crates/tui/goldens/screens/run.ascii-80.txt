@@ -1,0 +1,24 @@
+ yunta :: Q78GRR :: approve-plan
+................................................................................
+ plan approve-plan
+ ==== ============
+
+ ? needs you: yunta resolve-gate Q78GRR (node `approve-plan`)
+ == = 1 of 2 nodes done ; 1 needs you ; 0 of 2 tasks done ; 7m34s ; needs you
+
+   + plan  0s           | ? node approve-plan of run Q78GRR ; needs you
+ * ? approve-plan       |
+                        |   kind         gate
+                        |
+                        | next
+                        |   yunta status Q78GRR   shows the whole run
+                        |
+                        |
+                        |
+                        |
+                        |
+                        |
+                        |
+                        |
+                        |
+ j k move along its nodes ; ... ; ? the keys here

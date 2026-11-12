@@ -159,7 +159,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
 
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("approve") {
-        Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
+        Some(yunta_core::events::NodeState::Finished { outcome, .. }) => {
             assert_eq!(
                 outcome,
                 &NodeOutcome::Fact(EngineFact::OptionChosen {

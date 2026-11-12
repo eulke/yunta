@@ -23,6 +23,8 @@ yunta-core = { workspace = true, features = ["testkit"] }
 chrono.workspace = true
 # A session request carries an adapter's own settings as JSON.
 serde_json.workspace = true
+# The logs a property draws, for every crate that folds one.
+proptest.workspace = true
 # The session helpers read an adapter's event stream to its end.
 futures.workspace = true
 # A scripted CLI announces its grandchild's pid through a fifo the test

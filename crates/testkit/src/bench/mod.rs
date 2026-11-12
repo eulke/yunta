@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 use yunta_adapters::MockAdapter;
-use yunta_core::port::Adapter;
+use yunta_core::port::{Adapter, RunObserver};
 use yunta_core::{AdapterId, Capabilities, Clock, RunAdapter, RunId};
-use yunta_engine::{BirthArtifact, RunObserver};
+use yunta_engine::BirthArtifact;
 use yunta_storage::Storage;
 use yunta_testkit_core::{FixedClock, SeqIdSource};
 
@@ -164,6 +164,12 @@ impl Bench {
             driven: std::sync::Mutex::new(None),
             capabilities: None,
         }
+    }
+
+    /// Where this bench's event store lives: what a project that reads the bench's runs
+    /// names as its log.
+    pub fn store_path(&self) -> &std::path::Path {
+        &self.db
     }
 
     /// A second run in this bench's world: the same worktree, runs root

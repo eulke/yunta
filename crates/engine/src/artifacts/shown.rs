@@ -4,18 +4,12 @@ use std::path::Path;
 
 use yunta_core::events::findings::RunFindings;
 use yunta_core::events::{AcceptedDeparture, ArtifactId, Shown, TaskLedger};
+use yunta_core::shown::{ShownContent, ShownDocument};
 
-use crate::replay::RunState;
 use yunta_core::{ArtifactKind, TasksFile};
+use yunta_replay::RunState;
 
-use super::store::{view_path, ObjectStore};
-use crate::human_interaction::{ShownContent, ShownDocument};
-
-/// Where the document an escalation shows sits in the run's directory:
-/// the view of its canonical bytes, as the engine reads it.
-pub fn view_of(shown: &Shown) -> std::path::PathBuf {
-    view_path(shown.producer.as_ref(), &shown.artifact.view_name())
-}
+use super::store::ObjectStore;
 
 /// The documents `shows` names, from the run rooted at `run_dir`: the
 /// exact bytes each hash names, a tasks document read into the plan as
@@ -48,7 +42,7 @@ async fn held_documents(
         let bytes = store.get(&shown.content_hash).await?;
         // Where the person deciding opens it: in full, since they read it
         // from wherever they stand and not from the run's directory.
-        let path = run_dir.join(view_of(shown));
+        let path = run_dir.join(yunta_core::run_dir::view_of(shown));
         let content = content(shown, (&bytes, &path), state, (&answered, asked))?;
         documents.push(ShownDocument {
             shown: shown.clone(),

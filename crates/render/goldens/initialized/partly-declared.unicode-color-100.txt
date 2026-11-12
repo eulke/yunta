@@ -1,0 +1,25 @@
+␛[32m✓␛[0m ␛[1myunta init␛[0m␛[2m ·␛[0m␛[32m done ␛[0m␛[2m· in /home/me/project␛[0m
+␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+
+  ␛[2mwrote       ␛[0m .yunta/config.yaml
+  ␛[2mecosystem   ␛[0m none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml); declare
+               `commands:` and `baseline.suite` by hand
+
+  ␛[32m✓␛[0m ␛[1mclaude-code␛[0m  healthy (2.1.0)
+  ␛[33m▲␛[0m ␛[1mcodex␛[0m        unavailable (not on PATH)
+
+  ␛[2mrunners     ␛[0m planner on claude-code, model opus
+
+␛[2mfor this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file␛[0m
+  This repo uses Yunta for verified workflows. Before implementing
+  something ad hoc, check `yunta list` (or the `list_workflows` MCP
+  tool) for an existing verified workflow that already covers it.
+
+␛[2m`implementer` is not declared, so the agent nodes that name it cannot run until it is␛[0m
+␛[2mdeclare a runner in .yunta/config.yaml; this machine answers for `claude-code`:␛[0m
+  runners:
+    implementer:
+      - { adapter: claude-code, model: <model> }
+
+␛[2mnext␛[0m
+  ␛[1myunta doctor␛[0m   ␛[2mconfirms everything above is usable␛[0m

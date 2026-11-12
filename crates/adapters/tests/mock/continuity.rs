@@ -1,9 +1,12 @@
 //! What a mock keeps from one invocation to the next: a session whose script
-//! ended answers `kill` as stopped, and a ledger of claims lets a mock built
-//! later from the same fixture serve the scripts the first one left unclaimed.
+//! ended answers `kill` as stopped unless its script leaves a command behind,
+//! and a ledger of claims lets a mock built later from the same fixture serve
+//! the scripts the first one left unclaimed.
 
 use super::*;
 use yunta_adapters::MOCK_CLAIMS_FILE;
+use yunta_core::process::group::group_runs;
+use yunta_core::process::signal::{signal_group, Signal};
 use yunta_core::AdapterError;
 
 /// Two scripts, each completing with its own summary.
@@ -48,6 +51,38 @@ sessions:
         killed.is_ok(),
         "a kill after the script ended is refused: {killed:?}"
     );
+}
+
+/// A finished session whose kill leaves a command behind answers that the
+/// command would not die, naming its group, which runs on.
+#[tokio::test]
+async fn a_kill_that_leaves_a_command_behind_names_its_running_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockAdapter::from_yaml(
+        r#"
+dialect: claude-code
+sessions:
+  - kill: leave_behind
+    outcome: { type: completed, summary: done }
+"#,
+    )
+    .unwrap();
+    let mut session = mock.spawn(request(dir.path().to_path_buf())).await.unwrap();
+    session.events().collect::<Vec<_>>().await;
+
+    let killed = session.kill().await;
+
+    let Err(AdapterError::NotClosed { groups, .. }) = &killed else {
+        panic!("a kill that leaves a command behind says so: {killed:?}");
+    };
+    let running = groups
+        .iter()
+        .all(|group| matches!(group_runs(*group), Ok(true)));
+    for group in groups {
+        // best-effort: the command left behind is this test's to end.
+        signal_group(*group, Signal::SIGKILL).ok();
+    }
+    assert!(!groups.is_empty() && running, "{groups:?}");
 }
 
 /// A stop the script ignores leaves the session playing, so the refused kill

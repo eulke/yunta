@@ -7,11 +7,12 @@ mod down;
 pub mod flowchart;
 mod grid;
 pub(crate) mod layer;
+pub(crate) mod nest;
 pub(crate) mod outline;
 pub(crate) mod place;
 pub(crate) mod split;
 
-pub use flowchart::{flowchart, Direction, Flowchart, Link, Node, Shape, Stroke};
+pub use flowchart::{flowchart, Direction, Flowchart, Group, Link, Node, Shape, Stroke};
 
 /// A diagram as an author wrote it, and the flowchart it reads as.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +154,18 @@ mod tests {
     /// it: a pipeline that ends fanning out.
     const CHAINED: &str = "graph LR\n  a[Read the idea and its brief] --> b[Plan the change task by task] --> c[Write the tests for the plan] --> d[Approve the plan and its tests]\n  d --> e[Build the store task] & f[Build the command task] & g[Build the docs task] & h[Build the release task]";
 
+    /// A group of two checks the build leads to: one of them goes on to a fix, and
+    /// the group as a whole to the ship.
+    const GROUPED: &str = "graph TD\n  build --> checks\n  subgraph checks[the checks]\n    lint\n    test\n  end\n  checks --> ship\n  lint -.-> fix";
+
+    /// The same group, read across: a box a link reaches from outside, and one a
+    /// link leaves from a node inside it.
+    const GROUPED_ACROSS: &str = "graph LR\n  subgraph checks[the checks]\n    lint\n    test\n  end\n  build --> lint\n  checks --> ship\n  test -.-> fix";
+
+    /// A group too wide for any line, read either way: what it holds is said
+    /// after the chains.
+    const GROUPED_WIDE: &str = "graph LR\n  subgraph checks[the checks]\n    lint[Check the code is clean and formatted]\n    test[Run every test the project has]\n    docs[Check every document still holds]\n    size[Measure the binary against its ceiling]\n  end\n  build[Build the whole workspace] --> checks --> ship[Ship what was built] --> tell[Tell everyone what shipped]";
+
     #[test]
     fn a_chart_is_drawn_in_boxes_as_it_fits_and_matches_its_goldens() {
         let goldens = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/diagram");
@@ -162,6 +175,9 @@ mod tests {
             ("turned", TURNED),
             ("looped", LOOPED),
             ("outline", CHAINED),
+            ("grouped", GROUPED),
+            ("grouped-across", GROUPED_ACROSS),
+            ("grouped-outline", GROUPED_WIDE),
         ] {
             let doc = Doc::new().with(Block::Diagram(Diagram::of(source)));
             for environment in &crate::golden::ENVIRONMENTS {

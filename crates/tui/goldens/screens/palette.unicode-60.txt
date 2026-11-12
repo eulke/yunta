@@ -1,0 +1,14 @@
+ yunta › Q78GRR
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ p┌ what you can do here ────────────────────────────────┐
+ ━│ ▸ yunta resolve-gate Q78GRR        puts what the run │
+  │                                    waits on to you   │
+ ◆│   yunta review Q78GRR              reads the plan    │…
+ ━│                                    the run waits on, │
+  │                                    and answers it    │
+ ◆│                                    there             │R
+ ━│ … 9 more options                                     │━
+  │ ↑↓ move · type to filter · enter chooses · esc goes  │
+  │ back                                                 │
+ …└──────────────────────────────────────────────────────┘
+

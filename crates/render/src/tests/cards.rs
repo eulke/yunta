@@ -6,10 +6,9 @@ use surco::look::Look;
 use surco::surface::{Markdown, Surface, Terminal};
 use yunta_core::events::{InTree, Outside};
 use yunta_core::shown::PlanReview;
-use yunta_testkit_core::spell;
 
-use super::documents::{global_packs, read, review, run};
-use crate::plan::{document, Form};
+use super::documents::{global_packs, plan_page, read, review};
+use crate::page::Form;
 
 /// What follows a card of the plan of global packs, on a terminal or in a
 /// file: the next card, the next step or the proof, and in a file the next
@@ -42,13 +41,13 @@ fn narrow(review: &PlanReview) -> String {
         width: Look::plain().width.within(60),
         ..Look::plain()
     };
-    Terminal::on(look).draw(&document(review, &run(), Form::Review, &*spell()))
+    Terminal::on(look).draw(&plan_page(review, Form::Review, &look))
 }
 
 /// `review` under review as a file, where each row says its words on one
 /// line.
 fn written(review: &PlanReview) -> String {
-    Markdown.draw(&document(review, &run(), Form::Review, &*spell()))
+    Markdown.draw(&plan_page(review, Form::Review, &Markdown.look()))
 }
 
 /// What is said under the code that `title` names in `drawn`: the last line

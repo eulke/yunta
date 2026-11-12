@@ -115,7 +115,7 @@ async fn run_on(
 
 /// The median of what the log says `cmd` cost, as a cheapest-first sort
 /// key; `None` for a command the log never priced. The workspace's one
-/// [`crate::stats::median`], over samples the log holds in the order
+/// [`yunta_replay::stats::median`], over samples the log holds in the order
 /// they were measured, truncated back to whole milliseconds.
 fn median_duration(history: &TaskLedger, cmd: &str) -> Option<u64> {
     let mut sorted: Vec<f64> = history
@@ -124,7 +124,7 @@ fn median_duration(history: &TaskLedger, cmd: &str) -> Option<u64> {
         .map(|&ms| ms as f64)
         .collect();
     sorted.sort_by(|a, b| a.total_cmp(b));
-    crate::stats::median(&sorted).map(|ms| ms as u64)
+    yunta_replay::stats::median(&sorted).map(|ms| ms as u64)
 }
 
 /// Runs every criterion of `task` on `cwd` as its pre-check would —

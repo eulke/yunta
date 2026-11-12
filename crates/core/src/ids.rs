@@ -339,6 +339,13 @@ string_id!(
     RunnerName, what = "runner name", rule = NAME_RULE, check = is_name
 );
 
+impl RunnerName {
+    /// The role a project whose workflows name none gets proposed: what the
+    /// skeletons `yunta new` writes name in their comments, and what setting a
+    /// repository up declares.
+    pub const PROPOSED: RunnerName = RunnerName::from_static("implementer");
+}
+
 string_id!(
     /// An adapter's id as config names it (`claude-code`, `codex`,
     /// `mock`): `^[A-Za-z][A-Za-z0-9_-]*$`.
@@ -435,6 +442,24 @@ string_id!(
     /// to the engine beyond being one non-empty line.
     Responder, what = "responder", rule = OPAQUE_RULE, check = is_opaque
 );
+
+impl Responder {
+    /// The identity a person's answer is stamped with — `gate_resolved`'s
+    /// `resolved_by` and `questions_answered`'s `responder`: their own
+    /// `claimed` identity, recorded verbatim, or else the shell's `user`,
+    /// marked `unverified:` because nothing authenticates it, so the log stays
+    /// honest about which identities were asserted and which were ambient. A
+    /// user unset, or not one line, degrades to `unverified:unknown` rather
+    /// than dropping the attribution.
+    pub fn answering(claimed: Option<&Responder>, user: Option<&str>) -> Responder {
+        match claimed {
+            Some(by) => by.clone(),
+            None => format!("unverified:{}", user.unwrap_or("unknown"))
+                .parse()
+                .unwrap_or_else(|_| Responder::from_static("unverified:unknown")),
+        }
+    }
+}
 
 string_id!(
     /// An adapter session's id — opaque to the engine, persisted for

@@ -194,12 +194,34 @@ fn a_red_guard_is_named_by_its_stop_and_its_retry_waits_on_the_outside() {
     );
 }
 
+/// What a capped loop's retry does is what it says, on the menu a run writes now and on one
+/// an older log holds, which waits for a person to lift the cap.
 #[test]
-fn a_retry_that_waits_for_a_capped_loop_says_a_person_lifts_the_cap() {
-    let (label, _) = retry_words_of(vec![Precondition::CapLifted])
-        .expect("a retry that names its input has words");
-    assert_eq!(
-        label,
-        "Run it again (attempt 2) once a person lifts the cap on resume"
-    );
+fn a_capped_loop_s_retry_says_its_count_starts_over() {
+    for precondition in [None, Some(Precondition::CapLifted)] {
+        let menu = FailureMenu {
+            attempt: 2,
+            failure: Failure::LoopCapped {
+                node: yunta_core::NodeId::from("implement"),
+                loop_cap: 2,
+            },
+            remedies: vec![Remedy {
+                option: ReservedOption::Retry,
+                precondition,
+            }],
+            stuck: None,
+            reroute: None,
+        };
+        let (label, tradeoff) =
+            remedy_words(&menu, ReservedOption::Retry).expect("a capped loop's retry has words");
+        assert_eq!(
+            label,
+            "Run it again (attempt 2): its iteration count starts over"
+        );
+        let tradeoff = tradeoff.expect("what it costs");
+        assert!(
+            tradeoff.ends_with("It stops at the cap again if tasks remain"),
+            "{tradeoff}"
+        );
+    }
 }

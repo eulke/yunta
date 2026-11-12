@@ -1,0 +1,694 @@
+//! `RunStats`/`PriorEstimation::of` —
+//! golden tests over a hand-built log fixture with a retry and a
+//! reroute, exercised directly without spinning up a full run (same
+//! style `tests/progress.rs` uses for `render_progress`).
+
+use yunta_core::caution::Caution;
+use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
+use yunta_core::events::{
+    ArtifactSubmittedPayload, EventBody, EventPayload, Failure, Finding, FindingOperation,
+    FindingPostedPayload, FindingRefusedPayload, FindingSays, FindingSeverity,
+    FindingUpdatedPayload, FindingWithdrawnPayload, NodeFailedPayload, NodeFinishedPayload,
+    NodeOutcome, NodeReroutedPayload, NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload,
+    StoredEvent, SubmissionOutcome, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
+    TokenUsage,
+};
+use yunta_core::{Node, NodeId, NodeKind, RunnerCandidate, Workflow};
+use yunta_replay::history::{budget_caution, PriorEstimation, RunSummary};
+use yunta_replay::stats::RunStats;
+use yunta_replay::RunState;
+use yunta_replay::{FindingActivity, Submissions};
+use yunta_testkit_core::Log;
+
+fn node(id: &str, depends_on: &[&str]) -> Node {
+    Node {
+        id: id.into(),
+        kind: NodeKind::Bash { run: "true".into() },
+        depends_on: depends_on.iter().map(|d| (*d).into()).collect(),
+        scope: yunta_core::NodeScope::Unscoped,
+        runner: Some("implementer".into()),
+        artifacts: None,
+        hooks: None,
+        on_failure: None,
+        on_interrupt: None,
+        description: None,
+        permissions: None,
+        network: None,
+        context: Vec::new(),
+        invariant: false,
+        skills: Vec::new(),
+        runners: Vec::new(),
+        agent: None,
+        effort: None,
+        optional: false,
+        ask: None,
+        cli_config: None,
+    }
+}
+
+fn workflow(nodes: Vec<Node>) -> Workflow {
+    Workflow {
+        name: "fixture".into(),
+        modes: None,
+        description: None,
+        inputs: Default::default(),
+        node_defaults: None,
+        nodes,
+        yunta_schema: None,
+        on_finish: Vec::new(),
+    }
+}
+
+fn candidate() -> RunnerCandidate {
+    RunnerCandidate {
+        adapter: "mock".into(),
+        model: "mock-model".into(),
+        agent: None,
+        effort: None,
+    }
+}
+
+fn tokens(input: u64, output: u64, cached: Option<u64>) -> TokenUsage {
+    TokenUsage {
+        input,
+        output,
+        cached,
+    }
+}
+
+/// Two nodes: `a` runs clean in one attempt; `b` depends on `a`, starts 5s
+/// after `a` finishes (blocked time), fails on attempt 1, reroutes, and
+/// finishes on attempt 2 — a retry's tokens count as rework, and the
+/// second `RunnerResolved` re-affirms the same role.
+fn fixture_events() -> Vec<StoredEvent> {
+    Log::for_run("run-1")
+        .event(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            checkout: None,
+            manifest_hash: yunta_core::sha256_hex(b"h"),
+            inputs: Default::default(),
+            mode: "default".into(),
+            promoted_from: None,
+            yunta_schema: None,
+            base_branch: "main".to_string(),
+            base_commit: "deadbeef".into(),
+            environment: None,
+            left_out: Vec::new(),
+            opens_on_base: false,
+        })))
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
+                runner: "implementer".into(),
+                chosen: candidate(),
+                discarded: Vec::new(),
+            })),
+        )
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(10)
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                NodeOutcome::Summary("ok".to_string()),
+                tokens(100, 50, Some(20)),
+            ))),
+        )
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
+                runner: "implementer".into(),
+                chosen: candidate(),
+                discarded: Vec::new(),
+            })),
+        )
+        // `b` becomes ready at t=10s (when `a` finishes) but only starts
+        // at t=15s — 5s blocked.
+        .after(5)
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(10)
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                Failure::Message {
+                    outcome: "criteria still red".into(),
+                },
+                tokens(80, 40, None),
+            ))),
+        )
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+                "b".into(),
+                yunta_core::events::Failure::Message {
+                    outcome: "criteria still red".into(),
+                },
+                yunta_core::events::RerouteOrigin::OnFailure,
+                Some(2),
+                Some(1),
+            ))),
+        )
+        .after(1)
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
+                runner: "implementer".into(),
+                chosen: candidate(),
+                discarded: Vec::new(),
+            })),
+        )
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(2))),
+        )
+        .after(10)
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                NodeOutcome::Summary("ok".to_string()),
+                tokens(60, 30, None),
+            ))),
+        )
+        .event(EventPayload::Tasks(TaskEvent::Registered(
+            TaskRegisteredPayload {
+                task_id: "t1".into(),
+                criteria: Vec::new(),
+                scope: Vec::new(),
+                depends_on: Vec::new(),
+            },
+        )))
+        .after(1)
+        .event(EventPayload::Tasks(TaskEvent::StatusChanged(
+            TaskStatusChangedPayload::to("t1".into(), TaskStatus::Done, 10.into()),
+        )))
+        .build()
+}
+
+#[test]
+fn cptv_is_total_tokens_over_tasks_done() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
+    let stats = RunStats::as_logged(&RunState::replay(&fixture_events()), &wf);
+
+    // total tokens: a=150 (100+50), b=120+90=210 -> 360; one task done.
+    assert_eq!(stats.cptv, Some(360.0));
+    assert_eq!(stats.tasks_total, 1);
+    assert_eq!(stats.tasks_done, 1);
+}
+
+#[test]
+fn rework_rate_counts_only_tokens_spent_past_the_first_attempt() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
+    let stats = RunStats::as_logged(&RunState::replay(&fixture_events()), &wf);
+
+    // b's second attempt spent 60+30=90 tokens out of 360 total.
+    assert_eq!(stats.rework_rate, Some(90.0 / 360.0));
+}
+
+#[test]
+fn cache_rate_is_none_unless_some_attempt_reported_it() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
+    let stats = RunStats::as_logged(&RunState::replay(&fixture_events()), &wf);
+
+    // Only `a`'s attempt reported a cached figure (20), out of 240 input
+    // tokens total (100 + 80 + 60).
+    assert_eq!(stats.cache_rate, Some(20.0 / 240.0));
+
+    let wf_solo = workflow(vec![node("a", &[])]);
+    let no_cache_events: Vec<StoredEvent> = fixture_events()
+        .into_iter()
+        .take(4)
+        .map(|mut e| {
+            if let EventBody::Known(EventPayload::Node(NodeEvent::Finished(p))) = &mut e.body {
+                p.tokens_used.cached = None;
+            }
+            e
+        })
+        .collect();
+    let solo_stats = RunStats::as_logged(&RunState::replay(&no_cache_events), &wf_solo);
+    assert_eq!(solo_stats.cache_rate, None);
+}
+
+#[test]
+fn cache_rate_is_none_without_input() {
+    // A run can report a cache figure yet spend no input tokens to divide
+    // by; a rate over zero input is undefined, never a fabricated 0%.
+    let wf = workflow(vec![node("a", &[])]);
+    let events = Log::for_run("run-1")
+        .event(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            checkout: None,
+            manifest_hash: yunta_core::sha256_hex(b"h"),
+            inputs: Default::default(),
+            mode: "default".into(),
+            promoted_from: None,
+            yunta_schema: None,
+            base_branch: "main".to_string(),
+            base_commit: "deadbeef".into(),
+            environment: None,
+            left_out: Vec::new(),
+            opens_on_base: false,
+        })))
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(5)
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                NodeOutcome::Summary("ok".to_string()),
+                tokens(0, 50, Some(0)),
+            ))),
+        )
+        .build();
+    let stats = RunStats::as_logged(&RunState::replay(&events), &wf);
+    assert_eq!(stats.total_tokens.input, 0);
+    assert_eq!(stats.cache_rate, None);
+}
+
+#[test]
+fn median_of_even_count_is_the_mean_of_the_two_middles() {
+    // Nearest-rank picks one side; a median of an even count averages the
+    // two central samples, and a median of nothing is None, not zero.
+    assert_eq!(
+        yunta_replay::stats::median(&[1.0, 2.0, 3.0, 4.0]),
+        Some(2.5)
+    );
+    assert_eq!(yunta_replay::stats::median(&[10.0]), Some(10.0));
+    assert_eq!(yunta_replay::stats::median(&[1.0, 2.0, 3.0]), Some(2.0));
+    assert_eq!(yunta_replay::stats::median(&[]), None);
+}
+
+#[test]
+fn a_retried_node_reports_its_max_attempt_and_summed_tokens() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
+    let stats = RunStats::as_logged(&RunState::replay(&fixture_events()), &wf);
+
+    let b = stats
+        .nodes
+        .iter()
+        .find(|n| n.node_id.as_str() == "b")
+        .unwrap();
+    assert_eq!(b.attempts, 2);
+    assert_eq!(b.tokens.input, 140); // 80 + 60
+    assert_eq!(b.tokens.output, 70); // 40 + 30
+    assert_eq!(b.active, std::time::Duration::from_secs(10 + 10));
+}
+
+#[test]
+fn a_node_that_starts_after_its_dependency_finishes_records_blocked_time() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
+    let stats = RunStats::as_logged(&RunState::replay(&fixture_events()), &wf);
+
+    let a = stats
+        .nodes
+        .iter()
+        .find(|n| n.node_id.as_str() == "a")
+        .unwrap();
+    assert_eq!(a.blocked, std::time::Duration::ZERO);
+    assert_eq!(a.blocked_fraction(), Some(0.0));
+
+    let b = stats
+        .nodes
+        .iter()
+        .find(|n| n.node_id.as_str() == "b")
+        .unwrap();
+    // ready at t=10 (a finishes), started at t=15 -> 5s blocked.
+    assert_eq!(b.blocked, std::time::Duration::from_secs(5));
+    // wall clock = 5s blocked + 20s active = 25s -> 5/25 = 0.2.
+    assert_eq!(b.blocked_fraction(), Some(0.2));
+}
+
+#[test]
+fn tokens_by_role_groups_every_node_under_its_resolved_role() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
+    let stats = RunStats::as_logged(&RunState::replay(&fixture_events()), &wf);
+
+    let by_role = stats.tokens_by_runner();
+    assert_eq!(by_role.len(), 1);
+    let (role, tokens) = &by_role[0];
+    assert_eq!(role, "implementer");
+    assert_eq!(tokens.input, 240); // 100 + 140
+    assert_eq!(tokens.output, 120); // 50 + 70
+}
+
+#[test]
+fn wall_clock_spans_the_first_to_the_last_event() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
+    let stats = RunStats::as_logged(&RunState::replay(&fixture_events()), &wf);
+    assert_eq!(stats.wall_clock, Some(std::time::Duration::from_secs(37)));
+}
+
+#[test]
+fn a_node_that_never_started_is_absent_from_the_node_list() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"]), node("c", &[])]);
+    let stats = RunStats::as_logged(&RunState::replay(&fixture_events()), &wf);
+    assert!(!stats.nodes.iter().any(|n| n.node_id.as_str() == "c"));
+}
+
+fn summary(tokens: u64, wall_clock_secs: u64, tasks_total: usize) -> RunSummary {
+    RunSummary {
+        run_id: "r".into(),
+        mode: "default".into(),
+        workflow_hash: yunta_core::sha256_hex(b"h"),
+        tokens,
+        wall_clock: Some(std::time::Duration::from_secs(wall_clock_secs)),
+        tasks_total,
+        cptv: Some(tokens as f64 / tasks_total.max(1) as f64),
+    }
+}
+
+#[test]
+fn fewer_than_three_runs_means_no_estimation_at_all() {
+    let history = vec![summary(100, 10, 1), summary(200, 20, 2)];
+    assert_eq!(PriorEstimation::of(&history), None);
+}
+
+#[test]
+fn three_or_more_runs_produce_median_and_p90() {
+    let history = vec![
+        summary(100, 10, 1),
+        summary(200, 20, 2),
+        summary(300, 30, 3),
+    ];
+    let estimation = PriorEstimation::of(&history).expect("3 samples must estimate");
+    assert_eq!(estimation.sample_count, 3);
+    assert_eq!(estimation.tokens.median, 200.0);
+    assert_eq!(estimation.tokens.p90, 300.0);
+    let wall_clock = estimation
+        .wall_clock_secs
+        .expect("every run reported a wall-clock");
+    assert_eq!(wall_clock.median, 20.0);
+    assert_eq!(estimation.tasks.median, 2.0);
+}
+
+#[test]
+fn wall_clock_percentiles_are_absent_when_no_run_measured_one() {
+    // A run without a measurable wall-clock contributes no fabricated
+    // zero-second sample; with none measured, the estimate simply omits it
+    // rather than reporting a manufactured 0s median.
+    let history: Vec<RunSummary> = (0..3)
+        .map(|i| RunSummary {
+            run_id: "r".into(),
+            mode: "default".into(),
+            workflow_hash: yunta_core::sha256_hex(b"h"),
+            tokens: 100 * (i + 1),
+            wall_clock: None,
+            tasks_total: (i + 1) as usize,
+            cptv: None,
+        })
+        .collect();
+    let estimation = PriorEstimation::of(&history).expect("3 samples estimate tokens and tasks");
+    assert_eq!(estimation.wall_clock_secs, None);
+    assert_eq!(estimation.tokens.median, 200.0);
+}
+
+#[test]
+fn run_summary_reuses_compute_run_stats_for_its_own_numbers() {
+    let wf = workflow(vec![node("a", &[]), node("b", &["a"])]);
+    let events = fixture_events();
+    let summary = RunSummary::of(
+        "run-1".into(),
+        yunta_core::sha256_hex(b"workflow-hash"),
+        &wf,
+        &events,
+    );
+    assert_eq!(summary.tokens, 360);
+    assert_eq!(summary.cptv, Some(360.0));
+    assert_eq!(summary.tasks_total, 1);
+    assert_eq!(summary.wall_clock, Some(std::time::Duration::from_secs(37)));
+}
+
+// --- budget-vs-p90 caution -----------------------------
+
+#[test]
+fn a_cap_below_the_historical_p90_produces_the_warning() {
+    let history = vec![
+        summary(100, 10, 1),
+        summary(200, 20, 2),
+        summary(300, 30, 3),
+    ];
+    let estimation = PriorEstimation::of(&history);
+    assert_eq!(
+        budget_caution(Some(250), estimation.as_ref()),
+        Some(Caution::BudgetBelowHistory {
+            cap: 250,
+            p90: 300.0,
+            samples: 3
+        })
+    );
+    assert_eq!(budget_caution(Some(300), estimation.as_ref()), None);
+}
+
+/// The caution is the facts and nothing else: its cap, the p90 it sits
+/// under and the runs behind that p90 are all it carries, so a surface
+/// that words it adds its own marking exactly once.
+#[test]
+fn the_warning_sentence_carries_no_surface_s_own_marking() {
+    let history = vec![
+        summary(100, 10, 1),
+        summary(200, 20, 2),
+        summary(300, 30, 3),
+    ];
+    let estimation = PriorEstimation::of(&history);
+    let Some(Caution::BudgetBelowHistory { cap, p90, samples }) =
+        budget_caution(Some(250), estimation.as_ref())
+    else {
+        panic!("a cap under the p90 is a caution");
+    };
+    assert_eq!((cap, p90, samples), (250, 300.0, 3));
+}
+
+#[test]
+fn a_cap_at_or_above_the_p90_or_missing_pieces_stay_silent() {
+    let history = vec![
+        summary(100, 10, 1),
+        summary(200, 20, 2),
+        summary(300, 30, 3),
+    ];
+    let estimation = PriorEstimation::of(&history);
+    // Cap covers the p90: nothing to say.
+    assert_eq!(budget_caution(Some(300), estimation.as_ref()), None);
+    // No cap declared: nothing to compare.
+    assert_eq!(budget_caution(None, estimation.as_ref()), None);
+    // Not enough history (<3 runs): the estimation itself is None.
+    assert_eq!(budget_caution(Some(1), None), None);
+}
+
+// --- what sessions handed over -------------------------------------------------
+
+fn finding(id: &str) -> Finding {
+    Finding {
+        id: id.into(),
+        severity: FindingSeverity::Major,
+        says: FindingSays::Written {
+            title: "the tasks document has no criteria".to_string(),
+            detail: "every task needs one".to_string(),
+        },
+        location: "plan.yaml".into(),
+        proposed_criterion: None,
+    }
+}
+
+fn report() -> yunta_core::diagnostic::Report {
+    yunta_core::diagnostic::Report::new(
+        yunta_core::diagnostic::DocumentRef::new(
+            yunta_core::ArtifactKind::Findings,
+            "yunta_post_finding",
+        ),
+        vec![yunta_core::diagnostic::Diagnostic::new(
+            yunta_core::diagnostic::Subject::Document,
+            yunta_core::diagnostic::Problem::broke(yunta_core::FindingFault::EmptyDetail),
+        )],
+    )
+}
+
+/// `a` submits one document the engine takes and posts findings; `b`
+/// submits one the engine refuses.
+fn handover_events() -> Vec<StoredEvent> {
+    Log::for_run("run-1")
+        .node(
+            "a",
+            EventPayload::Artifacts(ArtifactEvent::Submitted(ArtifactSubmittedPayload {
+                name: "plan.yaml".to_string(),
+                artifact_kind: yunta_core::ArtifactKind::Tasks,
+                outcome: SubmissionOutcome::Accepted {
+                    content_hash: yunta_core::sha256_hex(b"plan"),
+                },
+                probes: Vec::new(),
+            })),
+        )
+        .after(1)
+        .node(
+            "b",
+            EventPayload::Artifacts(ArtifactEvent::Submitted(ArtifactSubmittedPayload {
+                name: "questions.yaml".to_string(),
+                artifact_kind: yunta_core::ArtifactKind::Questions,
+                outcome: SubmissionOutcome::Refused { report: report() },
+                probes: Vec::new(),
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+                finding: finding("f-1"),
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+                finding: finding("f-2"),
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
+                finding: finding("f-1"),
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
+                id: "f-2".into(),
+                reason: "the call it named is gone".to_string(),
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Refused(FindingRefusedPayload {
+                operation: FindingOperation::Post,
+                id: Some("f-3".into()),
+                report: report(),
+            })),
+        )
+        .build()
+}
+
+#[test]
+fn submissions_and_finding_calls_are_counted_by_verdict_and_by_node() {
+    let wf = workflow(vec![node("a", &[]), node("b", &[])]);
+    let stats = RunStats::as_logged(&RunState::replay(&handover_events()), &wf);
+
+    assert_eq!(
+        stats.artifact_submissions,
+        Submissions {
+            accepted: 1,
+            refused: 1,
+        }
+    );
+    assert_eq!(
+        stats.submissions_by_node.get(&NodeId::from("a")),
+        Some(&Submissions {
+            accepted: 1,
+            refused: 0,
+        })
+    );
+    assert_eq!(
+        stats.submissions_by_node.get(&NodeId::from("b")),
+        Some(&Submissions {
+            accepted: 0,
+            refused: 1,
+        })
+    );
+
+    let posted_by_a = FindingActivity {
+        posted: 2,
+        updated: 1,
+        withdrawn: 1,
+        refused: 1,
+        answered: 0,
+        proved: 0,
+    };
+    assert_eq!(stats.findings, posted_by_a);
+    assert_eq!(
+        stats.findings_by_node.get(&NodeId::from("a")),
+        Some(&posted_by_a)
+    );
+    // `b` submitted but posted nothing, so it holds no finding row.
+    assert_eq!(stats.findings_by_node.get(&NodeId::from("b")), None);
+}
+
+#[test]
+fn findings_effective_counts_what_stands_rather_than_what_was_posted() {
+    // Two posted, one replaced in place and one taken back: one stands.
+    let wf = workflow(vec![node("a", &[]), node("b", &[])]);
+    let stats = RunStats::as_logged(&RunState::replay(&handover_events()), &wf);
+    assert_eq!(stats.findings.posted, 2);
+    assert_eq!(stats.findings_effective, 1);
+}
+
+/// A suspension of `minutes`, noticed now.
+fn host_slept(minutes: u64) -> EventPayload {
+    EventPayload::Run(RunEvent::HostSuspended(
+        yunta_core::events::HostSuspendedPayload::slept(std::time::Duration::from_secs(
+            minutes * 60,
+        )),
+    ))
+}
+
+fn minutes(n: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(n * 60)
+}
+
+/// The run opens at minute 0 and `work` starts at minute 1; the host
+/// sleeps from minute 10 to minute 70; `work` finishes at minute 75.
+#[test]
+fn the_time_the_host_slept_is_left_out_of_active_and_wall_clock() {
+    let log = Log::for_run("run-asleep")
+        .event(fixture_events()[0].payload().cloned().expect("the birth"))
+        .after(60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(69 * 60)
+        .event(host_slept(60))
+        .after(5 * 60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                NodeOutcome::Summary("ok".to_string()),
+                TokenUsage::default(),
+            ))),
+        )
+        .build();
+
+    let stats = RunStats::as_logged(&RunState::replay(&log), &workflow(vec![node("work", &[])]));
+
+    assert_eq!(
+        stats.nodes[0].active,
+        minutes(14),
+        "74 minutes, 60 of them asleep"
+    );
+    assert_eq!(stats.wall_clock, Some(minutes(15)));
+    assert_eq!(stats.asleep, minutes(60));
+}
+
+/// A root node is ready when the run opens at minute 0; the host sleeps
+/// from minute 5 to minute 65, and the node starts at minute 70: it
+/// waited ten minutes the run had a machine for.
+#[test]
+fn a_suspension_before_a_node_started_is_left_out_of_the_time_it_waited() {
+    let log = Log::for_run("run-asleep")
+        .event(fixture_events()[0].payload().cloned().expect("the birth"))
+        .after(65 * 60)
+        .event(host_slept(60))
+        .after(5 * 60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .build();
+
+    let stats = RunStats::as_logged(&RunState::replay(&log), &workflow(vec![node("work", &[])]));
+
+    assert_eq!(stats.nodes[0].blocked, minutes(10));
+}

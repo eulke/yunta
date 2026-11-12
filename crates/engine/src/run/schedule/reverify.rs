@@ -7,10 +7,10 @@
 //! invariant runs again before anything else starts, a gate is asked, or
 //! the run finishes. It costs no session: the input it depends on changed.
 
+use yunta_core::events::NodeState;
 use yunta_core::Node;
 
 use super::{Board, Decision};
-use crate::replay::NodeState;
 
 /// The first invariant, in declaration order, whose pass no longer speaks
 /// for the run's tree — run again, alone, once nothing else is running.

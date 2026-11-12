@@ -1,5 +1,8 @@
 //! The one way an event reaches a run's log.
 //!
+//! A read of it, replayed, is a [`RunView`]: the events and the state they
+//! leave the run in, together.
+//!
 //! Appending an event is three things that must never drift apart: the
 //! run it belongs to, the node it speaks for, and the timestamp read
 //! from the run's own injected clock. They travel together here, so a
@@ -9,8 +12,9 @@
 
 use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
 
-use crate::observer::{Observed, RunObserver};
+use yunta_core::port::{Observed, RunObserver};
 use yunta_core::{Clock, NodeId, RunId, Seq};
+use yunta_replay::RunState;
 use yunta_storage::{AsyncStorage, StorageError};
 
 /// A handle on one run's log: where to append, which run, and the clock
@@ -204,5 +208,24 @@ mod tests {
             "the secret reached the log: {stored}"
         );
         assert!(outcome.is_err(), "the append must be refused");
+    }
+}
+
+/// A run's log read once and its [`RunState`] replayed once — the pair
+/// almost every read site needs together. The read and the [`RunState::replay`]
+/// call live here, in one place, instead of being repeated at each site.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RunView {
+    pub(crate) events: Vec<StoredEvent>,
+    /// Boxed: a view is held across the awaits of every run step, and the
+    /// state is the bulk of it, so the futures of those steps stay small.
+    pub(crate) state: Box<RunState>,
+}
+
+impl RunView {
+    /// Derives the state from the events, keeping both.
+    pub(crate) fn of(events: Vec<StoredEvent>) -> Self {
+        let state = Box::new(RunState::replay(&events));
+        Self { events, state }
     }
 }

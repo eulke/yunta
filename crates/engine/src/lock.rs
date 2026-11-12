@@ -20,7 +20,7 @@ use yunta_core::durable::{self, Durability};
 use yunta_core::process::signal::{self, Liveness};
 use yunta_core::{Clock, Pid};
 
-use crate::pace::Pace;
+use yunta_core::pace::Pace;
 
 /// What the host says about a lock's holder. `Send + Sync` so a
 /// `&dyn OwnerProbe` can be held across the awaits in [`acquire`] in a
@@ -61,7 +61,7 @@ pub struct LockOwner {
 impl yunta_core::persisted::Persisted for LockOwner {
     /// The version this binary writes; a newer one is refused, never guessed at.
     const SCHEMA_VERSION: u32 = 1;
-    const NAME: &'static str = "isolation lock";
+    const NAME: &'static str = "lock";
     const ENCODING: yunta_core::persisted::Encoding = yunta_core::persisted::Encoding::Json;
 }
 
@@ -230,6 +230,22 @@ pub async fn acquire(
     }
 }
 
+/// What [`acquire`] would answer a `Refuse` about `lock_path` right now, taking
+/// nothing: `None` when the lock is free or its holder is gone. For a command
+/// that has to refuse before it starts a wait or a process of its own.
+pub async fn refusal_now(lock_path: &Path, probe: &dyn OwnerProbe) -> Option<LockError> {
+    let bytes = match tokio::fs::read(lock_path).await {
+        Ok(bytes) => bytes,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(source) => return Some(io_error(lock_path, "read", source)),
+    };
+    let owner = yunta_core::persisted::PersistedDoc::<LockOwner>::read(&bytes)
+        .ok()
+        .map(|owner| owner.doc);
+    let liveness = owner.as_ref().map(|owner| holder_state(owner, probe));
+    (liveness != Some(Liveness::Dead)).then(|| refusal(lock_path, owner, liveness))
+}
+
 /// The record this process writes as a lock's holder: its pid, and when
 /// it started.
 fn this_process(probe: &dyn OwnerProbe, clock: &dyn Clock) -> LockOwner {
@@ -362,94 +378,19 @@ pub(crate) fn taken_at(pid: Pid, probe: &dyn OwnerProbe, clock: &dyn Clock) -> D
 ///
 /// A live pid is not enough: pids are reused, so a process that started
 /// *after* the record was written is a different process wearing the
-/// same number. Every reader of a pid somebody else wrote down asks
-/// here — the lock, and `yunta cancel` before it signals anything.
+/// same number. A process this one cannot signal is compared too: another
+/// user may have got the pid, and without the comparison that lock would
+/// stay present for good. Every reader of a pid somebody else wrote down
+/// asks here — the lock, and `yunta cancel` before it signals anything.
 pub fn holder_state(owner: &LockOwner, probe: &dyn OwnerProbe) -> Liveness {
     match probe.liveness(owner.pid) {
-        Liveness::Alive => match probe.started(owner.pid) {
+        Liveness::Dead => Liveness::Dead,
+        present => match probe.started(owner.pid) {
             Some(started) if started > owner.started_at => Liveness::Dead,
-            _ => Liveness::Alive,
+            _ => present,
         },
-        other => other,
     }
 }
 
 #[cfg(test)]
-mod taken_at_tests {
-    use super::*;
-
-    /// A probe that says a process started at a fixed instant.
-    struct Table(Option<DateTime<Utc>>);
-
-    impl OwnerProbe for Table {
-        fn liveness(&self, _pid: Pid) -> Liveness {
-            Liveness::Alive
-        }
-        fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
-            self.0
-        }
-    }
-
-    struct Frozen(DateTime<Utc>);
-
-    impl Clock for Frozen {
-        fn now(&self) -> DateTime<Utc> {
-            self.0
-        }
-    }
-
-    fn at(year: i32) -> DateTime<Utc> {
-        chrono::TimeZone::with_ymd_and_hms(&Utc, year, 1, 1, 0, 0, 0).unwrap()
-    }
-
-    /// The record states when the process started *by the same table*
-    /// `holder_state` reads. A run's clock answers about the run's
-    /// timeline: one frozen in the past would make every live holder
-    /// read as a stranger, and every lock stealable while its owner
-    /// works.
-    #[test]
-    fn a_lock_records_the_start_the_process_table_reports_not_the_clock() {
-        let pid = Pid::current();
-        let table = Table(Some(at(2020)));
-        let owner = LockOwner {
-            schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
-            pid,
-            started_at: taken_at(pid, &table, &Frozen(at(2000))),
-        };
-        assert_eq!(owner.started_at, at(2020));
-        assert_eq!(
-            holder_state(&owner, &table),
-            Liveness::Alive,
-            "the process that took the lock still holds it"
-        );
-    }
-
-    /// A host that cannot say when a process started leaves the clock as
-    /// the only answer — and the comparison it feeds cannot happen
-    /// either, so a live pid is taken at its word.
-    #[test]
-    fn a_host_with_no_process_table_falls_back_to_the_clock() {
-        let pid = Pid::current();
-        let blind = Table(None);
-        let owner = LockOwner {
-            schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
-            pid,
-            started_at: taken_at(pid, &blind, &Frozen(at(2000))),
-        };
-        assert_eq!(owner.started_at, at(2000));
-        assert_eq!(holder_state(&owner, &blind), Liveness::Alive);
-    }
-
-    /// A pid the host handed to something that started later is a
-    /// stranger, whatever the number says.
-    #[test]
-    fn a_pid_reused_by_a_later_process_reads_as_gone() {
-        let pid = Pid::current();
-        let owner = LockOwner {
-            schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
-            pid,
-            started_at: at(2020),
-        };
-        assert_eq!(holder_state(&owner, &Table(Some(at(2024)))), Liveness::Dead);
-    }
-}
+mod tests;

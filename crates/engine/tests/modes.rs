@@ -6,8 +6,8 @@
 //! `plan`); and the run finishes once every *included* node is done,
 //! never waiting on one that was never going to run.
 
-use yunta_core::events::NodeEvent;
-use yunta_engine::{NodeState, RunError, RunReport, RunTerminal};
+use yunta_core::events::{NodeEvent, NodeState};
+use yunta_engine::{RunError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 const WORKFLOW: &str = r#"

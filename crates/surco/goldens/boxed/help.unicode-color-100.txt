@@ -1,0 +1,6 @@
+␛[2m┌␛[0m ␛[1mkeys␛[0m ␛[2m────────────────────────────────────────────────────┐␛[0m
+␛[2m│␛[0m /      anything: only what can be done here              ␛[2m│␛[0m
+␛[2m│␛[0m n      start a new run, from anywhere                    ␛[2m│␛[0m
+␛[2m│␛[0m esc    one step back; what it leaves stays waiting       ␛[2m│␛[0m
+␛[2m│␛[0m q      leave: every run keeps going                      ␛[2m│␛[0m
+␛[2m└──────────────────────────────────────────────────────────┘␛[0m

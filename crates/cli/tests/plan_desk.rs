@@ -1,53 +1,14 @@
-//! The plan's desk on a real terminal: what `r` opens from a decision's card, what
-//! `yunta review` opens on a run that waits on one, and what each leaves behind.
+//! The plan's desk on a real terminal: what `r` opens from a decision's card, and what it
+//! leaves behind; and `yunta review` off a terminal, and what it refuses. At a terminal
+//! `review` opens the application, whose tests are `application/review.rs`.
 
 use std::path::Path;
 
+use yunta_testkit::workflows::{PLANNER_HANDS_TWO_TASKS, PLANNER_ON_THE_MOCK, PLAN_THEN_GATE};
 use yunta_testkit::{
     run_id_from, stderr, stdout, yunta_in, yunta_on_terminal, yunta_on_terminal_sized, Checkout,
     Terminal,
 };
-
-const REVIEWED: &str = r#"
-name: reviewed
-nodes:
-  - id: plan
-    kind: prompt
-    runner: planner
-    permissions: read-only
-    prompt: "Hand over the tasks document."
-    artifacts:
-      produces: [tasks]
-  - id: approve-plan
-    kind: gate
-    assignee: lead
-    message: "Plan registered. Approve?"
-    options: [approve, adjust]
-    on: { adjust: plan }
-    shows: [{ node: plan, kind: tasks }]
-"#;
-
-const PLANNER: &str = r#"
-dialect: claude-code
-sessions:
-  - steps:
-      - type: run_tool
-        tool: yunta_submit_tasks
-        arguments:
-          document:
-            summary: "Make the two files"
-            description: "Writes the files the run is about."
-            decisions:
-              - { id: names, question: "What are they called?", choice: "made and said", alternatives: [a and b], why: "They say what they are." }
-            risks: ["Two files can drift apart."]
-            tasks:
-              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "the file's first line" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
-              - { id: T002, title: "Say it", description: "Writes said.txt.", scope: [said.txt], depends_on: [T001], changes: [{ at: said.txt, what: "the words", code: "the words themselves" }], outcome: "said.txt exists", criteria: [{ cmd: "test -f said.txt", proves: "the words are there" }] }
-    outcome: { type: completed, summary: "planned" }
-  - steps:
-      - { type: note, text: "planned again" }
-    outcome: { type: completed, summary: "planned again" }
-"#;
 
 const RUN: [&str; 7] = [
     "run",
@@ -64,12 +25,9 @@ const WIDE: (u16, u16) = (118, 36);
 
 fn checkout(root: &Path, workflow: &str) -> Checkout {
     Checkout::under(root)
-        .config(
-            "defaults:\n  isolation: none\nrunners:\n  planner:\n    \
-             - { adapter: mock, model: mock-model }\n",
-        )
+        .config(PLANNER_ON_THE_MOCK)
         .workflow("wf", workflow)
-        .file("fixture.yaml", PLANNER)
+        .file("fixture.yaml", PLANNER_HANDS_TWO_TASKS)
         .committed()
 }
 
@@ -92,7 +50,7 @@ fn parked(checkout: &Checkout) -> String {
 #[test]
 fn the_card_says_what_the_plan_is_and_offers_it_with_a_key() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let terminal = at_the_card(&checkout);
     let screen = terminal.screen();
     assert!(screen.holds("Make the two files"), "{screen:#?}");
@@ -109,7 +67,7 @@ fn the_card_says_what_the_plan_is_and_offers_it_with_a_key() {
 #[test]
 fn r_opens_the_desk_on_the_other_screen_and_esc_comes_back_to_the_card() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let mut terminal = at_the_card(&checkout);
     let before = terminal.screen();
     terminal.keys("r");
@@ -148,7 +106,7 @@ fn r_opens_the_desk_on_the_other_screen_and_esc_comes_back_to_the_card() {
 #[test]
 fn j_walks_the_tasks_p_turns_a_card_over_and_d_shows_what_was_decided() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let mut terminal = at_the_card(&checkout);
     terminal.keys("r");
     terminal.wait_on_screen("▸ the change", "the desk never opened");
@@ -181,7 +139,7 @@ fn j_walks_the_tasks_p_turns_a_card_over_and_d_shows_what_was_decided() {
 #[test]
 fn a_number_confirmed_answers_the_decision_from_the_desk() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let mut terminal = at_the_card(&checkout);
     terminal.keys("r");
     terminal.wait_on_screen("▸ the change", "the desk never opened");
@@ -199,7 +157,7 @@ fn a_number_confirmed_answers_the_decision_from_the_desk() {
 #[test]
 fn an_option_that_asks_comes_back_to_the_card_with_its_field_open() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let mut terminal = at_the_card(&checkout);
     terminal.keys("r");
     terminal.wait_on_screen("▸ the change", "the desk never opened");
@@ -218,7 +176,7 @@ fn an_option_that_asks_comes_back_to_the_card_with_its_field_open() {
 #[test]
 fn ctrl_c_leaves_the_other_screen_before_the_run_stops() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let mut terminal = at_the_card(&checkout);
     terminal.keys("r");
     terminal.wait_on_screen("▸ the change", "the desk never opened");
@@ -245,7 +203,7 @@ fn ctrl_c_leaves_the_other_screen_before_the_run_stops() {
 #[test]
 fn a_narrow_terminal_has_no_rail() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let mut terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
     terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
     terminal.keys("r");
@@ -263,7 +221,7 @@ fn a_narrow_terminal_has_no_rail() {
 #[test]
 fn a_terminal_too_short_prints_the_plan_above_the_card() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let mut terminal = yunta_on_terminal_sized!(&checkout.repo, &checkout.home, &RUN, (90, 11));
     terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
     terminal.keys("r");
@@ -282,7 +240,7 @@ fn a_terminal_too_short_prints_the_plan_above_the_card() {
 #[test]
 fn a_decision_with_no_plan_offers_no_key_for_one() {
     let root = tempfile::tempdir().unwrap();
-    let workflow = REVIEWED.replace("    shows: [{ node: plan, kind: tasks }]\n", "");
+    let workflow = PLAN_THEN_GATE.replace("    shows: [{ node: plan, kind: tasks }]\n", "");
     let checkout = checkout(root.path(), &workflow);
     let mut terminal = at_the_card(&checkout);
     assert!(!terminal.screen().holds("r reads the plan"));
@@ -292,59 +250,11 @@ fn a_decision_with_no_plan_offers_no_key_for_one() {
     assert!(!terminal.screen().alternate);
 }
 
-/// `yunta review` opens the desk at once, and leaving it leaves the command, with the run
-/// as it was.
-#[test]
-fn review_opens_the_desk_and_esc_leaves_the_run_waiting() {
-    let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
-    let run = parked(&checkout);
-    let mut terminal = yunta_on_terminal_sized!(
-        &checkout.repo,
-        &checkout.home,
-        &["review", run.as_str()],
-        WIDE
-    );
-    terminal.wait_on_screen("▸ the change", "review never opened the desk");
-    assert!(terminal.screen().alternate);
-    terminal.keys("\x1b");
-    let drawn = terminal.ended();
-    assert_eq!(terminal.exit_code(), Some(0), "{drawn}");
-    assert!(!terminal.screen().alternate, "{drawn}");
-    let screen = terminal.screen();
-    assert!(
-        screen.holds("nothing recorded: it still waits on the decision"),
-        "{screen:#?}"
-    );
-    let status = yunta_in!(&checkout.repo, &checkout.home, &["status", run.as_str()]);
-    assert!(stdout(&status).contains("needs you"), "{}", stdout(&status));
-}
-
-#[test]
-fn review_answers_the_decision_the_way_resolve_gate_does() {
-    let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
-    let run = parked(&checkout);
-    let mut terminal = yunta_on_terminal_sized!(
-        &checkout.repo,
-        &checkout.home,
-        &["review", run.as_str()],
-        WIDE
-    );
-    terminal.wait_on_screen("▸ the change", "review never opened the desk");
-    terminal.keys("1");
-    terminal.wait_on_screen("enter confirms", "a number never asked to be confirmed");
-    terminal.keys("\r");
-    let drawn = terminal.ended();
-    assert_eq!(terminal.exit_code(), Some(0), "{drawn}");
-    assert!(drawn.contains("resolved `approve`"), "{drawn}");
-}
-
 /// Off a terminal it is the plan as a page, and how to answer it.
 #[test]
 fn review_off_a_terminal_prints_the_plan_and_the_commands_that_answer_it() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let run = parked(&checkout);
     let review = yunta_in!(&checkout.repo, &checkout.home, &["review", run.as_str()]);
     assert!(review.status.success(), "{}", stderr(&review));
@@ -360,7 +270,7 @@ fn review_off_a_terminal_prints_the_plan_and_the_commands_that_answer_it() {
 #[test]
 fn review_refuses_a_run_that_waits_on_no_plan_and_says_what_serves() {
     let root = tempfile::tempdir().unwrap();
-    let without = REVIEWED.replace("    shows: [{ node: plan, kind: tasks }]\n", "");
+    let without = PLAN_THEN_GATE.replace("    shows: [{ node: plan, kind: tasks }]\n", "");
     let checkout = checkout(root.path(), &without);
     let run = parked(&checkout);
     let review = yunta_in!(&checkout.repo, &checkout.home, &["review", run.as_str()]);
@@ -387,7 +297,7 @@ fn review_refuses_a_run_that_waits_on_no_plan_and_says_what_serves() {
 #[test]
 fn a_run_parked_on_a_plan_offers_review() {
     let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path(), REVIEWED);
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let run = parked(&checkout);
     let status = yunta_in!(&checkout.repo, &checkout.home, &["status", run.as_str()]);
     let page = stdout(&status);

@@ -2,7 +2,7 @@ banned_vocabulary 0
 bench_struct_outside_testkit 0
 cli_print_outside_output 0
 cli_word_outside_cli 0
-command_outside_advice 0
+command_outside_command_rs 0
 copied_test_helpers 0
 create_run_outside_testkit 0
 dash_in_prod_strings 0
@@ -23,6 +23,7 @@ mode_name_in_prod 0
 module_docs_over_60_lines 0
 numeric_const_without_reason 0
 parenthesized_plural_in_prod_strings 0
+process_read_below_the_shell 0
 prod_fns_over_100_lines 0
 prod_fns_over_50_lines 32
 reason_built_by_format 0
@@ -36,7 +37,7 @@ state_phrase_outside_words 0
 sync_fs_in_async 0
 system_clock_outside_boundary 0
 tense_markers 0
-test_files_over_500_lines 29
+test_files_over_500_lines 28
 test_fns_over_50_lines 117
 token_count_formatted_outside_units 0
 wildcard_in_ledger_apply 0

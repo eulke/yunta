@@ -13,6 +13,7 @@ use yunta_core::fence::Coverage;
 use yunta_core::port::PermissionProfile::{Edit, Full, ReadOnly};
 use yunta_core::port::{AgentEvent, ProbeReport};
 use yunta_core::port::{RunToolsEndpoint, SessionRequest};
+use yunta_core::process::SearchPath;
 use yunta_core::rail::RailEvent;
 use yunta_core::{
     sha256_hex, temp_dirs, AdapterError, AdapterSettings, CliConfig, EditSandbox, Effort,
@@ -407,7 +408,11 @@ pub async fn an_unknown_adapter_setting_is_reported_by_probe(subject: &dyn Subje
         adapter_settings: Some(extra),
         ..Default::default()
     };
-    let error = subject.adapter(settings).probe().await.unwrap_err();
+    let error = subject
+        .adapter(settings)
+        .probe(&SearchPath::default())
+        .await
+        .unwrap_err();
     let text = yunta_core::describe(&error);
     let words = ["sandbx", "adapter_settings", "sandbox"];
     let named = words.iter().all(|word| text.contains(*word));
@@ -439,7 +444,7 @@ pub async fn two_refused_stops_in_a_row_keep_the_session_alive(subject: &dyn Sub
 /// The probe reports the version the subject's CLI prints, and the CLI is healthy.
 pub async fn probe_reports_the_stub_version(subject: &dyn Subject) {
     let adapter = subject.adapter(AdapterSettings::default());
-    let report = adapter.probe().await.unwrap();
+    let report = adapter.probe(&SearchPath::default()).await.unwrap();
     let ProbeReport::Healthy { version } = report else {
         panic!("{report:?}");
     };

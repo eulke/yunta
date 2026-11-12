@@ -278,8 +278,8 @@ fn test_files(root: &Path) -> Vec<PathBuf> {
 }
 
 /// Wildcard match arms inside the functions that fold the log: every
-/// `ledger.rs` under `crates/core/src/events/`, plus the engine's own
-/// derivation. A `_ =>` there is a kind that derives nothing with
+/// `ledger.rs` under `crates/core/src/events/`, plus replay's own
+/// fold. A `_ =>` there is a kind that derives nothing with
 /// nothing saying so.
 fn wildcards_in_folds(root: &Path) -> usize {
     let mut folds: Vec<PathBuf> = corpus::entries(&root.join("crates/core/src/events"))
@@ -287,7 +287,7 @@ fn wildcards_in_folds(root: &Path) -> usize {
         .map(|domain| domain.join("ledger.rs"))
         .filter(|ledger| ledger.is_file())
         .collect();
-    folds.push(root.join("crates/engine/src/replay.rs"));
+    folds.push(root.join("crates/replay/src/lib.rs"));
     folds.sort();
     folds
         .iter()
@@ -396,6 +396,7 @@ mod tests {
         "system_clock_outside_boundary",
         "let_underscore_in_prod",
         "env_read_outside_boundary",
+        "process_read_below_the_shell",
         "exit_failure_in_cli",
         "create_run_outside_testkit",
         "execute_run_outside_testkit",
@@ -403,7 +404,7 @@ mod tests {
         "reason_built_by_format",
         "run_tool_named_outside_vocabulary",
         "glyph_literal_outside_glyphs",
-        "command_outside_advice",
+        "command_outside_command_rs",
         "state_phrase_outside_words",
         "look_inside_a_block",
         "dash_in_prod_strings",

@@ -1,0 +1,4 @@
+␛[2mfilter ␛[0m␛[1mn␛[0m
+  one-node  one command whose exit code is the check
+␛[1;35m▸␛[0m ␛[1mlint-fix  ␛[0ma check, and an agent that fixes what it finds
+␛[2m↑↓ move · type to filter · enter chooses · esc takes the first␛[0m

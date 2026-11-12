@@ -18,11 +18,12 @@
 //! without a producer — a mount, a promotion, a `document` input — sits
 //! at the root (`artifacts/<name>`).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use yunta_core::durable::{self, Durability};
 use yunta_core::events::ObjectProblem;
-use yunta_core::{sha256_hex, ContentHash, NodeId, ARTIFACTS_DIR, OBJECTS_DIR};
+use yunta_core::run_dir;
+use yunta_core::{sha256_hex, ContentHash, NodeId};
 
 /// Why the store cannot hand over the bytes an object names: the object
 /// is not what the run accepted, or the store's own I/O failed while it
@@ -83,7 +84,7 @@ impl<'a> ObjectStore<'a> {
         durability: Durability,
     ) -> std::io::Result<ContentHash> {
         let hash = sha256_hex(bytes);
-        let path = self.path_of(&hash);
+        let path = run_dir::object(self.run_dir, &hash);
         tokio::fs::create_dir_all(path.parent().unwrap_or(self.run_dir)).await?;
         // blocking: one object, written whole under its name. `Ok(false)`:
         // the name is taken, and a name is the hash of the bytes it holds.
@@ -123,7 +124,7 @@ impl<'a> ObjectStore<'a> {
 
     /// The bytes `hash` names, verified against it.
     pub async fn get(&self, hash: &ContentHash) -> Result<Vec<u8>, StoreError> {
-        let path = self.path_of(hash);
+        let path = run_dir::object(self.run_dir, hash);
         let bytes = match tokio::fs::read(&path).await {
             Ok(bytes) => bytes,
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
@@ -173,7 +174,7 @@ impl<'a> ObjectStore<'a> {
         name: &str,
         bytes: &[u8],
     ) -> Result<(), StoreError> {
-        let path = self.run_dir.join(view_path(node, name));
+        let path = self.run_dir.join(run_dir::view(node, name));
         let io = |context: String| move |source| StoreError::Io { context, source };
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -184,25 +185,6 @@ impl<'a> ObjectStore<'a> {
         durable::replace(&path, bytes, Durability::Atomic)
             .map_err(io(format!("write `{}`", path.display())))
     }
-
-    /// Where the bytes `hash` names live, absolute.
-    pub fn path_of(&self, hash: &ContentHash) -> PathBuf {
-        self.run_dir.join(OBJECTS_DIR).join(hash.as_str())
-    }
-}
-
-/// Where the view of one artifact goes, relative to the run directory.
-///
-/// The one place the layout of `artifacts/` is written down: a
-/// producer's artifacts under its node, what the run acquired without a
-/// producer at the root.
-pub fn view_path(node: Option<&NodeId>, name: &str) -> PathBuf {
-    let mut path = PathBuf::from(ARTIFACTS_DIR);
-    if let Some(node) = node {
-        path.push(node.as_str());
-    }
-    path.push(name);
-    path
 }
 
 /// A run's object store as what its commands printed is kept in it.

@@ -20,10 +20,10 @@ use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::ArtifactId;
 use yunta_core::events::{EngineError, EngineStep, Failure, MountError, StoredEvent};
 use yunta_core::{MountArtifact, MountSpec, NodeKind, RunId};
+use yunta_replay::RunState;
 
 use super::runs_root;
 use crate::artifacts::StoreError;
-use crate::replay::RunState;
 use crate::run::promote::birth_artifact;
 use crate::run::{read_manifest, BirthArtifact, RunCtx};
 

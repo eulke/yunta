@@ -1,14 +1,14 @@
 //! Sessions end-to-end: session events, the skills chain, on_finish distillation, runner fan-out, forensic events.jsonl, and resume_session.
 
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
 use yunta_core::events::{
-    ArtifactEvent, Failure, FindingEvent, NodeEvent, NodeOutcome, PauseReason, ScopeEvent,
-    SessionEvent,
+    ArtifactEvent, Failure, FindingEvent, NodeEvent, NodeOutcome, NodeState, PauseReason,
+    ScopeEvent, SessionEvent,
 };
 use yunta_core::port::{Policy, PolicyApplied};
 use yunta_core::Capabilities;
@@ -24,6 +24,9 @@ mod messages;
 
 #[path = "run_sessions/distill.rs"]
 mod distill;
+
+#[path = "run_sessions/marks.rs"]
+mod marks;
 
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
@@ -626,7 +629,7 @@ nodes:
 "#;
     // Corrupt the log by hand between the run's creation and its first
     // wake: a node_finished with no node_started — exactly the class of
-    // inconsistency `derive` refuses to guess over.
+    // inconsistency replay refuses to guess over.
     let result = bench
         .try_run_sabotaged(workflow, "dialect: claude-code\nsessions: []\n", |_| {
             bench
@@ -875,8 +878,9 @@ sessions:
     let RunTerminal::Paused { reason } = &terminal else {
         panic!("a fresh session is judged on what it produced: {terminal:?}");
     };
-    let state = yunta_engine::derive(&events);
-    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("work") else {
+    let state = yunta_replay::RunState::replay(&events);
+    let Some(yunta_core::events::NodeState::Failed { failure, .. }) = state.nodes.state("work")
+    else {
         panic!("`work` failed: {reason:?}");
     };
     let sentence = yunta_render::failure::sentence(failure);
@@ -1052,7 +1056,7 @@ nodes:
 on_finish:
   - distill: [{{ node: plan, name: plan.md }}]
 "#,
-        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
+        view = yunta_core::run_dir::artifacts(&bench.run_dir()).display()
     );
     let fixture = distill_fixture(&bench);
     let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;

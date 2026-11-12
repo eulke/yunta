@@ -5,10 +5,9 @@ use std::future::Future;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{EngineFact, Failure, NodeOutcome, PauseReason, TokenUsage};
+use yunta_core::events::{EngineFact, Failure, NodeOutcome, NodeState, PauseReason, TokenUsage};
 use yunta_core::{JoinPolicy, Node, NodeId};
-
-use crate::replay::{NodeState, RunState};
+use yunta_replay::RunState;
 
 use super::node_close::{close_node, fail, Close};
 use super::node_exec::{execute_node, NodeEnd};

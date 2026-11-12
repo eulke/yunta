@@ -204,16 +204,23 @@ pub fn handle(id: &str) -> &str {
 /// the id itself. For a test that opens the run's own directory, which
 /// is named by the whole id.
 pub fn full_run_id(home: &Path, called: &str) -> String {
-    let runs = std::fs::read_dir(crate::runs_root(home)).expect("the runs under the test's home");
-    let named: Vec<String> = runs
-        .filter_map(Result::ok)
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+    let named: Vec<String> = run_ids(home)
+        .into_iter()
         .filter(|id| id.ends_with(called))
         .collect();
     match named.as_slice() {
         [one] => one.clone(),
         other => panic!("`{called}` names {} runs: {other:?}", other.len()),
     }
+}
+
+/// The whole ids of the runs under `home`, each its directory's name.
+pub fn run_ids(home: &Path) -> Vec<String> {
+    std::fs::read_dir(crate::runs_root(home))
+        .expect("the runs under the test's home")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect()
 }
 
 fn find_run_id(text: &str) -> Option<String> {

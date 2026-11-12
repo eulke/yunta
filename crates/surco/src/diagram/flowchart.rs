@@ -1,15 +1,30 @@
 //! A Mermaid flowchart read into a graph: which way it reads, the boxes
-//! it names and the links between them. What this does not read — a
-//! subgraph, any other kind of diagram, a line it cannot parse — is not
-//! guessed at: the source is shown as written instead.
+//! it names, the groups it gathers them in, and the links between them.
+//! A group, `subgraph <id>[<label>]` to its `end`, is a node links name by
+//! its id, holding each node first named inside it, a group among them.
+//! What this does not read — a group's own `direction`, a title it cannot
+//! tell an id in, any other kind of diagram, a line it cannot parse — is
+//! not guessed at: the source is shown as written instead.
 
 /// A flowchart: the way it reads, its nodes in the order the source
-/// first names them, and its links in the order it draws them.
+/// first names them, its groups in the order they open, and its links in
+/// the order it draws them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Flowchart {
     pub direction: Direction,
     pub nodes: Vec<Node>,
     pub links: Vec<Link>,
+    pub groups: Vec<Group>,
+}
+
+/// A group of nodes, `subgraph` to `end`: the node it stands as, which a
+/// link names by the group's id, and the nodes first named inside it, by
+/// their places in the chart, a group's own node among them. Not a node's
+/// [`Shape`]: a group holds boxes, and is drawn around them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Group {
+    pub node: usize,
+    pub members: Vec<usize>,
 }
 
 /// The way a flowchart reads.
@@ -94,16 +109,63 @@ pub fn flowchart(source: &str) -> Option<Flowchart> {
         direction,
         nodes: Vec::new(),
         links: Vec::new(),
+        groups: Vec::new(),
     };
+    // The groups open where a statement stands, the innermost last.
+    let mut open: Vec<usize> = Vec::new();
     for statement in statements {
         let word = statement.split_whitespace().next().unwrap_or_default();
+        let named = chart.nodes.len();
         match word {
             "style" | "classDef" | "class" | "linkStyle" | "click" => continue,
-            "subgraph" | "end" | "direction" => return None,
+            "direction" => return None,
+            "subgraph" => {
+                let group = opened(&mut chart, &statement["subgraph".len()..])?;
+                gathered(&mut chart, open.last().copied(), named);
+                open.push(group);
+                continue;
+            }
+            "end" => {
+                open.pop()?;
+                continue;
+            }
             _ => chain(&mut chart, statement)?,
         }
+        gathered(&mut chart, open.last().copied(), named);
     }
+    if !open.is_empty() {
+        return None;
+    }
+    // A group nothing was named in holds nothing: it is the box it names.
+    chart.groups.retain(|group| !group.members.is_empty());
     (!chart.nodes.is_empty()).then_some(chart)
+}
+
+/// The group `header`, what follows `subgraph`, opens: its id and, when it
+/// has one, its label, as a node, which a link may have named already; by its
+/// place among the groups. `None` for a header that is no node, or names a
+/// group opened already.
+fn opened(chart: &mut Flowchart, header: &str) -> Option<usize> {
+    let mut rest = header;
+    let node = node(chart, &mut rest)?;
+    let reopened = chart.groups.iter().any(|group| group.node == node);
+    if reopened || !rest.trim().is_empty() {
+        return None;
+    }
+    chart.groups.push(Group {
+        node,
+        members: Vec::new(),
+    });
+    Some(chart.groups.len() - 1)
+}
+
+/// The nodes named from `named` on, each held by the group `within` where
+/// one is open.
+fn gathered(chart: &mut Flowchart, within: Option<usize>, named: usize) {
+    if let Some(group) = within {
+        let new = named..chart.nodes.len();
+        chart.groups[group].members.extend(new);
+    }
 }
 
 /// The statements of `line`: what its `;` separate, where a `;` is not
@@ -344,136 +406,4 @@ fn said(label: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::diagram::*;
-
-    /// Each link of `chart` as `from -> to`, with its label and stroke.
-    fn links(chart: &Flowchart) -> Vec<(String, String, Option<String>, Stroke)> {
-        chart
-            .links
-            .iter()
-            .map(|link| {
-                (
-                    chart.nodes[link.from].id.clone(),
-                    chart.nodes[link.to].id.clone(),
-                    link.label.clone(),
-                    link.stroke,
-                )
-            })
-            .collect()
-    }
-
-    fn link(
-        from: &str,
-        to: &str,
-        label: Option<&str>,
-        stroke: Stroke,
-    ) -> (String, String, Option<String>, Stroke) {
-        (
-            from.to_string(),
-            to.to_string(),
-            label.map(str::to_string),
-            stroke,
-        )
-    }
-
-    #[test]
-    fn a_chart_reads_its_direction_its_boxes_and_their_labels() {
-        let chart = flowchart("graph LR\n  Name[A name] --> Greeting(The greeting)").unwrap();
-        assert_eq!(chart.direction, Direction::Right);
-        assert_eq!(
-            chart.nodes,
-            [
-                Node {
-                    id: "Name".into(),
-                    label: "A name".into(),
-                    shape: Shape::Box
-                },
-                Node {
-                    id: "Greeting".into(),
-                    label: "The greeting".into(),
-                    shape: Shape::Round
-                },
-            ]
-        );
-        assert_eq!(
-            links(&chart),
-            [link("Name", "Greeting", None, Stroke::Arrow)]
-        );
-    }
-
-    #[test]
-    fn every_link_is_read_with_its_stroke_and_its_label() {
-        let chart = flowchart(
-            "flowchart TD\n a --> b\n a --- c\n a -.-> d\n a ==> e\n a -->|yes| f\n a -- no --> g\n a -. maybe .-> h\n a == sure ==> i\n a ---> j",
-        )
-        .unwrap();
-        assert_eq!(
-            links(&chart),
-            [
-                link("a", "b", None, Stroke::Arrow),
-                link("a", "c", None, Stroke::Open),
-                link("a", "d", None, Stroke::Dotted),
-                link("a", "e", None, Stroke::Thick),
-                link("a", "f", Some("yes"), Stroke::Arrow),
-                link("a", "g", Some("no"), Stroke::Arrow),
-                link("a", "h", Some("maybe"), Stroke::Dotted),
-                link("a", "i", Some("sure"), Stroke::Thick),
-                link("a", "j", None, Stroke::Arrow),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_chain_and_its_groups_link_every_pair_they_join() {
-        let chart = flowchart("graph TD; plan & spec --> gate --> build").unwrap();
-        assert_eq!(
-            links(&chart),
-            [
-                link("plan", "gate", None, Stroke::Arrow),
-                link("spec", "gate", None, Stroke::Arrow),
-                link("gate", "build", None, Stroke::Arrow),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_question_a_quoted_label_and_its_entities_are_read_as_written() {
-        let chart = flowchart(
-            "graph TD\n %% the one question\n Q{\"Is it #quot;ok#quot;?<br/>Say so\"} -->|yes| R\n style Q fill:#f9f\n classDef done fill:#9f9\n R:::done",
-        )
-        .unwrap();
-        assert_eq!(chart.nodes[0].label, "Is it \"ok\"? Say so");
-        assert_eq!(chart.nodes[0].shape, Shape::Decision);
-        assert_eq!(chart.nodes[1].id, "R");
-        assert_eq!(links(&chart), [link("Q", "R", Some("yes"), Stroke::Arrow)]);
-    }
-
-    #[test]
-    fn an_entity_outside_quotes_ends_no_statement() {
-        let chart = flowchart("graph LR; A[Say #quot;hi#quot;] --> B; B --> C").unwrap();
-        assert_eq!(chart.nodes[0].label, "Say \"hi\"");
-        assert_eq!(chart.links.len(), 2);
-    }
-
-    #[test]
-    fn a_node_named_again_keeps_the_label_it_was_given() {
-        let chart = flowchart("graph TD\n A[Start] --> B\n B --> A").unwrap();
-        assert_eq!(chart.nodes[0].label, "Start");
-        assert_eq!(chart.nodes[1].label, "B");
-        assert_eq!(chart.nodes.len(), 2);
-    }
-
-    #[test]
-    fn what_it_does_not_read_is_not_guessed_at() {
-        for source in [
-            "sequenceDiagram\n  A->>B: hi",
-            "graph TD\n subgraph one\n A --> B\n end",
-            "graph TD\n A -> B",
-            "graph XY\n A --> B",
-            "graph TD",
-        ] {
-            assert_eq!(flowchart(source), None, "{source}");
-        }
-    }
-}
+mod tests;

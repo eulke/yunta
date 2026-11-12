@@ -3,8 +3,8 @@
 //! The words a run's and a node's state are called by, the marks that
 //! repeat them for the eye, how a sentence counts, lists and quotes, how a
 //! figure reads, the columns a line is built from, the blocks a document
-//! is composed of, and the surfaces that draw a document: a terminal, at
-//! its width and in its paint, and a Markdown file.
+//! is composed of, what a screen holds, and the surfaces that draw them: a
+//! terminal, at its width and in its paint, a Markdown file and a page.
 //!
 //! One crate, below every other crate of the workspace and depending on
 //! none of them, because two readers told the same fact in two words — a
@@ -21,9 +21,11 @@
 //! - What is said: `words` and `figures`, `text` for the grammar and the layout
 //!   of a sentence, `prose` for what a session wrote, and `paths`.
 //! - What it is drawn with: `glyphs`, `line`, `bars`, `motion`, `paint` and
-//!   `palette`, for a stream that `look` and `width` measure.
+//!   `palette`, for a stream or a pane that `look` and `width` measure. A style
+//!   in `paint` is the one table of color every engine that draws reads.
 //! - What a document is made of: `doc`, `components`, `diagram`, and `code`, the
-//!   one lexer every reader of code reads with.
+//!   one lexer every reader of code reads with. A screen, in `components`, holds
+//!   documents with no cell, pixel or color: each interface lays it out.
 //! - Who draws it: `surface`, and `golden` compares what a surface drew with what
 //!   was written down for it.
 //!

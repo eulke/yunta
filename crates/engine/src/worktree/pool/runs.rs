@@ -49,7 +49,7 @@ impl CheckoutPool {
         birth: Birth,
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
-        let branch = crate::worktree::run_branch(run_id);
+        let branch = run_id.branch();
         let user = fit::User::Run {
             branch: &branch,
             birth,
@@ -79,7 +79,7 @@ impl CheckoutPool {
         run_id: &yunta_core::RunId,
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
-        let branch = crate::worktree::run_branch(run_id);
+        let branch = run_id.branch();
         let head = crate::git::read(&self.repo, &["rev-parse", &branch], supervision).await?;
         let head: CommitSha = head
             .trim()

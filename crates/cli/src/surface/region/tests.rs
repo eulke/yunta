@@ -1,6 +1,8 @@
+use yunta_core::events::ChildLink;
+use yunta_core::events::NodeState;
 use yunta_core::NodeId;
-use yunta_engine::{Counter, NodeStanding, NodeState, RunPhase, WaitingOn};
-use yunta_testkit::{child_link, node_frame, run_frame};
+use yunta_replay::frame::{Counter, NodeStanding, RunPhase, WaitingOn};
+use yunta_replay::frame::{NodeFrame, RunFrame};
 use yunta_testkit_core::Captured;
 
 use crate::surface::Watched;
@@ -22,17 +24,17 @@ fn region(term: &Watched, scrollback: &Captured) -> Region {
     .expect("the region's row template parses")
 }
 
-fn running(id: &'static str) -> yunta_engine::NodeFrame {
-    node_frame(
+fn running(id: &'static str) -> yunta_replay::frame::NodeFrame {
+    NodeFrame::sample(
         &NodeId::from_static(id),
         NodeStanding::Reached(NodeState::Running { attempt: 1 }),
     )
 }
 
 /// A run of `nodes` in `phase`, counted as the region counts them.
-fn frame(phase: RunPhase, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
-    let engine = yunta_engine::Engine::this(chrono::DateTime::UNIX_EPOCH);
-    let standing = yunta_engine::run_standing(&phase, &nodes, 0, &engine);
+fn frame(phase: RunPhase, nodes: Vec<yunta_replay::frame::NodeFrame>) -> RunFrame {
+    let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
+    let standing = yunta_replay::frame::run_standing(&phase, &nodes, 0, &engine);
     RunFrame {
         standing,
         phase,
@@ -41,14 +43,18 @@ fn frame(phase: RunPhase, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
             ..Counter::default()
         },
         nodes,
-        ..run_frame(&RUN)
+        ..RunFrame::sample(&RUN)
     }
 }
 
 /// The run of `nodes`, with a child run still open under `bore`.
-fn composing(bore: &'static str, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
+fn composing(bore: &'static str, nodes: Vec<yunta_replay::frame::NodeFrame>) -> RunFrame {
     RunFrame {
-        children: vec![child_link(&CHILD, Some(&NodeId::from_static(bore)), None)],
+        children: vec![ChildLink::sample(
+            &CHILD,
+            Some(&NodeId::from_static(bore)),
+            None,
+        )],
         ..frame(RunPhase::Running, nodes)
     }
 }
@@ -63,7 +69,7 @@ fn parked_on_plan() -> RunFrame {
         RunPhase::Waiting {
             on: WaitingOn::Node {
                 node: NodeId::from_static("plan"),
-                on: yunta_engine::NodeWait::Gate { external_ref: None },
+                on: yunta_core::events::NodeWait::Gate { external_ref: None },
                 reason: None,
             },
         },
@@ -157,7 +163,7 @@ fn a_row_is_cut_to_the_terminal_and_never_past_the_width_it_is_written_for() {
                 RunPhase::Waiting {
                     on: WaitingOn::Node {
                         node: NodeId::from_static(PARKED),
-                        on: yunta_engine::NodeWait::Gate { external_ref: None },
+                        on: yunta_core::events::NodeWait::Gate { external_ref: None },
                         reason: None,
                     },
                 },
@@ -166,7 +172,7 @@ fn a_row_is_cut_to_the_terminal_and_never_past_the_width_it_is_written_for() {
             &RUN,
             true,
         );
-        let room = crate::render::row_width(usize::from(columns)).cells();
+        let room = crate::output::row_width(usize::from(columns)).cells();
         let drawn = rows(&term);
         assert_eq!(
             drawn.len(),
@@ -262,4 +268,107 @@ fn the_footer_stays_the_last_row_as_nodes_come_and_go() {
             "{drawn:?}"
         );
     }
+}
+
+/// What a session of `node` in `run` said.
+fn said(run: &RunId, node: &'static str, text: &str) -> yunta_core::port::Said {
+    yunta_core::port::Said {
+        run_id: run.clone(),
+        node_id: NodeId::from_static(node),
+        session_id: yunta_core::SessionId::from_static("session-1"),
+        task_id: None,
+        seq: yunta_core::Seq::from(3),
+        at: chrono::DateTime::UNIX_EPOCH,
+        text: text.to_string(),
+        cut: false,
+    }
+}
+
+/// A node shows what its session said while it works. Once it stops, what
+/// it said is let go, so working again it shows nothing until it says
+/// something new.
+#[test]
+fn a_node_that_works_again_does_not_show_what_its_last_attempt_said() {
+    let term = Watched::sized(16, 80);
+    let scrollback = Captured::default();
+    let mut region = region(&term, &scrollback);
+    region.hear(said(&RUN, "build", "Compiling the parser."));
+
+    region.show(
+        &frame(RunPhase::Running, vec![running("build")]),
+        &RUN,
+        false,
+    );
+    assert!(
+        rows(&term)
+            .iter()
+            .any(|row| row.contains("says: Compiling the parser.")),
+        "{:?}",
+        rows(&term)
+    );
+
+    region.show(
+        &frame(RunPhase::Running, vec![running("test")]),
+        &RUN,
+        false,
+    );
+    region.show(
+        &frame(RunPhase::Running, vec![running("build")]),
+        &RUN,
+        false,
+    );
+    assert!(
+        !rows(&term).iter().any(|row| row.contains("says:")),
+        "{:?}",
+        rows(&term)
+    );
+}
+
+/// A follower hears a session off the run's socket and reads its node's start
+/// off the log, and the words can come first. What a node that has not started
+/// yet said is kept, and shown once the node works.
+#[test]
+fn what_a_node_said_before_its_start_is_shown_once_it_works() {
+    let term = Watched::sized(16, 80);
+    let scrollback = Captured::default();
+    let mut region = region(&term, &scrollback);
+    region.hear(said(&RUN, "build", "First I read the parser."));
+
+    let to_go = NodeFrame::sample(&NodeId::from_static("build"), NodeStanding::ToGo);
+    region.show(&frame(RunPhase::Running, vec![to_go]), &RUN, false);
+    region.show(
+        &frame(RunPhase::Running, vec![running("build")]),
+        &RUN,
+        false,
+    );
+
+    assert!(
+        rows(&term)
+            .iter()
+            .any(|row| row.contains("says: First I read the parser.")),
+        "{:?}",
+        rows(&term)
+    );
+}
+
+/// What a session of another run said, such as a child's, is not shown in
+/// this run's region, even under a node of the same name.
+#[test]
+fn what_another_run_said_is_not_shown() {
+    let term = Watched::sized(16, 80);
+    let scrollback = Captured::default();
+    let mut region = region(&term, &scrollback);
+    region.hear(said(&CHILD, "build", "Said in the child."));
+
+    region.show(
+        &frame(RunPhase::Running, vec![running("build")]),
+        &RUN,
+        false,
+    );
+
+    assert!(
+        !rows(&term).iter().any(|row| row.contains("says:")),
+        "{:?}",
+        rows(&term)
+    );
 }

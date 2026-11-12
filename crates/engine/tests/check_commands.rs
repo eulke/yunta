@@ -2,8 +2,8 @@
 //! name the project does not declare is refused before the first token,
 //! and the rest is judged as the project wrote it.
 
+use yunta_core::check::CheckError;
 use yunta_core::{CommandName, ConfigKey, ConfigLayer, Workflow};
-use yunta_engine::CheckError;
 
 fn parse<T: serde::de::DeserializeOwned>(text: &str) -> T {
     yunta_core::yaml::parse(text).expect("the fixture parses")

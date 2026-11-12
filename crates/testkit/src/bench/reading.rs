@@ -88,7 +88,7 @@ impl Bench {
     /// left in the run's `artifacts/` directory; every test about what
     /// the run holds asks [`artifact`](Self::artifact).
     pub fn projection(&self, producer: Option<&str>, name: &str) -> std::io::Result<Vec<u8>> {
-        let mut path = self.run_dir().join(yunta_core::ARTIFACTS_DIR);
+        let mut path = yunta_core::run_dir::artifacts(&self.run_dir());
         if let Some(node) = producer {
             path.push(node);
         }
@@ -133,8 +133,8 @@ impl Bench {
         workflow_yaml: &str,
         config_yaml: &str,
     ) -> yunta_core::Manifest {
-        let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
-        let config: ConfigLayer = yunta_core::yaml::parse(config_yaml).expect("parse config");
+        let workflow = Workflow::parse(workflow_yaml).expect("parse workflow");
+        let config = ConfigLayer::read(config_yaml).expect("parse config");
         self.freeze(&workflow, &config)
             .await
             .expect("the workflow freezes against this bench")

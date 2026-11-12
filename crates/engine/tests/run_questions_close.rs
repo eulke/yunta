@@ -2,8 +2,10 @@
 //! records `questions_asked`, and waits between that and `questions_answered`
 //! for the `node_finished` its close deferred.
 
-use yunta_core::events::{EventPayload, StoredEvent};
-use yunta_engine::{derive, NoInteraction, NodeState, RunReport, RunTerminal};
+use yunta_core::events::{EventPayload, NodeState, StoredEvent};
+use yunta_core::port::NoInteraction;
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_replay::RunState;
 use yunta_testkit::Bench;
 use yunta_testkit_core::Log;
 
@@ -81,7 +83,7 @@ fn assert_counted_once_while_asked(events: &[StoredEvent]) {
         .iter()
         .position(|e| e.body.kind_name() == "questions_asked")
         .expect("the question is on the log");
-    let spent = derive(&events[..=cut]).spend().so_far();
+    let spent = RunState::replay(&events[..=cut]).spend().so_far();
     assert_eq!((spent.input, spent.output), (30, 12), "counted once");
 }
 
@@ -287,7 +289,7 @@ async fn an_answered_node_owed_its_finish_is_finished_on_resume_without_a_sessio
         })
         .expect("the answer is on the log")
         + 1;
-    let state = derive(&full[..cut]);
+    let state = RunState::replay(&full[..cut]);
     assert!(
         matches!(state.nodes.state("grill"), Some(NodeState::Running { .. })),
         "an answered node is running again, owed its terminal: got {:?}",

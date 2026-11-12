@@ -15,7 +15,15 @@ pub(crate) struct Listed {
     pub(crate) branch: Option<String>,
     /// Whether git says the checkout is gone from where it was listed.
     pub(crate) prunable: bool,
+    /// Whether git marks the checkout as being added: an add that is
+    /// running, or one cut off before it finished, which left no checkout
+    /// git can open.
+    pub(crate) being_added: bool,
 }
+
+/// The line git lists a checkout with while `worktree add` makes it, and
+/// after an add that was cut off: the lock it takes for the add, and why.
+const BEING_ADDED: &str = "locked initializing";
 
 /// Every checkout `listing` names.
 pub(crate) fn checkouts(listing: &str) -> Vec<Listed> {
@@ -28,6 +36,7 @@ pub(crate) fn checkouts(listing: &str) -> Vec<Listed> {
                 head: None,
                 branch: None,
                 prunable: false,
+                being_added: false,
             });
         } else if let Some(listed) = current.as_mut() {
             if let Some(head) = line.strip_prefix("HEAD ") {
@@ -36,6 +45,8 @@ pub(crate) fn checkouts(listing: &str) -> Vec<Listed> {
                 listed.branch = Some(named.to_string());
             } else if line.starts_with("prunable") {
                 listed.prunable = true;
+            } else if line == BEING_ADDED {
+                listed.being_added = true;
             } else if line.is_empty() {
                 found.extend(current.take());
             }
@@ -90,6 +101,27 @@ mod tests {
                     Some("refs/heads/yunta/unit/r/task/T1/2".into()),
                     true
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_checkout_git_marks_as_being_added_is_read_so_and_one_locked_otherwise_is_not() {
+        let listing = format!(
+            "worktree /pool/slot-1\nHEAD {ONE}\ndetached\nlocked initializing\n\n\
+             worktree /pool/slot-2\nHEAD {TWO}\ndetached\nlocked kept by hand\n"
+        );
+
+        let being_added: Vec<(String, bool)> = checkouts(&listing)
+            .into_iter()
+            .map(|listed| (listed.path.display().to_string(), listed.being_added))
+            .collect();
+
+        assert_eq!(
+            being_added,
+            vec![
+                ("/pool/slot-1".into(), true),
+                ("/pool/slot-2".into(), false)
             ]
         );
     }
