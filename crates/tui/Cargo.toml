@@ -22,8 +22,9 @@ yunta-core.workspace = true
 yunta-ui.workspace = true
 # Every line written into a cell, and the one table its color is read from.
 yunta-surco.workspace = true
-# The cells a screen is laid out in, and the frame written to the terminal.
-ratatui = { workspace = true, features = ["crossterm"] }
+# The cells a screen is laid out in, and the frame written to the terminal; each layout
+# solved once for its size, kept in Ratatui's cache, since a screen redraws on every change.
+ratatui = { workspace = true, features = ["crossterm", "layout-cache"] }
 # The terminal's keys, pastes and size, read as a stream, and its modes held and given back.
 crossterm = { workspace = true, features = ["event-stream"] }
 # The loop: what arrives selected over, the time on a tick, the performer's channel.

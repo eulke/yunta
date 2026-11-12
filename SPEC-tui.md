@@ -191,12 +191,12 @@ On crates.io today, Ratatui 0.30.2, `ratatui-crossterm` 0.1.2 and crossterm 0.29
 
 Rust 1.98.0. A new workspace member `yunta-tui`, on:
 - `yunta-ui`, `yunta-surco` and `yunta-core`;
-- `ratatui` 0.30.2 with `default-features = false, features = ["crossterm"]`;
+- `ratatui` 0.30.2 with `default-features = false, features = ["crossterm", "layout-cache"]`: each layout is solved once for its size, which brings `critical-section` 1.2.0 (MIT or Apache-2.0);
 - `crossterm` 0.29.0 with `event-stream`;
 - `tokio` and `futures`, already in the workspace;
 - `nix`, already in the workspace, for suspending.
 
-The binary gains `yunta-tui`. Every new crate is MIT.
+The binary gains `yunta-tui`. Every new crate is MIT, or offered under MIT or Apache-2.0.
 
 ## Commands
 
