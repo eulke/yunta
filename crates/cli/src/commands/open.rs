@@ -3,8 +3,6 @@
 //! is.
 
 use std::io::IsTerminal;
-use std::path::Path;
-use std::process::{Command, Stdio};
 
 use surco::look::Look;
 use yunta_core::RunId;
@@ -31,7 +29,7 @@ pub async fn open(
         .page_for_a_browser(&remarks)
         .await?;
     let opened = match output {
-        Mode::Human if std::io::stdout().is_terminal() => Some(browser(&path).is_ok()),
+        Mode::Human if std::io::stdout().is_terminal() => Some(crate::browser::open(&path).is_ok()),
         _ => None,
     };
     emit(
@@ -42,23 +40,6 @@ pub async fn open(
         },
         look,
     )
-}
-
-/// Asks the system's own opener for `page`. The opener hands the page to the
-/// browser and is gone, so nothing waits on it.
-fn browser(page: &Path) -> std::io::Result<()> {
-    let opener = if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    Command::new(opener)
-        .arg(page)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(drop)
 }
 
 /// Where the page is, and, for a person at a terminal, whether it opened.

@@ -348,6 +348,14 @@ impl Stage {
     /// What a surface laid out of the screen's regions, which the stage reads on the
     /// next stroke where it scrolls one: a decision's desk and a page in the main region,
     /// a run's page beside its nodes.
+    /// The page `page`, which this stage asked a surface to show, could not be shown: the
+    /// evidence stage says so, the one stage that shows pages.
+    pub(crate) fn unshown(&mut self, page: &std::path::Path) {
+        if let Stage::Evidence(evidence) = self {
+            evidence.unshown(page);
+        }
+    }
+
     pub(crate) fn laid(&mut self, laid: ScreenLaid) {
         match self {
             Stage::Decision(decision) => decision.laid(laid.main),

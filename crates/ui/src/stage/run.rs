@@ -125,7 +125,7 @@ impl RunStage {
         screen.side = frame.as_ref().map(|frame| {
             let nodes = watched::nodes(frame, self.pointed.as_ref(), look);
             Side {
-                region: Region::new(Doc::new().with(Block::Lines(nodes)))
+                region: Region::new(Doc::new().with(Block::Rows(nodes)))
                     .in_sight(Sight::following_pointer()),
                 focused: true,
             }

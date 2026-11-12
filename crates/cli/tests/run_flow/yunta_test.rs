@@ -2,6 +2,8 @@
 
 use super::*;
 
+use yunta_testkit::workflows::PROMOTABLE;
+
 #[test]
 fn yunta_test_runs_a_case_with_the_mock_adapter_and_checks_expectations() {
     let root = tempfile::tempdir().unwrap();
@@ -354,24 +356,6 @@ nodes:
         "the refusal names what the workflow reaches for and does not have: {text}"
     );
 }
-
-/// A workflow with somewhere later to go, whose only node exhausts its
-/// reroutes at once — so the decision it parks on is the one that
-/// offers `promote`.
-const PROMOTABLE: &str = r#"
-name: promotable
-modes:
-  quick: { include: [check, fix] }
-  full:  { include: all }
-nodes:
-  - id: check
-    kind: bash
-    run: "test -f fixed.txt"
-    on_failure: { goto: fix, max_reroutes: 0 }
-  - id: fix
-    kind: bash
-    run: "touch fixed.txt"
-"#;
 
 #[test]
 fn a_case_answers_a_gate_and_reaches_the_promotion_it_expects() {

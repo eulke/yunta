@@ -2,8 +2,9 @@
 //! beside it and shown as `yunta receipt` prints it; its log and the objects it names
 //! verified, as `yunta verify` says them; or its page written where a browser reads
 //! it, then shown by the surface ([`Want::Show`]): a terminal hands it to the
-//! system's opener, the desktop to a window. A receipt or a check taller than what
-//! shows of it scrolls. Escape goes back to the run.
+//! system's opener, the desktop to a window. A page the surface could not show is said
+//! in the words `yunta open` says it in, and Enter asks for it again. A receipt or a
+//! check taller than what shows of it scrolls. Escape goes back to the run.
 
 use std::path::PathBuf;
 
@@ -52,8 +53,9 @@ enum Shown {
     Receipt(Box<Receipt>),
     /// Each check of the run's evidence.
     Verified(Vec<Check>),
-    /// Where the page for a browser was written.
-    Opened(PathBuf),
+    /// Where the page for a browser was written, and whether the surface said it could not
+    /// show it.
+    Opened { page: PathBuf, unshown: bool },
 }
 
 impl EvidenceStage {
@@ -90,11 +92,11 @@ impl EvidenceStage {
                 checks,
             }
             .document(look),
-            Shown::Opened(page) => {
+            Shown::Opened { page, unshown } => {
                 let page = page.display().to_string();
                 Opened {
                     page: &page,
-                    opened: None,
+                    opened: unshown.then_some(false),
                 }
                 .document(look)
             }
@@ -109,7 +111,7 @@ impl EvidenceStage {
             self.trail().to_string(),
         ];
         let legend = match self.shown {
-            Shown::Opened(_) => yunta_render::screen::opened_legend(),
+            Shown::Opened { .. } => yunta_render::screen::opened_legend(),
             Shown::Deriving | Shown::Receipt(_) | Shown::Verified(_) => {
                 yunta_render::screen::over_the_run_legend()
             }
@@ -144,7 +146,14 @@ impl EvidenceStage {
     /// scroll what stands.
     pub(crate) fn pressed(&mut self, stroke: Stroke) -> Vec<Want> {
         match (stroke, &self.shown) {
-            (Stroke::Enter, Shown::Opened(page)) => vec![Want::Show(page.clone())],
+            (Stroke::Enter, Shown::Opened { page, .. }) => {
+                let page = page.clone();
+                self.shown = Shown::Opened {
+                    page: page.clone(),
+                    unshown: false,
+                };
+                vec![Want::Show(page)]
+            }
             (Stroke::Decline, _) => vec![Want::Back],
             (Stroke::Insert('q') | Stroke::Interrupt, _) => vec![Want::Leave],
             (other, _) => {
@@ -158,13 +167,27 @@ impl EvidenceStage {
     /// shown again, once it is written.
     pub(crate) fn offered(&self) -> Vec<Act> {
         match self.shown {
-            Shown::Opened(_) => vec![Act::by(
+            Shown::Opened { .. } => vec![Act::by(
                 Stroke::Enter,
                 NextStep::Open {
                     run: self.run.clone(),
                 },
             )],
             Shown::Deriving | Shown::Receipt(_) | Shown::Verified(_) => Vec::new(),
+        }
+    }
+
+    /// The page `page` could not be shown: where it is the one this stage asked for, it
+    /// says so.
+    pub(crate) fn unshown(&mut self, page: &std::path::Path) {
+        if let Shown::Opened {
+            page: asked,
+            unshown,
+        } = &mut self.shown
+        {
+            if asked == page {
+                *unshown = true;
+            }
         }
     }
 
@@ -187,7 +210,10 @@ impl EvidenceStage {
                 Vec::new()
             }
             Outcome::Evidence(EvidenceOutcome::PageWritten { page }) => {
-                self.shown = Shown::Opened(page.clone());
+                self.shown = Shown::Opened {
+                    page: page.clone(),
+                    unshown: false,
+                };
                 vec![Want::Show(page)]
             }
             Outcome::Refused(refused) => {

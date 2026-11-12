@@ -21,8 +21,11 @@ yunta-replay.workspace = true
 yunta-api.workspace = true
 # The control plane `yunta mcp` serves on stdio.
 yunta-mcp.workspace = true
-# The prompts a person answers stroke by stroke, which the console holds.
+# The application, which bare `yunta` opens, and the prompts a person answers stroke by
+# stroke, which the console holds.
 yunta-ui.workspace = true
+# The application at a terminal.
+yunta-tui.workspace = true
 yunta-render.workspace = true
 yunta-surco = { workspace = true, features = ["clap"] }
 clap = { workspace = true, features = ["derive"] }

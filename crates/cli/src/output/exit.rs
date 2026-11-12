@@ -4,6 +4,8 @@
 
 use surco::words::Standing;
 
+use crate::shell::EndSignal;
+
 /// How a subcommand came back when nothing stopped it from running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -34,11 +36,29 @@ impl Outcome {
 /// signal's number, which a person's Ctrl-C reads as.
 const INTERRUPTED: u8 = 130;
 
+/// The code a shell reports for a process SIGTERM ended: 128 plus the
+/// signal's number.
+const TERMINATED: u8 = 143;
+
+/// The code a shell reports for a process SIGHUP ended: 128 plus the
+/// signal's number.
+const HUNG_UP: u8 = 129;
+
 impl Outcome {
     /// How an invocation a person interrupted exits, as a shell reports a
     /// process SIGINT ended.
     pub(crate) fn interrupted() -> Self {
         Outcome::Code(INTERRUPTED)
+    }
+
+    /// How an invocation `signal` asked to end exits, as a shell reports a
+    /// process that signal ended.
+    pub(crate) fn ended_by(signal: EndSignal) -> Self {
+        match signal {
+            EndSignal::Interrupt => Outcome::interrupted(),
+            EndSignal::Terminate => Outcome::Code(TERMINATED),
+            EndSignal::HangUp => Outcome::Code(HUNG_UP),
+        }
     }
 }
 
@@ -56,6 +76,13 @@ pub(crate) fn exit(standing: Standing) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_signal_that_asks_to_end_exits_as_a_shell_reports_it() {
+        assert_eq!(Outcome::ended_by(EndSignal::Interrupt).code(), 130);
+        assert_eq!(Outcome::ended_by(EndSignal::Terminate).code(), 143);
+        assert_eq!(Outcome::ended_by(EndSignal::HangUp).code(), 129);
+    }
 
     #[test]
     fn a_run_waiting_on_a_clock_exits_on_its_own_and_a_stop_is_not_a_success() {

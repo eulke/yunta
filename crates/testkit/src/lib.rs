@@ -13,7 +13,9 @@
 //! the crates with no run to build depend on directly.
 //!
 //! Its map: `bench` is the canonical run harness; `bin` runs the compiled
-//! binary, and `checkout` and `child` hold a test that drives it; `terminal`
+//! binary, and `checkout` and `child` hold a test that drives it; `held` holds
+//! a run on its first node until the test lets it go; `workflows` are the
+//! workflows tests in more than one file run; `terminal`
 //! drives a run on a real terminal; `repo` is a hermetic git fixture and
 //! `stubs` stand in for programs on `PATH`; `events` reads and writes a run's
 //! log; `interaction` and
@@ -32,6 +34,7 @@ mod checkout;
 mod child;
 mod corpus;
 mod events;
+mod held;
 mod interaction;
 mod observer;
 mod owner;
@@ -43,11 +46,12 @@ mod tasks;
 mod terminal;
 mod tools;
 mod wait;
+pub mod workflows;
 
 pub use bench::{no_secrets, Bench, MOCK_CONFIG};
 pub use bin::{
     checked, checks, full_run_id, handle, hermetic, hung, pool_checkouts, pool_checkouts_in,
-    run_id_from, run_yunta, stderr, stdout, unwrapped, Spawning,
+    run_id_from, run_ids, run_yunta, stderr, stdout, unwrapped, Spawning,
 };
 pub use checkout::Checkout;
 pub use child::{CliChild, ProcessGroupCleanup};
@@ -57,13 +61,15 @@ pub use corpus::{
 pub use events::{
     accepted, baselines, status_changed_carrying, task_registered, task_status_changed, SourceLog,
 };
+pub use held::HeldRun;
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use owner::Owner;
 pub use repo::{bare_origin, git, git_output, init_repo, read, write, INITIAL_BRANCH};
 pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
-pub use terminal::{runs_root, Screen, Terminal};
+pub use terminal::screen::Screen;
+pub use terminal::{runs_root, Terminal};
 pub use tools::{tools_environment, ToolsHost};
 pub use wait::{after, wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 

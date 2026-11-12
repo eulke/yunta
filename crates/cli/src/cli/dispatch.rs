@@ -9,6 +9,7 @@ use surco::look::Look;
 use yunta_core::{Env, Responder, WorkflowName};
 
 use super::{Command, ListArgs, NewArgs, PackAction, ResolveGateArgs, RunArgs};
+use crate::application;
 use crate::commands::run_ref::{named, RunArg};
 use crate::error::CliError;
 use crate::output::Outcome;
@@ -16,6 +17,7 @@ use crate::output::{self, Mode};
 use crate::shell::Shell;
 use crate::{commands, graph};
 use yunta_api::RunRef;
+use yunta_ui::State;
 
 /// Runs one subcommand, handing back its verdict or the one error the
 /// caller turns into a line on stderr and a failing exit code. The shell
@@ -33,6 +35,13 @@ pub(super) async fn dispatch(
     let shell = Shell::read(env)?;
     match command {
         Some(command) => route(&shell, command, started, output, look).await,
+        None if application::opens_here() => {
+            let opened = State::opened(shell.workspace().clock.now());
+            match application::opened(&shell, look, opened).await? {
+                Some(outcome) => Ok(outcome),
+                None => commands::list::field(&shell, look).await,
+            }
+        }
         None => commands::list::field(&shell, look).await,
     }
 }

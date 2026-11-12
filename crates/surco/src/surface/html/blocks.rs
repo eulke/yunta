@@ -125,7 +125,7 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
         Block::Concern(concern) => notices::concern(concern),
         Block::Diagram(drawn) => diagram::diagram(drawn),
         Block::Code(shown) => code::code(shown),
-        Block::Lines(rows) => lines(rows),
+        Block::Lines(rows) | Block::Rows(rows) => lines(rows),
     }
 }
 

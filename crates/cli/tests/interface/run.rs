@@ -8,36 +8,9 @@ use std::process::{Child, Stdio};
 use surco::doc::Block;
 use surco::paint::Paint;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
-use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
+use yunta_testkit::workflows::PROMOTABLE;
+use yunta_testkit::{run_ids, wait_until, yunta_on_terminal, Checkout, HeldRun, Terminal};
 use yunta_ui::{Input, News};
-
-/// A node that says it started and holds until told to go, or until its marker is gone
-/// with the test, so no engine outlives the test that started it; then one that
-/// finishes.
-fn holding(started: &Path, go: &Path) -> String {
-    format!(
-        "name: hold\nnodes:\n  - id: hold\n    kind: bash\n    run: \"echo in > {0}; until [ -f {1} ] || [ ! -e {0} ]; do sleep 0.05; done\"\n  - {{ id: after, kind: bash, run: \"true\", depends_on: [hold] }}\n",
-        started.display(),
-        go.display()
-    )
-}
-
-/// A check that fails in either mode, with its reroute already spent: `quick` offers
-/// to promote to `full`, which has nowhere later to go.
-const PROMOTABLE: &str = r#"
-name: promotable
-modes:
-  quick: { include: [check, fix] }
-  full:  { include: all }
-nodes:
-  - id: check
-    kind: bash
-    run: "test -f fixed.txt"
-    on_failure: { goto: fix, max_reroutes: 0 }
-  - id: fix
-    kind: bash
-    run: "touch fixed.txt"
-"#;
 
 /// The lines of the chronicle on `state`'s screen, as a pipe writes them.
 fn chronicle(state: &State) -> Vec<String> {
@@ -84,74 +57,27 @@ async fn followed_through(
     }
 }
 
-/// The runs under `home`, by their whole ids.
-fn runs(home: &Path) -> Vec<String> {
-    std::fs::read_dir(runs_root(home))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect()
-}
-
-/// A run of [`holding`] started off a terminal, held on its first node.
-struct Held {
-    checkout: Checkout,
-    /// Where its markers are, and the follower's output.
-    marks: tempfile::TempDir,
-    /// The marker that lets it go on.
-    go: PathBuf,
-    id: String,
-    process: Child,
-}
-
-impl Held {
-    /// The run started, once its first node says so.
-    fn started() -> Held {
-        let marks = tempfile::tempdir().unwrap();
-        let (started, go) = (marks.path().join("started"), marks.path().join("go"));
-        let checkout = Checkout::new()
-            .working_in_place()
-            .workflow("wf", &holding(&started, &go))
-            .committed();
-        let process = checkout
-            .command(Path::new(env!("CARGO_BIN_EXE_yunta")))
-            .args(["run", "wf.yaml"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        wait_until(|| started.exists(), || "the run never started".to_string());
-        let id = runs(&checkout.home).remove(0);
-        Held {
-            checkout,
-            marks,
-            go,
-            id,
-            process,
-        }
-    }
-
-    /// `yunta status <run> --follow`, what it writes going through a pipe into a file,
-    /// once it has opened its lines: the follower, and where it writes.
-    fn followed_through_a_pipe(&self) -> (Child, PathBuf) {
-        let written = self.marks.path().join("followed.txt");
-        let pipe = std::fs::File::create(&written).unwrap();
-        let follower = self
-            .checkout
-            .command(Path::new(env!("CARGO_BIN_EXE_yunta")))
-            .args(["status", &self.id, "--follow"])
-            .stdin(Stdio::null())
-            .stdout(pipe.try_clone().unwrap())
-            .stderr(pipe)
-            .spawn()
-            .unwrap();
-        let read = || std::fs::read_to_string(&written).unwrap_or_default();
-        wait_until(
-            || read().contains("one line per event"),
-            || format!("the follower never opened its lines: {}", read()),
-        );
-        (follower, written)
-    }
+/// `yunta status <run> --follow` on `held`, what it writes going through a pipe into a
+/// file beside its markers, once it has opened its lines: the follower, and where it
+/// writes.
+fn followed_through_a_pipe(held: &HeldRun) -> (Child, PathBuf) {
+    let written = held.marks().join("followed.txt");
+    let pipe = std::fs::File::create(&written).unwrap();
+    let follower = held
+        .checkout
+        .command(Path::new(env!("CARGO_BIN_EXE_yunta")))
+        .args(["status", &held.id, "--follow"])
+        .stdin(Stdio::null())
+        .stdout(pipe.try_clone().unwrap())
+        .stderr(pipe)
+        .spawn()
+        .unwrap();
+    let read = || std::fs::read_to_string(&written).unwrap_or_default();
+    wait_until(
+        || read().contains("one line per event"),
+        || format!("the follower never opened its lines: {}", read()),
+    );
+    (follower, written)
 }
 
 /// A run opened from the field is followed while it moves and to its end, and its
@@ -159,20 +85,17 @@ impl Held {
 /// lines that follower wrote close the chronicle, which keeps the run's whole story.
 #[tokio::test]
 async fn a_run_followed_to_its_end_says_each_moment_as_a_piped_follower_does() {
-    let mut held = Held::started();
-    let (mut follower, written) = held.followed_through_a_pipe();
+    let (held, mut process) = HeldRun::started(Path::new(env!("CARGO_BIN_EXE_yunta")));
+    let (mut follower, written) = followed_through_a_pipe(&held);
     let checkout = &held.checkout;
     let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
     let (opened, asked) = State::opened(now());
     let (mut state, _) = drive(opened, asked, &performer, &[]).await;
 
     let asked = state.update(Input::Stroke(Stroke::Enter));
-    followed_through(&mut state, asked, &performer, || {
-        std::fs::write(&held.go, "").unwrap();
-    })
-    .await;
+    followed_through(&mut state, asked, &performer, || held.let_go()).await;
 
-    assert!(held.process.wait().unwrap().success(), "the run finishes");
+    assert!(process.wait().unwrap().success(), "the run finishes");
     assert!(
         follower.wait().unwrap().success(),
         "the follower ends with it"
@@ -193,17 +116,6 @@ async fn a_run_followed_to_its_end_says_each_moment_as_a_piped_follower_does() {
     );
 }
 
-/// Moves the card on `terminal` down to `option` and chooses it.
-fn choose(terminal: &mut Terminal, below: &[&str], option: &str) {
-    for next in below.iter().chain([&option]) {
-        if !terminal.screen().holds(&format!("▸ {next}")) {
-            terminal.keys("\u{1b}[B");
-        }
-        terminal.wait_on_screen(&format!("▸ {next}"), "the card never pointed there");
-    }
-    terminal.keys("\r");
-}
-
 /// The run on `attached` answered at its terminal on a thread of its own, once
 /// `followed` says the application follows it: promoted, then the question its
 /// successor asks aborted. What the thread hands back is the code the run exits with.
@@ -213,9 +125,9 @@ fn answered_at_its_terminal(
 ) -> std::thread::JoinHandle<Option<i32>> {
     std::thread::spawn(move || {
         followed.recv().unwrap();
-        choose(&mut attached, &["abort"], "promote");
+        attached.choose(&["abort"], "promote");
         attached.wait_on_screen("▸ retry", "the successor never asked");
-        choose(&mut attached, &[], "abort");
+        attached.choose(&[], "abort");
         attached.ended();
         attached.exit_code()
     })
@@ -235,7 +147,7 @@ async fn a_promotion_is_followed_onto_its_successor() {
         &["run", "wf.yaml", "--mode", "quick"]
     );
     attached.wait_on_screen("▸ retry", "the exhausted reroute never asked");
-    let first = runs(&checkout.home).remove(0);
+    let first = run_ids(&checkout.home).remove(0);
     let (following, followed) = std::sync::mpsc::channel();
     let answering = answered_at_its_terminal(attached, followed);
     let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
@@ -257,7 +169,7 @@ async fn a_promotion_is_followed_onto_its_successor() {
         Some(1),
         "abort fails the successor"
     );
-    let successor = runs(&checkout.home)
+    let successor = run_ids(&checkout.home)
         .into_iter()
         .find(|run| *run != first)
         .expect("a successor");

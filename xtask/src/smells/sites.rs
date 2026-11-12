@@ -172,8 +172,9 @@ const ESCAPES: [Mark; 2] = [
 /// (`\x1b]`, which is how a link opens) are read through the byte. The owners
 /// are the paint module, paint.rs and the files under paint/ with their tests
 /// (clap's styles among them); the files that send a terminal a control that
-/// is not paint, the testkit's terminal, which sends the keys and the cursor
-/// and row controls of a real one; the CLI's integration tests, which send
+/// is not paint, the testkit's terminal and the files under terminal/, which
+/// send the keys and the cursor and row controls of a real one and read what
+/// it drew without its paint; the CLI's integration tests, which send
 /// keys to a terminal or check its paint; and the golden that writes what a
 /// surface printed.
 fn count_escape_outside_paint(root: &Path) -> usize {
@@ -187,6 +188,7 @@ fn count_escape_outside_paint(root: &Path) -> usize {
             "crates/surco/src/paint/",
             "crates/cli/tests/",
             "crates/testkit/src/terminal.rs",
+            "crates/testkit/src/terminal/",
             // A golden writes the paint a surface printed where a
             // reviewer can read it, and its test paints to prove that.
             "crates/surco/src/golden.rs",

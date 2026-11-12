@@ -19,7 +19,7 @@ use yunta_testkit::Bench;
 use yunta_testkit_ui::driving::drive;
 use yunta_testkit_ui::sandbox::{now, workspace};
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Performer, Request, State};
+use yunta_ui::{Input, Performer, Request, State};
 
 use support::{on_the_field, stopped};
 
@@ -87,6 +87,32 @@ async fn a_runs_page_is_shown_where_open_writes_it() {
     assert!(page.is_file(), "the page is written before it is shown");
     let trail = state.screen(&Markdown.look()).trail;
     assert_eq!(trail.last().map(String::as_str), Some("page"));
+}
+
+/// A page the surface could not show is said, with where it is, in the words `yunta open`
+/// says it in.
+#[tokio::test]
+async fn a_page_not_shown_is_said_with_where_it_is() {
+    let bench = Bench::with_run_id("01M7EV1DENCEN0TSH0WN000000");
+    bench.run(FINISHES, NO_SESSIONS).await;
+    let performer = Arc::new(Performer::new(workspace(&bench.worktree, root_of(&bench))));
+    let field = on_the_field(vec![stopped(&bench.run_id)]);
+    let strokes = [Stroke::Enter, Stroke::Insert('o')];
+    let (mut state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;
+    let [Request::ShowPage(page)] = surfaced.as_slice() else {
+        panic!("the page is shown: {surfaced:?}");
+    };
+    assert!(state.update(Input::Unshown(page.clone())).is_empty());
+    let said = Markdown.screen(&state.screen(&Markdown.look()));
+    let opened = page.display().to_string();
+    let printed = Markdown.draw(
+        &page::Opened {
+            page: &opened,
+            opened: Some(false),
+        }
+        .document(&Markdown.look()),
+    );
+    assert!(said.contains(printed.trim()), "{said}\nholds\n{printed}");
 }
 
 /// `bench`'s run with a node that finished without ever starting appended to its log,

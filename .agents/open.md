@@ -71,3 +71,11 @@ after a relink, and the batch itself did not show it again in 128 runs and ten b
 engine's probe, a sibling's sweep and a slow `python3` are ruled out. The test now names the command it waited on,
 whether the stub started it, and what the run left (`detached.log`, `engine.json`, `yunta status`), so the next miss
 names its cause.
+
+### The binary carries what the interface's performer drives
+Paths: `crates/ui/src/performer.rs`, `crates/ui/src/performer/**`, `crates/api/src/**`, `crates/cli/src/application.rs`
+Bare `yunta` links `yunta-ui`'s performer, which drives every API operation, and the release grew 2.1 MB with it,
+of which the application's own crates are about 90 KB. The growth is the performer's own work, the engine's and
+the API's async paths and the readers of tasks, questions and specs through `serde_path_to_error`. Not known: how
+much of it is a second copy of what the CLI's commands already instantiate. A symbol by symbol diff of the two
+builds answers that before any change.

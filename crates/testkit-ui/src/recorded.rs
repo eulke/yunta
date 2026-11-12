@@ -13,8 +13,8 @@ use yunta_core::{
     Answer, InputName, NodeId, OptionId, PackRef, QuestionId, WorkflowName, WorkflowShape,
 };
 use yunta_ui::{
-    EvidenceOperation, Input, News, Operation, OperationKind, Outcome, PackOperation, PackOutcome,
-    Performer, Request, State, WorkflowOperation,
+    EvidenceOperation, EvidenceOutcome, Input, News, Operation, OperationKind, Outcome,
+    PackOperation, PackOutcome, Performer, Request, State, WorkflowOperation,
 };
 
 use crate::home::{root_of, Home};
@@ -267,6 +267,19 @@ impl Recordings {
     pub fn news_of(&self, operation: &Operation) -> &[News] {
         self.recorded(operation)
             .map_or(&[], |recorded| recorded.news.as_slice())
+    }
+
+    /// Every page a piece of work wrote for a surface to show: what the walk tells each
+    /// state a surface could not show.
+    pub fn pages_written(&self) -> Vec<PathBuf> {
+        self.0
+            .iter()
+            .flat_map(|(_, recorded)| &recorded.outcomes)
+            .filter_map(|outcome| match outcome {
+                Outcome::Evidence(EvidenceOutcome::PageWritten { page }) => Some(page.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Every piece of work `requests` asks for is one these recordings answer, which the

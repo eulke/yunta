@@ -4,12 +4,14 @@
 //!
 //! - Commands: `cli` parses and routes, `commands` holds one module per
 //!   subcommand, `help` prints the help, and `graph` draws a workflow's
-//!   graph.
+//!   graph; `application` opens the application at a terminal, which bare
+//!   `yunta` does.
 //! - What a person sees and answers: every page a command shows is render's,
 //!   filled with what the command read; `output` owns what a command writes,
 //!   the streams it is drawn to and the code it exits with, `remarks` says what
-//!   the API says while it works, `surface` draws a run as it happens, and
-//!   `ask` and `human_interaction` take a person's answers.
+//!   the API says while it works, `surface` draws a run as it happens,
+//!   `ask` and `human_interaction` take a person's answers, and `browser`
+//!   shows a page in the system's browser.
 //! - The process: `shell` reads it once, into the workspace every command
 //!   takes; `error` is the one error a command hands back, and `interrupt` is
 //!   what trips cancellation.
@@ -29,7 +31,9 @@
 // separate crates neither reaches.
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
+mod application;
 mod ask;
+mod browser;
 mod cli;
 mod commands;
 mod error;

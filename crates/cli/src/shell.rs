@@ -8,8 +8,11 @@
 //! invocation, or a command and the API under it, cannot read two values.
 
 use std::ffi::OsString;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use tokio::signal::unix::{signal, SignalKind};
 
 use yunta_api::Workspace;
 use yunta_core::{Env, ProcessSecrets, SystemClock, SystemIdSource};
@@ -78,4 +81,34 @@ impl Shell {
     pub(crate) fn stop(&self) -> yunta_api::Stop {
         self.interrupt.stages()
     }
+
+    /// What asks this process to end while it holds a terminal of its own, where a typed
+    /// Ctrl-C is a key: an interrupt sent from outside, a terminate, or the terminal hanging
+    /// up, whichever comes first. Installed when asked for, so a command that holds no
+    /// terminal ends on a terminate or a hang-up as any process does.
+    pub(crate) fn asked_to_end(&self) -> Result<impl Future<Output = EndSignal>, CliError> {
+        let listening = |kind: SignalKind| {
+            signal(kind).map_err(|source| {
+                CliError::io("install the handler that ends", "the application", source)
+            })
+        };
+        let mut interrupt = listening(SignalKind::interrupt())?;
+        let mut terminate = listening(SignalKind::terminate())?;
+        let mut hang_up = listening(SignalKind::hangup())?;
+        Ok(async move {
+            tokio::select! {
+                _ = interrupt.recv() => EndSignal::Interrupt,
+                _ = terminate.recv() => EndSignal::Terminate,
+                _ = hang_up.recv() => EndSignal::HangUp,
+            }
+        })
+    }
+}
+
+/// A signal that asks the process to end: SIGINT, SIGTERM or SIGHUP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EndSignal {
+    Interrupt,
+    Terminate,
+    HangUp,
 }

@@ -26,7 +26,7 @@ use yunta_ui::{Input, Request, State};
 use dialogs::{nothing_unconfirmed, MUST_OFFER};
 
 /// What a screen the walk must reach shows, and what that screen is.
-const MUST_REACH: [(&str, &str); 45] = [
+const MUST_REACH: [(&str, &str); 46] = [
     ("not in a repository", "the signpost"),
     ("project name", "a setup"),
     ("runs on", "a runner's adapter asked"),
@@ -62,6 +62,7 @@ const MUST_REACH: [(&str, &str); 45] = [
     ("acme/tools · installed", "a pack installed"),
     ("receipt of done", "a run's receipt"),
     ("page.html", "a run's page for a browser"),
+    ("nothing here could open it", "a page not shown"),
     ("every row", "a run's stats"),
     ("workflow done of run", "a run's graph"),
     ("cost per verified task over time", "a workflow's past runs"),

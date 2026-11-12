@@ -25,8 +25,8 @@ and what a person reads is drawn from it in Surco.
 | `yunta-api` | what interfaces ask of Yunta | core, storage, replay, engine, adapters, render, surco |
 | `yunta-mcp` | the control plane an agent asks Yunta through | core, render, api, mcp-protocol, surco |
 | `yunta-ui` | the interface apart from its medium | core, replay, render, api, surco |
-| `yunta-tui` | the application at a terminal, in cells | core, ui, surco |
-| `yunta` | the commands | core, replay, render, api, mcp, ui, surco |
+| `yunta-tui` | the application at a terminal | core, ui, surco |
+| `yunta` | the commands | core, replay, render, api, mcp, ui, tui, surco |
 | `yunta-testkit-core` | test scaffolding below the engine | core |
 | `yunta-testkit` | whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
 | `yunta-testkit-ui` | the application's test world and walk | core, api, ui, surco, testkit-core, testkit |

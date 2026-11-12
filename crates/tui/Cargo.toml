@@ -32,3 +32,16 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 futures.workspace = true
 # The signal that stops the process on Ctrl-Z, once the terminal is given back.
 nix.workspace = true
+
+[dev-dependencies]
+# The states the target frames show, and the walk over every state the application reaches.
+yunta-testkit-ui.workspace = true
+# A deep stack for the work a screen's state is built by, and the pseudo-terminal a test
+# runs its own binary on.
+yunta-testkit.workspace = true
+# The directory a test's binary, run again in a pseudo-terminal, works in.
+tempfile.workspace = true
+# A clock that stands still, for the application run again in a pseudo-terminal.
+yunta-testkit-core.workspace = true
+# The runtime the application run again runs on, and the terminate it is asked to end by.
+tokio = { workspace = true, features = ["rt", "signal"] }

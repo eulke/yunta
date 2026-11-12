@@ -61,31 +61,32 @@ impl Application {
     ) -> Self;
     /// Holds the terminal and runs `opened` until the person leaves, or until
     /// `asked_to_end` resolves; the terminal is given back on every way out.
-    pub async fn run(
+    pub async fn run<E>(
         &self,
         opened: (State, Vec<Request>),
-        asked_to_end: impl Future<Output = ()>,
-    ) -> Result<Exit, Unheld>;
+        asked_to_end: impl Future<Output = E>,
+    ) -> Result<Exit<E>, TerminalFailure>;
 }
 
-/// How the application ended.
-pub enum Exit { Left, Interrupted, AskedToEnd }
+/// How the application ended, with what asked it to end.
+pub enum Exit<E> { Left, Interrupted, AskedToEnd(E) }
 
-/// The terminal could not be held: one that refused raw mode or the other screen.
-/// The binary prints instead of opening.
-pub struct Unheld(std::io::Error);
+/// How the terminal failed the application. `Unheld`: it refused raw mode or the other
+/// screen, and the binary prints instead of opening. `Lost`: it failed once held, and the
+/// command fails.
+pub enum TerminalFailure { Unheld(std::io::Error), Lost(std::io::Error) }
 ```
 
 | Module | Is |
 |---|---|
-| `application` | The loop: `Application`, `Exit`. |
-| `full_screen` | The terminal held, as `FullScreen`: the alternate screen, raw mode, bracketed paste, a hidden cursor. Given back on drop, by a panic hook, and before stopping on Ctrl-Z. `Unheld`. |
+| `application` | The loop: `Application`, `Exit`, `TerminalFailure`. |
+| `full_screen` | The terminal held, as `FullScreen`: the alternate screen, raw mode, bracketed paste, a hidden cursor. Given back on drop, by a panic hook, and before stopping on Ctrl-Z. |
 | `keys` | A crossterm key event turned into a `Stroke`, by the table the CLI's `keys.rs` keeps. A paste turned into strokes, or into nothing when the state is not typing. Ctrl-Z, which is the terminal's own key and not a stroke. |
 | `layout` | Where each part of a screen stands, as `Areas`, by the reference's rules. Pure: a size and what the screen holds in, areas out. Each number is a `const` with its reason: margin 1, side 22, edge 3, main at least 40, box at most 60 and 2 inside each edge, least terminal 60×14. |
 | `cells` | Surco's lines written into Ratatui's buffer: each span's `paint::style` turned into a Ratatui `Style`, and the rest of a filled row erased with `paint::erase`. Nothing at all under `Paint::Plain`. |
 | `drawn` | A screen drawn into a frame: the areas from `layout`, each part's lines from Surco, the cursor where a held prompt puts it. It hands back the `ScreenLaid`. |
 
-Names checked against those taken: `Application`, `FullScreen`, `Unheld`, `Areas` and `Exit` are free. `Places` is render's (`page::run::Places`). `Ended`, `Leaving`, `Left` (as a type), `Held`, `Pane`, `Frame`, `Session` and `Host` are taken, or are Yunta's for something else. A Ratatui item is named by its path where it shares a name with Surco's (`ratatui::Terminal`, `ratatui::layout::Layout`).
+Names checked against those taken: `Application`, `FullScreen`, `TerminalFailure`, `Areas` and `Exit` are free. `Places` is render's (`page::run::Places`). `Ended`, `Leaving`, `Left` (as a type), `Held`, `Pane`, `Frame`, `Session` and `Host` are taken, or are Yunta's for something else. A Ratatui item is named by its path where it shares a name with Surco's (`ratatui::Terminal`, `ratatui::layout::Layout`).
 
 ### 4. The loop
 
@@ -176,8 +177,8 @@ impl State {
 
 pub enum Input {
     // …
-    /// A page the surface could not show, and why.
-    Unshown { page: PathBuf, why: String },
+    /// A page the surface could not show: the person opens it themselves.
+    Unshown(PathBuf),
 }
 ```
 
@@ -198,7 +199,7 @@ pub enum Input {
   - The application opens when stdin and stdout are terminals and `TERM` is not `dumb`. It reads the CLI's settled terminal facts, which `ask::Console::attended` and `surface::terminal` already read.
   - It builds the `Performer` from `shell.workspace()`, the look from the stdout look, the clock from the workspace, the page opener, and the end from the shell's signals.
   - `Exit::Left` is success. `Exit::Interrupted` is `Outcome::interrupted()`. `Exit::AskedToEnd` is the exit code of the signal that fired.
-  - `Unheld` prints as off a terminal.
+  - `TerminalFailure::Unheld` prints as off a terminal; `TerminalFailure::Lost` is the command's failure.
 - **Bare `yunta`:** `dispatch.rs:36` opens the application where it may, and otherwise prints `list::field` as today.
 - **`yunta review <run>`:**
   - Its checks stay first and unchanged: the run found, the decision it waits on read, a plan among what it shows. A run that fails one is refused in the same words.
@@ -301,7 +302,8 @@ Inside a phase, each group of work ends green before the next begins, with what 
 - **`yunta-ui`:**
   - `State::opened_on`, with one mapping from a step to its stage;
   - back past an opening to where the application opens;
-  - each in the walk's required lists.
+  - each in the walk's required lists;
+  - the repository asked once as the application opens: two git processes, as the printed field runs, where Checkpoint B measured four.
 - **Decide:** a gate and a round answered in the application, in a pty against the mock.
 - **`review`:**
   - it opens the application on the plan, its checks first;
@@ -337,7 +339,7 @@ Inside a phase, each group of work ends green before the next begins, with what 
 
 The spec leaves these to the plan. Each stands unless the review of this plan changes it:
 
-- The names of section 3: `Application`, `Exit`, `Unheld`, `FullScreen`, `Areas`, and the modules `application`, `full_screen`, `keys`, `layout`, `cells`, `drawn`.
+- The names of section 3: `Application`, `Exit`, `TerminalFailure`, `FullScreen`, `Areas`, and the modules `application`, `full_screen`, `keys`, `layout`, `cells`, `drawn`.
 - Surco boxes the overlay (`boxed`), so `yunta-tui` draws no glyph of its own. The map's "draws the overlay's box in Surco's glyphs" is held by Surco drawing it.
 - Surco draws the attention and legend rows from the screen's values (`attention`, `legend`), beside `pane`, `trail`, `rule` and `title`.
 - `State::opened_on`, `State::TIME_EVERY` and `Input::Unshown`, with one mapping from a step to its stage.

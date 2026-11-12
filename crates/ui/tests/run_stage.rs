@@ -5,15 +5,16 @@
 mod support;
 
 use surco::doc::Block;
-use surco::look::Look;
+use surco::look::{Look, Width};
 use surco::motion::Motion;
 use surco::paint::Paint;
-use surco::surface::{Markdown, Surface};
+use surco::surface::{Markdown, Surface, Terminal};
 use yunta_api::{FollowedRun, RunNews};
 use yunta_core::{NodeId, Pid, RunId};
 use yunta_replay::registry::{Engine, Prompt};
 use yunta_replay::RunState;
 use yunta_testkit::Bench;
+use yunta_testkit_core::fixed_now;
 use yunta_testkit_ui::sandbox::now;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, News, Operation, Request, State};
@@ -23,6 +24,9 @@ use support::{on_the_field, performed, stopped};
 /// Two nodes that finish, one after the other.
 const FINISHES: &str = "name: done\nnodes:\n  - { id: first, kind: bash, run: \"true\" }\n  \
                         - { id: second, kind: bash, run: \"true\", depends_on: [first] }\n";
+
+/// The cells the region beside a run's page takes on a terminal.
+const SIDE: usize = 22;
 
 /// A mock fixture with no sessions: the workflow opens none.
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
@@ -190,6 +194,38 @@ async fn a_node_picked_shows_its_page_and_stops_following() {
     assert!(nodes.contains("first"), "{nodes}");
 }
 
+/// A node whose name passes the region beside the run's page keeps its one row there, cut
+/// where it passes, so a pointer moves along the nodes a row at a time.
+#[tokio::test]
+async fn a_node_named_past_the_side_keeps_its_one_row() {
+    let bench = Bench::with_run_id("01M7W1DENAMED0000000000000");
+    let named = "name: named\nnodes:\n  - { id: review-at-the-alternate-reviewer, kind: bash, run: \"true\" }\n  \
+                 - { id: second, kind: bash, run: \"true\", depends_on: [review-at-the-alternate-reviewer] }\n";
+    bench.run(named, NO_SESSIONS).await;
+    let (_, state) = opened_on(&followed(&bench).await);
+
+    let side = state
+        .screen(&Look::plain())
+        .side
+        .expect("the run's nodes beside its page");
+    let beside = Look {
+        width: Width::exact(SIDE),
+        ..Look::plain()
+    };
+    let rows: Vec<String> = Terminal::on(beside)
+        .pane(&side.region, 10)
+        .lines
+        .iter()
+        .map(|line| line.text().trim_end().to_string())
+        .filter(|row| !row.is_empty())
+        .collect();
+    assert_eq!(rows.len(), 2, "one row to each node: {rows:#?}");
+    assert!(
+        rows[0].ends_with(beside.glyphs.ellipsis()),
+        "the long name cut where it passes: {rows:#?}"
+    );
+}
+
 /// A run whose engine asks at its own terminal is said to ask there, and offers only
 /// stopping it: no other act is bound to a key, and stopping asks a confirmation first.
 #[tokio::test]
@@ -269,4 +305,30 @@ async fn the_ribbon_turns_only_on_a_look_that_moves() {
         };
         assert_eq!(ribbon.events.is_some(), plowed, "{motion:?}");
     }
+}
+
+/// A moving run's screen says its time to the second, so a surface hands the time in that
+/// often: read a [`State::TIME_EVERY`] later, it says a second more.
+#[tokio::test]
+async fn a_moving_runs_time_reads_a_second_more_each_time_it_is_handed_in() {
+    let bench = Bench::with_run_id("01M7T1MEEVERY0000000000000");
+    bench.run(FINISHES, NO_SESSIONS).await;
+    let mut running = followed(&bench).await;
+    running.events.truncate(2);
+    running.state = RunState::replay(&running.events);
+    running.engine = Engine::this(Pid::current());
+    let (_, mut state) = opened_on(&running);
+    let across = |state: &State| {
+        let about = state
+            .screen(&Look::plain())
+            .about
+            .expect("the run across the screen");
+        Markdown.draw(&about)
+    };
+    let a_while_in = fixed_now() + chrono::Duration::seconds(10);
+    state.update(Input::Time(a_while_in));
+    assert!(across(&state).contains("10s"), "{}", across(&state));
+    let every = chrono::Duration::from_std(State::TIME_EVERY).expect("a cadence in range");
+    state.update(Input::Time(a_while_in + every));
+    assert!(across(&state).contains("11s"), "{}", across(&state));
 }

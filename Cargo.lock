@@ -3589,6 +3589,7 @@ dependencies = [
  "yunta-testkit",
  "yunta-testkit-core",
  "yunta-testkit-ui",
+ "yunta-tui",
  "yunta-ui",
 ]
 
@@ -3792,6 +3793,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "nix",
+ "rustix",
  "serde_json",
  "tempfile",
  "tokio",
@@ -3840,9 +3842,13 @@ dependencies = [
  "futures",
  "nix",
  "ratatui",
+ "tempfile",
  "tokio",
  "yunta-core",
  "yunta-surco",
+ "yunta-testkit",
+ "yunta-testkit-core",
+ "yunta-testkit-ui",
  "yunta-ui",
 ]
 

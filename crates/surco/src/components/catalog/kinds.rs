@@ -45,6 +45,7 @@ fn kind_of(block: &Block) -> &'static str {
         Block::Diagram(_) => "diagram",
         Block::Code(_) => "code",
         Block::Lines(_) => "lines",
+        Block::Rows(_) => "rows",
     }
 }
 

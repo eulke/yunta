@@ -119,6 +119,10 @@ pub enum Block {
     Code(Code),
     /// Lines a surface composed itself, each span carrying its role.
     Lines(Vec<Line>),
+    /// Lines a surface composed, one to a row, which a pointer moves along: a row that
+    /// passes the edge it is drawn at is cut there with the ellipsis, never folded onto
+    /// the row under it. Not [`Block::Lines`], which a pane's edge folds.
+    Rows(Vec<Line>),
 }
 
 macro_rules! block_from {

@@ -1,5 +1,7 @@
 //! See [`crate`]. What reaches the application.
 
+use std::path::PathBuf;
+
 use chrono::{DateTime, Utc};
 use surco::components::ScreenLaid;
 use yunta_api::Remark;
@@ -8,8 +10,8 @@ use crate::prompt::Stroke;
 use crate::{News, Outcome, Ticket};
 
 /// What reaches the application: a stroke a person gave, what a surface laid out, the
-/// time, and what work it asked for says while it works, hands back while it lasts and
-/// came to.
+/// time, what work it asked for says while it works, hands back while it lasts and came
+/// to, and a page the surface could not show.
 #[derive(Debug, Clone)]
 pub enum Input {
     Stroke(Stroke),
@@ -24,4 +26,6 @@ pub enum Input {
     News(Ticket, News),
     /// What a piece of work came to.
     Outcome(Ticket, Outcome),
+    /// A page the surface was asked to show and could not: the person opens it themselves.
+    Unshown(PathBuf),
 }

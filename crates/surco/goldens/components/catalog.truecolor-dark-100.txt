@@ -118,6 +118,9 @@
 
   a line a page composed itself
 
+  a row a pointer moves along, cut where it passes the edge it stands at
+  the next row
+
 ␛[1;38;2;220;148;234;48;2;36;26;43m▎␛[0m␛[48;2;36;26;43m ␛[0m␛[1;38;2;255;255;255;48;2;36;26;43mapprove␛[0m␛[48;2;36;26;43m: builds the plan␛[0m␛[48;2;36;26;43m␛[K␛[0m
 ␛[1;38;2;220;148;234;48;2;36;26;43m▎␛[0m␛[48;2;36;26;43m ␛[0m␛[48;2;36;26;43m  ␛[0m␛[38;2;142;136;127;48;2;36;26;43mits tasks run, a step at a time␛[0m␛[48;2;36;26;43m␛[K␛[0m
 ␛[1;38;2;220;148;234;48;2;36;26;43m▎␛[0m␛[48;2;36;26;43m ␛[0m␛[48;2;36;26;43m  ␛[0m␛[1;38;2;255;255;255;48;2;36;26;43myunta resolve-gate 7E5PH4 approve␛[0m␛[48;2;36;26;43m␛[K␛[0m

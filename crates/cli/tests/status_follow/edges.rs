@@ -3,33 +3,7 @@
 
 use super::*;
 
-/// A check that fails in either mode, with its reroute already spent: `quick`
-/// offers to promote to `full`, which has nowhere later to go.
-const PROMOTABLE: &str = r#"
-name: promotable
-modes:
-  quick: { include: [check, fix] }
-  full:  { include: all }
-nodes:
-  - id: check
-    kind: bash
-    run: "test -f fixed.txt"
-    on_failure: { goto: fix, max_reroutes: 0 }
-  - id: fix
-    kind: bash
-    run: "touch fixed.txt"
-"#;
-
-/// Moves the card on `terminal` down to `option` and chooses it.
-fn choose(terminal: &mut yunta_testkit::Terminal, below: &[&str], option: &str) {
-    for next in below.iter().chain([&option]) {
-        if !terminal.screen().holds(&format!("▸ {next}")) {
-            terminal.keys("\u{1b}[B");
-        }
-        terminal.wait_on_screen(&format!("▸ {next}"), "the card never pointed there");
-    }
-    terminal.keys("\r");
-}
+use yunta_testkit::workflows::PROMOTABLE;
 
 /// The block a drawing ends on, from the last headline that names `named`.
 fn block_from(drawn: &str, named: &str) -> String {
@@ -73,9 +47,9 @@ fn a_promotion_is_followed_onto_its_successor() {
         "the follower never saw the question",
     );
 
-    choose(&mut attached, &["abort"], "promote");
+    attached.choose(&["abort"], "promote");
     attached.wait_on_screen("▸ retry", "the successor never asked");
-    choose(&mut attached, &[], "abort");
+    attached.choose(&[], "abort");
     let driven = attached.ended();
     let followed = follower.ended();
     assert_eq!(

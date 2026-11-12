@@ -52,6 +52,10 @@ pub struct State {
 }
 
 impl State {
+    /// How often a surface hands in the time: a screen says ages and how long a run has
+    /// gone to the second, so a second is how far its words can stand behind the clock.
+    pub const TIME_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
+
     /// The application as it opens at `now`, and what it asks first: the repository it
     /// works in, and whether Yunta was set up there. It stands on nothing until that is
     /// answered.
@@ -106,6 +110,12 @@ impl State {
                 Some(_) => self.answered(outcome),
                 None => Vec::new(),
             },
+            Input::Unshown(page) => {
+                if let Some(stage) = self.stage.as_mut() {
+                    stage.unshown(&page);
+                }
+                Vec::new()
+            }
         }
     }
 

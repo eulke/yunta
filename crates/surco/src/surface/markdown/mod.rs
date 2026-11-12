@@ -149,7 +149,9 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
             format!("{fence}mermaid\n{}\n{fence}", diagram.source)
         }
         Block::Code(shown) => code::drawn(shown, page),
-        Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
+        Block::Lines(lines) | Block::Rows(lines) => {
+            lines.iter().map(line).collect::<Vec<_>>().join("  \n")
+        }
     }
 }
 

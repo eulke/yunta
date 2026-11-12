@@ -125,6 +125,9 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
 
   a line a page composed itself
 
+  a row a pointer moves along, cut where it passes the edge…
+  the next row
+
 ▎ approve: builds the plan
 ▎   its tasks run, a step at a time
 ▎   yunta resolve-gate 7E5PH4 approve

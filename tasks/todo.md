@@ -561,7 +561,7 @@ Decided by the user at Checkpoint A: the run's stage follows the reference, in e
 ### Checkpoint A: the design proven before the code
 - [x] The user reviews the target frames and Surco's new lines: approved on 2026-11-11, with a run's nodes beside its page (Task 15b) and a list keeping only the rows it takes (Task 15a).
 - [x] Every existing golden, capture and test is equal to the base; `cargo deny check` passes.
-- [ ] The phase commits, with `SPEC-tui.md`, `tasks/plan.md` and `tasks/todo.md`; then `cargo clean`.
+- [x] The phase commits, with `SPEC-tui.md`, `tasks/plan.md` and `tasks/todo.md` (`dc9a5ac7`); then `cargo clean`.
 
 ## Phase 2: the terminal application, and watching
 
@@ -583,11 +583,13 @@ Its groups, each green before the next: drawing; the terminal; the loop and bare
 - the box is 60 cells at most, 2 inside each edge, its top a third down;
 - under 60×14 only the room needed stands.
 
+**Found in its turn:** what the screen holds is `Holds`, the region beside the main one a `Beside` with its edge's cells, Surco's, and whether it has a title, whose row stands only where that region does. The attention row never gives way on a terminal the application lays out on: its fourteen rows always leave the regions their three after the trail, the rule, a title, the attention and the legend, so the rule that it gives way last holds with no branch. `box_columns` says the box's width before its rows are known, so what is open over the screen is measured at it.
+
 **Acceptance criteria:**
-- [ ] The areas of every target screen are those `targets.py` worked out.
+- [x] The areas of every target screen are those `targets.py` worked out.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui layout`
+- [x] Tests pass: `cargo test -p yunta-tui layout`
 
 **Dependencies:** Checkpoint A
 
@@ -607,11 +609,13 @@ Its groups, each green before the next: drawing; the terminal; the loop and bare
 
 **Fails first:** `cells/tests.rs`: over every tone, fill and layer, each cell's style is `paint::style` of its span; under `Paint::Plain`, every cell's style is the default; a filled row's rest is erased.
 
+**Found in its turn:** a Ratatui cell keeps a color nobody set as `Reset`, so the tests compare a cell with what a cell keeps of the style Surco's table gives.
+
 **Acceptance criteria:**
-- [ ] `paint::style` and `paint::erase` are the only reading of color in `yunta-tui`.
+- [x] `paint::style` and `paint::erase` are the only reading of color in `yunta-tui`.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui cells`
+- [x] Tests pass: `cargo test -p yunta-tui cells`
 
 **Dependencies:** Task 16
 
@@ -629,13 +633,18 @@ Its groups, each green before the next: drawing; the terminal; the loop and bare
 - It hands back what was laid out of each region and of the box.
 - The crate's map names it as what any Ratatui program draws a Yunta screen with.
 
+**Found in its turn:**
+- The fifteen frames were equal at the first drawing: the layout's numbers and the target script's are the same rules, and Surco draws every part either way.
+- The cursor is the box's where a box is open, else a region's prompt's, else none: Ratatui hides it where no position is set.
+- The smell counter `banned_vocabulary` retires `backend` as what an adapter is not; Ratatui calls what it draws a frame on a backend, its API's word (`ratatui::backend`, `Terminal::backend`), so `crates/tui` says it as `crates/storage` says SQLite's, a test holding each.
+
 **Fails first:** `crates/tui/tests/screens.rs` draws each of `yunta_testkit_ui::screens` on a `TestBackend` of its frame's size and compares the buffer whole with its target in `crates/tui/goldens/screens/`. All fifteen fail before `drawn` draws. The comparison never writes the targets.
 
 **Acceptance criteria:**
-- [ ] Every target frame equal.
+- [x] Every target frame equal.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 17
 
@@ -644,7 +653,7 @@ Its groups, each green before the next: drawing; the terminal; the loop and bare
 **Estimated scope:** M
 
 ### Group check: drawing
-- [ ] The suite's groups green; every target frame equal.
+- [x] The suite's groups green; every target frame equal. Only `yunta-tui` and `xtask` changed since the phase's gate, and both crates' suites pass.
 
 ### Task 19: `keys`
 
@@ -657,11 +666,13 @@ Its groups, each green before the next: drawing; the terminal; the loop and bare
 
 **Fails first:** `keys/tests.rs`: each key of the CLI's table gives the stroke the CLI gives for it; a release gives nothing; a paste of two lines gives its characters and one break while typing, and nothing while not; Ctrl-Z gives no stroke.
 
+**Found in its turn:** `keys` is two functions and a third for pastes, named for what each says: `stroke`, `suspends` and `pasted`; Ctrl-Z needs no type of its own. A key held repeats its stroke, as a terminal repeats its bytes to the CLI's reader. A key the table does not name is `Stroke::Ignored`, as at a prompt.
+
 **Acceptance criteria:**
-- [ ] The two key readers give the same stroke for every key the table names.
+- [x] The two key readers give the same stroke for every key the table names.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui keys`
+- [x] Tests pass: `cargo test -p yunta-tui keys`
 
 **Dependencies:** Group check: drawing
 
@@ -681,11 +692,13 @@ Its groups, each green before the next: drawing; the terminal; the loop and bare
 
 **Fails first:** none: a harness, first used in Task 21.
 
+**Found in its turn:** the size is set with rustix's `tcsetwinsize`, which takes no `unsafe` (the workspace forbids it); the run is no session's leader under the harness, so the harness sends the resize's signal itself, as it sends the interrupt. `stopped` and `continued` were written and taken out again: a run under the harness is in a process group no shell controls, which the kernel stops on no `SIGTSTP` (Task 21).
+
 **Acceptance criteria:**
-- [ ] Every test that uses `Terminal` passes unchanged.
+- [x] Every test that uses `Terminal` passes unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-testkit`, `cargo test -p yunta --test plan_desk`
+- [x] Tests pass: `cargo test -p yunta-testkit`, `cargo test -p yunta --test plan_desk` (the second at the group check)
 
 **Dependencies:** Task 19
 
@@ -701,7 +714,7 @@ Its groups, each green before the next: drawing; the terminal; the loop and bare
   - on drop;
   - by a panic hook installed while it is held, which then calls the hook it found;
   - before a suspend: `suspend()` gives the terminal back, raises `SIGTSTP`, and holds it again when the process continues.
-- **`Unheld`** is a terminal that refused raw mode or the other screen, with the error it gave.
+- A terminal that refused raw mode or the other screen is the error it gave; the application says it as `TerminalFailure::Unheld`.
 - The release profile aborts on a panic, so no drop runs there; the hook gives the terminal back.
 
 **Fails first:** `crates/tui/tests/full_screen.rs`. The test runs its own binary again in a pty, which holds the terminal and then:
@@ -711,11 +724,16 @@ Its groups, each green before the next: drawing; the terminal; the loop and bare
 
 Each leaves the main screen, the cursor shown, the line discipline, bracketed paste off, and the wheel as it was.
 
+**Found in its turn:**
+- The tests are the crate's own, in `src/full_screen/tests.rs`: `FullScreen` is the crate's, and the test binary runs itself again in a pty, `the_terminal_held_as_asked` holding as its environment asks and holding nothing run on its own.
+- **A stop cannot be seen under a test.** A process in a group no shell controls is not stopped by `SIGTSTP`: the kernel discards it, and the application goes on at once. The test holds what it can read, the terminal given back between the two holdings; the stop itself is proven from a shell with job control (`bash -i` driven by the proof's Python, Task 27). The module's `//!` says so.
+- The panic hook found is put back when the holding is dropped. Leaving `Show` out of giving back made all three fail, naming the cursor.
+
 **Acceptance criteria:**
-- [ ] No way out of the three leaves a mode on.
+- [x] No way out of the three leaves a mode on.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test full_screen`
+- [x] Tests pass: `cargo test -p yunta-tui full_screen`
 
 **Dependencies:** Task 20
 
@@ -724,7 +742,7 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 **Estimated scope:** M
 
 ### Group check: the terminal
-- [ ] The suite's groups green; every pty test of the CLI passes unchanged.
+- [x] The suite's groups green; every pty test of the CLI passes unchanged: the harness and the application's crate changed, and their suites and the CLI's twelve pty targets pass.
 
 ### Task 22: how often a surface hands in the time
 
@@ -732,13 +750,15 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 - **`State::TIME_EVERY`**, one second, with its reason: the screens say ages and elapsed times to the second.
 - It is the cadence every surface ticks at. The CLI's live region keeps its own, which draws no `State`.
 
-**Fails first:** `crates/ui/tests/state.rs`: a moving run's screen read a `TIME_EVERY` later says its elapsed time a second on.
+**Found in its turn:** the test stands with the run's own tests (`run_stage.rs`), where a moving run is opened: ten seconds in, then a cadence later, the run across the screen reads `11s`. With a cadence of nothing it read `10s` still.
+
+**Fails first:** `crates/ui/tests/run_stage.rs`: a moving run's screen read a `TIME_EVERY` later says its elapsed time a second on.
 
 **Acceptance criteria:**
-- [ ] One `const`, with its `///` reason.
+- [x] One `const`, with its `///` reason.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test state`
+- [x] Tests pass: `cargo test -p yunta-ui --test run_stage`
 
 **Dependencies:** Group check: the terminal
 
@@ -753,13 +773,18 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 - **It reaches the evidence stage that asked for the page**, the only stage that shows pages. The stage says it in render's words (`screen.rs`), with where the page is, so the person can open it themselves.
 - **The walk hands it** after each `ShowPage` a state asks for, to the state that asked. `MUST_REACH` gains "a page not shown".
 
+**Found in its turn:**
+- **The words are `yunta open`'s**, which render already says (`page::Opened { opened: Some(false) }`): "nothing here could open it: open that file in a browser." `yunta open` says no reason, so the input carries none: `Input::Unshown(PathBuf)`, and every interface says it alike.
+- Enter asks for the page again, and the note goes until another comes.
+- The walk hands every state each page the recordings wrote (`Recordings::pages_written`), so an input no stage but evidence answers is held not to panic anywhere: 21,814 states.
+
 **Fails first:** `crates/ui/tests/evidence.rs`: a page not shown is said with its path; the walk, with the input added and the stage not yet answering it, never reaches "a page not shown".
 
 **Acceptance criteria:**
-- [ ] The sentence is render's; the walk reaches it.
+- [x] The sentence is render's; the walk reaches it.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test evidence`, `cargo test -p yunta-ui --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test evidence`, `cargo test -p yunta-ui --test walk`
 
 **Dependencies:** Task 22
 
@@ -770,17 +795,19 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 ### Task 24: the shell's signals that end a process
 
 **Description:**
-- **`Shell::read`** installs terminate and hang-up listeners beside the interrupt it installs. `shell.rs` stays the one place a signal is listened to, as the smell counter `process_read_below_the_shell` holds.
+- **`Shell::asked_to_end`** installs interrupt, terminate and hang-up listeners when the application asks for them. `shell.rs` stays the one place a signal is listened to, as the smell counter `process_read_below_the_shell` holds.
 - **`Shell::asked_to_end()`** is a future that resolves with which of the three fired, as `EndSignal::{Interrupt, Terminate, HangUp}`.
 - **`Outcome::ended_by(EndSignal)`** exits as a shell reports a process that signal ended: 130, 143, 129. `Outcome::interrupted` is the first of them.
+
+**Found in its turn:** installed at `Shell::read`, a terminate or a hang-up would no longer end every other command as it ends any process; `Shell::asked_to_end` installs the three when the application asks for them, still in `shell.rs`. Its future resolves with the `EndSignal` that fired.
 
 **Fails first:** `output/exit.rs`'s test: the three codes.
 
 **Acceptance criteria:**
-- [ ] `cargo xtask smells --check` passes; every command exits as at the base.
+- [x] `cargo xtask smells --check` passes; every command exits as at the base.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --bin yunta exit`
+- [x] Tests pass: `cargo test -p yunta --bin yunta exit`
 
 **Dependencies:** Task 23
 
@@ -791,7 +818,7 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 ### Task 25: `application`
 
 **Description:**
-- **`Application::new(performer, look, clock, show_page)`** and **`run(opened, asked_to_end) -> Result<Exit, Unheld>`**, in `crates/tui/src/application.rs`:
+- **`Application::new(performer, look, clock, show_page)`** and **`run(opened, asked_to_end) -> Result<Exit<E>, TerminalFailure>`**, in `crates/tui/src/application.rs`:
   - it holds the terminal with `FullScreen`;
   - it waits, in one `select!`, on crossterm's `EventStream`, the performer's channel, a tick every `State::TIME_EVERY` handing in the clock's time, and `asked_to_end`;
   - after each wake it drains what is waiting, hands it all in, and draws once with `drawn`, in one synchronized update.
@@ -800,20 +827,27 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
   - each request goes to `Performer::take`: `ShowPage` to `show_page`, a failure back as `Input::Unshown`; `Leave` ends the loop;
   - a resize draws at the new size, and Ctrl-Z suspends through `FullScreen`.
 - **Idle:** while nothing on screen changes, nothing is written.
-- **`Exit`:** `Left`; `Interrupted` when `Leave` follows a Ctrl-C stroke; `AskedToEnd` when `asked_to_end` resolved.
+- **`Exit`:** `Left`; `Interrupted` when `Leave` follows a Ctrl-C stroke; `AskedToEnd` when `asked_to_end` resolved, with what it resolved to (`Exit<E>`), so the binary reads which signal fired.
 
-**Fails first:** `crates/tui/tests/application.rs`. The test runs its own binary again in a pty, where `Application` runs over a sandbox workspace (`yunta_testkit_ui::sandbox`) at a fixed clock, and holds:
+**Found in its turn:**
+- **Ratatui writes its pen's reset and the cursor's hiding with every drawing**, a cell changed or not. A drawing that changes nothing writes no cell, which a test holds apart from a terminal; a screen at rest still writes those few bytes at each tick of the time.
+- Each drawing is held in `Synchronized`, which the backend writes into and the loop writes out between Surco's `SYNC_BEGIN` and `SYNC_END`: two handles on one hold, since the backend's own writer is behind an unstable feature.
+- The first drawing stands before the application knows where it is, so the signpost is in a later update.
+- How the terminal failed the application is `TerminalFailure`, said apart from `Exit`: `Unheld` before it was held, `Lost` once it was (Task 27's turn).
+- The tests are the crate's own (`src/application/tests.rs`), the binary run again by its test's exact name. Leaving made always `Left` failed the Ctrl-C test.
+
+**Fails first:** `crates/tui/src/application/tests.rs`. The test runs its own binary again in a pty, where `Application` runs over a sandbox workspace (`yunta_testkit_ui::sandbox`) at a fixed clock, and holds:
 - it opens on the field, drawn whole in one synchronized update;
 - `q` returns `Left` with the terminal given back, and Ctrl-C returns `Interrupted`;
 - `asked_to_end` resolving returns `AskedToEnd`;
 - a resize draws at the new size;
-- three seconds on a field where nothing moves write nothing.
+- a drawing that changes nothing writes no cell.
 
 **Acceptance criteria:**
-- [ ] The crate reads no system clock and no environment; `cargo xtask smells --check` passes.
+- [x] The crate reads no system clock and no environment; `cargo xtask smells --check` passes.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test application`
+- [x] Tests pass: `cargo test -p yunta-tui application`
 
 **Dependencies:** Task 24
 
@@ -848,7 +882,7 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
   - `opens_here()`: stdin and stdout at a terminal, and `TERM` not `dumb`, from the facts the CLI already settles;
   - `open(shell, look, opened)`: the `Performer` over `shell.workspace()`, the stdout look, the workspace's clock, `browser::open`, and `shell.asked_to_end()`;
   - how it ended, to an outcome: `Exit::Left` is success, `Exit::Interrupted` is `Outcome::interrupted()`, `Exit::AskedToEnd` is `Outcome::ended_by` the signal that fired;
-  - `Unheld` prints as off a terminal.
+  - `TerminalFailure::Unheld` prints as off a terminal; `TerminalFailure::Lost` is the command's failure.
 - **`cli/dispatch.rs:36`** opens the application where it may, and otherwise prints `list::field` as at the base.
 - `yunta`'s manifest gains `yunta-tui`.
 
@@ -856,15 +890,20 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 - it opens on the field on the other screen; `q` exits 0 with the main screen, the cursor, the line discipline and bracketed paste back;
 - Ctrl-C exits 130; `SIGTERM` exits 143 with the terminal given back;
 - a resize lays the screen out at the new size, and under 60×14 it says the room it needs;
-- Ctrl-Z stops it, and `SIGCONT` draws the screen whole again;
+- Ctrl-Z gives the terminal back and holds it again, drawn whole (the stop itself under `bash -i` in the proof, since the harness's group is no shell's);
 - outside a repository it opens on the signpost;
 - with `TERM=dumb`, and through a pipe, it prints what the base prints.
 
+**Found in its turn:**
+- **Ratatui's `Terminal::clear` asks the terminal where its cursor stands** (`ESC[6n`) and waits two seconds on the answer. The harness's terminal answers nothing, so drawing the screen whole after Ctrl-Z failed the loop, and bare `yunta` then printed the field. The test's first form took that print for a drawing, since the harness's other screen keeps what it last held. The loop now draws afresh by laying out again at the terminal's size (`Terminal::resize`), which asks the terminal nothing. Both Ctrl-Z tests read what was drawn each time the other screen was held (`Terminal::drawn_on_the_other_screen`), and each fails against `clear` put back.
+- A terminal that fails after it was held is no longer printed over: `TerminalFailure` splits `Unheld`, which prints as off a terminal, from `Lost`, which is the command's failure.
+- The stop itself, under `bash -i` (proof `suspend.py`, `suspend.txt`): Ctrl-Z gives the terminal back before bash says `Stopped` and gives back its prompt; `jobs -l` lists `Suspended: 18`; `fg` holds the terminal and draws the field whole again without asking the terminal anything; `q` leaves with 0, with nothing printed after.
+
 **Acceptance criteria:**
-- [ ] The captures equal the base's but bare `yunta` at a pty.
+- [x] The captures equal the base's but bare `yunta` at a pty.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test application`
+- [x] Tests pass: `cargo test -p yunta --test application`
 
 **Dependencies:** Task 26
 
@@ -873,7 +912,7 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 **Estimated scope:** M
 
 ### Group check: the loop and bare `yunta`
-- [ ] The suite's groups green; every capture equal to the base's but bare `yunta` at a pty, shown beside the base's.
+- [x] The suite's groups green; every capture equal to the base's but bare `yunta` at a pty, shown beside the base's. (`proof/tui/group-loop.txt`: 158 views, only `screen-bare` and `screen-bare-outside` differ, now the application; 247 goldens, 0 changed, 33 new; 4,830 tests against the base's 4,764, none gone, none aborted; release 30,583,392 bytes.)
 
 ### Task 28: the walk laid out
 
@@ -888,11 +927,16 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 
 **Fails first:** the walk, with a pane made one cell wider than its area for the run: a line crosses the edge, named with the inputs that reach it.
 
+**Found in its turn:**
+- **Drawing is the walk's cost:** 2.5 ms a frame in a debug build, against 17 µs for the screen and 30 µs for the checks. Drawing all 43,628 frames took 162 s, three times the interface walk's 53 s, so each distinct screen is drawn once on each terminal: 4,948 of the 21,814 states, in 77 s. A screen is told apart by its Markdown, where each region and the box are scrolled to, and whether a field is open; `Screen` has no `Hash` and no `Debug` to tell it by.
+- Each check fails on a mutation of its own: the main pane one cell wider writes in a margin on the first field screen; the edge drawn one row short breaks it on row 23; the cursor never placed leaves an open field without one. The side pane one cell wider stays green, because no side line in the walk's home reaches its last cell.
+- The rules are stated in the test apart from `layout`: what the screen is about gives way from its last row while the regions would get fewer than three, then the attention.
+
 **Acceptance criteria:**
-- [ ] Every state the walk reaches lays out at both sizes; the time is recorded in `proof/tui/`.
+- [x] Every state the walk reaches lays out at both sizes; the time is recorded in `proof/tui/` (`walk-laid-out.txt`).
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test walk`
+- [x] Tests pass: `cargo test -p yunta-tui --test walk`
 
 **Dependencies:** Group check: the loop and bare `yunta`
 
@@ -901,7 +945,7 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 **Estimated scope:** S
 
 ### Group check: the walk laid out
-- [ ] The suite's groups green; the walk's time beside the base's.
+- [x] The suite's groups green; the walk's time beside the base's. (No code outside the new test changed since the group check before, whose groups are green; `yunta-tui`'s suite green with the walk, 81 s, beside the interface walk's 58 s and the base's 40 s; `smells --check` and `docs --check` hold.)
 
 ### Task 29: watching, at a pty against the mock
 
@@ -913,11 +957,18 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 
 **Fails first:** each test seen red with the performer's news dropped for the run: the run's screen never moves.
 
+**Found in its turn:**
+- The run holds on a bash node, as the interface tests' run does, with no adapter: what the application follows is the run's log, which a bash node writes as a session does.
+- The three tests wait on the legend's "move along its nodes", which only the following brings, since a run not yet read has no nodes to point at. With the performer's news dropped, each fails there.
+- The chronicle's last lines stand below the main region while a run is followed (`… 2 more lines`): the page keeps its top. The run's end is read from the page's head.
+- What the tests share with the interface's and the follower's moved into the testkit, each said once: `HeldRun` (started off a terminal or detached), `workflows::PROMOTABLE` (three copies), `run_ids` (which `full_run_id` reads through), `Terminal::choose` (two copies) and `Terminal::process_id`. The field, the opening and the giving back moved to the application tests' root. The one-node `holding` of `close_cmd.rs` and `stalled_runs.rs` is another workflow, and stays.
+- The testkit's terminal passed 500 lines: the screen and how a drawing is read moved to `terminal/screen.rs`, and the escape smell names the module whole, as it names paint.
+
 **Acceptance criteria:**
-- [ ] Following in the application never hosts the run: the run's process is the detached one.
+- [x] Following in the application never hosts the run: the run's process is the detached one. (The engine the run's registry names is not the application's process.)
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test application watching`
+- [x] Tests pass: `cargo test -p yunta --test application watching`
 
 **Dependencies:** Group check: the walk laid out
 
@@ -934,11 +985,15 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 
 **Fails first:** none: a measurement.
 
+**Found in its turn:**
+- **What a drawing writes is no text to search:** it writes only the cells that changed, moving the cursor over the rest. The driver's first two runs waited for the legend in the bytes, never saw it, and left their runs going; each was cancelled and closed by hand within a few minutes. The driver now reads the screen as a terminal holds it (`pyte`), and cancels and closes its run wherever it ends early.
+- **A node named past the side region folded onto a second row** (`review@reviewer-alt` at 22 cells), so the pointer's list stood a row longer than its nodes. The walk never met it, since its home's node ids are short. Surco gains `Block::Rows`, rows a pointer moves along, each cut at the edge it stands at with the ellipsis, never folded. The run's nodes are drawn as rows, its sample stands in the catalog, and `run_stage.rs` holds a long name to one row, red first.
+
 **Acceptance criteria:**
-- [ ] `between_secs` inside the base's spread; the application followed the run to where it waits.
+- [x] `between_secs` inside the base's spread; the application followed the run to where it waits. (Run 01M76QB3ACHXCKQEE206QBRC8E: `between_secs` 0.559479 against the base's 0.559435, earlier runs 0.53 to 0.59; at `ship` after 132 s against 161 s; tokens 1,089,373, 913,047 cached; the screen at `ship` shows `◆ ship` and its decision, `real-follow/app-at-ship.txt`; 234 drawings and 3.4 s of processor time in the application; it left with 0.)
 
 **Verification:**
-- [ ] Manual check: the run's numbers beside the base's in `proof/tui/checkpoint-b.txt`.
+- [x] Manual check: the run's numbers beside the base's in `proof/tui/checkpoint-b.txt`.
 
 **Dependencies:** Task 29
 
@@ -956,11 +1011,15 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 
 **Fails first:** none: measurements.
 
+**Found in its turn:**
+- **The first screen is measured from a rest.** A process started on a busy machine runs its first steps several times faster than one started after a pause. An application start leaves a pause behind it, so back to back the application read 60 ms against the base's 26. A traced build placed it before `main`, whatever the command. Each start now waits the same rest, and the screen is read as a terminal reads it, after the fact: the base 70.7 ms, this 73.7 ms.
+- **The binary grew 2.1 MB, not by the application's own crates** (about 90 KB). The rest is `yunta-ui`'s performer, which bare `yunta` links now, and the engine's and the API's paths and readers it drives, instantiated again.
+
 **Acceptance criteria:**
-- [ ] A frame under 2 ms; the first screen within 20 ms of the base's; the binary under 40 MiB.
+- [x] A frame under 2 ms; the first screen within 20 ms of the base's; the binary under 40 MiB. (0.45 ms whole at 200x60; +3.0 ms; 30,583,392 bytes.)
 
 **Verification:**
-- [ ] Manual check: `checkpoint-b.txt` read whole.
+- [x] Manual check: `checkpoint-b.txt` read whole.
 
 **Dependencies:** Task 30
 
@@ -969,12 +1028,17 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 **Estimated scope:** S
 
 ### Group check: watching
-- [ ] The suite's groups green; the real run and the measurements recorded.
+- [x] The suite's groups green; the real run and the measurements recorded. (`group-watching.txt`, `checkpoint-b.txt`.)
 
 ### Checkpoint B: the terminal application, and watching
-- [ ] Every target frame equal, the walk laid out, the pty tests green.
-- [ ] A real run followed in the application at the base's time between nodes; a frame's time, the first screen's and the release size, against the spec's bounds.
-- [ ] The user reviews; the phase commits; then `cargo clean`.
+- [x] Every target frame equal, the walk laid out, the pty tests green.
+- [x] A real run followed in the application at the base's time between nodes; a frame's time, the first screen's and the release size, against the spec's bounds.
+- [x] The user reviews; the phase commits; then `cargo clean`.
+
+Decided at the checkpoint:
+- A followed run's page keeps its head in sight; the chronicle's newest lines stand below it until the person scrolls.
+- The binary's growth stands; the performer's paths it carries are open work in `.agents/open.md`.
+- Opening asks git for the repository twice: its fix is Task 35a, in this list's next phase.
 
 ## Phase 3: deciding, `review`, starting, every stage, and the proof
 
@@ -1072,6 +1136,28 @@ Its groups, each green before the next: opening on a step; deciding and `review`
 **Files likely touched:** `crates/cli/src/commands/review.rs`, `crates/render/src/refusal/` (the module refusals are worded in)
 
 **Estimated scope:** XS
+
+### Task 35a: the repository asked once as the application opens
+
+**Description:**
+- **What happens now:** opening asks `Operation::ReadRepository`, whose `Project::repository` runs `Here::of`: `git rev-parse --git-common-dir`, then the run branches. Once the repository is set up it asks `Operation::Field`, whose `Project::field` runs `Here::of` again. Four git processes before the field shows, where the printed field runs two; a git costs about 8 ms here.
+- **What should happen:** the application's opening runs git as the printed field does, twice, and so does going back to the field.
+- **Which assumption might be wrong:** that `repository` needs the run branches at all. It needs only to know whether there is a repository and whether Yunta's layer is in it.
+- The way is chosen in the task, the owner of the rule being the API: a reading of the field that says the repository it was asked in, or a lookup the field takes from the repository's answer. No git result is cached across readings, since a person may branch between two.
+
+**Fails first:** `crates/ui/tests/state.rs` (or the performer's tests), on a workspace whose `PATH` has a git that counts its runs and hands each to the real git (`yunta_testkit::stubs`): from `State::opened` to the field on screen, git ran four times; it must run two.
+
+**Acceptance criteria:**
+- [ ] Opening on the field runs git twice; the first screen's time, from a rest, is no slower than Checkpoint B's 73.7 ms.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-api -p yunta-ui`; `first_screen_shown.py` against `yunta-watching`.
+
+**Dependencies:** Task 35
+
+**Files likely touched:** `crates/api/src/field.rs`, `crates/ui/src/{state.rs,operation.rs,performer.rs}`, a test of `crates/ui/tests/`
+
+**Estimated scope:** S
 
 ### Group check: opening on a step
 - [ ] The suite's groups green; the captures equal Phase 2's.

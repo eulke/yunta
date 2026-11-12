@@ -1,6 +1,7 @@
 //! The walk: from the application as it opens, every stroke, what a terminal of a few
-//! rows laid out of the screen, and every recorded piece of news and answer of each piece
-//! of work a state waits on, applied to every state it reaches, each state once by its
+//! rows laid out of the screen, each page a surface could not show, and every recorded
+//! piece of news and answer of each piece of work a state waits on, applied to every
+//! state it reaches, each state once by its
 //! screen and the kinds of work it waits on. Its clock stands still at one instant: what
 //! time changes on a screen is each stage's own tests'.
 //!
@@ -210,8 +211,8 @@ impl<'r> Walk<'r> {
 
     /// Every input `state` can be handed: each stroke while it waits on few enough pieces
     /// of work ([`STROKED_WHILE_WAITING`]), what the walk's terminal laid out of its
-    /// screen, and each recorded piece of news and answer of each piece of work it waits
-    /// on. With a field open nothing is typed, and a list is narrowed by one character at
+    /// screen, each page written that a surface could not show, and each recorded piece
+    /// of news and answer of each piece of work it waits on. With a field open nothing is typed, and a list is narrowed by one character at
     /// most: what a typed line or a list's filter makes of more is its own tests', and
     /// words typed on would never end.
     fn inputs(&self, state: &State) -> Vec<Input> {
@@ -236,8 +237,14 @@ impl<'r> Walk<'r> {
                 .map(move |outcome| Input::Outcome(ticket, outcome.clone()));
             news.chain(outcomes).collect::<Vec<_>>()
         });
+        let unshown = self
+            .recordings
+            .pages_written()
+            .into_iter()
+            .map(Input::Unshown);
         strokes
             .chain([Input::Laid(laid_out(state))])
+            .chain(unshown)
             .chain(answers)
             .collect()
     }

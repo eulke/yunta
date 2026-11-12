@@ -51,6 +51,11 @@ pub(super) fn closing() -> Vec<Block> {
         field().into(),
         change_by_file().into(),
         Block::Lines(vec![Line::new().plain("  a line a page composed itself")]),
+        Block::Rows(vec![
+            Line::new()
+                .plain("  a row a pointer moves along, cut where it passes the edge it stands at"),
+            Line::new().plain("  the next row"),
+        ]),
         decision().into(),
         on_the_forge().into(),
         Note("the run holds its own state on disk.".to_string()).into(),

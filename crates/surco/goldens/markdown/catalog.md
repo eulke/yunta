@@ -146,6 +146,9 @@ _new · 1 line_
 
 a line a page composed itself
 
+a row a pointer moves along, cut where it passes the edge it stands at  
+the next row
+
 | option | what it does | what happens | command |
 |---|---|---|---|
 | **approve** | builds the plan | its tasks run, a step at a time | `yunta resolve-gate 7E5PH4 approve` |

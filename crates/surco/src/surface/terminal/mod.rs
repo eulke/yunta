@@ -216,6 +216,10 @@ impl Terminal {
             Block::Diagram(block) => block.lines(look),
             Block::Code(block) => block.lines(look),
             Block::Lines(lines) => lines.clone(),
+            Block::Rows(rows) => rows
+                .iter()
+                .map(|row| row.cut(look.width.cells(), look.glyphs))
+                .collect(),
         }
     }
 }
