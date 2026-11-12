@@ -22,7 +22,35 @@ pub fn check_workflow_refs(
     workflow_origin: &crate::catalog::WorkflowOrigin,
     declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
 ) -> RefsCheck {
-    let mut errors = check_declares_ceiling(workflow, workflow_origin, repo_root);
+    check_workflow_refs_in(
+        workflow,
+        config,
+        repo_root,
+        repo_root,
+        workflow_origin,
+        declared,
+    )
+}
+
+/// [`check_workflow_refs`] against the global pack store the workspace
+/// resolves names from.
+pub fn check_workflow_refs_in(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    repo_root: &std::path::Path,
+    global_packs_root: &std::path::Path,
+    workflow_origin: &crate::catalog::WorkflowOrigin,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
+) -> RefsCheck {
+    let workflow_root = match workflow_origin {
+        WorkflowOrigin::Pack { .. } => global_packs_root
+            .parent()
+            .and_then(std::path::Path::parent)
+            .filter(|root| global_packs_root.starts_with(root.join(".yunta/packs")))
+            .unwrap_or(repo_root),
+        WorkflowOrigin::Repo => repo_root,
+    };
+    let mut errors = check_declares_ceiling(workflow, workflow_origin, workflow_root);
     let max_depth = config.resolved_max_workflow_depth();
     let mut path: Vec<String> = Vec::new();
     let mut compares = comparisons(workflow, &path);
@@ -30,7 +58,7 @@ pub fn check_workflow_refs(
         workflow,
         Walk {
             repo_root,
-            global_packs_root: repo_root,
+            global_packs_root,
             config,
             declared,
             max_depth,
@@ -149,10 +177,24 @@ pub(crate) fn walk_workflow_refs(
                 continue;
             }
         };
+        let origin_root = match &resolved.origin {
+            WorkflowOrigin::Repo => walk.repo_root,
+            WorkflowOrigin::Pack { .. } if resolved.path.starts_with(walk.global_packs_root) => {
+                walk.global_packs_root
+                    .parent()
+                    .and_then(std::path::Path::parent)
+                    .filter(|root| {
+                        walk.global_packs_root
+                            .starts_with(root.join(".yunta/packs"))
+                    })
+                    .unwrap_or(walk.repo_root)
+            }
+            WorkflowOrigin::Pack { .. } => walk.repo_root,
+        };
         errors.extend(check_declares_ceiling(
             &child,
             &resolved.origin,
-            walk.repo_root,
+            origin_root,
         ));
         let problems = crate::check::check_mounted(
             &child,

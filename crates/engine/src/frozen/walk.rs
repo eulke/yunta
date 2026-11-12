@@ -38,6 +38,7 @@ pub(crate) async fn freeze(
     workflow: &Workflow,
     config: &ConfigLayer,
     user_knowledge: Option<&Path>,
+    env: &yunta_core::Env,
 ) -> Result<(Frozen, Vec<(ContentHash, Vec<u8>)>), FrozenError> {
     let mut reach = Reach::default();
     reach.visit(workflow, config);
@@ -45,7 +46,7 @@ pub(crate) async fn freeze(
         if reach.children.contains_key(&use_name) {
             continue;
         }
-        let (child, child_workflow) = read_child(repo, &use_name).await?;
+        let (child, child_workflow) = read_child(repo, env, &use_name).await?;
         reach.children.insert(use_name, child);
         reach.visit(&child_workflow, config);
     }
@@ -156,9 +157,10 @@ impl Blobs {
 /// its nodes read and the pack it came from, as the tree stands now.
 async fn read_child(
     repo: &Path,
+    env: &yunta_core::Env,
     use_name: &str,
 ) -> Result<(FrozenWorkflow, Workflow), FrozenError> {
-    let global_root = yunta_core::user_state_root(&yunta_core::Env::default())
+    let global_root = yunta_core::user_state_root(env)
         .unwrap_or_else(|| repo.to_path_buf())
         .join(".yunta/packs");
     let (path, declared) = match catalog::name_workflow(repo, &global_root, use_name)

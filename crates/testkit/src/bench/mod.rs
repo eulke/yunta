@@ -391,14 +391,15 @@ impl Bench {
             .ambient
             .as_ref()
             .and_then(yunta_core::user_knowledge_dir);
-        let built = yunta_engine::build_manifest(
+        let env = self.ambient.clone().unwrap_or_default();
+        let built = yunta_engine::build_manifest_in(
             workflow,
             config,
             self.workflow_dir.as_deref().unwrap_or(&self.worktree),
             &self.worktree,
             &self.inputs,
             self.supervision(),
-            user_knowledge.as_deref(),
+            (&env, user_knowledge.as_deref()),
         )
         .await;
         match built {

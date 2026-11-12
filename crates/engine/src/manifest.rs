@@ -106,6 +106,7 @@ pub async fn build_manifest(
     supervision: crate::process::Supervision<'_>,
     user_knowledge: Option<&Path>,
 ) -> Result<FrozenRun, ManifestError> {
+    let env = yunta_core::Env::default();
     birth(
         workflow,
         config,
@@ -115,6 +116,34 @@ pub async fn build_manifest(
         Origin::Tree {
             workflow_dir,
             user_knowledge,
+            env: &env,
+        },
+    )
+    .await
+}
+
+/// Freezes a manifest against the workspace environment, including global
+/// pack lookup for composed workflows.
+pub async fn build_manifest_in(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    workflow_dir: &Path,
+    repo: &Path,
+    provided_inputs: &HashMap<InputName, String>,
+    supervision: crate::process::Supervision<'_>,
+    user_context: (&yunta_core::Env, Option<&Path>),
+) -> Result<FrozenRun, ManifestError> {
+    let (env, user_knowledge) = user_context;
+    birth(
+        workflow,
+        config,
+        repo,
+        provided_inputs,
+        supervision,
+        Origin::Tree {
+            workflow_dir,
+            user_knowledge,
+            env,
         },
     )
     .await
@@ -158,6 +187,7 @@ enum Origin<'a> {
     Tree {
         workflow_dir: &'a Path,
         user_knowledge: Option<&'a Path>,
+        env: &'a yunta_core::Env,
     },
     /// The set the parent run was born with, and the run directory its
     /// objects are in.
@@ -236,7 +266,8 @@ async fn freeze_origin(
         Origin::Tree {
             workflow_dir,
             user_knowledge,
-        } => freeze_tree(workflow, config, repo, workflow_dir, user_knowledge).await,
+            env,
+        } => freeze_tree(workflow, config, repo, workflow_dir, user_knowledge, env).await,
         Origin::Parent(ParentRun {
             use_name,
             frozen,
@@ -253,11 +284,12 @@ async fn freeze_tree(
     repo: &Path,
     workflow_dir: &Path,
     user_knowledge: Option<&Path>,
+    env: &yunta_core::Env,
 ) -> Result<Freezing, ManifestError> {
     let root = PromptRoot::of_tree(repo, workflow_dir).await;
     let prompts = read_prompts(workflow, &root).await?;
     let (frozen, blobs) =
-        crate::frozen::walk::freeze(repo, workflow, config, user_knowledge).await?;
+        crate::frozen::walk::freeze(repo, workflow, config, user_knowledge, env).await?;
     let (pack, provenance_gaps) = pack_provenance(repo, workflow_dir).await;
     Ok(Freezing {
         prompts,

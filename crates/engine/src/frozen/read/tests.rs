@@ -26,9 +26,15 @@ async fn run_freezing_notes(root: &Path) -> (Frozen, PathBuf) {
         &repo.join("wf.yaml"),
     )
     .unwrap();
-    let (frozen, blobs) = walk::freeze(&repo, &workflow, &ConfigLayer::default(), None)
-        .await
-        .unwrap();
+    let (frozen, blobs) = walk::freeze(
+        &repo,
+        &workflow,
+        &ConfigLayer::default(),
+        None,
+        &yunta_core::Env::default(),
+    )
+    .await
+    .unwrap();
     store::write_at_birth(&run, &blobs, Some(&frozen))
         .await
         .unwrap();

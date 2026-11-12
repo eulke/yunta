@@ -8,7 +8,8 @@ use std::path::Path;
 use yunta_core::check::{CheckError, Composition};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{
-    check_workflow_refs, origin_of, resolve_workflow, CatalogError, WorkflowOrigin,
+    check_workflow_refs, check_workflow_refs_in, origin_of, resolve_workflow, CatalogError,
+    WorkflowOrigin,
 };
 
 fn write(path: &Path, contents: &str) {
@@ -45,6 +46,37 @@ fn write_pack(
 }
 
 const LEAF: &str = "name: leaf\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n";
+
+#[test]
+fn composition_check_resolves_a_child_from_the_configured_global_store() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    let global = root.path().join("user-home/.yunta/packs");
+    write(
+        &repo.join(".yunta/workflows/parent.yaml"),
+        "name: parent\nnodes:\n  - { id: child, kind: workflow, use: acme/review }\n",
+    );
+    write(
+        &global.join("acme/review-pack/pack.yaml"),
+        "name: review-pack\npublisher: acme\nversion: 1.0.0\ndeclares:\n  permissions: read-only\ncontents:\n  workflows: [review.yaml]\n",
+    );
+    write(&global.join("acme/review-pack/review.yaml"), LEAF);
+    let path = repo.join(".yunta/workflows/parent.yaml");
+    let parent: Workflow =
+        yunta_core::yaml::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let origin = origin_of(&repo, &path);
+
+    let errors = check_workflow_refs_in(
+        &parent,
+        &ConfigLayer::default(),
+        &repo,
+        &global,
+        &origin,
+        &|_| None,
+    )
+    .errors;
+    assert!(errors.is_empty(), "got: {errors:?}");
+}
 
 #[test]
 fn a_repo_workflow_shadows_a_pack_workflow_of_the_same_name() {
