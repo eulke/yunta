@@ -113,5 +113,6 @@ mod tests {
     mod publication_text;
     mod retry;
     mod routes;
+    mod screen;
     mod setup;
 }

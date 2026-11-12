@@ -18,10 +18,12 @@ use yunta_core::DocumentKind;
 use yunta_render::page::doctor::{CheckoutsKeep, Finding};
 use yunta_render::page::{Collected, Page, Schema};
 use yunta_testkit::Bench;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::workspace;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Outcome, Performer, Request, State, Ticket};
 
-use support::{drive, on_the_field, performed, stopped, workspace};
+use support::{on_the_field, performed, stopped};
 
 /// The screen's main region, as Markdown writes it.
 fn main_region(state: &State) -> String {

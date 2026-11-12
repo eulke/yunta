@@ -6,9 +6,10 @@ use yunta_render::prompt::Escape;
 use super::{Alternative, Picker};
 use crate::prompt::{Answerable, Press, Stroke};
 
-/// A terminal with room for two rows of a list, under the four a held list leaves to
-/// its filter, its keys, the question above it and the row a prompt never draws on.
-const TWO_ROWS: usize = 6;
+/// A terminal with room for two rows of a list, under the three a held list leaves to
+/// its keys, the question above it and the terminal's last row, which the cursor is
+/// left on.
+const TWO_ROWS: usize = 5;
 
 fn picker() -> Picker<&'static str> {
     Picker::new(

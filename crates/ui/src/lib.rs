@@ -28,6 +28,8 @@
 //!   it is handed and the [`Press`](prompt::Press) it answers with.
 //! - `scroll`, how a region taller than what a surface shows of it scrolls by the
 //!   keys, held by a desk's pane and every stage that shows a page.
+//! - `room`, what a surface shows where it has less room than it lays a screen out
+//!   in ([`room_needed`]).
 
 mod dialog;
 mod input;
@@ -38,6 +40,7 @@ mod performer;
 pub mod prompt;
 pub mod remark;
 mod request;
+mod room;
 mod scroll;
 mod stage;
 mod state;
@@ -55,6 +58,7 @@ pub use outcome::{
 };
 pub use performer::Performer;
 pub use request::Request;
+pub use room::room_needed;
 pub use stage::{
     CatalogStage, DecisionStage, DoctorStage, Evidence, EvidenceStage, FieldStage, FirstRunStage,
     GraphStage, RunStage, SchemaStage, SetupStage, Stage, StartStage, StatsStage, UpkeepStage,

@@ -82,6 +82,8 @@ yunta-adapters.workspace = true
 # The shared test harness: git-repo fixture, `yunta_in!`, fixed clock.
 yunta-testkit.workspace = true
 yunta-testkit-core.workspace = true
+# The instant the application's tests stand at, and a state driven with its performer.
+yunta-testkit-ui.workspace = true
 yunta-surco = { workspace = true, features = ["clap", "golden"] }
 tempfile.workspace = true
 # Tests write their workflows and configs as YAML literals.

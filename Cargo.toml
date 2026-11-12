@@ -12,9 +12,11 @@ members = [
     "crates/api",
     "crates/mcp",
     "crates/ui",
+    "crates/tui",
     "crates/cli",
     "crates/testkit",
     "crates/testkit-core",
+    "crates/testkit-ui",
     "xtask",
 ]
 
@@ -41,11 +43,13 @@ yunta-render = { path = "crates/render", version = "0.0.5" }
 yunta-api = { path = "crates/api", version = "0.0.5" }
 yunta-mcp = { path = "crates/mcp", version = "0.0.5" }
 yunta-ui = { path = "crates/ui", version = "0.0.5" }
+yunta-tui = { path = "crates/tui", version = "0.0.5" }
 # Test-support crate: a dev-dependency only (never published), but it
 # carries a version like the other internal crates so it is not a wildcard
 # path dependency.
 yunta-testkit = { path = "crates/testkit", version = "0.0.5" }
 yunta-testkit-core = { path = "crates/testkit-core", version = "0.0.5" }
+yunta-testkit-ui = { path = "crates/testkit-ui", version = "0.0.5" }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.23"
@@ -58,6 +62,7 @@ errno = "0.3"
 indexmap = "2"
 indicatif = "0.18"
 console = "0.16"
+crossterm = "0.29"
 nix = { version = "0.31", features = ["signal", "process"] }
 libc = "0.2"
 rustix = { version = "1.1", features = ["fs", "process"] }
@@ -67,6 +72,8 @@ libproc = "0.14.11"
 # would take `unsafe`; only its process reading is compiled.
 sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 proptest = "1"
+# Only the crossterm backend: a terminal application holds no other.
+ratatui = { version = "0.30", default-features = false }
 regex = "1"
 reqwest = { version = "0.13", default-features = false }
 rmcp = { version = "3.4", default-features = false }

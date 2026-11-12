@@ -23,7 +23,7 @@ pub(super) fn look(glyphs: Glyphs, cells: usize) -> Look {
 }
 
 /// Rows of the pane, numbered, as many as asked.
-pub(super) fn numbered(rows: usize) -> Vec<Line> {
+pub(in crate::surface::terminal) fn numbered(rows: usize) -> Vec<Line> {
     (1..=rows)
         .map(|at| Line::new().plain(format!("line {at}")))
         .collect()
@@ -84,7 +84,7 @@ fn rail() -> Vec<RailGroup> {
     ]
 }
 
-pub(super) fn desk(lines: Vec<Line>) -> Desk {
+pub(in crate::surface::terminal) fn desk(lines: Vec<Line>) -> Desk {
     Desk {
         title: vec![
             "plan".to_string(),
@@ -117,8 +117,9 @@ pub(super) fn desk(lines: Vec<Line>) -> Desk {
     }
 }
 
+/// `desk` as a terminal `rows` high holds it, over its last row: each row's text.
 pub(super) fn drawn(desk: &Desk, look: &Look, rows: usize) -> Vec<String> {
-    desk.drawn(look, rows)
+    desk.drawn(look, rows - 1)
         .lines
         .iter()
         .map(|row| row.text().trim_end().to_string())
@@ -213,15 +214,15 @@ fn the_panes_measure_follows_the_terminal() {
     assert_eq!(cells(300), 120, "and it is never wider than a line is read");
 }
 
-/// The rows it was asked for, less the one a prompt never draws on, whatever it holds.
+/// The rows it was asked for, whatever it holds.
 #[test]
 fn it_fills_the_rows_it_is_given_and_nothing_reaches_the_last_column() {
     let desks = [desk(Vec::new()), desk(numbered(500))];
     for desk in &desks {
         for cells in [20, 40, 60, 89, 90, 100, 118, 200, 300] {
-            for rows in 2..=60 {
+            for rows in 1..=59 {
                 let drawn = desk.drawn(&look(Glyphs::Unicode, cells), rows);
-                assert_eq!(drawn.lines.len(), rows - 1, "{cells}x{rows}");
+                assert_eq!(drawn.lines.len(), rows, "{cells}x{rows}");
                 for line in &drawn.lines {
                     let width = cell_width(&line.text());
                     assert!(width < cells, "{cells}x{rows}: {} {width}", line.text());
@@ -284,7 +285,7 @@ fn a_narrow_terminal_has_no_rail_and_the_pane_says_which_task() {
 fn the_pane_scrolls_and_counts_what_is_below_it() {
     let mut scrolled = desk(numbered(30));
     scrolled.pane.sight.top = 5;
-    let laid = scrolled.drawn(&look(Glyphs::Unicode, 100), 24);
+    let laid = scrolled.drawn(&look(Glyphs::Unicode, 100), 23);
     let text: Vec<String> = laid.lines.iter().map(Line::text).collect();
     let pane = laid_pane(&laid);
     let body = |row: &str| text.iter().any(|line| line.ends_with(row));
@@ -295,7 +296,7 @@ fn the_pane_scrolls_and_counts_what_is_below_it() {
     assert!(body("… 12 more lines"), "{text:#?}");
 
     scrolled.pane.sight.top = usize::MAX;
-    let last = scrolled.drawn(&look(Glyphs::Unicode, 100), 24);
+    let last = scrolled.drawn(&look(Glyphs::Unicode, 100), 23);
     let at_end = laid_pane(&last).top;
     assert_eq!(at_end, 16, "a scroll past the end stops at the end");
     let text: Vec<String> = last.lines.iter().map(Line::text).collect();
@@ -309,7 +310,7 @@ fn the_pane_scrolls_and_counts_what_is_below_it() {
 /// One row of the pane can be asked to stay in sight: a pointer the person moved.
 #[test]
 fn the_row_a_pointer_stands_on_stays_in_sight() {
-    let top = |desk: &Desk| laid_pane(&desk.drawn(&look(Glyphs::Unicode, 100), 24)).top;
+    let top = |desk: &Desk| laid_pane(&desk.drawn(&look(Glyphs::Unicode, 100), 23)).top;
     assert_eq!(top(&pointing(60, 40)), 40);
     assert_eq!(top(&pointing(60, 3)), 0);
     let mut scrolled_past = pointing(60, 3);
@@ -444,7 +445,7 @@ fn a_title_gives_up_whole_parts_from_its_end() {
 /// stops at the rule.
 #[test]
 fn the_row_pointed_at_is_set_apart_up_to_the_rule() {
-    let laid = desk(numbered(3)).drawn(&look(Glyphs::Unicode, 100), 24);
+    let laid = desk(numbered(3)).drawn(&look(Glyphs::Unicode, 100), 23);
     let pointed = laid
         .lines
         .iter()

@@ -2,8 +2,6 @@
 //! of what to build, over its catalog, and what is typed there reaches the start stage,
 //! whose choices ask for the run `yunta run` asks for with the same ones.
 
-mod support;
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,10 +9,10 @@ use std::sync::Arc;
 use surco::surface::Markdown;
 use yunta_api::RunRequest;
 use yunta_core::InputName;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::{now, workspace};
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Performer, Request, State};
-
-use support::{drive, now, workspace};
 
 /// A workflow that takes what was asked for as its request.
 const GREETS: &str = "name: greet\ninputs:\n  ask: { type: string, request: true }\nnodes:\n  \

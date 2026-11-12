@@ -83,6 +83,7 @@ fn card(rows: Vec<RoundRow>, legend: Legend) -> Card {
     }
 }
 
+/// `card` in `rows` rows: each row's text.
 fn drawn(card: &Card, look: &Look, rows: usize) -> Vec<String> {
     card.drawn(look, rows)
         .lines
@@ -305,7 +306,7 @@ fn a_field_in_a_round_fills_what_its_margin_leaves() {
 #[test]
 fn a_long_round_folds_what_was_answered_and_then_what_is_to_come() {
     let card = card(long_round(), Legend::new().key("enter", "answers"));
-    let tall = drawn(&card, &look(Glyphs::Unicode, 80), 13);
+    let tall = drawn(&card, &look(Glyphs::Unicode, 80), 12);
     assert_eq!(
         tall,
         [
@@ -322,7 +323,7 @@ fn a_long_round_folds_what_was_answered_and_then_what_is_to_come() {
             "▎ enter answers",
         ]
     );
-    let short = drawn(&card, &look(Glyphs::Unicode, 80), 10);
+    let short = drawn(&card, &look(Glyphs::Unicode, 80), 9);
     assert_eq!(
         short[3..=6],
         [
@@ -339,6 +340,6 @@ fn a_long_round_folds_what_was_answered_and_then_what_is_to_come() {
 #[test]
 fn the_cursor_follows_the_field_through_a_fold() {
     let card = card(long_round(), Legend::new().key("enter", "answers"));
-    let placed = card.drawn(&look(Glyphs::Unicode, 80), 13);
+    let placed = card.drawn(&look(Glyphs::Unicode, 80), 12);
     assert_eq!(placed.cursor, Some((5, 8)));
 }

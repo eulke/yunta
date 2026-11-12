@@ -1,0 +1,14 @@
+ yunta › Q78GRR
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ p┌ the keys here ───────────────────────────────────────┐
+ ━│   j k     move along its nodes                       │
+  │   enter   the page of plan                           │
+ ◆│   a       puts what the run waits on to you          │…
+ ━│   p       reads its plan, and answers it there       │
+  │   x       closes it for good                         │
+ ◆│   o       opens the run's page in a browser          │R
+ ━│   s       shows what the run cost                    │━
+  │   g       draws the run's graph, each node as its    │
+  │ … 7 more lines                                       │
+ …└──────────────────────────────────────────────────────┘
+ ↑↓ scroll · esc closes it

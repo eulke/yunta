@@ -1,0 +1,14 @@
+ ␛[1mplan␛[0m␛[2m · ␛[0m␛[2mEKPBGE␛[0m␛[2m · ␛[0m␛[2mharvest␛[0m␛[2m · ␛[0m␛[2m2 tasks in 2 steps␛[0m                               ␛[2mneeds you  approve-plan␛[0m
+
+ ␛[1msteps␛[0m                         ␛[2m │ ␛[0m␛[1mStore packs␛[0m                                           ␛[2mstep 1 of 2␛[0m
+ 1 ␛[1;35m▸␛[0m ␛[1mstorage␛[0m                   ␛[2m │ ␛[0m
+ 2   catalog                   ␛[2m │ ␛[0mline 1
+                               ␛[2m │ ␛[0mline 2
+ decided for you          ␛[1m 4␛[0m␛[2m  d␛[0m␛[2m │ ␛[0mline 3
+ risks                    ␛[1m 2␛[0m␛[2m   ␛[0m␛[2m │ ␛[0mline 4
+                               ␛[2m │ ␛[0mline 5
+                               ␛[2m │ ␛[0mline 6
+                               ␛[2m │ ␛[0m␛[2m… 24 more lines␛[0m
+
+ ␛[1;35m◆␛[0m ␛[1mPlan registered. Approve?␛[0m
+ ␛[1m1␛[0m approve   ␛[1m2␛[0m adjust                                                 ␛[2mj k task · p proof · esc back␛[0m

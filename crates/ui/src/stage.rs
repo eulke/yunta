@@ -351,7 +351,7 @@ impl Stage {
     pub(crate) fn laid(&mut self, laid: ScreenLaid) {
         match self {
             Stage::Decision(decision) => decision.laid(laid.main),
-            Stage::Run(run) => run.laid(laid.side),
+            Stage::Run(run) => run.laid(laid.main),
             Stage::Evidence(evidence) => evidence.laid(laid.main),
             Stage::Stats(stats) => stats.laid(laid.main),
             Stage::Graph(graph) => graph.laid(laid.main),

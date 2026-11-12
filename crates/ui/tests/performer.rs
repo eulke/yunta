@@ -2,14 +2,12 @@
 //! operation comes to arrives as an input under its ticket, and what failed below
 //! Yunta comes back in its own words. It reads nothing of its process.
 
-mod support;
-
 use tokio::sync::mpsc;
 use yunta_api::Repository;
 use yunta_api::Workspace;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::{now, workspace};
 use yunta_ui::{Input, Operation, Outcome, Performer, Request, State};
-
-use support::{drive, now, workspace};
 
 /// What the performer hands back for the operation the opening state asks.
 async fn opened_in(workspace: Workspace) -> Outcome {

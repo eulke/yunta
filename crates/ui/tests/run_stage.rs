@@ -14,10 +14,11 @@ use yunta_core::{NodeId, Pid, RunId};
 use yunta_replay::registry::{Engine, Prompt};
 use yunta_replay::RunState;
 use yunta_testkit::Bench;
+use yunta_testkit_ui::sandbox::now;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, News, Operation, Request, State};
 
-use support::{now, on_the_field, performed, stopped};
+use support::{on_the_field, performed, stopped};
 
 /// Two nodes that finish, one after the other.
 const FINISHES: &str = "name: done\nnodes:\n  - { id: first, kind: bash, run: \"true\" }\n  \
@@ -177,8 +178,16 @@ async fn a_node_picked_shows_its_page_and_stops_following() {
 
     let screen = state.screen(&Look::plain());
     assert_eq!(screen.trail.last().map(String::as_str), Some("first"));
-    let beside = Markdown.draw(&screen.side.expect("a page beside the run").region.doc);
-    assert!(beside.contains("node first of run"), "{beside}");
+    let page = Markdown.draw(&screen.main.doc);
+    assert!(page.contains("node first of run"), "{page}");
+    let nodes = Markdown.draw(
+        &screen
+            .side
+            .expect("the run's nodes beside its page")
+            .region
+            .doc,
+    );
+    assert!(nodes.contains("first"), "{nodes}");
 }
 
 /// A run whose engine asks at its own terminal is said to ask there, and offers only
@@ -200,8 +209,12 @@ async fn a_run_asking_at_its_terminal_offers_only_stopping() {
     };
     let (_, mut state) = opened_on(&asking);
 
-    let main = Markdown.draw(&state.screen(&Look::plain()).main.doc);
-    assert!(main.contains("asks at its terminal"), "{main}");
+    let about = state
+        .screen(&Look::plain())
+        .about
+        .expect("the rows the run is watched by, across the screen");
+    let across = Markdown.draw(&about);
+    assert!(across.contains("asks at its terminal"), "{across}");
     let does: Vec<String> = state
         .screen(&Look::plain())
         .legend
@@ -251,8 +264,8 @@ async fn the_ribbon_turns_only_on_a_look_that_moves() {
             ..Look::plain()
         };
         let about = state.screen(&look).about.expect("the run's ribbon");
-        let [Block::Ribbon(ribbon)] = about.blocks() else {
-            panic!("the ribbon alone across the screen");
+        let Some(Block::Ribbon(ribbon)) = about.blocks().first() else {
+            panic!("the ribbon first across the screen");
         };
         assert_eq!(ribbon.events.is_some(), plowed, "{motion:?}");
     }

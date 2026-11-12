@@ -1,13 +1,13 @@
 //! The rail of a plan's desk: the places a person can stand on, and what the plan says of
 //! itself as a whole. What gives way on a short terminal is decided here, a group at a time.
 
-use super::APART;
 use crate::components::{RailGroup, RailRow};
 use crate::diagram::outline::outline;
 use crate::diagram::Diagram;
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
+use crate::surface::terminal::APART;
 use crate::width::{cell_width, middle_cut};
 
 /// The fewest cells a step's number takes: one digit and a space, and a row with no number keeps

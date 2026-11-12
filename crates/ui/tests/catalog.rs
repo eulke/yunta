@@ -15,10 +15,12 @@ use tokio::sync::mpsc;
 use yunta_api::{Stop, WorkflowStem};
 use yunta_core::WorkflowShape;
 use yunta_render::page::Page;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::workspace;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, News, Operation, Performer, Request, State, WorkflowOperation};
 
-use support::{drive, on_the_field, stopped, workspace};
+use support::{on_the_field, stopped};
 
 /// Two nodes that each wait on the other: a cycle `check` refuses.
 const CYCLE: &str = "name: cycle\nnodes:\n  - { id: first, kind: bash, run: \"true\", \

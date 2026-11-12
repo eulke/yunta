@@ -16,10 +16,12 @@ use yunta_core::NodeId;
 use yunta_render::page::{self, Page, Verified};
 use yunta_storage::Storage;
 use yunta_testkit::Bench;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::{now, workspace};
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Performer, Request, State};
 
-use support::{drive, on_the_field, stopped, workspace};
+use support::{on_the_field, stopped};
 
 /// Two nodes that finish, one after the other.
 const FINISHES: &str = "name: done\nnodes:\n  - { id: first, kind: bash, run: \"true\" }\n  \
@@ -101,7 +103,7 @@ fn broken(bench: &Bench) {
     let ghost = Some(NodeId::from("ghost"));
     let draft = EventDraft::new(bench.run_id.clone(), ghost, payload).expect("a draft");
     storage
-        .append_at(&draft, support::now())
+        .append_at(&draft, now())
         .expect("the event appended");
 }
 

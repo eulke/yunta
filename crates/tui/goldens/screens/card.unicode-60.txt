@@ -1,0 +1,14 @@
+ yunta › Q78GRR › decision
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ▎ ◆ Plan registered. Approve?        approve-plan · Q78GRR
+ ▎
+ ▎ ▸ approve  Resolve the gate: nothing in the workflow
+ ▎            waits on it
+ ▎   adjust   Back to `plan`: sends what you say, and asks
+ ▎            again once it completes
+ ▎   abort    Pause here: nothing runs; this decision stays
+ ▎            open
+ ▎
+ ▎ ↑↓ move · enter chooses · n adds a note · r reads the
+ ▎ plan · esc leaves the run waiting
+ / what you can do here · ? the keys here

@@ -85,25 +85,15 @@ impl Home {
     pub async fn built() -> Home {
         let root = tempfile::tempdir().expect("a temporary root");
         let outside = root.path().join("outside");
-        std::fs::create_dir_all(&outside).expect("a directory outside any repository");
-        let never_set_up = root.path().join("never-set-up");
-        std::fs::create_dir_all(&never_set_up).expect("a repository's directory");
-        yunta_testkit::init_repo(&never_set_up);
-        let to_set_up = root.path().join("to-set-up");
-        std::fs::create_dir_all(&to_set_up).expect("a repository's directory");
-        yunta_testkit::init_repo(&to_set_up);
-        let clis = crate::support::claude_answering(root.path());
-        let packed = crate::support::with_a_pack_installed(&root.path().join("packed")).await;
-        let (tools, _) = crate::support::pack_with_an_executor(root.path());
-        let set_up = root.path().join("set-up");
-        std::fs::create_dir_all(set_up.join(".yunta/workflows")).expect("a repository's catalog");
-        yunta_testkit::init_repo(&set_up);
-        std::fs::write(set_up.join(".yunta/config.yaml"), SET_UP).expect("its config");
-        std::fs::write(set_up.join(".yunta/workflows/greet.yaml"), GREETS).expect("its workflow");
-        std::fs::create_dir_all(set_up.join(".yunta/tests/fixtures")).expect("its cases");
-        std::fs::write(set_up.join(".yunta/tests/fixtures/none.yaml"), NO_SESSIONS)
-            .expect("its fixture");
-        std::fs::write(set_up.join(".yunta/tests/greets.yaml"), GREETS_CASE).expect("its case");
+        tokio::fs::create_dir_all(&outside)
+            .await
+            .expect("a directory outside any repository");
+        let never_set_up = repository(root.path(), "never-set-up").await;
+        let to_set_up = repository(root.path(), "to-set-up").await;
+        let clis = crate::sandbox::claude_answering(root.path());
+        let packed = crate::sandbox::with_a_pack_installed(&root.path().join("packed")).await;
+        let (tools, _) = crate::sandbox::pack_with_an_executor(root.path());
+        let set_up = set_up_with_a_case(root.path()).await;
         let worked = Bench::with_run_id("01M7WALKFN1SHED00000000000");
         worked.run(FINISHES, NO_SESSIONS).await;
         let parked_bench = worked.beside("01M7WALKPARKED000000000000");
@@ -141,9 +131,45 @@ impl Home {
 }
 
 /// The state root of `bench`'s repository: where its runs and log are.
-pub fn root_of(bench: &Bench) -> &Path {
+pub(crate) fn root_of(bench: &Bench) -> &Path {
     bench
         .store_path()
         .parent()
         .expect("a bench's log stands in its root")
+}
+
+/// A git repository named `name` under `root`, which Yunta was never set up in.
+async fn repository(root: &Path, name: &str) -> PathBuf {
+    let repo = root.join(name);
+    tokio::fs::create_dir_all(&repo)
+        .await
+        .expect("a repository's directory");
+    yunta_testkit::init_repo(&repo);
+    repo
+}
+
+/// A git repository under `root` set up for Yunta, with one workflow, a case of it, and
+/// no run.
+async fn set_up_with_a_case(root: &Path) -> PathBuf {
+    let set_up = root.join("set-up");
+    tokio::fs::create_dir_all(set_up.join(".yunta/workflows"))
+        .await
+        .expect("a repository's catalog");
+    yunta_testkit::init_repo(&set_up);
+    tokio::fs::write(set_up.join(".yunta/config.yaml"), SET_UP)
+        .await
+        .expect("its config");
+    tokio::fs::write(set_up.join(".yunta/workflows/greet.yaml"), GREETS)
+        .await
+        .expect("its workflow");
+    tokio::fs::create_dir_all(set_up.join(".yunta/tests/fixtures"))
+        .await
+        .expect("its cases");
+    tokio::fs::write(set_up.join(".yunta/tests/fixtures/none.yaml"), NO_SESSIONS)
+        .await
+        .expect("its fixture");
+    tokio::fs::write(set_up.join(".yunta/tests/greets.yaml"), GREETS_CASE)
+        .await
+        .expect("its case");
+    set_up
 }

@@ -1,0 +1,14 @@
+ yunta › Q78GRR › decision
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  plan · Q78GRR                    needs you  approve-plan
+
+  the change
+
+    Writes the greeting the program says.
+
+
+
+  ◆ Plan registered. Approve?
+  1 approve   2 adjust   3 abort
+  j k task · ↑↓ scroll · esc back
+ / what you can do here · ? the keys here

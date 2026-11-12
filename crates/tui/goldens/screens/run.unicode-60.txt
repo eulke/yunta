@@ -1,0 +1,14 @@
+ yunta › Q78GRR › approve-plan
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ plan approve-plan
+ ━━━━ ━━━━━━━━━━━━
+
+ ◆ needs you: yunta resolve-gate Q78GRR (node `approve-pla…
+ ━━ ━ needs you
+
+ ◆ node approve-plan of run Q78GRR · needs you
+
+   kind         gate
+
+ … 2 more lines
+ j k move along its nodes · … · ? the keys here

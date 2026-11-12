@@ -41,7 +41,7 @@ fn rows() -> Vec<ChoiceRow> {
     ]
 }
 
-fn card(body: CardBody, glyphs: Glyphs) -> Card {
+pub(in crate::surface::terminal) fn card(body: CardBody, glyphs: Glyphs) -> Card {
     Card {
         question: "Plan and its tests registered. Approve?".to_string(),
         edge: Some(format!("approve-plan {} 3GQF5Q", glyphs.sep())),
@@ -282,7 +282,7 @@ fn what_is_too_wide_for_the_line_is_held_to_it() {
     }
 }
 
-fn eight_rows() -> Vec<ChoiceRow> {
+pub(in crate::surface::terminal) fn eight_rows() -> Vec<ChoiceRow> {
     ["a", "b", "c", "d", "e", "f", "g", "h"]
         .map(|name| row(name, Some("does it"), None))
         .into()
@@ -300,7 +300,7 @@ fn on_a_short_terminal_the_list_gives_way_first() {
         then: Some("x → y".to_string()),
     };
     let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 10)
+        .drawn(&look(Glyphs::Unicode, 80), 9)
         .lines
         .iter()
         .map(|line| line.text())
@@ -333,7 +333,7 @@ fn shorter_still_only_the_question_the_row_and_the_keys_stay() {
         then: Some("x → y".to_string()),
     };
     let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 7)
+        .drawn(&look(Glyphs::Unicode, 80), 6)
         .lines
         .iter()
         .map(|line| line.text())
@@ -363,7 +363,7 @@ fn shortest_of_all_the_keys_give_way_before_the_question() {
         then: Some("x → y".to_string()),
     };
     let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 6)
+        .drawn(&look(Glyphs::Unicode, 80), 5)
         .lines
         .iter()
         .map(|line| line.text())
@@ -395,7 +395,7 @@ fn a_long_question_keeps_its_first_row_on_a_short_narrow_terminal() {
     asked.question =
         "Plan and its tests registered, with every change it makes and each risk it takes?"
             .to_string();
-    let placed = asked.drawn(&look(Glyphs::Unicode, 40), 10);
+    let placed = asked.drawn(&look(Glyphs::Unicode, 40), 9);
     let rows: Vec<String> = placed.lines.iter().map(|line| line.text()).collect();
     assert!(rows.len() <= 9, "{rows:#?}");
     assert!(rows[0].starts_with("▎ ◆ Plan and its tests"), "{rows:#?}");

@@ -1,0 +1,24 @@
+ yunta :: Q78GRR
+................................................................................
+ plan appr+ the keys here -------------------------------------------+
+ ==== ====|   j k     move along its nodes                           |
+          |   enter   the page of plan                               |
+ ? needs y|   a       puts what the run waits on to you              |
+ == = 1 of|   p       reads its plan, and answers it there           |eds you
+          |   x       closes it for good                             |
+ * + plan |   o       opens the run's page in a browser              |   Q78GRR
+   ? appro|   s       shows what the run cost                        |=========
+          |   g       draws the run's graph, each node as its log    |
+          |           stands                                         |
+          |   f       follows                                        |
+          |   esc     back to the runs                               |
+          |   q       leaves yunta                                   |
+          |   /       what you can do here                           |
+          |   ?       the keys here                                  |
+          |   ctrl-c  leaves yunta                                   |
+          +----------------------------------------------------------+
+                        |     about: artifacts/plan/tasks.yaml
+                        |   | approve: Resolve the gate
+                        |   |   nothing in the workflow waits on it
+                        | ... 34 more lines
+ up/down scroll ; esc closes it

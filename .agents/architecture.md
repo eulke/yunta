@@ -1,6 +1,6 @@
 # Architecture
 
-How Yunta's crates fit and what every run guarantees; a crate's map is its root `//!`.
+How Yunta's crates fit and what every run guarantees.
 
 ## A run
 
@@ -8,7 +8,7 @@ An interface asks `yunta-api` for a run; `check` refuses what cannot run. The
 run loop schedules nodes, and a task's cycle opens sessions through the port on an adapter, each in a pooled
 checkout. The fence and the rail judge each write at the tool call, and the close judges the diff. Declared
 criteria the engine runs decide a task; an agent's word is never evidence. Every fact is an event in the log,
-replay derives every state from it, and what a person reads is drawn from it in Surco.
+and what a person reads is drawn from it in Surco.
 
 ## Crates
 
@@ -25,12 +25,12 @@ replay derives every state from it, and what a person reads is drawn from it in 
 | `yunta-api` | what interfaces ask of Yunta | core, storage, replay, engine, adapters, render, surco |
 | `yunta-mcp` | the control plane an agent asks Yunta through | core, render, api, mcp-protocol, surco |
 | `yunta-ui` | the interface apart from its medium | core, replay, render, api, surco |
+| `yunta-tui` | the application at a terminal, in cells | core, ui, surco |
 | `yunta` | the commands | core, replay, render, api, mcp, ui, surco |
 | `yunta-testkit-core` | test scaffolding below the engine | core |
 | `yunta-testkit` | whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
+| `yunta-testkit-ui` | the application's test world and walk | core, api, ui, surco, testkit-core, testkit |
 | `xtask` | smells, the docs checker, schemas | core, surco |
-
-`cargo xtask docs --check` holds it to the manifests.
 
 ## Product rules
 
@@ -39,18 +39,18 @@ replay derives every state from it, and what a person reads is drawn from it in 
 - What a person reads is a `Doc` a `Surface` draws; new output grows Surco as a principle, a token or a
   component in `crates/surco`, and what Yunta says with it stands in `crates/render`. [smell escape_outside_paint]
   [smell glyph_literal_outside_glyphs] [smell state_phrase_outside_words] [smell look_inside_a_block] [review]
-  Paths: `crates/cli/src/**`, `crates/ui/src/**`, `crates/adapters/src/**`, `crates/render/src/**`,
-  `crates/surco/src/**`
+  Paths: `crates/cli/src/**`, `crates/ui/src/**`, `crates/tui/src/**`, `crates/adapters/src/**`,
+  `crates/render/src/**`, `crates/surco/src/**`
 - A richer layer adds no fact: every layer of a stream writes the same text, so a person without color reads
   all of it. [review]
   Paths: `crates/surco/src/paint.rs`, `crates/surco/src/surface/**`
 - A command a reader is told to type is spelled once. [smell command_outside_command_rs]
 - A printed sentence carries no dash: a colon explains, a semicolon comes before the hint it ends with.
   [smell dash_in_prod_strings]
-- Every adapter (`claude-code`, `codex`, `mock`) offers the same features; a gap is a defect.
+- Every adapter offers the same features; a gap is a defect.
   [test adapters/contract]
-- A task session's brief names its task; its contract (notes, scope, criteria) is read through the run's tools,
-  never copied into the prompt, and what else a node reads its workflow declares.
+- A task session's brief names its task; its contract is read through the run's tools, never copied into the
+  prompt, and what else a node reads its workflow declares.
   [test engine/run_sessions::a_task_session_reads_its_task_through_its_tools_and_its_check_is_the_close_s]
 - Nothing retries unless an input the failure depends on changed. [test engine/check_retry]
 - A run stops for a person only for intent, an approval they chose or a fix only they can make; mechanical

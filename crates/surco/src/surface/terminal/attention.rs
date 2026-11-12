@@ -1,9 +1,10 @@
 //! The attention on a terminal: what needs a person, and how they answer it,
-//! on one row that keeps its answer when it is cut.
+//! on one row that keeps its answer when it is cut; on a screen, that row tinted.
 
+use super::Terminal;
 use crate::components::{Answer, Attention};
 use crate::glyphs::Mark;
-use crate::line::{Line, Tone};
+use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
 use crate::width::{cell_width, truncate};
 use crate::words::Standing;
@@ -60,6 +61,19 @@ impl Attention {
                 .push(Tone::NeedsYou, format!(" {word}")),
         };
         head.plain(": ")
+    }
+}
+
+impl Terminal {
+    /// The attention row a screen holds: the attention's one row at this look's width,
+    /// tinted across it.
+    pub fn attention(&self, attention: &Attention) -> Line {
+        attention
+            .lines(&self.look)
+            .into_iter()
+            .next()
+            .unwrap_or_default()
+            .filled(Fill::Tint)
     }
 }
 

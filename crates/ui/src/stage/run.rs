@@ -1,6 +1,6 @@
-//! See [`super`]. A run, followed: its chronicle in render's words, the rows a person
-//! watches it by under it, its ribbon across the screen and its page beside it, or the
-//! page of the node picked in its place.
+//! See [`super`]. A run, followed: its ribbon and the rows a person watches it by across
+//! the screen, its nodes beside its page as a list the pointer moves along, and its page
+//! with its chronicle under it, or the page of the node picked in its place.
 //!
 //! The stage asks for the run's following and its page as it opens. The following
 //! hands back the run as it reads first, then what each look at it finds, which the
@@ -13,10 +13,9 @@
 //! page. The acts the run offers that a key here takes are `acts`': each is bound to its
 //! key, and the legend says each in render's words.
 //!
-//! What a person watches the run by reads at its end, where it grows. The page beside it
-//! scrolls by the page, the arrows moving along the nodes; it keeps the line it was
-//! scrolled to when it is read again, and starts at its first line when it is another
-//! page: a node's, the run's again, a successor's.
+//! The page scrolls by the page, the arrows moving along the nodes; it keeps the line it
+//! was scrolled to when it is read again, and starts at its first line when it is
+//! another page: a node's, the run's again, a successor's.
 
 mod acts;
 
@@ -55,7 +54,7 @@ pub struct RunStage {
     pointed: Option<NodeId>,
     /// The node whose page stands in place of the run's, and that page once read.
     picked: Option<(NodeId, Option<Box<Node>>)>,
-    /// Where the page beside is scrolled to.
+    /// Where the page is scrolled to.
     scroll: Scroll,
     /// What the last piece of work came to where it did not do what was asked.
     said: Option<String>,
@@ -109,12 +108,12 @@ impl RunStage {
             .collect()
     }
 
-    /// The run as a screen at `now`: its ribbon across it, its chronicle and the rows a
-    /// person watches it by, its page or the picked node's beside them, and the keys.
+    /// The run as a screen at `now`: its ribbon and the rows a person watches it by across
+    /// it, its nodes beside its page, its page or the picked node's, and the keys.
     pub(crate) fn screen(&self, look: &Look, now: DateTime<Utc>) -> Screen {
         let frame = self.frame(now);
-        let watched = Region::new(self.watched(frame.as_ref(), look)).in_sight(Sight::at_the_end());
-        let mut screen = Screen::new(watched);
+        let page = Region::new(self.read(frame.as_ref(), look)).in_sight(self.scroll.sight());
+        let mut screen = Screen::new(page);
         screen.trail = vec![
             yunta_render::screen::YUNTA.to_string(),
             self.run.handle().to_string(),
@@ -122,17 +121,14 @@ impl RunStage {
         screen
             .trail
             .extend(self.picked.as_ref().map(|(node, _)| node.to_string()));
-        screen.about = frame
-            .as_ref()
-            .map(|frame| Doc::new().with(watched::ribbon(frame, look.motion)));
-        let beside = match &self.picked {
-            Some((_, page)) => page.as_ref().map(|page| page.document(look)),
-            None => self.page.as_ref().map(|page| page.document(look)),
-        };
-        let shows_a_page = beside.is_some();
-        screen.side = beside.map(|doc| Side {
-            region: Region::new(doc).in_sight(self.scroll.sight()),
-            focused: false,
+        screen.about = frame.as_ref().map(|frame| self.across(frame, look));
+        screen.side = frame.as_ref().map(|frame| {
+            let nodes = watched::nodes(frame, self.pointed.as_ref(), look);
+            Side {
+                region: Region::new(Doc::new().with(Block::Lines(nodes)))
+                    .in_sight(Sight::following_pointer()),
+                focused: true,
+            }
         });
         let offered = self.offered_in(frame.as_ref());
         let acts: Vec<(char, &str)> = offered.iter().map(|act| (act.key, act.does)).collect();
@@ -142,32 +138,48 @@ impl RunStage {
             self.follows,
             self.picked.is_some(),
         );
-        screen.legend = match shows_a_page && self.scroll.scrolls() {
-            true => yunta_render::screen::scrolling_beside(legend),
+        screen.legend = match self.scroll.scrolls() {
+            true => yunta_render::screen::scrolling_by_the_page(legend),
             false => legend,
         };
         screen
     }
 
-    /// The run as a person watches it, framed as `frame`: its chronicle, the rows under
-    /// it once the run is read, and what the last piece of work said where it did not
-    /// do what was asked.
-    fn watched(&self, frame: Option<&RunFrame>, look: &Look) -> Doc {
-        let mut doc = yunta_render::chronicle::told(&self.moments, &self.run, look);
-        if let (Some(followed), Some(frame)) = (&self.followed, frame) {
-            let rows = watched::rows(
-                frame,
-                &self.run,
-                followed.offers_a_menu(frame),
-                &self.heard,
-                look,
-            );
-            let lines = rows
-                .attention
-                .into_iter()
-                .chain(rows.nodes)
-                .chain([rows.footer]);
-            doc = doc.with(Block::Lines(lines.collect()));
+    /// What stands across the screen, framed as `frame`: the run's ribbon, then the rows a
+    /// person watches it by: what needs them, what each working node is doing, and how far
+    /// the run has come.
+    fn across(&self, frame: &RunFrame, look: &Look) -> Doc {
+        let doc = Doc::new().with(watched::ribbon(frame, look.motion));
+        let Some(followed) = &self.followed else {
+            return doc;
+        };
+        let rows = watched::rows(
+            frame,
+            &self.run,
+            followed.offers_a_menu(frame),
+            &self.heard,
+            look,
+        );
+        let lines = rows
+            .attention
+            .into_iter()
+            .chain(rows.nodes)
+            .chain([rows.footer]);
+        doc.with(Block::Lines(lines.collect()))
+    }
+
+    /// The page a person reads, framed as `frame`: the picked node's, or the run's with
+    /// its chronicle under it, and what the last piece of work said where it did not do
+    /// what was asked.
+    fn read(&self, frame: Option<&RunFrame>, look: &Look) -> Doc {
+        let page = match &self.picked {
+            Some((_, page)) => page.as_ref().map(|page| page.document(look)),
+            None => self.page.as_ref().map(|page| page.document(look)),
+        };
+        let mut doc = Doc::new().with_all(page.map(Doc::into_blocks).unwrap_or_default());
+        if self.picked.is_none() && frame.is_some() {
+            let told = yunta_render::chronicle::told(&self.moments, &self.run, look);
+            doc = doc.with_all(told.into_blocks());
         }
         match &self.said {
             Some(said) => doc.with(Note(said.clone())),
@@ -214,10 +226,9 @@ impl RunStage {
         }
     }
 
-    /// What a surface laid out of the page beside, which the keys that scroll move
-    /// from; none where it showed none of it.
-    pub(crate) fn laid(&mut self, laid: Option<Laid>) {
-        self.scroll.laid(laid.unwrap_or_default());
+    /// What a surface laid out of the page, which the keys that scroll move from.
+    pub(crate) fn laid(&mut self, laid: Laid) {
+        self.scroll.laid(laid);
     }
 
     /// What news of the run's following does at `now`: the run as it reads first, then

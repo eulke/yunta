@@ -7,9 +7,9 @@ use std::process::{Child, Stdio};
 
 use surco::doc::Block;
 use surco::paint::Paint;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
-use yunta_ui::News;
+use yunta_ui::{Input, News};
 
 /// A node that says it started and holds until told to go, or until its marker is gone
 /// with the test, so no engine outlives the test that started it; then one that
@@ -187,7 +187,10 @@ async fn a_run_followed_to_its_end_says_each_moment_as_a_piped_follower_does() {
     assert!(!piped.is_empty(), "the follower wrote what came");
     assert!(told.ends_with(&piped), "{told:#?}\nends with\n{piped:#?}");
     let screen = state.screen(&Markdown.look());
-    assert!(screen.side.is_some(), "the run's page stands beside it");
+    assert!(
+        screen.side.is_some(),
+        "the run's nodes stand beside its page"
+    );
 }
 
 /// Moves the card on `terminal` down to `option` and chooses it.

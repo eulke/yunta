@@ -15,10 +15,12 @@ use yunta_core::{Workflow, WorkflowName};
 use yunta_render::graph::{self, Labels};
 use yunta_render::page::{Graph, History, Page, Stats};
 use yunta_testkit::Bench;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::workspace;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Performer, State};
 
-use support::{drive, on_the_field, stopped, workspace};
+use support::{on_the_field, stopped};
 
 /// Two nodes that finish, one after the other.
 const FINISHES: &str = "name: done\nnodes:\n  - { id: first, kind: bash, run: \"true\" }\n  \

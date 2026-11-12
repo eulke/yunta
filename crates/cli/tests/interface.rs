@@ -5,15 +5,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use surco::surface::Markdown;
-use tokio::sync::mpsc;
 use yunta_api::Workspace;
 use yunta_core::process::SearchPath;
 use yunta_core::{Env, ProcessSecrets, SystemIdSource};
 use yunta_testkit_core::FixedClock;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::now;
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, Performer, Request, State};
+use yunta_ui::{Performer, Request, State};
 
 #[path = "interface/decision.rs"]
 mod decision;
@@ -45,43 +45,6 @@ fn workspace(dir: &Path, home: &Path) -> Workspace {
         ids: Arc::new(SystemIdSource),
         secrets: Arc::new(ProcessSecrets),
         binary: PathBuf::from(env!("CARGO_BIN_EXE_yunta")),
-    }
-}
-
-/// The instant the application stands at in these tests.
-fn now() -> DateTime<Utc> {
-    DateTime::from_timestamp(1_800_000_000, 0).expect("an instant")
-}
-
-/// `state` driven with `performer`: what `asked` asks for and every request it leads to
-/// carried out, each answer handed back, then each of `strokes` in turn once the state
-/// waits on nothing; the state as it stands when it waits on nothing and no stroke is
-/// left, with what only a surface does, showing a page or leaving, that it asked for.
-async fn drive(
-    mut state: State,
-    asked: Vec<Request>,
-    performer: &Arc<Performer>,
-    strokes: &[Stroke],
-) -> (State, Vec<Request>) {
-    let (inputs, mut received) = mpsc::unbounded_channel();
-    let mut strokes = strokes.iter().copied();
-    let (mut asked, mut surfaced) = (asked, Vec::new());
-    loop {
-        for request in asked.drain(..) {
-            surfaced.extend(performer.take(request, &inputs));
-        }
-        if state.waiting_on().is_empty() {
-            match strokes.next() {
-                Some(stroke) => asked = state.update(Input::Stroke(stroke)),
-                None => return (state, surfaced),
-            }
-            continue;
-        }
-        let input = received
-            .recv()
-            .await
-            .expect("the performer hands back what the state waits on");
-        asked = state.update(input);
     }
 }
 

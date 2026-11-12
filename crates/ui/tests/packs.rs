@@ -14,13 +14,14 @@ use yunta_api::{Remark, Stop};
 use yunta_core::PackRef;
 use yunta_render::page::pack::Inventory;
 use yunta_render::page::Page;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::{
+    commit_of, pack_with_an_executor, with_a_pack_installed, workspace,
+};
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Outcome, PackOperation, PackOutcome, Performer, Request, State};
 
-use support::{
-    commit_of, drive, on_the_field, pack_with_an_executor, stopped, with_a_pack_installed,
-    workspace,
-};
+use support::{on_the_field, stopped};
 
 /// The screen's main region, as Markdown writes it.
 fn main_region(state: &State) -> String {

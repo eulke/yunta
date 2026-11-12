@@ -82,3 +82,20 @@ fn an_attention_answered_elsewhere_says_what_is_asked() {
     );
     assert_eq!(cut[0].text(), "◆ EKPBGE needs you: node `implement` as…");
 }
+
+/// On a screen, the attention is the reference's row at 58 cells, what is asked giving way
+/// to the act it offers, and the row tinted across the screen.
+#[test]
+fn the_attention_row_keeps_its_act_and_is_tinted() {
+    let attention = Attention::key("implement asks at its terminal", "a", "go there").of("EKPBGE");
+    let terminal = Terminal::on(Look {
+        width: Width::exact(58),
+        ..look(58)
+    });
+    let row = terminal.attention(&attention);
+    assert_eq!(
+        row.text(),
+        "◆ EKPBGE needs you: implement asks at its te… · a go there"
+    );
+    assert_eq!(row.fill(), Some(Fill::Tint));
+}

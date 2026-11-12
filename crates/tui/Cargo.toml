@@ -1,0 +1,34 @@
+[package]
+name = "yunta-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Yunta's application at a terminal: each screen yunta-ui makes, laid out in cells with Ratatui and drawn in Surco's lines, its keys read with crossterm, and the terminal held and given back."
+
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The clock the application is handed, which the time it hands in is read from.
+yunta-core.workspace = true
+# The application it shows: what a person has open, what a stroke does, the work it asks.
+yunta-ui.workspace = true
+# Every line written into a cell, and the one table its color is read from.
+yunta-surco.workspace = true
+# The cells a screen is laid out in, and the frame written to the terminal.
+ratatui = { workspace = true, features = ["crossterm"] }
+# The terminal's keys, pastes and size, read as a stream, and its modes held and given back.
+crossterm = { workspace = true, features = ["event-stream"] }
+# The loop: what arrives selected over, the time on a tick, the performer's channel.
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+# The terminal's events, read as the stream the loop selects over.
+futures.workspace = true
+# The signal that stops the process on Ctrl-Z, once the terminal is given back.
+nix.workspace = true

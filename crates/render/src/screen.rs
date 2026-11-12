@@ -60,6 +60,16 @@ pub fn broke_inside(said: &str) -> String {
     }
 }
 
+/// What a terminal too small for the application says, alone on it: how much room the
+/// application needs, and how much the terminal has, each as columns by rows.
+pub fn room_needed(least: (usize, usize), has: (usize, usize)) -> String {
+    format!(
+        "the application needs a terminal of {} by {} at least, and this one is {} by {}: \
+         make it larger, or press q to leave",
+        least.0, least.1, has.0, has.1
+    )
+}
+
 /// What a confirmation is titled, over the screen it stands on.
 pub const CONFIRM: &str = "confirm";
 
@@ -135,9 +145,9 @@ pub fn scrolling(legend: Legend) -> Legend {
     )
 }
 
-/// `legend` led by the keys that scroll a run's page beside its nodes, the arrows
-/// moving along the nodes: a page with PageUp and PageDown.
-pub fn scrolling_beside(legend: Legend) -> Legend {
+/// `legend` led by the keys that scroll a run's page, where the arrows move along its
+/// nodes: the page by PageUp and PageDown.
+pub fn scrolling_by_the_page(legend: Legend) -> Legend {
     led_by(Legend::new().key("pgup pgdn", "scroll its page"), legend)
 }
 

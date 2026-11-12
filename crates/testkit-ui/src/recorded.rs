@@ -17,8 +17,9 @@ use yunta_ui::{
     Performer, Request, State, WorkflowOperation,
 };
 
-use super::home::{root_of, Home};
-use crate::support::{now, workspace, workspace_on};
+use crate::home::{root_of, Home};
+use crate::sandbox::{now, workspace, workspace_on};
+use crate::walk::Reached;
 
 /// What each kind of operation found and came to where it was performed.
 pub struct Recordings(Vec<(OperationKind, Recorded)>);
@@ -266,6 +267,20 @@ impl Recordings {
     pub fn news_of(&self, operation: &Operation) -> &[News] {
         self.recorded(operation)
             .map_or(&[], |recorded| recorded.news.as_slice())
+    }
+
+    /// Every piece of work `requests` asks for is one these recordings answer, which the
+    /// walk answers it with; `reached` says the inputs that asked where one is not.
+    pub fn carried_out(&self, requests: &[Request], reached: &Reached<'_>) {
+        for request in requests {
+            if let Request::Perform(_, operation) = request {
+                assert!(
+                    !self.of(operation).is_empty(),
+                    "{operation:?} has no recording in recorded.rs; asked after:\n{}",
+                    reached.inputs()
+                );
+            }
+        }
     }
 
     fn recorded(&self, operation: &Operation) -> Option<&Recorded> {

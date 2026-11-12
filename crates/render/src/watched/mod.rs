@@ -15,7 +15,7 @@ use std::time::Duration;
 use surco::motion::Motion;
 use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::step::{Choice, NextStep};
-use yunta_core::RunId;
+use yunta_core::{NodeId, RunId};
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
 
 use crate::command;
@@ -392,6 +392,36 @@ fn calls_row(node: &NodeFrame, look: &Look, taken: usize) -> String {
     }
     kept.reverse();
     kept.join(apart.as_str())
+}
+
+/// The run's nodes, one a row in the workflow's order, which a person moves along: the
+/// pointer on the one `pointed` at, each with its standing's mark in its tone, and how
+/// long it worked where it did.
+pub fn nodes(frame: &RunFrame, pointed: Option<&NodeId>, look: &Look) -> Vec<Line> {
+    let glyphs = look.glyphs;
+    frame
+        .nodes
+        .iter()
+        .map(|node| {
+            let mark = node.standing.mark();
+            let row = match pointed == Some(&node.id) {
+                true => Line::new()
+                    .push(Tone::NeedsYou, format!("{} ", glyphs.pointer()))
+                    .push(Tone::of(mark), glyphs.mark(mark).to_string())
+                    .plain(" ")
+                    .push(Tone::Strong, node.id.to_string()),
+                false => Line::new()
+                    .plain("  ")
+                    .push(Tone::of(mark), glyphs.mark(mark).to_string())
+                    .plain(" ")
+                    .plain(node.id.to_string()),
+            };
+            match node.elapsed {
+                Some(worked) => row.push(Tone::Muted, format!("  {}", duration(worked))),
+                None => row,
+            }
+        })
+        .collect()
 }
 
 /// Every node the run is working on right now, in the workflow's own

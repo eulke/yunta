@@ -1,0 +1,24 @@
+ yunta :: Q78GRR
+................................................................................
+ plan appr+ what you can do here ------------------------------------+
+ ==== ====| * yunta resolve-gate Q78GRR        puts what the run     |
+          |                                    waits on to you       |
+ ? needs y|   yunta review Q78GRR              reads the plan the    |
+ == = 1 of|                                    run waits on, and     |eds you
+          |                                    answers it there      |
+ * + plan |   yunta close Q78GRR               closes the run for    |   Q78GRR
+   ? appro|                                    good                  |=========
+          |   yunta open Q78GRR                opens the run's page  |
+          |                                    in a browser          |
+          |   yunta stats Q78GRR               shows what the run    |
+          |                                    cost                  |
+          |   yunta graph --run Q78GRR         draws the run's       |
+          |                                    graph, each node as   |
+          |                                    its log stands        |
+          |   yunta status Q78GRR --node plan  shows one node of the |
+          |                                    run whole             |
+          | ... 4 more options                                       |
+          | up/down move ; type to filter ; enter chooses ; esc goes |
+          | back                                                     |
+          +----------------------------------------------------------+
+

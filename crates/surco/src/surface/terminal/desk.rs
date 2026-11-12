@@ -1,9 +1,9 @@
 //! A plan's desk on a terminal of an exact size. Every row it draws stands inside a margin,
 //! so nothing reaches the last column, where a terminal decides on its own whether the next
-//! character wraps. It fills the rows it is given, less the one a prompt never draws on.
+//! character wraps. It fills the rows it is given.
 
 use super::card::Placed;
-use super::Terminal;
+use super::{at_ends, Terminal, APART};
 use crate::components::{Desk, FootRow, Laid, Pane};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Line, Tone};
@@ -31,8 +31,6 @@ const PANE_MOST: usize = 120;
 const ROOM_TO_READ: usize = 10;
 /// The rows they get before the rows left blank go too.
 const LEAST_TO_READ: usize = 5;
-/// The cells between what stands at the two ends of a row, when both stand on it.
-const APART: usize = 2;
 /// The fewest cells a title keeps when something stands at the far end of its row: under them
 /// what stands there goes instead.
 const LEAST_TITLE: usize = 20;
@@ -79,7 +77,7 @@ impl Desk {
     }
 
     /// The rows the desk takes with nothing given up: its whole head, the longer of its rail
-    /// and its pane, its foot, and the row a prompt never draws on.
+    /// and its pane, and its foot.
     fn whole_rows(&self, look: &Look) -> usize {
         let measures = Measures::of(look.width.cells());
         let head = 2 + usize::from(self.gist.is_some()) + usize::from(self.asked.is_some());
@@ -88,16 +86,15 @@ impl Desk {
         let rail = measures
             .rail
             .map_or(0, |cells| rail_length(&self.rail, look, cells));
-        head + pane.max(rail).max(ROOM_TO_READ) + foot + 1
+        head + pane.max(rail).max(ROOM_TO_READ) + foot
     }
 
-    /// The desk drawn in `rows` rows of a terminal, less the row a prompt never draws on, with
-    /// what a key that scrolls it has to know of its pane. On a short one the head gives up
-    /// what was asked, then the gist, then its blank rows.
-    pub fn drawn(&self, look: &Look, rows: usize) -> Placed {
+    /// The desk drawn in `most` rows, with what a key that scrolls it has to know of its
+    /// pane. Short of rows, the head gives up what was asked, then the gist, then its blank
+    /// rows.
+    pub fn drawn(&self, look: &Look, most: usize) -> Placed {
         let measures = Measures::of(look.width.cells());
         let glyphs = look.glyphs;
-        let most = rows.saturating_sub(1);
         let mut foot = self.foot_lines(glyphs, measures.whole);
         let mut head = self.head_lines(glyphs, measures.whole, most, foot.len());
         if most.saturating_sub(head.len() + foot.len()) < LEAST_TO_READ {
@@ -256,16 +253,6 @@ impl Desk {
     }
 }
 
-/// `left` at the start of `cells` cells and `right` at its far end, with the space between
-/// them as wide as the row needs. Without a `right`, `left` stands alone.
-fn at_ends(left: Line, right: Option<Line>, cells: usize) -> Line {
-    let Some(right) = right else {
-        return left;
-    };
-    let gap = cells.saturating_sub(cell_width(&left.text()) + cell_width(&right.text()));
-    left.plain(" ".repeat(gap)).then(right)
-}
-
 /// The title's parts in `cells`: as many leading parts as fit stand whole, the first in
 /// strong and the rest muted. A first part too wide for the cells is cut.
 fn title_parts(parts: &[String], cells: usize, glyphs: Glyphs) -> Line {
@@ -362,4 +349,4 @@ mod rail;
 use rail::{rail_length, rail_rows};
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

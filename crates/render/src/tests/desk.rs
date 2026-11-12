@@ -269,7 +269,8 @@ fn the_desk_matches_its_goldens() {
                 foot(keys),
                 &look,
             )
-            .drawn(&look, 36);
+            // A terminal 36 rows high holds the desk over its last row.
+            .drawn(&look, 35);
         let text: String = laid
             .lines
             .iter()

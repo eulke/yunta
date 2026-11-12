@@ -1,0 +1,10 @@
+  The plan the planner handed over.
+
+▎ ◆ Plan and its tests registered. Approve?
+▎
+▎   b  does it
+▎ ▸ c  does it
+▎ … 6 more options
+▎
+▎ ↑↓ move · enter chooses · n adds a note · esc leaves it
+▎ for later

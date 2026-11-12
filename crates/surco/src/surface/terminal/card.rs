@@ -61,13 +61,12 @@ enum Keeping {
 }
 
 impl Card {
-    /// The card as a prompt draws it on a terminal of `rows` rows, with where the
-    /// cursor stands when a field is open. A short terminal keeps the question and
-    /// the row pointed at: the list gives way first, counting what it leaves out,
-    /// then what stands under the question and the route, and then the keys. A
-    /// terminal too short for a question and one row is too short to be asked on.
-    pub fn drawn(&self, look: &Look, rows: usize) -> Placed {
-        let most = rows.saturating_sub(1);
+    /// The card as a prompt draws it in at most `rows` rows, with where the cursor
+    /// stands when a field is open. Short of rows, it keeps the question and the row
+    /// pointed at: the list gives way first, counting what it leaves out, then what
+    /// stands under the question and the route, and then the keys. Fewer rows than a
+    /// question and one row are too few to be asked in.
+    pub fn drawn(&self, look: &Look, most: usize) -> Placed {
         let whole = self.laid_out(look, most, Keeping::Everything);
         let placed = [Keeping::WhatAnswers, Keeping::TheQuestion]
             .into_iter()
@@ -389,4 +388,4 @@ mod round;
 pub use round::said_whole;
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

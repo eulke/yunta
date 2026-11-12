@@ -42,7 +42,7 @@ New or changed dependencies:
 | `yunta-api` | core, storage, replay, engine, adapters, render, surco |
 | `yunta-mcp` | core, render, api, mcp-protocol, surco |
 | `yunta-ui` | core, replay, render, api, surco |
-| `yunta-tui` | ui, surco, ratatui, crossterm |
+| `yunta-tui` | core (the clock it is handed), ui, surco, ratatui, crossterm |
 | `yunta` | core, replay, render, api, mcp, surco, and `yunta-ui` and the TUI as they come; its dependencies never name the engine, the store or the adapters |
 | desktop | ui, surco |
 

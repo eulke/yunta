@@ -12,6 +12,7 @@ use crate::words::Standing;
 
 mod asked;
 mod attention;
+mod boxed;
 mod card;
 pub use card::{narrowed, said_whole, Placed};
 mod checklist;
@@ -28,6 +29,8 @@ mod headline;
 mod legend;
 pub(in crate::surface) mod markdown;
 mod next;
+mod pane;
+pub use pane::Paned;
 mod typed;
 pub(in crate::surface) use next::{NEXT, OR};
 mod page;
@@ -35,8 +38,22 @@ mod problem;
 mod ribbon;
 pub(in crate::surface) use problem::{HELP, REFUSED};
 mod runs;
+mod screen;
 mod scrolled;
 mod table;
+
+/// The cells between what stands at the two ends of a row, when both stand on it.
+const APART: usize = 2;
+
+/// `left` at the start of `cells` cells and `right` at its far end, with the space between
+/// them as wide as the row needs. Without a `right`, `left` stands alone.
+fn at_ends(left: Line, right: Option<Line>, cells: usize) -> Line {
+    let Some(right) = right else {
+        return left;
+    };
+    let gap = cells.saturating_sub(cell_width(&left.text()) + cell_width(&right.text()));
+    left.plain(" ".repeat(gap)).then(right)
+}
 
 /// A terminal stream, by how its lines look.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,9 +82,15 @@ impl Terminal {
     /// which hangs from it. It opens on what it says: there is nothing
     /// above the first line, and no blank line is doubled.
     pub fn lines(&self, doc: &Doc) -> Vec<Line> {
+        self.in_rhythm(doc.blocks())
+    }
+
+    /// `blocks` laid out for this stream in the rhythm a page keeps, as [`Terminal::lines`]
+    /// lays out a document's.
+    fn in_rhythm(&self, blocks: &[Block]) -> Vec<Line> {
         let mut lines: Vec<Line> = Vec::new();
         let mut headed = false;
-        for block in doc.blocks() {
+        for block in blocks {
             let mut drawn = self.block(block);
             // What hangs from a heading starts on the line under it.
             if headed && drawn.first().is_some_and(|line| line.text().is_empty()) {
@@ -114,11 +137,19 @@ impl Terminal {
     }
 
     /// `block` held on a terminal `columns` wide and `rows` high while a person
-    /// answers it: a prompt's block fitted to the rows, with where the cursor stands
-    /// when it is typed into, and any other block as a document draws it. A desk lays
-    /// out columns of its own across every cell the terminal has; everything else
-    /// keeps to the measure of a line.
+    /// answers it where they are: fitted to the rows over the terminal's last, the row
+    /// the cursor is left on, so drawing it never scrolls what stands above it; a list
+    /// under the question its caller said above it, which stays in sight.
     pub fn held(&self, block: &Block, columns: usize, rows: usize) -> Placed {
+        let said_above = usize::from(matches!(block, Block::ChoiceList(_)));
+        self.held_in(block, columns, rows.saturating_sub(1 + said_above))
+    }
+
+    /// `block` held in `rows` rows `columns` wide: a prompt's block fitted to them, with
+    /// where the cursor stands when it is typed into, and any other block as a document
+    /// draws it. A desk lays out columns of its own across every cell it is given;
+    /// everything else keeps to the measure of a line.
+    fn held_in(&self, block: &Block, columns: usize, rows: usize) -> Placed {
         match block {
             Block::Card(card) => card.drawn(&self.look, rows),
             Block::Desk(desk) => {

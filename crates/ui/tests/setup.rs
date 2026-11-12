@@ -4,8 +4,6 @@
 //! unasked, and a setup left before it is written writes nothing and lets the project
 //! it detected go.
 
-mod support;
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,10 +12,10 @@ use surco::surface::{Markdown, Surface};
 use tokio::sync::mpsc;
 use yunta_api::{ProjectDraft, ProjectSetup, ProposedRunners, Repository, RunnerDeclaration};
 use yunta_core::{AdapterId, Detected, ModelName, ProbedAdapter, RunnerCandidate, RunnerName};
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::{claude_answering, now, workspace, workspace_on};
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Outcome, Performer, Request, State, Ticket};
-
-use support::{claude_answering, drive, now, workspace, workspace_on};
 
 /// What setting a repository up found: the name `project` and the base branch `main`,
 /// Claude Code answering and Codex not, and two runners proposed.

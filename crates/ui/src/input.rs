@@ -10,7 +10,7 @@ use crate::{News, Outcome, Ticket};
 /// What reaches the application: a stroke a person gave, what a surface laid out, the
 /// time, and what work it asked for says while it works, hands back while it lasts and
 /// came to.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Input {
     Stroke(Stroke),
     /// What a surface laid out of the screen's regions that it shows in part: of each,

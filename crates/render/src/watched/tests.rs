@@ -457,3 +457,29 @@ fn the_answer_outlasts_the_counter() {
     let row = Paint::Plain.line(&footer(&frame, &narrow));
     assert_eq!(row, "nothing needs you");
 }
+
+/// The run's nodes beside its page: each a row with its standing's mark, the pointer on
+/// the one pointed at, and how long a node worked where it did.
+#[test]
+fn the_runs_nodes_are_a_list_the_pointer_moves_along() {
+    let mut frame = RunFrame::sample(&RUN);
+    let mut plan = NodeFrame::sample(&NodeId::from("plan"), NodeStanding::ToGo);
+    plan.standing = Standing::Finished;
+    plan.elapsed = Some(Duration::from_secs(36));
+    let mut approve = NodeFrame::sample(&NodeId::from("approve-plan"), NodeStanding::ToGo);
+    approve.standing = Standing::NeedsYou;
+    approve.elapsed = None;
+    let mut ship = NodeFrame::sample(&NodeId::from("ship"), NodeStanding::ToGo);
+    ship.standing = Standing::NeverRan;
+    ship.elapsed = None;
+    frame.nodes = vec![plan, approve, ship];
+    let pointed = NodeId::from("approve-plan");
+    assert_eq!(
+        drawn(nodes(&frame, Some(&pointed), &look(22))),
+        ["  ✓ plan  36s", "▸ ◆ approve-plan", "  ◌ ship"]
+    );
+    assert_eq!(
+        drawn(nodes(&frame, None, &ascii())),
+        ["  + plan  36s", "  ? approve-plan", "  . ship"]
+    );
+}

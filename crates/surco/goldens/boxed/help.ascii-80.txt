@@ -1,0 +1,6 @@
++ keys ----------------------------------------------------+
+| /      anything: only what can be done here              |
+| n      start a new run, from anywhere                    |
+| esc    one step back; what it leaves stays waiting       |
+| q      leave: every run keeps going                      |
++----------------------------------------------------------+

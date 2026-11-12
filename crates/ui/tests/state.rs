@@ -1,16 +1,12 @@
 //! The application as values, through `State` alone: what it asks as it opens, an
 //! answer that comes late, and where it stands outside a repository.
 
-use chrono::{DateTime, Utc};
 use surco::look::Look;
 use surco::surface::{Markdown, Surface};
 use yunta_api::Repository;
 use yunta_render::page::{Page, Signpost};
+use yunta_testkit_ui::sandbox::now;
 use yunta_ui::{Input, Operation, Outcome, Request, State};
-
-fn now() -> DateTime<Utc> {
-    DateTime::from_timestamp(1_800_000_000, 0).expect("an instant")
-}
 
 /// The screen's main region, as Markdown writes it.
 fn main_region(state: &State) -> String {

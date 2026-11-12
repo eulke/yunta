@@ -45,3 +45,44 @@ fn a_narrow_legend_goes_on_between_two_keys() {
         ]
     );
 }
+
+/// On a screen, the legend is one row: every key where they all fit; where they do not,
+/// the first keys that fit, a mark that more stand between, and the last key.
+#[test]
+fn the_legend_row_keeps_its_first_keys_and_its_last() {
+    let legend = Legend::new()
+        .arrows("node")
+        .key("s", "stats")
+        .key("g", "graph")
+        .key("?", "the keys here");
+    let wide = Terminal::on(Look {
+        width: Width::exact(78),
+        ..look(78)
+    });
+    assert_eq!(
+        wide.legend(&legend).text(),
+        "↑↓ node · s stats · g graph · ? the keys here"
+    );
+    let narrow = Terminal::on(Look {
+        width: Width::exact(40),
+        ..look(40)
+    });
+    assert_eq!(
+        narrow.legend(&legend).text(),
+        "↑↓ node · s stats · … · ? the keys here"
+    );
+}
+
+/// A last key too wide to stand beside even the first leaves the first keys that fit,
+/// cut.
+#[test]
+fn a_last_key_too_wide_leaves_the_first_keys_cut() {
+    let legend = Legend::new()
+        .key("q", "field, it keeps going")
+        .key("s", "stats");
+    let narrow = Terminal::on(Look {
+        width: Width::exact(12),
+        ..look(12)
+    });
+    assert_eq!(narrow.legend(&legend).text(), "q field, it…");
+}

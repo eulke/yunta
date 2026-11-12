@@ -1,0 +1,41 @@
+[package]
+name = "yunta-testkit-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "What every surface's tests of Yunta's application share: the world a test works in, a state driven with its performer, and the walk over every state the application reaches."
+# A dev-only crate: every dependent uses it under [dev-dependencies], so it
+# is never part of a published package and never itself published.
+publish = false
+
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The workspace a test's application works in, and the work it fetches packs with.
+yunta-api.workspace = true
+# The environment a workspace reads, its search path and the ids it mints.
+yunta-core.workspace = true
+# The application a test drives: its state, inputs, requests and performer.
+yunta-ui.workspace = true
+# A git repository a test makes, and the commits it reads.
+yunta-testkit.workspace = true
+# A clock that stands still.
+yunta-testkit-core.workspace = true
+# The screen a state draws, as Markdown keeps it apart from another, and as a terminal of
+# a few rows lays it out.
+yunta-surco.workspace = true
+# The instant every test of the application stands at.
+chrono.workspace = true
+# The channel a performer hands its answers back on, and the files the walk's places are
+# written with while its async work runs.
+tokio = { workspace = true, features = ["fs", "sync"] }
+# The scratch places the walk's recordings are made in.
+tempfile.workspace = true

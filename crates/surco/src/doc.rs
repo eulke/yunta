@@ -208,6 +208,18 @@ impl Doc {
         })
     }
 
+    /// Where the prompt a person answers in this document stands: the first block a
+    /// terminal holds while it is answered, a card, a desk, a typed answer or a choice
+    /// list. A pane holds it fitted to the rows the other blocks leave.
+    pub fn prompt_at(&self) -> Option<usize> {
+        self.blocks.iter().position(|block| {
+            matches!(
+                block,
+                Block::Card(_) | Block::Desk(_) | Block::TypedAnswer(_) | Block::ChoiceList(_)
+            )
+        })
+    }
+
     /// What this document says, as blocks another document can hold.
     pub fn into_blocks(self) -> Vec<Block> {
         self.blocks

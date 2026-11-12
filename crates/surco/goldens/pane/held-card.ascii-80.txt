@@ -1,0 +1,10 @@
+  The plan the planner handed over.
+
+| ? Plan and its tests registered. Approve?                approve-plan ; 3GQF5Q
+| 8 files, +295 -73
+|
+|   b  does it
+| * c  does it
+| ... 6 more options
+|
+| up/down move ; enter chooses ; n adds a note ; esc leaves it for later

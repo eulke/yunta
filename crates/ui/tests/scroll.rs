@@ -24,10 +24,12 @@ use surco::surface::Terminal;
 use yunta_api::RunNews;
 use yunta_core::RunId;
 use yunta_testkit::Bench;
+use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::sandbox::workspace;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, News, Operation, Performer, Request, State};
 
-use support::{drive, on_the_field, performed, stopped, workspace};
+use support::{on_the_field, performed, stopped};
 
 /// A node an agent works, then one that finishes after it.
 const WORKED: &str =
@@ -90,12 +92,10 @@ fn pressed(state: &mut State, stroke: Stroke) -> Screen {
     laid_out(state)
 }
 
-/// The region a stage scrolls: the page beside a run's nodes, the main one elsewhere.
+/// The region a stage scrolls by the page: the main one, where a run's page stands too,
+/// its nodes beside it.
 fn scrolled(screen: &Screen) -> &Region {
-    match &screen.side {
-        Some(side) => &side.region,
-        None => &screen.main,
-    }
+    &screen.main
 }
 
 /// Whether the legend offers the keys that scroll a page.
@@ -140,7 +140,7 @@ async fn at(bench: &Bench, strokes: &[Stroke]) -> State {
 async fn every_page_a_stage_shows_scrolls_by_what_a_surface_laid_out_of_it() {
     let bench = finished("01M7SCROLL0000000000000000").await;
     let stages = [
-        ("its page beside its nodes", vec![Stroke::Enter]),
+        ("its page, its nodes beside it", vec![Stroke::Enter]),
         ("what it cost", vec![Stroke::Enter, Stroke::Insert('s')]),
         ("its graph", vec![Stroke::Enter, Stroke::Insert('g')]),
         ("its receipt", vec![Stroke::Enter, Stroke::Insert('e')]),
