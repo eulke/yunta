@@ -43,8 +43,12 @@ impl Drop for HeldPacks {
 /// `.yunta/yunta.lock.held` beside the lock, waiting while another pack
 /// command holds them. A holder that is gone is taken over; the caller's stop
 /// ends the wait.
-pub(super) async fn held(workspace: &Workspace, stop: &Stop) -> Result<HeldPacks, Error> {
-    let path = vendor::hold_path(&workspace.dir);
+pub(super) async fn held(
+    workspace: &Workspace,
+    root: &std::path::Path,
+    stop: &Stop,
+) -> Result<HeldPacks, Error> {
+    let path = vendor::hold_path(root);
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|source| {
             failed(PackError::Write {

@@ -3,7 +3,7 @@
 //! again. What it is installed as, a pack new to the repository or an update,
 //! is `Installing`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use yunta_core::refusal::{PackRefusal, PackVerb};
 use yunta_core::{PackAudit, PackLock, PackLockEntry, PackManifest, PackRef};
@@ -19,6 +19,7 @@ use crate::{Error, Remarks, Stop, Workspace};
 /// [`FetchedPack::install`].
 pub struct FetchedPack {
     workspace: Workspace,
+    root: PathBuf,
     clone: tempfile::TempDir,
     pub manifest: PackManifest,
     policy: PackPolicy,
@@ -69,6 +70,7 @@ impl FetchedPack {
     /// says, in `workspace`'s repository.
     pub(super) fn new(
         workspace: Workspace,
+        root: PathBuf,
         clone: tempfile::TempDir,
         manifest: PackManifest,
         policy: PackPolicy,
@@ -77,6 +79,7 @@ impl FetchedPack {
     ) -> Self {
         FetchedPack {
             workspace,
+            root,
             clone,
             manifest,
             policy,
@@ -149,12 +152,12 @@ impl FetchedPack {
             }
             Installing::Updated { source, reference } => (source.clone(), reference.clone()),
         };
-        let dir = &self.workspace.dir;
+        let dir = &self.root;
         // Held from the read of the lock to its write, so an entry another
         // pack command writes meanwhile is read, never written over. Read
         // before anything is written: a lock that cannot be read stops the
         // install before it starts.
-        let _held = held(&self.workspace, stop).await?;
+        let _held = held(&self.workspace, dir, stop).await?;
         let lock = vendor::load_lock(dir).map_err(failed)?;
         let pack = self.manifest.reference();
         // The fetch judged the repository before the packs were held; another

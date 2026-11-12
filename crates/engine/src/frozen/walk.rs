@@ -158,11 +158,15 @@ async fn read_child(
     repo: &Path,
     use_name: &str,
 ) -> Result<(FrozenWorkflow, Workflow), FrozenError> {
-    let (path, declared) =
-        match catalog::name_workflow(repo, use_name).map_err(FrozenError::unresolved)? {
-            Named::Repo(path) => (path, None),
-            Named::Pack { declared, .. } => (contained(&declared)?, Some(declared)),
-        };
+    let global_root = yunta_core::user_state_root(&yunta_core::Env::default())
+        .unwrap_or_else(|| repo.to_path_buf())
+        .join(".yunta/packs");
+    let (path, declared) = match catalog::name_workflow(repo, &global_root, use_name)
+        .map_err(FrozenError::unresolved)?
+    {
+        Named::Repo(path) => (path, None),
+        Named::Pack { declared, .. } => (contained(&declared)?, Some(declared)),
+    };
     let dir = workflow_dir(repo, &path);
     let root = match declared {
         Some(declared) => PromptRoot::Pack {

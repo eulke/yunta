@@ -313,14 +313,22 @@ async fn pack_command(shell: &Shell, action: PackAction, look: &Look) -> Result<
             source,
             yes,
             run_tests,
-        } => commands::pack::add(shell, &source, yes, run_tests, look).await,
-        PackAction::Update { pack, r#ref, yes } => {
-            commands::pack::update(shell, &pack, &r#ref, yes, look).await
-        }
+            global,
+        } => commands::pack::add(shell, &source, yes, run_tests, global, look).await,
+        PackAction::Update {
+            pack,
+            r#ref,
+            yes,
+            global,
+        } => commands::pack::update(shell, &pack, &r#ref, yes, global, look).await,
         PackAction::New { pack } => commands::pack::new_pack(shell, &pack, look).await,
-        PackAction::Remove { pack } => commands::pack::remove(shell, &pack, look).await,
-        PackAction::List => commands::pack::list(shell, look),
-        PackAction::Audit { pack } => commands::pack::audit(shell, &pack, look).await,
+        PackAction::Remove { pack, global } => {
+            commands::pack::remove(shell, &pack, global, look).await
+        }
+        PackAction::List { global } => commands::pack::list(shell, global, look),
+        PackAction::Audit { pack, global } => {
+            commands::pack::audit(shell, &pack, global, look).await
+        }
     }
 }
 

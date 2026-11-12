@@ -18,6 +18,10 @@ fn write(path: &Path, contents: &str) {
     std::fs::write(path, contents).unwrap();
 }
 
+fn resolve(root: &Path, name: &str) -> Result<yunta_engine::ResolvedWorkflow, CatalogError> {
+    resolve_workflow(root, &root.join(".yunta/packs"), name)
+}
+
 fn write_pack(
     root: &Path,
     publisher: &str,
@@ -59,7 +63,7 @@ fn a_repo_workflow_shadows_a_pack_workflow_of_the_same_name() {
         "name: repo-review\nnodes: []\n",
     );
 
-    let resolved = resolve_workflow(root.path(), "acme/review").unwrap();
+    let resolved = resolve(root.path(), "acme/review").unwrap();
     assert_eq!(resolved.origin, WorkflowOrigin::Repo);
     assert!(resolved.path.ends_with(".yunta/workflows/acme/review.yaml"));
 }
@@ -69,7 +73,7 @@ fn a_bare_name_never_falls_through_to_packs() {
     let root = tempfile::tempdir().unwrap();
     // No repo workflow named "review", and no publisher segment at all
     // — there's nothing for a bare name to fall through to.
-    let err = resolve_workflow(root.path(), "review").unwrap_err();
+    let err = resolve(root.path(), "review").unwrap_err();
     assert!(matches!(err, CatalogError::NotFoundNoPacksDir { .. }));
 }
 
@@ -84,7 +88,7 @@ fn a_namespaced_name_resolves_to_the_publishers_pack_when_the_repo_has_nothing_b
         &[("review.yaml", LEAF)],
     );
 
-    let resolved = resolve_workflow(root.path(), "acme/review").unwrap();
+    let resolved = resolve(root.path(), "acme/review").unwrap();
     match resolved.origin {
         WorkflowOrigin::Pack {
             publisher,
@@ -104,7 +108,7 @@ fn two_packs_from_the_same_publisher_declaring_the_same_workflow_basename_is_amb
     write_pack(root.path(), "acme", "pack-a", "", &[("review.yaml", LEAF)]);
     write_pack(root.path(), "acme", "pack-b", "", &[("review.yaml", LEAF)]);
 
-    let err = resolve_workflow(root.path(), "acme/review").unwrap_err();
+    let err = resolve(root.path(), "acme/review").unwrap_err();
     assert!(
         matches!(err, CatalogError::Ambiguous { count: 2, .. }),
         "{err:?}"
@@ -242,13 +246,13 @@ fn a_reference_that_is_not_a_name_or_publisher_name_is_refused_before_touching_t
         "",
         "acme/",
     ] {
-        let err = resolve_workflow(root.path(), name).unwrap_err();
+        let err = resolve(root.path(), name).unwrap_err();
         assert!(
             matches!(err, CatalogError::InvalidName { name: ref offending } if offending == name),
             "`{name}` must be refused as a reference, got {err:?}"
         );
     }
-    assert!(resolve_workflow(root.path(), "review").is_ok());
+    assert!(resolve(root.path(), "review").is_ok());
 }
 
 #[test]
@@ -262,7 +266,7 @@ fn a_malformed_pack_yaml_is_reported_by_path() {
         "this is not a pack manifest\n",
     );
 
-    let err = resolve_workflow(root.path(), "acme/review").unwrap_err();
+    let err = resolve(root.path(), "acme/review").unwrap_err();
     match err {
         CatalogError::Malformed { path, .. } => assert!(
             path.ends_with(".yunta/packs/acme/review-pack/pack.yaml"),
@@ -280,7 +284,7 @@ fn an_unreadable_pack_yaml_is_reported_by_path() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(root.path().join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap();
 
-    let err = resolve_workflow(root.path(), "acme/review").unwrap_err();
+    let err = resolve(root.path(), "acme/review").unwrap_err();
     match err {
         CatalogError::Unreadable { path, .. } => assert!(
             path.ends_with(".yunta/packs/acme/review-pack/pack.yaml"),

@@ -30,6 +30,7 @@ pub fn check_workflow_refs(
         workflow,
         Walk {
             repo_root,
+            global_packs_root: repo_root,
             config,
             declared,
             max_depth,
@@ -71,6 +72,7 @@ pub fn check_workflow_refs(
 #[derive(Clone, Copy)]
 pub(crate) struct Walk<'a> {
     repo_root: &'a std::path::Path,
+    global_packs_root: &'a std::path::Path,
     config: &'a ConfigLayer,
     declared: &'a dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
     max_depth: u32,
@@ -127,7 +129,13 @@ pub(crate) fn walk_workflow_refs(
             errors.push(CheckError::Composition(refusal));
             continue;
         }
-        let resolved = match resolve_reference(walk.repo_root, current_origin, &node, &name) {
+        let resolved = match resolve_reference(
+            walk.repo_root,
+            walk.global_packs_root,
+            current_origin,
+            &node,
+            &name,
+        ) {
             Ok(resolved) => resolved,
             Err(refusal) => {
                 errors.push(CheckError::Composition(refusal));
@@ -192,11 +200,12 @@ fn nesting_refusal(path: &[String], name: &str, max_depth: u32) -> Option<Compos
 /// another pack.
 fn resolve_reference(
     repo_root: &std::path::Path,
+    global_packs_root: &std::path::Path,
     current: &WorkflowOrigin,
     node: &NodeId,
     name: &str,
 ) -> Result<ResolvedWorkflow, Composition> {
-    let resolved = resolve_workflow(repo_root, name).map_err(|error| {
+    let resolved = resolve_workflow(repo_root, global_packs_root, name).map_err(|error| {
         let detail = error.to_string();
         match error {
             CatalogError::Ambiguous { .. } => Composition::Ambiguous {
