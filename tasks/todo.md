@@ -864,10 +864,10 @@ Each leaves the main screen, the cursor shown, the line discipline, bracketed pa
 **Fails first:** none: a move. Its guard is `open_cmd.rs` passing unchanged.
 
 **Acceptance criteria:**
-- [ ] `commands/open.rs` spawns nothing itself.
+- [x] `commands/open.rs` spawns nothing itself: it calls `browser::open`.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test open_cmd`
+- [x] Tests pass: `cargo test -p yunta --test open_cmd` (3 passed at the last gate).
 
 **Dependencies:** Task 25
 
