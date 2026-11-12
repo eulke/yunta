@@ -48,7 +48,21 @@ pub use scaffold::ScaffoldedPack;
 impl Workspace {
     /// The packs of the repository this workspace works in.
     pub fn packs(&self) -> Packs<'_> {
-        Packs { workspace: self }
+        Packs {
+            workspace: self,
+            root: self.dir.clone(),
+        }
+    }
+
+    /// The packs shared by projects under this user's Yunta data root.
+    pub fn global_packs(&self) -> Result<Packs<'_>, Error> {
+        let root = yunta_core::user_state_root(&self.env).ok_or_else(|| {
+            Failure::new(std::io::Error::other("no user state root is available"))
+        })?;
+        Ok(Packs {
+            workspace: self,
+            root,
+        })
     }
 }
 
@@ -56,6 +70,7 @@ impl Workspace {
 /// installed into it, updated, removed or scaffolded beside it.
 pub struct Packs<'w> {
     workspace: &'w Workspace,
+    root: PathBuf,
 }
 
 impl<'w> Packs<'w> {
@@ -81,7 +96,7 @@ impl<'w> Packs<'w> {
             .map_err(failed)?;
         let manifest = vendor::read_manifest(clone.path()).map_err(failed)?;
         let pack = manifest.reference();
-        refuse_vendored(&self.workspace.dir, &pack)?;
+        refuse_vendored(&self.root, &pack)?;
         // Policy first: a refused publisher or denied executors leave no
         // decision for a person to make, so the audit is never shown.
         policy::admit_schema(&manifest)?;
@@ -107,7 +122,7 @@ impl<'w> Packs<'w> {
         confirmed: bool,
         stop: &Stop,
     ) -> Result<FetchedPack, Error> {
-        let lock = vendor::load_lock(&self.workspace.dir).map_err(failed)?;
+        let lock = vendor::load_lock(&self.root).map_err(failed)?;
         let Some(entry) = lock.packs.get(pack).cloned() else {
             let pack = pack.clone();
             return Err(refused(PackRefusal::NotInstalled { pack }));
@@ -157,8 +172,8 @@ impl<'w> Packs<'w> {
         remarks: &dyn Remarks,
         stop: &Stop,
     ) -> Result<(), Error> {
-        let dir = &self.workspace.dir;
-        let _held = held(self.workspace, stop).await?;
+        let dir = &self.root;
+        let _held = held(self.workspace, dir, stop).await?;
         let mut lock = vendor::load_lock(dir).map_err(failed)?;
         if lock.packs.remove(pack).is_none() {
             let pack = pack.clone();
@@ -179,7 +194,7 @@ impl<'w> Packs<'w> {
     /// the content the lock recorded, hashed again rather than trusted; or
     /// that none is installed.
     pub fn list(&self) -> Result<Listed, Error> {
-        let dir = &self.workspace.dir;
+        let dir = &self.root;
         let lock = vendor::load_lock(dir).map_err(failed)?;
         let shown = |path: &Path| surco::paths::shown(path, dir, None);
         if lock.packs.is_empty() {
@@ -210,7 +225,7 @@ impl<'w> Packs<'w> {
         remarks: &dyn Remarks,
         stop: &Stop,
     ) -> Result<AuditedPack, Error> {
-        let dir = &self.workspace.dir;
+        let dir = &self.root;
         let pack_dir = vendor::vendor_dir(dir, pack);
         if !pack_dir.is_dir() {
             let root = vendor::packs_root(dir);
@@ -233,7 +248,15 @@ impl<'w> Packs<'w> {
         installing: Installing,
     ) -> FetchedPack {
         let workspace = self.workspace.clone();
-        FetchedPack::new(workspace, clone, manifest, policy, confirmed, installing)
+        FetchedPack::new(
+            workspace,
+            self.root.clone(),
+            clone,
+            manifest,
+            policy,
+            confirmed,
+            installing,
+        )
     }
 }
 

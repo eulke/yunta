@@ -41,8 +41,12 @@ impl Workspace {
         if reference.extension().is_some() {
             return Ok(reference.to_path_buf());
         }
-        let resolved = yunta_engine::resolve_workflow(&self.dir, &reference.to_string_lossy())
-            .map_err(Failure::new)?;
+        let global_root = yunta_core::user_state_root(&self.env)
+            .unwrap_or_else(|| self.dir.clone())
+            .join(".yunta/packs");
+        let resolved =
+            yunta_engine::resolve_workflow(&self.dir, &global_root, &reference.to_string_lossy())
+                .map_err(Failure::new)?;
         Ok(resolved.path)
     }
 

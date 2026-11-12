@@ -136,8 +136,12 @@ pub(crate) enum Named {
 /// layer, never shadowing something the repo already names). A pack's
 /// declared path that leaves the pack is refused, naming the pack and the
 /// path, so no reader loads a file outside the pack that declares it.
-pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError> {
-    Ok(match name_workflow(repo_root, name)? {
+pub fn resolve_workflow(
+    repo_root: &Path,
+    global_packs_root: &Path,
+    name: &str,
+) -> Result<ResolvedWorkflow, CatalogError> {
+    Ok(match name_workflow(repo_root, global_packs_root, name)? {
         Named::Repo(path) => ResolvedWorkflow {
             path,
             origin: WorkflowOrigin::Repo,
@@ -154,7 +158,11 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
 
 /// The lookup [`resolve_workflow`] makes, with a pack's declared path left
 /// unjoined: the freeze checks that it stays inside its pack first.
-pub(crate) fn name_workflow(repo_root: &Path, name: &str) -> Result<Named, CatalogError> {
+pub(crate) fn name_workflow(
+    repo_root: &Path,
+    global_packs_root: &Path,
+    name: &str,
+) -> Result<Named, CatalogError> {
     if !is_reference(name) {
         return Err(CatalogError::InvalidName {
             name: name.to_string(),
@@ -180,13 +188,19 @@ pub(crate) fn name_workflow(repo_root: &Path, name: &str) -> Result<Named, Catal
     };
 
     let publisher_dir = repo_root.join(".yunta/packs").join(publisher);
-    let Some(candidates) = declaring_packs(&publisher_dir, workflow)? else {
-        return Err(CatalogError::NotFound {
-            name: name.to_string(),
-            repo_path,
-            publisher: publisher.to_string(),
-            workflow: workflow.to_string(),
-        });
+    let candidates = match declaring_packs(&publisher_dir, workflow)? {
+        Some(candidates) if !candidates.is_empty() => candidates,
+        _ => match declaring_packs(&global_packs_root.join(publisher), workflow)? {
+            Some(candidates) if !candidates.is_empty() => candidates,
+            _ => {
+                return Err(CatalogError::NotFound {
+                    name: name.to_string(),
+                    repo_path,
+                    publisher: publisher.to_string(),
+                    workflow: workflow.to_string(),
+                })
+            }
+        },
     };
     let (pack_name, declared) = choose(name, repo_path, publisher, workflow, candidates)?;
     Ok(Named::Pack {

@@ -104,7 +104,17 @@ impl Project {
         // under the project's directory, then packs: the same catalog a run's
         // children resolve against at birth.
         let origin = yunta_engine::origin_of(dir, path);
-        let refs = yunta_engine::check_workflow_refs(workflow, config, dir, &origin, &facts);
+        let global_root = yunta_core::user_state_root(&self.workspace.env)
+            .unwrap_or_else(|| dir.to_path_buf())
+            .join(".yunta/packs");
+        let refs = yunta_engine::check_workflow_refs_in(
+            workflow,
+            config,
+            dir,
+            &global_root,
+            &origin,
+            &facts,
+        );
         errors.extend(refs.errors);
         cautions.extend(refs.warnings);
         let (unprovided, missing_programs) = self.environment(workflow, config, &origin);

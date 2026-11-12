@@ -189,14 +189,14 @@ impl Project {
             true => None,
             false => yunta_core::user_knowledge_dir(&self.workspace.env),
         };
-        let mut frozen = yunta_engine::build_manifest(
+        let mut frozen = yunta_engine::build_manifest_in(
             workflow,
             &self.config,
             workflow_dir,
             &self.workspace.dir,
             &request.inputs,
             self.workspace.supervision(stop),
-            user_knowledge.as_deref(),
+            (&self.workspace.env, user_knowledge.as_deref()),
         )
         .await?;
         let paths =

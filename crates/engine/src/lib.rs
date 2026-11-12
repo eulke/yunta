@@ -108,13 +108,14 @@ pub use catalog::{
 };
 pub use check::{
     check, check_context_files, check_mode_start, check_mounted, check_warnings,
-    check_workflow_refs, programs_named, ContextFilesCheck, RefsCheck, RunTreeOrigin,
+    check_workflow_refs, check_workflow_refs_in, programs_named, ContextFilesCheck, RefsCheck,
+    RunTreeOrigin,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
 pub use inputs::{resolve_inputs, ResolvedInputs};
-pub use manifest::{build_manifest, FrozenRun, ManifestError};
+pub use manifest::{build_manifest, build_manifest_in, FrozenRun, ManifestError};
 pub use pack_audit::audit_pack;
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
 pub use permissions::command_violation;
