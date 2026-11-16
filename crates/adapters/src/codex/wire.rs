@@ -15,7 +15,8 @@ use crate::mock::{FileAct, MockOutcome, MockStep};
 
 /// The lines the CLI prints for one step of a fixture, in the order it
 /// prints them. Usage is not printed here: the CLI reports it on the line
-/// that closes the turn, from `close`.
+/// that closes the turn, from `close`. A step that awaits a word prints
+/// nothing, since the CLI never sees it.
 pub(crate) fn render(step: &MockStep, naming: ToolNaming) -> Vec<String> {
     match step {
         MockStep::Note { text, .. } | MockStep::BeforeOpen { text, .. } => {
@@ -57,7 +58,9 @@ pub(crate) fn render(step: &MockStep, naming: ToolNaming) -> Vec<String> {
             "status": "completed",
         }))],
         MockStep::RunTool { tool, .. } => vec![run_tool_call(tool)],
-        MockStep::Usage { .. } | MockStep::RunToolRejected { .. } => Vec::new(),
+        MockStep::Usage { .. } | MockStep::RunToolRejected { .. } | MockStep::AwaitsWord { .. } => {
+            Vec::new()
+        }
     }
 }
 

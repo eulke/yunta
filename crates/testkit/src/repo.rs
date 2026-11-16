@@ -35,11 +35,22 @@ pub fn git_output(dir: &Path, args: &[&str]) -> String {
 }
 
 fn git_command(dir: &Path, args: &[&str]) -> std::process::Output {
+    git_with(dir, args, &[])
+}
+
+/// Runs `git` in `dir` as [`git`] does, with `vars` set over its environment, and
+/// answers how it ended: for a test that asks git something it may refuse, through an
+/// environment it points git with, or that dates and signs what git commits.
+pub fn git_with(dir: &Path, args: &[&str], vars: &[(String, String)]) -> std::process::Output {
     Command::new("git")
         .args(args)
         .current_dir(dir)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .envs(
+            vars.iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        )
         .output()
         .expect("failed to run git")
 }

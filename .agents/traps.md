@@ -24,3 +24,10 @@ build shares no generics, so each crate that names one builds its own copy of ev
 and the static binary passed its size ceiling that way.
 Right: read it through core's concrete reader (`Manifest::read_frozen`, `ConfigLayer::read`), and give a
 document a second crate reads one of its own.
+
+### A run refused for room on a full disk
+Paths: `crates/*/tests/**`, `crates/testkit/src/**`, `crates/testkit-ui/src/**`, `crates/engine/src/worktree/pool/room.rs`
+Wrong: reading a `NoRoom` refusal in a test, a recording or a real run as the change's fault: the pool keeps the
+larger of a twentieth of the disk and 10 GB free on the disk the test runs on, and a build beside it can take that.
+Right: read the disk's free space first; make room (a `cargo clean` of your own checkout) and run again.
+

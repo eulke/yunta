@@ -105,6 +105,7 @@ mod tests {
             tool_name: Some("Task".to_string()),
             action,
             target,
+            session: None,
             at: Default::default(),
         }
     }

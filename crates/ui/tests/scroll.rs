@@ -21,7 +21,7 @@ use surco::look::{Look, Width};
 use surco::motion::Motion;
 use surco::paint::Paint;
 use surco::surface::Terminal;
-use yunta_api::RunNews;
+use yunta_api::{FollowNews, RunNews};
 use yunta_core::RunId;
 use yunta_testkit::Bench;
 use yunta_testkit_ui::driving::drive;
@@ -234,13 +234,14 @@ async fn a_successors_page_starts_at_its_first_line() {
         run: successor.run_id.clone(),
     };
     let (news, _) = performed(&successor, read).await;
-    let Some(News::Following(followed)) = news.into_iter().next() else {
-        panic!("a following reads the run first");
+    let Some(News::Following(FollowNews::Whole { run, events })) = news.into_iter().next() else {
+        panic!("a following reads the run whole first");
     };
-    let asked = state.update(Input::News(
-        following,
-        News::Run(RunNews::Successor(followed)),
-    ));
+    let handed_on = FollowNews::Run {
+        run: promoted.run_id.clone(),
+        news: RunNews::Successor { run, events },
+    };
+    let asked = state.update(Input::News(following, News::Following(handed_on)));
     assert!(
         asked.iter().any(|request| matches!(
             request,

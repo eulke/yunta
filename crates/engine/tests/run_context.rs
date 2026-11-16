@@ -217,7 +217,7 @@ async fn a_missing_file_retried_after_it_is_put_in_place_finishes() {
         &bench.worktree.join("docs/architecture.md"),
         "MARKER-ARCHITECTURE\n",
     );
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, state } = bench.wake_on_fixture(fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);

@@ -1,0 +1,36 @@
+ yunta › /cut/worktree                                                                       ◆ 5 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  › what do you want to build?  · n                                           │ ◆ fragua (quick) · needs you     EZRPE9
+                                                                              │ ━━━━━━━ ┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄ ╌╌╌╌╌╌╌ ┄┄┄┄┄┄┄
+  asking now                                                                  │   node `grill` failed: session `mock`
+    ◆ Q78GRR standard  ━━━━━━━━━━━━━━┄┄ node `tests` asks at its termi…   0s  │   refused the request (its credential
+                                                                              │   was refused): Not logged in · Please
+  needs you, oldest first                                                     │   run /login.
+  ▸ ◆ EZRPE9 quick     ━ ┄ ┄┄ ╌ ┄       node `grill` failed: session `…  40d  │
+    ◆ C0NS0E default   ━━ ┄             node `approve` wants an extern…   1h  │   waiting      for 40d
+    ◆ T0KENS default   ━━ ┄             its token budget is spent (…      1h  │   branch       yunta/run/...EZRPE9 off
+    ◆ B10CKD default   ━━ ┄             no node is runnable: `ship` wa…   1h  │                main
+                                                                              │
+  stalled                                                                     │ what you can do
+    ▲ EKPBGE standard  ━ ┄ ┄┄ ┄ ┄       no process is driving it: the…   11d  │ enter  read the decision
+                                                                              │ x      close it for good
+  stopped                                                                     │
+    ■ ST0PPD default   ━━               interrupted by a person           1h  │
+    ■ AB0RTD default   ━━ ━             a person paused the run at nod…   1h  │
+                                                                              │
+  running                                                                     │
+    ● TW0TSK default   ━━ ━             1 of 2 nodes done                 1h  │
+                                                                              │
+  unreadable                                                                  │
+    ✗ 0RPHAN                            manifest missing or unreadable…       │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+ ✓ Nothing to resume: this one waits on a decision. Enter reads it.
+ j k move · enter open · n new run · x close · q quit                                               / anything · ? keys

@@ -1,0 +1,25 @@
+# The repository the design's run works in: every runner on the mock
+# adapter, three nodes at work at once, the suite and the lint the run is
+# measured against, and the forge its pull request opens on.
+project:
+  base_branch: main
+defaults:
+  max_parallel_nodes: 3
+runners:
+  planner:
+    - { adapter: mock, model: gpt-6-luna }
+  executor:
+    - { adapter: mock, model: gpt-6-luna }
+  mechanical:
+    - { adapter: mock, model: gpt-6-luna }
+  reviewer:
+    - { adapter: mock, model: gpt-6-luna }
+  reviewer-alt:
+    - { adapter: mock, model: gpt-6-luna }
+baseline:
+  suite: "cargo test --workspace"
+  held: [lint]
+commands:
+  lint: "cargo clippy --workspace --all-targets"
+forge:
+  github: { repo: eulke/yunta, token_env: YUNTA_DESIGNED_FORGE_TOKEN }

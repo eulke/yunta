@@ -14,6 +14,7 @@ pub(super) fn usage(input: u64, output: u64) -> EventPayload {
         cached_input_tokens: None,
         note: None,
         text: None,
+        session: None,
     }))
 }
 
@@ -28,5 +29,6 @@ pub(super) fn tool_use(tool: &str, digest: &str) -> EventPayload {
         cached_input_tokens: None,
         note: None,
         text: None,
+        session: None,
     }))
 }

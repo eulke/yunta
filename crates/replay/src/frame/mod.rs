@@ -236,7 +236,7 @@ impl RunFrame {
             asking: engine.asking(now),
             flow: flow_counter(&nodes, &mode),
             tasks: task_counter(state),
-            reroutes: reroutes(state),
+            reroutes: state.nodes.reroutes(),
             tokens: state.spend().so_far(),
             prior: prior.cloned(),
             nodes,
@@ -315,15 +315,6 @@ impl RunFrame {
 pub struct PullRequest<'a> {
     pub number: u64,
     pub url: &'a str,
-}
-
-/// Every `node_rerouted` on the log, over all the run's nodes.
-fn reroutes(state: &RunState) -> usize {
-    state
-        .nodes
-        .values()
-        .map(|record| record.reroutes as usize)
-        .sum()
 }
 
 /// How many findings the run has not settled that keep it from being done.

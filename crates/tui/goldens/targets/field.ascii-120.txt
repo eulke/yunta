@@ -1,0 +1,36 @@
+ yunta :: /cut/worktree                                                                      ? 5 need you ; ^ 1 stalled
+........................................................................................................................
+  :: what do you want to build?  ; n                                          | ? fragua (standard) ; needs you  Q78GRR
+                                                                              | == = == == = == == = == == = == == . ..
+  asking now                                                                  |   node `tests` asks at its terminal.
+  * ? Q78GRR standard  ==============.. node `tests` asks at its ter...   0s  |
+                                                                              |   progress     12 of 15 nodes done, 1
+  needs you, oldest first                                                     |                reroute
+    ? EZRPE9 quick     = . .. o .       node `grill` failed: session...  40d  |   tokens       26.1M in / 1.06M out
+    ? C0NS0E default   == .             node `approve` wants an exte...   1h  |                (25M cached)
+    ? T0KENS default   == .             its token budget is spent (...    1h  |   time         1h12m at work, 38m51s
+    ? B10CKD default   == .             no node is runnable: `ship`...    1h  |                waiting on you
+                                                                              |   slowest      implement 41m05s, spec
+  stalled                                                                     |                13m53s, plan 6m25s
+    ^ EKPBGE standard  = . .. . .       no process is driving it: th...  11d  |   branch       yunta/run/...Q78GRR off
+                                                                              |                main
+  stopped                                                                     |
+    # ST0PPD default   ==               interrupted by a person           1h  | what you can do
+    # AB0RTD default   == =             a person paused the run at n...   1h  | c      stop it and everything under it
+                                                                              | s      what it cost
+  running                                                                     |
+    > TW0TSK default   == =             1 of 2 nodes done                 1h  |
+                                                                              |
+  unreadable                                                                  |
+    ! 0RPHAN                            manifest missing or unreadab...       |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k move ; enter open ; n new run ; x close ; q quit                                               / anything ; ? keys

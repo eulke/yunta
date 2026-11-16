@@ -1,0 +1,24 @@
+ yunta › Q78GRR › implement                         ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 56m42s                              Q78GRR
+ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+ implement · loop                                   executor on mock/gpt-6-luna
+
+ ⠏ global-pack-install  Add explicit global pack install target · attempt 1
+
+   proved   red
+   by      cargo test --workspace --test pack_global_spec global_pack_commands…
+   keeps   lint, green at the baseline
+
+   what it is doing · 8 calls
+   … 7 above
+   read    crates/testkit/src/bin.rs
+   edit    crates/cli/src/pack.rs
+   edit    crates/cli/src/cli/pack.rs
+   edit    crates/cli/src/commands/pack.rs
+   edit    crates/cli/src/cli/dispatch.rs
+ 10.8M tokens ▁▁▄▃▁█▁▁▁▁▁▁▁▁▁ · 41m37s at work · 15m05s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused…  · a go there
+ j k node · s stats · g graph · q field, it keeps going · ? keys

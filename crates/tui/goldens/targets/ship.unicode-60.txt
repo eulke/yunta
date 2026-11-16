@@ -1,0 +1,14 @@
+ yunta › Q78GRR › ship           ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 0s            Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄
+ The work beside its plan, and every finding the run holds…
+ ship · gate                                  assignee lead
+   3 more files, +11 −7
+ ✓ 4 findings, 4 answered · 1 task, 1 criterion green
+ ▎ ◆ Create the PR?                                    ship
+ ▎ ▸ approve  On to `pr`: opens the pull request on github…
+ ▎   abort    Pause here: nothing runs; this decision stay…
+ 27.1M tokens · 1h12m at work · 39m51s waiting on you
+
+ j k choose · enter answer · n add a note · … · ? keys

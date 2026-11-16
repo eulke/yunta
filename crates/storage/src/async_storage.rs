@@ -1,8 +1,9 @@
 //! Storage from async code: every call runs on a blocking thread through
 //! `spawn_blocking`, on a connection opened for that call from the log's
 //! path — the runtime's threads never wait on SQLite. `Storage` itself
-//! stays synchronous; a synchronous command opens it directly, and this
-//! handle is the only way async code reaches the log.
+//! stays synchronous; a synchronous command opens it directly. Async code
+//! reaches the log through this handle, or, where it only reads and asks
+//! many times a second, through `LogReader`'s one connection kept open.
 
 use std::path::PathBuf;
 

@@ -95,6 +95,17 @@
           "format": "uint64",
           "minimum": 0
         },
+        "session": {
+          "description": "The session the call was made in, as its `agent_session_opened`\nnames it. Absent on anything but a tool call, and on a log older than\nthe field, which reads as it did: a call that names no session.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "target": {
           "description": "What the tool acted on. Absent for a message that is not a tool\ncall, and for a log written before the engine recorded it.",
           "anyOf": [

@@ -92,6 +92,14 @@ pub enum StorageError {
         source: Cause,
     },
 
+    /// The reading that says whether another connection wrote to the log
+    /// since a handle last looked could not be taken.
+    #[error("failed to read whether the event log moved")]
+    DataVersion {
+        #[source]
+        source: Cause,
+    },
+
     /// The hash chain's genesis is `SHA-256(manifest_hash)`, and only
     /// `run_created` carries one — a run whose log starts with anything
     /// else has no chain to anchor, so the append is refused instead of

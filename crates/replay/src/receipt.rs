@@ -3,21 +3,20 @@
 //! an agent wrote. "The receipt IS the evidence": every number here traces
 //! back to a specific event kind, the same discipline [`crate::stats`]
 //! and [`crate::RunState::replay`] hold to. No new bookkeeping — this
-//! module only reads what the engine already recorded. Drawing it for a
-//! person is for whoever shows it; this hands over the data.
+//! module reads the ledgers the log folds into, once, and walks no event
+//! of its own: a second reading of the events would be a second answer.
+//! Drawing it for a person is for whoever shows it; this hands over the
+//! data.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
 
 use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
 use yunta_core::events::{
-    EventPayload, Failure, FindingSeverity, NodeState, Phase, RunMetrics, StoredEvent,
-    TerminalState,
+    Failure, FindingSeverity, NodeState, RunMetrics, StoredEvent, TerminalState,
 };
 use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId, Seq};
 
 use crate::RunState;
-use yunta_core::events::NodeEvent;
 
 use yunta_core::receipt::{
     BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry, DiagnosticCount,
@@ -128,7 +127,6 @@ pub fn closed(
     Ok(receipt(
         run_id,
         manifest,
-        events,
         &state,
         event_chain,
         Some(finished.terminal),
@@ -147,35 +145,23 @@ pub fn so_far(
 ) -> Receipt {
     let state = RunState::replay(events);
     let metrics = state.metrics();
-    receipt(run_id, manifest, events, &state, event_chain, None, metrics)
+    receipt(run_id, manifest, &state, event_chain, None, metrics)
 }
 
-/// The receipt of `state`'s run. The criteria, scope and reroute counts
-/// are read from the log's own events; every other answer comes from
-/// `state`.
+/// The receipt of `state`'s run: every answer comes from its ledgers.
 fn receipt(
     run_id: &RunId,
     manifest: &Manifest,
-    events: &[StoredEvent],
     state: &RunState,
     event_chain: EventChainStatus,
     terminal_state: Option<TerminalState>,
     metrics: RunMetrics,
 ) -> Receipt {
-    let criteria = criteria_summary(events);
+    let criteria = criteria_summary(state);
     let baseline = baseline_summary(manifest, state);
-    let scope = scope_summary(events);
+    let scope = scope_summary(state);
     let runners = runner_usage(state);
     let unknown_kinds = state.unknown_kinds();
-    let reroutes = events
-        .iter()
-        .filter(|e| {
-            matches!(
-                e.payload(),
-                Some(EventPayload::Node(NodeEvent::Rerouted(_)))
-            )
-        })
-        .count();
     Receipt {
         schema_version: Receipt::SCHEMA_VERSION,
         run_id: run_id.clone(),
@@ -190,7 +176,7 @@ fn receipt(
         cost: CostSummary {
             tokens: metrics.tokens,
             cptv: metrics.cptv,
-            reroutes,
+            reroutes: state.nodes.reroutes(),
         },
         event_chain,
         unknown_kinds,
@@ -218,24 +204,18 @@ fn failed_nodes(manifest: &Manifest, state: &RunState) -> Vec<FailedNode> {
         .collect()
 }
 
-/// The latest post-check `criteria_checked` per task — a retried task's
-/// earlier, superseded attempts don't get counted twice: the log keeps
-/// every attempt, but the receipt certifies only the final verdict.
-fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
-    let mut latest_post: HashMap<String, &yunta_core::events::CriteriaCheckedPayload> =
-        HashMap::new();
-    for event in events {
-        if let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() {
-            if p.phase == Phase::Post {
-                latest_post.insert(p.task_id.to_string(), p);
-            }
-        }
-    }
-    let mut entries: Vec<CriterionEntry> = latest_post
-        .values()
-        .flat_map(|p| {
-            p.results.iter().map(|r| CriterionEntry {
-                task_id: p.task_id.to_string(),
+/// Each task's check after its work, as the tasks' ledger keeps it: the
+/// latest, so a retried task's earlier, superseded attempts don't get
+/// counted twice. The log keeps every attempt, but the receipt certifies
+/// only the final verdict.
+fn criteria_summary(state: &RunState) -> CriteriaSummary {
+    let mut entries: Vec<CriterionEntry> = state
+        .tasks
+        .iter()
+        .filter_map(|(task, record)| Some((task, record.checked.as_ref()?)))
+        .flat_map(|(task, checked)| {
+            checked.results.iter().map(move |r| CriterionEntry {
+                task_id: task.to_string(),
                 cmd: r.cmd.clone(),
                 exit_code: r.exit_code,
             })
@@ -290,18 +270,13 @@ fn baseline_summary(manifest: &Manifest, state: &RunState) -> Option<BaselineSum
     })
 }
 
-fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
-    let mut files: BTreeSet<PathBuf> = BTreeSet::new();
-    let mut violations: BTreeSet<PathBuf> = BTreeSet::new();
-    for event in events {
-        if let Some(EventPayload::Node(NodeEvent::ScopeChecked(p))) = event.payload() {
-            files.extend(p.diff.iter().cloned());
-            violations.extend(p.violations.iter().cloned());
-        }
-    }
+/// Every path the run's scope checks found changed, and those it may not
+/// change, each once: the union the node ledger keeps over every check.
+fn scope_summary(state: &RunState) -> ScopeSummary {
+    let union = state.nodes.scope_union();
     ScopeSummary {
-        files_touched: files.len(),
-        violations: violations.into_iter().collect(),
+        files_touched: union.diff.len(),
+        violations: union.violations.iter().cloned().collect(),
     }
 }
 

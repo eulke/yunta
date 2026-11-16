@@ -1,0 +1,36 @@
+ yunta › STA11D › build                                                                     ◆ 1 needs you · ▲ 2 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ▲ two-steps (default) · stalled · for 0s                                                                        STA11D
+ build ship
+ ━━━━━ ┄┄┄┄
+ no process is driving it: the engine that ran it is gone
+
+ ▸ ● build                       │ build · bash
+   ◌ ship                        │
+                                 │ where it stopped
+                                 │ ● build  attempt 1, after 0s
+                                 │ why      no process is driving it: the engine that ran it is gone
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 0 tokens ▁▁ · 0s at work
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ j k node · r continue it from its log · x close · s stats · g graph · q field                      / anything · ? keys

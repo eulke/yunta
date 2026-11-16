@@ -4,19 +4,25 @@
 //! status` prints, and grouped by what a reader can do about it. Naming a
 //! run `last` or `needs` reads the same groups, so a run the field shows
 //! under "needs you" is the run `needs` names.
+//!
+//! A run is read for a field one way, for a listing and a following alike
+//! ([`Placed::of`]): its directory, the manifest it froze and, only when that
+//! manifest places it here, its log, folded into a [`FollowedRun`] whose row
+//! is [`FollowedRun::row`]. So a run of another repository costs no read of
+//! the log, and a run's row reads the same on every interface.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
 use yunta_core::{Manifest, RunId};
 use yunta_engine::git::Cause;
 use yunta_render::page::{FieldGroup, FieldRow, RunUnread, UnreadableRun};
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::RunState;
-use yunta_storage::Storage;
+use yunta_storage::LogReader;
 
-use crate::{Error, Failure, Project, Stop};
+use crate::run::read_manifest;
+use crate::{Error, Failure, FollowedRun, Project, RunRegistry, Stop};
 
 /// Which runs a field is about.
 ///
@@ -49,15 +55,13 @@ pub struct FieldReading {
 
 impl Project {
     /// The field `reach` asks for: every run this project's store holds,
-    /// sorted into the ones the field is about and the count of the rest.
+    /// sorted into the ones the field is about and the count of the rest,
+    /// each read as a following reads it.
     pub async fn field(&self, reach: FieldReach, stop: &Stop) -> Result<FieldReading, Error> {
-        let storage = Storage::open(&self.storage_path).map_err(Failure::new)?;
-        let run_ids: Vec<RunId> = storage
-            .list_runs()
-            .map_err(Failure::new)?
-            .into_iter()
-            .map(|run| run.run_id)
-            .collect();
+        let reader = LogReader::open(&self.storage_path)
+            .await
+            .map_err(Failure::new)?;
+        let heads = reader.heads().await.map_err(Failure::new)?;
         let here = match reach {
             FieldReach::Machine => None,
             FieldReach::Here => Here::of(self, stop).await?,
@@ -69,23 +73,11 @@ impl Project {
             elsewhere: 0,
             here: here.is_some(),
         };
-        for run_id in run_ids {
-            match run_row(self, &storage, run_id, now) {
-                Ok((row, project))
-                    if here
-                        .as_ref()
-                        .is_none_or(|here| here.holds(&row.frame.run_id, project.as_deref())) =>
-                {
-                    field.rows.push(row)
-                }
-                Err(problem)
-                    if here
-                        .as_ref()
-                        .is_none_or(|here| here.holds(&problem.run_id, None)) =>
-                {
-                    field.unreadable.push(problem)
-                }
-                Ok(_) | Err(_) => field.elsewhere += 1,
+        for head in heads {
+            match Placed::of(self, &reader, here.as_ref(), &head.run_id, None).await {
+                Placed::Read(run, _) => field.rows.push(run.row(now)),
+                Placed::Unreadable(why) => field.unreadable.push(why),
+                Placed::Elsewhere => field.elsewhere += 1,
             }
         }
         Ok(field)
@@ -146,7 +138,7 @@ impl FieldReading {
 
 /// The repository a field is asked in: the git directory its checkouts
 /// share, and the runs that have their own branch in it.
-struct Here {
+pub(crate) struct Here {
     git_common_dir: PathBuf,
     branches: BTreeSet<RunId>,
 }
@@ -155,7 +147,7 @@ impl Here {
     /// The repository `project` is rooted in, with the runs that have a branch
     /// there, or `None` outside one — where every run is listed, since there is
     /// no project to narrow to.
-    async fn of(project: &Project, stop: &Stop) -> Result<Option<Self>, Error> {
+    pub(crate) async fn of(project: &Project, stop: &Stop) -> Result<Option<Self>, Error> {
         let Some(git_common_dir) = git_common_dir(project, stop).await? else {
             return Ok(None);
         };
@@ -175,7 +167,7 @@ impl Here {
     /// Whether the run `run_id`, created in the repository whose git
     /// directory is `project` when its manifest says so, belongs here. A
     /// run that does not say is placed by its branch.
-    fn holds(&self, run_id: &RunId, project: Option<&Path>) -> bool {
+    pub(crate) fn holds(&self, run_id: &RunId, project: Option<&Path>) -> bool {
         match project {
             Some(project) => project == self.git_common_dir,
             None => self.branches.contains(run_id),
@@ -204,44 +196,72 @@ pub fn offers_a_menu(frame: &RunFrame, manifest: &Manifest, state: &RunState) ->
         && yunta_engine::awaits_decision(manifest, state).is_some()
 }
 
-/// One run's row and the repository its manifest says it was created
-/// in, or what stops it from having one.
-fn run_row(
-    project: &Project,
-    storage: &Storage,
-    run_id: RunId,
-    now: DateTime<Utc>,
-) -> Result<(FieldRow, Option<PathBuf>), UnreadableRun> {
-    let events = storage
-        .events_for_run(&run_id)
-        .map_err(|e| UnreadableRun::new(&run_id, RunUnread::EventLog(e.to_string())))?;
-    // The same frozen-path-aware search `status` uses, so a run created
-    // under a since-changed `paths.runs` still lists.
-    let run_dir = project.run_dir(run_id.as_str()).ok_or_else(|| {
-        UnreadableRun::new(
-            &run_id,
-            RunUnread::NoDirectory {
-                runs_root: project.runs_root.clone(),
-            },
-        )
-    })?;
-    let manifest_path = yunta_engine::run_dir::manifest_path(&run_dir);
-    let manifest: Manifest = std::fs::read(&manifest_path)
-        .ok()
-        .and_then(|bytes| Manifest::read_frozen(&bytes).ok())
-        .map(|frozen| frozen.doc)
-        .ok_or_else(|| {
-            UnreadableRun::new(
-                &run_id,
-                RunUnread::Manifest {
-                    path: manifest_path.clone(),
-                },
-            )
-        })?;
-    let state = yunta_replay::RunState::replay(&events);
-    let engine = crate::RunRegistry::at(run_dir).engine();
-    let frame = RunFrame::of(&run_id, &manifest.workflow, &state, None, &engine, now);
-    let menu = offers_a_menu(&frame, &manifest, &state);
-    let row = FieldRow { frame, menu };
-    Ok((row, manifest.project.map(|project| project.git_common_dir)))
+/// Where a run read for a field goes. Not [`FieldGroup`], where a run read
+/// is listed.
+pub(crate) enum Placed {
+    /// Into the field, read, beside the registry its engine keeps.
+    Read(Box<FollowedRun>, RunRegistry),
+    /// Into the field, not read, for why.
+    Unreadable(UnreadableRun),
+    /// To another repository.
+    Elsewhere,
+}
+
+impl Placed {
+    /// `run` read for a field and placed by `here`: its directory, found
+    /// where `status` finds it, so a run created under a since-changed
+    /// `paths.runs` still lists; then `held`, the copy a following already
+    /// keeps of it with its registry, so the two stand at one head; else the
+    /// manifest it froze and, only when that places it here, its log through
+    /// `reader`. A run with no directory or manifest to read is placed by its
+    /// branch.
+    pub(crate) async fn of(
+        project: &Project,
+        reader: &LogReader,
+        here: Option<&Here>,
+        run: &RunId,
+        held: Option<(&FollowedRun, &RunRegistry)>,
+    ) -> Placed {
+        let holds = |manifest: Option<&Manifest>| {
+            let project = manifest.and_then(|manifest| manifest.project.as_ref());
+            let project = project.map(|project| project.git_common_dir.as_path());
+            here.is_none_or(|here| here.holds(run, project))
+        };
+        let unread = |problem: RunUnread| {
+            if holds(None) {
+                Placed::Unreadable(UnreadableRun::new(run, problem))
+            } else {
+                Placed::Elsewhere
+            }
+        };
+        let Some(dir) = project.run_dir(run.as_str()) else {
+            let runs_root = project.runs_root.clone();
+            return unread(RunUnread::NoDirectory { runs_root });
+        };
+        if let Some((read, registry)) = held {
+            if !holds(Some(&read.manifest)) {
+                return Placed::Elsewhere;
+            }
+            return Placed::Read(Box::new(read.clone()), registry.clone());
+        }
+        let path = yunta_engine::run_dir::manifest_path(&dir);
+        let Ok(manifest) = read_manifest(&path) else {
+            return unread(RunUnread::Manifest { path });
+        };
+        let manifest = manifest.doc;
+        if !holds(Some(&manifest)) {
+            return Placed::Elsewhere;
+        }
+        let registry = RunRegistry::at(dir);
+        match reader.events(run).await {
+            Ok(events) => {
+                let read = FollowedRun::read(run.clone(), manifest, &events, registry.engine());
+                Placed::Read(Box::new(read), registry)
+            }
+            Err(unread) => {
+                let problem = RunUnread::EventLog(unread.to_string());
+                Placed::Unreadable(UnreadableRun::new(run, problem))
+            }
+        }
+    }
 }

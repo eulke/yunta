@@ -1,0 +1,14 @@
+ yunta › DEPART › implement      ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ departs (default) · needs you · for 0s            DEPART
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ a task departs from what the plan decided
+ implement · loop                                     greet
+ ▎ ◆ The task departs from its plan. Accept it?   implement
+ ▎ ▸ continue-work  keeps the blocked task's last changes…
+ ▎   accept         the work stands as it is, and the plan…
+ ▎   send-back      the session goes back to what the plan…
+ ▎   abort          nothing runs; this decision stays open
+ 0 tokens · 0s at work
+
+ j k choose · enter answer · n add a note · … · ? keys

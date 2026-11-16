@@ -14,11 +14,15 @@
 //!
 //! Its map: `bench` is the canonical run harness; `bin` runs the compiled
 //! binary, and `checkout` and `child` hold a test that drives it; `held` holds
-//! a run on its first node until the test lets it go; `workflows` are the
+//! a run on its first node until the test lets it go, and gives the words a
+//! held mock session waits for; `workflows` are the
 //! workflows tests in more than one file run; `terminal`
 //! drives a run on a real terminal; `repo` is a hermetic git fixture and
-//! `stubs` stand in for programs on `PATH`; `events` reads and writes a run's
-//! log; `interaction` and
+//! `stubs` stand in for programs on `PATH`; `reference_pack` is the Yunta
+//! repository's pack a setup installs, in a local repository git is pointed at
+//! for the Yunta repository's URL; `events` reads and writes a run's
+//! log, and loads a log into a store of its own; `registry` writes what a run's
+//! registry says of the engine driving it; `interaction` and
 //! `observer` are doubles for a gate and the display boundary; `tools` hosts
 //! the per-run MCP listener; `said` reads what a run's sessions said off its
 //! socket; `tasks` writes a tasks document; `corpus` reads
@@ -38,6 +42,8 @@ mod held;
 mod interaction;
 mod observer;
 mod owner;
+pub mod reference_pack;
+mod registry;
 mod repo;
 pub mod said;
 mod stack;
@@ -59,13 +65,15 @@ pub use corpus::{
     backticked, fenced_blocks, has_top_level_key, json_schema, markdown_files, section, Block,
 };
 pub use events::{
-    accepted, baselines, status_changed_carrying, task_registered, task_status_changed, SourceLog,
+    accepted, baselines, loaded, status_changed_carrying, task_registered, task_status_changed,
+    SourceLog,
 };
 pub use held::{HeldRun, Hold};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use owner::Owner;
-pub use repo::{bare_origin, git, git_output, init_repo, read, write, INITIAL_BRANCH};
+pub use registry::WrittenRegistry;
+pub use repo::{bare_origin, git, git_output, git_with, init_repo, read, write, INITIAL_BRANCH};
 pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
 pub use terminal::screen::Screen;

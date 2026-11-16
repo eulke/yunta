@@ -1,0 +1,36 @@
+ yunta :: REFVSE :: ask                                                                      ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ? ask (default) ; needs you ; for 40s                                                                           REFVSE
+ ask
+ ====
+ node `ask`'s answers were refused: answers.yaml: 1 error question `q1`: this question is `required` and nothing ans...
+
+ | ? ask asks                                                                                            REFVSE
+ |
+ | ? What is the release called?
+ |     .------------------------------------------------------------------------------------------------------.
+ |     | Spring release                                                                                       |
+ |     '------------------------------------------------------------------------------------------------------'
+ |     ! this question is `required` and nothing answers it
+ | . Which environment?  optional, assumes staging
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 0 tokens _ ; 0s at work ; 1m55s waiting on you
+
+ enter answer ; esc leave it for later

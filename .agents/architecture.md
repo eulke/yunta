@@ -4,11 +4,10 @@ How Yunta's crates fit and what every run guarantees.
 
 ## A run
 
-An interface asks `yunta-api` for a run; `check` refuses what cannot run. The
-run loop schedules nodes, and a task's cycle opens sessions through the port on an adapter, each in a pooled
-checkout. The fence and the rail judge each write at the tool call, and the close judges the diff. Declared
-criteria the engine runs decide a task; an agent's word is never evidence. Every fact is an event in the log,
-and what a person reads is drawn from it in Surco.
+`check` refuses what cannot run. The run loop schedules nodes, and a task's cycle opens sessions through the
+port on an adapter, each in a pooled checkout. The fence and the rail judge each write at the tool call, and the
+close judges the diff. Declared criteria the engine runs decide a task; an agent's word is never evidence. Every
+fact is an event in the log.
 
 ## Crates
 
@@ -64,8 +63,8 @@ and what a person reads is drawn from it in Surco.
   holder replaced. [test engine/run_guard]
 - One answer pays for one engine: `continue` lifts the token cap only in the engine that took it.
   [test engine/parked_answers]
-- A follower only reads: it takes no lock, writes no event, signals no engine.
-  [test cli/status_follow]
+- A follower only reads: past a first open, which sets a log up as every open does, it takes no lock, writes nothing
+  and signals no engine; every reader folds a log by replay's one fold. [test cli/status_follow] [test api/following]
 - What a session says while it works reaches another process only through its run's socket, redacted: the
   log keeps each note's digest and no words, and only a terminal draws them; the summary a session ends with is
   its node's outcome. [test engine/run_words] [test cli/run_words]
@@ -78,7 +77,7 @@ and what a person reads is drawn from it in Surco.
 - Engine decisions are deterministic and each effect has one owner: the clock, the environment, the filesystem
   and git are reached through their boundaries. [smell system_clock_outside_boundary]
   [smell env_read_outside_boundary] [smell engine_fs_outside_runtime] [smell git_command_outside_git_rs]
-- Replay is a pure fold of the log: two logs with the same facts derive the same state. [test replay/properties]
+- Two logs with the same facts derive the same state. [test replay/properties]
 - A log an earlier binary wrote still replays. [test replay/logs_from_runs] [test render/older_words]
 - No session writes what an agent CLI loads as configuration, at its own path or through a link the base commit
   holds; a person may grant the instruction files. [test engine/paths_deny] [test adapters/own_config]

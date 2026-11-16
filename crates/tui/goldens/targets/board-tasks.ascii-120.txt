@@ -1,0 +1,36 @@
+ yunta :: TW0TSK :: implement                                                               ? 1 needs you ; ^ 1 stalled
+........................................................................................................................
+ > independent-tasks (default) ; running ; for 2m27s                                                             TW0TSK
+ plan implement
+ ==== =========
+ nothing needs you: it is moving
+
+   + plan                   50s  | implement ; loop                                         executor on mock/mock-model
+ * | implement                   |
+    +- > task-1                  | | task-1  Write the greeting ; attempt 1
+    `- > task-2                  |
+                                 |   proved   red
+                                 |   by      test -f greeting.txt
+                                 |
+                                 |   its scope
+                                 |   + greeting.txt
+                                 |
+                                 | | task-2  Write the farewell ; attempt 1
+                                 |
+                                 |   proved   red
+                                 |   by      test -f farewell.txt
+                                 |
+                                 |   its scope
+                                 |   + farewell.txt
+                                 |
+                                 |   what it is doing ; 4 calls
+                                 |   ... 3 above
+                                 |   read    task-1  README.md
+                                 |   task-2 pre: 1 criterion
+                                 |   session opened on mock-model ; fence widened to 2 roots
+                                 |   read    task-2  README.md
+                                 |   write   task-1  greeting.txt
+                                 |   write   task-2  farewell.txt
+ 0 tokens __ ; 2m25s at work
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; s stats ; g graph ; q field, it keeps going                                             / anything ; ? keys

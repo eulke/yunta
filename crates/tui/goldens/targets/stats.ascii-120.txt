@@ -1,0 +1,36 @@
+ yunta :: Q78GRR stats                                                                       ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ? fragua (standard) ; needs you ; 1h52m so far                                                                  Q78GRR
+ ======= ======= ======= ======= ======= ======= ======= ====== ======= ======= ======= ======= ======= ======= .......
+   65% of it was agents and the engine at work.
+
+   task cost    27.1M tokens per verified task, 1 task done
+   rework       37% of tokens went to retries and reroutes
+   cache        96% cached tokens per input token
+   tokens       26.1M in / 1.06M out (25M cached)
+   documents    3 accepted
+   findings     4 posted; 4 standing
+
+ where its time went
+ ######################################################################################################################
+ > working 1h12m ; > waiting on you 39m51s
+
+ who spent it
+ executor      ############################  21.2M tokens
+ planner       ######                        4.71M tokens
+ reviewer      #                             558k tokens
+ reviewer-alt  #                             421k tokens
+ mechanical                                  217k tokens
+
+
+
+
+
+
+
+
+
+
+
+ ? Q78GRR needs you: The work beside its plan, and every finding the run holds with its answer. Create...  ; a go there
+ esc back ; n new run                                                                               / anything ; ? keys

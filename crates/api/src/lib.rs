@@ -29,9 +29,10 @@
 //!   of them found by the [`RunRef`] a person typed, opened as an
 //!   [`OpenedRun`], read as a [`RunReading`] or a [`StatsReading`], its page
 //!   and a node's read whole, its document for a program, its page written for
-//!   a browser, receipted, verified, and followed as a [`Following`] that hands back
-//!   [`RunNews`], which a [`FollowedRun`] folds, beside the [`RunRegistry`] its engine
-//!   keeps; `event_log`, the
+//!   a browser, receipted and verified; `follow`, what is [`Followed`], followed
+//!   as a [`Following`] that hands back [`FollowNews`], the field read whole as a
+//!   [`FollowedField`], the run read whole and the [`RunNews`] a [`FollowedRun`]
+//!   folds, beside the [`RunRegistry`] its engine keeps; `event_log`, the
 //!   [`EventLog`] a moving run's log is read through; and `history`, a
 //!   workflow's past runs as a [`WorkflowHistory`], read as a [`HistoryReading`].
 //! - What a workflow gets here: `workflow`, the file a reference names, read
@@ -42,8 +43,8 @@
 //!   [`Admission`] of a [`RunRequest`], made a [`CreatedRun`] (`creation`),
 //!   held as a [`HeldRun`] (`hold`, a parked run taken back too), driven
 //!   here with the [`Ports`] a surface lends to a [`Driven`] run (`drive`),
-//!   or handed to a detached Yunta (`detach`); and `answers`, the
-//!   [`WaitingDecision`] a run waits on, decided or its questions answered;
+//!   or handed to a detached Yunta (`detach`); and `answers`, the [`Awaited`]
+//!   a run waits on, a [`WaitingDecision`] decided or its questions answered;
 //!   and `ending`, a run cancelled, its engine and process groups stopped,
 //!   or closed for good; and `collect`, what a project's runs leave
 //!   collected as far as [`Collect`] asks; every caution said through the
@@ -71,6 +72,7 @@ mod ending;
 mod error;
 mod event_log;
 mod field;
+mod follow;
 mod forge;
 mod history;
 mod hold;
@@ -87,7 +89,7 @@ mod workflow;
 mod workspace;
 
 pub use admission::{Admission, RunRequest};
-pub use answers::{waiting_round, WaitingDecision, WaitingQuestions};
+pub use answers::{waiting_round, Awaited, WaitingDecision, WaitingQuestions};
 pub use cases::CaseSuite;
 pub use collect::Collect;
 pub use committer::Committer;
@@ -97,14 +99,16 @@ pub use ending::ClosedRun;
 pub use error::{Error, Failure};
 pub use event_log::EventLog;
 pub use field::{offers_a_menu, FieldReach, FieldReading, Repository};
+pub use follow::{
+    AnswerablePause, Document, FollowNews, Followed, FollowedField, FollowedRun, Following,
+    RunNews, RunRegistry,
+};
 pub use history::{HistoryReading, WorkflowHistory};
 pub use hold::HeldRun;
 pub use packs::{AuditedPack, FetchedPack, InstalledPack, Packs, ScaffoldedPack};
 pub use project::{config_layers, Project};
 pub use remark::{Remark, Remarks};
-pub use run::{
-    FollowedRun, Following, OpenedRun, RunNews, RunReading, RunRef, RunRegistry, StatsReading,
-};
+pub use run::{OpenedRun, RunReading, RunRef, StatsReading};
 pub use setup::{
     DetectedProject, InitializedProject, ProjectDraft, ProjectSetup, ProposedRunners, RunnerAnswer,
     RunnerDeclaration, WorkflowStem, WrittenWorkflow,

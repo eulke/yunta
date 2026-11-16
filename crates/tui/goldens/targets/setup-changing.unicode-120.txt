@@ -1,0 +1,36 @@
+ yunta › set up                                                                                       nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+                                                  █ █ █ █ █▄ █ ▀█▀ ▄▀█
+                                                   █  █▄█ █ ▀█  █  █▀█
+
+           This repository has never used yunta. Here is what it found. Nothing is written until you say so.
+
+              what this repository is
+                ✓ name          yunta
+                ✓ language      rust
+                ✓ suite         cargo test
+                ✓ lint          cargo clippy --all-targets -- -D warnings
+                ✓ forge         github eulke/yunta, from origin
+                ✓ base          main
+                ✓ commits as    Marta Ruiz
+                ✓ workflow      yunta/fragua, to install as a pack
+
+              who does the work
+                ✓ planner       claude-code                     then codex
+                ✓ executor      claude-code                     then codex
+                ✓ reviewer      claude-code                     then codex
+                ✓ reviewer-alt  claude-code                     then codex
+              ▸ ✓ mechanical  ▸ claude-code   codex
+                                ╭ model ───────────────────────╮
+                                │                              │
+                                ╰──────────────────────────────╯
+                                enter with none leaves it to declare later
+
+                 write .yunta/config.yaml and install yunta/fragua  · then yunta asks what to build
+
+             ⢀⣀⣀⣀⣀⣀⣀⣀⣠⣤⣤⣤⣤⢤⣤⣤⣴⣶⣶⣶⣶⣶⢶⣶⣾⣿⡿⣿⣿⣿⡿⠿⣿⣟⡻⠿⠿⣛⡻⠮⠝⠒⡩⠔⠊  ⡇ ⠑⠢⢍⠒⠛⠵⢟⣛⠿⠿⢟⣻⣿⠿⢿⣿⣿⣿⢿⣿⣿⣶⡶⣶⣶⣶⣶⣶⣶⣤⣤⡤⣤⣤⣤⣤⣤⣀⣀⣀⣀⣀⣀⣀⣀
+ ⠶⠶⠶⣶⣚⣛⣛⣛⣻⣿⣿⣭⣭⠭⠿⠿⠿⠿⢖⣚⣛⣛⡻⠯⠭⢭⣝⣛⣓⠶⠮⠭⠛⠛⣓⣊⡩⠭⠭⠒⠒⠊⢉⣉⠤⠔⠒⠊⠉ ⢀⡠⠒⠉     ⡇    ⠉⠒⢄⡀ ⠉⠉⠒⠢⠤⣉⣉⠑⠒⠒⠭⠭⢍⣑⣚⡛⠛⠭⠵⠶⣚⣛⣫⡭⠭⠽⢟⣛⣛⣓⡲⠿⠿⠿⠿⠭⣭⣭⣿⣿⣟⣛⣛⣛⣛⣶⠶⠶⠶
+ ⠛⠛⢛⣉⣉⣉⡩⠭⠤⠤⠔⠒⣒⣒⣊⡩⠭⠭⠥⠒⠒⠒⠉⢉⣉⣁⠤⠤⠔⠒⠒⠉⠉⠉ ⢀⣀⡠⠤⠒⠊⠉⠁    ⣀⠤⠊⠁        ⡇       ⠈⠑⠤⣀     ⠉⠑⠒⠤⠤⣀⡀ ⠈⠉⠉⠒⠒⠢⠤⠤⣈⣉⡉⠉⠒⠒⠒⠬⠭⠭⢍⣑⣒⣒⠒⠢⠤⠤⠭⢍⣉⣉⣉⡛⠛⠛
+ ⣉⣉⠥⠤⠤⠔⠒⠒⠊⠉⠉⠉  ⢀⣀⠤⠤⠔⠒⠒⠉⠉⠁     ⢀⡠⠤⠔⠒⠉⠁        ⡠⠔⠊            ⡇           ⠑⠢⢄        ⠈⠉⠒⠒⠤⢄⡀     ⠈⠉⠉⠒⠒⠢⠤⠤⣀⡀  ⠉⠉⠉⠑⠒⠒⠢⠤⠤⠬⣉⣉
+
+ ←→ adapter · enter take it · esc keeps the detected default

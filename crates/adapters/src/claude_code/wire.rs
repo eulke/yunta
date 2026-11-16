@@ -20,7 +20,8 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 /// The lines a session's stream carries for one step. A run tool's call is
 /// printed by the player that made it, with the name it was called by, so
-/// a run tool step prints nothing here.
+/// a run tool step prints nothing here; nor does a step that awaits a word,
+/// which the CLI never sees.
 pub(crate) fn render(step: &MockStep, _naming: ToolNaming) -> Vec<String> {
     match step {
         MockStep::Note { text, .. } | MockStep::BeforeOpen { text, .. } => {
@@ -83,7 +84,9 @@ pub(crate) fn render(step: &MockStep, _naming: ToolNaming) -> Vec<String> {
                 *cached_input_tokens,
             )),
         )],
-        MockStep::RunTool { .. } | MockStep::RunToolRejected { .. } => Vec::new(),
+        MockStep::RunTool { .. }
+        | MockStep::RunToolRejected { .. }
+        | MockStep::AwaitsWord { .. } => Vec::new(),
     }
 }
 

@@ -5,9 +5,13 @@
 //! event log.
 //!
 //! The world a run happens in is stated here; [`driving`] creates the
-//! run and wakes it, and [`reading`] answers what it left behind.
+//! run and wakes it, [`answering`] answers what it is parked on,
+//! [`promoting`] creates the successor a promotion asks for, and
+//! [`reading`] answers what it left behind.
 
+mod answering;
 mod driving;
+mod promoting;
 mod reading;
 
 pub use driving::no_secrets;

@@ -1,0 +1,14 @@
+ yunta › machine › upkeep                     ◆ 1 needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◌ upkeep · would reclaim no run
+   `storage.retention_days` isn't configured, so no run is…
+   now          0 checkouts, builds 0 B of a 98.9 GB budge…
+
+
+
+
+
+
+
+ ◆ 000000 needs you: Go on?  · a go there
+ c collect it · esc back · ? keys

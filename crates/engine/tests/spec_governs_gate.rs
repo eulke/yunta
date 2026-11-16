@@ -250,7 +250,7 @@ async fn a_gate_withholds_going_on_with_a_plan_that_changes_its_own_spec_test() 
 async fn a_withheld_option_is_refused_with_why_when_it_is_answered_from_elsewhere() {
     let bench = parked(GOVERNED, &planning(&[CHANGES_ITS_TEST])).await;
 
-    let refused = answer_parked(&bench, "approve").await;
+    let refused = bench.answer_parked("approve", None).await;
 
     let Err(ResolveGateError::Refused(GateRefusal::Withheld { chosen, withheld })) = refused else {
         panic!("approving a plan that cannot be proven is refused: {refused:?}");

@@ -1,0 +1,24 @@
+ yunta › fragua graph                                ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua · the nodes it runs, in order                                standard
+
+           ┌───────┐
+           │ grill │
+           └───────┘
+               │
+               ▼
+           ┌───────┐
+           │ brief │
+           └───────┘
+               │
+               ▼
+           ┌──────┐
+           │ plan │
+           └──────┘
+               │
+               ▼
+           ┌──────┐
+           │ spec │
+ … 43 more lines
+ ◆ Q78GRR needs you: The work beside its plan, and every finding…  · a go there
+ ↑↓ scroll · esc back · n new run · ? keys

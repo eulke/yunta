@@ -1,7 +1,9 @@
 //! A run a test holds on its first node until it lets it go. The node says when it started,
 //! then waits for the test's word to go on, and ends anyway once the test's marks are gone,
 //! so no engine outlives the test that started it. A second node follows, so a run let go
-//! has more to say before it finishes.
+//! has more to say before it finishes. A mock session is held by the same marks: it waits at
+//! a step for a word the test names, goes on once the test gives it, and ends once the marks
+//! are gone, so a test lets a session's calls go one at a time.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
@@ -11,7 +13,8 @@ use tempfile::TempDir;
 use crate::{run_ids, stderr, wait_until, Checkout};
 
 /// What a held run's first node says and hears by: the marker it writes once it started,
-/// and the word it waits for to go on. Dropped, it gives that word, however the test ends:
+/// and the word it waits for to go on; and the words a test names for the mock sessions it
+/// holds, each given apart. Dropped, it gives the node's word, however the test ends:
 /// a held engine started at a terminal stays in the terminal's session and keeps it open,
 /// so it has to end before the terminal is dropped, which waits for it to close. Not a
 /// run: the workflow that holds on it, which a test or the application starts.
@@ -49,6 +52,17 @@ impl Hold {
         std::fs::write(self.go(), "").expect("the word to go on");
     }
 
+    /// Where the word `name` stands once it is given: the path a mock session's fixture
+    /// names for the step that waits for it.
+    pub fn word(&self, name: &str) -> PathBuf {
+        self.marks.path().join(name)
+    }
+
+    /// Gives the word `name`, so a session waiting for it goes on.
+    pub fn give(&self, name: &str) {
+        std::fs::write(self.word(name), "").expect("the word a session waits for");
+    }
+
     /// Where the run's markers are, which a test may write beside.
     pub fn marks(&self) -> &Path {
         self.marks.path()
@@ -70,7 +84,7 @@ impl Hold {
 
     /// The word the run's first node waits for to go on.
     fn go(&self) -> PathBuf {
-        self.marks.path().join("go")
+        self.word("go")
     }
 }
 

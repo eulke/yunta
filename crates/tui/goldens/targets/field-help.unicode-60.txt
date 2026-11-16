@@ -1,0 +1,14 @@
+ yunta › /cut/worktree           ◆ 5 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  ╭ keys ────────────────────────────────────────────────╮
+  │ You never have to remember more than this.           │
+  │ /      anything: only what can be done here, with it…│
+  │ n      start a new run, wherever no prompt stands    │
+  │ j k    move; the footer always says what they move   │
+  │ enter  open, answer, confirm                         │
+  │ space  mark it                                       │
+  │ … 11 under                                           │
+  ╰──────────────────────────────────────────────────────╯
+  s      what it cost
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ esc back

@@ -29,6 +29,7 @@ mod run_tool;
 mod script;
 mod session;
 mod stand_in;
+mod word;
 
 pub use file_act::FileAct;
 pub use fixture::{

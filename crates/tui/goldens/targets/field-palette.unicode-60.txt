@@ -1,0 +1,14 @@
+ yunta › /cut/worktree           ◆ 5 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  ╭ what do you want to do? ─────────────────────────────╮
+  │ ▸ type to filter                                     │
+  │▸ follow it as it moves                               │
+  │  stop it and everything under it                     │
+  │  what it cost, and where its time went               │
+  │  go to what needs you                                │
+  │  start a new run                                     │
+  │  … 7 under                                           │
+  ╰──────────────────────────────────────────────────────╯
+  s      what it cost
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` r…
+ ↑↓ move · enter do it · esc back

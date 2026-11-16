@@ -1,12 +1,15 @@
-//! What an escalation shows, read out of the run for the person deciding.
+//! What an escalation shows, read out of the run for the person deciding; and the
+//! documents a node produced, read together for its page or one at a time, each as it
+//! is handed over, where one that does not read leaves the rest read.
 
 use std::path::Path;
 
+use yunta_core::events::artifacts::ledger::ArtifactRef;
 use yunta_core::events::findings::RunFindings;
 use yunta_core::events::{AcceptedDeparture, ArtifactId, Shown, TaskLedger};
-use yunta_core::shown::{ShownContent, ShownDocument};
+use yunta_core::shown::{Answered, ShownContent, ShownDocument};
 
-use yunta_core::{ArtifactKind, TasksFile};
+use yunta_core::{ArtifactKind, NodeId, Seq, TasksFile};
 use yunta_replay::RunState;
 
 use super::store::ObjectStore;
@@ -39,18 +42,30 @@ async fn held_documents(
     let answered = answered(&store, state).await?;
     let mut documents = Vec::with_capacity(shows.len());
     for shown in shows {
-        let bytes = store.get(&shown.content_hash).await?;
-        // Where the person deciding opens it: in full, since they read it
-        // from wherever they stand and not from the run's directory.
-        let path = run_dir.join(yunta_core::run_dir::view_of(shown));
-        let content = content(shown, (&bytes, &path), state, (&answered, asked))?;
-        documents.push(ShownDocument {
-            shown: shown.clone(),
-            path,
-            content,
-        });
+        documents.push(read(&store, run_dir, shown, state, (&answered, asked)).await?);
     }
     Ok(beside_its_plan(documents))
+}
+
+/// The document `shown` names, of the run rooted at `run_dir` whose `store` holds its
+/// bytes: where a person opens it, and what it says as [`content`] reads it.
+async fn read(
+    store: &ObjectStore<'_>,
+    run_dir: &Path,
+    shown: &Shown,
+    state: &RunState,
+    (answered, asked): (&[Answered], Option<&str>),
+) -> Result<ShownDocument, super::HeldError> {
+    let bytes = store.get(&shown.content_hash).await?;
+    // Where the person deciding opens it: in full, since they read it
+    // from wherever they stand and not from the run's directory.
+    let path = run_dir.join(yunta_core::run_dir::view_of(shown));
+    let content = content(shown, (&bytes, &path), state, (answered, asked))?;
+    Ok(ShownDocument {
+        shown: shown.clone(),
+        path,
+        content,
+    })
 }
 
 /// What `bytes`, the document `shown` names read at `path`, says: a plan
@@ -61,7 +76,7 @@ fn content(
     shown: &Shown,
     (bytes, path): (&[u8], &Path),
     state: &RunState,
-    (answered, asked): (&[yunta_core::shown::Answered], Option<&str>),
+    (answered, asked): (&[Answered], Option<&str>),
 ) -> Result<ShownContent, super::HeldError> {
     Ok(match &shown.artifact {
         _ if crate::run::gate_findings::shows_view(shown) => {
@@ -103,24 +118,11 @@ pub async fn produced(
     state: &RunState,
     asked: Option<&str>,
 ) -> Result<Vec<ShownDocument>, crate::run::RunError> {
-    let read = |artifact: &ArtifactId| {
-        matches!(
-            artifact,
-            ArtifactId::Interpreted {
-                kind: ArtifactKind::Tasks | ArtifactKind::Spec | ArtifactKind::Findings
-            }
-        )
-    };
-    let shown = |held: &yunta_core::events::artifacts::ledger::ArtifactRef| Shown {
-        producer: held.producer.clone(),
-        artifact: held.artifact.clone(),
-        content_hash: held.content_hash.clone(),
-    };
     let mut shows: Vec<Shown> = state
         .artifacts
         .by_producer(node)
-        .filter(|held| read(&held.artifact))
-        .map(shown)
+        .filter(|held| read_whole(&held.artifact))
+        .map(shown_of)
         .collect();
     let spec = ArtifactId::Interpreted {
         kind: ArtifactKind::Spec,
@@ -132,9 +134,63 @@ pub async fn produced(
             }
     });
     if plans && !shows.iter().any(|shown| shown.artifact == spec) {
-        shows.extend(state.artifacts.latest(&spec, None).map(shown));
+        shows.extend(state.artifacts.latest(&spec, None).map(shown_of));
     }
     Ok(held_documents(run_dir, &shows, state, asked).await?)
+}
+
+/// Each document a node of the run in `state` handed over that a person reads whole,
+/// accepted past `past`, with the node that handed it over: every one the run holds,
+/// for none. In the order the run first accepted each, as [`produced`] lists a node's.
+pub fn documents_handed_over(state: &RunState, past: Option<Seq>) -> Vec<(NodeId, Shown)> {
+    state
+        .artifacts
+        .every()
+        .filter(|held| Some(held.seq) > past && read_whole(&held.artifact))
+        .filter_map(|held| Some((held.producer.clone()?, shown_of(held))))
+        .collect()
+}
+
+/// The document `shown` names, which a node of the run rooted at `run_dir` produced,
+/// read on its own as [`produced`] reads each of a node's: a plan as the run in `state`
+/// judges it, with what a person `asked` for and answered, though not beside the spec a
+/// node's page judges it with; a spec; a review's findings. One that cannot be read
+/// fails alone, so whoever reads a node's documents one by one reads the rest.
+pub async fn produced_document(
+    run_dir: &Path,
+    shown: &Shown,
+    state: &RunState,
+    asked: Option<&str>,
+) -> Result<ShownDocument, crate::run::RunError> {
+    let store = ObjectStore::at(run_dir);
+    // What a person answered is restated by a plan alone.
+    let answered = match &shown.artifact {
+        ArtifactId::Interpreted {
+            kind: ArtifactKind::Tasks,
+        } => answered(&store, state).await?,
+        _ => Vec::new(),
+    };
+    Ok(read(&store, run_dir, shown, state, (&answered, asked)).await?)
+}
+
+/// Whether `artifact` is a document a person reads whole: a plan, a spec, a review's
+/// findings.
+fn read_whole(artifact: &ArtifactId) -> bool {
+    matches!(
+        artifact,
+        ArtifactId::Interpreted {
+            kind: ArtifactKind::Tasks | ArtifactKind::Spec | ArtifactKind::Findings
+        }
+    )
+}
+
+/// `held` named as a decision names a document it shows.
+fn shown_of(held: &ArtifactRef) -> Shown {
+    Shown {
+        producer: held.producer.clone(),
+        artifact: held.artifact.clone(),
+        content_hash: held.content_hash.clone(),
+    }
 }
 
 /// The plan `bytes` hold, as the run in `state` will judge it: with the
@@ -166,7 +222,7 @@ fn plan_reviewed(
 async fn answered(
     store: &ObjectStore<'_>,
     state: &RunState,
-) -> Result<Vec<yunta_core::shown::Answered>, super::HeldError> {
+) -> Result<Vec<Answered>, super::HeldError> {
     let (Some(questions), Some(answers)) = (
         held::<yunta_core::QuestionsFile>(store, state).await?,
         held::<yunta_core::AnswersFile>(store, state).await?,
@@ -181,7 +237,7 @@ async fn answered(
                 .questions
                 .iter()
                 .find(|question| question.id == answer.id)?;
-            Some(yunta_core::shown::Answered {
+            Some(Answered {
                 question: asked.text.clone(),
                 id: answer.id,
                 answer: answer.value,

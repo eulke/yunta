@@ -93,7 +93,7 @@ async fn a_blocked_loop_offers_no_retry_on_the_tree_it_failed_on() {
     assert_eq!(options(&bench).await, ["abort"]);
     assert!(
         matches!(
-            answer_parked(&bench, "retry").await,
+            bench.answer_parked("retry", None).await,
             Err(yunta_engine::ResolveGateError::Refused(
                 GateRefusal::UnknownOption { .. }
             ))
@@ -188,7 +188,7 @@ async fn continuing_a_loop_from_the_work_it_left_closes_the_task_without_a_sessi
     );
 
     write(&marker, "done");
-    answer_parked(&bench, "continue-work").await.unwrap();
+    bench.answer_parked("continue-work", None).await.unwrap();
     let RunReport { terminal, state } = bench
         .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;
@@ -335,7 +335,7 @@ async fn retrying_a_loop_gives_the_task_it_left_blocked_a_fresh_cycle() {
     );
     assert_eq!(options(&bench).await, ["retry", "abort"]);
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, state } = bench.wake_on_fixture(MAKES_IT).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -356,7 +356,7 @@ async fn retrying_a_loop_gives_the_task_it_left_blocked_a_fresh_cycle_once_its_c
 
     // The person makes the command runnable. It passes once the work is done.
     make_runnable(&tool);
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, state } = bench.wake_on_fixture(MAKES_IT).await;
 
     assert_eq!(terminal, RunTerminal::Finished);

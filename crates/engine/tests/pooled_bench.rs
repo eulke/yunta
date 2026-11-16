@@ -5,9 +5,6 @@
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, Bench};
 
-mod common;
-use common::answer_parked;
-
 const MAKES: &str =
     "name: makes\nnodes:\n  - id: make\n    kind: bash\n    run: \"echo made > made.txt\"\n";
 
@@ -41,7 +38,7 @@ async fn a_pooled_benchs_wake_takes_a_checkout_again_on_the_runs_branch() {
     );
     // Given back while the run was parked: on no branch, anybody's.
     git(&bench.tree(), &["switch", "-q", "--detach"]);
-    answer_parked(&bench, "approve").await.unwrap();
+    bench.answer_parked("approve", None).await.unwrap();
 
     let RunReport { terminal, .. } = bench.wake().await;
 

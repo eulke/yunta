@@ -1,0 +1,34 @@
+This node produces the `findings` artifact. It is not a file this session writes: report each finding through its run tools the moment you see it, and the engine writes the file at the end from everything this node reported. A finding reported before this session ends survives whatever happens after.
+
+What follows is the whole contract for that document: the keys, their types, and the rules. Where any other instruction describes it differently, this is what the engine enforces.
+
+# What a review found, as data the engine counts and carries forward.
+# Written strictly — any key not listed here is refused.
+
+findings:                               # required; an empty list is valid and
+                                        #   means the review found nothing
+  - id: null-deref-on-resize            # required, unique in this file
+    severity: blocking                  # required, one of:
+                                        #   blocking | major | minor | note
+    title: "Resize handler dereferences a null pointer"   # required, one line
+    location: "src/ui/resize.rs:142-150"                  # required: a path in
+                                        #   the worktree, never absolute,
+                                        #   optionally with a line range
+                                        #   (`142` or `142-150`)
+    detail: >-                          # required: what goes wrong, and when
+      When the window is resized before the first paint, `surface` is still
+      null and the handler dereferences it.
+    proposed_criterion:                 # optional: a command that is red today
+      cmd: "cargo test -p ui resize_before_paint"
+
+# The engine also refuses the document, and fails the node, unless:
+#   - each `id` is declared once in the file
+#   - `title` is a non-empty one-line summary
+#   - `detail` is non-empty: what goes wrong, and when
+#   - an update or a withdrawal names an id this node posted
+#   - a withdrawn id is final: it is not posted, updated or withdrawn again
+#   - a withdrawal says why, in a non-empty `reason`
+#
+# When it is submitted, the engine runs every criterion under `sh`, where it runs criteria (not in your shell, whose tools it may not have), and refuses the document unless:
+#   - a `proposed_criterion` runs where the engine runs criteria: each program it calls is on that `PATH`
+#   - a `proposed_criterion` fails on the run's tree until the finding is fixed

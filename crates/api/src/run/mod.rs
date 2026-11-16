@@ -5,7 +5,6 @@
 //! nobody has is refused in one sentence, naming where it was looked for and
 //! the run it was one slip away from, whichever interface asked.
 
-mod follow;
 mod page;
 mod reading;
 mod receipt;
@@ -21,9 +20,8 @@ use yunta_core::{Manifest, RunId};
 use yunta_render::refusal::Refused;
 use yunta_storage::Storage;
 
-use crate::{Error, Failure, Project};
+use crate::{Error, Failure, Project, Remark};
 
-pub use follow::{FollowedRun, Following, RunNews, RunRegistry};
 pub use reading::RunReading;
 pub use reference::RunRef;
 pub use stats::StatsReading;
@@ -125,4 +123,13 @@ pub(crate) fn read_manifest(path: &Path) -> Result<PersistedDoc<Manifest>, Failu
         })
     })?;
     Manifest::read_frozen(&bytes).map_err(Failure::new)
+}
+
+/// The remark that says the keys of `manifest` this binary does not read, which every
+/// reader of a run says before anything else of it: none where it holds none.
+pub(crate) fn unread_keys(manifest: &PersistedDoc<Manifest>) -> Option<Remark> {
+    let keys = manifest.unknown_keys();
+    (!keys.is_empty()).then(|| Remark::UnreadManifestKeys {
+        keys: keys.into_iter().map(str::to_string).collect(),
+    })
 }

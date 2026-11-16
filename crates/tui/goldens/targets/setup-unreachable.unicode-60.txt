@@ -1,0 +1,14 @@
+ yunta › set up                           nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ … 6 above
+   ✓ commits as   Marta Ruiz
+   ▲ workflow     yunta/fragua, out of reach: fatal:
+                  '/home/nowhere' does not appear to be a
+                  git repository
+
+ who does the work
+   ✓ implementer  claude-code
+
+  ▸ write .yunta/config.yaml
+
+ j k step · enter write it · … · ? keys

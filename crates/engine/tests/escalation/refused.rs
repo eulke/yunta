@@ -23,7 +23,7 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let err = answer_parked(&bench, "retry").await.unwrap_err();
+    let err = bench.answer_parked("retry", None).await.unwrap_err();
     assert!(matches!(
         err,
         ResolveGateError::Refused(GateRefusal::NotPaused)
@@ -37,7 +37,8 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
-    let err = answer_parked(&bench, "nonexistent-option")
+    let err = bench
+        .answer_parked("nonexistent-option", None)
         .await
         .unwrap_err();
     match err {
@@ -97,7 +98,7 @@ nodes:
         "{terminal:?}"
     );
 
-    let err = answer_parked(&bench, "anything").await.unwrap_err();
+    let err = bench.answer_parked("anything", None).await.unwrap_err();
     assert!(matches!(
         err,
         ResolveGateError::Refused(GateRefusal::NothingToResolve)

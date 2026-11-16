@@ -1,0 +1,36 @@
+ yunta :: CAPPED :: implement                                                                ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ? loop-cap (default) ; needs you ; for 0s                                                                       CAPPED
+ plan implement
+ ==== =========
+ node `implement` failed: loop `implement` exceeded `limits.max_loop_iterations` (2)
+
+   + plan                    0s  | implement ; loop                                         executor on mock/mock-model
+ * ? implement                   |
+    +- + T001                    |   limits.max_loop_iterations                2
+    +- + T002                    |   iterations already run this invocation    2
+    `- . T003                    |   the tasks document still has ready tasks
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 | | ? loop `implement` needs another iteration and its cap is spent          implement
+                                 | |
+                                 | | * retry  its iteration count starts over; it stops at the cap again if tasks
+                                 | |          remain
+                                 | |   abort  Pause here: nothing runs; this decision stays open
+ 0 tokens __ ; 0s at work
+
+ j k choose ; enter answer ; n add a note ; esc leave it waiting                                    / anything ; ? keys

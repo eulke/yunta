@@ -1,0 +1,307 @@
+schema_version: 6
+yunta_version: "0.0.5"
+workflow:
+  name: fragua
+  description: Full feature cycle — grill, verified tasks document, multi-runner review and the work held to its plan, one fix round, lint/fix, baseline, PR
+  modes:
+    quick:
+      include:
+      - grill
+      - brief
+      - plan
+      - implement
+      - lint
+      - fix-lint
+      - tests
+      - conform
+      - ship
+      - pr
+      ask: required
+    standard:
+      include:
+      - grill
+      - brief
+      - plan
+      - spec
+      - approve-plan
+      - implement
+      - lint
+      - fix-lint
+      - tests
+      - review@reviewer
+      - review@reviewer-alt
+      - conform
+      - fix-findings
+      - ship
+      - pr
+    full:
+      include: all
+  inputs:
+    idea:
+      type: string
+      description: What to build — becomes the brief
+      request: true
+  nodes:
+  - id: grill
+    kind: prompt
+    prompt: |
+      Find what in "{{inputs.idea}}" only a person can decide. Read the code
+      first: what it already answers is not a question. Ask only what changes
+      what gets built, each question standing alone; a question is `required`
+      only when the brief cannot be written without it.
+    runner: planner
+    artifacts:
+      produces:
+      - questions
+    permissions: read-only
+    invariant: false
+  - id: brief
+    kind: prompt
+    prompt: |
+      Write the brief for "{{inputs.idea}}" from the idea and the answers a
+      person gave to the questions in your context. List every question left
+      unanswered as an open point, with the assumption it states.
+    depends_on:
+    - grill
+    runner: planner
+    artifacts:
+      produces:
+      - brief.md
+    context:
+    - artifact:
+        node: grill
+        kind: questions
+    - artifact:
+        node: grill
+        kind: answers
+    invariant: false
+  - id: plan
+    kind: prompt
+    prompt: |
+      Write the tasks document that builds the brief: each task inside its
+      scope, each held by criteria that fail before the work and pass after.
+    depends_on:
+    - brief
+    - grill
+    runner: planner
+    artifacts:
+      produces:
+      - tasks
+    permissions: read-only
+    context:
+    - artifact:
+        node: brief
+        name: brief.md
+    - artifact:
+        node: grill
+        kind: questions
+    - artifact:
+        node: grill
+        kind: answers
+    invariant: false
+  - id: spec
+    kind: prompt
+    prompt: |
+      Write the tests the plan's tasks are held to, before any task is built.
+    depends_on:
+    - plan
+    runner: planner
+    artifacts:
+      produces:
+      - spec
+    permissions: read-only
+    context:
+    - artifact:
+        node: plan
+        kind: tasks
+    invariant: false
+  - id: approve-plan
+    kind: gate
+    assignee: lead
+    options:
+    - approve
+    - adjust
+    "on":
+      adjust: plan
+    shows:
+    - node: brief
+      name: brief.md
+    - node: plan
+      kind: tasks
+    - node: spec
+      kind: spec
+    depends_on:
+    - spec
+    - brief
+    - plan
+    invariant: false
+  - id: implement
+    kind: loop
+    until: all_tasks_complete
+    prompt: |
+      Build your task as its plan declares it, inside its scope. Check your
+      task as you go: the check runs its criteria exactly as the engine will.
+    concurrency: 2
+    scope_expansion:
+      mode: ask
+      max_per_run: 3
+    depends_on:
+    - approve-plan
+    runner: executor
+    invariant: true
+  - id: review@reviewer
+    kind: prompt
+    prompt: |
+      Review what the run changed against the brief, and post each finding.
+    depends_on:
+    - implement
+    - brief
+    runner: reviewer
+    artifacts:
+      produces:
+      - findings
+    permissions: read-only
+    context:
+    - artifact:
+        node: brief
+        name: brief.md
+    invariant: false
+  - id: review@reviewer-alt
+    kind: prompt
+    prompt: |
+      Review what the run changed against the brief, and post each finding.
+    depends_on:
+    - implement
+    - brief
+    runner: reviewer-alt
+    artifacts:
+      produces:
+      - findings
+    permissions: read-only
+    context:
+    - artifact:
+        node: brief
+        name: brief.md
+    invariant: false
+  - id: conform
+    kind: prompt
+    prompt: |
+      Hold the work to the plan a person approved, and post where it departs.
+    depends_on:
+    - implement
+    - plan
+    runner: reviewer
+    artifacts:
+      produces:
+      - findings
+    permissions: read-only
+    context:
+    - artifact:
+        node: plan
+        kind: tasks
+    invariant: false
+  - id: fix-findings
+    kind: prompt
+    prompt: |
+      Read the findings this run holds that are not settled, and answer every
+      one: fix it and answer it fixed, or answer it declined and say why.
+    depends_on:
+    - review@reviewer
+    - review@reviewer-alt
+    - conform
+    runner: executor
+    invariant: false
+  - id: lint
+    kind: bash
+    run:
+      command: lint
+    depends_on:
+    - fix-findings
+    on_failure:
+      goto: fix-lint
+      max_reroutes: 1
+    invariant: true
+    optional: true
+  - id: fix-lint
+    kind: prompt
+    prompt: |
+      Fix every error in the lint report, and nothing else.
+    scope: run
+    runner: mechanical
+    context:
+    - node-output:
+        node: lint
+    invariant: false
+  - id: tests
+    kind: check
+    builtin: baseline_compare
+    depends_on:
+    - lint
+    invariant: true
+  - id: ship
+    kind: gate
+    assignee: lead
+    message: The work beside its plan, and every finding the run holds with its answer. Create the PR?
+    shows:
+    - node: plan
+      kind: tasks
+    - kind: findings
+    depends_on:
+    - tests
+    - plan
+    invariant: false
+  - id: pr
+    kind: pull_request
+    title: "{{inputs.idea}}"
+    depends_on:
+    - ship
+    invariant: false
+  yunta_schema: ">=1 <2"
+config:
+  runners:
+    executor:
+    - adapter: mock
+      model: gpt-6-luna
+    mechanical:
+    - adapter: mock
+      model: gpt-6-luna
+    planner:
+    - adapter: mock
+      model: gpt-6-luna
+    reviewer:
+    - adapter: mock
+      model: gpt-6-luna
+    reviewer-alt:
+    - adapter: mock
+      model: gpt-6-luna
+  project:
+    base_branch: main
+  defaults:
+    max_parallel_nodes: 3
+  commands:
+    lint: cargo clippy --workspace --all-targets
+  baseline:
+    suite: cargo test --workspace
+    held:
+    - lint
+  forge:
+    github:
+      repo: eulke/yunta
+      token_env: YUNTA_DESIGNED_FORGE_TOKEN
+inputs:
+  idea: add support for installing a pack globally
+prompts: {}
+base_branch: main
+base_commit: 36aeaf5927afd4e0d3f17907d2e043e38836d1c1
+isolation: worktree
+max_parallel_nodes: 3
+workflow_hash: c7d0700ad62cb55b83f88b79cc5053836ff36957f963ac0761c2e6e5a2bd02c1
+config_hash: 2daf2ef925d87f37c22a96f4e06e39e9eacc3190f14fd7a022ad65af4de4d7fd
+project:
+  git_common_dir: /designed/worktree/.git
+frozen:
+  agents: {}
+  skills: {}
+  executors: {}
+  workflows: {}
+  knowledge: {}

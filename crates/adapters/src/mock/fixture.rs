@@ -336,6 +336,33 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
+    /// Holds the session as a test's `Hold` holds a node: it says nothing and goes on once
+    /// the file `word` stands, the word that test gives. Once the directory holding the
+    /// word is gone, the test that would give it ended, and the session ends as a stop
+    /// ends it, so no session outlives its test. A stop ends it while it waits.
+    AwaitsWord {
+        #[serde(deserialize_with = "absolute_word")]
+        word: PathBuf,
+        #[serde(default)]
+        after_ms: u64,
+    },
+}
+
+/// Reads the word a step awaits, refusing one that is not an absolute path: a relative
+/// word's directory is the empty path, which never stands, so its session would end at
+/// once and a test would read a held session that was never held.
+fn absolute_word<'de, D>(deserializer: D) -> Result<PathBuf, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let word = PathBuf::deserialize(deserializer)?;
+    if word.is_absolute() {
+        return Ok(word);
+    }
+    Err(<D::Error as serde::de::Error>::custom(format!(
+        "`word` is `{}`, a relative path; a word is an absolute path, where its test gives it",
+        word.display()
+    )))
 }
 
 /// What a scripted tool call expects the engine to answer.
@@ -365,7 +392,8 @@ impl MockStep {
             | MockStep::UnknownLine { after_ms }
             | MockStep::BeforeOpen { after_ms, .. }
             | MockStep::RunTool { after_ms, .. }
-            | MockStep::RunToolRejected { after_ms, .. } => *after_ms,
+            | MockStep::RunToolRejected { after_ms, .. }
+            | MockStep::AwaitsWord { after_ms, .. } => *after_ms,
         }
     }
 }

@@ -34,8 +34,21 @@ yunta-testkit-core.workspace = true
 yunta-surco.workspace = true
 # The instant every test of the application stands at.
 chrono.workspace = true
-# The channel a performer hands its answers back on, and the files the walk's places are
-# written with while its async work runs.
-tokio = { workspace = true, features = ["fs", "sync"] }
+# The channel a performer hands its answers back on, the files the walk's places are
+# written with while its async work runs, and the pace the design's recording looks at
+# its run's log at, beside the wake that drives it.
+tokio = { workspace = true, features = ["fs", "sync", "time", "macros"] }
 # The scratch places the walk's recordings are made in.
 tempfile.workspace = true
+# The forge the design's run opens its pull request on implements the engine's
+# dyn-safe async `Forge`.
+async-trait.workspace = true
+# The design's kept log, read back one event a line.
+serde_json.workspace = true
+
+[dev-dependencies]
+# The design's kept run is held as goldens are: compared with what a recording writes,
+# and written by it under `YUNTA_BLESS=1`.
+yunta-surco = { workspace = true, features = ["golden"] }
+# Where each small run stands, as a reader of its log frames it.
+yunta-replay.workspace = true

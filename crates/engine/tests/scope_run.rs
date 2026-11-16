@@ -7,7 +7,7 @@ use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{write, Bench};
 
 mod common;
-use common::{answer_parked, parked};
+use common::parked;
 
 /// What each start of `node` recorded it may change, oldest first.
 fn run_scopes(events: &[StoredEvent], node: &str) -> Vec<Option<Vec<ScopeGlob>>> {
@@ -114,7 +114,7 @@ async fn a_persons_edit_is_part_of_what_the_run_changed() {
     let bench = parked(workflow, "dialect: claude-code\nsessions: []\n").await;
     write(&bench.worktree.join("draft.txt"), "a person's draft\n");
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, .. } = bench
         .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;

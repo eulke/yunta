@@ -1,0 +1,14 @@
+ yunta › 0RPHAN › only           ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ uncertain-on-crash (default) · needs you · for 0s
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ a node was running with no terminal event when the engine…
+ only · bash
+ left half done
+ ■ only  attempt 1, after 15m00s
+ branch  yunta/run/01M7SMA11RVN000000000RPHAN off main
+
+
+ 0 tokens · 15m00s at work
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · r hand it back · s stats · g graph · … · ? keys

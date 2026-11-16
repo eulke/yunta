@@ -1,0 +1,626 @@
+# The mock's sessions of the design's run, one script per session, each told
+# apart by what its node asks. Every session is held by words its recorder
+# gives, `@words@` standing for where they are given, so its calls land at the
+# moments the recorder chooses and nothing it says races another session.
+# Each usage reads 96% of its input from the cache, as the design's numbers
+# show it: the cache is a part of the input, never added to it.
+dialect: claude-code
+sessions:
+  - match_prompt_contains: "only a person can decide"
+    model: gpt-6-luna
+    steps:
+      - { type: awaits_word, word: "@words@/grill-1" }
+      - { type: usage, input_tokens: 84000, output_tokens: 4000, cached_input_tokens: 80640 }
+      - { type: file_call, action: read, path: docs/pack.md }
+      - { type: file_call, action: read, path: crates/cli/src/cli/pack.rs }
+      - { type: awaits_word, word: "@words@/grill-2" }
+      - { type: usage, input_tokens: 126000, output_tokens: 6000, cached_input_tokens: 120960 }
+      - { type: file_call, action: read, path: crates/cli/src/project.rs }
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
+            questions:
+              - id: where-global-lives
+                text: "What does global mean in terms of where a pack is installed and which users or projects can access it?"
+                answer_type: choice
+                values:
+                  - "The current user's platform data directory, shared by that user's projects"
+                  - "A fixed home-directory path such as ~/.yunta"
+                  - "A machine-wide directory shared across users"
+                required: true
+              - id: how-requested
+                text: "How should someone request a global installation, and how does that differ from project-level installation?"
+                answer_type: choice
+                values:
+                  - "--global on pack add, update, remove and list"
+                  - "A separate pack global command group"
+                  - "A global-by-default install"
+                required: true
+              - id: beside-project-packs
+                text: "How should global installations interact with project-level packs, including precedence and conflicts?"
+                answer_type: choice
+                values:
+                  - "Independent stores and locks; each operation affects the selected target"
+                  - "Project packs override global packs"
+                  - "Global packs override project packs"
+                required: false
+                assumes: "Independent stores and locks; each operation affects the selected target"
+      - { type: awaits_word, word: "@words@/grill-3" }
+    outcome: { type: completed, summary: "Submitted the questions a person has to decide; the rest the repository already answers." }
+
+  - match_prompt_contains: "Write the brief"
+    model: gpt-6-luna
+    effects:
+      - path: "{{run.staging}}/brief/brief.md"
+        content: |
+          # Brief: install a pack globally
+
+          A person installs a pack once for every project of theirs, beside the
+          project-level installs that exist today.
+
+          ## Requirements
+
+          - A global pack lives in the current user's platform data directory,
+            shared by that user's projects.
+          - `--global` on `pack add`, `update`, `remove` and `list` selects the
+            global installation; without it, each command keeps its project
+            behavior.
+
+          ## Open points
+
+          - How global installations interact with project-level packs: nobody
+            answered. Assumed: independent stores and locks; each operation
+            affects the selected target.
+    steps:
+      - { type: awaits_word, word: "@words@/brief-1" }
+      - { type: usage, input_tokens: 106000, output_tokens: 6000, cached_input_tokens: 101760 }
+      - { type: file_call, action: write, path: brief.md }
+      - { type: note, text: "It captures the idea and lists unsettled details as open points with planning assumptions." }
+      - { type: file_call, action: read, path: brief.md }
+      - { type: awaits_word, word: "@words@/brief-2" }
+    outcome: { type: completed, summary: "Wrote and verified brief.md. It captures the idea and lists unsettled details as open points with planning assumptions." }
+
+  - match_prompt_contains: "Write the tasks document"
+    model: gpt-6-luna
+    steps:
+      - { type: awaits_word, word: "@words@/plan-1" }
+      - { type: usage, input_tokens: 610000, output_tokens: 25000, cached_input_tokens: 585600 }
+      - { type: file_call, action: read, path: crates/cli/src/commands/pack.rs }
+      - { type: file_call, action: read, path: crates/cli/src/cli/pack.rs }
+      - { type: file_call, action: read, path: crates/engine/src/catalog.rs }
+      - { type: awaits_word, word: "@words@/plan-2" }
+      - { type: usage, input_tokens: 1100000, output_tokens: 43000, cached_input_tokens: 1056000 }
+      - { type: file_call, action: read, path: crates/cli/src/main.rs }
+      - { type: file_call, action: read, path: crates/cli/src/commands/pack.rs }
+      - { type: tool_use, name: Bash, target: "cargo xtask docs --about" }
+      - { type: note, text: "The selected install target determines both the vendor directory and the lock file." }
+      - { type: file_call, action: read, path: docs/architecture.md }
+      - { type: awaits_word, word: "@words@/plan-3" }
+      - { type: usage, input_tokens: 730000, output_tokens: 32000, cached_input_tokens: 700800 }
+      - { type: note, text: "Add explicit per-user global pack installation alongside project-level installs." }
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Add explicit per-user global pack installation alongside project-level installs"
+            description: "Pack installation currently writes to the current project's .yunta/packs/ and .yunta/yunta.lock. Add an explicit --global mode that stores packs and their lock in a per-user Yunta data directory, so the same pack can be installed for broader use without changing project installs. Project and global installs are selected explicitly; global installs do not shadow or merge with project installs."
+            design: "The selected install target determines both the vendor directory and lock file. add, update, remove and list operate on one target at a time; --global selects the per-user target and omission keeps the existing project target. The pack manifest, audit, permission checks, atomic staging, lock integrity checks and output remain shared."
+            decisions:
+              - id: global-root
+                question: "Where does a global pack live?"
+                choice: "Under the current user's platform data directory, in a Yunta-specific subdirectory, shared by that user's projects."
+                alternatives: ["A fixed home-directory path such as ~/.yunta", "A machine-wide directory shared across users"]
+                why: "The platform data directory is intended for per-user application data and avoids coupling installations to a project checkout or requiring machine-wide permissions."
+                answers: where-global-lives
+              - id: global-flag
+                question: "How is a global install requested?"
+                choice: "--global on pack add, update, remove and list; without it, commands retain project-level behavior."
+                alternatives: ["A separate pack global command group", "A global-by-default install"]
+                why: "An explicit flag makes the target visible in each operation and preserves the existing default for scripts and project workflows."
+                answers: how-requested
+              - id: independent-stores
+                question: "How do global and project packs interact?"
+                choice: "Stores and locks stay independent; no implicit precedence or fallback. Every operation affects only the selected target."
+                alternatives: ["Project packs override global packs", "Global packs override project packs"]
+                why: "The brief does not define runtime lookup precedence; independent stores avoid silently changing current project behavior."
+            risks:
+              - "A user who sets YUNTA_HOME expects every store of theirs beneath it"
+              - "Two processes installing the same global pack at once race on its lock"
+            out_of_scope:
+              - "Resolving a workflow's pack from the global store at run time"
+              - "A machine-wide installation shared across users"
+              - "Moving an installed pack between the project and the global store"
+            tasks:
+              - id: global-pack-install
+                title: "Add explicit global pack install target"
+                description: "Adds the per-user install target, its store and its lock, and the --global flag that selects it."
+                scope:
+                  - crates/cli/src/pack.rs
+                  - crates/cli/src/cli/pack.rs
+                  - crates/cli/src/cli/dispatch.rs
+                  - crates/cli/src/commands/pack.rs
+                  - crates/cli/tests/pack_cmd.rs
+                changes:
+                  - at: crates/cli/src/pack.rs
+                    what: "The target enum, global store root and corresponding lock path; project paths retain their current layout."
+                    code: |
+                      pub enum PackTarget {
+                          Project,
+                          Global,
+                      }
+
+                      pub fn pack_target_root(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError>
+                      pub fn pack_target_lock_path(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError>
+                  - at: crates/cli/src/cli/pack.rs
+                    what: "Add a --global boolean to add, update, remove and list; preserve new and audit arguments."
+                    code: |
+                      pub(super) enum PackAction {
+                          Add { source: String, yes: bool, run_tests: bool, global: bool },
+                          Update { pack: PackRef, r#ref: String, yes: bool, global: bool },
+                          New { pack: PackRef },
+                          Remove { pack: PackRef, global: bool },
+                          List { global: bool },
+                          Audit { pack: PackRef },
+                      }
+                  - at: crates/cli/src/commands/pack.rs
+                    what: "Use the selected target for vendored directories, lock loading and saving, staging, and removal; share existing policy, audit and atomic replacement."
+                    code: |
+                      pub async fn add(source: &str, confirmed_executors: bool, run_tests: bool, target: PackTarget, look: &Look) -> Result<Outcome, CliError>
+                      pub async fn update(pack: &PackRef, new_ref: &str, confirmed_executors: bool, target: PackTarget, look: &Look) -> Result<Outcome, CliError>
+                      pub fn remove(pack: &PackRef, target: PackTarget, look: &Look) -> Result<Outcome, CliError>
+                      pub fn list(target: PackTarget, look: &Look) -> Result<Outcome, CliError>
+                outcome: "Before, yunta pack add, update, remove and list operate on the current project only. After, the same commands accept --global and show or change the per-user installation and lock, while omitting the flag continues to operate on the project installation."
+                criteria:
+                  - cmd: "cargo test --workspace --test pack_global_spec global_pack_commands_use_the_per_user_store_without_changing_the_project_store"
+                    proves: "The new end-to-end test verifies global add, list, update and remove use the per-user store while the project store remains independent."
+      - { type: awaits_word, word: "@words@/plan-4" }
+      - { type: file_call, action: read, path: tasks.yaml }
+      - { type: awaits_word, word: "@words@/plan-5" }
+    outcome: { type: completed, summary: "Submitted the revised plan. The engine accepted tasks.yaml and registered global-pack-install. It defines per-user global storage, explicit --global selection, and keeps global and project stores independent." }
+
+  - match_prompt_contains: "Write the tests the plan's tasks are held to"
+    model: gpt-6-luna
+    steps:
+      - { type: awaits_word, word: "@words@/spec-1" }
+      - { type: usage, input_tokens: 540000, output_tokens: 12000, cached_input_tokens: 518400 }
+      - { type: tool_use, name: Bash, target: "git status" }
+      - { type: file_call, action: read, path: crates/cli/src/cli/pack.rs }
+      - { type: file_call, action: read, path: crates/engine/src/catalog.rs }
+      - { type: awaits_word, word: "@words@/spec-2" }
+      - { type: usage, input_tokens: 1250000, output_tokens: 38000, cached_input_tokens: 1200000 }
+      - { type: file_call, action: read, path: crates/cli/tests/pack_cmd.rs }
+      - { type: file_call, action: read, path: crates/engine/tests/catalog.rs }
+      - type: run_tool
+        tool: yunta_submit_spec
+        arguments:
+          document:
+            specs:
+              - task: global-pack-install
+                files:
+                  - path: crates/cli/tests/pack_global_spec.rs
+                    content: |
+                      //! Global pack commands use the per-user store and leave the
+                      //! project's store as it was.
+
+                      use yunta_testkit::{Checkout, PackSource};
+
+                      #[test]
+                      fn global_pack_commands_use_the_per_user_store_without_changing_the_project_store() {
+                          let home = tempfile::tempdir().unwrap();
+                          let checkout = Checkout::new().committed();
+                          let pack = PackSource::named("acme/demo");
+
+                          checkout.yunta_in(home.path(), &["pack", "add", "--global", pack.as_str(), "--yes"]);
+                          let listed = checkout.yunta_in(home.path(), &["pack", "list", "--global"]);
+                          assert!(listed.stdout.contains("acme/demo"));
+                          assert!(home.path().join("packs/acme/demo").exists());
+                          assert!(!checkout.path().join(".yunta/packs/acme/demo").exists());
+
+                          checkout.yunta_in(home.path(), &["pack", "remove", "--global", "acme/demo"]);
+                          assert!(!home.path().join("packs/acme/demo").exists());
+                      }
+                tests:
+                  - cmd: "cargo test --workspace --test pack_global_spec global_pack_commands_use_the_per_user_store_without_changing_the_project_store"
+                    proves: "The new end-to-end test verifies global add, list, update and remove use the per-user store while the project store remains independent."
+      - { type: note, text: "The engine confirmed both test commands fail before the implementation, as required." }
+      - { type: awaits_word, word: "@words@/spec-3" }
+    outcome: { type: completed, summary: "Submitted and accepted the spec for global-pack-install. The engine confirmed both test commands fail before the implementation, as required." }
+
+  # The task's first session: its work in scope, and a write the fence refuses,
+  # whose path it then asks for.
+  - match_prompt_contains: "Build your task as its plan declares it"
+    model: gpt-6-luna
+    effects:
+      - path: crates/cli/src/pack.rs
+        content: |
+          //! Packs: where they are installed, and the lock that records them.
+
+          use std::path::{Path, PathBuf};
+
+          use crate::error::PackError;
+
+          /// Where a pack command installs: the project's store, or the user's own.
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          pub enum PackTarget {
+              Project,
+              Global,
+          }
+
+          /// The directory a target's packs are vendored under.
+          pub fn pack_target_root(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError> {
+              match target {
+                  PackTarget::Project => Ok(cwd.join(".yunta/packs")),
+                  PackTarget::Global => global_data_dir().map(|dir| dir.join("packs")),
+              }
+          }
+
+          /// The lock a target's installs are recorded in.
+          pub fn pack_target_lock_path(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError> {
+              match target {
+                  PackTarget::Project => Ok(cwd.join(".yunta/yunta.lock")),
+                  PackTarget::Global => global_data_dir().map(|dir| dir.join("yunta.lock")),
+              }
+          }
+      - path: crates/cli/src/cli/pack.rs
+        content: |
+          //! `yunta pack`'s arguments.
+
+          pub(super) enum PackAction {
+              Add { source: String, yes: bool, run_tests: bool, global: bool },
+              Update { pack: PackRef, r#ref: String, yes: bool, global: bool },
+              New { pack: PackRef },
+              Remove { pack: PackRef, global: bool },
+              List { global: bool },
+              Audit { pack: PackRef },
+          }
+      - path: crates/cli/src/commands/pack.rs
+        content: |
+          //! `yunta pack`: add, update, remove and list, on the target chosen.
+
+          pub async fn add(source: &str, confirmed_executors: bool, run_tests: bool, target: PackTarget, look: &Look) -> Result<Outcome, CliError> {
+              let root = pack_target_root(target, &look.cwd)?;
+              install(source, confirmed_executors, run_tests, &root, look).await
+          }
+
+          pub fn remove(pack: &PackRef, target: PackTarget, look: &Look) -> Result<Outcome, CliError> {
+              let root = pack_target_root(target, &look.cwd)?;
+              uninstall(pack, &root, look)
+          }
+
+          pub fn list(target: PackTarget, look: &Look) -> Result<Outcome, CliError> {
+              listed(&pack_target_lock_path(target, &look.cwd)?, look)
+          }
+      - path: crates/cli/src/cli/dispatch.rs
+        content: |
+          //! Which command an invocation runs.
+
+          pub(super) fn pack(action: PackAction, look: &Look) -> Dispatched {
+              let target = |global| if global { PackTarget::Global } else { PackTarget::Project };
+              match action {
+                  PackAction::Add { source, yes, run_tests, global } => {
+                      Dispatched::later(commands::pack::add(source, yes, run_tests, target(global), look))
+                  }
+                  PackAction::Remove { pack, global } => Dispatched::now(commands::pack::remove(&pack, target(global), look)),
+                  PackAction::List { global } => Dispatched::now(commands::pack::list(target(global), look)),
+                  other => Dispatched::now(commands::pack::other(other, look)),
+              }
+          }
+      - path: crates/cli/src/commands/pack_audit.rs
+        content: |
+          //! `yunta pack audit`, on the project's store.
+
+          pub fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
+              let root = pack_target_root(PackTarget::Project, &look.cwd)?;
+              audited(&root.join(pack.as_path()), look)
+          }
+    steps:
+      - { type: awaits_word, word: "@words@/implement-1" }
+      - { type: usage, input_tokens: 3600000, output_tokens: 150000, cached_input_tokens: 3456000 }
+      - { type: run_tool, tool: yunta_task }
+      - { type: file_call, action: read, path: crates/cli/src/pack.rs }
+      - { type: file_call, action: read, path: crates/cli/src/commands/pack.rs }
+      - { type: file_call, action: read, path: crates/testkit/src/bin.rs }
+      - { type: awaits_word, word: "@words@/implement-2" }
+      - { type: usage, input_tokens: 2250000, output_tokens: 90000, cached_input_tokens: 2160000 }
+      - { type: file_call, action: edit, path: crates/cli/src/pack.rs }
+      - { type: file_call, action: edit, path: crates/cli/src/cli/pack.rs }
+      - { type: file_call, action: edit, path: crates/cli/src/commands/pack.rs }
+      - { type: file_call, action: edit, path: crates/cli/src/cli/dispatch.rs }
+      - { type: awaits_word, word: "@words@/implement-3" }
+      - { type: usage, input_tokens: 2780000, output_tokens: 130000, cached_input_tokens: 2668800 }
+      - { type: tool_use, name: Bash, target: "cargo xtask docs --about" }
+      - { type: tool_use, name: Bash, target: "cargo check" }
+      - { type: file_call, action: read, path: crates/cli/src/commands/pack_audit.rs }
+      - type: run_tool
+        tool: yunta_request_scope_expansion
+        arguments:
+          paths: [crates/cli/src/commands/pack_audit.rs]
+          reason: "The target-aware vendor_dir and packs_root APIs are used by project-local pack audit; this path must retain its existing project behavior and compile after changing the shared helpers."
+      - { type: awaits_word, word: "@words@/implement-4" }
+    outcome: { type: completed, summary: "Asked to touch crates/cli/src/commands/pack_audit.rs." }
+
+  # The fresh session the pending request opens: it moves nothing more.
+  - match_prompt_contains: "Build your task as its plan declares it"
+    model: gpt-6-luna
+    steps:
+      - { type: awaits_word, word: "@words@/implement-5" }
+      - { type: usage, input_tokens: 400000, output_tokens: 20000, cached_input_tokens: 384000 }
+      - { type: run_tool, tool: yunta_task_status }
+      - { type: awaits_word, word: "@words@/implement-6" }
+    outcome: { type: completed, summary: "The task waits on the path it asked for." }
+
+  # Picked back up once the path is granted: it writes it, and asks for the
+  # module its target's paths move into.
+  - match_prompt_contains: "was granted"
+    model: gpt-6-luna
+    effects:
+      - path: crates/cli/src/commands/pack_audit.rs
+        content: |
+          //! `yunta pack audit`, on the project's store.
+
+          pub fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
+              let root = vendor_dir(PackTarget::Project, &look.cwd)?;
+              audited(&root.join(pack.as_path()), look)
+          }
+    steps:
+      - { type: awaits_word, word: "@words@/implement-7" }
+      - { type: usage, input_tokens: 2400000, output_tokens: 100000, cached_input_tokens: 2304000 }
+      - { type: run_tool, tool: yunta_task_status }
+      - { type: file_call, action: edit, path: crates/cli/src/pack.rs }
+      - { type: file_call, action: edit, path: crates/cli/src/commands/pack.rs }
+      - { type: tool_use, name: Bash, target: "cargo check" }
+      - { type: tool_use, name: Bash, target: "cargo test" }
+      - type: run_tool
+        tool: yunta_request_scope_expansion
+        arguments:
+          paths: [crates/cli/src/pack/target.rs]
+          reason: "The global target types and path resolution added to pack.rs push that module over the repository's 500-line smell limit. Moving the target-specific path logic into a child module is needed to keep the smell ratchet green."
+      - { type: awaits_word, word: "@words@/implement-8" }
+    outcome: { type: completed, summary: "Asked to touch crates/cli/src/pack/target.rs." }
+
+  - match_prompt_contains: "Build your task as its plan declares it"
+    model: gpt-6-luna
+    steps:
+      - { type: awaits_word, word: "@words@/implement-9" }
+      - { type: usage, input_tokens: 500000, output_tokens: 25000, cached_input_tokens: 480000 }
+      - { type: run_tool, tool: yunta_task_status }
+      - { type: awaits_word, word: "@words@/implement-10" }
+    outcome: { type: completed, summary: "The task waits on the path it asked for." }
+
+  - match_prompt_contains: "was granted"
+    model: gpt-6-luna
+    effects:
+      - path: crates/cli/src/pack/target.rs
+        content: |
+          //! Where each install target keeps its packs and its lock.
+
+          use std::path::{Path, PathBuf};
+
+          use crate::error::PackError;
+
+          /// Where a pack command installs: the project's store, or the user's own.
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          pub enum PackTarget {
+              Project,
+              Global,
+          }
+
+          /// The directory a target's packs are vendored under.
+          pub fn pack_target_root(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError> {
+              match target {
+                  PackTarget::Project => Ok(cwd.join(".yunta/packs")),
+                  PackTarget::Global => global_data_dir().map(|dir| dir.join("packs")),
+              }
+          }
+
+          /// The lock a target's installs are recorded in.
+          pub fn pack_target_lock_path(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError> {
+              match target {
+                  PackTarget::Project => Ok(cwd.join(".yunta/yunta.lock")),
+                  PackTarget::Global => global_data_dir().map(|dir| dir.join("yunta.lock")),
+              }
+          }
+
+          fn global_data_dir() -> Result<PathBuf, PackError> {
+              let home = Env.home.as_ref().ok_or(PackError::NoHome)?;
+              Ok(home.join(".yunta"))
+          }
+      - path: crates/cli/src/pack.rs
+        content: |
+          //! Packs: where they are installed, and the lock that records them.
+
+          mod target;
+
+          pub use target::{pack_target_lock_path, pack_target_root, PackTarget};
+    steps:
+      - { type: awaits_word, word: "@words@/implement-11" }
+      - { type: usage, input_tokens: 6800000, output_tokens: 255000, cached_input_tokens: 6528000 }
+      - { type: file_call, action: read, path: crates/cli/tests/pack_global_spec.rs }
+      - { type: file_call, action: edit, path: crates/cli/src/pack/target.rs }
+      - { type: run_tool, tool: yunta_check_task }
+      - { type: awaits_word, word: "@words@/implement-12" }
+    outcome: { type: completed, summary: "1 task done" }
+
+  # The three reviewers, at work at once.
+  - match_prompt_contains: "Review what the run changed"
+    model: gpt-6-luna
+    steps:
+      - { type: awaits_word, word: "@words@/review-1" }
+      - { type: usage, input_tokens: 375000, output_tokens: 19000, cached_input_tokens: 360000 }
+      - { type: file_call, action: read, path: crates/cli/src/pack/target.rs }
+      - { type: tool_use, name: Bash, target: "git diff main" }
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: global-paths-ignore-yunta-home
+          severity: major
+          title: "Global pack paths ignore the configured YUNTA_HOME"
+          location: "crates/cli/src/pack/target.rs:31-35"
+          detail: "global_data_dir uses only Env.home and appends /.yunta. With HOME=/home/alice and YUNTA_HOME=/scratch/yunta-state, pack add --global stores under /home/alice/.yunta/packs instead of /scratch/yunta-state/packs."
+      - { type: awaits_word, word: "@words@/review-2" }
+    outcome: { type: completed, summary: "Reported one major finding: global pack commands ignore YUNTA_HOME and use HOME/.yunta instead." }
+
+  - match_prompt_contains: "Review what the run changed"
+    model: gpt-6-luna
+    steps:
+      - { type: awaits_word, word: "@words@/review-alt-1" }
+      - { type: usage, input_tokens: 400000, output_tokens: 21000, cached_input_tokens: 384000 }
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: global-commands-ignore-yunta-home
+          severity: major
+          title: "Global pack commands ignore the configured YUNTA_HOME state root"
+          location: "crates/cli/src/pack/target.rs:29-33"
+          detail: "Other user-level state resolves beneath YUNTA_HOME, but global_data_dir appends ~/.yunta, so users who rely on YUNTA_HOME cannot find the global installation."
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: audit-misses-global-packs
+          severity: minor
+          title: "Pack audit cannot inspect globally installed packs"
+          location: "crates/cli/src/cli/pack.rs:76-88"
+          detail: "After pack add --global, pack audit publisher/name still resolves only the project .yunta/packs directory and returns not installed."
+      - { type: awaits_word, word: "@words@/review-alt-2" }
+    outcome: { type: completed, summary: "Reported two findings: global pack storage ignores YUNTA_HOME, and pack audit cannot inspect packs installed globally." }
+
+  - match_prompt_contains: "Hold the work to the plan"
+    model: gpt-6-luna
+    steps:
+      - { type: awaits_word, word: "@words@/conform-1" }
+      - { type: usage, input_tokens: 156000, output_tokens: 8000, cached_input_tokens: 149760 }
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: target-outside-declared-file
+          severity: blocking
+          title: "Pack target API shapes are defined outside the declared file"
+          location: "crates/cli/src/pack/target.rs:10-27"
+          detail: "The plan declares PackTarget, pack_target_root and pack_target_lock_path in crates/cli/src/pack.rs. The implementation puts the enum and both functions in pack/target.rs; pack.rs only re-exports them."
+      - { type: awaits_word, word: "@words@/conform-2" }
+    outcome: { type: completed, summary: "Reported one blocking finding: PackTarget and its path functions are defined in pack/target.rs, while the plan names pack.rs." }
+
+  - match_prompt_contains: "Read the findings this run holds"
+    model: gpt-6-luna
+    effects:
+      - path: crates/cli/src/pack.rs
+        content: |
+          //! Packs: where they are installed, and the lock that records them.
+
+          use std::path::{Path, PathBuf};
+
+          use crate::error::PackError;
+          use crate::state::user_state_root;
+
+          /// Where a pack command installs: the project's store, or the user's own.
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          pub enum PackTarget {
+              Project,
+              Global,
+          }
+
+          /// The directory a target's packs are vendored under.
+          pub fn pack_target_root(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError> {
+              match target {
+                  PackTarget::Project => Ok(cwd.join(".yunta/packs")),
+                  PackTarget::Global => Ok(user_state_root()?.join("packs")),
+              }
+          }
+
+          /// The lock a target's installs are recorded in.
+          pub fn pack_target_lock_path(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError> {
+              match target {
+                  PackTarget::Project => Ok(cwd.join(".yunta/yunta.lock")),
+                  PackTarget::Global => Ok(user_state_root()?.join("yunta.lock")),
+              }
+          }
+
+          fn packs_root(cwd: &Path) -> PathBuf {
+              cwd.join(".yunta/packs")
+          }
+
+          fn vendor_dir(cwd: &Path, pack: &PackRef) -> PathBuf {
+              packs_root(cwd).join(pack.as_path())
+          }
+      - path: crates/cli/src/pack/target.rs
+        content: |
+          //! What the install targets share with the commands that read them.
+
+          pub use super::PackTarget;
+      - path: crates/cli/src/commands/pack_audit.rs
+        content: |
+          //! `yunta pack audit`, on the store its target names.
+
+          pub fn audit(pack: &PackRef, target: PackTarget, look: &Look) -> Result<Outcome, CliError> {
+              let root = pack_target_root(target, &look.cwd)?;
+              audited(&root.join(pack.as_path()), look)
+          }
+    steps:
+      - { type: awaits_word, word: "@words@/fix-findings-1" }
+      - { type: usage, input_tokens: 700000, output_tokens: 30000, cached_input_tokens: 672000 }
+      - { type: run_tool, tool: yunta_findings }
+      - { type: file_call, action: edit, path: crates/cli/src/pack/target.rs }
+      - { type: file_call, action: edit, path: crates/cli/src/commands/pack_audit.rs }
+      - { type: awaits_word, word: "@words@/fix-findings-2" }
+      - { type: usage, input_tokens: 940000, output_tokens: 40000, cached_input_tokens: 902400 }
+      - { type: tool_use, name: Bash, target: "cargo xtask docs --check" }
+      - { type: tool_use, name: Bash, target: "cargo test -p yunta" }
+      - type: run_tool
+        tool: yunta_answer_finding
+        arguments: { node: conform, id: target-outside-declared-file, answer: fixed, why: "PackTarget and its path functions are now defined in crates/cli/src/pack.rs." }
+      - type: run_tool
+        tool: yunta_answer_finding
+        arguments: { node: "review@reviewer", id: global-paths-ignore-yunta-home, answer: fixed, why: "Global pack paths now use the shared user_state_root resolver, which honors YUNTA_HOME." }
+      - type: run_tool
+        tool: yunta_answer_finding
+        arguments: { node: "review@reviewer-alt", id: global-commands-ignore-yunta-home, answer: fixed, why: "Global pack paths now use the shared user_state_root resolver, which honors YUNTA_HOME." }
+      - type: run_tool
+        tool: yunta_answer_finding
+        arguments: { node: "review@reviewer-alt", id: audit-misses-global-packs, answer: fixed, why: "pack audit now accepts --global and resolves the pack under the global installation root." }
+      - { type: awaits_word, word: "@words@/fix-findings-3" }
+    outcome: { type: completed, summary: "Answered all four findings as fixed. cargo xtask docs --check passed." }
+
+  - match_prompt_contains: "Fix every error in the lint report"
+    model: gpt-6-luna
+    effects:
+      - path: crates/cli/src/pack.rs
+        content: |
+          //! Packs: where they are installed, and the lock that records them.
+
+          use std::path::{Path, PathBuf};
+
+          use crate::error::PackError;
+          use crate::state::user_state_root;
+
+          /// Where a pack command installs: the project's store, or the user's own.
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          pub enum PackTarget {
+              Project,
+              Global,
+          }
+
+          /// The directory a target's packs are vendored under.
+          pub fn pack_target_root(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError> {
+              match target {
+                  PackTarget::Project => Ok(cwd.join(".yunta/packs")),
+                  PackTarget::Global => Ok(user_state_root()?.join("packs")),
+              }
+          }
+
+          /// The lock a target's installs are recorded in.
+          pub fn pack_target_lock_path(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError> {
+              match target {
+                  PackTarget::Project => Ok(cwd.join(".yunta/yunta.lock")),
+                  PackTarget::Global => Ok(user_state_root()?.join("yunta.lock")),
+              }
+          }
+    steps:
+      - { type: awaits_word, word: "@words@/fix-lint-1" }
+      - { type: usage, input_tokens: 207000, output_tokens: 10000, cached_input_tokens: 198720 }
+      - { type: file_call, action: read, path: crates/cli/src/pack.rs }
+      - { type: file_call, action: edit, path: crates/cli/src/pack.rs }
+      - { type: tool_use, name: Bash, target: "cargo xtask docs --check" }
+      - { type: tool_use, name: Bash, target: "cargo check -p yunta" }
+      - { type: awaits_word, word: "@words@/fix-lint-2" }
+    outcome: { type: completed, summary: "Removed the unused packs_root and vendor_dir functions from pack.rs." }

@@ -228,7 +228,7 @@ async fn an_option_that_sends_the_plan_back_asks_what_should_change() {
 #[tokio::test]
 async fn a_correction_without_words_is_refused_wherever_it_comes_from() {
     let bench = parked(REVIEWED_PLAN, PLANNER).await;
-    let refused = answer_parked(&bench, "adjust").await;
+    let refused = bench.answer_parked("adjust", None).await;
     assert!(
         matches!(
             refused,

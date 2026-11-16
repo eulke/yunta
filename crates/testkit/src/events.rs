@@ -1,6 +1,8 @@
-//! Reading a run's log the way a test asks about it, and writing the
-//! events a run would have written.
+//! Reading a run's log the way a test asks about it, writing the
+//! events a run would have written, and loading a log a run wrote into
+//! a store of its own.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use yunta_core::events::artifacts::ArtifactRef;
@@ -100,6 +102,30 @@ pub fn status_changed_carrying(
         "commit": commit.as_str(),
     });
     serde_json::from_value(wire).expect("the wire shape of a task_status_changed")
+}
+
+/// `events`, a log a run wrote, loaded into the store at `store` as it was
+/// written: each at its own instant, in the order given. A run's events
+/// are loaded from its first, no seq missed, so each takes the seq it
+/// holds; the store chains them afresh, as it chains every append.
+pub fn loaded(store: &Path, events: &[StoredEvent]) {
+    let storage = Storage::open(store).expect("the store a log is loaded into");
+    for event in events {
+        let payload = event
+            .payload()
+            .unwrap_or_else(|| panic!("seq {} is of a kind this binary reads", event.seq))
+            .clone();
+        let draft = EventDraft::new(event.run_id.clone(), event.node_id.clone(), payload)
+            .expect("a draft names its subject");
+        let seq = storage
+            .append_at(&draft, event.timestamp)
+            .expect("the store takes the event");
+        assert_eq!(
+            seq, event.seq,
+            "`{}`'s log is loaded from its first event, every seq in turn",
+            event.run_id
+        );
+    }
 }
 
 /// The `run_created` a log written by hand opens with: a manifest named by

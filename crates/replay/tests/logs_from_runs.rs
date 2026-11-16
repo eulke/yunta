@@ -22,6 +22,7 @@ fn load(name: &str) -> Vec<StoredEvent> {
 /// A log an earlier binary wrote replays: no kind or payload it holds stops
 /// reading as the binary that wrote it meant.
 /// Reached by: `crates/core/src/events/**`, `crates/replay/src/lib.rs`,
+/// `crates/replay/src/fold.rs`,
 /// `crates/replay/src/activity.rs`, `crates/replay/src/clock.rs`,
 /// `crates/replay/src/decisions.rs`, `crates/replay/src/refuse.rs`,
 /// `crates/replay/src/tree.rs`, `crates/core/src/best_effort.rs`,

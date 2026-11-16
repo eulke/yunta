@@ -1,7 +1,8 @@
 //! The world a test of the application works in: a workspace in a directory of its own,
 //! whose state and org layer it keeps beside it, which reads nothing of the machine's and
-//! finds only the CLIs a test stands in for on its `PATH`; packs to install from a local
-//! repository; and the instant every test stands at.
+//! finds only the CLIs a test stands in for on its `PATH`, its git pointed where a test
+//! points it; packs to install from a local repository; and the instant every test stands
+//! at.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -39,18 +40,42 @@ pub fn workspace_on(dir: &Path, root: &Path, first: Vec<PathBuf>) -> Workspace {
     }
 }
 
+/// A workspace as [`workspace_on`] makes it, whose git reads `git`, the environment a
+/// test points git with, for every process it starts.
+pub fn workspace_reaching(
+    dir: &Path,
+    root: &Path,
+    first: Vec<PathBuf>,
+    git: Vec<(String, String)>,
+) -> Workspace {
+    let mut workspace = workspace_on(dir, root, first);
+    workspace.env.subprocess_vars = git;
+    workspace
+}
+
 /// A directory under `root` holding a `claude` that answers `--version` as Claude
 /// Code does: on a workspace's `PATH`, the adapter this machine answers for. It opens
 /// no session.
 pub fn claude_answering(root: &Path) -> PathBuf {
+    answering(&root.join("bin"), "claude", "2.1.0 (Claude Code)")
+}
+
+/// A directory under `root` holding a `codex` that answers `--version` as the Codex CLI
+/// does, at the lowest version Yunta takes: beside [`claude_answering`]'s on a
+/// workspace's `PATH`, a second adapter this machine answers for. It opens no session.
+pub fn codex_answering(root: &Path) -> PathBuf {
+    answering(&root.join("codex-bin"), "codex", "codex-cli 0.157.0")
+}
+
+/// The directory `bin`, holding a `cli` that says `version` when asked for one.
+fn answering(bin: &Path, cli: &str, version: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
-    let bin = root.join("bin");
-    std::fs::create_dir_all(&bin).expect("a directory for the CLIs");
-    let claude = bin.join("claude");
-    std::fs::write(&claude, "#!/bin/sh\necho '2.1.0 (Claude Code)'\n").expect("a stub CLI");
+    std::fs::create_dir_all(bin).expect("a directory for the CLIs");
+    let stub = bin.join(cli);
+    std::fs::write(&stub, format!("#!/bin/sh\necho '{version}'\n")).expect("a stub CLI");
     let executable = std::fs::Permissions::from_mode(0o755);
-    std::fs::set_permissions(&claude, executable).expect("a stub CLI that runs");
-    bin
+    std::fs::set_permissions(&stub, executable).expect("a stub CLI that runs");
+    bin.to_path_buf()
 }
 
 /// A pack's manifest: one workflow, nothing it executes.

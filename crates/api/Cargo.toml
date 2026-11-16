@@ -49,6 +49,9 @@ tempfile.workspace = true
 [dev-dependencies]
 # Ids a test writes as text, which core opens to tests only.
 yunta-core = { workspace = true, features = ["testkit"] }
+# A follower's test of a run whose log fails a read corrupts a stored event behind
+# the store's back through the same fault injector storage's own tests use.
+yunta-storage = { workspace = true, features = ["testkit"] }
 # A person a test answers for, through the port's own async trait.
 async-trait.workspace = true
 # A clock that stands still, and waiting on a condition rather than sleeping.

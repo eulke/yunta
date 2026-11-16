@@ -1,0 +1,36 @@
+ yunta › ADJVST › plan                                                                      ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● reviewed (default) · running · for 4m37s                                                                      ADJVST
+ plan approve
+ ━━━━ ━━━━━━━
+ nothing needs you: it is moving
+
+ ▸ ⠴ plan                        │ plan · prompt                                             planner on mock/mock-model
+   ↻ approve-plan                │
+                                 │ what it hands over
+  f follow what it is doing      │ ◌ tasks  not yet
+                                 │
+                                 │ what it is doing · 0 calls
+                                 │ running: attempt 1
+                                 │ session opened on mock-model · fence widened to 1 root
+                                 │ accepted tasks
+                                 │ submit  tasks
+                                 │ finished: planned · 1m35s
+                                 │ running: attempt 2
+                                 │ session opened on mock-model · fence widened to 1 root
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 0 tokens ▁▁ · 1m35s at work · 3m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ j k node · f follow it · s stats · q field, it keeps going                                         / anything · ? keys

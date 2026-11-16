@@ -2,8 +2,10 @@
 //! backend — no dialect leaks past this crate's interface: every public method
 //! here takes and returns `yunta_core` types, and a failure keeps the backend's
 //! cause behind a type-erased error. Its map: `store` holds the log in SQLite,
-//! `async_storage` reaches it from async code on a blocking thread, and `error`
-//! is a failure with its cause kept behind it.
+//! `async_storage` reaches it from async code on a blocking thread, opening a
+//! connection for each call, `log_reader` reads it from async code through one
+//! connection kept open that refuses to write, and `error` is a failure with its
+//! cause kept behind it.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.
@@ -22,8 +24,10 @@
 
 mod async_storage;
 mod error;
+mod log_reader;
 mod store;
 
 pub use async_storage::AsyncStorage;
 pub use error::{Cause, Result, StorageError};
+pub use log_reader::LogReader;
 pub use store::{ChainVerification, Purge, RunHead, RunListing, Storage};

@@ -1,0 +1,24 @@
+ yunta › Q78GRR › approve-plan                       ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  plan · Q78GRR · fragua · 1 task, 6 files             needs you  approve-plan
+  Add explicit per-user global pack installation alongside project-level inst…
+  you asked  add support for installing a pack globally
+
+  global-pack-install, its proof                          2 of 2 · 1 criterion
+
+    proves       The new end-to-end test verifies global add, list, update and
+                 remove use the per-user store while the project store remains
+                 independent.
+    runs         cargo test --workspace --test pack_global_spec \
+                   global_pack_commands_use_the_per_user_store_without_changi…
+
+    crates/cli/tests/pack_global_spec.rs
+      │ //! Global pack commands use the per-user store and leave the
+      │ //! project's store as it was.
+      │
+  … 23 more lines
+
+  ◆ Approve the plan: Add explicit per-user global pack installation alongsid…
+  1 approve   2 adjust   3 abort
+
+ 1 2 3 answer · tab next place · ↑↓ scroll · p proof · … · ? keys

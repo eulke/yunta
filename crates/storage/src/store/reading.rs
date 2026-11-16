@@ -1,5 +1,7 @@
-//! Reading the log back: a run whole or past a seq, the runs the log holds, and
-//! where each of them stands.
+//! Reading the log back: a run whole or past a seq, the runs the log holds,
+//! where each of them stands, and whether another connection wrote since a
+//! handle last looked; and a handle made to refuse every write, for one kept
+//! only to read.
 //!
 //! A row becomes a [`StoredEvent`] in one place, so every read keeps a kind this
 //! binary does not know verbatim and fails on a corrupt row the same way. A read
@@ -130,6 +132,29 @@ impl Storage {
             runs.push(RunListing { run_id, created_at });
         }
         Ok(runs)
+    }
+
+    /// The log's `data_version`: a number that differs between two readings
+    /// on this handle when another connection committed between them, and
+    /// only then. Not a count of commits, and blind to this handle's own.
+    pub(crate) fn data_version(&self) -> Result<i64> {
+        lock(&self.conn)
+            .pragma_query_value(None, "data_version", |row| row.get(0))
+            .map_err(|error| StorageError::DataVersion {
+                source: cause(error),
+            })
+    }
+
+    /// Makes this handle's connection refuse every write from here on
+    /// (`PRAGMA query_only`): what a handle kept only to read the log is
+    /// opened with, once the open has set the log up.
+    pub(crate) fn refuse_writes(&self) -> Result<()> {
+        lock(&self.conn)
+            .pragma_update(None, "query_only", true)
+            .map_err(|error| StorageError::Open {
+                path: self.path.clone(),
+                source: cause(error),
+            })
     }
 }
 

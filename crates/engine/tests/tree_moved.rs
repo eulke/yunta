@@ -143,7 +143,7 @@ async fn a_red_attempts_check_reaches_the_log_before_anyone_decides() {
     assert_eq!(options(&bench).await, ["retry", "abort"]);
 
     // A person retries; the session that opens meets the criterion.
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, .. } = bench.wake_on_fixture(MADE_IT).await;
     assert_eq!(terminal, RunTerminal::Finished);
     // The log only grows: the first attempt's check stays ahead of it.
@@ -232,7 +232,7 @@ async fn a_coverage_gate_retried_after_its_tree_moved_measures_again_and_finishe
         "a wake does not measure a failed gate again"
     );
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, .. } = bench.wake().await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(ran(&bench), 2, "the retry measured the tree it moved to");
@@ -247,7 +247,7 @@ async fn a_retry_answered_for_a_tree_moved_back_runs_no_gate() {
     write(&bench.worktree.join("cov.txt"), "90%");
     bench.wake().await;
     assert_eq!(options(&bench).await, ["retry", "abort"]);
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
 
     // The same bytes as at the failure, so the tree is the one it failed on.
     write(&bench.worktree.join("cov.txt"), "50%");

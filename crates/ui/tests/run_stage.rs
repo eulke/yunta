@@ -9,7 +9,8 @@ use surco::look::{Look, Width};
 use surco::motion::Motion;
 use surco::paint::Paint;
 use surco::surface::{Markdown, Surface, Terminal};
-use yunta_api::{FollowedRun, RunNews};
+use yunta_api::{FollowNews, FollowedRun, RunNews};
+use yunta_core::events::StoredEvent;
 use yunta_core::{NodeId, Pid, RunId};
 use yunta_replay::registry::{Engine, Prompt};
 use yunta_replay::RunState;
@@ -31,8 +32,8 @@ const SIDE: usize = 22;
 /// A mock fixture with no sessions: the workflow opens none.
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 
-/// The run `bench` ran, as its following reads it first.
-async fn followed(bench: &Bench) -> FollowedRun {
+/// The run `bench` ran, as its following reads it first, and every event of its log.
+async fn followed(bench: &Bench) -> (FollowedRun, Vec<StoredEvent>) {
     let following = Operation::Follow {
         run: bench.run_id.clone(),
     };
@@ -40,10 +41,20 @@ async fn followed(bench: &Bench) -> FollowedRun {
     found
         .into_iter()
         .find_map(|news| match news {
-            News::Following(run) => Some(*run),
-            News::Run(_) | News::CasesNamed(_) | News::Case(_) => None,
+            News::Following(FollowNews::Whole { run, events }) => Some((*run, events)),
+            News::Following(_) | News::CasesNamed(_) | News::Case(_) => None,
         })
         .expect("the following hands back the run as it reads first")
+}
+
+/// `run` as its following would read it whole had its log stopped after `events`.
+fn read_whole(run: &FollowedRun, events: &[StoredEvent]) -> News {
+    let mut cut = run.clone();
+    cut.state = RunState::replay(events);
+    News::Following(FollowNews::Whole {
+        run: Box::new(cut),
+        events: events.to_vec(),
+    })
 }
 
 /// The lines of the run's chronicle on the screen, as a pipe writes them.
@@ -63,28 +74,35 @@ fn chronicle(state: &State) -> Vec<String> {
         .collect()
 }
 
-/// What a following finds grows the run's chronicle: the events that come are said
-/// under the ones the run was opened with.
+/// What a following finds grows the run's chronicle by what came alone: the events that
+/// come are said under the ones the run was read whole with, as the whole log says them,
+/// and a batch handed twice says nothing again.
 #[tokio::test]
 async fn news_of_events_grows_the_chronicle() {
     let bench = Bench::with_run_id("01M7RVNSTAGE00000000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let whole = followed(&bench).await;
+    let (whole, events) = followed(&bench).await;
+    let mut at_once = on_the_field(vec![stopped(&whole.run)]);
+    let read = following(&at_once.update(Input::Stroke(Stroke::Enter)));
+    at_once.update(Input::News(read, read_whole(&whole, &events)));
     let mut state = on_the_field(vec![stopped(&whole.run)]);
     let following = following(&state.update(Input::Stroke(Stroke::Enter)));
 
-    let mut opening = whole.clone();
-    opening.events.truncate(1);
-    opening.state = RunState::replay(&opening.events);
-    state.update(Input::News(following, News::Following(Box::new(opening))));
+    state.update(Input::News(following, read_whole(&whole, &events[..1])));
     let before = chronicle(&state);
-    let came = RunNews::Events(whole.events[1..].to_vec());
-    state.update(Input::News(following, News::Run(came)));
+    let came = News::Following(FollowNews::Run {
+        run: whole.run.clone(),
+        news: RunNews::Events(events[1..].to_vec()),
+    });
+    state.update(Input::News(following, came.clone()));
     let after = chronicle(&state);
+    state.update(Input::News(following, came));
+    let again = chronicle(&state);
 
     assert_eq!(before.len(), 1, "{before:?}");
-    assert!(after.len() > before.len(), "{after:?}");
     assert!(after.starts_with(&before), "{before:?} then {after:?}");
+    assert_eq!(after, chronicle(&at_once), "what came, said once");
+    assert_eq!(again, after, "a batch handed twice says nothing again");
 }
 
 /// The ticket the run's following was asked under, among `asked`.
@@ -141,12 +159,16 @@ fn going_back_to_the_runs_lets_the_run_go_and_reads_the_field_again() {
     );
 }
 
-/// The run `read` says, opened from the field and followed, as it reads first: the
-/// ticket the state asked its following under, and the state.
-fn followed_from_the_field(read: &FollowedRun) -> (yunta_ui::Ticket, State) {
+/// The run `read` says, opened from the field and followed, as it reads whole had its
+/// log stopped after `events`: the ticket the state asked its following under, and the
+/// state.
+fn followed_from_the_field(
+    read: &FollowedRun,
+    events: &[StoredEvent],
+) -> (yunta_ui::Ticket, State) {
     let mut state = on_the_field(vec![stopped(&read.run)]);
     let first = following(&state.update(Input::Stroke(Stroke::Enter)));
-    state.update(Input::News(first, News::Following(Box::new(read.clone()))));
+    state.update(Input::News(first, read_whole(read, events)));
     (first, state)
 }
 
@@ -156,7 +178,8 @@ fn followed_from_the_field(read: &FollowedRun) -> (yunta_ui::Ticket, State) {
 async fn a_node_picked_shows_its_page_and_stops_following() {
     let bench = Bench::with_run_id("01M7N0DEP1CKED000000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let (first, mut state) = followed_from_the_field(&followed(&bench).await);
+    let (read, events) = followed(&bench).await;
+    let (first, mut state) = followed_from_the_field(&read, &events);
 
     let asked = state.update(Input::Stroke(Stroke::Enter));
     assert!(asked.contains(&Request::LetGo(first)), "{asked:?}");
@@ -202,7 +225,8 @@ async fn a_node_named_past_the_side_keeps_its_one_row() {
     let named = "name: named\nnodes:\n  - { id: review-at-the-alternate-reviewer, kind: bash, run: \"true\" }\n  \
                  - { id: second, kind: bash, run: \"true\", depends_on: [review-at-the-alternate-reviewer] }\n";
     bench.run(named, NO_SESSIONS).await;
-    let (_, state) = followed_from_the_field(&followed(&bench).await);
+    let (read, events) = followed(&bench).await;
+    let (_, state) = followed_from_the_field(&read, &events);
 
     let side = state
         .screen(&Look::plain())
@@ -232,9 +256,7 @@ async fn a_node_named_past_the_side_keeps_its_one_row() {
 async fn a_run_asking_at_its_terminal_offers_only_stopping() {
     let bench = Bench::with_run_id("01M7ASK1NGATTERM1NA1000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let mut asking = followed(&bench).await;
-    asking.events.truncate(2);
-    asking.state = RunState::replay(&asking.events);
+    let (mut asking, events) = followed(&bench).await;
     asking.engine = Engine::Alive {
         pid: Pid::current(),
         prompt: Some(Prompt {
@@ -243,7 +265,7 @@ async fn a_run_asking_at_its_terminal_offers_only_stopping() {
         }),
         words: None,
     };
-    let (_, mut state) = followed_from_the_field(&asking);
+    let (_, mut state) = followed_from_the_field(&asking, &events[..2]);
 
     let about = state
         .screen(&Look::plain())
@@ -288,11 +310,9 @@ async fn a_run_asking_at_its_terminal_offers_only_stopping() {
 async fn the_ribbon_turns_only_on_a_look_that_moves() {
     let bench = Bench::with_run_id("01M7R1BB0NTVRNS00000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let mut running = followed(&bench).await;
-    running.events.truncate(2);
-    running.state = RunState::replay(&running.events);
+    let (mut running, events) = followed(&bench).await;
     running.engine = Engine::this(Pid::current());
-    let (_, state) = followed_from_the_field(&running);
+    let (_, state) = followed_from_the_field(&running, &events[..2]);
 
     for (motion, plowed) in [(Motion::Moves, true), (Motion::Still, false)] {
         let look = Look {
@@ -313,11 +333,9 @@ async fn the_ribbon_turns_only_on_a_look_that_moves() {
 async fn a_moving_runs_time_reads_a_second_more_each_time_it_is_handed_in() {
     let bench = Bench::with_run_id("01M7T1MEEVERY0000000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let mut running = followed(&bench).await;
-    running.events.truncate(2);
-    running.state = RunState::replay(&running.events);
+    let (mut running, events) = followed(&bench).await;
     running.engine = Engine::this(Pid::current());
-    let (_, mut state) = followed_from_the_field(&running);
+    let (_, mut state) = followed_from_the_field(&running, &events[..2]);
     let across = |state: &State| {
         let about = state
             .screen(&Look::plain())

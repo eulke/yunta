@@ -194,6 +194,7 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             tool,
             action,
             target,
+            ..
         } => crate::target::said(*action, tool.as_deref(), target.as_ref()),
         H::Message {
             kind,
@@ -215,16 +216,8 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             exit_code,
             timed_out,
         } => super::format_words::formatted(run, changed, *exit_code, *timed_out),
-        H::RunToolFailed { tool, cause } => {
-            format!("run tool call failed: {} ({})", tool.name(), cause.as_str())
-        }
-        H::RunToolRefused { tool, reason } => {
-            format!(
-                "run tool call refused: {} ({})",
-                tool.name(),
-                reason.as_str()
-            )
-        }
+        H::RunToolFailed { tool, cause } => run_tool_call(*tool, "failed", cause.as_str()),
+        H::RunToolRefused { tool, reason } => run_tool_call(*tool, "refused", reason.as_str()),
         H::CutOff { message } => service_words(Some(message), None),
         H::Reconnected { waited } => service_words(None, Some(*waited)),
         H::RailFailed { event, cause } => super::rail_words::rail_failed(*event, *cause),
@@ -233,6 +226,12 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
         }
         H::BestEffortFailed { step, cause } => best_effort(*step, cause),
     }
+}
+
+/// A call to a run tool that failed or that the engine refused: the tool,
+/// and the closed reason why.
+fn run_tool_call(tool: yunta_core::RunTool, what: &str, why: &str) -> String {
+    format!("run tool call {what}: {} ({why})", tool.name())
 }
 
 /// A step the run went on past: what the step was doing, then the cause

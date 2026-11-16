@@ -1,0 +1,36 @@
+ yunta :: Q78GRR :: grill                                                                    ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ? fragua (standard) ; needs you ; for 5m00s                                                                     Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ===== ..... .... .... ....... ......... ...... .... ....... .... .... ........ ..... .... ....
+ node `grill` asks 3 questions: nothing is recorded until every one is answered
+
+ * ? grill                       | grill ; prompt                                            planner on mock/gpt-6-luna
+   . brief                       |
+   . plan                        | what it waits on
+   . spec                        | asked 3 questions: `where-global-lives`, `how-requested`, `beside-project-packs`
+   . approve-plan                |
+   . implement                   | what it is doing ; 4 calls
+   . review@reviewer             | running: attempt 1
+   . review@reviewer-alt         | session opened on gpt-6-luna ; fence widened to 1 root
+   . conform                     | read    docs/pack.md
+   . fix-findings                | read    crates/cli/src/cli/pack.rs
+   . lint                        | read    crates/cli/src/project.rs
+   . fix-lint                    | accepted questions
+   . tests                       | submit  questions
+   . ship                        | needs you: asked 3 questions: `where-global-lives`, `how-requested`, `beside-proj...
+   . pr                          |
+                                 |
+  f follow what it is doing      |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 220k tokens #______________ ; 36s at work ; 5m00s waiting on you
+ + Nothing recorded. The run stays waiting on these questions.
+ j k node ; f follow it ; s stats ; q field                                                         / anything ; ? keys

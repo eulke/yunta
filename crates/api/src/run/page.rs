@@ -19,8 +19,8 @@ use yunta_render::escalation::Decision;
 use yunta_render::page::{Node, Page, Places, Run, RunScope};
 use yunta_render::refusal::Refused;
 
-use super::{OpenedRun, RunReading};
-use crate::{Error, Failure, Remark, Remarks};
+use super::{unread_keys, OpenedRun, RunReading};
+use crate::{Error, Failure, Remarks};
 
 /// The file a run's page is written to for a browser, in the run's folder.
 const BROWSER_PAGE: &str = "page.html";
@@ -109,11 +109,8 @@ impl OpenedRun<'_> {
     /// Says the keys of the run's manifest this binary does not read, when there
     /// are any.
     fn remark_unread_keys(&self, remarks: &dyn Remarks) {
-        let keys = self.manifest.unknown_keys();
-        if !keys.is_empty() {
-            remarks.remark(Remark::UnreadManifestKeys {
-                keys: keys.into_iter().map(str::to_string).collect(),
-            });
+        if let Some(remark) = unread_keys(&self.manifest) {
+            remarks.remark(remark);
         }
     }
 }

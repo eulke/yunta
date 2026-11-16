@@ -1,0 +1,36 @@
+ yunta :: Q78GRR :: receipt                                                                 ? 1 needs you ; ^ 1 stalled
+........................................................................................................................
+ + fragua (standard) ; finished ; in 1h52m                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ===== ===== ==== ==== ======= ========= ====== ==== ======= ==== ==== ======== ===== ==== ====
+ every criterion green, every finding answered, the log's chain intact
+
+   + grill                  36s  |   + criteria     1 of 1 green, red before the work
+   + brief                  22s  |   + baseline     cargo test --workspace still passes
+   + plan                 6m25s  |   + scope        7 files, 2 of them granted by you
+   + spec                13m53s  |   + review       4 findings, 4 answered
+   + approve-plan        10m05s  |   + event chain  intact
+   + implement           41m05s  |
+    `- + global-pack-install     |   cost         27.1M tokens per verified task, 1 reroute
+   + review@reviewer      2m00s  |   changed      7 files, +65 -24
+   + review@reviewer-alt    42s  |   pull request #31: https://github.com/eulke/yunta/pull/31
+   + conform                25s  |
+   + fix-findings         5m31s  |
+   + lint                   11s  |
+   + fix-lint             1m31s  |
+   + tests                1m04s  |
+   + ship                    0s  |
+ * + pr                      0s  |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 27.1M tokens __.._#___._____ ; 1h12m at work ; 39m51s waiting on you
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; s stats ; g graph ; n new run ; q field                                                 / anything ; ? keys

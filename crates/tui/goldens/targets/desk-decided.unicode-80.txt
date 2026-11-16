@@ -1,0 +1,24 @@
+ yunta › Q78GRR › approve-plan                       ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  plan · Q78GRR · fragua · 1 task, 6 files             needs you  approve-plan
+  Add explicit per-user global pack installation alongside project-level inst…
+  you asked  add support for installing a pack globally
+
+  decided for you                                                    3 choices
+
+  Where does a global pack live?
+    Under the current user's platform data directory, in a Yunta-specific
+    subdirectory, shared by that user's projects.
+
+    The platform data directory is intended for per-user application data and
+    avoids coupling installations to a project checkout or requiring
+    machine-wide permissions.
+
+  How is a global install requested?
+    --global on pack add, update, remove and list; without it, commands retain
+  … 11 more lines
+
+  ◆ Approve the plan: Add explicit per-user global pack installation alongsid…
+  1 approve   2 adjust   3 abort
+
+ 1 2 3 answer · tab next place · ↑↓ scroll · p proof · … · ? keys

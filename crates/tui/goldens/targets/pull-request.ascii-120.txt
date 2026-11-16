@@ -1,0 +1,36 @@
+ yunta :: PR0PEN :: approve                                                                  ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ? published (default) ; needs you ; for 0s                                                                      PR0PEN
+ make approve
+ ==== =======
+ waiting on external gate: https://github.com/acme/web/pull/7
+
+   + make                    0s  | approve ; gate                                                     assignee reviewer
+ * ? approve                     |
+                                 | pull request #7: https://github.com/acme/web/pull/7
+                                 | stands       waiting on its review
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 0 tokens __ ; 0s at work
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; o open the pull request ; s stats ; g graph ; q field                                   / anything ; ? keys

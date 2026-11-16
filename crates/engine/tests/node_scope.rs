@@ -151,7 +151,7 @@ async fn a_grant_chosen_while_parked_widens_the_scope_once_and_the_next_attempt_
     )
     .await;
 
-    answer_parked(&bench, "grant").await.unwrap();
+    bench.answer_parked("grant", None).await.unwrap();
     let RunReport { terminal, .. } = bench
         .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;
@@ -195,7 +195,7 @@ async fn a_restart_after_the_grant_never_grants_it_twice() {
         "dialect: claude-code\nsessions: []\n",
     )
     .await;
-    answer_parked(&bench, "grant").await.unwrap();
+    bench.answer_parked("grant", None).await.unwrap();
     bench
         .storage
         .async_handle()

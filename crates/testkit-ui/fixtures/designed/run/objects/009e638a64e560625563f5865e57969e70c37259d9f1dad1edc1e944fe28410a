@@ -1,0 +1,41 @@
+findings:
+- node: review@reviewer
+  id: global-paths-ignore-yunta-home
+  severity: major
+  title: Global pack paths ignore the configured YUNTA_HOME
+  location: crates/cli/src/pack/target.rs:31-35
+  detail: global_data_dir uses only Env.home and appends /.yunta. With HOME=/home/alice and YUNTA_HOME=/scratch/yunta-state, pack add --global stores under /home/alice/.yunta/packs instead of /scratch/yunta-state/packs.
+  answers:
+  - by: fix-findings
+    answer: fixed
+    why: Global pack paths now use the shared user_state_root resolver, which honors YUNTA_HOME.
+- node: review@reviewer-alt
+  id: global-commands-ignore-yunta-home
+  severity: major
+  title: Global pack commands ignore the configured YUNTA_HOME state root
+  location: crates/cli/src/pack/target.rs:29-33
+  detail: Other user-level state resolves beneath YUNTA_HOME, but global_data_dir appends ~/.yunta, so users who rely on YUNTA_HOME cannot find the global installation.
+  answers:
+  - by: fix-findings
+    answer: fixed
+    why: Global pack paths now use the shared user_state_root resolver, which honors YUNTA_HOME.
+- node: review@reviewer-alt
+  id: audit-misses-global-packs
+  severity: minor
+  title: Pack audit cannot inspect globally installed packs
+  location: crates/cli/src/cli/pack.rs:76-88
+  detail: After pack add --global, pack audit publisher/name still resolves only the project .yunta/packs directory and returns not installed.
+  answers:
+  - by: fix-findings
+    answer: fixed
+    why: pack audit now accepts --global and resolves the pack under the global installation root.
+- node: conform
+  id: target-outside-declared-file
+  severity: blocking
+  title: Pack target API shapes are defined outside the declared file
+  location: crates/cli/src/pack/target.rs:10-27
+  detail: The plan declares PackTarget, pack_target_root and pack_target_lock_path in crates/cli/src/pack.rs. The implementation puts the enum and both functions in pack/target.rs; pack.rs only re-exports them.
+  answers:
+  - by: fix-findings
+    answer: fixed
+    why: PackTarget and its path functions are now defined in crates/cli/src/pack.rs.

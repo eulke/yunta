@@ -1,0 +1,14 @@
+ yunta › Q78GRR › review@reviewer                 ◆ 1 · ▲ 1
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h41m           Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ nothing needs you: it is moving
+ findings · 0 of 4 answered · review@reviewer, review@revi…
+ what it is doing · 3 calls
+ … 3 above
+ run     git diff
+ finding global-paths-ignore-yunta-home major: Global pack…
+ call    yunta_post_finding
+ 25.2M tokens · 1h02m at work · 38m51s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k finding · tab nodes · s stats · … · ? keys

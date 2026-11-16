@@ -1,0 +1,24 @@
+ yunta › RN0TES › publish                            ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ release-notes (default) · needs you · for 0s                          RN0TES
+ notes publish
+ ━━━━━ ━━━━━━━
+ The release notes, as they will be published. Publish them?
+
+ publish · gate                                                   assignee lead
+
+   Release notes: release-notes.md of `notes`
+   - `yunta pack add --global` installs a pack once for every project of yours.
+   - `yunta pack list --global` lists the packs installed that way.
+
+   CHANGELOG.md  +3  ███████████████████
+
+ ▎ ◆ Publish them?                                                      publish
+ ▎
+ ▎ ▸ publish  Resolve the gate: nothing in the workflow waits on it
+ ▎   revise   Back to `notes`: sends what you say, and asks again once it
+ ▎            completes
+ ▎   abort    Pause here: nothing runs; this decision stays open
+ 0 tokens ▁▁ · 0s at work
+
+ j k choose · enter answer · n add a note · esc leave it waiting · ? keys

@@ -1,0 +1,36 @@
+ yunta › PR0M0T › lint                                                                      ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ↻ promotable (alpha) · promoted · in 2s                                                                         PR0M0T
+ lint fix-lint
+ ━━━━ ┄┄┄┄┄┄┄┄
+ promoted to `beta`
+
+ ▸ ✗ lint                        │ lint · bash
+   ◌ fix-lint                    │
+                                 │ node `lint` exhausted its reroutes to `fix-lint` (exit 1)
+  f follow what it is doing      │
+                                 │ its successor
+                                 │ ● nted-1  promotable (beta) · created · for 0s
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 0 tokens ▁▁ · 0s at work
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ j k node · f follow it · s stats · q field                                                         / anything · ? keys

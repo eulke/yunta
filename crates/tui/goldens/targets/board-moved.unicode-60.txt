@@ -1,0 +1,14 @@
+ yunta › Q78GRR › implement     ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h02m           Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ nothing needs you: it is moving
+ implement · loop               executor on mock/gpt-6-luna
+ ⠼ global-pack-install  Add explicit global pack install t…
+   what it is doing · 12 calls
+   … 14 above
+   read    crates/cli/src/commands/pack_audit.rs
+   call    yunta_request_scope_expansion
+ 13.7M tokens · 47m47s at work · 15m05s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · s stats · g graph · … · ? keys

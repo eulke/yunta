@@ -1,0 +1,36 @@
+ yunta › new run                                                                            ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+                                                                         │
+ What do you want to build?                                              │ what it usually takes
+ ╭─────────────────────────────────────────────────────────────────────╮ │ 3 past runs
+ │ add support for installing a pack globally                          │ │ median 2.17M tokens, p90 27.1M
+ ╰─────────────────────────────────────────────────────────────────────╯ │ median wall-clock 1h07m
+ this becomes the brief; fragua asks before it decides for you           │ █▁▂
+                                                                         │
+ workflow                                                                │   ✓ claude-code  2.1.0
+ ▸ yunta/fragua   the full cycle: questions, plan, tests, work, review,… │   ✓ codex        0.157.0
+   lint-fix       lint and format, with one fix round                    │   ✓ git          commits as Marta Ruiz
+   run-tasks      a tasks document you wrote by hand                     │   ✗ forge        github eulke/yunta:
+                                                                         │                  `YUNTA_DESIGNED_FORGE_TOKEN
+ mode                                                                    │                  `, the variable its token
+  ▸ quick   standard   full                                              │                  is in, is not set, and
+                                                                         │                  `yunta/fragua` opens a pull
+ adapter                                                                 │                  request through it
+  ▸ as the runners in config.yaml say   claude-code   codex              │     fix          export
+                                                                         │                  YUNTA_DESIGNED_FORGE_TOKEN
+ what runs                                                               │                  to reach it
+   ┄ ┄ ┄ ╌ ╌ ┄ ╌ ╌╌ ┄ ╌ ┄ ┄ ┄ ┄ ┄                                        │   ✓ checkouts    builds 0 B of a 98.9 GB
+   grill brief plan implement conform lint fix-lint tests ship pr        │                  budget
+   ◆ it stops for you at ship                                            │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+ ◆ C0NS0E needs you: node `approve` wants an external gate (assignee: reviewer) but no forge is reachable from this ma…
+ ←→ mode · tab next row · enter start · esc back

@@ -3,11 +3,15 @@
 //! with its chronicle under it, or the page of the node picked in its place.
 //!
 //! The stage asks for the run's following and its page as it opens. The following
-//! hands back the run as it reads first, then what each look at it finds, which the
-//! stage folds into its copy of the run by the API's own fold, so the chronicle, the
-//! rows and the ribbon are the ones `status --follow` draws from the same log. A
-//! promotion's successor is followed on and its page read again; once the run stops or
-//! stalls, its page is read once more and the stage stops following.
+//! hands back the run read whole first, whose moments the stage tells from the events
+//! it was read with by replay's chronicle; then what each look at it finds, which the
+//! stage folds into its copy of the run by the API's own fold, adding the moments that
+//! fold hands back for each batch. One fold, so the chronicle, the rows and the ribbon
+//! are the ones `status --follow` draws from the same log, and no news folds the whole
+//! log again. A promotion's successor, read whole too, stands in the run's place and its
+//! page is read again; once the following ends where `status --follow` stops, the run
+//! no longer moving and no successor awaited, its page is read once more and the stage
+//! stops following.
 //!
 //! A pointer moves along the run's nodes, and picking one stops following and shows its
 //! page. The acts the run offers that a key here takes are `acts`': each is bound to its
@@ -23,7 +27,7 @@ use chrono::{DateTime, Utc};
 use surco::components::{Laid, Note, Region, Screen, Side, Sight};
 use surco::doc::{Block, Depth, Doc};
 use surco::look::Look;
-use yunta_api::{FollowedRun, RunNews};
+use yunta_api::{FollowNews, FollowedRun, RunNews};
 use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
 use yunta_render::page::{Node, Page, Run};
@@ -42,7 +46,8 @@ pub struct RunStage {
     run: RunId,
     /// The run as its following read it, once it has.
     followed: Option<Box<FollowedRun>>,
-    /// What happened to it, in order, as replay's chronicle folds the events read.
+    /// What happened to it, in order: the chronicle of the events it was read whole
+    /// with, then the moments each batch folded into it hands back.
     moments: Vec<Moment>,
     /// What its sessions said last, a frame to each node.
     heard: Heard,
@@ -153,13 +158,7 @@ impl RunStage {
         let Some(followed) = &self.followed else {
             return doc;
         };
-        let rows = watched::rows(
-            frame,
-            &self.run,
-            followed.offers_a_menu(frame),
-            &self.heard,
-            look,
-        );
+        let rows = watched::rows(frame, &self.run, followed.menu, &self.heard, look);
         let lines = rows
             .attention
             .into_iter()
@@ -231,50 +230,77 @@ impl RunStage {
         self.scroll.laid(laid);
     }
 
-    /// What news of the run's following does at `now`: the run as it reads first, then
-    /// each look folded in, by the fold the following itself makes.
+    /// What news of the run's following does at `now`: the run read whole, its moments
+    /// told from the events it was read with; then each piece of news of it folded in,
+    /// by the fold the following itself makes.
     pub(crate) fn heard(&mut self, news: News, now: DateTime<Utc>) -> Vec<Want> {
         let news = match news {
-            News::Following(followed) => {
-                self.followed = Some(followed);
-                self.follows = true;
-                self.read_on(now);
-                return Vec::new();
-            }
-            News::Run(news) => news,
+            News::Following(news) => news,
             News::CasesNamed(_) | News::Case(_) => return Vec::new(),
         };
-        let Some(followed) = self.followed.as_mut() else {
-            return Vec::new();
-        };
-        followed.took(&news);
         let wants = match news {
-            RunNews::Said(said) => {
-                self.heard.hear(said);
+            FollowNews::Whole { run, events } => {
+                self.moments = chronicle(&events);
+                self.followed = Some(run);
+                self.follows = true;
                 Vec::new()
             }
-            RunNews::Successor(_) => {
-                self.scroll.rewound();
-                vec![Want::Work(Operation::ReadPage {
-                    run: followed.run.clone(),
-                })]
-            }
-            RunNews::Events(_) | RunNews::Engine(_) | RunNews::Stopped | RunNews::Stalled => {
-                Vec::new()
-            }
+            FollowNews::Run { run, news } => self.took(&run, news),
+            // The run's following follows no field.
+            FollowNews::Field(_)
+            | FollowNews::Joined(_)
+            | FollowNews::Unreadable(_)
+            | FollowNews::Left(_)
+            | FollowNews::Elsewhere(_) => Vec::new(),
         };
         self.read_on(now);
         wants
     }
 
-    /// The run, its moments, what its sessions said and the node pointed at kept to
-    /// what was read at `now`.
+    /// `news` of `run` folded into the run followed, where it is that run: the moments of
+    /// the events that came added to its own; what a session said kept for its node's
+    /// row; a successor, read whole, in its place, its moments told from the events it
+    /// was read with and its page read.
+    fn took(&mut self, run: &RunId, news: RunNews) -> Vec<Want> {
+        let Some(followed) = self
+            .followed
+            .as_mut()
+            .filter(|followed| followed.run == *run)
+        else {
+            return Vec::new();
+        };
+        self.moments.extend(followed.took(&news));
+        match news {
+            RunNews::Said { said, .. } => {
+                self.heard.hear(said);
+                Vec::new()
+            }
+            RunNews::Successor { events, .. } => {
+                self.moments = chronicle(&events);
+                self.scroll.rewound();
+                vec![Want::Work(Operation::ReadPage {
+                    run: followed.run.clone(),
+                })]
+            }
+            // What the run waits on a person for is the decision stage's to read; this stage
+            // shows neither what its nodes hand over nor what reading it remarks on.
+            RunNews::Events(_)
+            | RunNews::Engine(_)
+            | RunNews::NoSuccessor
+            | RunNews::Awaited(_)
+            | RunNews::AwaitedUnread { .. }
+            | RunNews::Document { .. }
+            | RunNews::Remark(_) => Vec::new(),
+        }
+    }
+
+    /// The run, what its sessions said and the node pointed at kept to what was read at
+    /// `now`.
     fn read_on(&mut self, now: DateTime<Utc>) {
         let Some(followed) = &self.followed else {
             return;
         };
         self.run = followed.run.clone();
-        self.moments = chronicle(&followed.events);
         let frame = followed.frame(now);
         self.heard.kept_to(&frame, &self.run);
         let held = self
@@ -408,7 +434,7 @@ impl RunStage {
             .as_ref()
             .and_then(|page| page.decision.as_ref())
             .map(|decision| &decision.escalation);
-        let answerable = followed.offers_a_menu(frame) || yunta_api::waiting_round(frame).is_some();
+        let answerable = followed.menu || yunta_api::waiting_round(frame).is_some();
         acts::offered(frame, decision, answerable)
     }
 

@@ -1,0 +1,14 @@
+ yunta › this machine            ◆ 5 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  asking now
+  ▸ ◆ Q78GRR standard  node `tests` asks at its term…   0s
+  needs you, oldest first
+    ◆ EZRPE9 quick     node `grill` failed: session…   40d
+    ◆ C0NS0E default   node `approve` wants an exter…   1h
+    ◆ T0KENS default   its token budget is spent (…     1h
+    … 7 under
+  what you can do
+  c      stop it and everything under it
+  s      what it cost
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k move · enter open · n new run · x close · … · ? keys

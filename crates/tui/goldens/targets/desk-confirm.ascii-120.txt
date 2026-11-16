@@ -1,0 +1,36 @@
+ yunta :: Q78GRR :: approve-plan                                                             ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+  plan ; Q78GRR ; fragua ; 1 task, 6 files                                                     needs you  approve-plan
+  Add explicit per-user global pack installation alongside project-level installs
+  you asked  add support for installing a pack globally
+
+      the change                      | global-pack-install                                                step 1 of 1
+  1 * global-pack-install             |
+                                      |   you will see Before, yunta pack add, update, remove and list operate on the
+  what it says                        |                current project only. After, the same commands accept --global
+  decided for you                3  d |                and show or change the per-user installation and lock, while
+  out of scope                   3    |                omitting the flag continues to operate on the project
+  risks                          2    |                installation.
+                                      |
+                                      |   crates/cli/src/pack.rs
+                                      |     The target enum, global store root and corresponding lock path; project
+                                      |     paths retain their current layout.
+                                      |     | pub enum PackTarget {
+                                      |     |     Project,
+                                      |     |     Global,
+                                      |     | }
+                                      |     |
+                                      |     | pub fn pack_target_root(target: PackTarget, cwd: &Path) ->
+                                      |     |   \ Result<PathBuf, PackError>
+                                      |     | pub fn pack_target_lock_path(target: PackTarget, cwd: &Path) ->
+                                      |     |   \ Result<PathBuf, PackError>
+                                      |     new ; 7 lines
+                                      |
+                                      |   crates/cli/src/cli/pack.rs
+                                      |     Add a --global boolean to add, update, remove and list; preserve new and
+                                      | ... 23 more lines
+
+  ? Approve the plan: Add explicit per-user global pack installation alongside project-level installs?
+  approve  On to `implement`: resolves this gate
+
+ enter confirm ; esc go back                                                                        / anything ; ? keys

@@ -1,0 +1,36 @@
+ yunta :: Q78GRR :: tests                                                                    ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ? fragua (standard) ; needs you ; for 0s                                                                        Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ===== ===== ==== ==== ======= ========= ====== ==== ======= ==== ==== ======== ===== .... ....
+ regression: `cargo test --workspace` passed at baseline (exit 0) but now exits 101
+
+   + grill                  36s  | tests ; check                                                       baseline_compare
+   + brief                  22s  |
+   + plan                 6m25s  |   | ---- smells::tests::the_tree_holds_each_counter_that_reaches_zero_at_zero std...
+   + spec                13m53s  |   | panicked at xtask/src/smells.rs:473:13:
+   + approve-plan        10m05s  |   | assertion `left == right` failed: src_files_over_500_lines
+   + implement           41m05s  |   |   left: Some(1)
+    `- + global-pack-install     |   |  right: Some(0)
+   + review@reviewer      2m00s  |   | test result: FAILED. 71 passed; 1 failed; 0 ignored; finished in 21.18s
+   + review@reviewer-alt    42s  |
+   + conform                25s  |   kind         check, baseline_compare
+   + fix-findings         5m31s  |   attempt      1
+   + lint                   11s  |   took         32s
+   + fix-lint             1m31s  |
+ * ? tests                       |
+   . ship                        |
+   . pr                          |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 | | ? `tests` failed. What now?                                                  tests
+                                 | |
+                                 | | * retry  Starts a fresh attempt from the run's tree as it stands: what failed is
+                                 | |          asked again and what passed stays passed
+                                 | |   abort  Pause here: nothing runs; this decision stays open
+ 27.1M tokens __.._#___._____ ; 1h12m at work ; 39m51s waiting on you
+
+ j k choose ; enter answer ; n add a note ; esc leave it waiting                                    / anything ; ? keys

@@ -96,7 +96,10 @@ pub use answers::{
     answer_questions, asked_questions, AnswerQuestionsError, AnswersError,
     Recorded as AnswersRecorded, Reply as AnswersReply,
 };
-pub use artifacts::shown::{documents as shown_documents, produced as produced_documents};
+pub use artifacts::shown::{
+    documents as shown_documents, documents_handed_over, produced as produced_documents,
+    produced_document,
+};
 pub use artifacts::store::{ObjectStore, StoreError};
 pub use artifacts::{
     close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity, StagedHash,

@@ -1,0 +1,14 @@
+ yunta › Q78GRR › approve-plan   ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  plan · Q78GRR · fragua · 1 task, 6 files
+  global-pack-install                 2 of 2 · step 1 of 1
+    you will see Before, yunta pack add, update, remove
+                 and list operate on the current project
+  … 52 more lines
+  ◆ Approve the plan: Add explicit per-user global pack i…
+  adjust  Back to `plan`: sends what you say, and asks ag…
+  ╭──────────────────────────────────────────────────────╮
+  │ what should change?                                  │
+  ╰──────────────────────────────────────────────────────╯
+
+ enter send it · esc go back

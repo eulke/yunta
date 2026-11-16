@@ -1,0 +1,14 @@
+ yunta › Q78GRR › tests          ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 0s            Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄
+ regression: `cargo test --workspace` passed at baseline (…
+ tests · check                             baseline_compare
+   │ … 5 above
+   │ test result: FAILED. 71 passed; 1 failed; 0 ignored;…
+ ▎ ◆ `tests` failed. What now?                        tests
+ ▎ ▸ retry  Starts a fresh attempt from the run's tree as…
+ ▎   abort  Pause here: nothing runs; this decision stays…
+ 27.1M tokens · 1h12m at work · 39m51s waiting on you
+
+ j k choose · enter answer · n add a note · … · ? keys

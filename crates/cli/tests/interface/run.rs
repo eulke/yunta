@@ -8,6 +8,7 @@ use std::process::{Child, Stdio};
 use surco::doc::Block;
 use surco::paint::Paint;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
+use yunta_api::FollowNews;
 use yunta_testkit::workflows::PROMOTABLE;
 use yunta_testkit::{run_ids, wait_until, yunta_on_terminal, Checkout, HeldRun, Terminal};
 use yunta_ui::{Input, News};
@@ -50,7 +51,10 @@ async fn followed_through(
             .recv()
             .await
             .expect("the performer hands back what the state waits on");
-        if matches!(input, Input::News(_, News::Following(_))) {
+        if matches!(
+            input,
+            Input::News(_, News::Following(FollowNews::Whole { .. }))
+        ) {
             followed();
         }
         asked = state.update(input);

@@ -1,0 +1,164 @@
+# The design's run: fragua's nodes, by their ids and kinds, run in its
+# `standard` mode on the mock adapter. A prompt reads as fragua's does, so the
+# mock's sessions are told apart by what each node asks of its session.
+name: fragua
+description: Full feature cycle — grill, verified tasks document, multi-runner review and the work held to its plan, one fix round, lint/fix, baseline, PR
+yunta_schema: ">=1 <2"
+inputs:
+  idea:
+    type: string
+    request: true
+    required: true
+    description: "What to build — becomes the brief"
+
+modes:
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, conform, ship, pr], ask: required }
+  standard: { include: [grill, brief, plan, spec, approve-plan, implement, lint, fix-lint, tests, review, conform, fix-findings, ship, pr] }
+  full:     { include: all }
+
+nodes:
+  - id: grill
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    prompt: |
+      Find what in "{{inputs.idea}}" only a person can decide. Read the code
+      first: what it already answers is not a question. Ask only what changes
+      what gets built, each question standing alone; a question is `required`
+      only when the brief cannot be written without it.
+    artifacts:
+      produces: [questions]
+
+  - id: brief
+    kind: prompt
+    runner: planner
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, kind: answers }
+    prompt: |
+      Write the brief for "{{inputs.idea}}" from the idea and the answers a
+      person gave to the questions in your context. List every question left
+      unanswered as an open point, with the assumption it states.
+    artifacts:
+      produces: [brief.md]
+
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    depends_on: [brief]
+    context:
+      - artifact: { node: brief, name: brief.md }
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, kind: answers }
+    prompt: |
+      Write the tasks document that builds the brief: each task inside its
+      scope, each held by criteria that fail before the work and pass after.
+    artifacts:
+      produces: [tasks]
+
+  - id: spec
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    depends_on: [plan]
+    context:
+      - artifact: { node: plan, kind: tasks }
+    prompt: |
+      Write the tests the plan's tasks are held to, before any task is built.
+    artifacts:
+      produces: [spec]
+
+  - id: approve-plan
+    kind: gate
+    depends_on: [spec]
+    assignee: lead
+    options: [approve, adjust]
+    on: { adjust: plan }
+    shows:
+      - { node: brief, name: brief.md }
+      - { node: plan, kind: tasks }
+      - { node: spec, kind: spec }
+
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [approve-plan]
+    until: all_tasks_complete
+    invariant: true
+    concurrency: 2
+    scope_expansion:
+      mode: ask
+      max_per_run: 3
+    prompt: |
+      Build your task as its plan declares it, inside its scope. Check your
+      task as you go: the check runs its criteria exactly as the engine will.
+
+  - id: review
+    kind: prompt
+    depends_on: [implement]
+    runners: [reviewer, reviewer-alt]
+    permissions: read-only
+    context:
+      - artifact: { node: brief, name: brief.md }
+    prompt: |
+      Review what the run changed against the brief, and post each finding.
+    artifacts:
+      produces: [findings]
+
+  - id: conform
+    kind: prompt
+    runner: reviewer
+    permissions: read-only
+    depends_on: [implement]
+    context:
+      - artifact: { node: plan, kind: tasks }
+    prompt: |
+      Hold the work to the plan a person approved, and post where it departs.
+    artifacts:
+      produces: [findings]
+
+  - id: fix-findings
+    kind: prompt
+    runner: executor
+    depends_on: [review, conform]
+    prompt: |
+      Read the findings this run holds that are not settled, and answer every
+      one: fix it and answer it fixed, or answer it declined and say why.
+
+  - id: lint
+    kind: bash
+    invariant: true
+    optional: true
+    depends_on: [fix-findings]
+    run: { command: lint }
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
+
+  - id: fix-lint
+    kind: prompt
+    runner: mechanical
+    context: [{ node-output: { node: lint } }]
+    prompt: |
+      Fix every error in the lint report, and nothing else.
+    scope: run
+
+  - id: tests
+    kind: check
+    builtin: baseline_compare
+    invariant: true
+    depends_on: [lint]
+
+  - id: ship
+    kind: gate
+    depends_on: [tests]
+    assignee: lead
+    message: "The work beside its plan, and every finding the run holds with its answer. Create the PR?"
+    shows:
+      - { node: plan, kind: tasks }
+      - { kind: findings }
+
+  - id: pr
+    kind: pull_request
+    depends_on: [ship]
+    title: "{{inputs.idea}}"

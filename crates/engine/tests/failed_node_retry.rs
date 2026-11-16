@@ -116,7 +116,7 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
         "{said}"
     );
 
-    let refused = answer_parked(&bench, "retry").await;
+    let refused = bench.answer_parked("retry", None).await;
     assert!(
         matches!(
             refused,
@@ -137,7 +137,7 @@ async fn a_plain_failure_retried_after_its_cause_is_fixed_finishes() {
     .await;
     write(&bench.worktree.join("fixed.txt"), "fixed");
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, state } = bench
         .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;
@@ -183,7 +183,7 @@ async fn a_retry_that_fails_again_asks_again_for_the_next_attempt() {
     )
     .await;
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, .. } = bench
         .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;

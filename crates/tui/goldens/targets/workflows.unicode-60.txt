@@ -1,0 +1,14 @@
+ yunta › workflows                        nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ the workflows you can run
+ ▸ greet
+ greet
+   inputs  --input ask=… (string, required)
+   run     yunta run greet
+ what you can do
+ enter  a new run of it
+ c      check it
+ … 2 more lines
+
+
+ j k move · enter new run · n new workflow · … · ? keys

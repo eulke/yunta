@@ -1,0 +1,5 @@
+error: function `packs_root` is never used
+  --> crates/cli/src/pack.rs:31:4
+error: function `vendor_dir` is never used
+  --> crates/cli/src/pack.rs:35:4
+error: could not compile `yunta` (lib) due to 2 previous errors

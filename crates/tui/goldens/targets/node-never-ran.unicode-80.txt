@@ -1,0 +1,24 @@
+ yunta › Q78GRR › spec                              ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 7m34s                               Q78GRR
+ ━━━━ ━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+ spec · prompt                                       planner on mock/gpt-6-luna
+
+   It has not run yet.
+
+
+
+
+
+
+
+
+
+
+
+
+ 967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused…  · a go there
+ j k node · f follow it · s stats · q field, it keeps going · ? keys

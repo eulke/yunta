@@ -18,7 +18,7 @@ fn block_from(drawn: &str, named: &str) -> String {
 /// it, to the end `yunta run` reaches with the same chain: the successor's
 /// block and code.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/run/follow/following.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/follow/following.rs`
 #[test]
 fn a_promotion_is_followed_onto_its_successor() {
     let root = tempfile::tempdir().unwrap();
@@ -104,6 +104,38 @@ fn a_parent_is_followed_with_its_children_under_their_nodes() {
     assert_eq!(follower.exit_code(), Some(0), "{followed}");
 }
 
+/// A moving run whose manifest carries a key a newer binary wrote: its follower says so
+/// once, in the words `yunta status` says it with, while the run moves on.
+#[test]
+fn a_manifests_unread_keys_are_said_once_by_a_follower() {
+    let root = tempfile::tempdir().unwrap();
+    let marks = root.path().join("marks");
+    let checkout = holding(root.path(), &marks);
+    let detached = yunta_in!(
+        &checkout.repo,
+        &checkout.home,
+        &["run", "wf.yaml", "--detach"]
+    );
+    assert!(detached.status.success(), "{}", stdout(&detached));
+    let id = the_held_run(&checkout.home, &marks);
+    let manifest = runs_root(&checkout.home).join(&id).join("manifest.yaml");
+    let mut text = std::fs::read_to_string(&manifest).unwrap();
+    text.push_str("something_later: 7\n");
+    std::fs::write(&manifest, text).unwrap();
+    let status = yunta_in!(&checkout.repo, &checkout.home, &["status", &id]);
+    let said = yunta_testkit::stderr(&status);
+    let unread = said
+        .lines()
+        .find(|line| line.contains("something_later"))
+        .unwrap_or_else(|| panic!("`yunta status` says the key: {said}"));
+
+    let (mut follower, _, err) = following_off_a_terminal(&checkout, &id, root.path());
+    std::fs::write(marks.join("go"), "go").unwrap();
+    assert_eq!(follower.wait().unwrap().code(), Some(0));
+    let followed = std::fs::read_to_string(err).unwrap();
+    assert_eq!(followed.matches(unread).count(), 1, "{followed}");
+}
+
 /// What a run's registry and lock hold, byte for byte.
 fn held_files(home: &Path, id: &str) -> (Vec<u8>, Vec<u8>) {
     let scratch = runs_root(home).join(id).join("scratch");
@@ -149,7 +181,7 @@ fn kinds(home: &Path, id: &str) -> Vec<String> {
 /// A follower only reads. Two of them on one run leave its registry and its
 /// lock as they were, and its log holds what a run nobody followed holds.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/run/follow/following.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/follow/following.rs`
 #[test]
 fn two_followers_change_nothing() {
     let root = tempfile::tempdir().unwrap();

@@ -1,0 +1,14 @@
+ yunta › Q78GRR › implement      ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 10m00s        Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ node `implement` failed: 1 request owes a person's decisi…
+ implement · loop               executor on mock/gpt-6-luna
+ what it is doing · 13 calls
+ … 19 above
+ global-pack-install post: 1 criterion · red · `cargo test…
+ global-pack-install asks for crates/cli/src/commands/pack…
+ failed: 1 request owes a person's decision about scope: t…
+ 14.1M tokens · 49m36s at work · 25m05s waiting on you
+ ◆ Q78GRR needs you: node `implement` failed…  · a go there
+ j k node · f follow it · s stats · q field · ? keys

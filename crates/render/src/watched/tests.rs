@@ -167,6 +167,7 @@ fn activity() -> Vec<yunta_core::events::ToolCall> {
         tool_name: Some("any".to_string()),
         action,
         target,
+        session: None,
         at: chrono::DateTime::UNIX_EPOCH,
     };
     let path = |path: &str| Some(ToolTarget::of_path(std::path::Path::new(path)));

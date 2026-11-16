@@ -8,7 +8,7 @@ use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git_output, write, Bench, MOCK_CONFIG};
 
 mod common;
-use common::{answer_parked, parked};
+use common::parked;
 
 /// What each start of `node` found and committed, oldest first.
 fn found(events: &[StoredEvent], node: &str) -> Vec<Option<CommitSha>> {
@@ -32,7 +32,7 @@ async fn what_a_person_left_in_the_tree_during_a_pause_is_committed_as_found_whe
     .await;
     write(&bench.worktree.join("fixed.txt"), "fixed by hand");
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, .. } = bench
         .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;
@@ -133,7 +133,7 @@ async fn a_scoped_node_lands_an_edit_to_what_a_person_left() {
     .await;
     write(&bench.worktree.join("draft.txt"), "a person's draft\n");
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, .. } = bench
         .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;

@@ -12,7 +12,6 @@ use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{write, Bench, MOCK_CONFIG};
 
 mod common;
-use common::answer_parked;
 use common::menu::rebuilt_menu;
 
 /// A node that breaks what the suite checks, then the comparison.
@@ -102,7 +101,7 @@ async fn offers_retry(bench: &Bench) -> bool {
 
 /// Answers the menu with `retry`, then wakes the run headlessly.
 async fn retried(bench: &Bench) -> RunTerminal {
-    answer_parked(bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     bench.wake_on_fixture(NO_SESSIONS).await.terminal
 }
 
@@ -131,7 +130,7 @@ async fn a_regression_offers_abort_alone_on_the_tree_it_failed_on() {
     assert_eq!(offered(&bench).await, ["abort"]);
     assert!(
         matches!(
-            answer_parked(&bench, "retry").await,
+            bench.answer_parked("retry", None).await,
             Err(yunta_engine::ResolveGateError::Refused(
                 GateRefusal::UnknownOption { .. }
             ))
@@ -199,7 +198,8 @@ async fn a_retry_chosen_on_a_moved_tree_is_not_run_once_the_tree_moved_back() {
         offers_retry(&bench).await,
         "the menu offers the retry once the tree changed"
     );
-    answer_parked(&bench, "retry")
+    bench
+        .answer_parked("retry", None)
         .await
         .expect("the retry is chosen while the menu offers it");
     remove_marker(&bench);
@@ -235,7 +235,7 @@ async fn a_coverage_gate_on_an_unchanged_tree_offers_no_retry_and_runs_no_more()
 
     assert!(
         matches!(
-            answer_parked(&bench, "retry").await,
+            bench.answer_parked("retry", None).await,
             Err(yunta_engine::ResolveGateError::Refused(
                 GateRefusal::UnknownOption { .. }
             ))

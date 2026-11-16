@@ -1,0 +1,6 @@
+stdout:
+    Finished `dev` profile [unoptimized + debuginfo] in 11.02s
+
+
+stderr:
+

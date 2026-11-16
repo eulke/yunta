@@ -1,0 +1,36 @@
+ yunta :: workflows :: packs :: acme/demo                                                             nothing needs you
+........................................................................................................................
+ + pack acme/demo ; audited ; 1.0.0
+
+   permissions  read-only
+   network      none
+   executors    none
+   tests        none shipped
+
+ workflow workflows/demo-says.yaml
+   node `say` bash
+     command      true
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ esc back ; n new run                                                                               / anything ; ? keys

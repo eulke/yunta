@@ -45,6 +45,7 @@ pub(crate) fn agent_message() -> AgentMessagePayload {
         cached_input_tokens: None,
         note: None,
         text: None,
+        session: None,
     }
 }
 

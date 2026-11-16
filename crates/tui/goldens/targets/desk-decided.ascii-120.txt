@@ -1,0 +1,36 @@
+ yunta :: Q78GRR :: approve-plan                                                             ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+  plan ; Q78GRR ; fragua ; 1 task, 6 files                                                     needs you  approve-plan
+  Add explicit per-user global pack installation alongside project-level installs
+  you asked  add support for installing a pack globally
+
+      the change                      | decided for you                                                      3 choices
+  1 * global-pack-install             |
+                                      | Where does a global pack live?
+  what it says                        |   Under the current user's platform data directory, in a Yunta-specific
+  decided for you                3  d |   subdirectory, shared by that user's projects.
+  out of scope                   3    |
+  risks                          2    |   The platform data directory is intended for per-user application data and
+                                      |   avoids coupling installations to a project checkout or requiring
+                                      |   machine-wide permissions.
+                                      |
+                                      | How is a global install requested?
+                                      |   --global on pack add, update, remove and list; without it, commands retain
+                                      |   project-level behavior.
+                                      |
+                                      |   An explicit flag makes the target visible in each operation and preserves
+                                      |   the existing default for scripts and project workflows.
+                                      |
+                                      | How do global and project packs interact?
+                                      |   Stores and locks stay independent; no implicit precedence or fallback. Every
+                                      |   operation affects only the selected target.
+                                      |
+                                      |   The brief does not define runtime lookup precedence; independent stores
+                                      |   avoid silently changing current project behavior.
+                                      |
+                                      |
+
+  ? Approve the plan: Add explicit per-user global pack installation alongside project-level installs?
+  1 approve   2 adjust   3 abort
+
+ 1 2 3 answer ; tab next place ; up/down scroll ; p proof ; d decided for you ; ...                 / anything ; ? keys

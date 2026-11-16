@@ -1,0 +1,14 @@
+ yunta › Q78GRR › grill          ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 5m00s         Q78GRR
+ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ node `grill` asks 3 questions: nothing is recorded until…
+ grill · prompt                  planner on mock/gpt-6-luna
+ what it is doing · 4 calls
+ … 5 above
+ accepted questions
+ submit  questions
+ needs you: asked 3 questions: `where-global-lives`, `how-…
+ 220k tokens · 36s at work · 5m00s waiting on you
+ ✓ Nothing recorded. The run stays waiting on these questi…
+ j k node · f follow it · s stats · q field · ? keys

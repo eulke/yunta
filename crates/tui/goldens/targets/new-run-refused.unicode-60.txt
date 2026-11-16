@@ -1,0 +1,14 @@
+ yunta › new run                ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ … 2 above
+ tasks (document, required)
+ ╭────────────────────────────────────────────────────────╮
+ │                                                        │
+ ╰────────────────────────────────────────────────────────╯
+ Tasks document YAML, relative to the repository root.
+ ✗ input `tasks` is required and has no default; pass
+   `--input tasks=...`
+ adapter
+  ▸ as the runners in config.yaml say   claude-code   codex
+ ◆ C0NS0E needs you: node `approve` wants an external gate…
+ type the tasks document · tab next row · enter start · …

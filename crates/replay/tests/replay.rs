@@ -482,7 +482,6 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
 const AUDIT_KINDS: &[&str] = &[
     "finding_refused",
     "context_assembled",
-    "scope_checked",
     "hook_executed",
     "pull_request_opened",
     "write_formatted",
@@ -523,18 +522,14 @@ fn a_kind_that_moves_no_state_says_so_by_name() {
         let (event, behind_it) = log
             .split_last()
             .expect("the log ends with the kind under test");
-        let mut state = yunta_replay::RunState::default();
-        for setup in behind_it {
-            let _ = state.apply(setup);
-        }
+        let mut state = yunta_replay::RunState::replay(behind_it);
         let before = state.clone();
-        let moved = match state.apply(event) {
-            // What a kind derives, not that its node was heard from:
-            // every event of a node updates when it last said anything,
-            // which is the envelope's doing and not the kind's.
-            Ok(()) => state != before,
-            Err(_) => true,
-        };
+        state.fold(event);
+        // What a kind derives, not that its node was heard from: every
+        // event of a node updates when it last said anything, which is the
+        // envelope's doing and not the kind's. A refused event marks the
+        // state broken, which moves it.
+        let moved = state != before;
         let audit = AUDIT_KINDS.contains(&kind);
         if !moved != audit {
             mismatched.push(format!("{kind}: moves={moved} audit={audit}"));

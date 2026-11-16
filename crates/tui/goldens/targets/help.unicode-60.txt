@@ -1,0 +1,14 @@
+ yunta › Q78GRR › plan          ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ●╭ keys ────────────────────────────────────────────────╮R
+ ━│ You never have to remember more than this.           │
+ n│ /          anything: only what can be done here, wit…│
+ p│ n          start a new run, wherever no prompt stands│a
+ w│ j k        move; the footer always says what they mo…│
+ …│ pgup pgdn  scroll the pane a page at a time          │
+ r│ enter      open, answer, confirm                     │
+ r│ … 8 under                                            │
+ r╰──────────────────────────────────────────────────────╯
+ 967k tokens · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ esc back

@@ -1,0 +1,36 @@
+ yunta :: ST0PPD :: lint                                                                    ? 1 needs you ; ^ 1 stalled
+........................................................................................................................
+ # cancel-me (default) ; stopped ; for 0s                                                                        ST0PPD
+ lint
+ ====
+ interrupted by a person
+
+ * # lint                        | lint ; bash
+                                 |
+                                 | where it stopped
+                                 | # lint  attempt 1, after 45s
+                                 | why     interrupted by a person
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 0 tokens _ ; 45s at work
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; r continue it where it stopped ; x close ; s stats ; g graph ; q field                  / anything ; ? keys

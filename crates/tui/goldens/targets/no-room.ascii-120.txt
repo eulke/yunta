@@ -1,0 +1,36 @@
+ yunta :: N0R00M :: only                                                                     ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ? one-step (default) ; needs you ; for 0s                                                                       N0R00M
+ only
+ ....
+ no room on the disk, which has 42 GB free where 9000 TB stays free; make room (`yunta gc`, close a parked run, or l...
+
+ * . only                        | only ; bash
+                                 |
+                                 | what it waits on
+                                 | no room on the disk, which has 42 GB free where 9000 TB stays free; make room
+                                 | (`yunta gc`, close a parked run, or lower `storage.pool.keep_free`) and resume
+                                 |
+                                 | free    42 GB
+                                 | needed  9000 TB
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 0 tokens _ ; 0s at work
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; u make room ; r hand it back ; s stats ; g graph ; q field                              / anything ; ? keys

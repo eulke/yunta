@@ -1,25 +1,38 @@
 //! See [`crate`]. Answering a run that waits on a person: the decision its
-//! gate waits on, read with what it shows, and a decision recorded on its log
-//! through the engine's one consequence path, after which a detached resume
-//! applies it. A run another engine drives is refused before anything is
-//! written; a run whose decision is on its log but that could not be handed
-//! on says so as recorded, because a reader who took it for a refusal would
-//! answer the same gate twice.
+//! gate waits on, read with what it shows, or the round of questions one of
+//! its nodes asked, each read by one function of the run's manifest, directory
+//! and state that a run opened and a run followed both read through; and a
+//! decision recorded on its log through the engine's one consequence path,
+//! after which a detached resume applies it. A run another engine drives is
+//! refused before anything is written; a run whose decision is on its log but
+//! that could not be handed on says so as recorded, because a reader who took
+//! it for a refusal would answer the same gate twice.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use yunta_core::events::{
-    ChangesCountedPayload, DecisionOn, GateWaitingPayload, HumanChoice, PauseReason,
+    ChangesCountedPayload, DecisionOn, GateWaitingPayload, HumanChoice, PauseReason, StoredEvent,
 };
 use yunta_core::port::QuestionsReply;
+use yunta_core::refusal::AnswersRefusal;
 use yunta_core::shown::ShownDocument;
-use yunta_core::{NodeId, OptionId, QuestionsFile, Responder, RunId};
+use yunta_core::{Manifest, NodeId, OptionId, QuestionsFile, Responder, RunId};
 use yunta_render::escalation::Route;
 use yunta_render::refusal::Refused;
 use yunta_replay::frame::RunFrame;
 use yunta_replay::RunState;
 
 use crate::{Error, Failure, OpenedRun};
+
+/// What a run waits on a person for: the decision its gate waits on, with what it shows,
+/// or the round of questions one of its nodes asked. Not
+/// [`WaitingOn`](yunta_replay::frame::WaitingOn), where a run is parked.
+#[derive(Debug, Clone)]
+pub enum Awaited {
+    Decision(Box<WaitingDecision>),
+    Round(Box<WaitingQuestions>),
+}
 
 /// The decision a run waits on, with the documents it shows and what the menu a person
 /// picks from is drawn from.
@@ -56,6 +69,63 @@ pub fn waiting_round(frame: &RunFrame) -> Option<&NodeId> {
     }
 }
 
+impl WaitingDecision {
+    /// The decision the run whose manifest is `manifest`, whose directory is `dir` and
+    /// whose events derive `state` waits on, with the documents it shows: none when it
+    /// waits on none, as a decision answered elsewhere reads.
+    pub(crate) async fn read(
+        manifest: &Manifest,
+        dir: &Path,
+        state: &RunState,
+    ) -> Result<Option<WaitingDecision>, Error> {
+        let decision = yunta_engine::current_escalation(manifest, dir, state).await?;
+        let Some((on, escalation)) = decision else {
+            return Ok(None);
+        };
+        let escalation = escalation.into_payload();
+        let asked = manifest.request();
+        let shown = yunta_engine::shown_documents(dir, escalation.shows(), state, asked).await?;
+        let workflow = &manifest.workflow;
+        let routes = yunta_render::escalation::routes(
+            &escalation,
+            workflow,
+            state.run.left_out(),
+            on.node(),
+        );
+        Ok(Some(WaitingDecision {
+            routes,
+            changed: state.current_change().cloned(),
+            called: yunta_render::state::called(&workflow.name, state.run.mode()),
+            on,
+            escalation,
+            shown,
+        }))
+    }
+}
+
+impl WaitingQuestions {
+    /// The round of questions `node` asked and nobody has answered, read from the
+    /// document it handed over in the run whose directory is `dir`, by the hash its
+    /// `questions_asked` in `events` recorded: none when it waits on no round, as a round
+    /// answered elsewhere reads.
+    pub(crate) async fn read(
+        dir: &Path,
+        events: &[StoredEvent],
+        node: NodeId,
+    ) -> Result<Option<WaitingQuestions>, Error> {
+        match yunta_engine::asked_questions(dir, events, &node).await {
+            Ok(questions) => Ok(Some(WaitingQuestions { node, questions })),
+            Err(yunta_engine::AnswerQuestionsError::Refused(AnswersRefusal::NothingAsked {
+                ..
+            })) => Ok(None),
+            Err(yunta_engine::AnswerQuestionsError::Refused(refusal)) => {
+                Err(Refused::Answers(refusal).into())
+            }
+            Err(failed) => Err(Failure::new(failed).into()),
+        }
+    }
+}
+
 impl OpenedRun<'_> {
     /// The questions this run is parked on, read from the document the node handed
     /// over, by the hash its `questions_asked` recorded: refused when it waits on
@@ -68,48 +138,22 @@ impl OpenedRun<'_> {
             }
             .into());
         };
-        let questions = yunta_engine::asked_questions(&self.dir, &self.events, &node)
-            .await
-            .map_err(|error| match error {
-                yunta_engine::AnswerQuestionsError::Refused(refusal) => {
-                    Error::from(Refused::Answers(refusal))
-                }
-                failed => Failure::new(failed).into(),
-            })?;
-        Ok(WaitingQuestions { node, questions })
+        let nothing_asked = Refused::Answers(AnswersRefusal::NothingAsked { node: node.clone() });
+        WaitingQuestions::read(&self.dir, &self.events, node)
+            .await?
+            .ok_or_else(|| nothing_asked.into())
     }
 
     /// The decision this run waits on, with what it shows: refused when it
     /// waits on none, naming the command that says where it stands.
     pub async fn waiting_decision(&self) -> Result<WaitingDecision, Error> {
-        let manifest = &self.manifest.doc;
         let state = RunState::replay(&self.events);
-        let decision = yunta_engine::current_escalation(manifest, &self.dir, &state).await?;
-        let Some((on, escalation)) = decision else {
-            return Err(Refused::NoDecision {
-                run: self.id.clone(),
-            }
-            .into());
+        let no_decision = Refused::NoDecision {
+            run: self.id.clone(),
         };
-        let escalation = escalation.into_payload();
-        let asked = manifest.request();
-        let shown =
-            yunta_engine::shown_documents(&self.dir, escalation.shows(), &state, asked).await?;
-        let workflow = &manifest.workflow;
-        let routes = yunta_render::escalation::routes(
-            &escalation,
-            workflow,
-            state.run.left_out(),
-            on.node(),
-        );
-        Ok(WaitingDecision {
-            routes,
-            changed: state.current_change().cloned(),
-            called: yunta_render::state::called(&workflow.name, state.run.mode()),
-            on,
-            escalation,
-            shown,
-        })
+        WaitingDecision::read(&self.manifest.doc, &self.dir, &state)
+            .await?
+            .ok_or_else(|| no_decision.into())
     }
 
     /// Records `option`, with the words a person added to it, on the

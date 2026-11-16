@@ -1,8 +1,10 @@
 //! The tasks document as a run works it, folded once: each task's status,
-//! its attempts, the commit a `done` landed at, and the event each status
-//! change is caused by. Every surface that asks what a task is doing — or
-//! what the criteria it is checked against cost — reads it here rather than
-//! walking the kinds itself: a second fold is a second answer.
+//! its attempts, the commit a `done` landed at, the event each status
+//! change is caused by, what proves it and what it may write, and the
+//! checks that last answered for it. Every surface that asks what a task
+//! is doing, what it proved, or what the criteria it is checked against
+//! cost reads it here rather than walking the kinds itself: a second fold
+//! is a second answer.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,8 +14,10 @@ use crate::events::tasks::kinds::TaskEvent;
 use crate::events::tasks::{TaskCause, TaskStop};
 use crate::events::TaskStatus;
 use crate::events::{
-    DeviationDeclaredPayload, DeviationResolvedPayload, ShapesReadPayload, TaskStatusChangedPayload,
+    CriteriaCheckedPayload, Criterion, DeviationDeclaredPayload, DeviationResolvedPayload, Phase,
+    ScopeCheckedPayload, ShapesReadPayload, TaskStatusChangedPayload,
 };
+use crate::glob::ScopeGlob;
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{NodeId, Seq, SessionId, TaskId};
 
@@ -31,6 +35,29 @@ pub struct TaskRecord {
     /// Where the registration sits — what a status change names as the
     /// event that justifies it.
     pub registered_at: Option<Seq>,
+    /// What proves it: the criteria its latest registration froze, in
+    /// the order the tasks document declares them.
+    pub criteria: Vec<Criterion>,
+    /// The globs it may write, as its latest registration froze them.
+    pub scope: Vec<ScopeGlob>,
+    /// Its latest check after the work (`Phase::Post`), as the log has
+    /// it: each criterion's command, exit code and tail. A retried task
+    /// is proved by its last attempt's. Not `checked_before`, the check
+    /// before the work, nor a session's own check (`task_check_answered`),
+    /// which judges work in progress and proves nothing. `None` until its
+    /// work is checked.
+    pub checked: Option<CriteriaCheckedPayload>,
+    /// Its latest check before the work (`Phase::Pre`), as the log has it:
+    /// each criterion's exit code where the work has something to prove,
+    /// each guard's where it has to hold. Not `checked`, the check after
+    /// the work, which the task is proved by. `None` until a check runs
+    /// before its work.
+    pub checked_before: Option<CriteriaCheckedPayload>,
+    /// Its latest scope check, as the log has it: what its work changed,
+    /// and what of that it may not change. On a log whose calls name no
+    /// session, its diff is what tells the paths the task wrote. Not a
+    /// node's own scope check, which names no task.
+    pub scope_checked: Option<ScopeCheckedPayload>,
     /// How many times this task was dispatched: one per move into
     /// `Running`.
     pub attempts: u32,
@@ -217,8 +244,11 @@ impl TaskLedger {
 
     /// Folds one node-domain event into what it says about the tasks: a
     /// `criteria_checked` prices every criterion it actually ran, and
-    /// that price outlives the invocation that paid it.
-    pub fn apply_criteria(&mut self, event: &NodeEvent) {
+    /// that price outlives the invocation that paid it; one after the
+    /// work is what its task is proved by, and one before it is kept
+    /// apart; and a task's `scope_checked` is kept on that task. A check
+    /// naming no task, or a task the log never registered, is kept on none.
+    pub fn apply_checks(&mut self, event: &NodeEvent) {
         match event {
             NodeEvent::CriteriaChecked(p) => {
                 for result in &p.results {
@@ -232,13 +262,27 @@ impl TaskLedger {
                             .push(duration_ms);
                     }
                 }
+                if let Some(record) = self.per_task.get_mut(&p.task_id) {
+                    match p.phase {
+                        Phase::Pre => record.checked_before = Some(p.clone()),
+                        Phase::Post => record.checked = Some(p.clone()),
+                    }
+                }
+            }
+            NodeEvent::ScopeChecked(p) => {
+                if let Some(record) = p
+                    .task_id
+                    .as_ref()
+                    .and_then(|task| self.per_task.get_mut(task))
+                {
+                    record.scope_checked = Some(p.clone());
+                }
             }
             // What a node resolved, started, assembled, hooked, closed,
-            // rerouted or opened prices no command.
+            // rerouted or opened checks no task.
             NodeEvent::RunnerResolved(_)
             | NodeEvent::Started(_)
             | NodeEvent::ContextAssembled(_)
-            | NodeEvent::ScopeChecked(_)
             | NodeEvent::Finished(_)
             | NodeEvent::Failed(_)
             | NodeEvent::HookExecuted(_)
@@ -262,6 +306,10 @@ impl TaskLedger {
                 let record = self.per_task.entry(p.task_id.clone()).or_default();
                 record.owner = record.owner.take().or_else(|| meta.node.cloned());
                 record.registered_at.get_or_insert(meta.seq);
+                // A registration again under the same id may freeze
+                // another identity: what proves the task is the latest.
+                record.criteria = p.criteria.clone();
+                record.scope = p.scope.clone();
                 Ok(())
             }
             TaskEvent::StatusChanged(p) => self.status_changed(p, meta),
@@ -378,6 +426,11 @@ impl Default for TaskRecord {
             status: TaskStatus::Pending,
             owner: None,
             registered_at: None,
+            criteria: Vec::new(),
+            scope: Vec::new(),
+            checked: None,
+            checked_before: None,
+            scope_checked: None,
             attempts: 0,
             commit: None,
             left_work: None,

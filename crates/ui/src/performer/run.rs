@@ -3,7 +3,9 @@
 //! the API's open run.
 
 use surco::doc::Depth;
-use yunta_api::{Error, FieldReach, Project, Remarks, RunRequest, Stop};
+use yunta_api::{
+    Error, FieldReach, FollowNews, Followed, FollowedRun, Project, Remarks, RunRequest, Stop,
+};
 use yunta_core::events::Channel;
 use yunta_core::port::QuestionsReply;
 use yunta_core::{Answer, NodeId, OptionId, RunId};
@@ -74,18 +76,45 @@ pub(super) async fn graph_read(project: &Project, run: RunId) -> Result<Outcome,
     Ok(Outcome::Graph(Box::new(graph)))
 }
 
-/// `run` followed until it no longer moves: the run as its following reads it first,
-/// then what each look at it finds, handed to `found` as it comes.
+/// `run` followed until its frame no longer moves and the following awaits no
+/// successor, the rule every interface stops a following by: the run read whole first,
+/// then what each look at it finds, handed to `found` as it comes. The rule is read on
+/// a copy of the run kept here, each piece of news folded into it.
 pub(super) async fn followed(
     project: &Project,
     run: &RunId,
     found: &(dyn Fn(News) + Sync),
     stop: &Stop,
 ) -> Result<Outcome, Error> {
-    let mut following = project.follow(run).await?;
-    found(News::Following(Box::new(following.followed().clone())));
-    while let Some(news) = following.next(stop).await? {
-        found(News::Run(news));
+    let followed = Followed {
+        field: None,
+        run: Some(run.clone()),
+    };
+    let mut following = project.follow(followed).await?;
+    let mut kept: Option<FollowedRun> = None;
+    loop {
+        if let Some(kept) = &kept {
+            let moves = kept.frame(project.workspace.clock.now()).moves();
+            if !moves && !following.awaits_successor() {
+                break;
+            }
+        }
+        let news = following.next(stop).await?;
+        match &news {
+            FollowNews::Whole { run, .. } => kept = Some((**run).clone()),
+            FollowNews::Run { run, news } => {
+                if let Some(kept) = kept.as_mut().filter(|kept| kept.run == *run) {
+                    kept.took(news);
+                }
+            }
+            // No field is followed here.
+            FollowNews::Field(_)
+            | FollowNews::Joined(_)
+            | FollowNews::Unreadable(_)
+            | FollowNews::Left(_)
+            | FollowNews::Elsewhere(_) => {}
+        }
+        found(News::Following(news));
     }
     Ok(Outcome::Followed)
 }

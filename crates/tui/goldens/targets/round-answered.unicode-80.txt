@@ -1,0 +1,24 @@
+ yunta › Q78GRR › grill                              ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 5m00s                             Q78GRR
+ ━━━━ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ node `grill` asks 3 questions: nothing is recorded until every one is answered
+
+ you asked  add support for installing a pack globally
+
+ ▎ ◆ grill asks                                                          Q78GRR
+ ▎
+ ▎ ✓ What does global mean in terms of…  The current user's platform data di…
+ ▎ ◆ How should someone request a global installation, and how does that differ
+ ▎   from project-level installation?
+ ▎      ▸ type to filter
+ ▎     ▸ --global on pack add, update, remove and list
+ ▎       A separate pack global command group
+ ▎       A global-by-default install
+ ▎ ◌ How should global installations interact with project-level packs,
+ ▎   including precedence and conflicts?  optional, assumes Independent stores
+ ▎   and locks; each operation affects the selected target
+
+ 220k tokens █▁▁▁▁▁▁▁▁▁▁▁▁▁▁ · 36s at work · 5m00s waiting on you
+
+ ↑↓ choose · enter answer · shift-tab go back · esc leave it for later

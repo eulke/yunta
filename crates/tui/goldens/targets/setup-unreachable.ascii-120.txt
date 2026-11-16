@@ -1,0 +1,36 @@
+ yunta :: set up                                                                                      nothing needs you
+........................................................................................................................
+                                                          yunta
+
+
+           This repository has never used yunta. Here is what it found. Nothing is written until you say so.
+
+              what this repository is
+                + name         yunta
+                + language     rust
+                + suite        cargo test
+                + lint         cargo clippy --all-targets -- -D warnings
+                + forge        github eulke/yunta, from origin
+                + base         main
+                + commits as   Marta Ruiz
+                ^ workflow     yunta/fragua, out of reach: fatal: '/home/nowhere' does not appear to be a
+                               git repository
+
+              who does the work
+                + implementer  claude-code                     then codex
+
+               * write .yunta/config.yaml  ; then yunta asks what to build
+
+
+
+
+
+
+
+
+
+
+
+
+
+ j k step ; enter write it ; q leave, nothing written                                               / anything ; ? keys

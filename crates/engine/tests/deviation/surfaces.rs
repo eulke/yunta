@@ -5,7 +5,7 @@ use yunta_core::events::TaskStatus;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
-use super::{answering, common, fixture, WORKFLOW};
+use super::{answering, fixture, WORKFLOW};
 
 /// An aborted departure leaves no menu to choose from, its question comes
 /// back on resume; every surface that asks whether a parked run waits on a
@@ -38,7 +38,8 @@ async fn a_departure_owed_without_a_terminal_is_answered_from_the_parked_menu() 
         "{terminal:?}"
     );
 
-    common::answer_parked(&bench, "accept")
+    bench
+        .answer_parked("accept", None)
         .await
         .expect("the parked menu offers the departure's answers");
     let RunReport { terminal, .. } = bench.wake().await;
@@ -66,16 +67,13 @@ async fn a_departure_owed_without_a_terminal_is_sent_back_from_the_parked_menu_w
     );
 
     assert!(
-        common::answer_parked(&bench, "send-back").await.is_err(),
+        bench.answer_parked("send-back", None).await.is_err(),
         "a send-back with no words would leave the departure's own question unanswered"
     );
-    common::answer_parked_saying(
-        &bench,
-        "send-back",
-        Some("say good night without the clock"),
-    )
-    .await
-    .expect("the parked menu sends the departure back with the person's words");
+    bench
+        .answer_parked("send-back", Some("say good night without the clock"))
+        .await
+        .expect("the parked menu sends the departure back with the person's words");
     let RunReport { terminal, state } = bench.wake().await;
 
     assert_eq!(terminal, RunTerminal::Finished);
