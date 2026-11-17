@@ -1,0 +1,20 @@
+● node plan of run Q78GRR · running
+
+  kind         prompt
+  attempt      1
+  runner       planner on mock/gpt-6-luna
+  tokens       610k in / 25k out (586k cached)
+  took         1m36s
+
+what it hands over
+◌ tasks  not yet
+
+what it is doing · 3 calls
+running: attempt 1
+session opened on gpt-6-luna · fence widened to 1 root
+read    crates/cli/src/commands/pack.rs
+read    crates/cli/src/cli/pack.rs
+read    crates/engine/src/catalog.rs
+
+next
+  yunta status Q78GRR   shows the whole run

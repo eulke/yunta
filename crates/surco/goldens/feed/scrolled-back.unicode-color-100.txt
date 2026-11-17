@@ -1,0 +1,10 @@
+␛[2m… 4 above␛[0m
+search  global pack
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+␛[2m… 4 under␛[0m

@@ -1,0 +1,21 @@
+␛[31m✗␛[0m ␛[1mnode lint of run Q78GRR␛[0m␛[2m ·␛[0m␛[31m failed␛[0m
+
+  exit 101
+
+␛[2m  │ ␛[0merror: function `packs_root` is never used
+␛[2m  │ ␛[0m  --> crates/cli/src/pack.rs:31:4
+␛[2m  │ ␛[0merror: function `vendor_dir` is never used
+␛[2m  │ ␛[0m  --> crates/cli/src/pack.rs:35:4
+␛[2m  │ ␛[0merror: could not compile `yunta` (lib) due to 2 previous errors
+  ␛[2mwhole output: ␛[0m~/.yunta/runs/01M7DES1GNED00000000Q78GRR/objects/f14ef2d70af42292993be0c658999b79b5e4dde21379a510b936fb43bf33f018
+
+  ␛[2mkind        ␛[0m bash
+  ␛[2mattempt     ␛[0m 1
+  ␛[2mtook        ␛[0m 6s
+
+␛[2mwhat it is doing · 0 calls␛[0m
+running: attempt 1
+␛[1mfailed: exit 101 · 6s␛[0m
+
+␛[2mnext␛[0m
+  ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m

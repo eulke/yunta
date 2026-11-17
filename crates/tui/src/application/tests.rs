@@ -12,12 +12,14 @@ use surco::look::{Look, Width};
 use surco::motion::Motion;
 use surco::paint::{Paint, SYNC_BEGIN, SYNC_END};
 use tokio::signal::unix::{signal, SignalKind};
+use yunta_core::events::Channel;
 use yunta_testkit::Terminal;
 use yunta_testkit_core::{fixed_now, FixedClock};
 use yunta_testkit_ui::sandbox::workspace;
 use yunta_ui::{Performer, State};
 
 use super::{Application, Synchronized};
+use crate::full_screen::WindowTitle;
 
 /// What the signpost, where the application opens outside a repository, says.
 const SIGNPOST: &str = "not in a repository";
@@ -140,14 +142,17 @@ fn after_ctrl_z_it_is_held_and_drawn_again_and_goes_on() {
 #[test]
 fn a_drawing_that_changes_no_cell_writes_nothing() {
     let root = tempfile::tempdir().expect("a directory for the run");
-    let performer = Arc::new(Performer::new(workspace(root.path(), root.path())));
+    let performer = Arc::new(Performer::new(
+        workspace(root.path(), root.path()),
+        Channel::Tty,
+    ));
     let look = Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::exact(78),
         motion: Motion::Still,
     };
-    let application = Application::new(performer, look, Arc::new(FixedClock), recorded);
+    let application = Application::new(performer, look, Arc::new(FixedClock), recorded, false);
     let drawing = Synchronized::default();
     let options = TerminalOptions {
         viewport: Viewport::Fixed(Rect::new(0, 0, 80, 24)),
@@ -161,6 +166,8 @@ fn a_drawing_that_changes_no_cell_writes_nothing() {
         drawing,
         laid: None,
         on_screen: None,
+        title: WindowTitle::default(),
+        ringing: false,
     };
     let (mut state, _) = State::opened(fixed_now());
     let mut first = Vec::new();
@@ -197,21 +204,26 @@ fn recorded(page: &std::path::Path) -> std::io::Result<()> {
 #[test]
 fn what_the_state_asks_is_carried_out_in_order_leaving_last() {
     let root = tempfile::tempdir().expect("a directory for the run");
-    let performer = Arc::new(Performer::new(workspace(root.path(), root.path())));
+    let performer = Arc::new(Performer::new(
+        workspace(root.path(), root.path()),
+        Channel::Tty,
+    ));
     let look = Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::exact(78),
         motion: Motion::Still,
     };
-    let application = Application::new(performer, look, Arc::new(FixedClock), recorded);
+    let application = Application::new(performer, look, Arc::new(FixedClock), recorded, false);
     let (inputs, _answered) = tokio::sync::mpsc::unbounded_channel();
-    let running = super::Running {
+    let mut running = super::Running {
         application: &application,
         inputs,
         drawing: Synchronized::default(),
         laid: None,
         on_screen: None,
+        title: WindowTitle::default(),
+        ringing: false,
     };
     let (mut state, _) = State::opened(fixed_now());
     let (first, second) = (
@@ -251,14 +263,17 @@ fn the_application_run_again() {
     let root = tempfile::tempdir().expect("a directory outside any repository");
     let outside = root.path().join("outside");
     std::fs::create_dir_all(&outside).expect("the directory");
-    let performer = Arc::new(Performer::new(workspace(&outside, root.path())));
+    let performer = Arc::new(Performer::new(
+        workspace(&outside, root.path()),
+        Channel::Tty,
+    ));
     let look = Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::exact(78),
         motion: Motion::Still,
     };
-    let application = Application::new(performer, look, Arc::new(FixedClock), |_| Ok(()));
+    let application = Application::new(performer, look, Arc::new(FixedClock), |_| Ok(()), false);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

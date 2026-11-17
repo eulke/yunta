@@ -44,7 +44,10 @@ async fn a_run_started_at_the_first_run_is_followed_to_its_end() {
         .working_in_place()
         .file(".yunta/workflows/greet.yaml", GREETS)
         .committed();
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
 
     let mut strokes = typed("greet ana");
@@ -81,7 +84,10 @@ async fn an_input_left_empty_is_refused_as_yunta_run_refuses_it() {
     let refused_at_the_command_line =
         yunta_at!(&checkout, &["run", "named", "--input", "ask=greet ana"]);
     assert!(!refused_at_the_command_line.status.success());
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
 
     let mut strokes = typed("greet ana");

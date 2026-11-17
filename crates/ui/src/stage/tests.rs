@@ -6,7 +6,7 @@ use yunta_core::RunId;
 
 use super::{DecisionStage, RunStage, Stage, StatsStage, Want};
 use crate::prompt::Opens;
-use crate::Outcome;
+use crate::{Operation, Outcome};
 
 /// The run a stage is about.
 fn this_run() -> RunId {
@@ -31,7 +31,7 @@ fn a_decision_goes_back_only_once_its_own_run_is_decided() {
 }
 
 #[test]
-fn a_run_follows_again_only_once_its_own_run_goes_on() {
+fn a_run_reads_its_page_again_only_once_its_own_run_goes_on() {
     let mut stage = RunStage::of(this_run());
     let elsewhere = stage.answered(Outcome::Resumed { run: another_run() });
     assert!(
@@ -39,7 +39,12 @@ fn a_run_follows_again_only_once_its_own_run_goes_on() {
         "another run resumed asks nothing here"
     );
     let own = stage.answered(Outcome::Resumed { run: this_run() });
-    assert_eq!(own.len(), 2, "its following and its page, read again");
+    let page =
+        |want: &Want| matches!(want, Want::Work(Operation::ReadPage { run }) if *run == this_run());
+    assert!(
+        matches!(own.as_slice(), [read] if page(read)),
+        "its page, read again"
+    );
 }
 
 /// A run's step opens the stage that shows what its command shows, through the one

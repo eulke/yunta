@@ -408,13 +408,10 @@ impl CatalogStage {
             Outcome::Refused(refused) => self.unanswered(refused.to_string()),
             Outcome::Failed(said) => self.unanswered(said),
             Outcome::Repository(_)
-            | Outcome::Field { .. }
-            | Outcome::Followed
             | Outcome::Page(_)
             | Outcome::NodePage(_)
             | Outcome::Questions(_)
             | Outcome::Decision(_)
-            | Outcome::Stats(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)

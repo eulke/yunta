@@ -3,6 +3,8 @@
 //! as written keeps every sign Markdown reads, a code span keeps its text as
 //! written, and a table cell stays on one line.
 
+use crate::line::{Line, Tone};
+
 /// Text for one table cell: on one line, as `plain_text` writes it, and with
 /// the pipe that would end the cell escaped.
 pub(super) fn cell(text: &str) -> String {
@@ -183,4 +185,27 @@ fn prefixed(prefix: &str, line: &str) -> String {
         true => prefix.trim_end().to_string(),
         false => format!("{prefix}{line}"),
     }
+}
+
+/// One line of spans, its strong parts in bold and its command parts in code,
+/// as written; every other part is words, written as `plain_text` writes them.
+pub(super) fn line(line: &Line) -> String {
+    line.spans()
+        .iter()
+        .map(|span| match span.tone {
+            Tone::Strong if !span.text.trim().is_empty() => {
+                format!("**{}**", plain_text(span.text.trim()))
+            }
+            Tone::Command if !span.text.trim().is_empty() => code_span(span.text.trim()),
+            _ => plain_text(&span.text),
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// Lines a surface composed, each as [`line()`] writes it, one to a row: a hard
+/// break ends each but the last.
+pub(super) fn rows(lines: &[Line]) -> String {
+    lines.iter().map(line).collect::<Vec<_>>().join("  \n")
 }

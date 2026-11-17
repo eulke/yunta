@@ -22,7 +22,10 @@ async fn a_parked_gate_decided_is_resumed_detached_to_its_end() {
         .committed();
     let parked = yunta_at!(&checkout, &["run", "wf.yaml"]);
     let id = full_run_id(&checkout.home, &run_id_from(&parked));
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
 
     let answered = [Stroke::Enter, Stroke::Insert('a'), Stroke::Enter];
@@ -57,7 +60,10 @@ async fn the_card_is_the_one_resolve_gate_holds_at_a_terminal() {
     let mut terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &["resolve-gate", &id]);
     terminal.wait_on_screen("▸ go", "resolve-gate never put the card");
     let held = terminal.screen();
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
 
     let (state, _) = drive(

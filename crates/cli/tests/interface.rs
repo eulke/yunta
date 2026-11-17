@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use surco::surface::Markdown;
 use yunta_api::Workspace;
+use yunta_core::events::Channel;
 use yunta_core::process::SearchPath;
 use yunta_core::{Env, ProcessSecrets, SystemIdSource};
 use yunta_testkit_core::FixedClock;
@@ -54,7 +55,10 @@ async fn outside_a_repository_it_rests_on_the_signpost() {
     let root = tempfile::tempdir().unwrap();
     let outside = root.path().join("outside");
     std::fs::create_dir_all(&outside).unwrap();
-    let performer = Arc::new(Performer::new(workspace(&outside, root.path())));
+    let performer = Arc::new(Performer::new(
+        workspace(&outside, root.path()),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
     let (state, surfaced) = drive(opened, asked, &performer, &[Stroke::Insert('q')]).await;
     assert!(state.waiting_on().is_empty());

@@ -2,7 +2,7 @@
 //! of its kind: checking doctor again leaves its sessions running, and a dry run leaves
 //! a collection collecting.
 
-use yunta_api::FieldReach;
+use yunta_core::RunId;
 
 use super::State;
 use crate::{Operation, Request};
@@ -21,18 +21,17 @@ fn let_go_by(first: Operation, then: Operation) -> Vec<Request> {
 
 #[test]
 fn a_reading_lets_go_the_reading_of_its_kind_under_way() {
+    let page = |run: &'static str| Operation::ReadPage {
+        run: RunId::from_static(run),
+    };
     let let_go = let_go_by(
-        Operation::Field {
-            reach: FieldReach::Here,
-        },
-        Operation::Field {
-            reach: FieldReach::Machine,
-        },
+        page("01M7PROMOTED00000000000000"),
+        page("01M7SUCCESSOR0000000000000"),
     );
     assert_eq!(
         let_go.len(),
         1,
-        "the field read again supersedes the one under way"
+        "a successor's page read supersedes its run's under way"
     );
     let let_go = let_go_by(Operation::Collect { dry_run: true }, Operation::ReadCatalog);
     assert!(

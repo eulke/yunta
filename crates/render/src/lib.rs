@@ -28,7 +28,7 @@
 //! - What happened to a run, in order: `chronicle`, what each moment of it
 //!   says, the same on every surface that follows the run; and `watched`,
 //!   the rows a person watches a moving run by: what needs them, each node
-//!   at work with what its session said, and the counters.
+//!   at work with what its session said, the run's gist and what it spent.
 //! - A decision a person meets: `escalation`, `claim`, `evidence`, `offers`
 //!   and `found`.
 //! - What Yunta refuses: `refusal`, the sentences of every refusal over its data.

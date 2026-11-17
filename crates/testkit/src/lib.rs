@@ -21,7 +21,8 @@
 //! `stubs` stand in for programs on `PATH`; `reference_pack` is the Yunta
 //! repository's pack a setup installs, in a local repository git is pointed at
 //! for the Yunta repository's URL; `events` reads and writes a run's
-//! log, and loads a log into a store of its own; `registry` writes what a run's
+//! log, reads where each run of a store stands, loads a log into a store of
+//! its own, and sets a store's log aside and puts it back; `registry` writes what a run's
 //! registry says of the engine driving it; `interaction` and
 //! `observer` are doubles for a gate and the display boundary; `tools` hosts
 //! the per-run MCP listener; `said` reads what a run's sessions said off its
@@ -65,8 +66,8 @@ pub use corpus::{
     backticked, fenced_blocks, has_top_level_key, json_schema, markdown_files, section, Block,
 };
 pub use events::{
-    accepted, baselines, loaded, status_changed_carrying, task_registered, task_status_changed,
-    SourceLog,
+    accepted, baselines, heads, loaded, put_log_back, set_log_aside, status_changed_carrying,
+    task_registered, task_status_changed, SourceLog,
 };
 pub use held::{HeldRun, Hold};
 pub use interaction::{ApproveEverything, ScriptedInteraction};

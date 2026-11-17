@@ -28,6 +28,7 @@ mod setup;
 mod signpost;
 mod start;
 mod stats;
+mod steps;
 mod upkeep;
 
 pub use catalog::CatalogStage;
@@ -48,12 +49,13 @@ use chrono::{DateTime, Utc};
 use surco::components::{Screen, ScreenLaid};
 use surco::look::Look;
 
-use yunta_api::Remark;
-use yunta_core::step::{Arg, NextStep};
+use yunta_api::{FieldReach, Remark};
+use yunta_core::step::NextStep;
+use yunta_core::RunId;
 
 use crate::dialog::Confirmation;
-use crate::prompt::{Opens, Stroke};
-use crate::{News, Operation, Outcome, Ticket};
+use crate::prompt::Stroke;
+use crate::{FollowedRuns, News, Operation, Outcome, Ticket};
 
 /// Where a person is.
 #[derive(Debug, Clone)]
@@ -138,97 +140,31 @@ impl Want {
 }
 
 impl Stage {
-    /// What every stage's palette offers after the stage's own acts, in their order:
-    /// the workflows, doctor, upkeep and the shapes of the documents Yunta reads, each
-    /// opening the stage that takes it ([`Stage::opened_by`]).
-    pub(crate) fn always() -> [NextStep; 4] {
-        [
-            NextStep::List,
-            NextStep::Doctor {
-                sessions: false,
-                full: false,
-            },
-            NextStep::Gc { dry_run: true },
-            NextStep::Schemas,
-        ]
-    }
-
-    /// The stage `step` opens: one of [`Stage::always`]; a run's step that shows or
-    /// follows the run, its decision on its card or on its plan, its evidence, its
-    /// numbers or its graph; or a workflow's past runs or its graph. None for a step that
-    /// is work or asks a confirmation first, which the stage it is taken on carries out.
-    /// The one mapping from a step to the stage that takes it: every stage and every
-    /// opening reads it.
-    pub(crate) fn opened_by(step: &NextStep) -> Option<Stage> {
-        Some(match step {
-            NextStep::List => Stage::Catalog(CatalogStage::new()),
-            NextStep::Doctor {
-                sessions: false,
-                full: false,
-            } => Stage::Doctor(DoctorStage::new()),
-            NextStep::Gc { dry_run: true } => Stage::Upkeep(UpkeepStage::new()),
-            NextStep::Schemas => Stage::Schema(SchemaStage::new()),
-            NextStep::Status { run, .. } | NextStep::Follow { run } => {
-                Stage::Run(RunStage::of(run.clone()))
-            }
-            NextStep::ResolveGate { run, .. } => {
-                Stage::Decision(DecisionStage::of(run.clone(), Opens::TheCard))
-            }
-            NextStep::Review { run } => {
-                Stage::Decision(DecisionStage::of(run.clone(), Opens::ThePlan))
-            }
-            NextStep::Receipt { run } => {
-                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::Receipt))
-            }
-            NextStep::Verify { run } => {
-                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::Verification))
-            }
-            NextStep::Open { run } => {
-                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::PageForABrowser))
-            }
-            NextStep::Stats { run } => Stage::Stats(StatsStage::of_run(run.clone())),
-            NextStep::RunGraph { run } => Stage::Graph(GraphStage::of_run(run.clone())),
-            NextStep::History { workflow } => {
-                Stage::Stats(StatsStage::of_workflow(workflow.clone()))
-            }
-            NextStep::Graph {
-                workflow: Arg::Given(workflow),
-            } => Stage::Graph(GraphStage::of_workflow(workflow.clone())),
-            _ => return None,
-        })
-    }
-
-    /// The step of [`Stage::always`] whose command shows what this stage shows: a
-    /// palette over it does not offer opening it again.
-    pub(crate) fn showing(&self) -> Option<NextStep> {
+    /// The run this stage shows, which the state follows under every stage opened over it.
+    pub(crate) fn run_shown(&self) -> Option<&RunId> {
         match self {
-            Stage::Catalog(_) => Some(NextStep::List),
-            Stage::Doctor(_) => Some(NextStep::Doctor {
-                sessions: false,
-                full: false,
-            }),
-            Stage::Upkeep(_) => Some(NextStep::Gc { dry_run: true }),
-            Stage::Schema(_) => Some(NextStep::Schemas),
-            Stage::Signpost
-            | Stage::Field(_)
-            | Stage::Run(_)
-            | Stage::Decision(_)
-            | Stage::FirstRun(_)
-            | Stage::Start(_)
-            | Stage::Setup(_)
-            | Stage::Evidence(_)
-            | Stage::Stats(_)
-            | Stage::Graph(_) => None,
+            Stage::Run(run) => Some(&run.run),
+            _ => None,
         }
     }
 
-    /// What the stage offers at `now`, each with the key that takes it here: what a
-    /// palette over it lists first. A stage whose prompt is the act, a decision's card,
-    /// a question, a form, offers none of its own.
-    pub(crate) fn offered(&self, now: DateTime<Utc>) -> Vec<Act> {
+    /// The reach of the field this stage reads, which the state follows wherever it
+    /// stands: the field's own, and here for the first request, which waits on a run.
+    pub(crate) fn field_reach(&self) -> Option<FieldReach> {
         match self {
-            Stage::Field(field) => field.offered(),
-            Stage::Run(run) => run.offered(now),
+            Stage::Field(field) => Some(field.reach),
+            Stage::FirstRun(_) => Some(FieldReach::Here),
+            _ => None,
+        }
+    }
+
+    /// What the stage offers over what `followed` keeps at `now`, each with the key that
+    /// takes it here: what a palette over it lists first. A stage whose prompt is the act,
+    /// a decision's card, a question, a form, offers none of its own.
+    pub(crate) fn offered(&self, followed: &FollowedRuns, now: DateTime<Utc>) -> Vec<Act> {
+        match self {
+            Stage::Field(field) => field.offered(followed, now),
+            Stage::Run(run) => run.offered(followed, now),
             Stage::Catalog(catalog) => catalog.offered(),
             Stage::Evidence(evidence) => evidence.offered(),
             Stage::Doctor(doctor) => doctor.offered(),
@@ -244,20 +180,25 @@ impl Stage {
         }
     }
 
-    /// The stage as a screen at `now`.
-    pub(crate) fn screen(&self, look: &Look, now: DateTime<Utc>) -> Screen {
+    /// The stage as a screen of what `followed` keeps at `now`.
+    pub(crate) fn screen(
+        &self,
+        look: &Look,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Screen {
         match self {
             Stage::Signpost => signpost::screen(look),
-            Stage::Field(field) => field.screen(look),
-            Stage::Run(run) => run.screen(look, now),
+            Stage::Field(field) => field.screen(look, followed, now),
+            Stage::Run(run) => run.screen(look, followed, now),
             Stage::Decision(decision) => decision.screen(look),
             Stage::FirstRun(first_run) => first_run.screen(look),
             Stage::Start(start) => start.screen(look),
             Stage::Setup(setup) => setup.screen(look),
             Stage::Catalog(catalog) => catalog.screen(look),
             Stage::Evidence(evidence) => evidence.screen(look),
-            Stage::Stats(stats) => stats.screen(look),
-            Stage::Graph(graph) => graph.screen(look),
+            Stage::Stats(stats) => stats.screen(look, followed, now),
+            Stage::Graph(graph) => graph.screen(look, followed, now),
             Stage::Doctor(doctor) => doctor.screen(look),
             Stage::Upkeep(upkeep) => upkeep.screen(look),
             Stage::Schema(schema) => schema.screen(look),
@@ -303,10 +244,12 @@ impl Stage {
         }
     }
 
-    /// What the stage asks for when a person comes back to it.
-    pub(crate) fn returned(&mut self) -> Vec<Want> {
+    /// What the stage asks for when a person comes back to it, `followed` what the state
+    /// keeps of what it follows.
+    pub(crate) fn returned(&mut self, followed: &FollowedRuns) -> Vec<Want> {
         match self {
             Stage::Signpost
+            | Stage::Field(_)
             | Stage::Decision(_)
             | Stage::Start(_)
             | Stage::Setup(_)
@@ -316,19 +259,70 @@ impl Stage {
             | Stage::Upkeep(_)
             | Stage::Schema(_) => Vec::new(),
             Stage::Doctor(doctor) => doctor.returned(),
-            Stage::Field(field) => field.returned(),
             Stage::Catalog(catalog) => catalog.opening(),
-            Stage::FirstRun(first_run) => first_run.returned(),
-            Stage::Run(run) => run.returned(),
+            Stage::FirstRun(first_run) => first_run.returned(followed),
+            Stage::Run(run) => run.returned(followed),
         }
     }
 
-    /// What `stroke` asks for here at `now`.
-    pub(crate) fn pressed(&mut self, stroke: Stroke, now: DateTime<Utc>) -> Vec<Want> {
+    /// What the stage the person is at asks once the state folded a piece of what it
+    /// follows into `followed`: a run's stage, the page it shows read again where the run
+    /// turned. Not [`Stage::heard`], news of work the stage asked for.
+    pub(crate) fn followed_on(&mut self, followed: &FollowedRuns) -> Vec<Want> {
+        match self {
+            Stage::Run(run) => run.followed_on(followed),
+            Stage::Signpost
+            | Stage::Field(_)
+            | Stage::Decision(_)
+            | Stage::FirstRun(_)
+            | Stage::Start(_)
+            | Stage::Setup(_)
+            | Stage::Catalog(_)
+            | Stage::Evidence(_)
+            | Stage::Stats(_)
+            | Stage::Graph(_)
+            | Stage::Doctor(_)
+            | Stage::Upkeep(_)
+            | Stage::Schema(_) => Vec::new(),
+        }
+    }
+
+    /// The stage, where it shows `run`, moved onto `by`, the successor a promotion handed
+    /// the run's work to: a run's stage shows the successor's own page from its first
+    /// line, which it reads once told what was folded ([`Stage::followed_on`]) or as the
+    /// person comes back to it ([`Stage::returned`]); a run's stats and its graph show the
+    /// successor's, from their first line. Not a stage opened on `by`, which stands on it
+    /// from nothing.
+    pub(crate) fn succeeded(&mut self, run: &RunId, by: &RunId) {
+        match self {
+            Stage::Run(stage) => stage.succeeded(run, by),
+            Stage::Stats(stats) => stats.succeeded(run, by),
+            Stage::Graph(graph) => graph.succeeded(run, by),
+            Stage::Signpost
+            | Stage::Field(_)
+            | Stage::Decision(_)
+            | Stage::FirstRun(_)
+            | Stage::Start(_)
+            | Stage::Setup(_)
+            | Stage::Catalog(_)
+            | Stage::Evidence(_)
+            | Stage::Doctor(_)
+            | Stage::Upkeep(_)
+            | Stage::Schema(_) => {}
+        }
+    }
+
+    /// What `stroke` asks for here, over what `followed` keeps at `now`.
+    pub(crate) fn pressed(
+        &mut self,
+        stroke: Stroke,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Vec<Want> {
         match self {
             Stage::Signpost => signpost::pressed(stroke),
-            Stage::Field(field) => field.pressed(stroke),
-            Stage::Run(run) => run.pressed(stroke, now),
+            Stage::Field(field) => field.pressed(stroke, followed, now),
+            Stage::Run(run) => run.pressed(stroke, followed, now),
             Stage::Decision(decision) => decision.pressed(stroke),
             Stage::FirstRun(first_run) => first_run.pressed(stroke),
             Stage::Start(start) => start.pressed(stroke),
@@ -414,11 +408,13 @@ impl Stage {
         }
     }
 
-    /// What news of lasting work the stage asked for does here at `now`.
-    pub(crate) fn heard(&mut self, news: News, now: DateTime<Utc>) -> Vec<Want> {
+    /// What news of lasting work the stage asked for does here: the cases', which the
+    /// catalog asks to run. Not what the state follows, which no stage asks for.
+    pub(crate) fn heard(&mut self, news: News) -> Vec<Want> {
         match self {
             Stage::Signpost
             | Stage::Field(_)
+            | Stage::Run(_)
             | Stage::Decision(_)
             | Stage::FirstRun(_)
             | Stage::Start(_)
@@ -429,7 +425,6 @@ impl Stage {
             | Stage::Doctor(_)
             | Stage::Upkeep(_)
             | Stage::Schema(_) => Vec::new(),
-            Stage::Run(run) => run.heard(news, now),
             Stage::Catalog(catalog) => catalog.heard(news),
         }
     }

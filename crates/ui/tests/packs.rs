@@ -11,6 +11,7 @@ use std::sync::Arc;
 use surco::surface::{Markdown, Surface};
 use tokio::sync::mpsc;
 use yunta_api::{Remark, Stop};
+use yunta_core::events::Channel;
 use yunta_core::PackRef;
 use yunta_render::page::pack::Inventory;
 use yunta_render::page::Page;
@@ -21,7 +22,7 @@ use yunta_testkit_ui::sandbox::{
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Outcome, PackOperation, PackOutcome, Performer, Request, State};
 
-use support::{on_the_field, stopped};
+use support::on_the_field;
 
 /// The screen's main region, as Markdown writes it.
 fn main_region(state: &State) -> String {
@@ -33,10 +34,8 @@ fn main_region(state: &State) -> String {
 async fn a_pack_removed_after_its_confirmation_leaves_the_listing_read_again() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = with_a_pack_installed(root.path()).await;
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7PACKS00000000000000000",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7PACKS00000000000000000")]).await;
     let opened = [
         Stroke::Insert('w'),
         Stroke::Insert('p'),
@@ -73,10 +72,8 @@ async fn a_pack_removed_after_its_confirmation_leaves_the_listing_read_again() {
 async fn a_pack_audited_shows_the_page_pack_audit_prints() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = with_a_pack_installed(root.path()).await;
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7PACKS00000000000000001",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7PACKS00000000000000001")]).await;
     let strokes = [
         Stroke::Insert('w'),
         Stroke::Insert('p'),
@@ -126,10 +123,8 @@ async fn a_pack_with_an_executor_installs_the_commit_its_audit_read() {
     let root = tempfile::tempdir().expect("a temporary root");
     let (upstream, audited) = pack_with_an_executor(root.path());
     let repo = set_up(root.path());
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7PACKS00000000000000002",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7PACKS00000000000000002")]).await;
     let mut strokes = vec![
         Stroke::Insert('w'),
         Stroke::Insert('p'),
@@ -177,10 +172,8 @@ async fn a_pack_left_unconfirmed_leaves_no_temporary_checkout() {
     let root = tempfile::tempdir().expect("a temporary root");
     let (upstream, _) = pack_with_an_executor(root.path());
     let repo = set_up(root.path());
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7PACKS00000000000000003",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7PACKS00000000000000003")]).await;
     let opened = [
         Stroke::Insert('w'),
         Stroke::Insert('p'),
@@ -226,10 +219,8 @@ async fn a_pack_left_unconfirmed_leaves_no_temporary_checkout() {
 async fn leaving_the_packs_reads_the_workflows_again() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = with_a_pack_installed(root.path()).await;
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7PACKS00000000000000003",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7PACKS00000000000000003")]).await;
     let to_the_packs = [Stroke::Insert('w'), Stroke::Insert('p')];
     let (mut state, _) = drive(field, Vec::new(), &performer, &to_the_packs).await;
     // What a pack installed, updated or removed changes the workflows the catalog offers.

@@ -50,15 +50,15 @@ pub(super) enum Beat {
 /// Handed to `RunEnv.observer`, cloned by every `RunCtx` under it, and
 /// dropped with the invocation. It derives nothing and decides nothing:
 /// it copies what it is given into the queue and returns.
-pub(super) struct Feed {
-    beats: Sender<Beat>,
+pub(super) struct Beats {
+    queue: Sender<Beat>,
 }
 
-impl Feed {
-    /// A feed and the receiving end the painter owns.
+impl Beats {
+    /// The queue's sending end and the receiving end the painter owns.
     pub(super) fn open() -> (Arc<Self>, Receiver<Beat>) {
-        let (beats, received) = channel(super::QUEUE_DEPTH);
-        (Arc::new(Self { beats }), received)
+        let (queue, received) = channel(super::QUEUE_DEPTH);
+        (Arc::new(Self { queue }), received)
     }
 
     /// Sends a beat the surface itself raises, waiting for room rather
@@ -70,11 +70,11 @@ impl Feed {
     /// for, and which leaves a caller holding a line a person has to
     /// read to say it somewhere else.
     pub(super) async fn tell(&self, beat: Beat) -> bool {
-        self.beats.send(beat).await.is_ok()
+        self.queue.send(beat).await.is_ok()
     }
 
     /// Hands the painter an event read off the log, waiting for room as
-    /// [`Feed::tell`] does: the observer's copy can be dropped because the
+    /// [`Beats::tell`] does: the observer's copy can be dropped because the
     /// log holds it, and this one came from the log.
     pub(super) async fn deliver(&self, event: StoredEvent) -> bool {
         self.tell(Beat::Event(Box::new(event))).await
@@ -85,13 +85,13 @@ impl Feed {
     /// beat waits for it to have done it.
     #[cfg(test)]
     pub(super) fn taken(&self) -> bool {
-        self.beats.capacity() == self.beats.max_capacity()
+        self.queue.capacity() == self.queue.max_capacity()
     }
 }
 
-impl RunObserver for Feed {
+impl RunObserver for Beats {
     fn observe(&self, event: Observed<'_>) {
-        match self.beats.try_send(Beat::Event(Box::new(stored(event)))) {
+        match self.queue.try_send(Beat::Event(Box::new(stored(event)))) {
             Ok(()) => {}
             // The queue's policy, not a failure: the frame copies an
             // event the log already holds, so the painter recovers it by
@@ -101,7 +101,7 @@ impl RunObserver for Feed {
     }
 
     fn said(&self, said: &Said) {
-        match self.beats.try_send(Beat::Said(Box::new(said.clone()))) {
+        match self.queue.try_send(Beat::Said(Box::new(said.clone()))) {
             Ok(()) => {}
             // Words are not evidence: a frame with no room is let go, and
             // the next thing said takes its row.
@@ -139,12 +139,12 @@ fn stored(event: Observed<'_>) -> StoredEvent {
 /// stderr, so a command with no surface, and a run whose surface has
 /// already come down, say it exactly as they always did.
 #[derive(Clone)]
-pub(crate) struct Diagnostics(Option<Arc<Feed>>);
+pub(crate) struct Diagnostics(Option<Arc<Beats>>);
 
 impl Diagnostics {
-    /// The door onto `feed`'s painter.
-    pub(super) fn through(feed: &Arc<Feed>) -> Self {
-        Self(Some(Arc::clone(feed)))
+    /// The door onto the painter `beats` reaches.
+    pub(super) fn through(beats: &Arc<Beats>) -> Self {
+        Self(Some(Arc::clone(beats)))
     }
 
     /// A door with no surface behind it.
@@ -157,7 +157,7 @@ impl Diagnostics {
     pub(crate) async fn raise(&self, diagnostic: impl std::fmt::Display) {
         let line = diagnostic.to_string();
         let taken = match &self.0 {
-            Some(feed) => feed.tell(Beat::Note(line.clone())).await,
+            Some(beats) => beats.tell(Beat::Note(line.clone())).await,
             None => false,
         };
         if !taken {

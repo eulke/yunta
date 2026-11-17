@@ -132,6 +132,31 @@ async fn a_reader_opened_where_no_log_is_leaves_one_in_wal_that_the_store_reads(
     );
 }
 
+/// Each run's first event, whatever the length of its log, in one statement: what a
+/// follower reads to learn which run a promotion created a run from.
+#[tokio::test]
+async fn first_events_hand_each_runs_first_event_in_one_statement() {
+    let (_dir, log) = temp_log();
+    let storage = Storage::open(&log).unwrap();
+    for (run, pauses) in [("run-b", 3), ("run-a", 0), ("run-c", 1)] {
+        storage.append(&created(run), &FixedClock).unwrap();
+        for _ in 0..pauses {
+            storage.append(&paused(run), &FixedClock).unwrap();
+        }
+    }
+    let reader = LogReader::open(log).await.unwrap();
+
+    let before = reader.statements();
+    let firsts = reader.first_events().await.unwrap();
+    assert_eq!(reader.statements() - before, 1, "one statement");
+    let opened: Vec<_> = ["run-a", "run-b", "run-c"]
+        .into_iter()
+        .map(|run| storage.events_for_run(&RunId::from(run)).unwrap()[0].clone())
+        .collect();
+    assert_eq!(firsts, opened, "each run's first event, by run");
+    assert_eq!(storage.first_events().unwrap(), opened);
+}
+
 #[tokio::test]
 async fn heads_events_and_events_after_are_the_store_s_on_the_same_log() {
     let (_dir, log) = temp_log();

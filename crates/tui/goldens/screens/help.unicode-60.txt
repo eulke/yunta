@@ -9,6 +9,6 @@
  ◆│   o       opens the run's page in a browser          │R
  ━│   s       shows what the run cost                    │━
   │   g       draws the run's graph, each node as its    │
-  │ … 7 more lines                                       │
+  │ … 6 more lines                                       │
  …└──────────────────────────────────────────────────────┘
  ↑↓ scroll · esc closes it

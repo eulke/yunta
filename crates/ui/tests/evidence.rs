@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use surco::surface::{Markdown, Surface};
 use yunta_core::events::{
-    EventDraft, EventPayload, NodeEvent, NodeFinishedPayload, NodeOutcome, TokenUsage,
+    Channel, EventDraft, EventPayload, NodeEvent, NodeFinishedPayload, NodeOutcome, TokenUsage,
 };
 use yunta_core::NodeId;
 use yunta_render::page::{self, Page, Verified};
@@ -21,7 +21,7 @@ use yunta_testkit_ui::sandbox::{now, workspace};
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Performer, Request, State};
 
-use support::{on_the_field, stopped};
+use support::on_the_field;
 
 /// Two nodes that finish, one after the other.
 const FINISHES: &str = "name: done\nnodes:\n  - { id: first, kind: bash, run: \"true\" }\n  \
@@ -48,10 +48,14 @@ fn main_region(state: &State) -> String {
 async fn a_finished_runs_receipt_is_the_one_receipt_writes() {
     let bench = Bench::with_run_id("01M7EV1DENCERECE1PT0000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let performer = Arc::new(Performer::new(workspace(&bench.worktree, root_of(&bench))));
-    let field = on_the_field(vec![stopped(&bench.run_id)]);
-    // The run opened, then the receipt it offers once it finished.
-    let strokes = [Stroke::Enter, Stroke::Insert('e')];
+    let performer = Arc::new(Performer::new(
+        workspace(&bench.worktree, root_of(&bench)),
+        Channel::Tty,
+    ));
+    let (field, _) = on_the_field(&[&bench.run_id]).await;
+    // The run opened, then the receipt it offers once it finished: the field lists a
+    // finished run with its closed runs, which `d` shows.
+    let strokes = [Stroke::Insert('d'), Stroke::Enter, Stroke::Insert('e')];
     let (state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;
     assert!(surfaced.is_empty(), "{surfaced:?}");
     let written = |name: &str| {
@@ -78,9 +82,13 @@ async fn a_finished_runs_receipt_is_the_one_receipt_writes() {
 async fn a_runs_page_is_shown_where_open_writes_it() {
     let bench = Bench::with_run_id("01M7EV1DENCEPAGE0000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let performer = Arc::new(Performer::new(workspace(&bench.worktree, root_of(&bench))));
-    let field = on_the_field(vec![stopped(&bench.run_id)]);
-    let strokes = [Stroke::Enter, Stroke::Insert('o')];
+    let performer = Arc::new(Performer::new(
+        workspace(&bench.worktree, root_of(&bench)),
+        Channel::Tty,
+    ));
+    let (field, _) = on_the_field(&[&bench.run_id]).await;
+    // The field lists a finished run with its closed runs, which `d` shows.
+    let strokes = [Stroke::Insert('d'), Stroke::Enter, Stroke::Insert('o')];
     let (state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;
     let page = bench.run_dir().join("page.html");
     assert_eq!(surfaced, [Request::ShowPage(page.clone())]);
@@ -95,9 +103,13 @@ async fn a_runs_page_is_shown_where_open_writes_it() {
 async fn a_page_not_shown_is_said_with_where_it_is() {
     let bench = Bench::with_run_id("01M7EV1DENCEN0TSH0WN000000");
     bench.run(FINISHES, NO_SESSIONS).await;
-    let performer = Arc::new(Performer::new(workspace(&bench.worktree, root_of(&bench))));
-    let field = on_the_field(vec![stopped(&bench.run_id)]);
-    let strokes = [Stroke::Enter, Stroke::Insert('o')];
+    let performer = Arc::new(Performer::new(
+        workspace(&bench.worktree, root_of(&bench)),
+        Channel::Tty,
+    ));
+    let (field, _) = on_the_field(&[&bench.run_id]).await;
+    // The field lists a finished run with its closed runs, which `d` shows.
+    let strokes = [Stroke::Insert('d'), Stroke::Enter, Stroke::Insert('o')];
     let (mut state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;
     let [Request::ShowPage(page)] = surfaced.as_slice() else {
         panic!("the page is shown: {surfaced:?}");
@@ -138,8 +150,11 @@ async fn a_broken_runs_evidence_is_verified_as_verify_says_it() {
     let bench = Bench::with_run_id("01M7BROKEN0000000000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
     broken(&bench);
-    let performer = Arc::new(Performer::new(workspace(&bench.worktree, root_of(&bench))));
-    let field = on_the_field(vec![stopped(&bench.run_id)]);
+    let performer = Arc::new(Performer::new(
+        workspace(&bench.worktree, root_of(&bench)),
+        Channel::Tty,
+    ));
+    let (field, _) = on_the_field(&[&bench.run_id]).await;
     // The run opened: a broken run offers its evidence verified, on `v`.
     let strokes = [Stroke::Enter, Stroke::Insert('v')];
     let (state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;

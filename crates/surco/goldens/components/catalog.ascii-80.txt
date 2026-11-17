@@ -203,3 +203,16 @@ up/down move ; type to filter ; enter chooses ; esc takes the first
 
   + acme/lint    v1.2.0 (3f9c2e1), as its lock records it
 * ^ acme/review  v0.4.0 (91ab7d0), modified: its files no longer match its lock
+
+... 4 above
+search  global pack
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+... 4 under
+
+967k tokens :.#____________ ; 2m34s at work ; 5m00s waiting on you

@@ -11,8 +11,11 @@
 //! nothing.
 //!
 //! What only a terminal does is done here: a page shown with what the binary hands in to
-//! show one, a failure handed back as [`Input::Unshown`]; Ctrl-Z, the terminal's own key,
-//! suspends; leaving ends the loop, and the terminal is given back on every way out. A
+//! show one, a failure handed back as [`Input::Unshown`]; the window's title, which each
+//! drawing gives as its screen asks, given back with the terminal; the bell, rung after the
+//! drawing that follows a call of the person ([`Request::CallThePerson`]) where the binary
+//! hands in that the person asked for one; Ctrl-Z, the terminal's own key, suspends;
+//! leaving ends the loop, and the terminal is given back on every way out. A
 //! terminal that fails the application is said apart from how it ended
 //! ([`TerminalFailure`]): before it was held, the binary can print instead; after, it can
 //! only say so.
@@ -34,7 +37,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use surco::components::ScreenLaid;
 use surco::look::{Look, Width};
-use surco::paint::{SYNC_BEGIN, SYNC_END};
+use surco::paint::{BELL, SYNC_BEGIN, SYNC_END};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 use yunta_core::Clock;
@@ -42,18 +45,20 @@ use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Performer, Request, State};
 
 use crate::drawn::drawn;
-use crate::full_screen::FullScreen;
+use crate::full_screen::{FullScreen, WindowTitle};
 use crate::keys;
 use crate::layout;
 
 /// The application at a terminal, with what it is handed to run: the performer that
-/// carries its work out, the look it draws in, the clock it reads the time from, and what
-/// shows a page.
+/// carries its work out, the look it draws in, the clock it reads the time from, what
+/// shows a page, and whether calling the person rings the bell.
 pub struct Application {
     performer: Arc<Performer>,
     look: Look,
     clock: Arc<dyn Clock>,
     show_page: fn(&Path) -> std::io::Result<()>,
+    /// Whether calling the person rings the terminal's bell: whether they asked for one.
+    bell: bool,
 }
 
 /// How the application ended: left, interrupted by Ctrl-C, or asked to end by what the
@@ -105,12 +110,14 @@ impl Application {
         look: Look,
         clock: Arc<dyn Clock>,
         show_page: fn(&Path) -> std::io::Result<()>,
+        bell: bool,
     ) -> Self {
         Application {
             performer,
             look,
             clock,
             show_page,
+            bell,
         }
     }
 
@@ -149,6 +156,8 @@ impl Application {
             drawing,
             laid: None,
             on_screen: None,
+            title: full_screen.window_title(),
+            ringing: false,
         };
         if let Some(exit) = running.carried_out(&mut state, asked, false) {
             return Ok(exit);
@@ -195,14 +204,20 @@ enum Arrived {
 }
 
 /// The application while it runs: where the performer hands its answers, what a drawing
-/// writes, what was last laid out of the screen, and the cells last written to the
-/// terminal, which a drawing that changes none of them leaves as they are.
+/// writes, what was last laid out of the screen, the cells last written to the terminal,
+/// which a drawing that changes none of them leaves as they are, the window's title, and
+/// whether the next drawing rings the bell.
 struct Running<'a> {
     application: &'a Application,
     inputs: UnboundedSender<Input>,
     drawing: Synchronized,
     laid: Option<ScreenLaid>,
     on_screen: Option<Buffer>,
+    /// The title the window was given, which each drawing gives as its screen asks.
+    title: WindowTitle,
+    /// Whether the person was called since the last drawing, with a bell asked for: the
+    /// next drawing rings it once it shows why.
+    ringing: bool,
 }
 
 impl Running<'_> {
@@ -223,7 +238,8 @@ impl Running<'_> {
             Arrived::Event(Event::Key(key)) if keys::suspends(key) => {
                 full_screen.suspend()?;
                 drawn_afresh(terminal)?;
-                // The terminal cleared: the next drawing is written whole.
+                // The terminal cleared and its window's title given back: the next drawing
+                // is written whole, and gives the window its title again.
                 self.on_screen = None;
                 return Ok(None);
             }
@@ -242,12 +258,13 @@ impl Running<'_> {
     }
 
     /// Each of `asked` carried out through the performer in the order it was asked, a page
-    /// shown and a failure to show it handed back, what that asks carried out after; how the
-    /// application ended where one asked it to leave, after a Ctrl-C where it was
-    /// `interrupted`. Leaving comes last: what the state asks before it, such as letting go
-    /// of the work under way, is carried out first.
+    /// shown and a failure to show it handed back, what that asks carried out after, a call
+    /// of the person kept for the next drawing to ring; how the application ended where one
+    /// asked it to leave, after a Ctrl-C where it was `interrupted`. Leaving comes last: what
+    /// the state asks before it, such as letting go of the work under way, is carried out
+    /// first.
     fn carried_out<E>(
-        &self,
+        &mut self,
         state: &mut State,
         asked: Vec<Request>,
         interrupted: bool,
@@ -266,6 +283,7 @@ impl Running<'_> {
                         waiting.extend(state.update(Input::Unshown(page)));
                     }
                 }
+                Some(Request::CallThePerson) => self.ringing |= self.application.bell,
                 Some(_) | None => {}
             }
         }
@@ -273,9 +291,10 @@ impl Running<'_> {
     }
 
     /// The state's screen drawn and written to `out` as one update, or nothing where it
-    /// changes no cell of what the terminal shows; and what was laid out of it handed back
-    /// where it changed, with what that asks carried out: how the application ended, where
-    /// that asked it to leave.
+    /// changes no cell of what the terminal shows; the window given the screen's title after
+    /// it, and the bell rung after that where the person was called; and what was laid out
+    /// of it handed back where it changed, with what that asks carried out: how the
+    /// application ended, where that asked it to leave.
     fn draw<E>(
         &mut self,
         terminal: &mut Drawing,
@@ -284,6 +303,7 @@ impl Running<'_> {
     ) -> io::Result<Option<Exit<E>>> {
         let look = self.application.look;
         let mut laid = ScreenLaid::default();
+        let mut title = None;
         let completed = terminal.draw(|frame| {
             let columns = usize::from(layout::inner_columns(frame.area().width));
             let screen = state.screen(&Look {
@@ -291,6 +311,7 @@ impl Running<'_> {
                 ..look
             });
             laid = drawn(frame, &screen, &look);
+            title = screen.title;
         })?;
         let cells = completed.buffer.clone();
         match self.on_screen.as_ref() == Some(&cells) {
@@ -299,6 +320,10 @@ impl Running<'_> {
                 self.drawing.written(out)?;
                 self.on_screen = Some(cells);
             }
+        }
+        self.title.give(title.as_deref(), out)?;
+        if std::mem::take(&mut self.ringing) {
+            out.write_all(BELL.as_bytes()).and_then(|()| out.flush())?;
         }
         if self.laid == Some(laid) {
             return Ok(None);

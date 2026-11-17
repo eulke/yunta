@@ -11,8 +11,8 @@
 
 use crate::components::{
     Attention, Card, Checklist, ChoiceList, Code, Concern, Decision, Desk, Diffstat, Evidence,
-    Fields, Furrow, Gist, Headline, Legend, Marked, Next, NodeTable, Note, Paths, Problem, Prose,
-    Refusal, Ribbon, Runs, Said, Section, Table, TypedAnswer,
+    Feed, Fields, Furrow, Gist, Headline, Legend, Marked, Meter, Next, NodeTable, Note, Paths,
+    Problem, Prose, Refusal, Ribbon, Runs, Said, Section, Table, TypedAnswer,
 };
 use crate::line::Line;
 
@@ -123,6 +123,11 @@ pub enum Block {
     /// passes the edge it is drawn at is cut there with the ellipsis, never folded onto
     /// the row under it. Not [`Block::Lines`], which a pane's edge folds.
     Rows(Vec<Line>),
+    /// What happens at a node, a row a moment: the rows in sight, the newest last, with how
+    /// many stand above and under them.
+    Feed(Feed),
+    /// What a run has spent, on one row: its count, one bar a node, and its times.
+    Meter(Meter),
 }
 
 macro_rules! block_from {
@@ -169,6 +174,8 @@ block_from!(
     Diagram(crate::diagram::Diagram),
     Code(Code),
     Lines(Vec<Line>),
+    Feed(Feed),
+    Meter(Meter),
 );
 
 /// A block a person answers while it is held: what a terminal fits to the rows it has,

@@ -13,13 +13,17 @@
 //!
 //! And [`walked_to`], where a person's keys take them from the field, beside
 //! [`reviewed`]: the application opened on `yunta review` of the parked run, which stands
-//! where a person walks to the plan, and goes back the way they walked.
+//! where a person walks to the plan, and goes back the way they walked. [`World`] is the
+//! repository they all stand in, for a test that reads its log beside a state.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
+use yunta_core::events::Channel;
 use yunta_core::step::NextStep;
+use yunta_core::{RunId, Seq};
 use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::Bench;
 use yunta_testkit_core::fixed_now;
@@ -40,7 +44,8 @@ const SECONDS_AFTER_THE_RUNS: i64 = 454;
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 
 /// The application opened on the repository's runs, then `strokes` pressed, each once
-/// the state waits on nothing: where a person walks to with them.
+/// the state waits on nothing and stands caught up with the log: where a person walks to
+/// with them.
 pub async fn walked_to(strokes: &[Stroke]) -> State {
     World::made().await.driven(strokes).await
 }
@@ -91,8 +96,9 @@ pub async fn help() -> State {
     walked_to(&[Stroke::Enter, Stroke::Insert('?')]).await
 }
 
-/// A repository whose runs a bench made, and the application's work answered there.
-struct World {
+/// A repository whose runs a bench made, one finished and one parked on its plan's gate,
+/// and the application's work answered there.
+pub struct World {
     parked: Bench,
     _finished: Bench,
 }
@@ -100,7 +106,7 @@ struct World {
 impl World {
     /// The repository's two runs, each with its fixed id, made by its own bench beside the
     /// other.
-    async fn made() -> World {
+    pub async fn made() -> World {
         let parked = Bench::with_run_id(PARKED);
         crate::planned::parked_on_its_plan(&parked).await;
         let finished = parked.beside("01M7SCREEN0000000000EKPBGE");
@@ -111,28 +117,45 @@ impl World {
         }
     }
 
+    /// The run parked on its plan's gate.
+    pub fn parked(&self) -> &RunId {
+        &self.parked.run_id
+    }
+
+    /// Each run's last seq in the repository's log.
+    pub fn heads(&self) -> BTreeMap<RunId, Seq> {
+        yunta_testkit::heads(self.parked.store_path())
+    }
+
     /// The application opened in the repository, its work answered, then `strokes`
-    /// pressed, each once the state waits on nothing.
-    async fn driven(&self, strokes: &[Stroke]) -> State {
+    /// pressed, each once the state waits on nothing and stands caught up with the log.
+    pub async fn driven(&self, strokes: &[Stroke]) -> State {
         let root: &Path = self
             .parked
             .store_path()
             .parent()
             .expect("a bench's log stands in its root");
-        let performer = Arc::new(Performer::new(workspace(&self.parked.worktree, root)));
+        let performer = Arc::new(Performer::new(
+            workspace(&self.parked.worktree, root),
+            Channel::Tty,
+        ));
         let (opened, asked) = State::opened(stands_at());
         drive(opened, asked, &performer, strokes).await.0
     }
 
     /// The application opened in the repository on `step`, its work answered, then
-    /// `strokes` pressed, each once the state waits on nothing.
-    async fn driven_from(&self, step: &NextStep, strokes: &[Stroke]) -> State {
+    /// `strokes` pressed, each once the state waits on nothing and stands caught up with
+    /// the log.
+    pub async fn driven_from(&self, step: &NextStep, strokes: &[Stroke]) -> State {
         let root: &Path = self
             .parked
             .store_path()
             .parent()
             .expect("a bench's log stands in its root");
-        let performer = Arc::new(Performer::new(workspace(&self.parked.worktree, root)));
+        let performer = Arc::new(Performer::new(
+            workspace(&self.parked.worktree, root),
+            Channel::Tty,
+        ));
         let (opened, asked) = State::opened_on(stands_at(), step).expect("a stage takes the step");
         drive(opened, asked, &performer, strokes).await.0
     }

@@ -1,7 +1,7 @@
 //! How a moving run's [`RunFrame`] reads as the rows a person watches: the
 //! line that says whether the run needs them, the line each working node
-//! gets with what its session last said under it, and the counters under
-//! it all.
+//! gets with what its session last said under it, and under it all the
+//! run's gist ([`gist()`]) and what it has spent ([`spent()`]).
 //!
 //! Every surface that watches a run draws the same frame, the terminal's
 //! live region and the run as the user interface follows it, so this is
@@ -9,6 +9,11 @@
 //! the glyphs, the column widths and the duration format (Surco's
 //! `figures`), is the look the caller hands in, and nothing here
 //! reimplements a piece of it.
+//!
+//! What the run has spent is Surco's `Meter`, named here by what it says rather than by
+//! the component that draws it: [`spent()`] hands the figures, and each surface draws them
+//! with its own look. The application's run screen closes on the counters of [`footer`]
+//! instead.
 
 use std::time::Duration;
 
@@ -23,10 +28,14 @@ use crate::engine;
 use crate::pause;
 use crate::spend::Breakdown;
 
+mod gist;
 mod heard;
 mod said;
+mod spent;
 
+pub use gist::gist;
 pub use heard::Heard;
+pub use spent::spent;
 
 use crate::children::{child_row, children_of};
 
@@ -60,7 +69,7 @@ pub fn asked(asking: &yunta_replay::registry::Asking, look: &Look) -> Option<Lin
 /// The row that opens the region while the frame stands as
 /// `Standing::NeedsYou`: the command that answers it, and what it is about,
 /// drawn at `look` as an [`Attention`] keeps a command when its row is cut.
-/// Any other standing draws none, since the footer says that nothing needs
+/// Any other standing draws none, since the run's gist says that nothing needs
 /// the person, or that the run waits for a reset: a pause a person chose
 /// stands as `Standing::Stopped`, and a reset that resumes on its own as
 /// `Standing::Waiting`. A row saying nothing would cost the work a row.
@@ -76,10 +85,11 @@ pub fn attention(frame: &RunFrame, run_id: &RunId, answerable: bool, look: &Look
         .next()
 }
 
-/// The region's last row, which answers on every redraw: the run's furrow
-/// when the row has room for it, then how far the run has come, what it has
-/// spent, how long it has taken — beside how long this workflow usually
-/// takes, when its history says — and whether anything needs the person.
+/// The last row of the application's run screen, which answers on every
+/// redraw: the run's furrow when the row has room for it, then how far the
+/// run has come, what it has spent, how long it has taken — beside how long
+/// this workflow usually takes, when its history says — and whether anything
+/// needs the person.
 ///
 /// It is drawn for every phase, including the ones that need nobody,
 /// because a surface that says so only when there is something to say
@@ -297,15 +307,16 @@ fn headline(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
 }
 
 /// The rows a person watches a moving run by: the row that asks for them where something
-/// does, each working node's rows with what its session said last, and the footer. Not
-/// the run's chronicle, which says what happened, in order.
+/// does, and each working node's rows with what its session said last. A surface closes
+/// them on what the run comes to and what it spent: a terminal's region on the run's
+/// [`gist()`] and [`spent()`], the application's run screen on the [`footer`]. Not the
+/// run's chronicle, which says what happened, in order.
 pub struct Rows {
     /// The row that asks for the person, or says whom the run's engine asks at its own
     /// terminal; absent while nothing needs them.
     pub attention: Option<Line>,
     /// Each working node's rows, in the workflow's order.
     pub nodes: Vec<Line>,
-    pub footer: Line,
 }
 
 /// The rows of `frame`, the run `run_id`, with what `heard` kept of what its sessions
@@ -327,11 +338,7 @@ pub fn rows(
         .into_iter()
         .flat_map(|node| node_rows(frame, node, heard.of(run_id, &node.id), look))
         .collect();
-    Rows {
-        attention,
-        nodes,
-        footer: footer(frame, look),
-    }
+    Rows { attention, nodes }
 }
 
 /// The run's signature at the top of a screen that watches it: each node's name over

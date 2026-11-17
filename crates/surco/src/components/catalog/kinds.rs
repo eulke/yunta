@@ -46,11 +46,13 @@ fn kind_of(block: &Block) -> &'static str {
         Block::Code(_) => "code",
         Block::Lines(_) => "lines",
         Block::Rows(_) => "rows",
+        Block::Feed(_) => "feed",
+        Block::Meter(_) => "meter",
     }
 }
 
 /// Every kind there is, as [`kind_of`] names it.
-const KINDS: [&str; 35] = [
+const KINDS: [&str; 37] = [
     "headline",
     "furrow",
     "ribbon",
@@ -86,6 +88,8 @@ const KINDS: [&str; 35] = [
     "diagram",
     "code",
     "lines",
+    "feed",
+    "meter",
 ];
 
 /// Adds to `seen` what `blocks` are, and what each of them holds.

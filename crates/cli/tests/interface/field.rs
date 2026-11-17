@@ -1,18 +1,21 @@
 //! The field driven end to end: runs this build started, picked and closed after one
-//! confirmation, and the field read again.
+//! confirmation, and found among the closed runs by what is followed, with no reading of
+//! the field asked.
 
 use super::*;
 
+use tokio::sync::mpsc;
 use yunta_testkit::{full_run_id, handle, run_id_from, yunta_at, Checkout};
+use yunta_ui::{Input, Operation};
 
 /// A build that fails at once: its run stops on a person.
 const FAILS: &str = "name: fails\nnodes:\n  - { id: build, kind: bash, run: \"exit 101\" }\n";
 
 /// Two runs stopped on a person, picked and closed after one confirmation, leave the
-/// runs the field lists at a glance and stand among its closed runs when it is read in
-/// full.
+/// runs the field lists at a glance and stand among its closed runs in full, with no
+/// reading of the field asked.
 #[tokio::test]
-async fn two_picked_runs_are_closed_and_the_field_read_again() {
+async fn two_picked_runs_are_closed_and_found_among_the_closed_runs() {
     let checkout = Checkout::new()
         .working_in_place()
         .workflow("wf", FAILS)
@@ -24,7 +27,10 @@ async fn two_picked_runs_are_closed_and_the_field_read_again() {
             full_run_id(&checkout.home, &run_id_from(&run))
         })
         .collect();
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let look = Markdown.look();
 
     let (opened, asked) = State::opened(now());
@@ -34,14 +40,14 @@ async fn two_picked_runs_are_closed_and_the_field_read_again() {
         assert!(before.contains(handle(run)), "{before}");
     }
 
-    let picked_and_closed = [
+    let picked = [
         Stroke::Insert(' '),
         Stroke::Insert('j'),
         Stroke::Insert(' '),
         Stroke::Insert('x'),
-        Stroke::Enter,
     ];
-    let (state, _) = drive(state, Vec::new(), &performer, &picked_and_closed).await;
+    let (state, _) = drive(state, Vec::new(), &performer, &picked).await;
+    let state = closed(state, &performer).await;
     let after = Markdown.screen(&state.screen(&look));
     for run in &runs {
         assert!(
@@ -59,4 +65,34 @@ async fn two_picked_runs_are_closed_and_the_field_read_again() {
     for run in &runs {
         assert!(closed.contains(handle(run)), "{full}");
     }
+}
+
+/// `state`, standing at the confirmation of a close, confirmed: the close carried out by
+/// `performer`, its answer asking no reading of the field, then the state driven until it
+/// stands caught up with the log.
+async fn closed(mut state: State, performer: &Arc<Performer>) -> State {
+    let asked = state.update(Input::Stroke(Stroke::Enter));
+    let [Request::Perform(closing, Operation::Close { .. })] = asked.as_slice() else {
+        panic!("{asked:?}");
+    };
+    let closing = *closing;
+    let (inputs, mut received) = mpsc::unbounded_channel();
+    for request in asked {
+        performer.take(request, &inputs);
+    }
+    let answer = loop {
+        match received
+            .recv()
+            .await
+            .expect("the performer answers the close")
+        {
+            Input::Outcome(ticket, outcome) if ticket == closing => {
+                break Input::Outcome(ticket, outcome);
+            }
+            _ => continue,
+        }
+    };
+    let asked = state.update(answer);
+    assert!(asked.is_empty(), "no reading of the field: {asked:?}");
+    drive(state, asked, performer, &[]).await.0
 }

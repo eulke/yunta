@@ -4,9 +4,9 @@
  ..............................................................................
 
  needs you, oldest first
- * ? Q78GRR  planned (default)  ====  Plan registered. Approve?              0s
+ * ? Q78GRR  planned (default)  ====  Plan registered. Approve?              7m
 
-   the newest closed 0s ago
+   the newest closed 7m ago
 
  next
    yunta status Q78GRR        opens the run that has waited longest

@@ -1,0 +1,23 @@
+◆ node grill of run Q78GRR · needs you
+
+  kind         prompt
+  attempt      1
+  runner       planner on mock/gpt-6-luna
+  tokens       210k in / 10k out (202k cached)
+  took         36s
+  produced     ~/.yunta/runs/01M7DES1GNED00000000Q78GRR/artifacts/grill/questions.yaml
+
+what it hands over
+✓ questions  the engine read it and accepted it
+
+what it is doing · 4 calls
+running: attempt 1
+session opened on gpt-6-luna · fence widened to 1 root
+read    docs/pack.md
+read    crates/cli/src/cli/pack.rs
+read    crates/cli/src/project.rs
+accepted questions
+submit  questions
+
+next
+  yunta status Q78GRR   shows the whole run

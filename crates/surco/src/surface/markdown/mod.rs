@@ -9,12 +9,11 @@ use crate::components::{
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::{Glyphs, Mark};
-use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
 use crate::motion::Motion;
 use crate::paint::Paint;
 use crate::surface::Surface;
-use text::{cell, cell_code_span, code_span, literal, plain_text};
+use text::{cell, cell_code_span, code_span, line, literal, plain_text, rows};
 
 mod asked;
 mod card;
@@ -149,9 +148,9 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
             format!("{fence}mermaid\n{}\n{fence}", diagram.source)
         }
         Block::Code(shown) => code::drawn(shown, page),
-        Block::Lines(lines) | Block::Rows(lines) => {
-            lines.iter().map(line).collect::<Vec<_>>().join("  \n")
-        }
+        Block::Lines(lines) | Block::Rows(lines) => rows(lines),
+        Block::Feed(feed) => rows(&feed.said(GLYPHS)),
+        Block::Meter(meter) => rows(&[meter.said(GLYPHS)]),
     }
 }
 
@@ -438,23 +437,6 @@ fn steps(steps: &[(String, &'static str)]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// One line of spans, its strong parts in bold and its command parts in code,
-/// as written; every other part is words, written as `plain_text` writes them.
-fn line(line: &Line) -> String {
-    line.spans()
-        .iter()
-        .map(|span| match span.tone {
-            Tone::Strong if !span.text.trim().is_empty() => {
-                format!("**{}**", plain_text(span.text.trim()))
-            }
-            Tone::Command if !span.text.trim().is_empty() => code_span(span.text.trim()),
-            _ => plain_text(&span.text),
-        })
-        .collect::<String>()
-        .trim()
-        .to_string()
 }
 
 /// A caution as a list item, with what it means and what fixes it under

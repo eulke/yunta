@@ -36,6 +36,10 @@ pub struct Screen {
     /// What is open over the regions; its legend stands for the screen's
     /// while it is open.
     pub overlay: Option<Overlay>,
+    /// The window's title while a run needs the person; none leaves the
+    /// window its own. Only a terminal shows it, as its window's title:
+    /// Markdown and HTML draw none of it. Not a region's title.
+    pub title: Option<String>,
 }
 
 /// How many runs stand at one word: `13 need you`.
@@ -90,6 +94,7 @@ impl Screen {
             attention: None,
             legend: Legend::new(),
             overlay: None,
+            title: None,
         }
     }
 

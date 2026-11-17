@@ -1,0 +1,11 @@
+␛[36m●␛[0m ␛[1mglobal-pack-install␛[0m  Add explicit global pack install target␛[2m · attempt 1␛[0m
+
+  ␛[2mproved  ␛[0m␛[31m red␛[0m
+  ␛[2mby      ␛[0m␛[1mcargo test --workspace --test pack_global_spec global_pack_commands_use_t␛[0m␛[1m…␛[0m
+  ␛[2mkeeps   ␛[0mlint, green at the baseline
+
+  ␛[2mits scope␛[0m
+  ␛[32m✓␛[0m crates/cli/src/pack.rs
+  ␛[32m✓␛[0m crates/cli/src/cli/pack.rs
+  ␛[2m◌␛[0m crates/cli/tests/pack_cmd.rs
+  ␛[2m◌␛[0m crates/cli/src/commands/pack_audit.rs␛[2m · granted by you␛[0m

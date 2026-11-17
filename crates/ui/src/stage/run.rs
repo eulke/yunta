@@ -2,60 +2,68 @@
 //! the screen, its nodes beside its page as a list the pointer moves along, and its page
 //! with its chronicle under it, or the page of the node picked in its place.
 //!
-//! The stage asks for the run's following and its page as it opens. The following
-//! hands back the run read whole first, whose moments the stage tells from the events
-//! it was read with by replay's chronicle; then what each look at it finds, which the
-//! stage folds into its copy of the run by the API's own fold, adding the moments that
-//! fold hands back for each batch. One fold, so the chronicle, the rows and the ribbon
-//! are the ones `status --follow` draws from the same log, and no news folds the whole
-//! log again. A promotion's successor, read whole too, stands in the run's place and its
-//! page is read again; once the following ends where `status --follow` stops, the run
-//! no longer moving and no successor awaited, its page is read once more and the stage
-//! stops following.
+//! The stage keeps none of the run: its ribbon, its rows, its nodes and its chronicle are
+//! the run in view's, which the state keeps of what it follows, drawn where it is the
+//! stage's run and framed at the instant of each draw. They move as the run's news come,
+//! a node picked or not, and its ages move with the clock. The moments are the ones the
+//! state's fold tells, so the chronicle, the rows and the ribbon are the ones `status
+//! --follow` draws from the same log; whether the run offers a menu is the run in view's,
+//! worked out once for its head, and so is the decision its acts are chosen by: what the
+//! run in view waits on, once read for the pause it stands at, never its page's. A look
+//! that failed is said under the page, over the run as it was last read, until the next
+//! news.
 //!
-//! A pointer moves along the run's nodes, and picking one stops following and shows its
-//! page. The acts the run offers that a key here takes are `acts`': each is bound to its
-//! key, and the legend says each in render's words.
+//! The stage asks for the run's page as it opens, and nothing to follow: the state follows
+//! the stage's run under every stage over it, so no key starts or stops it. Where the work
+//! goes on in a promotion's successor, the state moves the stage onto it as it folds the
+//! successor (`succeeded`): the successor's own page stands in place of a node's, read
+//! again as the page of another run.
+//!
+//! The run's page stands at the run as kept, its headline, furrow and gist the kept
+//! frame's at each draw, and the page shown is read again when the run turns (`page`).
+//!
+//! A pointer moves along the run's nodes and is kept by the node it stands on; where the
+//! run no longer holds that node, its first node stands for it. Picking one shows its
+//! page, letting nothing go, while the rows go on moving. The acts the run offers that a
+//! key here takes are `acts`': each is bound to its key, and the legend says each in
+//! render's words.
 //!
 //! The page scrolls by the page, the arrows moving along the nodes; it keeps the line it
 //! was scrolled to when it is read again, and starts at its first line when it is
 //! another page: a node's, the run's again, a successor's.
 
 mod acts;
+mod page;
 
 use chrono::{DateTime, Utc};
 use surco::components::{Laid, Note, Region, Screen, Side, Sight};
 use surco::doc::{Block, Depth, Doc};
 use surco::look::Look;
-use yunta_api::{FollowNews, FollowedRun, RunNews};
+use yunta_api::Awaited;
 use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
 use yunta_render::page::{Node, Page, Run};
-use yunta_render::watched::{self, Heard};
-use yunta_replay::frame::{chronicle, Moment, RunFrame};
+use yunta_render::watched;
+use yunta_replay::frame::RunFrame;
 
 use super::{Act, Want};
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
-use crate::{News, Operation, Outcome};
+use crate::{AwaitedReading, FollowedRuns, Operation, Outcome, RunInView};
 
-/// A run a person follows.
+/// A run a person follows: where they stand on it. Not the run, which the state keeps of
+/// what it follows.
 #[derive(Debug, Clone)]
 pub struct RunStage {
     /// The run followed: the one opened, or the last a promotion handed the work to.
-    run: RunId,
-    /// The run as its following read it, once it has.
-    followed: Option<Box<FollowedRun>>,
-    /// What happened to it, in order: the chronicle of the events it was read whole
-    /// with, then the moments each batch folded into it hands back.
-    moments: Vec<Moment>,
-    /// What its sessions said last, a frame to each node.
-    heard: Heard,
+    pub(super) run: RunId,
     /// Its page, once read.
     page: Option<Box<Run>>,
-    /// Whether news of the run comes while it moves.
-    follows: bool,
-    /// The node a key acts on, once the run's nodes are read.
+    /// Where the run as kept stood turned when the page shown was last asked: none
+    /// before the run is kept.
+    turned: Option<page::Turn>,
+    /// The node a key acts on, where a person moved onto one: where the run does not hold
+    /// it, its first node stands for it.
     pointed: Option<NodeId>,
     /// The node whose page stands in place of the run's, and that page once read.
     picked: Option<(NodeId, Option<Box<Node>>)>,
@@ -65,16 +73,19 @@ pub struct RunStage {
     said: Option<String>,
 }
 
+/// The run in view, framed at an instant: what the stage draws and acts on.
+struct Framed<'a> {
+    in_view: &'a RunInView,
+    frame: RunFrame,
+}
+
 impl RunStage {
     /// The stage of `run`, before anything of it is read.
     pub(crate) fn of(run: RunId) -> Self {
         RunStage {
             run,
-            followed: None,
-            moments: Vec::new(),
-            heard: Heard::default(),
             page: None,
-            follows: true,
+            turned: None,
             pointed: None,
             picked: None,
             scroll: Scroll::default(),
@@ -82,43 +93,52 @@ impl RunStage {
         }
     }
 
-    /// What the stage asks for as it opens: the run's following, and its page.
+    /// What the stage asks for as it opens: the run's page.
     pub(crate) fn opening(&self) -> Vec<Want> {
-        vec![
-            Want::Work(Operation::Follow {
-                run: self.run.clone(),
-            }),
-            Want::Work(Operation::ReadPage {
-                run: self.run.clone(),
-            }),
-        ]
+        vec![Want::Work(Operation::ReadPage {
+            run: self.run.clone(),
+        })]
     }
 
-    /// What the stage asks for when a person comes back to it: the following it had,
-    /// and the page it showed, read again.
-    pub(crate) fn returned(&self) -> Vec<Want> {
-        let run = self.run.clone();
-        let following = self.follows.then(|| Operation::Follow { run: run.clone() });
-        let page = match &self.picked {
-            Some((node, _)) => Operation::ReadNodePage {
-                run,
-                node: node.clone(),
-            },
-            None => Operation::ReadPage { run },
-        };
-        following
-            .into_iter()
-            .chain([page])
-            .map(Want::Work)
-            .collect()
+    /// What the stage asks for when a person comes back to it: the page it showed, read
+    /// again at the run as `followed` keeps it.
+    pub(crate) fn returned(&mut self, followed: &FollowedRuns) -> Vec<Want> {
+        self.turned = self.kept_turn(followed);
+        vec![Want::Work(self.page_shown())]
     }
 
-    /// The run as a screen at `now`: its ribbon and the rows a person watches it by across
-    /// it, its nodes beside its page, its page or the picked node's, and the keys.
-    pub(crate) fn screen(&self, look: &Look, now: DateTime<Utc>) -> Screen {
-        let frame = self.frame(now);
-        let page = Region::new(self.read(frame.as_ref(), look)).in_sight(self.scroll.sight());
-        let mut screen = Screen::new(page);
+    /// The run in view `followed` keeps, framed at `now`, where it is this stage's run:
+    /// none until it is read.
+    fn framed<'a>(&self, followed: &'a FollowedRuns, now: DateTime<Utc>) -> Option<Framed<'a>> {
+        let in_view = followed.in_view.as_deref()?;
+        (in_view.run.run == self.run).then(|| Framed {
+            frame: in_view.run.frame(now),
+            in_view,
+        })
+    }
+
+    /// The node a key acts on among the nodes of `frame`: the one pointed at where the run
+    /// holds it, its first node otherwise.
+    fn pointed_in(&self, frame: &RunFrame) -> Option<NodeId> {
+        let held = |node: &&NodeId| frame.nodes.iter().any(|framed| framed.id == **node);
+        let pointed = self.pointed.as_ref().filter(held);
+        pointed
+            .or(frame.nodes.first().map(|node| &node.id))
+            .cloned()
+    }
+
+    /// The run `followed` keeps as a screen at `now`: its ribbon and the rows a person
+    /// watches it by across it, its nodes beside its page, its page or the picked node's,
+    /// and the keys.
+    pub(crate) fn screen(
+        &self,
+        look: &Look,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Screen {
+        let framed = self.framed(followed, now);
+        let read = self.read(framed.as_ref(), followed.look_failed.as_ref(), look);
+        let mut screen = Screen::new(Region::new(read).in_sight(self.scroll.sight()));
         screen.trail = vec![
             yunta_render::screen::YUNTA.to_string(),
             self.run.handle().to_string(),
@@ -126,23 +146,22 @@ impl RunStage {
         screen
             .trail
             .extend(self.picked.as_ref().map(|(node, _)| node.to_string()));
-        screen.about = frame.as_ref().map(|frame| self.across(frame, look));
-        screen.side = frame.as_ref().map(|frame| {
-            let nodes = watched::nodes(frame, self.pointed.as_ref(), look);
+        let pointed = framed
+            .as_ref()
+            .and_then(|framed| self.pointed_in(&framed.frame));
+        screen.about = framed.as_ref().map(|framed| self.across(framed, look));
+        screen.side = framed.as_ref().map(|framed| {
+            let nodes = watched::nodes(&framed.frame, pointed.as_ref(), look);
             Side {
                 region: Region::new(Doc::new().with(Block::Rows(nodes)))
                     .in_sight(Sight::following_pointer()),
                 focused: true,
             }
         });
-        let offered = self.offered_in(frame.as_ref());
+        let offered = self.offered_in(framed.as_ref());
         let acts: Vec<(char, &str)> = offered.iter().map(|act| (act.key, act.does)).collect();
-        let legend = yunta_render::screen::run_legend(
-            self.pointed.as_ref(),
-            &acts,
-            self.follows,
-            self.picked.is_some(),
-        );
+        let legend =
+            yunta_render::screen::run_legend(pointed.as_ref(), &acts, self.picked.is_some());
         screen.legend = match self.scroll.scrolls() {
             true => yunta_render::screen::scrolling_by_the_page(legend),
             false => legend,
@@ -150,52 +169,61 @@ impl RunStage {
         screen
     }
 
-    /// What stands across the screen, framed as `frame`: the run's ribbon, then the rows a
-    /// person watches it by: what needs them, what each working node is doing, and how far
-    /// the run has come.
-    fn across(&self, frame: &RunFrame, look: &Look) -> Doc {
-        let doc = Doc::new().with(watched::ribbon(frame, look.motion));
-        let Some(followed) = &self.followed else {
-            return doc;
-        };
-        let rows = watched::rows(frame, &self.run, followed.menu, &self.heard, look);
+    /// What stands across the screen of the run `framed`: its ribbon, then the rows a
+    /// person watches it by: what needs them, what each working node is doing with what
+    /// its session said last, and how far the run has come.
+    fn across(&self, framed: &Framed<'_>, look: &Look) -> Doc {
+        let Framed { in_view, frame } = framed;
+        let ribbon = watched::ribbon(frame, look.motion);
+        let rows = watched::rows(frame, &self.run, in_view.run.menu, &in_view.heard, look);
         let lines = rows
             .attention
             .into_iter()
             .chain(rows.nodes)
-            .chain([rows.footer]);
-        doc.with(Block::Lines(lines.collect()))
+            .chain([watched::footer(frame, look)]);
+        Doc::new().with(ribbon).with(Block::Lines(lines.collect()))
     }
 
-    /// The page a person reads, framed as `frame`: the picked node's, or the run's with
-    /// its chronicle under it, and what the last piece of work said where it did not do
-    /// what was asked.
-    fn read(&self, frame: Option<&RunFrame>, look: &Look) -> Doc {
+    /// The page a person reads of the run `framed`: the picked node's, or the run's,
+    /// standing at the run as framed, with its chronicle under it; then the look that
+    /// failed, and what the last piece of work said where it did not do what was asked.
+    fn read(&self, framed: Option<&Framed<'_>>, look_failed: Option<&String>, look: &Look) -> Doc {
         let page = match &self.picked {
             Some((_, page)) => page.as_ref().map(|page| page.document(look)),
-            None => self.page.as_ref().map(|page| page.document(look)),
+            None => self.page.as_ref().map(|page| {
+                let kept = framed.and_then(|framed| framed.page(page));
+                kept.as_ref().unwrap_or(page).document(look)
+            }),
         };
         let mut doc = Doc::new().with_all(page.map(Doc::into_blocks).unwrap_or_default());
-        if self.picked.is_none() && frame.is_some() {
-            let told = yunta_render::chronicle::told(&self.moments, &self.run, look);
+        if let (None, Some(framed)) = (&self.picked, framed) {
+            let told = yunta_render::chronicle::told(&framed.in_view.moments, &self.run, look);
             doc = doc.with_all(told.into_blocks());
         }
-        match &self.said {
-            Some(said) => doc.with(Note(said.clone())),
-            None => doc,
+        for said in [look_failed, self.said.as_ref()].into_iter().flatten() {
+            doc = doc.with(Note(said.clone()));
         }
+        doc
     }
 
-    /// What `stroke` asks for here at `now`: moving along the nodes and picking one, an
-    /// act the run offers, following it or not, going back, leaving, or scrolling the
-    /// page beside.
-    pub(crate) fn pressed(&mut self, stroke: Stroke, now: DateTime<Utc>) -> Vec<Want> {
+    /// What `stroke` asks for here, on the run `followed` keeps at `now`, the pointer
+    /// first kept to its nodes: moving along the nodes and picking one, an act the run
+    /// offers, going back, leaving, or scrolling the page beside.
+    pub(crate) fn pressed(
+        &mut self,
+        stroke: Stroke,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Vec<Want> {
         self.said = None;
+        let framed = self.framed(followed, now);
+        if let Some(framed) = &framed {
+            self.pointed = self.pointed_in(&framed.frame);
+        }
         match stroke {
-            Stroke::Down | Stroke::Insert('j') => self.moved(1, now),
-            Stroke::Up | Stroke::Insert('k') => self.moved(-1, now),
+            Stroke::Down | Stroke::Insert('j') => self.moved(1, framed.as_ref()),
+            Stroke::Up | Stroke::Insert('k') => self.moved(-1, framed.as_ref()),
             Stroke::Enter => self.picking(),
-            Stroke::Insert('f') => self.following_or_not(),
             Stroke::Decline => match self.picked.take() {
                 Some(_) => {
                     self.scroll.rewound();
@@ -205,9 +233,8 @@ impl RunStage {
             },
             Stroke::Insert('q') | Stroke::Interrupt => vec![Want::Leave],
             Stroke::Insert(key) => {
-                let frame = self.frame(now);
                 let act = self
-                    .offered_in(frame.as_ref())
+                    .offered_in(framed.as_ref())
                     .into_iter()
                     .find(|act| act.key == key);
                 match act {
@@ -230,91 +257,20 @@ impl RunStage {
         self.scroll.laid(laid);
     }
 
-    /// What news of the run's following does at `now`: the run read whole, its moments
-    /// told from the events it was read with; then each piece of news of it folded in,
-    /// by the fold the following itself makes.
-    pub(crate) fn heard(&mut self, news: News, now: DateTime<Utc>) -> Vec<Want> {
-        let news = match news {
-            News::Following(news) => news,
-            News::CasesNamed(_) | News::Case(_) => return Vec::new(),
-        };
-        let wants = match news {
-            FollowNews::Whole { run, events } => {
-                self.moments = chronicle(&events);
-                self.followed = Some(run);
-                self.follows = true;
-                Vec::new()
-            }
-            FollowNews::Run { run, news } => self.took(&run, news),
-            // The run's following follows no field.
-            FollowNews::Field(_)
-            | FollowNews::Joined(_)
-            | FollowNews::Unreadable(_)
-            | FollowNews::Left(_)
-            | FollowNews::Elsewhere(_) => Vec::new(),
-        };
-        self.read_on(now);
-        wants
-    }
-
-    /// `news` of `run` folded into the run followed, where it is that run: the moments of
-    /// the events that came added to its own; what a session said kept for its node's
-    /// row; a successor, read whole, in its place, its moments told from the events it
-    /// was read with and its page read.
-    fn took(&mut self, run: &RunId, news: RunNews) -> Vec<Want> {
-        let Some(followed) = self
-            .followed
-            .as_mut()
-            .filter(|followed| followed.run == *run)
-        else {
-            return Vec::new();
-        };
-        self.moments.extend(followed.took(&news));
-        match news {
-            RunNews::Said { said, .. } => {
-                self.heard.hear(said);
-                Vec::new()
-            }
-            RunNews::Successor { events, .. } => {
-                self.moments = chronicle(&events);
-                self.scroll.rewound();
-                vec![Want::Work(Operation::ReadPage {
-                    run: followed.run.clone(),
-                })]
-            }
-            // What the run waits on a person for is the decision stage's to read; this stage
-            // shows neither what its nodes hand over nor what reading it remarks on.
-            RunNews::Events(_)
-            | RunNews::Engine(_)
-            | RunNews::NoSuccessor
-            | RunNews::Awaited(_)
-            | RunNews::AwaitedUnread { .. }
-            | RunNews::Document { .. }
-            | RunNews::Remark(_) => Vec::new(),
-        }
-    }
-
-    /// The run, what its sessions said and the node pointed at kept to what was read at
-    /// `now`.
-    fn read_on(&mut self, now: DateTime<Utc>) {
-        let Some(followed) = &self.followed else {
+    /// The stage, where its run is `run`, moved onto `by`, the successor a promotion
+    /// handed the work to: the successor's own page stands in place of a node's, from its
+    /// first line, read once the state says what it folded or the person comes back.
+    pub(crate) fn succeeded(&mut self, run: &RunId, by: &RunId) {
+        if self.run != *run {
             return;
-        };
-        self.run = followed.run.clone();
-        let frame = followed.frame(now);
-        self.heard.kept_to(&frame, &self.run);
-        let held = self
-            .pointed
-            .as_ref()
-            .is_some_and(|node| frame.nodes.iter().any(|framed| framed.id == *node));
-        if !held {
-            self.pointed = frame.nodes.first().map(|node| node.id.clone());
         }
+        self.run = by.clone();
+        self.picked = None;
+        self.scroll.rewound();
     }
 
-    /// What an answer to work the stage asked for does: a page read, or, once the run
-    /// no longer moves, its page read once more; after an act, the run read again;
-    /// what refused or failed is said.
+    /// What an answer to work the stage asked for does: a page read; after an act, the
+    /// run read again; what refused or failed is said.
     pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
         let run = self.run.clone();
         match outcome {
@@ -325,10 +281,6 @@ impl RunStage {
             Outcome::NodePage(page) => {
                 self.node_page_read(page);
                 Vec::new()
-            }
-            Outcome::Followed => {
-                self.follows = false;
-                vec![Want::Work(Operation::ReadPage { run })]
             }
             // What another run went on to is said where it is followed, not here.
             Outcome::Resumed { run: went_on }
@@ -352,10 +304,8 @@ impl RunStage {
             | Outcome::Resumed { .. }
             | Outcome::Decided { .. }
             | Outcome::Answered { .. }
-            | Outcome::Field { .. }
             | Outcome::Questions(_)
             | Outcome::Decision(_)
-            | Outcome::Stats(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)
@@ -366,18 +316,14 @@ impl RunStage {
         }
     }
 
-    /// The run went on, here: it is followed again, and its own page stands in place of
-    /// a node's, read again.
+    /// The run went on, here: its own page stands in place of a node's, read again.
     fn went_on(&mut self) -> Vec<Want> {
-        self.follows = true;
         if self.picked.take().is_some() {
             self.scroll.rewound();
         }
-        let run = self.run.clone();
-        vec![
-            Want::Work(Operation::Follow { run: run.clone() }),
-            Want::Work(Operation::ReadPage { run }),
-        ]
+        vec![Want::Work(Operation::ReadPage {
+            run: self.run.clone(),
+        })]
     }
 
     /// `said`, what refused or failed, said where the run is.
@@ -395,14 +341,14 @@ impl RunStage {
         }
     }
 
-    /// What the run offers at `now`, each with the key that takes it here: every act its
-    /// frame offers that a key here takes, answering what it waits on first, then the
-    /// page of the node pointed at.
-    pub(crate) fn offered(&self, now: DateTime<Utc>) -> Vec<Act> {
-        let frame = self.frame(now);
-        let node_page = self
-            .pointed
-            .clone()
+    /// What the run `followed` keeps offers at `now`, each with the key that takes it
+    /// here: every act its frame offers that a key here takes, answering what it waits on
+    /// first, then the page of the node pointed at.
+    pub(crate) fn offered(&self, followed: &FollowedRuns, now: DateTime<Utc>) -> Vec<Act> {
+        let framed = self.framed(followed, now);
+        let node_page = framed
+            .as_ref()
+            .and_then(|framed| self.pointed_in(&framed.frame))
             .filter(|_| self.picked.is_none())
             .map(|node| NextStep::Status {
                 run: self.run.clone(),
@@ -411,37 +357,36 @@ impl RunStage {
             });
         let node_page = node_page.map(|step| Act::by(Stroke::Enter, step));
         let acts = self
-            .offered_in(frame.as_ref())
+            .offered_in(framed.as_ref())
             .into_iter()
             .map(|act| Act::by(Stroke::Insert(act.key), act.step));
         acts.chain(node_page).collect()
     }
 
-    /// The run's frame at `now`, once its following has read it.
-    fn frame(&self, now: DateTime<Utc>) -> Option<RunFrame> {
-        self.followed.as_ref().map(|followed| followed.frame(now))
-    }
-
-    /// Each act the run framed as `frame` offers that a key here takes: what it offers
-    /// by its standing and the decision its page says it stopped on, and answering what
-    /// it waits on where it stopped on a menu of its own or on a round of questions.
-    fn offered_in(&self, frame: Option<&RunFrame>) -> Vec<acts::Offered> {
-        let (Some(frame), Some(followed)) = (frame, &self.followed) else {
+    /// Each act the run `framed` offers that a key here takes: what it offers by its
+    /// standing and the decision it waits on, once the state read it for the pause the
+    /// run stands at, and answering what it waits on where it stopped on a menu of its
+    /// own, as kept for its head, or on a round of questions.
+    fn offered_in(&self, framed: Option<&Framed<'_>>) -> Vec<acts::Offered> {
+        let Some(Framed { in_view, frame }) = framed else {
             return Vec::new();
         };
-        let decision = self
-            .page
-            .as_ref()
-            .and_then(|page| page.decision.as_ref())
-            .map(|decision| &decision.escalation);
-        let answerable = followed.menu || yunta_api::waiting_round(frame).is_some();
+        let paused_at = in_view.run.state.run.paused().map(|(_, at)| at);
+        let decision = match &in_view.awaited {
+            Some(AwaitedReading::Read {
+                pause,
+                awaited: Awaited::Decision(decision),
+            }) if Some(pause.seq()) == paused_at => Some(&decision.escalation),
+            _ => None,
+        };
+        let answerable = in_view.run.menu || yunta_api::waiting_round(frame).is_some();
         acts::offered(frame, decision, answerable)
     }
 
-    /// The pointer moved `by` nodes along the run's nodes at `now`, around at either
+    /// The pointer moved `by` nodes along the nodes of the run `framed`, around at either
     /// end.
-    fn moved(&mut self, by: isize, now: DateTime<Utc>) -> Vec<Want> {
-        let Some(frame) = self.frame(now) else {
+    fn moved(&mut self, by: isize, framed: Option<&Framed<'_>>) -> Vec<Want> {
+        let Some(Framed { frame, .. }) = framed else {
             return Vec::new();
         };
         let nodes: Vec<&NodeId> = frame.nodes.iter().map(|node| &node.id).collect();
@@ -458,40 +403,17 @@ impl RunStage {
         Vec::new()
     }
 
-    /// The node pointed at picked: following stops, and its page is read to stand in
-    /// place of the run's.
+    /// The node pointed at picked: the node's page is read to stand in place of the run's,
+    /// nothing let go, the rows moving on with what the state follows.
     fn picking(&mut self) -> Vec<Want> {
         let Some(node) = self.pointed.clone() else {
             return Vec::new();
         };
         self.picked = Some((node.clone(), None));
         self.scroll.rewound();
-        let run = self.run.clone();
-        let mut wants = vec![Want::Work(Operation::ReadNodePage {
-            run: run.clone(),
-            node,
-        })];
-        if std::mem::replace(&mut self.follows, false) {
-            wants.push(Want::LetGo(Operation::Follow { run }));
-        }
-        wants
-    }
-
-    /// Following the run, or no longer: following again shows the run's page in place
-    /// of a node's.
-    fn following_or_not(&mut self) -> Vec<Want> {
-        self.follows = !self.follows;
-        let following = Operation::Follow {
+        vec![Want::Work(Operation::ReadNodePage {
             run: self.run.clone(),
-        };
-        match self.follows {
-            true => {
-                if self.picked.take().is_some() {
-                    self.scroll.rewound();
-                }
-                vec![Want::Work(following)]
-            }
-            false => vec![Want::LetGo(following)],
-        }
+            node,
+        })]
     }
 }

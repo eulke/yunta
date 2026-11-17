@@ -6,12 +6,12 @@
 //! after it, and each one after that once a look folded the event that hands it over.
 //! Which they are is worked out again only once the run held moved past the head it was
 //! last worked out at, from what its state holds past that head, so a run that stands
-//! still costs nothing. Each is read on its own, through the engine's reading of a
-//! node's documents, so one that fails today's shape is handed unread in its place, with
-//! where a person opens it and why, and the rest are read. A document is owed until it is
-//! read and kept to hand, so a look dropped half way leaves it to the next; a refollow
-//! that lets the run go forgets what was owed of it, and a run held again is handed again
-//! what it handed over.
+//! still costs nothing. Each is read on its own, by [`Document::read`], so one that fails
+//! today's shape is handed unread in its place, with where a person opens it and why, and
+//! the rest are read; a node's page reads its documents the same way. A document is owed
+//! until it is read and kept to hand, so a look dropped half way leaves it to the next; a
+//! refollow that lets the run go forgets what was owed of it, and a run held again is
+//! handed again what it handed over.
 //!
 //! The keys of a run's manifest that this binary does not read are said once for each
 //! run read whole, as `yunta status` says them, before any of its documents: read off the
@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use yunta_core::events::Shown;
 use yunta_core::shown::ShownDocument;
 use yunta_core::{NodeId, RunId, Seq};
+use yunta_replay::RunState;
 
 use super::{Following, RunNews};
 use crate::run::{read_manifest, unread_keys};
@@ -41,6 +42,28 @@ pub enum Document {
         path: PathBuf,
         why: String,
     },
+}
+
+impl Document {
+    /// The document `shown` names, of the run rooted at `dir` that `state` holds, read on
+    /// its own through the engine's reading of a node's document, a plan beside what the
+    /// person `asked` for; unread where it fails today's shape or its bytes cannot be read,
+    /// with where a person opens it and why, as its reader words it.
+    pub(crate) async fn read(
+        dir: &Path,
+        shown: &Shown,
+        state: &RunState,
+        asked: Option<&str>,
+    ) -> Document {
+        match yunta_engine::produced_document(dir, shown, state, asked).await {
+            Ok(read) => Document::Read(read),
+            Err(error) => Document::Unread {
+                shown: shown.clone(),
+                path: dir.join(yunta_core::run_dir::view_of(shown)),
+                why: yunta_core::describe(&Error::from(error)),
+            },
+        }
+    }
 }
 
 /// What the run held handed over, as far as the following worked it out and handed it.
@@ -119,15 +142,7 @@ impl Following {
         let (node, shown) = self.handing.owed.front()?;
         let dir = held.registry.run_dir();
         let asked = held.run.manifest.request();
-        let read = yunta_engine::produced_document(dir, shown, &held.run.state, asked).await;
-        let document = match read {
-            Ok(read) => Document::Read(read),
-            Err(error) => Document::Unread {
-                shown: shown.clone(),
-                path: dir.join(yunta_core::run_dir::view_of(shown)),
-                why: yunta_core::describe(&Error::from(error)),
-            },
-        };
+        let document = Document::read(dir, shown, &held.run.state, asked).await;
         let node = node.clone();
         Some(RunNews::Document { node, document })
     }

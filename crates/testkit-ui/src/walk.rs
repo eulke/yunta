@@ -1,17 +1,23 @@
 //! The walk: from the application as it opens, and as it opens on each step the
 //! recordings answer the opening of ([`Recordings::opened_on`]), every stroke, what a
-//! terminal of a few rows laid out of the screen, each page a surface could not show, and
-//! every recorded piece of news and answer of each piece of work a state waits on, applied
-//! to every state it reaches. Each state is walked once, kept by its screen, the kinds of
-//! work it waits on, the rows its regions are scrolled to and the stages it has yet to
-//! open. Its clock stands still at one instant: what time changes on a screen is each
-//! stage's own tests'.
+//! terminal of a few rows laid out of the screen, each page a surface could not show,
+//! every recorded piece of news and answer of each piece of work a state waits on, and
+//! every recorded piece of what it follows ([`Recordings::followed`]), applied to every
+//! state it reaches. Each state is walked once, kept by its screen, the kinds of work it
+//! waits on, the rows its regions are scrolled to, the stages it has yet to open and what
+//! it follows. Its clock stands still at one instant: what time changes on a screen is
+//! each stage's own tests'.
+//!
+//! What is followed is recorded by place and handed to every state that follows it,
+//! whatever the state waits on, as a following hands it under no ticket. The state's fold
+//! takes an event once and a piece handed again changes nothing, so a state handed a piece
+//! it holds is the state it was: the news are bounded, as the recorded answers are.
 //!
 //! The walk holds only what every walk needs: that it ends, that no input panics, and
-//! that every piece of work a state asks for is one the recordings answer. What a surface
-//! holds of every state it reaches is a [`Checks`] of its own: the interface's rules, a
-//! terminal's layout. A state that breaks one is named with the inputs that reach it
-//! ([`Reached`]).
+//! that every piece of work a state asks for, and everything it asks to follow, is one
+//! the recordings answer. What a surface holds of every state it reaches is a [`Checks`]
+//! of its own: the interface's rules, a terminal's layout. A state that breaks one is
+//! named with the inputs that reach it ([`Reached`]).
 
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -27,10 +33,11 @@ use crate::recorded::Recordings;
 use crate::sandbox::now;
 use crate::terminal::laid_out;
 
-/// The most states the walk visits before it calls the application endless: more than
-/// twice what its stages reach, counted in states rather than seconds so the bound holds
-/// alike on a fast machine and on a slow runner beside the rest of the suite.
-const MOST_STATES: usize = 40_000;
+/// The most states the walk visits before it calls the application endless: a quarter
+/// past the some 63,000 its stages reach, each told apart by what it follows too, and
+/// counted in states rather than seconds so the bound holds alike on a fast machine and on
+/// a slow runner beside the rest of the suite.
+const MOST_STATES: usize = 80_000;
 
 /// Each character a stage binds, and one no stage binds.
 const KEYS: [char; 25] = [
@@ -101,8 +108,8 @@ struct Step {
 }
 
 /// How the walk tells a state apart: a fingerprint of its screen as Markdown draws it, the
-/// kinds of work it waits on, the rows its regions are scrolled to and the stages it has
-/// yet to open; and that Markdown, which the checks read.
+/// kinds of work it waits on, the rows its regions are scrolled to, the stages it has yet
+/// to open and what it follows; and that Markdown, which the checks read.
 struct Seen {
     fingerprint: u64,
     markdown: String,
@@ -132,8 +139,10 @@ impl Seen {
         // The stages a step opened the application on, which no screen shows before it
         // first stands somewhere: each opening's own.
         let to_open = format!("{:?}", state.stages_to_open());
+        // What it follows, which the news it is handed are chosen by.
+        let followed = format!("{:?}", state.followed());
         let mut fingerprint = DefaultHasher::new();
-        (&markdown, kinds, tops, to_open).hash(&mut fingerprint);
+        (&markdown, kinds, tops, to_open, followed).hash(&mut fingerprint);
         Seen {
             fingerprint: fingerprint.finish(),
             markdown,
@@ -325,10 +334,11 @@ impl<'r> Walk<'r> {
 
     /// Every input `state` can be handed: each stroke while it waits on few enough pieces
     /// of work ([`STROKED_WHILE_WAITING`]), what the walk's terminal laid out of its
-    /// screen, each page written that a surface could not show, and each recorded piece
-    /// of news and answer of each piece of work it waits on. With a field open nothing is typed, and a list is narrowed by one character at
-    /// most: what a typed line or a list's filter makes of more is its own tests', and
-    /// words typed on would never end.
+    /// screen, each page written that a surface could not show, each recorded piece of
+    /// news and answer of each piece of work it waits on, and each recorded piece of what
+    /// it follows. With a field open nothing is typed, and a list is narrowed by one
+    /// character at most: what a typed line or a list's filter makes of more is its own
+    /// tests', and words typed on would never end.
     fn inputs(&self, state: &State) -> Vec<Input> {
         let waiting = state.waiting_on();
         let typing = state.typing() || filtered(state);
@@ -356,10 +366,15 @@ impl<'r> Walk<'r> {
             .pages_written()
             .into_iter()
             .map(Input::Unshown);
+        let followed = self.recordings.followed(&state.followed());
+        let news = followed
+            .into_iter()
+            .map(|news| Input::FollowNews(news.clone()));
         strokes
             .chain([Input::Laid(laid_out(state))])
             .chain(unshown)
             .chain(answers)
+            .chain(news)
             .collect()
     }
 }

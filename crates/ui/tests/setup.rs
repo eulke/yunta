@@ -11,11 +11,12 @@ use std::sync::Arc;
 use surco::surface::{Markdown, Surface};
 use tokio::sync::mpsc;
 use yunta_api::{ProjectDraft, ProjectSetup, ProposedRunners, Repository, RunnerDeclaration};
+use yunta_core::events::Channel;
 use yunta_core::{AdapterId, Detected, ModelName, ProbedAdapter, RunnerCandidate, RunnerName};
 use yunta_testkit_ui::driving::drive;
 use yunta_testkit_ui::sandbox::{claude_answering, now, workspace, workspace_on};
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, Operation, Outcome, Performer, Request, State, Ticket};
+use yunta_ui::{Input, Operation, Outcome, Performer, RepositoryReading, Request, State, Ticket};
 
 /// What setting a repository up found: the name `project` and the base branch `main`,
 /// Claude Code answering and Codex not, and two runners proposed.
@@ -51,7 +52,11 @@ fn on_the_setup() -> (State, Ticket) {
     let [Request::Perform(opening, Operation::ReadRepository)] = asked.as_slice() else {
         panic!("{asked:?}");
     };
-    let never_set_up = Outcome::Repository(Repository::NeverSetUp);
+    let never_set_up = Outcome::Repository(Box::new(RepositoryReading {
+        repository: Repository::NeverSetUp,
+        storage: PathBuf::from("/home/me/.yunta/yunta.db"),
+        prices: None,
+    }));
     let asked = state.update(Input::Outcome(*opening, never_set_up));
     let [Request::Perform(detecting, Operation::DetectProject)] = asked.as_slice() else {
         panic!("a repository never set up opens on finding what it runs: {asked:?}");
@@ -148,7 +153,10 @@ async fn escape_through_every_question_writes_what_init_writes_unasked() {
     let answered = tempfile::tempdir().expect("a temporary root");
     let repo = never_set_up(answered.path());
     let clis = vec![claude_answering(answered.path())];
-    let performer = Arc::new(Performer::new(workspace_on(&repo, answered.path(), clis)));
+    let performer = Arc::new(Performer::new(
+        workspace_on(&repo, answered.path(), clis),
+        Channel::Tty,
+    ));
     let (state, asked) = State::opened(now());
     // As many as any project proposes runners for: once it is written, Escape does
     // nothing more.
@@ -179,8 +187,8 @@ async fn escape_through_every_question_writes_what_init_writes_unasked() {
     );
     assert_eq!(config(&repo), config(&other));
     let asked = state.update(Input::Stroke(Stroke::Enter));
-    let [Request::Perform(_, Operation::ReadCatalog)] = asked.as_slice() else {
-        panic!("Enter on the setup written goes on to the first run: {asked:?}");
+    let [Request::Perform(_, Operation::ReadCatalog), Request::Follow(_)] = asked.as_slice() else {
+        panic!("Enter on the setup written goes on to the first run, which follows the field: {asked:?}");
     };
 }
 
@@ -188,7 +196,7 @@ async fn escape_through_every_question_writes_what_init_writes_unasked() {
 async fn a_setup_left_before_it_is_written_writes_nothing() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = never_set_up(root.path());
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
     let (mut state, asked) = State::opened(now());
     let [Request::Perform(opening, reading)] = asked.as_slice() else {
         panic!("{asked:?}");

@@ -11,7 +11,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver};
 use yunta_api::FollowNews;
 use yunta_testkit::workflows::PROMOTABLE;
 use yunta_testkit::{run_ids, wait_until, yunta_on_terminal, Checkout, HeldRun, Terminal};
-use yunta_ui::{Input, News};
+use yunta_ui::Input;
 
 /// The lines of the chronicle on `state`'s screen, as a pipe writes them.
 fn chronicle(state: &State) -> Vec<String> {
@@ -30,8 +30,9 @@ fn chronicle(state: &State) -> Vec<String> {
 }
 
 /// `state` driven with `performer` from what `asked` asks for until it waits on
-/// nothing, `followed` called once the following of a run hands it back as it reads
-/// first.
+/// nothing, the run in view no longer moves, and it stands caught up with the log of the
+/// store `performer` follows; `followed` called each time what it follows hands a run
+/// read whole, its first reading.
 async fn followed_through(
     state: &mut State,
     asked: Vec<Request>,
@@ -39,22 +40,27 @@ async fn followed_through(
     mut followed: impl FnMut(),
 ) {
     let (inputs, mut received): (_, UnboundedReceiver<Input>) = mpsc::unbounded_channel();
+    let store = performer
+        .workspace()
+        .project()
+        .expect("the performer's project names the store it follows")
+        .storage_path;
     let mut asked = asked;
     loop {
         for request in asked.drain(..) {
             performer.take(request, &inputs);
         }
-        if state.waiting_on().is_empty() {
+        let in_view = state.followed_runs().in_view.as_ref();
+        let moves = in_view.is_some_and(|in_view| in_view.run.frame(now()).moves());
+        let at_rest = state.waiting_on().is_empty() && !moves;
+        if at_rest && state.caught_up(&yunta_testkit::heads(&store)) {
             return;
         }
         let input = received
             .recv()
             .await
             .expect("the performer hands back what the state waits on");
-        if matches!(
-            input,
-            Input::News(_, News::Following(FollowNews::Whole { .. }))
-        ) {
+        if matches!(input, Input::FollowNews(FollowNews::Whole { .. })) {
             followed();
         }
         asked = state.update(input);
@@ -92,7 +98,10 @@ async fn a_run_followed_to_its_end_says_each_moment_as_a_piped_follower_does() {
     let (held, mut process) = HeldRun::started(Path::new(env!("CARGO_BIN_EXE_yunta")));
     let (mut follower, written) = followed_through_a_pipe(&held);
     let checkout = &held.checkout;
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
     let (mut state, _) = drive(opened, asked, &performer, &[]).await;
 
@@ -154,7 +163,10 @@ async fn a_promotion_is_followed_onto_its_successor() {
     let first = run_ids(&checkout.home).remove(0);
     let (following, followed) = std::sync::mpsc::channel();
     let answering = answered_at_its_terminal(attached, followed);
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
     let (mut state, _) = drive(opened, asked, &performer, &[]).await;
 

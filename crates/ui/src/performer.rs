@@ -4,21 +4,28 @@
 //!
 //! A surface makes one performer and hands it every request the state asks for
 //! ([`Performer::take`]): work to do starts under its ticket, work let go is stopped,
-//! and what only a surface can do, showing a page or leaving, comes back to it. The
-//! performer reads nothing of its process: everything comes from the workspace, so a
-//! test makes it as it makes a workspace.
+//! what to follow goes to its following, and what only a surface can do, showing a page,
+//! calling the person or leaving, comes back to it. The performer reads nothing of its
+//! process: everything comes from the workspace, so a test makes it as it makes a
+//! workspace. Nor does it know where it is drawn: the surface that makes it hands it the
+//! channel a person reaches it through, which every answer it records carries, so the
+//! interface names no terminal.
 //!
-//! Each family of work is carried out in a module of its own: `run`, a run's
-//! readings, its stats and its graph among them, and its acts; `evidence`, what a run
-//! leaves; `workflow`, a workflow's check, past runs and graph, the cases and a new
-//! workflow; `pack`, the packs'; `machine`, what doctor checks of this machine and
-//! this project, and what upkeep collects of what runs left. What one piece of work finds that a later one takes stays
-//! with the performer, in `held`, under the ticket that found it: a repository's project detected for its
-//! setup, which is bound to the repository and written by the setup's own work. The
-//! state hands back only the ticket, and lets it go when the person leaves the stage
-//! that holds it.
+//! It keeps one following, made on the first request to follow and followed anew on
+//! each after it, made anew where a request hands its news to other inputs, which never
+//! ends by itself: dropping the performer ends it, `following`'s.
+//!
+//! Each family of work is carried out in a module of its own: `run`, a run's readings and
+//! its acts; `evidence`, what a run leaves; `workflow`, a workflow's check, past runs and
+//! graph, the cases and a new workflow; `pack`, the packs'; `machine`, what doctor checks
+//! of this machine and this project, and what upkeep collects of what runs left. What one
+//! piece of work finds that a later one takes stays with the performer, in `held`, under
+//! the ticket that found it: a repository's project detected for its setup, which is bound
+//! to the repository and written by the setup's own work. The state hands back only the
+//! ticket, and lets it go when the person leaves the stage that holds it.
 
 mod evidence;
+mod following;
 mod held;
 mod machine;
 mod pack;
@@ -29,25 +36,39 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::mpsc::UnboundedSender;
 use yunta_api::{Error, Project, ProjectSetup, Remark, Remarks, Stop, Workspace};
+use yunta_core::events::Channel;
 
-use crate::{Input, News, Operation, Outcome, Request, Ticket};
+use crate::{Input, News, Operation, Outcome, RepositoryReading, Request, Ticket};
+use following::FollowingTask;
 use held::{Found, Held};
 
 /// Carries out an [`Operation`] through `yunta-api`, against the workspace it was made
 /// with, and hands back what it says on the way and what it comes to as inputs.
 pub struct Performer {
     workspace: Workspace,
+    /// The channel a person reaches it through, which every answer it records carries.
+    channel: Channel,
     /// What it holds for the work it was handed, by ticket.
     held: Mutex<Held>,
+    /// Its one following, once it was asked to follow.
+    following: FollowingTask,
 }
 
 impl Performer {
-    /// A performer working through `workspace`.
-    pub fn new(workspace: Workspace) -> Self {
+    /// A performer working through `workspace`, which records every answer under
+    /// `channel`, the one a person reaches the surface that makes it through.
+    pub fn new(workspace: Workspace, channel: Channel) -> Self {
         Performer {
             workspace,
+            channel,
             held: Mutex::default(),
+            following: FollowingTask::default(),
         }
+    }
+
+    /// The workspace it works through, whose project names the store it follows.
+    pub fn workspace(&self) -> &Workspace {
+        &self.workspace
     }
 
     /// Carries out `operation` under `ticket`, under a stop of its own: what it says
@@ -101,8 +122,9 @@ impl Performer {
 
     /// Takes `request`: work to do is held as under way, then starts under its ticket in
     /// a task of its own, and hands what it comes to to `inputs`; work let go is stopped.
-    /// Work that breaks inside Yunta still answers its ticket, as failed. What only a
-    /// surface can do, showing a page or leaving, comes back.
+    /// Work that breaks inside Yunta still answers its ticket, as failed. What to follow
+    /// goes to its one following, which hands what it reads to `inputs`. What only a
+    /// surface can do, showing a page, calling the person or leaving, comes back.
     pub fn take(
         self: &Arc<Self>,
         request: Request,
@@ -131,7 +153,11 @@ impl Performer {
                 self.let_go(ticket);
                 None
             }
-            Request::ShowPage(_) | Request::Leave => Some(request),
+            Request::Follow(followed) => {
+                self.following.follow(&self.workspace, followed, inputs);
+                None
+            }
+            Request::ShowPage(_) | Request::CallThePerson | Request::Leave => Some(request),
         }
     }
 
@@ -152,7 +178,7 @@ impl Performer {
     ) -> Result<Outcome, Error> {
         let project = self.workspace.project()?;
         match operation {
-            Operation::ReadRepository => Ok(Outcome::Repository(project.repository(stop).await?)),
+            Operation::ReadRepository => repository_read(&project, stop).await,
             Operation::DetectProject => self.detected(&project, ticket, stop).await,
             Operation::WriteSetup { held, setup } => self.written(held, setup).await,
             Operation::ReadCatalog => {
@@ -173,16 +199,12 @@ impl Performer {
             Operation::Collect { dry_run } => {
                 machine::collected(&project, dry_run, remarks, stop).await
             }
-            Operation::Field { reach } => run::field_read(&project, reach, stop).await,
-            Operation::Follow { run } => run::followed(&project, &run, found, stop).await,
             Operation::ReadPage { run } => run::page_read(&project, &run, remarks).await,
             Operation::ReadNodePage { run, node } => {
                 run::node_page_read(&project, &run, &node, remarks).await
             }
             Operation::ReadQuestions { run } => run::questions_read(&project, &run).await,
             Operation::ReadDecision { run } => run::decision_read(&project, &run).await,
-            Operation::ReadStats { run } => run::stats_read(&project, &run).await,
-            Operation::ReadRunGraph { run } => run::graph_read(&project, run).await,
             Operation::ReadHistory { workflow } => {
                 workflow::history_read(&project, &workflow).await
             }
@@ -191,7 +213,7 @@ impl Performer {
                 run::decided(&project, run, option, words).await
             }
             Operation::Answer { run, node, answers } => {
-                run::answered(&project, run, &node, answers).await
+                run::answered(&project, run, &node, answers, self.channel).await
             }
             Operation::Resume { run } => run::resumed(&project, run).await,
             Operation::Cancel { run } => run::cancelled(&project, run, remarks, stop).await,
@@ -236,6 +258,16 @@ impl Performer {
     fn held(&self) -> MutexGuard<'_, Held> {
         self.held.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// The repository `project` works in, as far as Yunta goes, with where the project keeps
+/// its runs and what it prices tokens at.
+async fn repository_read(project: &Project, stop: &Stop) -> Result<Outcome, Error> {
+    Ok(Outcome::Repository(Box::new(RepositoryReading {
+        repository: project.repository(stop).await?,
+        storage: project.storage_path.clone(),
+        prices: project.config.pricing.clone(),
+    })))
 }
 
 /// What the work that broke said as it broke: its panic's message, where it gave one.

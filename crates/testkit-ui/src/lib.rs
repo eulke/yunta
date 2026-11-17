@@ -5,7 +5,8 @@
 //! - [`sandbox`]: the world a test works in: a workspace in its own directory that reads
 //!   nothing of the machine's, the CLIs it stands in for, packs to install, and the
 //!   instant every test stands at.
-//! - [`driving`]: a state driven with its performer until it waits on nothing.
+//! - [`driving`]: a state driven with its performer until it waits on nothing and stands
+//!   caught up with the log.
 //! - [`home`]: the places the walk's recordings are made in, and the places the design's
 //!   starting screens stand in.
 //! - `planned`: a run parked on its plan's gate, which the screens' world and the home

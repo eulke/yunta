@@ -10,7 +10,7 @@
 
 use std::mem::{discriminant, Discriminant};
 
-use yunta_api::{FieldReach, ProjectSetup, RunRequest};
+use yunta_api::{ProjectSetup, RunRequest};
 use yunta_core::{Answer, NodeId, OptionId, PackRef, RunId, WorkflowName, WorkflowShape};
 
 use crate::Ticket;
@@ -38,10 +38,6 @@ pub enum Operation {
     Pack(PackOperation),
     /// What a run leaves: its receipt, its verification, its page for a browser.
     Evidence(EvidenceOperation),
-    /// The runs as far as `reach` reaches.
-    Field { reach: FieldReach },
-    /// `run` followed while it moves, onto the successor a promotion hands the work to.
-    Follow { run: RunId },
     /// `run`'s page.
     ReadPage { run: RunId },
     /// The page of `run`'s node `node`.
@@ -50,17 +46,12 @@ pub enum Operation {
     ReadQuestions { run: RunId },
     /// The decision `run` waits on, with the documents it shows.
     ReadDecision { run: RunId },
-    /// What `run` spent, as `yunta stats` reads it.
-    ReadStats { run: RunId },
     /// The past runs of the workflow called `workflow`, as `yunta stats --workflow`
     /// reads them.
     ReadHistory { workflow: WorkflowName },
     /// The workflow the catalog offers as `workflow`, drawn as written, as `yunta
     /// graph` draws it.
     ReadGraph { workflow: String },
-    /// The workflow `run` froze, drawn with each node labelled with what the run's
-    /// log derives for it, as `yunta graph --run` draws it.
-    ReadRunGraph { run: RunId },
     /// `option` recorded on the decision `run` waits on, with the `words` it was chosen
     /// with, and the run handed on to a detached resume.
     Decide {
@@ -99,16 +90,12 @@ impl Operation {
             Operation::ReadRepository
             | Operation::DetectProject
             | Operation::ReadCatalog
-            | Operation::Field { .. }
-            | Operation::Follow { .. }
             | Operation::ReadPage { .. }
             | Operation::ReadNodePage { .. }
             | Operation::ReadQuestions { .. }
             | Operation::ReadDecision { .. }
-            | Operation::ReadStats { .. }
             | Operation::ReadHistory { .. }
-            | Operation::ReadGraph { .. }
-            | Operation::ReadRunGraph { .. } => true,
+            | Operation::ReadGraph { .. } => true,
             Operation::Doctor { sessions } => !sessions,
             Operation::Collect { dry_run } => *dry_run,
             Operation::Workflow(work) => work.reads(),
@@ -144,16 +131,12 @@ impl Operation {
             | Operation::Workflow(_)
             | Operation::Pack(_)
             | Operation::Evidence(_)
-            | Operation::Field { .. }
-            | Operation::Follow { .. }
             | Operation::ReadPage { .. }
             | Operation::ReadNodePage { .. }
             | Operation::ReadQuestions { .. }
             | Operation::ReadDecision { .. }
-            | Operation::ReadStats { .. }
             | Operation::ReadHistory { .. }
             | Operation::ReadGraph { .. }
-            | Operation::ReadRunGraph { .. }
             | Operation::Decide { .. }
             | Operation::Answer { .. }
             | Operation::Resume { .. }

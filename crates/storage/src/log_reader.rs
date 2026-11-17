@@ -90,6 +90,13 @@ impl LogReader {
         .await
     }
 
+    /// [`Storage::first_events`], on the kept connection: each run's first
+    /// event, in one statement, whatever the length of each run's log.
+    pub async fn first_events(&self) -> Result<Vec<StoredEvent>> {
+        self.run("read each run's first event", Storage::first_events)
+            .await
+    }
+
     /// How many statements the reader's calls ran since it opened, one a
     /// call: what a test of a follower counts to hold what a look costs.
     pub fn statements(&self) -> u64 {

@@ -1,7 +1,9 @@
-//! Reading a run's log the way a test asks about it, writing the
-//! events a run would have written, and loading a log a run wrote into
-//! a store of its own.
+//! Reading a run's log the way a test asks about it, and where each run
+//! of a store stands, writing the events a run would have written,
+//! loading a log a run wrote into a store of its own, and setting a
+//! store's log aside, so every read of it fails, and putting it back.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -30,6 +32,17 @@ pub fn accepted(events: &[StoredEvent]) -> Vec<ArtifactRef> {
             }),
             _ => None,
         })
+        .collect()
+}
+
+/// Each run's last seq in the log at `store`, by run: where a reader that
+/// stands caught up with the log has read each run to.
+pub fn heads(store: &Path) -> BTreeMap<RunId, Seq> {
+    let storage = Storage::open(store).expect("the store whose heads are read");
+    let heads = storage.heads().expect("the log's heads");
+    heads
+        .into_iter()
+        .map(|head| (head.run_id, head.seq))
         .collect()
 }
 
@@ -126,6 +139,31 @@ pub fn loaded(store: &Path, events: &[StoredEvent]) {
             event.run_id
         );
     }
+}
+
+/// The table a log set aside keeps its events in: one no read of the log names.
+const EVENTS_ASIDE: &str = "events_set_aside";
+
+/// The log at `store` set aside, behind every connection open on it: from here every
+/// read of a run's events or of the runs' heads fails, so each look a following takes
+/// at it fails whole, until [`put_log_back`]. Not a broken payload, which makes one run
+/// unreadable.
+pub fn set_log_aside(store: &Path) {
+    renamed(store, "events", EVENTS_ASIDE);
+}
+
+/// The log at `store`, set aside by [`set_log_aside`], put back as it was: every read
+/// of it goes through again.
+pub fn put_log_back(store: &Path) {
+    renamed(store, EVENTS_ASIDE, "events");
+}
+
+/// The table `from` of the log at `store` renamed `to`, in one commit another
+/// connection reads at its next statement.
+fn renamed(store: &Path, from: &str, to: &str) {
+    let log = rusqlite::Connection::open(store).expect("the log at the store");
+    log.execute_batch(&format!("ALTER TABLE {from} RENAME TO {to}"))
+        .unwrap_or_else(|error| panic!("the log's `{from}` renamed `{to}`: {error}"));
 }
 
 /// The `run_created` a log written by hand opens with: a manifest named by

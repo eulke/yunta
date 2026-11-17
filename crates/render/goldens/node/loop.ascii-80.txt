@@ -1,0 +1,37 @@
+> node implement of run Q78GRR ; running
+
+  kind         loop
+  attempt      1
+  runner       executor on mock/gpt-6-luna
+  tokens       5.85M in / 240k out (5.62M cached)
+  took         20m21s
+
+> global-pack-install  Add explicit global pack install target ; attempt 1
+
+  proved   red
+  by      cargo test --workspace --test pack_global_spec global_pack_commands...
+  keeps   lint, green at the baseline
+
+  its scope
+  + crates/cli/src/pack.rs
+  + crates/cli/src/cli/pack.rs
+  + crates/cli/src/cli/dispatch.rs
+  + crates/cli/src/commands/pack.rs
+  . crates/cli/tests/pack_cmd.rs
+
+what it is doing ; 8 calls
+running: attempt 1
+global-pack-install pre: 3 criteria
+session opened on gpt-6-luna ; fence widened to 2 roots
+write refused: crates/cli/src/commands/pack_audit.rs
+call    yunta_task
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+
+next
+  yunta status Q78GRR   shows the whole run

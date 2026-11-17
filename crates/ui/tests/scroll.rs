@@ -22,14 +22,15 @@ use surco::motion::Motion;
 use surco::paint::Paint;
 use surco::surface::Terminal;
 use yunta_api::{FollowNews, RunNews};
+use yunta_core::events::Channel;
 use yunta_core::RunId;
 use yunta_testkit::Bench;
 use yunta_testkit_ui::driving::drive;
 use yunta_testkit_ui::sandbox::workspace;
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, News, Operation, Performer, Request, State};
+use yunta_ui::{Input, Operation, Performer, Request, State};
 
-use support::{on_the_field, performed, stopped};
+use support::{on_the_field, performed, read_whole};
 
 /// A node an agent works, then one that finishes after it.
 const WORKED: &str =
@@ -127,11 +128,18 @@ async fn finished(run_id: &str) -> Bench {
 }
 
 /// The application at the stage `strokes` reach from the field, over `bench`'s finished
-/// run.
+/// run, which the field lists with its closed runs once `d` shows them.
 async fn at(bench: &Bench, strokes: &[Stroke]) -> State {
-    let performer = Arc::new(Performer::new(workspace(&bench.worktree, root_of(bench))));
-    let field = on_the_field(vec![stopped(&bench.run_id)]);
-    let (state, surfaced) = drive(field, Vec::new(), &performer, strokes).await;
+    let performer = Arc::new(Performer::new(
+        workspace(&bench.worktree, root_of(bench)),
+        Channel::Tty,
+    ));
+    let (field, _) = on_the_field(&[&bench.run_id]).await;
+    let strokes: Vec<Stroke> = [Stroke::Insert('d')]
+        .into_iter()
+        .chain(strokes.iter().copied())
+        .collect();
+    let (state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;
     assert!(surfaced.is_empty(), "{surfaced:?}");
     state
 }
@@ -185,7 +193,10 @@ async fn a_page_read_again_keeps_its_line_and_another_page_starts_at_its_first()
     let screen = pressed(&mut state, Stroke::PageDown);
     assert_eq!(scrolled(&screen).sight.top, A_PAGE);
     // What it cost, then back: the run's page is read again, and stands where it was.
-    let performer = Arc::new(Performer::new(workspace(&bench.worktree, root_of(&bench))));
+    let performer = Arc::new(Performer::new(
+        workspace(&bench.worktree, root_of(&bench)),
+        Channel::Tty,
+    ));
     let strokes = [Stroke::Insert('s'), Stroke::Decline];
     let (mut state, _) = drive(state, Vec::new(), &performer, &strokes).await;
     let screen = laid_out(&mut state);
@@ -205,43 +216,34 @@ async fn a_page_read_again_keeps_its_line_and_another_page_starts_at_its_first()
 async fn a_successors_page_starts_at_its_first_line() {
     let promoted = finished("01M7SCROLLPROMOTED00000000").await;
     let successor = finished("01M7SCROLLSUCCESSOR0000000").await;
-    let field = on_the_field(vec![stopped(&promoted.run_id)]);
+    let (field, _) = on_the_field(&[&promoted.run_id]).await;
     let mut state = field;
-    // The run opened, its following and its page handed back as the performer hands them.
+    // The run opened: its page handed back as the performer hands it, the run read whole
+    // as what the state follows.
     let asked = state.update(Input::Stroke(Stroke::Enter));
-    let following = asked.iter().find_map(|request| match request {
-        Request::Perform(ticket, Operation::Follow { .. }) => Some(*ticket),
+    let reading = Operation::ReadPage {
+        run: promoted.run_id.clone(),
+    };
+    let page = asked.iter().find_map(|request| match request {
+        Request::Perform(ticket, operation) if *operation == reading => Some(*ticket),
         _ => None,
     });
-    let following = following.expect("the run is followed");
-    for request in asked {
-        let Request::Perform(ticket, operation) = request else {
-            continue;
-        };
-        let (news, outcome) = performed(&promoted, operation).await;
-        for news in news.into_iter().take(1) {
-            state.update(Input::News(ticket, news));
-        }
-        if ticket != following {
-            state.update(Input::Outcome(ticket, outcome));
-        }
-    }
+    let page = page.expect("the run's page is read");
+    let (_, read) = performed(&promoted, reading).await;
+    state.update(Input::Outcome(page, read));
+    state.update(Input::FollowNews(read_whole(&promoted).await));
     laid_out(&mut state);
     let screen = pressed(&mut state, Stroke::PageDown);
     assert_eq!(scrolled(&screen).sight.top, A_PAGE);
     // The work goes on in the successor: its page is read, and stands from its first line.
-    let read = Operation::Follow {
-        run: successor.run_id.clone(),
-    };
-    let (news, _) = performed(&successor, read).await;
-    let Some(News::Following(FollowNews::Whole { run, events })) = news.into_iter().next() else {
-        panic!("a following reads the run whole first");
+    let FollowNews::Whole { run, events } = read_whole(&successor).await else {
+        unreachable!("a run read whole");
     };
     let handed_on = FollowNews::Run {
         run: promoted.run_id.clone(),
         news: RunNews::Successor { run, events },
     };
-    let asked = state.update(Input::News(following, News::Following(handed_on)));
+    let asked = state.update(Input::FollowNews(handed_on));
     assert!(
         asked.iter().any(|request| matches!(
             request,
@@ -253,12 +255,13 @@ async fn a_successors_page_starts_at_its_first_line() {
     assert_eq!(scrolled(&screen).sight.top, 0, "the successor's page");
 }
 
-#[test]
-fn a_field_taller_than_its_region_keeps_the_run_pointed_at_in_sight() {
+#[tokio::test]
+async fn a_field_taller_than_its_region_keeps_the_run_pointed_at_in_sight() {
     let runs: Vec<RunId> = (0..12)
         .map(|at| format!("01M7FIELD{at:017}").parse().expect("a run's id"))
         .collect();
-    let mut state = on_the_field(runs.iter().map(stopped).collect());
+    let listed: Vec<&RunId> = runs.iter().collect();
+    let (mut state, _) = on_the_field(&listed).await;
     laid_out(&mut state);
     for _ in 0..10 {
         state.update(Input::Stroke(Stroke::Insert('j')));

@@ -1,7 +1,7 @@
 //! Reading the log back: a run whole or past a seq, the runs the log holds,
-//! where each of them stands, and whether another connection wrote since a
-//! handle last looked; and a handle made to refuse every write, for one kept
-//! only to read.
+//! where each of them stands and how each of them opened, and whether another
+//! connection wrote since a handle last looked; and a handle made to refuse
+//! every write, for one kept only to read.
 //!
 //! A row becomes a [`StoredEvent`] in one place, so every read keeps a kind this
 //! binary does not know verbatim and fails on a corrupt row the same way. A read
@@ -36,6 +36,21 @@ const HEADS: &str = "WITH RECURSIVE ids(run_id) AS (
      )
      SELECT run_id, (SELECT MAX(seq) FROM events WHERE events.run_id = ids.run_id)
      FROM ids WHERE run_id IS NOT NULL";
+
+/// Each run's first row, read off the same key the way [`HEADS`] reads each
+/// run's last seq: the next run id, its least seq, then that row, so a run's
+/// length costs nothing. The columns are a run's read's, its run id after them.
+const FIRST_EVENTS: &str = "WITH RECURSIVE ids(run_id) AS (
+         SELECT MIN(run_id) FROM events
+         UNION ALL
+         SELECT (SELECT MIN(run_id) FROM events WHERE run_id > ids.run_id) FROM ids
+         WHERE ids.run_id IS NOT NULL
+     )
+     SELECT events.seq, events.ts, events.node_id, events.payload_json,
+            events.schema_version, events.run_id
+     FROM ids JOIN events ON events.run_id = ids.run_id
+         AND events.seq = (SELECT MIN(seq) FROM events AS run WHERE run.run_id = ids.run_id)
+     ORDER BY events.run_id";
 
 /// Where one run stands: the seq of its last event. Not the run's state, which
 /// is derived from its events; this only says whether there are more of them.
@@ -98,6 +113,28 @@ impl Storage {
             heads.push(RunHead { run_id, seq });
         }
         Ok(heads)
+    }
+
+    /// Each run's first event, by run id, in one read: what a reader asks to
+    /// learn which run a promotion created a run from, without reading any run
+    /// whole. Each row is read as [`Storage::events_for_run`] reads it.
+    pub fn first_events(&self) -> Result<Vec<StoredEvent>> {
+        let list_err = |error| StorageError::ListRuns {
+            source: cause(error),
+        };
+        let conn = lock(&self.conn);
+        let mut stmt = conn.prepare(FIRST_EVENTS).map_err(list_err)?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(5)?, row_of(row)?)))
+            .map_err(list_err)?;
+        let mut firsts = Vec::new();
+        for row in rows {
+            let (run_id, row) = row.map_err(list_err)?;
+            let run_id =
+                RunId::try_from(run_id).map_err(|source| StorageError::CorruptRunId { source })?;
+            firsts.push(stored(&run_id, row)?);
+        }
+        Ok(firsts)
     }
 
     /// Every run with at least one event, oldest first by the timestamp

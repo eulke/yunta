@@ -1,0 +1,25 @@
++ node brief of run Q78GRR ; finished
+
+  Wrote and verified brief.md. It captures the idea and lists unsettled details
+  as open points with planning assumptions.
+
+  kind         prompt
+  attempt      1
+  runner       planner on mock/gpt-6-luna
+  tokens       106k in / 6k out (102k cached)
+  took         22s
+  produced     ~/.yunta/runs/01M7DES1GNED00000000Q78GRR/artifacts/brief/brief.md
+
+what it hands over
++ brief.md  the engine read it and accepted it
+
+what it is doing ; 2 calls
+running: attempt 1
+session opened on gpt-6-luna ; fence widened to 3 roots
+write   brief.md
+read    brief.md
+accepted brief.md
+finished: Wrote and verified brief.md. It captures the idea and lists unsettl...
+
+next
+  yunta status Q78GRR   shows the whole run

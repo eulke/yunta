@@ -2,12 +2,13 @@
 //! reaches from the application as it opens, and beside them a remark of each piece of
 //! work under way, which asks nothing. What every state holds: an input never panics,
 //! every piece of work it asks for is one the performer carries out, no work that stops,
-//! closes, removes or spends is asked but on its confirmation, and its screen draws on
-//! Markdown and HTML. Over each state the palette is opened and every row of each palette
-//! the walk meets is taken, and help is opened over each legend it meets, holding the
-//! same. A state that breaks one is named with the inputs that reach it. Among the inputs
-//! is what a terminal of a few rows laid out of the state's screen, so every page a stage
-//! shows scrolls.
+//! closes, removes or spends is asked but on its confirmation, its screen draws on
+//! Markdown and HTML, and where its trail names a run, under any stage opened over the
+//! run's, it follows that run. Over each state the palette is opened and every row of
+//! each palette the walk meets is taken, and help is opened over each legend it meets,
+//! holding the same. A state that breaks one is named with the inputs that reach it.
+//! Among the inputs is what a terminal of a few rows laid out of the state's screen, so
+//! every page a stage shows scrolls.
 
 #[path = "walk/dialogs.rs"]
 mod dialogs;
@@ -18,6 +19,7 @@ use std::time::Instant;
 
 use surco::components::{Screen, Sight};
 use surco::surface::{Html, Markdown};
+use yunta_core::RunId;
 use yunta_testkit_ui::home::Home;
 use yunta_testkit_ui::recorded::Recordings;
 use yunta_testkit_ui::walk::{Checks, Reached, Walk};
@@ -108,10 +110,12 @@ const MUST_SCROLL: [(&str, &str); 9] = [
 const REMARKED: &str = "the work under way remarks this as it works";
 
 /// What the interface holds over the walk, and the screens it has yet to show: the
-/// recordings its work is answered from, each palette taken row by row by its rows, and
-/// each help opened by the keys it lists.
+/// recordings its work is answered from, the runs of the walk's home a trail names by
+/// their handles, each palette taken row by row by its rows, and each help opened by the
+/// keys it lists.
 pub struct InterfaceChecks<'r> {
     recordings: &'r Recordings,
+    runs: Vec<RunId>,
     unreached: Vec<(&'static str, &'static str)>,
     unscrolled: Vec<(&'static str, &'static str)>,
     palettes: HashSet<u64>,
@@ -120,10 +124,12 @@ pub struct InterfaceChecks<'r> {
 }
 
 impl<'r> InterfaceChecks<'r> {
-    /// Checks that have met nothing, with every screen of [`MUST_REACH`] yet to show.
-    fn new(recordings: &'r Recordings) -> Self {
+    /// Checks that have met nothing, with every screen of [`MUST_REACH`] yet to show,
+    /// over `runs`, the runs of the walk's home.
+    fn new(recordings: &'r Recordings, runs: Vec<RunId>) -> Self {
         InterfaceChecks {
             recordings,
+            runs,
             unreached: MUST_REACH.to_vec(),
             unscrolled: MUST_SCROLL.to_vec(),
             palettes: HashSet::new(),
@@ -138,9 +144,11 @@ impl Checks for InterfaceChecks<'_> {
         let _ = Html.screen(&state.screen(&Html.look()));
         self.unreached
             .retain(|(shown, _)| !markdown.contains(shown));
-        if let Some(page) = scrolled(&state.screen(&Markdown.look())) {
+        let screen = state.screen(&Markdown.look());
+        if let Some(page) = scrolled(&screen) {
             self.unscrolled.retain(|(at, _)| *at != page);
         }
+        follows_the_run_it_names(state, &screen.trail, &self.runs, reached);
         self.palette_taken(state, reached);
         self.help_taken(state, reached);
         remarks_hold(state, reached);
@@ -159,14 +167,26 @@ fn every_state_the_application_reaches_holds() {
     yunta_testkit::on_a_deep_stack(|| async {
         let home = Home::built().await;
         let recordings = Recordings::made(&home).await;
-        walked_whole(&recordings);
+        walked_whole(&recordings, runs_of(&home));
     });
 }
 
-/// The walk over `recordings`, held to every screen it must reach.
-fn walked_whole(recordings: &Recordings) {
+/// The runs of the walk's home, which a trail names by their handles.
+fn runs_of(home: &Home) -> Vec<RunId> {
+    vec![
+        home.worked.run_id.clone(),
+        home.parked.clone(),
+        home.deciding.run_id.clone(),
+        home.asking.run_id.clone(),
+        home.reviewing.run_id.clone(),
+    ]
+}
+
+/// The walk over `recordings`, held to every screen it must reach, its trails naming
+/// `runs`.
+fn walked_whole(recordings: &Recordings, runs: Vec<RunId>) {
     let started = Instant::now();
-    let mut checks = InterfaceChecks::new(recordings);
+    let mut checks = InterfaceChecks::new(recordings, runs);
     let states = Walk::over(recordings).walked(&mut checks);
     eprintln!(
         "the walk reached {states} states, took {} palettes row by row and opened {} helps, in {:?}",
@@ -206,6 +226,30 @@ fn scrolled(screen: &Screen) -> Option<&str> {
     let main = screen.main.sight != Sight::at_the_end() && screen.main.sight.top > 0;
     main.then(|| screen.trail.last().map(String::as_str))
         .flatten()
+}
+
+/// Where `trail`, `state`'s, reached as `reached` says, names one of `runs` by its handle,
+/// `state` follows a run of that handle: the run's stage follows its run under every stage
+/// opened over it, its stats, its graph, its decision, its evidence, the palette and help,
+/// so what each shows of the run is what the run comes to.
+fn follows_the_run_it_names(
+    state: &State,
+    trail: &[String],
+    runs: &[RunId],
+    reached: &Reached<'_>,
+) {
+    let named = trail
+        .iter()
+        .find(|place| runs.iter().any(|run| run.handle() == place.as_str()));
+    let Some(handle) = named else {
+        return;
+    };
+    let followed = state.followed().run;
+    assert!(
+        followed.as_ref().is_some_and(|run| run.handle() == handle),
+        "the trail names the run {handle} and the state follows {followed:?}, reached by:\n{}",
+        reached.inputs()
+    );
 }
 
 /// A remark of each piece of work `state`, reached as `reached` says, waits on, handed to

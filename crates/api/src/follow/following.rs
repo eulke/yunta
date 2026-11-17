@@ -1,19 +1,20 @@
 //! See [`super`]. What is followed, followed while it moves, from a process that does
 //! not drive it: the run read whole, what came past its head, the engine as the run's
-//! registry reads it, what the run's sessions say, and the run a promotion hands the
-//! work to; beside it the field, whose side of a look is `field`'s, what the run waits on
-//! a person for, `awaited`'s, and what its nodes hand over, `document`'s. Every interface
-//! that follows a run reads the same news at the same pace.
+//! registry reads it, and what the run's sessions say; beside it the field, whose side of
+//! a look is `field`'s, the run a promotion hands the work to, `successor`'s, what the run
+//! waits on a person for, `awaited`'s, and what its nodes hand over, `document`'s. Every
+//! interface that follows a run reads the same news at the same pace.
 //!
 //! A following never ends by itself: a run that parks, stalls or closes is a reading
 //! of its frame, and the following reads on past it, as a parked run resumed elsewhere
 //! moves again. It ends only by its caller's rule, the one every interface stops by,
 //! `!frame.moves() && !following.awaits_successor()`, or by its stop. A look hands what
 //! the log says before what the registry says, so a caller that stops at the rule
-//! after a piece of news has been handed every event its frame reads; and a run closed
-//! promoted whose successor does not come in the time one takes to be created is
-//! handed as having none, once, so a caller waiting on the following reads its rule
-//! again.
+//! after a piece of news has been handed every event its frame reads. A successor
+//! already in the log is handed as one that comes, right after the run read whole closed
+//! promoted; and a run closed promoted whose successor does not come in the time one
+//! takes to be created is handed as having none, once, so a caller waiting on the
+//! following reads its rule again.
 //!
 //! What a look found waits in the following's queue until it is handed, and a look
 //! changes what the following holds only once a read is done: a caller may drop
@@ -41,26 +42,14 @@ use yunta_storage::LogReader;
 use super::awaited::Asking;
 use super::field::HeldField;
 use super::listening::Listening;
+use super::successor::SuccessorWait;
 use super::{document::Handing, FollowNews, Followed, FollowedRun, RunNews, RunRegistry};
-use crate::event_log::PromotionChain;
-use crate::run::read_manifest;
 use crate::{Error, Failure, OpenedRun, Project, Stop};
-
-/// How often a following asks the log whether another connection committed since it
-/// last asked. A tenth of a second puts an event on a follower's screen well inside the
-/// quarter second a person reads as at once, and a log nothing was committed to costs
-/// one pragma.
-const READ_EVERY: Duration = Duration::from_millis(100);
 
 /// How often a following reads the run's registry while the run's log says it moves or
 /// asks a person. Once a second tells a gone engine within the two seconds a stall is
 /// owed, with no read of the process table for every look.
 pub(super) const REGISTRY_EVERY: Duration = Duration::from_secs(1);
-
-/// How long a following awaits the successor of a run that closed promoted before it
-/// hands that none came: the engine that promotes creates it once it has closed the run
-/// and set its tree up, which takes a few seconds on a large repository.
-pub(super) const SUCCESSOR_WAIT: Duration = Duration::from_secs(30);
 
 /// What is followed, followed while it moves. Not the run's driving, which happens in
 /// the process its registry names.
@@ -87,7 +76,7 @@ pub struct Following {
     pub(super) field: Option<HeldField>,
     /// Whether another connection committed since a look last read all a commit asks of
     /// it: kept until then, so a look dropped half way leaves the reading to the next.
-    commit_unread: bool,
+    pub(super) commit_unread: bool,
     /// The engine the run's registry named at a look, when it changed, which is handed
     /// after that look's events.
     engine_read: Option<Engine>,
@@ -111,35 +100,7 @@ pub(super) struct Held {
     pub(super) run: FollowedRun,
     /// The registry the run keeps beside it, in its directory.
     pub(super) registry: RunRegistry,
-    /// The chain of promotions the run's successor is found along.
-    chain: PromotionChain,
     pub(super) successor: SuccessorWait,
-}
-
-/// Where a following stands on the successor of the run it holds.
-#[derive(Debug, Clone, Copy)]
-pub(super) enum SuccessorWait {
-    /// The run held has not closed promoted, as far as it has been read.
-    NotPromoted,
-    /// The run held closed promoted, first read so at `since`, and no successor of it
-    /// has been found: the log is asked for one after each commit.
-    Awaited { since: Instant },
-    /// None came within [`SUCCESSOR_WAIT`], which was handed once; one that comes later
-    /// is still followed on.
-    RanOut,
-}
-
-impl SuccessorWait {
-    /// The wait begun, as the run's close is first read: whether it began now.
-    fn begin(&mut self) -> bool {
-        let began = matches!(self, SuccessorWait::NotPromoted);
-        if began {
-            *self = SuccessorWait::Awaited {
-                since: Instant::now(),
-            };
-        }
-        began
-    }
 }
 
 impl Project {
@@ -174,13 +135,23 @@ impl Project {
         // following, which takes the git it runs down with it.
         following.read_field_whole(&Stop::new()).await?;
         following.read_whole().await?;
+        let now = following.clock.now();
+        following.onto_successors(now).await?;
         following.hand_over().await;
-        following.ask(following.clock.now());
+        following.ask(now);
         Ok(following)
     }
 }
 
 impl Following {
+    /// How often a following looks at the log, asking it whether another connection
+    /// committed since it last asked. A tenth of a second puts an event on a follower's
+    /// screen well inside the quarter second a person reads as at once, and a log nothing
+    /// was committed to costs one pragma. An interface whose following could not be made
+    /// makes it again at this pace, so nothing that follows the log looks at it more often
+    /// than a following.
+    pub const LOOKS_EVERY: Duration = Duration::from_millis(100);
+
     /// The next news of what is followed: what a look found, or what a session said, as
     /// soon as either comes. It never ends by itself: its caller stops where
     /// `!frame.moves() && !awaits_successor()`, or trips `stop`, which is
@@ -198,7 +169,7 @@ impl Following {
                 }
                 Some((turn, news)) = self.asking.read.recv() => self.asked_read(turn, news),
                 // Words handed back between looks never hold the next look back.
-                () = Pace::every(READ_EVERY).beat_after(self.looked_at) => {
+                () = Pace::every(Self::LOOKS_EVERY).beat_after(self.looked_at) => {
                     self.looked_at = Instant::now();
                     self.look(stop).await?;
                 }
@@ -300,13 +271,11 @@ impl Following {
     }
 
     /// The run followed read whole and handed, when it is not the one held: as the
-    /// field reads it, where it does. Its chain of promotions begins before it is read,
-    /// so a successor made while it is read is one the chain still finds.
+    /// field reads it, where it does.
     async fn read_whole(&mut self) -> Result<(), Error> {
         let Some(run) = self.whole_owed() else {
             return Ok(());
         };
-        let chain = PromotionChain::starting_at(&self.reader, run.clone()).await?;
         let (read, registry, events) = match self.whole_from_the_field(&run).await? {
             Some(whole) => whole,
             None => {
@@ -322,25 +291,26 @@ impl Following {
                 (read, registry, events)
             }
         };
-        // A run already closed promoted is awaited a successor from here: one made since
-        // the chain began is found by the first look past its commit.
-        let mut successor = SuccessorWait::NotPromoted;
-        if closed_promoted(&read.frame(self.clock.now())) {
-            successor.begin();
-        }
-        self.held = Some(Held {
+        // Its successor is awaited from the successor's side of the same look, which
+        // begins the wait for a run read closed promoted.
+        self.hold(Held {
             run: read.clone(),
             registry,
-            chain,
-            successor,
+            successor: SuccessorWait::NotPromoted,
         });
-        self.engine_read = None;
-        self.registry_read_at = Instant::now();
         self.news.push_back(FollowNews::Whole {
             run: Box::new(read),
             events,
         });
         Ok(())
+    }
+
+    /// `held` the run followed from here, the engine it was read with counted as the
+    /// registry's last reading.
+    pub(super) fn hold(&mut self, held: Held) {
+        self.held = Some(held);
+        self.engine_read = None;
+        self.registry_read_at = Instant::now();
     }
 
     /// What came past the head of the run held, kept to hand back: the run's whole log
@@ -387,90 +357,6 @@ impl Following {
         self.engine_read = (engine != held.run.engine).then_some(engine);
     }
 
-    /// Follows the run held onto its successor while it stands closed promoted, and
-    /// hands once that none came when the wait for one runs out. The log is asked as the
-    /// close is first read, then after each commit; a successor found closed promoted in
-    /// turn is asked after at once, along the chain.
-    async fn onto_successors(&mut self, now: DateTime<Utc>) -> Result<(), Error> {
-        loop {
-            let Some(held) = self.held.as_mut() else {
-                return Ok(());
-            };
-            if !closed_promoted(&held.run.frame(now)) {
-                return Ok(());
-            }
-            if !held.successor.begin() && !self.commit_unread {
-                break;
-            }
-            // The chain is asked as a copy, kept once the successor is read whole, so a
-            // look dropped half way asks again.
-            let mut chain = held.chain.clone();
-            let Some(successor) = chain.successor(&self.reader).await? else {
-                break;
-            };
-            self.go_on_with(successor, chain).await?;
-        }
-        self.ran_out();
-        Ok(())
-    }
-
-    /// Follows `successor` from here on, read whole, as the field reads it where it does,
-    /// else beside the run it was promoted from, since the engine that promotes creates
-    /// it under the runs root it works in; `chain` is the chain that found it.
-    async fn go_on_with(&mut self, successor: RunId, chain: PromotionChain) -> Result<(), Error> {
-        let Some(held) = &self.held else {
-            return Ok(());
-        };
-        let predecessor = held.run.run.clone();
-        let (read, registry, events) = match self.whole_from_the_field(&successor).await? {
-            Some(whole) => whole,
-            None => {
-                let registry = held.registry.of_successor(&successor);
-                let manifest_path = yunta_engine::run_dir::manifest_path(registry.run_dir());
-                let manifest = read_manifest(&manifest_path)?.doc;
-                let events = self.reader.events(&successor).await.map_err(Failure::new)?;
-                let read =
-                    FollowedRun::read(successor.clone(), manifest, &events, registry.engine());
-                (read, registry, events)
-            }
-        };
-        self.held = Some(Held {
-            run: read.clone(),
-            registry,
-            chain,
-            successor: SuccessorWait::NotPromoted,
-        });
-        if self.followed.run.as_ref() == Some(&predecessor) {
-            self.followed.run = Some(successor);
-        }
-        self.engine_read = None;
-        self.registry_read_at = Instant::now();
-        let news = RunNews::Successor {
-            run: Box::new(read),
-            events,
-        };
-        self.news.push_back(FollowNews::Run {
-            run: predecessor,
-            news,
-        });
-        Ok(())
-    }
-
-    /// That no successor came, kept to hand back once, when the run held has awaited one
-    /// for [`SUCCESSOR_WAIT`].
-    fn ran_out(&mut self) {
-        let Some(held) = self.held.as_mut() else {
-            return;
-        };
-        let SuccessorWait::Awaited { since } = held.successor else {
-            return;
-        };
-        if since.elapsed() >= SUCCESSOR_WAIT {
-            held.successor = SuccessorWait::RanOut;
-            self.found(RunNews::NoSuccessor);
-        }
-    }
-
     /// `news` of the run held folded into it, and kept to hand back.
     pub(super) fn found(&mut self, news: RunNews) {
         let Some(held) = &self.held else {
@@ -479,11 +365,6 @@ impl Following {
         let run = held.run.run.clone();
         self.found_of(run, news);
     }
-}
-
-/// Whether the run `frame` reads closed promoted, handing the work to a successor.
-fn closed_promoted(frame: &RunFrame) -> bool {
-    matches!(frame.phase, RunPhase::Promoted { .. })
 }
 
 /// Whether the run's log, as `frame` reads it, says it moves or asks a person: the runs

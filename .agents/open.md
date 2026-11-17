@@ -10,6 +10,16 @@ run a red suite (`sleep 2; false`) as a guard and stop the node with `BrokenGuar
 run again, it passed. The order between the pre-check and the measurement landing is a race the test does not
 pin. Reproduce it under load, many runs beside busy loops, before deciding what the pre-check waits on.
 
+### A governed command's group is still seen running as its outcome is handed
+Paths: `crates/engine/src/process.rs`, `crates/engine/src/process/**`, `crates/engine/tests/process.rs`, `crates/engine/tests/memo_across_wakes.rs`, `crates/testkit-core/src/adapter.rs`
+Beside another build, `crates/engine/tests/process.rs` fails in about one run of two, a different test each time:
+`context_command_timeout_leaves_no_process_alive` and `repeated_forks_during_cancellation_leave_no_running_group_members`
+see a member of the group after `TimedOut` or `Cancelled`, and `a_supervision_outside_any_run_still_answers_to_its_token`
+fails the same way. Alone they pass. Either the outcome is handed before the group is gone, or the test's reading
+counts a member not yet reaped: reproduce it under load, many runs beside busy loops, before deciding which.
+`yunta-testkit-core`'s `a_pid_never_recorded_ends_the_wait_instead_of_hanging_it` timed out once in the same suite. So did
+`crates/engine/tests/memo_across_wakes.rs`'s `a_wake_whose_commands_run_elsewhere…`, once, beside the same builds.
+
 ### A skill a run revises is not the one its later sessions load
 Paths: `crates/engine/src/frozen/**`, `crates/adapters/src/mount.rs`, `crates/engine/src/run/session_plan.rs`
 A run freezes each skill when it is born and mounts that copy in every session, so a node that rewrites a skill's

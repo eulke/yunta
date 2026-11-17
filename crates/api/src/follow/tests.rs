@@ -1,15 +1,15 @@
 //! What a look at a followed run and field costs, counted on the reader the following
 //! keeps, and what waits on the following's own clocks, which no caller outside the
-//! module can move: a wait for a successor run out, a run's directory checked. Over a log
-//! a bench writes.
+//! module can move: a wait for a successor run out, and final once handed; a run's
+//! directory checked. Over a log a bench writes.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::time::Instant;
 use yunta_core::events::{
-    EventDraft, EventPayload, HostSuspendedPayload, RunEvent, RunFinishedPayload, RunMetrics,
-    TerminalState, TokenUsage,
+    EventDraft, EventPayload, HostSuspendedPayload, RunCreatedPayload, RunEvent,
+    RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
 };
 use yunta_core::persisted::PersistedDoc;
 use yunta_core::{ConfigLayer, Env, ProcessSecrets, RunId, SystemIdSource};
@@ -18,7 +18,7 @@ use yunta_testkit::{Bench, SourceLog};
 use yunta_testkit_core::FixedClock;
 
 use super::field::DIRS_EVERY;
-use super::following::{SuccessorWait, SUCCESSOR_WAIT};
+use super::successor::SuccessorWait;
 use super::{FollowNews, Followed, Following, RunNews};
 use crate::{FieldReach, Project, Stop, Workspace};
 
@@ -215,7 +215,7 @@ async fn a_wait_for_a_successor_that_runs_out_is_handed_once() {
 
     let held = following.held.as_mut().expect("the run is held");
     held.successor = SuccessorWait::Awaited {
-        since: Instant::now() - SUCCESSOR_WAIT,
+        until: Instant::now(),
     };
     for _ in 0..LOOKS {
         following.look(&Stop::new()).await.unwrap();
@@ -239,4 +239,92 @@ async fn a_wait_for_a_successor_that_runs_out_is_handed_once() {
         .count();
     assert_eq!(none_came, 1, "{handed:?}");
     assert!(!following.awaits_successor(), "no longer awaited");
+}
+
+/// Appends `payload` to `run`'s log on `bench`'s store.
+fn appended(bench: &Bench, run: &RunId, payload: EventPayload) {
+    let draft = EventDraft::new(run.clone(), None, payload).unwrap();
+    bench.storage.append(&draft, &FixedClock).unwrap();
+}
+
+/// Run `run`, born on `bench`'s log as promoted from `from`, its manifest beside it.
+async fn born_promoted_from(bench: &Bench, from: &RunId, run: &str) -> RunId {
+    let dir = bench.runs_root.join(run);
+    std::fs::create_dir_all(&dir).unwrap();
+    let manifest = bench.manifest_for(WORKFLOW, "").await;
+    let bytes = PersistedDoc::of(manifest).write().unwrap();
+    std::fs::write(yunta_engine::run_dir::manifest_path(&dir), bytes).unwrap();
+    let run = RunId::from(run);
+    let created = RunCreatedPayload {
+        checkout: None,
+        manifest_hash: yunta_core::sha256_hex(run.as_str().as_bytes()),
+        inputs: Default::default(),
+        mode: Default::default(),
+        promoted_from: Some(from.clone()),
+        yunta_schema: None,
+        base_branch: "main".to_string(),
+        base_commit: yunta_core::sha256_hex(b"base").as_str().into(),
+        environment: None,
+        left_out: Vec::new(),
+        opens_on_base: false,
+    };
+    appended(bench, &run, EventPayload::Run(RunEvent::Created(created)));
+    run
+}
+
+/// How many statements a look past a commit to one run of the field costs, the run held
+/// standing closed promoted with none come: whether the log moved, the runs' heads, and
+/// what came past that run's head. Nothing asks after a successor.
+const A_LOOK_PAST_A_COMMIT: u64 = 3;
+
+/// Whether `handed` holds news of a run that `is` takes.
+fn holds(handed: &[FollowNews], is: fn(&RunNews) -> bool) -> bool {
+    handed
+        .iter()
+        .any(|news| matches!(news, FollowNews::Run { news, .. } if is(news)))
+}
+
+/// That none came is final: once it is handed, a look past a later commit asks after no
+/// successor, and a run the log then holds that names the promoted run joins the field as
+/// any run new to the log does, no successor handed.
+#[tokio::test]
+async fn none_come_is_final() {
+    let bench = Bench::with_run_id("followed");
+    let project = project_of(&bench);
+    let beside = born(&bench, "beside").await;
+    let run = born(&bench, "promoted").await;
+    let tokens = RunMetrics::of(TokenUsage::default(), 0);
+    let closed = RunFinishedPayload::closed(TerminalState::Promoted, tokens);
+    appended(&bench, &run, EventPayload::Run(RunEvent::Finished(closed)));
+    let followed = Followed {
+        field: Some(FieldReach::Machine),
+        run: Some(run.clone()),
+    };
+    let mut following = project.follow(followed).await.unwrap();
+    let held = following.held.as_mut().expect("the run is held");
+    held.successor = SuccessorWait::Awaited {
+        until: Instant::now(),
+    };
+    following.look(&Stop::new()).await.unwrap();
+    let handed: Vec<FollowNews> = following.news.drain(..).collect();
+    assert!(holds(&handed, |news| matches!(news, RunNews::NoSuccessor)));
+
+    let slept = HostSuspendedPayload::slept(std::time::Duration::from_secs(3));
+    appended(
+        &bench,
+        &beside,
+        EventPayload::Run(RunEvent::HostSuspended(slept)),
+    );
+    let before = following.reader.statements();
+    following.look(&Stop::new()).await.unwrap();
+    let cost = following.reader.statements() - before;
+    assert_eq!(cost, A_LOOK_PAST_A_COMMIT, "a look asks after no successor");
+
+    let late = born_promoted_from(&bench, &run, "late").await;
+    following.look(&Stop::new()).await.unwrap();
+    let handed: Vec<FollowNews> = following.news.drain(..).collect();
+    let joined = |news: &FollowNews| matches!(news, FollowNews::Joined(it) if it.run == late);
+    assert!(handed.iter().any(joined), "it joins the field: {handed:?}");
+    let handed_on = holds(&handed, |news| matches!(news, RunNews::Successor { .. }));
+    assert!(!handed_on, "no successor after none came: {handed:?}");
 }

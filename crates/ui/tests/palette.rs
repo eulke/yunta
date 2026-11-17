@@ -13,9 +13,9 @@ use yunta_core::RunId;
 use yunta_render::command;
 use yunta_testkit::Bench;
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, News, Operation, Request, State};
+use yunta_ui::{Input, Operation, Request, State};
 
-use support::{on_the_field, performed, stopped};
+use support::{on_the_field, read_whole};
 
 /// A gate nobody answers: its run parks on it.
 const PARKS: &str = "name: gated\nnodes:\n  - { id: approve, kind: gate, assignee: lead, \
@@ -66,17 +66,14 @@ fn asked_for(asked: &[Request], kind: fn(&Operation) -> bool) -> yunta_ui::Ticke
         .unwrap_or_else(|| panic!("{asked:?}"))
 }
 
-/// The application on `bench`'s parked run, followed as its following first reads it.
+/// The application on `bench`'s parked run, its first reading handed as what the state
+/// follows hands it.
 async fn on_the_parked_run(bench: &Bench) -> (State, RunId) {
     let run = bench.run_id.clone();
-    let (found, _) = performed(bench, Operation::Follow { run: run.clone() }).await;
-    let Some(News::Following(read)) = found.into_iter().next() else {
-        panic!("the following hands back the run as it reads first");
-    };
-    let mut state = on_the_field(vec![stopped(&run)]);
-    let asked = state.update(Input::Stroke(Stroke::Enter));
-    let followed = asked_for(&asked, |work| matches!(work, Operation::Follow { .. }));
-    state.update(Input::News(followed, News::Following(read)));
+    let read = read_whole(bench).await;
+    let (mut state, _) = on_the_field(&[&run]).await;
+    state.update(Input::Stroke(Stroke::Enter));
+    state.update(Input::FollowNews(read));
     (state, run)
 }
 
@@ -159,10 +156,10 @@ async fn a_row_does_what_its_key_does_and_escape_does_nothing() {
     assert_eq!(draw(&chosen), draw(&pressed));
 }
 
-#[test]
-fn where_words_are_typed_a_slash_is_typed() {
+#[tokio::test]
+async fn where_words_are_typed_a_slash_is_typed() {
     // A repository set up with no runs opens on the first run's question.
-    let mut state = on_the_field(Vec::new());
+    let (mut state, _) = on_the_field(&[]).await;
     assert!(state.typing(), "the first run asks for words");
     state.update(Input::Stroke(Stroke::Insert('/')));
     let screen = state.screen(&Markdown.look());
@@ -197,11 +194,11 @@ async fn a_palette_taller_than_its_box_keeps_the_row_pointed_at_in_sight() {
     assert!(pointed.contains(&listed[last]), "{pointed}");
 }
 
-#[test]
-fn the_fields_close_row_names_the_run_x_closes() {
+#[tokio::test]
+async fn the_fields_close_row_names_the_run_x_closes() {
     let first: RunId = "01M7PALETTE000000000AAAAAA".parse().expect("a run's id");
     let second: RunId = "01M7PALETTE000000000BBBBBB".parse().expect("a run's id");
-    let mut state = on_the_field(vec![stopped(&first), stopped(&second)]);
+    let (mut state, _) = on_the_field(&[&first, &second]).await;
     // The first picked, the pointer on the second: `x` closes the first.
     for stroke in [
         Stroke::Insert(' '),

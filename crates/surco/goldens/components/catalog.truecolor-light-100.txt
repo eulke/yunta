@@ -206,3 +206,16 @@
 
   ␛[38;2;45;134;73m✓␛[0m ␛[1;38;2;14;12;18macme/lint␛[0m    v1.2.0 (3f9c2e1), as its lock records it
 ␛[1;38;2;14;12;18m▸␛[0m ␛[38;2;148;101;0m▲␛[0m ␛[1;38;2;14;12;18macme/review␛[0m  v0.4.0 (91ab7d0), modified: its files no longer match its lock
+
+␛[38;2;123;117;111m… 4 above␛[0m
+search  global pack
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+␛[38;2;123;117;111m… 4 under␛[0m
+
+967k tokens ␛[38;2;29;124;151m▃▂█▁▁▁▁▁▁▁▁▁▁▁▁␛[0m␛[38;2;200;194;187m · ␛[0m2m34s␛[38;2;123;117;111m at work␛[0m␛[38;2;200;194;187m · ␛[0m␛[1;38;2;158;47;155m5m00s␛[0m␛[38;2;123;117;111m waiting on you␛[0m

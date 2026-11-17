@@ -31,3 +31,11 @@ Wrong: reading a `NoRoom` refusal in a test, a recording or a real run as the ch
 larger of a twentieth of the disk and 10 GB free on the disk the test runs on, and a build beside it can take that.
 Right: read the disk's free space first; make room (a `cargo clean` of your own checkout) and run again.
 
+### A test file under `src` that the smell counters read as production
+Paths: `crates/*/src/**/tests/*.rs`, `xtask/src/smells/corpus.rs`
+Wrong: taking a file under `src/**/tests/` for a test file: the counters know a unit test's file by its name,
+`tests.rs`, so a submodule of it (`src/chronicle/tests/feed.rs`) is counted as production code, and an assertion
+that quotes a run tool's name or a long test function there raises a production counter.
+Right: read `cargo xtask smells --check` after adding one; say what the assertion holds through the crate's own
+values rather than a quoted literal the counter reads, and keep its functions under the production counts.
+

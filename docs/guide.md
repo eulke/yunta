@@ -690,7 +690,9 @@ on the first run, which asks what to build.
 
 The application follows runs and never runs one: a run it starts is handed to an engine
 of its own, as `yunta run --detach` hands it, and the application reads its log as
-`yunta status <run> --follow` does. Leaving leaves every run where it stands.
+`yunta status <run> --follow` does. The field and a run's screen move as their runs do,
+with no key to press, and a run stays followed under every screen opened over it. Leaving
+leaves every run where it stands.
 
 The last row says the keys of the screen; `?` lists every key it takes, and `/` opens the
 palette: what can be done from here, each row the command that does the same at a shell,

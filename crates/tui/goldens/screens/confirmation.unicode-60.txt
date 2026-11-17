@@ -4,9 +4,9 @@
  ┄│   cancel Q78GRR? It stops, with everything under it. │┄
   │                                                      │
  n│ next                                                 │
- ▸│   yunta cancel Q78GRR   does the same at a shell     │s
+ ▸│   yunta cancel Q78GRR   does the same at a shell     │m
   └──────────────────────────────────────────────────────┘
-   the newest closed 0s ago
+   the newest closed 7m ago
 
  next
  … 3 more lines

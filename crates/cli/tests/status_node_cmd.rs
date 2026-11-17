@@ -1,7 +1,9 @@
 //! `yunta status <run> --node <id>`: one node whole, read from the log
-//! of a run whose command failed the way a compiler does.
+//! of a run whose command failed the way a compiler does, and from the
+//! design's run where its loop works its task.
 
-use yunta_testkit::{run_id_from, stderr, stdout, yunta_at, Checkout};
+use yunta_testkit::{run_id_from, stderr, stdout, yunta_at, yunta_in, Checkout};
+use yunta_testkit_ui::cut::Cut;
 
 /// A build that fails with what went wrong on stdout, in a run that
 /// closes on the failure instead of asking what to do about it.
@@ -59,5 +61,52 @@ fn an_unknown_node_suggests_the_closest_id() {
         stderr(&page).contains("has no node `biuld`; did you mean `build`?"),
         "{}",
         stderr(&page)
+    );
+}
+
+/// The loop of the design's run, at work on its task where the target `board` stands, says
+/// in print what its pane shows: the task's own row, how it is proved, its scope with the
+/// paths its session wrote, and what it is doing, its newest call last.
+#[tokio::test]
+async fn a_loop_at_work_prints_its_task_s_proof_and_scope_and_its_feed_s_last_rows() {
+    let cut = Cut::of_target("board").await;
+    let run = cut.runs()[0].to_string();
+    let page = yunta_in!(
+        &cut.repository(),
+        cut.root(),
+        &["status", &run, "--node", "implement"]
+    );
+    assert!(page.status.success(), "{}", stderr(&page));
+    let text = stdout(&page);
+    let lines: Vec<&str> = text.lines().collect();
+    for printed in [
+        "● global-pack-install  Add explicit global pack install target · attempt 1",
+        "  proved   red",
+        "  keeps   lint, green at the baseline",
+        "  its scope",
+        "  ✓ crates/cli/src/pack.rs",
+        "  ◌ crates/cli/tests/pack_cmd.rs",
+        "what it is doing · 8 calls",
+    ] {
+        assert!(lines.contains(&printed), "`{printed}` in:\n{text}");
+    }
+    assert!(
+        lines.iter().any(
+            |line| line.starts_with("  by      cargo test --workspace --test pack_global_spec")
+        ),
+        "{text}"
+    );
+    let feed = lines
+        .iter()
+        .position(|line| *line == "what it is doing · 8 calls")
+        .expect("the feed's heading");
+    let newest = lines[feed + 1..]
+        .iter()
+        .take_while(|line| !line.is_empty())
+        .last();
+    assert_eq!(
+        newest,
+        Some(&"edit    crates/cli/src/cli/dispatch.rs"),
+        "{text}"
     );
 }

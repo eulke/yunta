@@ -13,6 +13,7 @@ use std::time::Duration;
 use surco::surface::{Markdown, Surface};
 use tokio::sync::mpsc;
 use yunta_api::{Stop, WorkflowStem};
+use yunta_core::events::Channel;
 use yunta_core::WorkflowShape;
 use yunta_render::page::Page;
 use yunta_testkit_ui::driving::drive;
@@ -20,7 +21,7 @@ use yunta_testkit_ui::sandbox::workspace;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, News, Operation, Performer, Request, State, WorkflowOperation};
 
-use support::{on_the_field, stopped};
+use support::on_the_field;
 
 /// Two nodes that each wait on the other: a cycle `check` refuses.
 const CYCLE: &str = "name: cycle\nnodes:\n  - { id: first, kind: bash, run: \"true\", \
@@ -51,10 +52,8 @@ fn main_region(state: &State) -> String {
 async fn a_workflow_checked_in_the_catalog_shows_the_page_check_prints() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = offering_a_cycle(root.path());
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7CATALOG000000000000000",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7CATALOG000000000000000")]).await;
     let strokes = [Stroke::Insert('w'), Stroke::Insert('c')];
     let (state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;
     assert!(surfaced.is_empty(), "{surfaced:?}");
@@ -85,10 +84,8 @@ async fn a_workflow_checked_in_the_catalog_shows_the_page_check_prints() {
 async fn enter_starts_the_workflow_pointed_at() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = offering_a_cycle(root.path());
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7CATALOG000000000000001",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7CATALOG000000000000001")]).await;
     let strokes = [Stroke::Insert('w'), Stroke::Enter];
     let (mut state, _) = drive(field, Vec::new(), &performer, &strokes).await;
     assert_eq!(state.screen(&Markdown.look()).trail, ["yunta", "start"]);
@@ -139,10 +136,8 @@ fn typed(words: &str) -> Vec<Stroke> {
 async fn a_new_workflow_is_written_with_the_skeleton_new_writes() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = offering_a_cycle(root.path());
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7CATALOG000000000000002",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7CATALOG000000000000002")]).await;
     let mut strokes = vec![Stroke::Insert('w'), Stroke::Insert('n')];
     strokes.extend(typed("greeter"));
     // The name, then the first shape, `one-node`.
@@ -172,10 +167,8 @@ async fn a_new_workflow_is_written_with_the_skeleton_new_writes() {
 async fn the_cases_that_all_end_show_the_tally_test_prints() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = with_cases(root.path(), &[("quick", "true")]);
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7CATALOG000000000000003",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7CATALOG000000000000003")]).await;
     let strokes = [Stroke::Insert('w'), Stroke::Insert('t')];
     let (state, _) = drive(field, Vec::new(), &performer, &strokes).await;
     let shown = main_region(&state);
@@ -187,10 +180,8 @@ async fn the_cases_that_all_end_show_the_tally_test_prints() {
 async fn each_case_is_seen_as_it_ends_and_the_rest_stop_when_let_go() {
     let root = tempfile::tempdir().expect("a temporary root");
     let repo = with_cases(root.path(), &[("a-quick", "true"), ("b-slow", "sleep 30")]);
-    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
-    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
-        "01M7CATALOG000000000000004",
-    ))]);
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7CATALOG000000000000004")]).await;
     let (mut state, _) = drive(field, Vec::new(), &performer, &[Stroke::Insert('w')]).await;
     let asked = state.update(Input::Stroke(Stroke::Insert('t')));
     let [Request::Perform(ticket, Operation::Workflow(WorkflowOperation::RunCases))] =

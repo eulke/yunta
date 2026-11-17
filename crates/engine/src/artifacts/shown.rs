@@ -1,6 +1,8 @@
 //! What an escalation shows, read out of the run for the person deciding; and the
-//! documents a node produced, read together for its page or one at a time, each as it
-//! is handed over, where one that does not read leaves the rest read.
+//! documents a node produced, read together, or one at a time, each as it is handed
+//! over or for its page, where one that does not read leaves the rest read and a plan
+//! is put beside its spec after. A document that fails its shape is named where its
+//! view sits in the run's folder, as every diagnostic of a run's artifact names one.
 
 use std::path::Path;
 
@@ -48,7 +50,9 @@ async fn held_documents(
 }
 
 /// The document `shown` names, of the run rooted at `run_dir` whose `store` holds its
-/// bytes: where a person opens it, and what it says as [`content`] reads it.
+/// bytes: where a person opens it, and what it says as [`content`] reads it. What fails
+/// its shape names it where its view sits in the run's folder, as every diagnostic of a
+/// run's artifact names one, so a decision and a node's page say it alike.
 async fn read(
     store: &ObjectStore<'_>,
     run_dir: &Path,
@@ -57,10 +61,11 @@ async fn read(
     (answered, asked): (&[Answered], Option<&str>),
 ) -> Result<ShownDocument, super::HeldError> {
     let bytes = store.get(&shown.content_hash).await?;
+    let view = yunta_core::run_dir::view_of(shown);
     // Where the person deciding opens it: in full, since they read it
     // from wherever they stand and not from the run's directory.
-    let path = run_dir.join(yunta_core::run_dir::view_of(shown));
-    let content = content(shown, (&bytes, &path), state, (answered, asked))?;
+    let path = run_dir.join(&view);
+    let content = content(shown, (&bytes, &view), state, (answered, asked))?;
     Ok(ShownDocument {
         shown: shown.clone(),
         path,
@@ -68,7 +73,7 @@ async fn read(
     })
 }
 
-/// What `bytes`, the document `shown` names read at `path`, says: a plan
+/// What `bytes`, the document `shown` names, named `path`, says: a plan
 /// as the run in `state` judges it, with what a person `answered` and what
 /// they `asked` for; a spec, a findings document, the run's findings, or
 /// its text.
@@ -118,6 +123,16 @@ pub async fn produced(
     state: &RunState,
     asked: Option<&str>,
 ) -> Result<Vec<ShownDocument>, crate::run::RunError> {
+    let shows = produced_shown(node, state);
+    Ok(held_documents(run_dir, &shows, state, asked).await?)
+}
+
+/// What [`produced`] reads of `node`, as the run in `state` holds it: each
+/// document it handed over that a person reads whole, and, beside a plan, the
+/// spec the run holds, whichever node wrote it, to judge the plan with. A
+/// reader that reads each on its own, so one that fails leaves the rest read,
+/// puts them together with [`beside_its_plan`].
+pub fn produced_shown(node: &yunta_core::NodeId, state: &RunState) -> Vec<Shown> {
     let mut shows: Vec<Shown> = state
         .artifacts
         .by_producer(node)
@@ -136,7 +151,7 @@ pub async fn produced(
     if plans && !shows.iter().any(|shown| shown.artifact == spec) {
         shows.extend(state.artifacts.latest(&spec, None).map(shown_of));
     }
-    Ok(held_documents(run_dir, &shows, state, asked).await?)
+    shows
 }
 
 /// Each document a node of the run in `state` handed over that a person reads whole,
@@ -267,7 +282,7 @@ async fn held<T: yunta_core::shape::Document>(
 /// would put each test a screen away from the task it holds. The plan is
 /// judged again in place, so all it was read with stands beside the
 /// spec's judgement.
-fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
+pub fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
     let has_plan = documents
         .iter()
         .any(|document| matches!(document.content, ShownContent::Tasks(_)));

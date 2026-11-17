@@ -10,7 +10,7 @@ const NEXT: &str = "Now I add a test for the empty input.";
 /// sentence of what the node's session said, and when the session says
 /// something else, the row says that instead.
 ///
-/// Reached by: `crates/cli/src/surface/feed.rs`,
+/// Reached by: `crates/cli/src/surface/beats.rs`,
 /// `crates/cli/src/surface/painter.rs`, `crates/cli/src/surface/region.rs`,
 /// `crates/render/src/watched/heard.rs`
 #[test]

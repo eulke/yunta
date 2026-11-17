@@ -2,12 +2,12 @@
 //!
 //! What a run asks is keyed by the [`AnswerablePause`] it waits at: a decision, by the
 //! node or run `awaits_decision` names and the seq of the run's pause; a round of
-//! questions, by its node and how many rounds that node asked, which names its
-//! `questions_asked` as that event's seq would and stays the same while the run parks
-//! again on the same round. The key is worked out here alone, from the state the
-//! following holds, again only once the run's head moved, so a parked run looked at many
-//! times costs no more; what was worked out of a run a refollow lets go is forgotten, so
-//! a run held again is asked again. A key the following has not read is read on a task
+//! questions, by its node and the seq of its `questions_asked`, which stays the same
+//! while the run parks again on the same round. Each key says that event's seq, so an
+//! interface tells whether what it keeps was read for the pause a run stands at. The key
+//! is worked out here alone, from the state the following holds, again only once the
+//! run's head moved, so a parked run looked at many times costs no more; what was worked
+//! out of a run a refollow lets go is forgotten, so a run held again is asked again. A key the following has not read is read on a task
 //! of its own, off the look's path: a decision from the run's manifest, directory and
 //! that state; a round from its events too, read through the following's reader. What
 //! it read is handed with its key while the key is still the run's, and dropped once the
@@ -58,9 +58,9 @@ pub(super) struct Asking {
 /// the run stands parked on, which the follower alone works out and hands with what it
 /// read of it. Two are equal when they name the same run stopped at the same pause: a
 /// decision by what it decides on and the `run_paused` the run stands at, so each time
-/// the run parks on a decision is a pause of its own; a round by its node and how many
-/// rounds that node asked, so a run parked again on the same round, as when the answers
-/// given were refused, keeps its key. Worked out again, as when the run is followed
+/// the run parks on a decision is a pause of its own; a round by its node and the
+/// `questions_asked` that opened it, so a run parked again on the same round, as when the
+/// answers given were refused, keeps its key. Worked out again, as when the run is followed
 /// anew, the same pause gives the same key. Not
 /// [`PauseReason`](yunta_core::events::PauseReason), why a run stands, nor [`Awaited`],
 /// what a person is asked at the pause.
@@ -75,8 +75,21 @@ pub struct AnswerablePause {
 enum AskedOn {
     /// The decision `on` the run waits on at the pause written at `paused_at`.
     Decision { on: DecisionOn, paused_at: Seq },
-    /// The round of questions `node` asked, the `round`th it asked.
-    Round { node: NodeId, round: usize },
+    /// The round of questions `node` opened with the `questions_asked` written at
+    /// `asked_at`.
+    Round { node: NodeId, asked_at: Seq },
+}
+
+impl AnswerablePause {
+    /// Where the log holds the event this pause was read for: the `run_paused` that
+    /// parked the run on a decision, or the `questions_asked` that opened a round of
+    /// questions. Two pauses of one run are one pause when they name the same event.
+    pub fn seq(&self) -> Seq {
+        match &self.on {
+            AskedOn::Decision { paused_at, .. } => *paused_at,
+            AskedOn::Round { asked_at, .. } => *asked_at,
+        }
+    }
 }
 
 impl Asking {
@@ -233,10 +246,9 @@ fn asked_of(run: &FollowedRun, now: DateTime<Utc>) -> Option<AskedOn> {
     let frame = run.frame(now);
     frame.phase.waiting_on()?;
     if let Some(node) = waiting_round(&frame) {
-        let gates = run.state.gates.get(node);
-        let round = gates.map_or(0, |gates| gates.rounds.len());
-        let node = node.clone();
-        return Some(AskedOn::Round { node, round });
+        let round = run.state.gates.get(node)?.rounds.last()?;
+        let (node, asked_at) = (node.clone(), round.asked_at);
+        return Some(AskedOn::Round { node, asked_at });
     }
     let on = yunta_engine::awaits_decision(&run.manifest, &run.state)?;
     Some(AskedOn::Decision { on, paused_at })

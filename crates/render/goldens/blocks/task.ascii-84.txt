@@ -1,0 +1,11 @@
+> global-pack-install  Add explicit global pack install target ; attempt 1
+
+  proved   red
+  by      cargo test --workspace --test pack_global_spec global_pack_commands_use...
+  keeps   lint, green at the baseline
+
+  its scope
+  + crates/cli/src/pack.rs
+  + crates/cli/src/cli/pack.rs
+  . crates/cli/tests/pack_cmd.rs
+  . crates/cli/src/commands/pack_audit.rs ; granted by you

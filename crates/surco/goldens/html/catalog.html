@@ -61,6 +61,17 @@ line 3</pre><div class="steps"><button type="button" class="cmd" data-copy="yunt
 <section id="s-5"><h2 class="sec">▸ <b>lint-fix</b>: a check, and an agent that fixes what it finds</h2><dl class="fields"><dt>run</dt><dd>yunta run lint-fix</dd></dl></section>
 <section id="s-6"><h2 class="sec"><b>tasks</b>: a plan of tasks, and an agent that works through them</h2><dl class="fields"><dt>run</dt><dd>yunta run tasks</dd></dl></section>
 <ul class="checks"><li><span class="mark done">✓</span> <span class="subject">acme/lint</span> <span>v1.2.0 (3f9c2e1), as its lock records it</span></li><li>▸ <span class="mark caution">▲</span> <span class="subject">acme/review</span> <span>v0.4.0 (91ab7d0), modified: its files no longer match its lock</span></li></ul>
+<pre class="lines"><span class="muted">… 4 above</span>
+search  global pack
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+<span class="muted">… 4 under</span></pre>
+<pre class="lines">967k tokens <span class="running">▃▂█▁▁▁▁▁▁▁▁▁▁▁▁</span><span class="faint"> · </span>2m34s<span class="muted"> at work</span><span class="faint"> · </span><span class="needs">5m00s</span><span class="muted"> waiting on you</span></pre>
 </main>
 <aside class="decide" aria-label="what this run waits on">
 <p class="otherwise">on GitHub</p>

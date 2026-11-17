@@ -1,5 +1,5 @@
 //! The blocks a screen that stays open is made of, for the catalog: what a
-//! terminal, a page and a desktop draw at the top of a run and at its foot.
+//! terminal, a page and a desktop draw at the top of a run, in its pane and at its foot.
 
 use super::*;
 use crate::components::{
@@ -89,6 +89,8 @@ pub(super) fn on_a_screen() -> Vec<Block> {
         moved_through(true).into(),
         moved_through(false).into(),
         installed().into(),
+        crate::components::feed::tests::scrolled_back().into(),
+        crate::components::meter::tests::waited_on_you().into(),
     ]
 }
 

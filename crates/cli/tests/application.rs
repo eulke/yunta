@@ -1,8 +1,12 @@
 //! The application at a terminal, opened by this build's `yunta`: each slice of what a
 //! person does in it in a file of its own beside this one, driven at a pseudo-terminal.
 
+#[path = "application/calling.rs"]
+mod calling;
 #[path = "application/deciding.rs"]
 mod deciding;
+#[path = "application/field.rs"]
+mod field;
 #[path = "application/machine.rs"]
 mod machine;
 #[path = "application/opening.rs"]

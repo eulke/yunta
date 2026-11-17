@@ -14,9 +14,12 @@
 //! gets the page `yunta status` prints instead, since no block closes it out.
 //!
 //! A follower only reads: it takes no lock, writes no event, writes no registry and
-//! never signals the engine. A run that is not moving has nothing to follow, so it
-//! gets the page `yunta status` prints and the code its stop gives. Ctrl-C stops
-//! the follower alone: the run goes on in the process that drives it.
+//! never signals the engine. A run that is not moving has nothing to follow, so it gets
+//! the page `yunta status` prints and the code its stop gives; but one that closed
+//! promoted before it is followed is followed on to its successor, read whole, once the
+//! following hands one, and where none comes in the time one takes to be created since
+//! the close, nothing moved while it was followed, and its page is what is printed.
+//! Ctrl-C stops the follower alone: the run goes on in the process that drives it.
 
 use surco::look::Look;
 use surco::words::Standing;
@@ -44,13 +47,30 @@ pub(crate) async fn follow(
     };
     let mut following = project.follow(followed).await?;
     let stop = shell.stop();
-    let (mut kept, events) = read_whole(&mut following, &stop).await?;
+    match start(&mut following, &stop, &project).await {
+        Ok(Start::Moving(run, events)) => {
+            let reading = (&project, look);
+            moving(&mut following, &stop, *run, events, reading).await
+        }
+        Ok(Start::Still(still)) => page(&project, &still, look).await,
+        Err(yunta_api::Error::Stopped) => Ok(left_running(run_id, look)),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// `kept`, a run that moves, read whole with `events`, followed on the surface `yunta
+/// run` draws until the rule every interface stops a following by: the block it leaves,
+/// or the page of a run whose engine went, and the code either gives.
+async fn moving(
+    following: &mut Following,
+    stop: &Stop,
+    mut kept: FollowedRun,
+    events: Vec<StoredEvent>,
+    (project, look): (&Project, &Look),
+) -> Result<Outcome, CliError> {
+    let run_id = &kept.run.clone();
     let clock = std::sync::Arc::clone(&project.workspace.clock);
     let frame = kept.frame(clock.now());
-    if !frame.moves() {
-        let standing = super::print_page(&project, run_id, look).await?;
-        return Ok(crate::output::exit(standing));
-    }
     let started = events.first().map(|event| event.timestamp);
     let prior = project
         .prior_estimation(&kept.manifest, &frame.mode, started)
@@ -70,22 +90,52 @@ pub(crate) async fn follow(
         },
         events,
     );
-    let drawn = drawn(&mut following, &mut kept, &stop, &surface, (&project, look)).await;
+    let drawn = drawn(following, &mut kept, stop, &surface, (project, look)).await;
     surface.close().await;
     match drawn {
         // What drove the run is gone, so no block closes it out: the page says
         // what holds it.
         Ok(()) if kept.frame(clock.now()).standing == Standing::Stalled => {
-            let standing = super::print_page(&project, run_id, look).await?;
-            Ok(crate::output::exit(standing))
+            page(project, run_id, look).await
         }
-        Ok(()) => closing(&kept, prior.as_ref(), &project, look).await,
-        Err(yunta_api::Error::Stopped) => {
-            crate::output::show(look, &LeftRunning { run_id });
-            Ok(crate::output::Outcome::interrupted())
-        }
+        Ok(()) => closing(&kept, prior.as_ref(), project, look).await,
+        Err(yunta_api::Error::Stopped) => Ok(left_running(run_id, look)),
         Err(error) => Err(error.into()),
     }
+}
+
+/// The page `yunta status` prints of `run`, and the code its stop gives.
+async fn page(project: &Project, run: &RunId, look: &Look) -> Result<Outcome, CliError> {
+    let standing = super::print_page(project, run, look).await?;
+    Ok(crate::output::exit(standing))
+}
+
+/// Where a follower starts. Not where it stops, which the rule every interface stops a
+/// following by says.
+enum Start {
+    /// The run that moves, read whole, with every event of its log from its first.
+    Moving(Box<FollowedRun>, Vec<StoredEvent>),
+    /// The run that stands still where what was read ends: nothing moved while it was
+    /// followed, so its page is all there is to show.
+    Still(RunId),
+}
+
+/// Where a follower of `following` starts, at `project`'s clock: the run read whole,
+/// where it moves; else, where it closed promoted, its successor read whole once one is
+/// handed, on along the chain; else the run that stands still.
+async fn start(
+    following: &mut Following,
+    stop: &Stop,
+    project: &Project,
+) -> Result<Start, yunta_api::Error> {
+    let (mut run, mut events) = read_whole(following, stop).await?;
+    while !run.frame(project.workspace.clock.now()).moves() {
+        let Some(successor) = handed_on(following, stop).await? else {
+            return Ok(Start::Still(run.run));
+        };
+        (run, events) = successor;
+    }
+    Ok(Start::Moving(Box::new(run), events))
 }
 
 /// The run `following` hands first, read whole, and every event of its log from its
@@ -100,6 +150,32 @@ async fn read_whole(
             return Ok((*run, events));
         }
     }
+}
+
+/// The successor `following` hands, read whole with every event of its log, while it
+/// awaits one; none once it hands that none came, or where it awaits none. What else it
+/// hands of a run that stands still shows nothing a page does not.
+async fn handed_on(
+    following: &mut Following,
+    stop: &Stop,
+) -> Result<Option<(FollowedRun, Vec<StoredEvent>)>, yunta_api::Error> {
+    while following.awaits_successor() {
+        if let FollowNews::Run {
+            news: RunNews::Successor { run, events },
+            ..
+        } = following.next(stop).await?
+        {
+            return Ok(Some((*run, events)));
+        }
+    }
+    Ok(None)
+}
+
+/// What a follower stopped by its person says: the run goes on in the process that
+/// drives it.
+fn left_running(run_id: &RunId, look: &Look) -> Outcome {
+    crate::output::show(look, &LeftRunning { run_id });
+    crate::output::Outcome::interrupted()
 }
 
 /// Hands `surface` each news of `following` until the run's frame, as `kept` reads it

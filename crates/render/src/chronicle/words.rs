@@ -157,7 +157,8 @@ fn context_assembled(absent: &[String], sep: char) -> String {
 /// A task's check: how many criteria ran, and each one a post-check left
 /// red, named with the last thing it printed — the command's own output
 /// never reaches the terminal, so this line is where a person watching
-/// learns why.
+/// learns why. `red` stands alone between separators, as the proof's pill
+/// says it on a task's board.
 fn criteria_checked(
     task: &yunta_core::TaskId,
     (phase, checked): (yunta_core::events::Phase, usize),
@@ -177,7 +178,7 @@ fn criteria_checked(
                 None => format!("`{}` exit {}", red.cmd, red.exit_code),
             })
             .collect();
-        said.push_str(&format!(" {sep} red: {}", named.join("; ")));
+        said.push_str(&format!(" {sep} red {sep} {}", named.join("; ")));
     }
     said
 }

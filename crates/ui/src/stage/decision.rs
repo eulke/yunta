@@ -184,11 +184,8 @@ impl DecisionStage {
             | Outcome::Pack(_)
             | Outcome::Evidence(_)
             | Outcome::Started { .. }
-            | Outcome::Field { .. }
-            | Outcome::Followed
             | Outcome::Page(_)
             | Outcome::NodePage(_)
-            | Outcome::Stats(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)

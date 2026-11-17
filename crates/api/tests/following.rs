@@ -11,6 +11,8 @@ mod documents;
 mod field;
 #[path = "following/kept_logs.rs"]
 mod kept_logs;
+#[path = "following/promoted.rs"]
+mod promoted;
 #[path = "following/said.rs"]
 mod said;
 

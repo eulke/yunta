@@ -10,13 +10,13 @@
    ? appro|   s       shows what the run cost                        |=========
           |   g       draws the run's graph, each node as its log    |
           |           stands                                         |
-          |   f       follows                                        |
           |   esc     back to the runs                               |
           |   q       leaves yunta                                   |
           |   /       what you can do here                           |
           |   ?       the keys here                                  |
           |   ctrl-c  leaves yunta                                   |
           +----------------------------------------------------------+
+                        |     assignee: lead
                         |     about: artifacts/plan/tasks.yaml
                         |   | approve: Resolve the gate
                         |   |   nothing in the workflow waits on it

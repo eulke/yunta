@@ -1,0 +1,20 @@
+␛[36m●␛[0m ␛[1mnode plan of run Q78GRR␛[0m␛[2m ·␛[0m␛[36m running␛[0m
+
+  ␛[2mkind        ␛[0m prompt
+  ␛[2mattempt     ␛[0m 1
+  ␛[2mrunner      ␛[0m planner on mock/gpt-6-luna
+  ␛[2mtokens      ␛[0m 610k in / 25k out (586k cached)
+  ␛[2mtook        ␛[0m 1m36s
+
+␛[2mwhat it hands over␛[0m
+␛[2m◌␛[0m tasks  not yet
+
+␛[2mwhat it is doing · 3 calls␛[0m
+running: attempt 1
+session opened on gpt-6-luna · fence widened to 1 root
+read    crates/cli/src/commands/pack.rs
+read    crates/cli/src/cli/pack.rs
+␛[1mread    crates/engine/src/catalog.rs␛[0m
+
+␛[2mnext␛[0m
+  ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m

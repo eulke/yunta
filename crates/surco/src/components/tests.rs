@@ -284,6 +284,7 @@ fn every_block() -> Doc {
         .with(printed)
         .with(decision())
         .with(fields)
+        .with(crate::components::feed::tests::scrolled_back())
         .with(next)
 }
 

@@ -78,15 +78,10 @@ pub const DECISION: &str = "decision";
 
 /// The keys of a run: moving along its nodes and showing the page of the one `pointed`
 /// at, each act the run offers (`acts`, the key each is bound to and what it does, in
-/// the words `command` says it with), following it or not (`follows` when news of it
-/// comes), going back to the run's page from a node's (`picked`) or to the runs, and
-/// leaving.
-pub fn run_legend(
-    pointed: Option<&NodeId>,
-    acts: &[(char, &str)],
-    follows: bool,
-    picked: bool,
-) -> Legend {
+/// the words `command` says it with), going back to the run's page from a node's
+/// (`picked`) or to the runs, and leaving. No key follows the run: it moves as its news
+/// comes.
+pub fn run_legend(pointed: Option<&NodeId>, acts: &[(char, &str)], picked: bool) -> Legend {
     let mut legend = Legend::new();
     if let Some(node) = pointed {
         legend = legend
@@ -96,16 +91,9 @@ pub fn run_legend(
     for (key, does) in acts {
         legend = legend.key(key.to_string(), *does);
     }
-    let following = match follows {
-        true => "stops following",
-        false => "follows",
-    };
     let back = match picked {
         true => "back to the run",
         false => "back to the runs",
     };
-    legend
-        .key("f", following)
-        .key(ESC, back)
-        .key("q", "leaves yunta")
+    legend.key(ESC, back).key("q", "leaves yunta")
 }

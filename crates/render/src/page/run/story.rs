@@ -8,12 +8,12 @@ use crate::state::NodeDisplay;
 use surco::components::{Branch, Cell, Column, Fields, Holds, NodeRow, NodeTable, Row, Table};
 use surco::doc::{Block, Depth};
 use surco::figures::{duration, Tokens};
-use surco::glyphs::{Glyphs, Mark};
+use surco::glyphs::Glyphs;
 use surco::line::Tone;
 use surco::prose;
 use surco::text::{counted, ordinal};
 use surco::words::{Standing, WAITED_ON_YOU};
-use yunta_core::events::{NodeState, TaskStatus};
+use yunta_core::events::NodeState;
 use yunta_core::shown::ShownContent;
 use yunta_core::step::NextStep;
 use yunta_replay::frame::{NodeFrame, NodeStanding};
@@ -207,7 +207,7 @@ impl Run {
                     said.push_str(&format!("; its work is at {shown}"));
                 }
                 Row {
-                    mark: Some(task_mark(record.status)),
+                    mark: Some(crate::blocks::task_mark(record.status)),
                     cells: vec![Cell::plain(id.as_str()), Cell::toned(Tone::Muted, said)],
                 }
             })
@@ -298,18 +298,5 @@ fn times(count: u32) -> String {
         1 => "once".to_string(),
         2 => "twice".to_string(),
         n => format!("{n} times"),
-    }
-}
-
-/// The mark a task's status carries: what is done, what failed, what a
-/// cause it cannot pass on its own stopped, what is under way, and what
-/// has not begun.
-fn task_mark(status: TaskStatus) -> Mark {
-    match status {
-        TaskStatus::Done => Mark::Done,
-        TaskStatus::Failed => Mark::Failed,
-        TaskStatus::Blocked => Mark::Caution,
-        TaskStatus::Running => Mark::Running,
-        TaskStatus::Pending | TaskStatus::Ready => Mark::Absent,
     }
 }

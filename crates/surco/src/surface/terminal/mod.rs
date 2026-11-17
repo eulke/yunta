@@ -24,10 +24,12 @@ mod diagram;
 mod diffstat;
 mod document;
 mod evidence;
+mod feed;
 mod fields;
 mod headline;
 mod legend;
 pub(in crate::surface) mod markdown;
+mod meter;
 mod next;
 mod pane;
 pub use pane::Paned;
@@ -199,13 +201,7 @@ impl Terminal {
             Block::Next(block) => block.lines(look),
             Block::Legend(block) => block.lines(look),
             Block::Attention(block) => block.lines(look),
-            Block::Heading(title) => std::iter::once(Line::new())
-                .chain(
-                    crate::width::wrap_unbroken(title, look.width.cells())
-                        .into_iter()
-                        .map(|part| Line::new().push(Tone::Muted, part)),
-                )
-                .collect(),
+            Block::Heading(title) => self.heading(title),
             Block::Title(title) => title.lines(look),
             Block::Section(section) => self.section(section),
             Block::Fold(fold) => self.section(&fold.0),
@@ -221,11 +217,25 @@ impl Terminal {
                 .iter()
                 .map(|row| row.cut(look.width.cells(), look.glyphs))
                 .collect(),
+            Block::Feed(block) => block.lines(look),
+            Block::Meter(block) => vec![self.meter(block)],
         }
     }
 }
 
 impl Terminal {
+    /// The title of what follows it, inside a document: a blank line, then its words muted,
+    /// going on in the lines under it where they pass the line.
+    fn heading(&self, title: &str) -> Vec<Line> {
+        std::iter::once(Line::new())
+            .chain(
+                crate::width::wrap_unbroken(title, self.look.width.cells())
+                    .into_iter()
+                    .map(|part| Line::new().push(Tone::Muted, part)),
+            )
+            .collect()
+    }
+
     /// Markdown an author wrote: its text as prose and code, and each
     /// diagram in it drawn as one.
     fn markdown(&self, text: &str) -> Vec<Line> {

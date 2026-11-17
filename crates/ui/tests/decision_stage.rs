@@ -16,9 +16,9 @@ use yunta_core::{
 };
 use yunta_testkit::Bench;
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, News, Operation, Outcome, Request, State};
+use yunta_ui::{Input, Operation, Outcome, Request, State};
 
-use support::{on_the_field, performed, stopped};
+use support::{on_the_field, performed, read_whole};
 
 /// A gate nobody answers: its run parks on it.
 const PARKS: &str = "name: gated\nnodes:\n  - { id: approve, kind: gate, assignee: lead, \
@@ -92,15 +92,10 @@ fn asked_for(asked: &[Request], kind: fn(&Operation) -> bool) -> yunta_ui::Ticke
 /// is read for a round first, as `resolve-gate` reads it, and waits on none.
 async fn on_the_decision(bench: &Bench) -> (State, RunId) {
     let run = bench.run_id.clone();
-    let following = Operation::Follow { run: run.clone() };
-    let (found, _) = performed(bench, following).await;
-    let Some(News::Following(read)) = found.into_iter().next() else {
-        panic!("the following hands back the run as it reads first");
-    };
-    let mut state = on_the_field(vec![stopped(&run)]);
-    let asked = state.update(Input::Stroke(Stroke::Enter));
-    let followed = asked_for(&asked, |work| matches!(work, Operation::Follow { .. }));
-    state.update(Input::News(followed, News::Following(read)));
+    let read = read_whole(bench).await;
+    let (mut state, _) = on_the_field(&[&run]).await;
+    state.update(Input::Stroke(Stroke::Enter));
+    state.update(Input::FollowNews(read));
     let asked = state.update(Input::Stroke(Stroke::Insert('a')));
     let round = asked_for(&asked, |work| {
         matches!(work, Operation::ReadQuestions { .. })
@@ -159,15 +154,10 @@ async fn reading_turns_to_the_desk_and_a_number_picked_there_decides() {
 /// The application on the round `bench`'s run is parked on, put to the person.
 async fn on_the_round(bench: &Bench) -> State {
     let run = bench.run_id.clone();
-    let following = Operation::Follow { run: run.clone() };
-    let (found, _) = performed(bench, following).await;
-    let Some(News::Following(read)) = found.into_iter().next() else {
-        panic!("the following hands back the run as it reads first");
-    };
-    let mut state = on_the_field(vec![stopped(&run)]);
-    let asked = state.update(Input::Stroke(Stroke::Enter));
-    let followed = asked_for(&asked, |work| matches!(work, Operation::Follow { .. }));
-    state.update(Input::News(followed, News::Following(read)));
+    let read = read_whole(bench).await;
+    let (mut state, _) = on_the_field(&[&run]).await;
+    state.update(Input::Stroke(Stroke::Enter));
+    state.update(Input::FollowNews(read));
     let asked = state.update(Input::Stroke(Stroke::Insert('a')));
     let reading = asked_for(&asked, |work| {
         matches!(work, Operation::ReadQuestions { .. })

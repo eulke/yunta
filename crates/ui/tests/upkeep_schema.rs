@@ -14,6 +14,7 @@ use surco::components::Note;
 use surco::doc::Doc;
 use surco::surface::{Markdown, Surface};
 use yunta_api::Remark;
+use yunta_core::events::Channel;
 use yunta_core::DocumentKind;
 use yunta_render::page::doctor::{CheckoutsKeep, Finding};
 use yunta_render::page::{Collected, Page, Schema};
@@ -23,7 +24,7 @@ use yunta_testkit_ui::sandbox::workspace;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Outcome, Performer, Request, State, Ticket};
 
-use support::{on_the_field, performed, stopped};
+use support::{on_the_field, performed};
 
 /// The screen's main region, as Markdown writes it.
 fn main_region(state: &State) -> String {
@@ -43,9 +44,9 @@ fn trail(state: &State) -> Vec<String> {
 }
 
 /// The application over a field of one stopped run.
-fn on_a_field() -> State {
+async fn on_a_field() -> State {
     let run = "01M7UPKEEP0000000000000000".parse().expect("a run's id");
-    on_the_field(vec![stopped(&run)])
+    on_the_field(&[&run]).await.0
 }
 
 /// The state root of `bench`'s repository: where its runs and log are.
@@ -59,7 +60,7 @@ fn root_of(bench: &Bench) -> &Path {
 /// Upkeep opened from doctor, its checkouts over their budget, standing on what
 /// collecting would reclaim in `bench`: the state, and that dry run's page.
 async fn at_upkeep(bench: &Bench) -> (State, Box<Collected>) {
-    let mut state = on_a_field();
+    let mut state = on_a_field().await;
     let asked = state.update(Input::Stroke(Stroke::Insert('m')));
     let [Request::Perform(checks, Operation::Doctor { sessions: false })] = asked.as_slice() else {
         panic!("doctor checks the machine as it opens: {asked:?}");
@@ -174,9 +175,12 @@ async fn escape_stops_a_collection_and_doctor_checks_again_on_the_way_back() {
 #[tokio::test]
 async fn a_documents_shape_is_picked_by_typing_and_shown_as_schema_prints_it() {
     let bench = Bench::new();
-    let performer = Arc::new(Performer::new(workspace(&bench.worktree, root_of(&bench))));
+    let performer = Arc::new(Performer::new(
+        workspace(&bench.worktree, root_of(&bench)),
+        Channel::Tty,
+    ));
     let strokes = [Stroke::Insert('w'), Stroke::Insert('s')];
-    let (mut state, _) = drive(on_a_field(), Vec::new(), &performer, &strokes).await;
+    let (mut state, _) = drive(on_a_field().await, Vec::new(), &performer, &strokes).await;
     assert_eq!(trail(&state), ["yunta", "schema"]);
     for stroke in ["t", "a", "s"].map(|typed| Stroke::Insert(typed.chars().next().unwrap())) {
         state.update(Input::Stroke(stroke));

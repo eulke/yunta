@@ -117,7 +117,7 @@ fn a_red_post_check_names_each_red_criterion_with_the_last_line_it_printed() {
     }));
     assert_eq!(
         said_for(payload),
-        "run: T001 post: 3 criteria · red: `cargo test` exit 101 (test result: FAILED); \
+        "run: T001 post: 3 criteria · red · `cargo test` exit 101 (test result: FAILED); \
          `test -f made.txt` exit 1"
     );
 }
@@ -400,6 +400,7 @@ fn a_rail_summary_says_its_calls_and_model() {
 }
 
 mod calls;
+mod feed;
 mod promotion;
 
 /// The chronicle as a document logs every moment that says anything, in order, each on

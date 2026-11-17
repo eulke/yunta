@@ -1,29 +1,13 @@
-//! See [`super`]. The work a run's stages ask for: its readings, what it spent and
-//! its graph among them, its following, and the acts that change it, each through
-//! the API's open run.
+//! See [`super`]. The work a run's stages ask for: its readings and the acts that change
+//! it, each through the API's open run.
 
 use surco::doc::Depth;
-use yunta_api::{
-    Error, FieldReach, FollowNews, Followed, FollowedRun, Project, Remarks, RunRequest, Stop,
-};
+use yunta_api::{Error, Project, Remarks, RunRequest, Stop};
 use yunta_core::events::Channel;
 use yunta_core::port::QuestionsReply;
 use yunta_core::{Answer, NodeId, OptionId, RunId};
-use yunta_render::page::Graph;
 
-use crate::{News, Outcome};
-
-/// The runs as far as `reach` reaches, and where the project keeps them.
-pub(super) async fn field_read(
-    project: &Project,
-    reach: FieldReach,
-    stop: &Stop,
-) -> Result<Outcome, Error> {
-    Ok(Outcome::Field {
-        reading: project.field(reach, stop).await?,
-        storage: project.storage_path.clone(),
-    })
-}
+use crate::Outcome;
 
 /// `run`'s page, what reading it says said through `remarks`.
 pub(super) async fn page_read(
@@ -58,67 +42,6 @@ pub(super) async fn decision_read(project: &Project, run: &RunId) -> Result<Outc
     Ok(Outcome::Decision(Box::new(waiting)))
 }
 
-/// What `run` spent, read at the project's clock's instant, as `yunta stats` reads
-/// it.
-pub(super) async fn stats_read(project: &Project, run: &RunId) -> Result<Outcome, Error> {
-    let stats = project.run(run).await?.stats();
-    Ok(Outcome::Stats(Box::new(stats)))
-}
-
-/// The workflow `run` froze, each node labelled with the state its log derives for
-/// it, as `yunta graph --run` draws it.
-pub(super) async fn graph_read(project: &Project, run: RunId) -> Result<Outcome, Error> {
-    let open = project.run(&run).await?;
-    let graph = Graph {
-        workflow: open.manifest.doc.workflow.clone(),
-        run: Some((run, open.frame())),
-    };
-    Ok(Outcome::Graph(Box::new(graph)))
-}
-
-/// `run` followed until its frame no longer moves and the following awaits no
-/// successor, the rule every interface stops a following by: the run read whole first,
-/// then what each look at it finds, handed to `found` as it comes. The rule is read on
-/// a copy of the run kept here, each piece of news folded into it.
-pub(super) async fn followed(
-    project: &Project,
-    run: &RunId,
-    found: &(dyn Fn(News) + Sync),
-    stop: &Stop,
-) -> Result<Outcome, Error> {
-    let followed = Followed {
-        field: None,
-        run: Some(run.clone()),
-    };
-    let mut following = project.follow(followed).await?;
-    let mut kept: Option<FollowedRun> = None;
-    loop {
-        if let Some(kept) = &kept {
-            let moves = kept.frame(project.workspace.clock.now()).moves();
-            if !moves && !following.awaits_successor() {
-                break;
-            }
-        }
-        let news = following.next(stop).await?;
-        match &news {
-            FollowNews::Whole { run, .. } => kept = Some((**run).clone()),
-            FollowNews::Run { run, news } => {
-                if let Some(kept) = kept.as_mut().filter(|kept| kept.run == *run) {
-                    kept.took(news);
-                }
-            }
-            // No field is followed here.
-            FollowNews::Field(_)
-            | FollowNews::Joined(_)
-            | FollowNews::Unreadable(_)
-            | FollowNews::Left(_)
-            | FollowNews::Elsewhere(_) => {}
-        }
-        found(News::Following(news));
-    }
-    Ok(Outcome::Followed)
-}
-
 /// `option` recorded on the decision `run` waits on, with the `words` it was chosen
 /// with, and the run handed on to a detached resume.
 pub(super) async fn decided(
@@ -131,19 +54,18 @@ pub(super) async fn decided(
     Ok(Outcome::Decided { run })
 }
 
-/// `answers` to the round `node` asked recorded on `run`, and the run handed on to a
-/// detached resume.
+/// `answers` to the round `node` asked recorded on `run`, under the `channel` a person
+/// reached the performer through, and the run handed on to a detached resume.
 pub(super) async fn answered(
     project: &Project,
     run: RunId,
     node: &NodeId,
     answers: Vec<Answer>,
+    channel: Channel,
 ) -> Result<Outcome, Error> {
-    // A person answers the application where it is drawn: on a terminal, as every
-    // surface of it does today.
     let reply = QuestionsReply {
         answers,
-        channel: Channel::Tty,
+        channel,
         responder: None,
     };
     project.run(&run).await?.answer(node, reply).await?;

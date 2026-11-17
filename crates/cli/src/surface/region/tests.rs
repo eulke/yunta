@@ -97,9 +97,11 @@ fn the_attention_row_opens_the_region_only_while_something_needs_you() {
     );
     assert!(
         quiet
-            .last()
-            .is_some_and(|row| row.ends_with("nothing needs you")),
-        "and the footer says nothing needs you: {quiet:?}"
+            .iter()
+            .rev()
+            .nth(1)
+            .is_some_and(|row| row == "nothing needs you: it is moving"),
+        "and the gist over the meter says nothing needs you: {quiet:?}"
     );
 
     region.show(&parked_on_plan(), &RUN, true);
@@ -174,9 +176,13 @@ fn a_row_is_cut_to_the_terminal_and_never_past_the_width_it_is_written_for() {
         );
         let room = crate::output::row_width(usize::from(columns)).cells();
         let drawn = rows(&term);
+        let held = [&region.attention, &region.gist]
+            .iter()
+            .filter(|row| row.is_some())
+            .count();
         assert_eq!(
             drawn.len(),
-            2 + region.body.len(),
+            held + region.body.len() + 1,
             "on a terminal {columns} wide the region took more rows than it drew, which is \
              a row that wrapped onto the one below: {drawn:?}"
         );
@@ -248,8 +254,10 @@ fn a_child_row_cut_to_a_narrow_terminal_still_says_where_the_child_stands() {
     }
 }
 
+/// Under the working nodes, however many there are, the gist and then the meter, a bar
+/// for each node the run has.
 #[test]
-fn the_footer_stays_the_last_row_as_nodes_come_and_go() {
+fn the_gist_and_the_meter_stay_the_last_rows_as_nodes_come_and_go() {
     let term = Watched::sized(16, 80);
     let scrollback = Captured::default();
     let mut region = region(&term, &scrollback);
@@ -259,15 +267,91 @@ fn the_footer_stays_the_last_row_as_nodes_come_and_go() {
         vec![running("plan"), running("build")],
         vec![running("build")],
     ] {
+        let bars = "_".repeat(nodes.len());
         region.show(&frame(RunPhase::Running, nodes), &RUN, false);
         let drawn = rows(&term);
-        assert!(
-            drawn
-                .last()
-                .is_some_and(|row| row.contains(" of ") && row.contains(" done")),
+        assert_eq!(
+            drawn[drawn.len().saturating_sub(2)..],
+            [
+                "nothing needs you: it is moving".to_string(),
+                format!("0 tokens {bars} ; 0s at work"),
+            ],
             "{drawn:?}"
         );
     }
+}
+
+/// A run whose word says it all has no gist to say: its region ends on the meter alone,
+/// under the work, and takes up the gist's row again once there is one.
+#[test]
+fn a_run_with_no_gist_ends_its_region_on_the_meter() {
+    let term = Watched::sized(16, 80);
+    let scrollback = Captured::default();
+    let mut region = region(&term, &scrollback);
+    let finished = NodeFrame::sample(
+        &NodeId::from_static("plan"),
+        NodeStanding::Reached(NodeState::Finished {
+            outcome: yunta_core::events::NodeOutcome::Summary("exit 0".to_string()),
+            tokens: yunta_core::events::TokenUsage::default(),
+        }),
+    );
+
+    region.show(&frame(RunPhase::Finished, vec![finished]), &RUN, false);
+    assert_eq!(rows(&term), ["0 tokens _ ; 0s at work"]);
+
+    region.show(
+        &frame(RunPhase::Running, vec![running("plan")]),
+        &RUN,
+        false,
+    );
+    let drawn = rows(&term);
+    assert!(drawn[0].contains("plan running"), "{drawn:?}");
+    assert_eq!(
+        drawn[1..],
+        ["nothing needs you: it is moving", "0 tokens _ ; 0s at work"],
+        "the gist stands between the work and the meter: {drawn:?}"
+    );
+}
+
+/// The design's run with `plan` at work, as its screen stands in the target `work`: the
+/// region's last two rows say what that screen says under its ribbon and over its
+/// attention row, the run's gist and what it spent, a bar a node, at work and waiting on
+/// the person, each at the region's first column.
+#[tokio::test]
+async fn the_region_ends_on_the_runs_gist_and_what_it_spent() {
+    let cut = yunta_testkit_ui::cut::Cut::of_target("work").await;
+    let run = cut.runs()[0].clone();
+    let project = cut.workspace().project().expect("the cut's repository");
+    let followed = yunta_api::Followed {
+        field: None,
+        run: Some(run.clone()),
+    };
+    let mut following = project.follow(followed).await.expect("the cut's run");
+    let Ok(yunta_api::FollowNews::Whole { run: read, .. }) =
+        following.next(&yunta_api::Stop::new()).await
+    else {
+        panic!("the run read whole comes first");
+    };
+    let term = Watched::sized(36, 120);
+    let scrollback = Captured::default();
+    let mut region = Region::open(
+        Screen::immediate(term.clone()),
+        Glyphs::Unicode,
+        surco::paint::Paint::Plain,
+        Box::new(scrollback.clone()),
+    )
+    .expect("the region's row template parses");
+
+    region.show(&read.frame(cut.now()), &run, false);
+    let drawn = rows(&term);
+    assert_eq!(
+        drawn[drawn.len().saturating_sub(2)..],
+        [
+            "nothing needs you: it is moving",
+            "967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you",
+        ],
+        "{drawn:#?}"
+    );
 }
 
 /// What a session of `node` in `run` said.

@@ -16,7 +16,7 @@ use yunta_replay::history::PriorEstimation;
 ///
 /// Not a refusal, which ends the operation, nor a session's note, which a
 /// run's agent says.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Remark {
     /// Something a person can still act on before anything is spent.
     Caution(Caution),

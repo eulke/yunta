@@ -1,12 +1,13 @@
 //! The pinned region: a few rows of text held at the bottom of a
 //! terminal while the work that finished scrolls away above them — the
 //! row that asks for the person while something does, a row for each
-//! node at work, and a footer that always says whether the run needs
-//! them.
+//! node at work, then the run's gist, which says whether the run needs
+//! them, and last what the run has spent.
 //!
 //! It is the one place on a terminal that keeps what a session said, by
 //! render's [`Heard`], and draws render's watched rows: the row that asks,
-//! each working node's rows, and the footer.
+//! each working node's rows, the run's gist and its meter, which Surco's
+//! [`Terminal::meter`] draws at the region's look.
 //!
 //! It takes no alternate screen, no raw mode and no mouse capture, which
 //! is why the reader keeps their scrollback, their text selection, and a
@@ -29,6 +30,7 @@ use surco::glyphs::Glyphs;
 use surco::line::Line;
 use surco::motion::Motion;
 use surco::paint::Paint;
+use surco::surface::Terminal;
 use yunta_core::port::Said;
 use yunta_core::RunId;
 use yunta_render::watched::{self, Heard};
@@ -37,10 +39,10 @@ use yunta_replay::frame::RunFrame;
 use super::scrollback::Scrollback;
 use super::Screen;
 
-/// The region's rows carry text, and beside the footer's words the run's
-/// furrow: no bar of one quantity and no percentage. The furrow is where each
-/// node stands, which the counter beside it says in words. A running node's
-/// spin turns a frame per event it says, and no clock turns it.
+/// The region's rows carry text, and in the meter a bar a node beside the
+/// figure that says the whole in numbers: no bar of one quantity and no
+/// percentage. A running node's spin turns a frame per event it says, and no
+/// clock turns it.
 const ROW: &str = "{msg}";
 
 /// A run drawn as rows that stay in place, and the work that has left
@@ -55,9 +57,12 @@ pub(super) struct Region {
     attention: Option<ProgressBar>,
     /// The working nodes and their detail, rebuilt as nodes come and go.
     body: Vec<ProgressBar>,
-    /// Always the last row, and always answering whether the run needs
-    /// the person: a reader looking for that looks in one place.
-    footer: ProgressBar,
+    /// The row over the meter that says what the run comes to, answering
+    /// whether the run needs the person: a reader looking for that looks
+    /// in one place. Absent for a run whose word says it all.
+    gist: Option<ProgressBar>,
+    /// Always the last row: what the run has spent.
+    meter: ProgressBar,
     glyphs: Glyphs,
     /// How the stream the rows go on is painted.
     paint: Paint,
@@ -94,14 +99,15 @@ impl Region {
     ) -> Result<Self, TemplateError> {
         let style = ProgressStyle::with_template(ROW)?;
         let multi = MultiProgress::with_draw_target(screen.target());
-        let footer = multi.add(row(&style));
+        let meter = multi.add(row(&style));
         let above = Scrollback::over(&multi, scrollback);
         Ok(Self {
             multi,
             screen,
             attention: None,
             body: Vec::new(),
-            footer,
+            gist: None,
+            meter,
             glyphs,
             paint,
             style,
@@ -141,7 +147,8 @@ impl Region {
     /// registry, the row says so instead.
     pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
         self.heard.kept_to(frame, run_id);
-        let rows = watched::rows(frame, run_id, answerable, &self.heard, &self.look());
+        let look = self.look();
+        let rows = watched::rows(frame, run_id, answerable, &self.heard, &look);
         let attention = rows.attention.map(|line| self.fit(&line));
         self.attend(attention);
         let nodes: Vec<String> = rows.nodes.iter().map(|row| self.fit(row)).collect();
@@ -149,7 +156,10 @@ impl Region {
         for (bar, text) in self.body.iter().zip(nodes) {
             bar.set_message(text);
         }
-        self.footer.set_message(self.fit(&rows.footer));
+        let gist = watched::gist(frame).map(|line| self.fit(&line));
+        self.sum_up(gist);
+        let meter = Terminal::on(look).meter(&watched::spent(frame));
+        self.meter.set_message(self.fit(&meter));
     }
 
     /// Tells the window a person is being asked, as a prompt takes the terminal:
@@ -179,19 +189,19 @@ impl Region {
     /// Puts the attention row at the top while there is something to
     /// say on it, and takes it off when there is not.
     fn attend(&mut self, said: Option<String>) {
-        match (said, &self.attention) {
-            (Some(said), Some(bar)) => bar.set_message(said),
-            (Some(said), None) => {
-                let bar = self.multi.insert(0, row(&self.style));
-                bar.set_message(said);
-                self.attention = Some(bar);
-            }
-            (None, _) => {
-                if let Some(bar) = self.attention.take() {
-                    self.multi.remove(&bar);
-                }
-            }
-        }
+        let (multi, style) = (&self.multi, &self.style);
+        keep(multi, &mut self.attention, said, || {
+            multi.insert(0, row(style))
+        });
+    }
+
+    /// Puts the gist's row over the meter while the run has one, and takes
+    /// it off when its word says it all.
+    fn sum_up(&mut self, said: Option<String>) {
+        let (multi, style, meter) = (&self.multi, &self.style, &self.meter);
+        keep(multi, &mut self.gist, said, || {
+            multi.insert_before(meter, row(style))
+        });
     }
 
     /// Writes one diagnostic into the terminal's history above the
@@ -256,7 +266,7 @@ impl Region {
     }
 
     /// Grows or shrinks the body to `rows` rows, keeping the attention
-    /// row first and the footer last.
+    /// row first, and the gist and the meter last.
     fn resize(&mut self, rows: usize) {
         while self.body.len() > rows {
             if let Some(spare) = self.body.pop() {
@@ -264,8 +274,9 @@ impl Region {
             }
         }
         while self.body.len() < rows {
+            let under = self.gist.as_ref().unwrap_or(&self.meter);
             self.body
-                .push(self.multi.insert_before(&self.footer, row(&self.style)));
+                .push(self.multi.insert_before(under, row(&self.style)));
         }
     }
 
@@ -291,6 +302,30 @@ impl Region {
 /// it, and the plain-text style.
 fn row(style: &ProgressStyle) -> ProgressBar {
     ProgressBar::no_length().with_style(style.clone())
+}
+
+/// Sets `kept`, a row of `multi` that stands only while it has something to
+/// say, to say `said`: the row `add` puts in its place where there is none
+/// yet, and none once there is nothing to say.
+fn keep(
+    multi: &MultiProgress,
+    kept: &mut Option<ProgressBar>,
+    said: Option<String>,
+    add: impl FnOnce() -> ProgressBar,
+) {
+    match (said, kept.as_ref()) {
+        (Some(said), Some(bar)) => bar.set_message(said),
+        (Some(said), None) => {
+            let bar = add();
+            bar.set_message(said);
+            *kept = Some(bar);
+        }
+        (None, _) => {
+            if let Some(bar) = kept.take() {
+                multi.remove(&bar);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

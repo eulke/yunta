@@ -20,9 +20,9 @@
 //! What a session says is on no log: the driving process gets it from the
 //! observer, a follower off the run's socket, and only the region draws it.
 
+mod beats;
 mod closing;
 mod draw;
-mod feed;
 mod fold;
 mod lines;
 mod painter;
@@ -50,13 +50,13 @@ use yunta_replay::registry::Engine;
 
 use surco::glyphs::Glyphs;
 
-use feed::{Beat, Feed};
+use beats::{Beat, Beats};
 use lines::Lines;
 use painter::{Draw, Painter};
 use region::Region;
 
+pub(crate) use beats::Diagnostics;
 pub(crate) use closing::{Closing, ClosingEnv};
-pub(crate) use feed::Diagnostics;
 pub(crate) use screen::Screen;
 pub(crate) use terminal::TerminalEnv;
 pub(crate) use turns::Curtain;
@@ -184,7 +184,7 @@ pub(crate) struct SurfaceEnv<'a> {
 /// The live surface of one invocation: the observer the engine feeds and
 /// the task that draws from it.
 pub(crate) struct Surface {
-    feed: Option<Arc<Feed>>,
+    beats: Option<Arc<Beats>>,
     /// Kept so the invocation owns the task it spawned and waits for it
     /// to take the region down before anything else prints.
     painter: Option<JoinHandle<()>>,
@@ -201,7 +201,7 @@ impl Surface {
         let draw = match env.delivery {
             Delivery::Quiet => {
                 return Self {
-                    feed: None,
+                    beats: None,
                     painter: None,
                     curtain: Curtain::none(),
                 }
@@ -219,12 +219,12 @@ impl Surface {
                 }
             }
         };
-        let (feed, beats) = Feed::open();
+        let (beats, received) = Beats::open();
         let (curtain, standby) = Curtain::open();
         let painter = Painter::seeded(&env, draw, seed);
         Self {
-            feed: Some(feed),
-            painter: Some(tokio::spawn(painter::paint(painter, beats, standby))),
+            beats: Some(beats),
+            painter: Some(tokio::spawn(painter::paint(painter, received, standby))),
             curtain,
         }
     }
@@ -235,8 +235,8 @@ impl Surface {
     /// whether the painter took it; nothing draws under `--quiet`, and that
     /// is taking it too.
     pub(crate) async fn deliver(&self, event: StoredEvent) -> bool {
-        match &self.feed {
-            Some(feed) => feed.deliver(event).await,
+        match &self.beats {
+            Some(beats) => beats.deliver(event).await,
             None => true,
         }
     }
@@ -248,7 +248,7 @@ impl Surface {
     /// stream observes. A run drawing nothing hands back a door onto
     /// stderr, so the caller has one path either way.
     pub(crate) fn diagnostics(&self) -> Diagnostics {
-        self.feed
+        self.beats
             .as_ref()
             .map_or_else(Diagnostics::none, Diagnostics::through)
     }
@@ -264,26 +264,26 @@ impl Surface {
 
     /// The observer to hand the engine, or `None` when nothing is drawing.
     pub(crate) fn observer(&self) -> Option<Arc<dyn RunObserver>> {
-        self.feed
+        self.beats
             .as_ref()
-            .map(|feed| Arc::clone(feed) as Arc<dyn RunObserver>)
+            .map(|beats| Arc::clone(beats) as Arc<dyn RunObserver>)
     }
 
     /// Whether this surface says what happens in the run as it happens. Nothing does under
     /// `--quiet`, so whoever else speaks has to say it itself.
     pub(crate) fn chronicles(&self) -> bool {
-        self.feed.is_some()
+        self.beats.is_some()
     }
 
     /// Takes the surface down: everything already queued is drawn, then
     /// the region is cleared, so the closing block lands on a terminal
     /// with nothing pinned to it.
     pub(crate) async fn close(self) {
-        if let Some(feed) = &self.feed {
+        if let Some(beats) = &self.beats {
             // Whether the painter took it is nothing to act on here: one
             // that has already stopped takes nothing, and that is the
             // state this instruction is asking for.
-            feed.tell(Beat::Close).await;
+            beats.tell(Beat::Close).await;
         }
         if let Some(painter) = self.painter {
             if let Err(e) = painter.await {

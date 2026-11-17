@@ -27,9 +27,9 @@ pub(super) struct Offered {
 
 /// What the run framed as `frame` offers here: answering what it waits on where it
 /// stopped on a menu of its own or on a round of questions (`answerable`), then each
-/// act its standing and `decision`, the decision its page says it stopped on, offer that
-/// a key here takes, then what every run offers: its page for a browser, what it cost
-/// and its graph.
+/// act its standing and `decision`, the decision it waits on as read for the pause it
+/// stands at, offer that a key here takes, then what every run offers: its page for a
+/// browser, what it cost and its graph.
 pub(super) fn offered(
     frame: &RunFrame,
     decision: Option<&GateWaitingPayload>,

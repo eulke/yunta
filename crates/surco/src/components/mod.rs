@@ -13,6 +13,15 @@
 //! needs the person and the keys, and each interface lays it out its own
 //! way. The keys a card, a desk or a screen answers to are one [`Legend`],
 //! so a key is said one way wherever a person presses it.
+//!
+//! A [`Feed`] is what happens at a node, a row a moment, as a pane and a
+//! printed page show it: the rows in sight, the newest last, and how many
+//! stand above and under them. A row is cut at the edge, never folded and
+//! never inside a number, so it stays one moment.
+//!
+//! A [`Meter`] is what a run has spent, on one row: its count, one bar a
+//! node, and its times. Where the row passes the edge its parts go whole,
+//! the bars first, so no figure in it is cut.
 
 mod attention;
 mod card;
@@ -24,9 +33,11 @@ mod desk;
 mod diffstat;
 mod document;
 mod evidence;
+mod feed;
 mod fields;
 mod headline;
 mod legend;
+mod meter;
 mod next;
 mod node_table;
 mod page;
@@ -49,9 +60,11 @@ pub use desk::{Desk, DeskFoot, FootRow, Pane, RailGroup, RailRow};
 pub use diffstat::{Diffstat, FileRow, MoreFiles, COLUMNS};
 pub use document::{Against, Code, Fold, Lead, Marked, Marks, Note, Part, Prose, Section, Title};
 pub use evidence::{Evidence, Whole};
+pub use feed::Feed;
 pub use fields::{Fields, Reads};
 pub use headline::Headline;
 pub use legend::{Binding, Keys, Legend};
+pub use meter::{Meter, Time};
 pub use next::Next;
 pub use node_table::{Branch, NodeRow, NodeTable};
 pub use page::{Furrow, Gist};

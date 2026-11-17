@@ -3801,6 +3801,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "nix",
+ "rusqlite",
  "rustix",
  "serde_json",
  "tempfile",

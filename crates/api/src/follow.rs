@@ -18,9 +18,11 @@
 //! at a terminal commit nothing; every ten seconds, that each run of the field still has
 //! its directory. Neither reads the log. Reading a field whole costs the runs' heads and
 //! each run's log, and git once for each reach, to say which repository is here. A run
-//! closed promoted is asked of the same reader for its successor: the runs' heads and the
-//! first events of each run new to the log, again only after a commit. Every pace runs on
-//! tokio's monotonic time; the workspace clock only stamps the frames.
+//! closed promoted is asked of the same reader for its successor: each run's first event,
+//! in one statement, as its close is read and again only after a commit, until a successor
+//! or that none came is handed. Every pace runs on tokio's monotonic time; the workspace
+//! clock stamps the frames, and says how long ago a run closed promoted, which the wait
+//! for its successor runs from.
 //!
 //! One fold. The run followed is handed read whole once, with every event of its log
 //! from its first ([`FollowNews::Whole`]), then each batch as it comes, and a successor
@@ -41,6 +43,7 @@ mod field;
 mod followed;
 mod following;
 mod listening;
+mod successor;
 
 use std::path::{Path, PathBuf};
 
@@ -123,7 +126,8 @@ pub enum RunNews {
         events: Vec<StoredEvent>,
     },
     /// The run closed promoted and no successor came in the time one takes to be
-    /// created. Not `Successor`.
+    /// created since its close. Final: no successor of the run is handed after it. Not
+    /// `Successor`.
     NoSuccessor,
     /// What the run waits on a person for, read once for each pause it waits at and
     /// handed with that pause; none once it waits on none, as a decision answered
