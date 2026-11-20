@@ -5,7 +5,7 @@
 use yunta_core::events::{EventPayload, Failure, NodeEvent, StoredEvent};
 use yunta_core::protected::Protection;
 use yunta_engine::{RunReport, RunTerminal};
-use yunta_testkit::{git_output, write, Bench, MOCK_CONFIG};
+use yunta_testkit::{git, git_output, write, Bench, MOCK_CONFIG};
 
 mod common;
 use common::answer_parked;
@@ -62,6 +62,70 @@ async fn an_unscoped_node_writing_a_denied_path_fails_and_head_never_holds_it() 
     assert!(
         !bench.worktree.join(".github/ci.yml").exists(),
         "put back as the branch had it"
+    );
+}
+
+/// A repository whose last commit holds `.github/ci.yml`, and the run of one
+/// node that moves it, under `config`.
+async fn moving_the_denied_path(config: &str) -> (Bench, RunTerminal) {
+    let bench = Bench::new();
+    write(&bench.worktree.join(".github/ci.yml"), "on: push\n");
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-q", "-m", "seed"]);
+    let workflow =
+        "name: w\nnodes:\n  - { id: tidy, kind: bash, run: \"mv .github/ci.yml moved.yml\" }\n";
+    let RunReport { terminal, .. } = bench
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", config)
+        .await;
+    (bench, terminal)
+}
+
+/// A move takes a file off its path as a delete does: the close refuses that
+/// path and puts the file back, and the copy is committed with the rest.
+/// Reached by: `crates/engine/src/scope.rs`, `crates/engine/src/run/shared_tree.rs`,
+/// `crates/engine/src/worktree/commit.rs`
+#[tokio::test]
+async fn an_unscoped_node_moving_a_denied_path_fails_and_gets_it_put_back() {
+    let (bench, terminal) = moving_the_denied_path(&denying_ci()).await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    let ci = std::path::PathBuf::from(".github/ci.yml");
+    assert_eq!(
+        failures(&bench.events(), "tidy"),
+        vec![(
+            Failure::paths_denied(vec![ci.clone()], vec![Protection::ProjectDeny]),
+            vec![ci]
+        )]
+    );
+    let head = at_head(&bench);
+    assert!(head.contains(".github/ci.yml"), "{head}");
+    assert!(head.contains("moved.yml"), "the rest is committed: {head}");
+    assert!(
+        bench.worktree.join(".github/ci.yml").exists(),
+        "put back as the branch had it"
+    );
+}
+
+/// A node that works in the person's own tree commits nothing and puts nothing
+/// back: its close says what it refused, and the tree stays as the node left it.
+/// Reached by: `crates/engine/src/scope.rs`, `crates/engine/src/run/shared_tree.rs`
+#[tokio::test]
+async fn a_node_in_the_person_s_own_tree_moving_a_denied_path_fails() {
+    let config = format!("{}defaults:\n  isolation: none\n", denying_ci());
+    let (bench, terminal) = moving_the_denied_path(&config).await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    let failed = failures(&bench.events(), "tidy");
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    assert_eq!(
+        failed[0].0,
+        Failure::paths_denied(vec![".github/ci.yml".into()], vec![Protection::ProjectDeny])
     );
 }
 

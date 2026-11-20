@@ -198,16 +198,21 @@ pub(crate) fn standing_refusal(
     }
 }
 
+/// Every path this attempt touched: a staged move counts at both of its
+/// paths, as the audit reads it, and what git does not track yet counts too.
 async fn diff_paths(
     cwd: &Path,
     supervision: Supervision<'_>,
 ) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {
-    let mut paths: Vec<std::path::PathBuf> =
-        crate::git::read(cwd, &["diff", "--name-only", "HEAD"], supervision)
-            .await?
-            .lines()
-            .map(std::path::PathBuf::from)
-            .collect();
+    let mut paths: Vec<std::path::PathBuf> = crate::git::read(
+        cwd,
+        &["diff", "--no-renames", "--name-only", "HEAD"],
+        supervision,
+    )
+    .await?
+    .lines()
+    .map(std::path::PathBuf::from)
+    .collect();
     paths.extend(
         crate::git::read(
             cwd,
@@ -336,6 +341,51 @@ mod tests {
                 precheck: Precheck::Red { exit: 1 },
             }),
         }
+    }
+
+    /// A move a session staged is a change at the path it left, so the files
+    /// that left a directory count against a request for that directory.
+    #[tokio::test]
+    async fn the_file_bound_counts_a_staged_move_at_the_path_it_left() {
+        let dir = checkout(&[]);
+        yunta_testkit::git(dir.path(), &["config", "diff.renames", "true"]);
+        for name in ["one", "two"] {
+            yunta_testkit::write(&dir.path().join(format!("old/{name}.rs")), "// a file\n");
+        }
+        yunta_testkit::git(dir.path(), &["add", "-A"]);
+        yunta_testkit::git(dir.path(), &["commit", "-q", "-m", "old"]);
+        std::fs::create_dir_all(dir.path().join("new")).unwrap();
+        for name in ["one", "two"] {
+            yunta_testkit::git(
+                dir.path(),
+                &["mv", &format!("old/{name}.rs"), &format!("new/{name}.rs")],
+            );
+        }
+        let cancel = CancellationToken::new();
+        let supervision = Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock);
+        let protected = Protected::default();
+        let bounds = Bounds {
+            max_files: 1,
+            ..rules(&protected)
+        };
+        let paths = [ScopeGlob::from("old/**")];
+        let (decision, _) = expand(
+            red_request(&paths),
+            &bounds,
+            &GrantWindow::seeded(0),
+            dir.path(),
+            supervision,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            decision,
+            Decision::Deny(Denial::TooManyFiles {
+                touched: 2,
+                bound: 1,
+            })
+        );
     }
 
     #[tokio::test]

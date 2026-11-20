@@ -109,6 +109,72 @@ async fn no_changes_means_no_diff_and_no_violations() {
     assert!(result.violations.is_empty());
 }
 
+/// `tracked.txt` as it stands at `to`, a move the repository has not been
+/// told about: git would have to find it by comparing the two trees.
+fn move_tracked(dir: &std::path::Path, to: &str) {
+    let to = dir.join(to);
+    std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+    std::fs::rename(dir.join("tracked.txt"), to).unwrap();
+}
+
+/// A move changes two paths, and each answers to the scope: what reached the
+/// scope from outside it still left a path the scope does not hold.
+#[tokio::test]
+async fn a_file_moved_into_the_scope_is_a_violation_at_the_path_it_left() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    setup_repo(dir.path());
+    move_tracked(dir.path(), "src/tracked.txt");
+
+    let result = from_here(dir.path(), &["src/**".into()], &[], &owner)
+        .await
+        .unwrap();
+    assert_eq!(
+        result.violations,
+        vec![std::path::PathBuf::from("tracked.txt")]
+    );
+}
+
+#[tokio::test]
+async fn a_file_moved_inside_the_scope_is_not_a_violation() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    setup_repo(dir.path());
+    move_tracked(dir.path(), "src/tracked.txt");
+
+    let scope = ["src/**".into(), "tracked.txt".into()];
+    let result = from_here(dir.path(), &scope, &[], &owner).await.unwrap();
+    assert!(result.violations.is_empty(), "{:?}", result.violations);
+}
+
+/// A repository's own `diff.renames` decides whether git pairs the two ends
+/// of a move, and a verdict that followed it would differ from one machine to
+/// the next on the same work.
+#[tokio::test]
+async fn what_a_move_changed_does_not_depend_on_the_repository_s_git_config() {
+    for setting in ["true", "false", "copies"] {
+        let owner = Owner::new();
+        let dir = tempfile::tempdir().unwrap();
+        setup_repo(dir.path());
+        yunta_testkit::git(dir.path(), &["config", "diff.renames", setting]);
+        move_tracked(dir.path(), "src/tracked.txt");
+
+        let mut diff = from_here(dir.path(), &["**".into()], &[], &owner)
+            .await
+            .unwrap()
+            .diff;
+        diff.sort();
+        assert_eq!(
+            diff,
+            vec![
+                std::path::PathBuf::from("src/tracked.txt"),
+                std::path::PathBuf::from("tracked.txt"),
+            ],
+            "with diff.renames={setting}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_non_git_directory_surfaces_a_typed_git_failure() {
     let owner = Owner::new();
