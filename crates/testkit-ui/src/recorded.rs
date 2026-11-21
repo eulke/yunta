@@ -2,13 +2,29 @@
 //! the home where it reads something different, and what it found and came to: what
 //! the walk answers an operation of that kind with, in every state that waits on one.
 //! The acts that change a run are performed last, once every reading is made.
+//!
+//! What the application follows is recorded by place, `followed`'s, as a state opened there
+//! follows it: the field at each reach in the places the walk's field comes from, and each
+//! run whose screen it opens, its performer's following taken piece by piece until the state
+//! stands caught up with the place's log, before any act moves a log. Each piece is kept by
+//! what it is about, the field at the reach followed or the run it names at the head its log
+//! stands at there, and the walk hands it to every state that follows that and holds the run
+//! at that head, or none of it yet. The fold takes an event once and a piece handed again
+//! changes nothing, so what is followed adds no endless states: it bounds the walk as the
+//! recorded answers do.
+//!
+//! The runs of the home's cuts, each standing at a scene of a run's screen, are followed on
+//! their screens, and the application is opened on each of their screens: what those screens
+//! ask to read as a scene opens, a pull request or a verification, is recorded there.
+
+mod followed;
 
 use std::collections::HashMap;
-
 use std::path::{Path, PathBuf};
 
 use tokio::sync::mpsc;
-use yunta_api::{FieldReach, Repository, RunRequest, Workspace};
+use yunta_api::{FollowNews, Repository, RunRequest, Workspace};
+use yunta_core::events::Channel;
 use yunta_core::step::NextStep;
 use yunta_core::{
     Answer, InputName, NodeId, OptionId, PackRef, QuestionId, WorkflowName, WorkflowShape,
@@ -18,14 +34,18 @@ use yunta_ui::{
     PackOperation, PackOutcome, Performer, Request, State, WorkflowOperation,
 };
 
+use crate::cut::Cut;
 use crate::home::{root_of, Home};
 use crate::sandbox::{now, workspace, workspace_on};
 use crate::walk::Reached;
+use followed::{read_as, FollowedNews};
 
-/// What each kind of operation found and came to where it was performed, and the steps
-/// the application is also opened on, whose openings they answer.
+/// What each kind of operation found and came to where it was performed, what the
+/// application's following handed where it was recorded, and the steps the application
+/// is also opened on, whose openings they answer.
 pub struct Recordings {
     kinds: Vec<(OperationKind, Recorded)>,
+    followed: FollowedNews,
     opened_on: Vec<NextStep>,
 }
 
@@ -43,9 +63,19 @@ impl Recordings {
         let reviewed = NextStep::Review {
             run: home.reviewing.run_id.clone(),
         };
+        let asked = NextStep::status(&home.asking.run_id);
+        let choosing = NextStep::status(&home.scenes.choosing.run_id);
+        let mut opened_on = vec![reviewed, asked, choosing];
+        for run in home.scenes.cuts().flat_map(Cut::runs) {
+            let status = NextStep::status(run);
+            if !opened_on.contains(&status) {
+                opened_on.push(status);
+            }
+        }
         let mut made = Recordings {
             kinds: Vec::new(),
-            opened_on: vec![reviewed],
+            followed: FollowedNews::default(),
+            opened_on,
         };
         made.readings(home).await;
         made.acts(home).await;
@@ -53,14 +83,18 @@ impl Recordings {
     }
 
     /// The steps the application is also opened on, beside its opening: `review` of the
-    /// home's run parked on its plan.
+    /// home's run parked on its plan, the screen of each of its runs parked on a round, typed
+    /// or of choices, which no field the walk shows lists and whose round stands in place
+    /// there, and the screen of each run of the home's cuts, once for each run however many
+    /// moments it stands at.
     pub fn opened_on(&self) -> &[NextStep] {
         &self.opened_on
     }
 
     /// Every reading the application asks for, performed where it reads something
-    /// different.
+    /// different; what it follows first, while the home's own root holds no run.
     async fn readings(&mut self, home: &Home) {
+        self.followings(home).await;
         self.repository_readings(home).await;
         self.catalog_readings(home).await;
         self.finished_readings(home).await;
@@ -72,17 +106,12 @@ impl Recordings {
     /// what setting a repository up finds, with an adapter answering.
     async fn repository_readings(&mut self, home: &Home) {
         let (outside, never_set_up) = (home.outside.as_path(), home.never_set_up.as_path());
-        let worked = (home.worked.worktree.as_path(), home.worked_root());
         let unworked = home.root();
         for dir in [outside, never_set_up, home.set_up.as_path()] {
             self.kept(performed(dir, unworked, Operation::ReadRepository).await);
         }
         let answering = workspace_on(never_set_up, unworked, vec![home.clis.clone()]);
         self.kept(performed_in(answering, Operation::DetectProject).await);
-        for reach in [FieldReach::Here, FieldReach::Machine] {
-            self.kept(performed(never_set_up, unworked, Operation::Field { reach }).await);
-            self.kept(performed(worked.0, worked.1, Operation::Field { reach }).await);
-        }
     }
 
     /// The catalog, a workflow's check, past runs (none) and graph, the cases, and the
@@ -122,23 +151,14 @@ impl Recordings {
         self.kept(performed(packed, unworked, Operation::Pack(update)).await);
     }
 
-    /// What a finished run leaves, cost and is drawn as, and its workflow's past runs.
+    /// What a finished run leaves, and its workflow's past runs.
     async fn finished_readings(&mut self, home: &Home) {
         let worked = (home.worked.worktree.as_path(), home.worked_root());
         let finished = home.worked.run_id.clone();
-        for reading in [
-            Operation::ReadStats {
-                run: finished.clone(),
-            },
-            Operation::ReadRunGraph {
-                run: finished.clone(),
-            },
-            Operation::ReadHistory {
-                workflow: WorkflowName::from("done"),
-            },
-        ] {
-            self.kept(performed(worked.0, worked.1, reading).await);
-        }
+        let past = Operation::ReadHistory {
+            workflow: WorkflowName::from("done"),
+        };
+        self.kept(performed(worked.0, worked.1, past).await);
         for evidence in [
             EvidenceOperation::WriteReceipt {
                 run: finished.clone(),
@@ -168,41 +188,15 @@ impl Recordings {
         }
     }
 
-    /// A run's decision and rounds, followed, and its pages.
+    /// The pull request of the gate a run waits at. The home holds no run waiting at a gate a
+    /// forge holds: the pull request of the run parked on its own gate is read as none. What
+    /// a run's log says, the decision and the round it waits on among it, is followed.
     async fn run_readings(&mut self, home: &Home) {
         let worked = (home.worked.worktree.as_path(), home.worked_root());
-        let parked = home.parked.clone();
-        let deciding = Operation::ReadDecision {
-            run: parked.clone(),
+        let no_pull_request = Operation::ReadPullRequest {
+            run: home.parked.clone(),
         };
-        self.kept(performed(worked.0, worked.1, deciding).await);
-        let no_round = Operation::ReadQuestions { run: parked };
-        self.kept(performed(worked.0, worked.1, no_round).await);
-        let asking = (home.asking.worktree.as_path(), root_of(&home.asking));
-        let round = Operation::ReadQuestions {
-            run: home.asking.run_id.clone(),
-        };
-        self.kept(performed(asking.0, asking.1, round).await);
-        let reviewing = (home.reviewing.worktree.as_path(), root_of(&home.reviewing));
-        let on_its_plan = Operation::ReadDecision {
-            run: home.reviewing.run_id.clone(),
-        };
-        self.kept(performed(reviewing.0, reviewing.1, on_its_plan).await);
-        for (run, node) in [
-            (home.worked.run_id.clone(), "only"),
-            (home.parked.clone(), "approve"),
-        ] {
-            for reading in [
-                Operation::Follow { run: run.clone() },
-                Operation::ReadPage { run: run.clone() },
-                Operation::ReadNodePage {
-                    run,
-                    node: NodeId::from(node),
-                },
-            ] {
-                self.kept(performed(worked.0, worked.1, reading).await);
-            }
-        }
+        self.kept(performed(worked.0, worked.1, no_pull_request).await);
     }
 
     /// Every act the application asks for, performed on a run it changes or a
@@ -291,6 +285,19 @@ impl Recordings {
             .map_or(&[], |recorded| recorded.news.as_slice())
     }
 
+    /// What the application's following handed of what `state` follows, where it was
+    /// recorded: each piece of the field at its reach, then each piece of its run recorded
+    /// where the run's log stood at the head `state` holds it read whole at, or every
+    /// place's where it holds none of it.
+    pub fn followed(&self, state: &State) -> Vec<&FollowNews> {
+        let followed = state.followed();
+        let in_view = state.followed_runs().in_view.as_ref();
+        let held = in_view
+            .filter(|in_view| followed.run.as_ref() == Some(&in_view.run.run))
+            .and_then(|in_view| in_view.run.state.head());
+        self.followed.about(&followed, held)
+    }
+
     /// Every page a piece of work wrote for a surface to show: what the walk tells each
     /// state a surface could not show.
     pub fn pages_written(&self) -> Vec<PathBuf> {
@@ -304,16 +311,26 @@ impl Recordings {
             .collect()
     }
 
-    /// Every piece of work `requests` asks for is one these recordings answer, which the
-    /// walk answers it with; `reached` says the inputs that asked where one is not.
+    /// Every piece of work `requests` asks for, and everything it asks to follow, is one
+    /// these recordings answer, which the walk answers it with; `reached` says the inputs
+    /// that asked where one is not.
     pub fn carried_out(&self, requests: &[Request], reached: &Reached<'_>) {
         for request in requests {
-            if let Request::Perform(_, operation) = request {
-                assert!(
+            match request {
+                Request::Perform(_, operation) => assert!(
                     !self.of(operation).is_empty(),
                     "{operation:?} has no recording in recorded.rs; asked after:\n{}",
                     reached.inputs()
-                );
+                ),
+                Request::Follow(followed) => assert!(
+                    self.followed.answers(followed),
+                    "{followed:?} has no following recorded in recorded.rs; asked after:\n{}",
+                    reached.inputs()
+                ),
+                Request::LetGo(_)
+                | Request::ShowPage(_)
+                | Request::CallThePerson
+                | Request::Leave => {}
             }
         }
     }
@@ -356,12 +373,12 @@ async fn set_up(workspace: Workspace) -> (Operation, Vec<News>, Outcome) {
     let [Request::Perform(opening, _)] = requests.as_slice() else {
         panic!("the application asks where it stands as it opens");
     };
-    let never_set_up = Outcome::Repository(Repository::NeverSetUp);
+    let never_set_up = read_as(&workspace, Repository::NeverSetUp);
     let requests = state.update(Input::Outcome(*opening, never_set_up));
     let [Request::Perform(detecting, Operation::DetectProject)] = requests.as_slice() else {
         panic!("a repository never set up opens on finding what it runs");
     };
-    let performer = Performer::new(workspace);
+    let performer = Performer::new(workspace, Channel::Tty);
     let (inputs, mut received) = mpsc::unbounded_channel();
     performer
         .perform(*detecting, Operation::DetectProject, inputs.clone())
@@ -396,12 +413,12 @@ async fn installed(workspace: Workspace, source: String) -> (Operation, Vec<News
     let [Request::Perform(opening, _)] = requests.as_slice() else {
         panic!("the application asks where it stands as it opens");
     };
-    let never_set_up = Outcome::Repository(Repository::NeverSetUp);
+    let never_set_up = read_as(&workspace, Repository::NeverSetUp);
     let requests = state.update(Input::Outcome(*opening, never_set_up));
     let [Request::Perform(fetching, _)] = requests.as_slice() else {
         panic!("a repository never set up asks what setting it up finds");
     };
-    let performer = Performer::new(workspace);
+    let performer = Performer::new(workspace, Channel::Tty);
     let (inputs, mut received) = mpsc::unbounded_channel();
     let fetch = Operation::Pack(PackOperation::Fetch { source });
     performer.perform(*fetching, fetch, inputs.clone()).await;
@@ -451,7 +468,7 @@ async fn performed_in(
         panic!("the application asks something as it opens");
     };
     let (inputs, mut received) = mpsc::unbounded_channel();
-    Performer::new(workspace)
+    Performer::new(workspace, Channel::Tty)
         .perform(ticket, operation.clone(), inputs)
         .await;
     let mut news = Vec::new();

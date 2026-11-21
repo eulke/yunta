@@ -28,6 +28,7 @@ use std::path::Path;
 
 use surco::components::{self, Note, Prose, Section};
 use surco::doc::Block;
+use yunta_core::ahead::NodesAhead;
 use yunta_core::events::{DecisionOn, GateWaitingPayload};
 use yunta_core::shown::ShownDocument;
 use yunta_core::RunId;
@@ -41,6 +42,8 @@ pub struct Decision {
     pub escalation: GateWaitingPayload,
     /// The documents the decision shows, as the run holds them.
     pub shown: Vec<ShownDocument>,
+    /// What lies ahead at the nodes its options lead to, as the run froze them.
+    pub ahead: NodesAhead,
 }
 
 /// What the page showing a decision says beside it already.
@@ -76,7 +79,7 @@ impl Decision {
         {
             blocks.push(before.into());
         }
-        let mut menu = menu(run, escalation);
+        let mut menu = menu(run, escalation, &self.ahead);
         menu.otherwise = otherwise;
         blocks.push(menu.into());
         super::section(self.heading(), blocks)
@@ -121,8 +124,8 @@ fn account(escalation: &GateWaitingPayload, beside: Beside, shown: &[ShownDocume
 
 /// Every option of a decision: what it costs and the command that
 /// chooses it.
-fn menu(run: &RunId, escalation: &GateWaitingPayload) -> components::Decision {
-    let options = crate::offers::decision_options(escalation);
+fn menu(run: &RunId, escalation: &GateWaitingPayload, ahead: &NodesAhead) -> components::Decision {
+    let options = crate::offers::decision_options(escalation, ahead);
     crate::blocks::decision::here(run, options)
 }
 
@@ -201,6 +204,7 @@ mod tests {
                 on: DecisionOn::Node(NODE),
                 escalation: escalation.clone(),
                 shown: Vec::new(),
+                ahead: NodesAhead::default(),
             },
             beside,
         )
@@ -214,6 +218,7 @@ mod tests {
                 on: DecisionOn::Run,
                 escalation: escalation(),
                 shown: Vec::new(),
+                ahead: NodesAhead::default(),
             },
             NOTHING_BESIDE,
         );
@@ -389,6 +394,7 @@ mod tests {
             on: DecisionOn::Node(NODE),
             escalation: withheld.clone(),
             shown: vec![flawed_plan()],
+            ahead: NodesAhead::default(),
         };
         let lines = drawn_with(decision, NOTHING_BESIDE);
         let reason = "is not offered, because";

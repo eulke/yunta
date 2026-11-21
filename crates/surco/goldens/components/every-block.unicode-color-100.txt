@@ -25,6 +25,17 @@
   ␛[2mprogress    ␛[0m 0 of 2 nodes done, 1 failed
   ␛[2mtokens      ␛[0m 20.2k spent, 3 past runs, median 18k tokens
 
+␛[2m… 4 above␛[0m
+search  global pack
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+␛[2m… 4 under␛[0m
+
 ␛[2mnext␛[0m
   ␛[1myunta status 7E5PH4␛[0m   ␛[2mwhere it stands␛[0m
   ␛[1myunta close 7E5PH4 ␛[0m   ␛[2mcloses it for good␛[0m

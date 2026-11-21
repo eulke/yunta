@@ -7,21 +7,38 @@
 //! leaving a stage is never undone by a late answer. Work already under way is not
 //! asked twice, and a reading asked again lets go the one of its kind under way.
 //!
+//! The application first stands where the repository's reading says outside a
+//! repository and in one never set up. In one set up it follows the field here and stands
+//! once the field's first news is folded: on the field where it holds a run, read or
+//! not, on the first request where it holds none. Until then its screen says the runs are
+//! being read, and no reading of the field is asked: what is followed is the one reading.
+//!
 //! Opened on a step, the application first stands where it would open, then opens over
 //! it the stages a person walks through to the step, so going back walks the same way.
 //!
 //! A stage opens over another, which the person comes back to; leaving a stage either
 //! way lets go the readings it waits on, and what the performer holds for it, while an
 //! act goes on and what it comes to is said where the person is. A stroke goes to the dialog standing over the stage when
-//! there is one, and to the stage otherwise; news of lasting work goes to the stage.
+//! there is one, and to the stage otherwise; news of work a stage asked for goes to it.
+//!
+//! Leaving a run ends on the field: the state goes down to the stage at the bottom of what
+//! stands under the run, which the field takes the place of where it is another, as the
+//! first request is once a run was started from it, and the field notes what leaving said.
+//!
+//! What the application follows is a function of where the person is, `followed`'s
+//! ([`State::followed`]): each input ends by asking for it where it changed, never twice
+//! the same and under no ticket, since a following is never let go. What is followed
+//! folds into what the state keeps of it, for every stage to read; a promotion's successor
+//! takes the place of its run under every stage that shows it, so it is followed from
+//! then on; the stage the person is at then says what the piece folded asks of it
+//! (`Stage::followed_on`). A run kept that turns to need the person once the field was
+//! read whole calls them, and the screen's title names one that needs them (`calling`).
+//!
 //! The state is `Clone`: a test branches it once per input.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use surco::components::{Note, Region, Screen};
-use surco::doc::Doc;
-use surco::look::Look;
 use yunta_api::{FieldReach, Repository};
 use yunta_core::step::NextStep;
 
@@ -30,8 +47,13 @@ use crate::dialog::help::{self, Helped};
 use crate::dialog::palette::{self, Chosen};
 use crate::dialog::{Dialog, Help, Palette};
 use crate::prompt::Stroke;
-use crate::stage::{FieldStage, FirstRunStage, SetupStage, Want};
-use crate::{Input, Operation, Outcome, Request, Stage, Ticket};
+use crate::stage::{FieldStage, SetupStage, Want};
+use crate::{FollowedRuns, Input, Operation, Outcome, RepositoryReading, Request, Stage, Ticket};
+
+mod attending;
+mod calling;
+mod followed;
+mod screen;
 
 /// The application as one value.
 #[derive(Debug, Clone)]
@@ -56,6 +78,10 @@ pub struct State {
     next: Ticket,
     /// The instant the application stands at.
     now: DateTime<Utc>,
+    /// What it follows, as it last asked, and what it keeps of it.
+    followed_runs: FollowedRuns,
+    /// Which runs it keeps need the person, so a run that turns to need them calls them.
+    calling: calling::Calling,
 }
 
 impl State {
@@ -77,6 +103,8 @@ impl State {
             waiting: BTreeMap::new(),
             next: Ticket::first(),
             now,
+            followed_runs: FollowedRuns::new(),
+            calling: calling::Calling::default(),
         };
         let asked = state.asked(Operation::ReadRepository);
         (state, asked)
@@ -84,21 +112,30 @@ impl State {
 
     /// The application as it opens at `now` on `step`, and what it asks first: it reads
     /// where it stands as [`State::opened`] does and stands there, then opens over it the
-    /// run's stage, for a step of a run, and over that the stage `step` opens, as a person
-    /// walks there; going back walks the same way. None for a step no stage takes.
+    /// run's stage, for a step of a run that shows something over the run, the stage
+    /// `status` opens, and over that the stage `step` opens, as a person walks there; going
+    /// back walks the same way. A step that shows the run itself, `review` and `resolve-gate`
+    /// among them, opens the run's stage alone. None for a step no stage takes.
     pub fn opened_on(now: DateTime<Utc>, step: &NextStep) -> Option<(State, Vec<Request>)> {
         let opens = Stage::opened_by(step)?;
         let (mut state, asked) = State::opened(now);
         let run = step
             .run()
             .filter(|_| !matches!(opens, Stage::Run(_)))
-            .and_then(|run| Stage::opened_by(&NextStep::Follow { run: run.clone() }));
+            .and_then(|run| Stage::opened_by(&NextStep::status(run)));
         state.opened_on = run.into_iter().chain([opens]).collect();
         Some((state, asked))
     }
 
-    /// What `input` does: the state it leaves, and what it asks for.
+    /// What `input` does: the state it leaves, and what it asks for, what it follows last.
     pub fn update(&mut self, input: Input) -> Vec<Request> {
+        let mut asked = self.taken(input);
+        asked.extend(self.followed_runs.asked(self.followed()));
+        asked
+    }
+
+    /// What `input` does but for what the state asks to follow.
+    fn taken(&mut self, input: Input) -> Vec<Request> {
         match input {
             Input::Stroke(stroke) => self.pressed(stroke),
             Input::Laid(laid) => {
@@ -106,7 +143,7 @@ impl State {
                     help.laid(laid.overlay.unwrap_or_default());
                 }
                 if let Some(stage) = self.stage.as_mut() {
-                    stage.laid(laid);
+                    stage.laid(laid, &self.followed_runs, self.now);
                 }
                 Vec::new()
             }
@@ -119,7 +156,7 @@ impl State {
             Input::News(ticket, news) => {
                 match (self.waiting.contains_key(&ticket), &mut self.stage) {
                     (true, Some(stage)) => {
-                        let wants = stage.heard(news, self.now);
+                        let wants = stage.heard(news);
                         self.wanted(wants)
                     }
                     (false, _) | (true, None) => Vec::new(),
@@ -130,12 +167,17 @@ impl State {
                 Vec::new()
             }
             Input::Outcome(ticket, outcome) => match self.waiting.remove(&ticket) {
-                Some(_) => self.answered(outcome),
+                Some(asked) => self.answered(&asked, outcome),
                 None => Vec::new(),
             },
-            Input::Unshown(page) => {
+            Input::FollowNews(news) => self.folded(news),
+            Input::LookFailed(why) => {
+                self.followed_runs.look_failed = Some(why);
+                Vec::new()
+            }
+            Input::Unshown(address) => {
                 if let Some(stage) = self.stage.as_mut() {
-                    stage.unshown(&page);
+                    stage.unshown(&address);
                 }
                 Vec::new()
             }
@@ -145,7 +187,8 @@ impl State {
     /// Whether a field is open where the person is, so a surface hands what is pasted
     /// in as typed text: anywhere else a paste answers nothing.
     pub fn typing(&self) -> bool {
-        self.dialog.is_none() && self.stage.as_ref().is_some_and(Stage::typing)
+        let typing = |stage: &Stage| stage.typing(&self.followed_runs, self.now);
+        self.dialog.is_none() && self.stage.as_ref().is_some_and(typing)
     }
 
     /// The stages a step opened the application on, yet to open, outermost first: they
@@ -163,68 +206,34 @@ impl State {
             .collect()
     }
 
-    /// This moment, as a screen any surface lays out.
-    pub fn screen(&self, look: &Look) -> Screen {
-        let mut screen = match &self.stage {
-            Some(stage) => stage.screen(look, self.now),
-            None => self.unopened_screen(),
-        };
-        match &self.dialog {
-            Some(Dialog::Confirmation(confirmation)) => {
-                screen.overlay = Some(confirmation.overlay());
-            }
-            Some(Dialog::Palette(palette)) => screen.overlay = Some(palette.overlay(look)),
-            Some(Dialog::Help(help)) => screen.overlay = Some(help.overlay(&screen.legend, look)),
-            None if self.stage.as_ref().is_some_and(|stage| !stage.typing()) => {
-                let legend = std::mem::take(&mut screen.legend);
-                screen.legend = yunta_render::screen::over_every_stage(legend);
-            }
-            None => {}
-        }
-        screen
-    }
-
-    /// The screen before the application knows where it stands: nothing; the runs
-    /// being read once it knows the repository; or what stopped it learning, with
-    /// leaving left.
-    fn unopened_screen(&self) -> Screen {
-        let doc = match (&self.unopened, self.repository) {
-            (Some(said), _) => Doc::new().with(Note(said.clone())),
-            (None, Some(_)) => {
-                Doc::new().with(Note(yunta_render::screen::READING_THE_RUNS.to_string()))
-            }
-            (None, None) => Doc::new(),
-        };
-        let mut screen = Screen::new(Region::new(doc));
-        screen.trail = vec![yunta_render::screen::YUNTA.to_string()];
-        if self.unopened.is_some() {
-            screen.legend = yunta_render::screen::leaving_legend();
-        }
-        screen
-    }
-
     /// What a stroke does: to the dialog standing over the stage, or to the stage; over a
     /// stage where nothing is typed, `/` opens the palette.
     fn pressed(&mut self, stroke: Stroke) -> Vec<Request> {
         if let Some(dialog) = self.dialog.take() {
             return self.at_the_dialog(dialog, stroke);
         }
-        if let Some(stage) = self.stage.as_ref().filter(|stage| !stage.typing()) {
+        let (followed, now) = (&self.followed_runs, self.now);
+        if let Some(stage) = self
+            .stage
+            .as_mut()
+            .filter(|stage| !stage.typing(followed, now))
+        {
             let opened = match stroke {
                 palette::OPENS => Some(Dialog::Palette(Palette::over(
-                    stage.offered(self.now),
+                    stage.offered(&self.followed_runs, self.now),
                     stage.showing(),
                 ))),
                 help::OPENS => Some(Dialog::Help(Help::default())),
                 _ => None,
             };
             if opened.is_some() {
+                stage.opened_over(&self.followed_runs);
                 self.dialog = opened;
                 return Vec::new();
             }
         }
         let wants = match (self.stage.as_mut(), &self.unopened) {
-            (Some(stage), _) => stage.pressed(stroke, self.now),
+            (Some(stage), _) => stage.pressed(stroke, &self.followed_runs, self.now),
             (None, Some(_)) => match stroke {
                 Stroke::Insert('q') | Stroke::Decline | Stroke::Interrupt => vec![Want::Leave],
                 _ => Vec::new(),
@@ -237,31 +246,17 @@ impl State {
         self.wanted(wants)
     }
 
-    /// What an answer the state waited on does: where the application opens, or what
-    /// the stage makes of it. A repository Yunta was never set up in opens on its setup.
+    /// What an answer to the work `asked` the state waited on does: the repository read,
+    /// which says where the application opens, or what the stage makes of it; a run handed
+    /// to a detached engine, started, resumed or answered, kept as handed on until a reading
+    /// of that engine comes. A repository Yunta was never set up in opens on its setup.
     /// Where it first stands, the stages a step opened it on open over it.
-    fn answered(&mut self, outcome: Outcome) -> Vec<Request> {
+    fn answered(&mut self, asked: &Operation, outcome: Outcome) -> Vec<Request> {
+        if let Some(run) = outcome.handed_on() {
+            self.followed_runs.handed_on(run.clone());
+        }
         let wants = match (outcome, self.stage.as_mut()) {
-            (Outcome::Repository(Repository::Absent), _) => self.stands_on(Stage::Signpost),
-            (Outcome::Repository(Repository::NeverSetUp), _) => {
-                self.stands_on(Stage::Setup(SetupStage::new()))
-            }
-            (Outcome::Repository(repository), _) => {
-                self.repository = Some(repository);
-                vec![Want::Work(Operation::Field {
-                    reach: FieldReach::Here,
-                })]
-            }
-            (Outcome::Field { reading, storage }, None | Some(Stage::Signpost)) => {
-                let first_run = self.repository == Some(Repository::SetUp)
-                    && reading.rows.is_empty()
-                    && reading.unreadable.is_empty();
-                let stage = match first_run {
-                    true => Stage::FirstRun(FirstRunStage::new()),
-                    false => Stage::Field(FieldStage::read(reading, storage, FieldReach::Here)),
-                };
-                self.stands_on(stage)
-            }
+            (Outcome::Repository(read), _) => self.read_in(*read),
             (Outcome::Refused(refused), None) => {
                 self.unopened = Some(refused.to_string());
                 Vec::new()
@@ -270,10 +265,32 @@ impl State {
                 self.unopened = Some(said);
                 Vec::new()
             }
-            (outcome, Some(stage)) => stage.answered(outcome),
+            (outcome, Some(stage)) => stage.answered(asked, outcome),
             (_, None) => Vec::new(),
         };
         self.wanted(wants)
+    }
+
+    /// What the repository read as `read` does: where the project keeps its runs and its
+    /// prices kept for every stage, then outside a repository the signpost, in one never
+    /// set up its setup, and in one set up nowhere yet: the field here is followed, and its
+    /// first news says where the application stands.
+    fn read_in(&mut self, read: RepositoryReading) -> Vec<Want> {
+        let RepositoryReading {
+            repository,
+            storage,
+            prices,
+        } = read;
+        self.followed_runs.storage = Some(storage);
+        self.followed_runs.prices = prices;
+        match repository {
+            Repository::Absent => self.stands_on(Stage::Signpost),
+            Repository::NeverSetUp => self.stands_on(Stage::Setup(SetupStage::new())),
+            Repository::SetUp => {
+                self.repository = Some(repository);
+                Vec::new()
+            }
+        }
     }
 
     /// The application standing on `stage`, where it first stands: what `stage` asks as
@@ -290,7 +307,7 @@ impl State {
 
     /// What `stroke` does at `dialog`, standing over the stage: answered, it closes and
     /// what was chosen is done, a confirmed act asked for by the stage that wanted it and
-    /// a palette's row taken by its key or by opening its stage; otherwise it stays.
+    /// a palette's row taken by its key or as its step is; otherwise it stays.
     fn at_the_dialog(&mut self, dialog: Dialog, stroke: Stroke) -> Vec<Request> {
         let wants = match dialog {
             Dialog::Confirmation(confirmation) => match confirmation.pressed(stroke) {
@@ -307,10 +324,10 @@ impl State {
             },
             Dialog::Palette(mut palette) => match palette.pressed(stroke) {
                 Chosen::Pressed(key) => match self.stage.as_mut() {
-                    Some(stage) => stage.pressed(key, self.now),
+                    Some(stage) => stage.pressed(key, &self.followed_runs, self.now),
                     None => Vec::new(),
                 },
-                Chosen::Opened(stage) => vec![Want::Open(*stage)],
+                Chosen::Took(wants) => wants,
                 Chosen::Closed => Vec::new(),
                 Chosen::Leave => vec![Want::Leave],
                 Chosen::Stay => {
@@ -340,13 +357,15 @@ impl State {
                 Want::Work(operation) => asked.extend(self.asked(operation)),
                 Want::LetGo(operation) => asked.extend(self.let_go(|waited| *waited == operation)),
                 Want::Release(ticket) => asked.push(Request::LetGo(ticket)),
-                Want::Show(page) => asked.push(Request::ShowPage(page)),
+                Want::Show(address) => asked.push(Request::ShowPage(address)),
                 Want::Confirm(confirmation) => {
                     self.dialog = Some(Dialog::Confirmation(confirmation));
                 }
                 Want::Open(stage) => asked.extend(self.opened_over(stage)),
                 Want::Replace(stage) => asked.extend(self.replaced_by(stage)),
                 Want::Back => asked.extend(self.back()),
+                Want::BackToItsDecision => asked.extend(self.back_to_its_decision()),
+                Want::ToTheField(said) => asked.extend(self.down_to_the_field(said)),
                 Want::Leave => asked.extend(self.leaving()),
             }
         }
@@ -385,9 +404,33 @@ impl State {
         };
         let mut asked = self.released();
         asked.extend(self.let_go(Operation::reads));
-        let returned = below.returned();
+        let returned = below.returned(&self.followed_runs);
         self.stage = Some(below);
         asked.extend(self.wanted(returned));
+        asked
+    }
+
+    /// Down to the field at the bottom of the stages, `said` noted on it: what the performer
+    /// holds for each stage left, and the readings they wait on, let go. A field standing at
+    /// the bottom stays as the person left it; any other stage there, the first request
+    /// among them, gives way to the field the state keeps, at the reach it follows.
+    fn down_to_the_field(&mut self, said: Option<String>) -> Vec<Request> {
+        let mut asked = self.let_go(Operation::reads);
+        let stages = std::mem::take(&mut self.under)
+            .into_iter()
+            .chain(self.stage.take());
+        let mut bottom = None;
+        for (at, stage) in stages.enumerate() {
+            match (at, stage) {
+                (0, Stage::Field(field)) => bottom = Some(field),
+                (_, left) => asked.extend(left.held().map(Request::LetGo)),
+            }
+        }
+        let reach = self.followed_runs.field.as_ref().map(|field| field.reach);
+        let mut field =
+            bottom.unwrap_or_else(|| FieldStage::reaching(reach.unwrap_or(FieldReach::Here)));
+        field.noting(said);
+        self.stage = Some(Stage::Field(field));
         asked
     }
 

@@ -9,9 +9,6 @@ use yunta_core::events::{EventPayload, RunEvent, StoredEvent};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, Bench, ScriptedInteraction};
 
-mod common;
-use common::answer_parked;
-
 /// A plan of one task, a loop working it, and `after` — a bash node in
 /// the run's tree once the task's work landed.
 fn builds_then(after: &str) -> String {
@@ -102,7 +99,7 @@ async fn a_moved_run_wakes_where_it_moved() {
         "{terminal:?}"
     );
     let moved = bench.tree();
-    answer_parked(&bench, "approve").await.unwrap();
+    bench.answer_parked("approve", None).await.unwrap();
 
     let RunReport { terminal, state } = bench.wake().await;
 
@@ -130,7 +127,7 @@ async fn a_run_follows_its_tasks_build_past_a_gate() {
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
-    answer_parked(&bench, "approve").await.unwrap();
+    bench.answer_parked("approve", None).await.unwrap();
 
     let RunReport { terminal, .. } = bench.wake().await;
 

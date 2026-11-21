@@ -60,6 +60,9 @@ mod said;
 #[path = "mock/retry.rs"]
 mod retry;
 
+#[path = "mock/held.rs"]
+mod held;
+
 use rail::judged;
 
 #[tokio::test]

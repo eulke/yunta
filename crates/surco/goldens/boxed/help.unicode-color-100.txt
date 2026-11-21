@@ -1,6 +1,49 @@
-␛[2m┌␛[0m ␛[1mkeys␛[0m ␛[2m────────────────────────────────────────────────────┐␛[0m
-␛[2m│␛[0m /      anything: only what can be done here              ␛[2m│␛[0m
-␛[2m│␛[0m n      start a new run, from anywhere                    ␛[2m│␛[0m
-␛[2m│␛[0m esc    one step back; what it leaves stays waiting       ␛[2m│␛[0m
-␛[2m│␛[0m q      leave: every run keeps going                      ␛[2m│␛[0m
-␛[2m└──────────────────────────────────────────────────────────┘␛[0m
+␛[2m╭␛[0m ␛[1mkeys␛[0m ␛[2m──────────────────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[2mYou never have to remember more than this.␛[0m                         ␛[2m│␛[0m
+␛[2m│␛[0m                                                                    ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1m/          ␛[0manything: only what can be done here, with its command  ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mn          ␛[0mstart a new run, wherever no prompt stands              ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mj k        ␛[0mmove; the footer always says what they move             ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mpgup pgdn  ␛[0mscroll the pane a page at a time                        ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1menter      ␛[0mopen, answer, confirm                                   ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mesc        ␛[0mone step back; what it leaves stays waiting             ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1ma          ␛[0mgo to what needs you                                    ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mf          ␛[0mfollow what the run is doing                            ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1ms g        ␛[0mwhat it cost, its graph                                 ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mc          ␛[0mstop it and everything under it                         ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mo          ␛[0mthe whole page, in a browser                            ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mq          ␛[0mgo to the field; it keeps going                         ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mctrl-c     ␛[0mleave: every run keeps going without this window        ␛[2m│␛[0m
+␛[2m│␛[0m                                                                    ␛[2m│␛[0m
+␛[2m│␛[0m                                                                    ␛[2m│␛[0m
+␛[2m╰────────────────────────────────────────────────────────────────────╯␛[0m
+
+␛[2m╭␛[0m ␛[1mkeys␛[0m ␛[2m──────────────────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[2mYou never have to remember more than this.␛[0m                         ␛[2m│␛[0m
+␛[2m│␛[0m                                                                    ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1m/          ␛[0manything: only what can be done here, with its command  ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mn          ␛[0mstart a new run, wherever no prompt stands              ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mj k        ␛[0mmove; the footer always says what they move             ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mpgup pgdn  ␛[0mscroll the pane a page at a time                        ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1menter      ␛[0mopen, answer, confirm                                   ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mesc        ␛[0mone step back; what it leaves stays waiting             ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1ma          ␛[0mgo to what needs you                                    ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mf          ␛[0mfollow what the run is doing                            ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1ms g        ␛[0mwhat it cost, its graph                                 ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mc          ␛[0mstop it and everything under it                         ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mo          ␛[0mthe whole page, in a browser                            ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mq          ␛[0mgo to the field; it keeps going                         ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mctrl-c     ␛[0mleave: every run keeps going without this window        ␛[2m│␛[0m
+␛[2m│␛[0m                                                                    ␛[2m│␛[0m
+␛[2m│␛[0m                                                                    ␛[2m│␛[0m
+␛[2m╰────────────────────────────────────────────────────────────────────╯␛[0m
+
+␛[2m╭␛[0m ␛[1mkeys␛[0m ␛[2m────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[2mYou never have to remember more than this.␛[0m           ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1m/          ␛[0manything: only what can be done here, wit…␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mn          ␛[0mstart a new run, wherever no prompt stands␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mj k        ␛[0mmove; the footer always says what they mo…␛[2m│␛[0m
+␛[2m│␛[0m ␛[1mpgup pgdn  ␛[0mscroll the pane a page at a time          ␛[2m│␛[0m
+␛[2m│␛[0m ␛[1menter      ␛[0mopen, answer, confirm                     ␛[2m│␛[0m
+␛[2m│␛[0m ␛[2m… 8 under␛[0m                                            ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────╯␛[0m

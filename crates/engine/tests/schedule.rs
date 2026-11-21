@@ -102,6 +102,7 @@ fn audit() -> EventPayload {
         cached_input_tokens: None,
         note: None,
         text: Some("thinking".into()),
+        session: None,
     }))
 }
 

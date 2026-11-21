@@ -15,7 +15,7 @@
 //! - `layout`: where each part of a screen stands on a terminal, with Ratatui's `Layout`:
 //!   the rows from the trail to the legend, the margins, the side region and the box.
 //! - `cells`: Surco's lines written into Ratatui's cells, in the colors of Surco's one
-//!   table.
+//!   table, each cell of a line's row replaced whole.
 //! - `keys`: what a key or a paste means to the application, by the CLI's table: a
 //!   stroke, or Ctrl-Z, the terminal's own.
 //! - `full_screen`: the terminal held while the application is open, as `FullScreen`, and

@@ -53,13 +53,13 @@ fn body(body: &CardBody) -> Vec<String> {
             parts
         }
         CardBody::Saying {
-            chosen,
+            choices,
             asks,
             typed,
             refused,
         } => {
             let mut parts = vec![
-                option(chosen, true),
+                listed(choices),
                 format!("<p><b>{}</b></p>", words(asks)),
                 format!("<p>{}</p>", typed_line(typed)),
             ];
@@ -83,13 +83,17 @@ pub(super) fn listed(choices: &Choices) -> String {
 }
 
 /// One option as a decision's option is drawn: its name in bold, after the
-/// pointer when it is pointed at, what it says and what it costs.
+/// pointer when it is pointed at, its key where it has one, what it says and what it
+/// costs.
 fn option(row: &ChoiceRow, pointed: bool) -> String {
     let pointer = match pointed {
         true => format!("{} ", GLYPHS.pointer()),
         false => String::new(),
     };
     let mut drawn = format!(r#"<div class="opt"><b>{pointer}{}</b>"#, esc(&row.name));
+    if let Some(key) = &row.key {
+        drawn.push_str(&format!(r#" <span class="key">{}</span>"#, esc(key)));
+    }
     if let Some(said) = &row.said {
         drawn.push_str(&format!(r#" <span class="does">{}</span>"#, words(said)));
     }

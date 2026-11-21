@@ -1,22 +1,33 @@
 //! The session side of a node's record: the sessions its attempt has
-//! open, the writes their fences refused and the calls they made.
+//! open, the writes their fences refused and the calls they made, and,
+//! kept for the run past each session's close, the task each session
+//! worked and the paths its write and edit calls named.
+
+use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 
 use super::{NodeLedger, NodeRecord};
 use crate::events::meta::EventMeta;
-use crate::events::{AgentMessagePayload, AgentMessageType, SubjectError, TokenUsage};
+use crate::events::{
+    AgentMessagePayload, AgentMessageType, SubjectError, TokenUsage, ToolAction, ToolTarget,
+};
 
 impl NodeRecord {
-    /// A session this node's attempt opened: open while the attempt is,
-    /// and — when it is the node's own, not a task's — the one a
-    /// continuation picks back up.
+    /// A session this node's attempt opened: open while the attempt is;
+    /// when a loop opened it for a task, that task's for the run; and when
+    /// it is the node's own, the one a continuation picks back up.
     fn opened(&mut self, p: &crate::events::AgentSessionOpenedPayload, at: DateTime<Utc>) {
-        if p.task_id.is_none() {
-            self.last_session = Some(p.session_id.clone());
+        match &p.task_id {
+            Some(task) => {
+                self.session_tasks
+                    .insert(p.session_id.clone(), task.clone());
+            }
+            None => self.last_session = Some(p.session_id.clone()),
         }
         self.sessions.push(OpenSession {
             session_id: p.session_id.clone(),
+            task: p.task_id.clone(),
             agent: p.agent.clone(),
             model: p.model.clone(),
             fence: p.fence.clone(),
@@ -56,12 +67,7 @@ impl NodeRecord {
     /// an attempt is open; reported outside one, it belongs to no attempt.
     fn message(&mut self, p: &AgentMessagePayload, at: DateTime<Utc>) {
         match p.message_type {
-            AgentMessageType::ToolUse => self.calls.push(ToolCall {
-                tool_name: p.tool_name.clone(),
-                action: p.tool_action(),
-                target: p.target.clone(),
-                at,
-            }),
+            AgentMessageType::ToolUse => self.called(p, at),
             AgentMessageType::Usage => {
                 if self.open_since.is_some() {
                     self.spend.in_flight += TokenUsage {
@@ -75,6 +81,27 @@ impl NodeRecord {
             // moves nothing.
             AgentMessageType::Note => {}
         }
+    }
+
+    /// A tool call of the open attempt, under the session it names; a write
+    /// or an edit of a path the log shows marks that path written by that
+    /// session, for the run.
+    fn called(&mut self, p: &AgentMessagePayload, at: DateTime<Utc>) {
+        let action = p.tool_action();
+        let shown = p.target.as_ref().and_then(ToolTarget::display);
+        if let (ToolAction::Write | ToolAction::Edit, Some(path)) = (action, shown) {
+            self.written
+                .entry(p.session.clone())
+                .or_default()
+                .insert(PathBuf::from(path));
+        }
+        self.calls.push(ToolCall {
+            tool_name: p.tool_name.clone(),
+            action,
+            target: p.target.clone(),
+            session: p.session.clone(),
+            at,
+        });
     }
 }
 
@@ -92,6 +119,9 @@ pub enum OrphanedSession {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpenSession {
     pub session_id: crate::ids::SessionId,
+    /// The task a loop opened the session to work; `None` for the node's
+    /// own session, and on a log written before sessions named their task.
+    pub task: Option<crate::ids::TaskId>,
     /// The adapter's own named agent the session runs as; `None` when
     /// the runner named none.
     pub agent: Option<crate::ids::AgentName>,
@@ -134,6 +164,9 @@ pub struct ToolCall {
     /// What the call acted on, as the log carries it; `None` when the
     /// adapter reported none.
     pub target: Option<crate::events::ToolTarget>,
+    /// The session the call was made in; `None` on a log older than calls
+    /// that name their session.
+    pub session: Option<crate::ids::SessionId>,
     pub at: DateTime<Utc>,
 }
 

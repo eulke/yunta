@@ -1,10 +1,11 @@
-//! See [`super`]. The keys of where the person is: each key the screen under it answers
-//! to, with what it does, then those every stage answers to, worded by render. It is
-//! built from the legend of the screen it stands over, so help never says a key the
+//! See [`super`]. The keys of where the person is, worded by render, which the stage under
+//! it lists (`Stage::help`): over a run, the keys every screen answers to and the run's own,
+//! then each act its scene offers by a key of its own; over any other stage, each key its
+//! legend names, then those every stage answers to. Either way help never says a key the
 //! screen does not take. Taller than its box, it scrolls; Escape or `?` closes it.
 
-use surco::components::{Laid, Legend, Overlay};
-use surco::look::Look;
+use surco::components::{Laid, Overlay};
+use surco::doc::Doc;
 
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
@@ -29,9 +30,8 @@ pub(crate) enum Helped {
 }
 
 impl Help {
-    /// Help as the overlay a surface draws over a screen whose keys are `keys`.
-    pub(crate) fn overlay(&self, keys: &Legend, look: &Look) -> Overlay {
-        let listed = yunta_render::screen::help(keys, look.glyphs);
+    /// Help as the overlay a surface draws over a screen whose keys it `listed`.
+    pub(crate) fn overlay(&self, listed: Doc) -> Overlay {
         Overlay::new(yunta_render::screen::HELP, listed)
             .legend(yunta_render::screen::help_legend())
             .in_sight(self.scroll.sight())

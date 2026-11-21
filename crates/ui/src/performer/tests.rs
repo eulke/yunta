@@ -6,22 +6,26 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use yunta_api::Workspace;
+use yunta_core::events::Channel;
 use yunta_core::{Env, ProcessSecrets, SystemIdSource};
 use yunta_testkit_core::FixedClock;
 
 use super::Performer;
 use crate::{Operation, Request, State};
 
-/// A performer working in `dir`, which holds no repository.
+/// A performer working in `dir`, which holds no repository. It records no answer, so
+/// any channel serves.
 fn performer(dir: PathBuf) -> Arc<Performer> {
-    Arc::new(Performer::new(Workspace {
+    let workspace = Workspace {
         dir,
         env: Env::default(),
         clock: Arc::new(FixedClock),
         ids: Arc::new(SystemIdSource),
         secrets: Arc::new(ProcessSecrets),
+        forges: Arc::new(yunta_api::DeclaredForge),
         binary: PathBuf::from("yunta"),
-    }))
+    };
+    Arc::new(Performer::new(workspace, Channel::Mcp))
 }
 
 #[tokio::test(flavor = "current_thread")]

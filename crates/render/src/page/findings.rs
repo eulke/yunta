@@ -1,12 +1,14 @@
 //! What a review found, as the person deciding reads it: how many of each
 //! severity, then each finding, the most severe first — what is wrong,
 //! where, and in the reviewer's own words what goes wrong and when. The
-//! run's findings read the same way, each with the node that found it
-//! and what other nodes answered.
+//! run's findings read as a run's screen lists them: how many were answered
+//! and which nodes posted them, a finding a row in the order they were
+//! posted, each answered one with its answer under it; then each one with
+//! the node that found it, what it says and what other nodes answered.
 
-use surco::components::{Fields, Prose, Section};
+use surco::components::{Fields, FindingList, FindingRow, Prose, Section};
 use surco::doc::{Block, Doc};
-use surco::glyphs::Mark;
+use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use yunta_core::events::findings::{RunFindings, Settled, StandingFinding};
@@ -29,11 +31,59 @@ pub enum Findings<'a> {
 }
 
 impl Page for Findings<'_> {
-    fn document(&self, _look: &Look) -> Doc {
+    fn document(&self, look: &Look) -> Doc {
         match self {
             Findings::Held { held, of } => held_document(held, of),
-            Findings::Run(view) => run_document(view),
+            Findings::Run(view) => run_document(view, look.glyphs),
         }
+    }
+}
+
+/// The heading of the run's findings `view`, as a run's screen says it: how many were
+/// answered of how many were posted, then the nodes that posted them, in the order each
+/// first posted one.
+pub fn heading(view: &RunFindings, glyphs: Glyphs) -> String {
+    let answered = view
+        .findings
+        .iter()
+        .filter(|standing| !standing.answers.is_empty())
+        .count();
+    let mut posted_by: Vec<&str> = Vec::new();
+    for node in view
+        .findings
+        .iter()
+        .filter_map(|standing| standing.node.as_ref())
+    {
+        if !posted_by.contains(&node.as_str()) {
+            posted_by.push(node.as_str());
+        }
+    }
+    let sep = glyphs.sep();
+    let mut said = format!(
+        "findings {sep} {answered} of {} answered",
+        view.findings.len()
+    );
+    if !posted_by.is_empty() {
+        said.push_str(&format!(" {sep} {}", posted_by.join(", ")));
+    }
+    said
+}
+
+/// The run's findings `view` as a run's screen lists them: a finding a row, in the order
+/// they were posted, each answered one with its latest answer under it.
+pub fn list(view: &RunFindings) -> FindingList {
+    FindingList::new(view.findings.iter().map(row).collect())
+}
+
+/// One finding as its row: the mark and the word of its severity, its title, and its
+/// latest answer once a node answered it.
+fn row(standing: &StandingFinding) -> FindingRow {
+    let finding = &standing.finding;
+    let (title, _) = found::said(&finding.says);
+    let row = FindingRow::new(mark(finding.severity), finding.severity.as_str(), title);
+    match standing.answers.last() {
+        Some(given) => row.answered(format!("{}: {}", given.answer.as_str(), given.why)),
+        None => row,
     }
 }
 
@@ -42,10 +92,9 @@ fn held_document(held: &HeldFindings, of: &str) -> Doc {
     let mut sorted: Vec<Finding> = held.findings.iter().cloned().map(Finding::from).collect();
     sorted.sort_by_key(|finding| finding.severity);
     let counts = counted(sorted.iter().map(|finding| finding.severity));
-    let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(heading(
+    let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(heading_of(
         &format!("findings{of}"),
         &counts,
-        String::new(),
     ))));
     for finding in sorted {
         let (title, detail) = found::said(&finding.says);
@@ -61,41 +110,46 @@ fn held_document(held: &HeldFindings, of: &str) -> Doc {
     doc
 }
 
-/// The run's findings, the most severe first, with how many were answered and settled.
-fn run_document(view: &RunFindings) -> Doc {
-    let mut sorted: Vec<&StandingFinding> = view.findings.iter().collect();
-    sorted.sort_by_key(|standing| standing.finding.severity);
-    let counts = counted(sorted.iter().map(|standing| standing.finding.severity));
-    let answered = sorted
+/// The run's findings as a run's screen lists them, under its heading, which a page
+/// follows with how many of each severity it holds and how many were settled; then each
+/// finding in the order it was posted, with the node that found it and what other nodes
+/// answered.
+fn run_document(view: &RunFindings, glyphs: Glyphs) -> Doc {
+    let mut severities: Vec<FindingSeverity> = view
+        .findings
         .iter()
-        .filter(|standing| !standing.answers.is_empty())
-        .count();
-    let settled = sorted
+        .map(|standing| standing.finding.severity)
+        .collect();
+    severities.sort();
+    let mut said = vec![heading(view, glyphs)];
+    said.extend((!severities.is_empty()).then(|| counted(severities.into_iter()).join(", ")));
+    let settled = view
+        .findings
         .iter()
         .filter(|standing| standing.settled.is_some())
         .count();
-    let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(heading(
-        "the run's findings",
-        &counts,
-        tally(answered, settled),
-    ))));
-    for standing in sorted {
-        doc = doc.with(standing_section(standing));
+    said.extend((settled > 0).then(|| format!("{settled} settled")));
+    let title = Line::new().push(Tone::Strong, said.join(&format!(" {} ", glyphs.sep())));
+    let mut doc = Doc::new()
+        .with(Block::Title(surco::components::Title::named(title)))
+        .with(Block::Findings(list(view)));
+    for standing in &view.findings {
+        doc = doc.with(standing_section(standing, glyphs));
     }
     doc
 }
 
 /// What a document of findings is, and how many of each severity it
 /// holds.
-fn heading(what: &str, counts: &[String], tally: String) -> Line {
+fn heading_of(what: &str, counts: &[String]) -> Line {
     let said = match counts.is_empty() {
         true => ": none".to_string(),
-        false => format!(": {}{tally}", counts.join(", ")),
+        false => format!(": {}", counts.join(", ")),
     };
     Line::new().push(Tone::Strong, what).plain(said)
 }
 
-fn standing_section(standing: &StandingFinding) -> Section {
+fn standing_section(standing: &StandingFinding, glyphs: Glyphs) -> Section {
     let finding = &standing.finding;
     let (title, detail) = found::said(&finding.says);
     let found_by = match &standing.node {
@@ -107,11 +161,11 @@ fn standing_section(standing: &StandingFinding) -> Section {
         let by = answer
             .by
             .as_ref()
-            .map(|node| format!(" by `{node}`"))
+            .map(|node| format!(" {} by `{node}`", glyphs.sep()))
             .unwrap_or_default();
         fields = fields.push_if(
             "answered",
-            format!("{}{by}: {}", answer.answer.as_str(), answer.why),
+            format!("{}: {}{by}", answer.answer.as_str(), answer.why),
         );
     }
     if let Some(proof) = &standing.proof {
@@ -153,18 +207,6 @@ pub(crate) fn mark(severity: FindingSeverity) -> Mark {
     }
 }
 
-fn tally(answered: usize, settled: usize) -> String {
-    let said: Vec<String> = [(answered, "answered"), (settled, "settled")]
-        .into_iter()
-        .filter(|(count, _)| *count > 0)
-        .map(|(count, what)| format!("{count} {what}"))
-        .collect();
-    match said.is_empty() {
-        true => String::new(),
-        false => format!("; {}", said.join(", ")),
-    }
-}
-
 fn counted(severities: impl Iterator<Item = FindingSeverity>) -> Vec<String> {
     let severities: Vec<FindingSeverity> = severities.collect();
     severities
@@ -172,3 +214,6 @@ fn counted(severities: impl Iterator<Item = FindingSeverity>) -> Vec<String> {
         .filter_map(|same| Some(format!("{} {}", same.len(), same.first()?.as_str())))
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

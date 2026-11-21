@@ -1,8 +1,9 @@
 //! Storage from async code: every call runs on a blocking thread through
 //! `spawn_blocking`, on a connection opened for that call from the log's
 //! path — the runtime's threads never wait on SQLite. `Storage` itself
-//! stays synchronous; a synchronous command opens it directly, and this
-//! handle is the only way async code reaches the log.
+//! stays synchronous; a synchronous command opens it directly. Async code
+//! reaches the log through this handle, or, where it only reads and asks
+//! many times a second, through `LogReader`'s one connection kept open.
 
 use std::path::PathBuf;
 
@@ -65,6 +66,19 @@ impl AsyncStorage {
     pub async fn append(&self, draft: EventDraft, at: DateTime<Utc>) -> Result<Seq> {
         self.blocking("append", move |storage| storage.append_at(&draft, at))
             .await
+    }
+
+    /// [`Storage::append_together_at`], from async code: `drafts` as one
+    /// commit, stamped with `at`.
+    pub async fn append_together<const N: usize>(
+        &self,
+        drafts: [EventDraft; N],
+        at: DateTime<Utc>,
+    ) -> Result<[Seq; N]> {
+        self.blocking("append together", move |storage| {
+            storage.append_together_at(&drafts, at)
+        })
+        .await
     }
 
     pub async fn events_for_run(&self, run_id: RunId) -> Result<Vec<StoredEvent>> {

@@ -18,7 +18,8 @@
 //!   is answered; `operation`, the [`Operation`]s a stage asks of
 //!   Yunta under a [`Ticket`] (`ticket`); `outcome` and `news`, what that work comes
 //!   to as an [`Outcome`] and hands back while it lasts as [`News`]; `input` and
-//!   `request`.
+//!   `request`; `followed_runs`, the [`FollowedRuns`] the state keeps of what it
+//!   follows, for every stage to read.
 //! - `performer`, the [`Performer`] a surface hands each request to, which carries
 //!   the work out through `yunta-api` and hands back what it says and comes to;
 //!   `remark`, what a remark the API makes while it works says, and how a person
@@ -27,11 +28,13 @@
 //!   [`Answerable`](prompt::Answerable) a surface holds, the [`Stroke`](prompt::Stroke)
 //!   it is handed and the [`Press`](prompt::Press) it answers with.
 //! - `scroll`, how a region taller than what a surface shows of it scrolls by the
-//!   keys, held by a desk's pane and every stage that shows a page.
+//!   keys, held by a desk's pane, every stage that shows a page and a run's feed: the
+//!   [`Scroll`] that says where it stands ([`ScrolledTo`]).
 //! - `room`, what a surface shows where it has less room than it lays a screen out
 //!   in ([`room_needed`]).
 
 mod dialog;
+mod followed_runs;
 mod input;
 mod news;
 mod operation;
@@ -47,6 +50,7 @@ mod state;
 mod ticket;
 
 pub use dialog::{Confirmation, Dialog};
+pub use followed_runs::{AwaitedReading, FieldInView, FollowedRuns, RunInView};
 pub use input::Input;
 pub use news::News;
 pub use operation::{
@@ -54,14 +58,16 @@ pub use operation::{
 };
 pub use outcome::{
     EvidenceOutcome, NewWorkflowWritten, Outcome, PackFetched, PackInstalled, PackOutcome,
-    PackScaffolded, WorkflowOutcome,
+    PackScaffolded, RepositoryReading, WorkflowOutcome,
 };
 pub use performer::Performer;
-pub use request::Request;
+pub use request::{Address, Request};
 pub use room::room_needed;
+pub use scroll::{Scroll, ScrolledTo};
 pub use stage::{
-    CatalogStage, DecisionStage, DoctorStage, Evidence, EvidenceStage, FieldStage, FirstRunStage,
-    GraphStage, RunStage, SchemaStage, SetupStage, Stage, StartStage, StatsStage, UpkeepStage,
+    CatalogStage, ChronicleStage, DoctorStage, Evidence, EvidenceStage, FieldStage, FirstRunStage,
+    GraphStage, Grounds, ItsRun, RunStage, Scene, SchemaStage, SetupStage, Stage, Standstill,
+    StartStage, StatsStage, UpkeepStage,
 };
 pub use state::State;
 pub use ticket::Ticket;

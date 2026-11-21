@@ -3,6 +3,7 @@
 //! reads for its claim, its facts, its options and what it withholds.
 
 use std::collections::BTreeMap;
+use yunta_core::ahead::NodesAhead;
 
 use crate::command;
 use yunta_core::events::{DecisionOn, Fact, GateWaitingPayload, Menu, Shown};
@@ -89,9 +90,10 @@ impl DecisionJson {
     }
 }
 
-/// Every option the gate offers, with the words a person reads beside it.
+/// Every option the gate offers, with the words a person reads beside it. A program's
+/// document reads no workflow, so it says nothing of what lies ahead past a node's name.
 fn options_of(escalation: &GateWaitingPayload) -> Vec<OptionJson> {
-    crate::offers::decision_options(escalation)
+    crate::offers::decision_options(escalation, &NodesAhead::default())
         .into_iter()
         .map(|option| OptionJson {
             id: option.id,

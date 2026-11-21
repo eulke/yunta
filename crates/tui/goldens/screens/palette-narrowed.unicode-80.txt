@@ -1,0 +1,24 @@
+ yunta › Q78GRR › plan                              ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 7m34s                               Q78GRR
+ ━━━━ ━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ n╭ what do you want to do? ─────────────────────────────────────────────────╮
+  │ ▸ st                                                                     │
+ p│                                                                          │a
+  │▸ stop it and everything under it                                         │
+ w│  start a new run                                                         │
+ ◌│  what it cost, and where its time went                                   │
+  │  every run of this repository                                            │
+ w│  check adapters, git, forge, packs                                       │
+ r│  the shape of every document yunta reads                                 │
+ s╰──────────────────────────────────────────────────────────────────────────╯
+ read    crates/cli/src/commands/pack.rs
+ read    crates/cli/src/cli/pack.rs
+ read    crates/engine/src/catalog.rs
+
+
+
+
+ 967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (…
+ ↑↓ move · enter do it · esc back

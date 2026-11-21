@@ -1,5 +1,5 @@
 //! `yunta review <run>`: the plan a run waits on a decision about. At a terminal it opens the
-//! application on the plan, over the run and the field, as a person walks there, and the
+//! application on the run's screen over the field, the plan's desk standing in place, and the
 //! decision is answered there the way `resolve-gate` answers it. Off a terminal it prints the
 //! plan and the commands that answer it. Wherever it shows the plan, its checks come first:
 //! the run found, the decision it waits on read, a plan among what that decision shows.

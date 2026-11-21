@@ -1,0 +1,14 @@
+ yunta › Q78GRR › grill          ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 5m00s         Q78GRR
+ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ node `grill` asks 3 questions: nothing is recorded until…
+ ▎ … 1 above
+ ▎ ◆ How should someone request a global installation, and…
+ ▎     ▸ --global on pack add, update, remove and list
+ ▎       A separate pack global command group
+ ▎       A global-by-default install
+ ▎ … 1 under
+ 220k tokens · 36s at work · 5m00s waiting on you
+
+ ↑↓ choose · enter answer · shift-tab go back · …

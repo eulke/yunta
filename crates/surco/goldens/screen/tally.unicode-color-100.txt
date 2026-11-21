@@ -1,0 +1,8 @@
+␛[1myunta␛[0m␛[2m › ␛[0m/home/set-up                                         ␛[2mnothing needs you␛[0m
+␛[1myunta␛[0m␛[2m › ␛[0mworkflows                                            ␛[2mnothing needs you␛[0m
+␛[1myunta␛[0m
+␛[1myunta␛[0m␛[2m › ␛[0m/cut/worktree                               ␛[1;35m◆ 5 need you␛[0m␛[2m · ␛[0m␛[33m▲ 1 stalled␛[0m
+␛[1myunta␛[0m␛[2m › ␛[0m/home/set-up                     ␛[2mnothing needs you␛[0m
+␛[1myunta␛[0m␛[2m › ␛[0mworkflows                        ␛[2mnothing needs you␛[0m
+␛[1myunta␛[0m
+␛[1myunta␛[0m␛[2m › ␛[0m/cut/worktree           ␛[1;35m◆ 5 need you␛[0m␛[2m · ␛[0m␛[33m▲ 1 stalled␛[0m

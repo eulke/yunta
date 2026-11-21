@@ -367,6 +367,7 @@ fn a_word_a_log_holds_is_never_read_as_a_tag() {
         .with(Evidence {
             tail: vec![hostile.to_string()],
             whole: Some(Whole::Command(hostile.to_string())),
+            kept: None,
         })
         .with(Fields::new().push_if("said", hostile))
         .with(Marked {

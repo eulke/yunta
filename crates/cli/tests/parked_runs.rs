@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 
 use surco::width::LINE_WIDTH;
 use yunta_testkit::{
-    git, handle, run_id_from, stderr, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG,
+    git, handle, run_id_from, stderr, stdout, unwrapped, wait_for, write, yunta_in, Checkout,
+    MOCK_CONFIG,
 };
 
 #[path = "parked_runs/cap.rs"]
@@ -340,8 +341,13 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
         "the page says which node the decision belongs to: {text}"
     );
     assert!(
-        text.contains("retry: Run it again (attempt 2) once something outside the tree changes"),
+        text.contains("retry: Starts a fresh attempt from the run's tree as it stands"),
         "{text}"
+    );
+    let said = unwrapped(&text.replace('▎', " "));
+    assert!(
+        said.contains("until something outside the tree changes, it fails the same way"),
+        "the retry says what it waits for: {text}"
     );
     assert!(text.contains("abort: Pause here"), "{text}");
     for option in ["retry", "abort"] {
@@ -639,9 +645,8 @@ fn a_listing_document_reads_the_same_whatever_glyphs_the_terminal_asks_for() {
 fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
     // A node parked on a person is the phase every surface reports, so
     // the one-line summary names the node. The page under it has room
-    // for the sentence the engine wrote when it stopped the run, and
-    // that sentence — not the node id — is what says which questions are
-    // still unanswered.
+    // for what holds the run: how many questions the node asks, not only
+    // the node.
     let root = tempfile::tempdir().unwrap();
     let repo = repo_with(
         root.path(),
@@ -669,8 +674,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
     let lines: Vec<&str> = text.lines().collect();
     assert!(
-        lines[0].contains("· needs you ·")
-            && lines[2] == "  node `ask` asked 1 question: `summary`.",
+        lines[0].contains("· needs you ·") && lines[2] == "  node `ask` asks 1 question.",
         "the page opens with what the run waits on — the question still unanswered, not \
          only the node: {text}"
     );

@@ -23,6 +23,7 @@ fn a_tool_call_reads_as_its_action() {
                 cached_input_tokens: None,
                 note: None,
                 text: None,
+                session: None,
             },
         )))
     };

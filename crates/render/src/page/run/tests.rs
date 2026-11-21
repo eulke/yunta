@@ -176,6 +176,7 @@ fn spend_log() -> Vec<StoredEvent> {
         cached_input_tokens: None,
         note: None,
         text: None,
+        session: None,
     };
     let settled = NodeFinishedPayload::new(
         NodeOutcome::Summary("exit 0".to_string()),

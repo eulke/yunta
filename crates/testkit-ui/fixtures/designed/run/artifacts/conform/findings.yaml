@@ -1,0 +1,6 @@
+findings:
+- id: target-outside-declared-file
+  severity: blocking
+  title: Pack target API shapes are defined outside the declared file
+  location: crates/cli/src/pack/target.rs:10-27
+  detail: The plan declares PackTarget, pack_target_root and pack_target_lock_path in crates/cli/src/pack.rs. The implementation puts the enum and both functions in pack/target.rs; pack.rs only re-exports them.

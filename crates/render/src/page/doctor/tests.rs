@@ -131,3 +131,25 @@ fn a_session_that_ended_well_folds_under_its_binding() {
     assert_eq!(check.said, "ok: 812 tokens");
     assert_eq!(check.brief.as_deref(), Some("claude-code/claude-sonnet-5"));
 }
+
+/// A forge whose token is set and that could not be made ready to be asked with it is a
+/// problem, said with the repository, the variable its token is in, and why, in what failing
+/// said: every fact the forge's row says where its token is not set, and the failure.
+#[test]
+fn a_forge_not_reached_with_its_token_says_the_variable_and_why() {
+    let repo: yunta_core::GitHubRepo = "acme/web".parse().expect("a repository");
+    let unready = Finding::Forge {
+        repo,
+        answer: super::ForgeAnswer::Unready {
+            token_env: "ACME_TOKEN".to_string(),
+            said: "forge: no answer while trying to build the HTTP client".to_string(),
+        },
+    };
+    let [check] = checks(&[unready]).try_into().expect("one row");
+    assert_eq!(check.found, Found::Problem);
+    assert_eq!(
+        check.said,
+        "github acme/web: `ACME_TOKEN`, the variable its token is in, is set, and reaching the \
+         forge with it failed: forge: no answer while trying to build the HTTP client"
+    );
+}

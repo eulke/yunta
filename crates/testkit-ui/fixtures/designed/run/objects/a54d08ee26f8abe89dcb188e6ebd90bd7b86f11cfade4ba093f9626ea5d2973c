@@ -1,0 +1,55 @@
+This node produces the `spec` document. It is not a file this session writes: hand it over with `mcp__yunta-run__yunta_submit_spec`, and the engine validates it and writes the file itself.
+
+What follows is the whole contract for that document: the keys, their types, and the rules. Where any other instruction describes it differently, this is what the engine enforces.
+
+# The tests a plan's tasks are held to, written before any task is built.
+# Each task gets the files its tests live in, whole, and the commands that
+# run them: the engine writes the files into the tree the task's work
+# starts from, denies that work any change to them, and adds the commands
+# to the task's criteria. Written strictly — any key not listed here is
+# refused.
+
+specs:                                  # required
+  - task: add-dark-mode                 # required: a task of the run's plan,
+                                        #   given one spec
+    files:                              # the files its tests live in
+      - path: tests/theme.sh            # required: relative, inside the
+                                        #   repository and outside `.git`,
+                                        #   named once in the document, and
+                                        #   new: the run's tree holds
+                                        #   nothing there
+        content: |                      # required: the file, whole
+          #!/bin/sh
+          # A new user starts in light; the switch turns dark on.
+          ./app theme | grep -qx light &&
+            ./app theme --set dark &&
+            ./app theme | grep -qx dark
+    tests:                              # required, at least one
+      - cmd: "sh tests/theme.sh"        # required: fails before the work and
+                                        #   passes once it is done
+        proves: "a new user starts in light, and the switch turns dark on"
+                                        # required: in words a person
+                                        #   approving the plan reads
+
+# The engine also refuses the document, and fails the node, unless:
+#   - each task is given one spec
+#   - every spec lists at least one test
+#   - every test says what passing it `proves`, in words
+#   - a file's `path` is relative, inside the repository and outside `.git`
+#   - each file is named once in the document
+#
+# When it is submitted, the engine runs every criterion under `sh`, where it runs criteria (not in your shell, whose tools it may not have), and refuses the document unless:
+#   - `task` names a task of the run's plan
+#   - every file is new: the run's tree holds nothing at its `path`
+#   - written again for a departure, every other task's spec is as the run holds it
+#   - written again for a departure, the spec of the task departed from changes
+#   - every test runs where the engine runs criteria: each program it calls is on that `PATH`
+#   - every test fails before the work
+#
+# When it is handed over, the engine holds it to the run it belongs to (the spec the workflow writes, the questions a person answered), and refuses it unless:
+#   - a test that runs the project's tests extends the suite the run measures (`<suite> <selector>`, where `<selector>` picks the test), so the build the suite leaves serves it
+#   - every file a spec writes is run by one of its tests: name it in the command that runs it
+#   - every test of a spec that writes files runs one of them: a test that runs only what the task writes judges the task by its own work
+
+
+This run measures its suite with `cargo test --workspace`. A command of this document that runs the project's tests extends it (`cargo test --workspace <selector>`, where `<selector>` picks its tests), so the build the suite leaves serves it; the engine refuses one that runs them another way.

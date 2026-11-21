@@ -1,12 +1,14 @@
 //! What a failure hands its readers: the lines its command printed, the run
-//! object holding its output, the paths it wrote outside its scope, and the
-//! artifacts that did not close. Each accessor names every variant: the ones
-//! that carry what it reads answer with it, and the rest are listed with the
-//! empty answer, so a variant added later is answered on purpose.
+//! object holding its output, the paths it wrote outside its scope, the
+//! artifacts that did not close, and the departures from the plan it owes a
+//! person. Each accessor names every variant: the ones that carry what it reads
+//! answer with it, and the rest are listed with the empty answer, so a variant
+//! added later is answered on purpose.
 
 use std::path::PathBuf;
 
 use crate::diagnostic::{ArtifactFailure, Report};
+use crate::events::{TaskCause, TaskStop};
 use crate::glob::{InvalidScopeGlob, ScopeGlob};
 use crate::hash::ContentHash;
 
@@ -250,6 +252,51 @@ impl Failure {
             Failure::PullRequestClosed { .. } | Failure::LoopStalled { .. } => [].iter(),
             Failure::NoTasksDocument { .. } | Failure::RunnerUnresolved { .. } => [].iter(),
             Failure::Message { .. } => [].iter(),
+        }
+    }
+
+    /// How many of a loop's tasks this failure stopped, where it stopped them each on a
+    /// departure from the plan owed a person's answer: what such a failure asks of a
+    /// person, and what holds its run. `None` for any other failure, and for a loop one
+    /// of whose tasks stopped for anything else.
+    pub fn departures_owed(&self) -> Option<usize> {
+        match self {
+            Failure::TasksStopped { stopped } => {
+                let owed = |stop: &TaskStop| match stop.cause {
+                    TaskCause::DeviationOwed { .. } => true,
+                    TaskCause::PreCheck { .. } | TaskCause::Unmet { .. } => false,
+                    TaskCause::Unrunnable { .. } | TaskCause::SessionRefused(_) => false,
+                    TaskCause::SessionLimited(_) | TaskCause::SessionDied(_) => false,
+                    TaskCause::CarriedWorkNoLongerApplies { .. } => false,
+                    TaskCause::CommandDenied { .. } | TaskCause::ScopeDecisionOwed => false,
+                    TaskCause::CriterionUnpassable { .. } => false,
+                };
+                let every = !stopped.is_empty() && stopped.iter().all(owed);
+                every.then_some(stopped.len())
+            }
+            Failure::Artifacts { .. } | Failure::SessionDied { .. } => None,
+            Failure::ScopeViolated { .. } | Failure::ScopeRequested { .. } => None,
+            Failure::ScopeOwed { .. } | Failure::Unset { .. } => None,
+            Failure::Unchanged { .. } | Failure::PathsDenied { .. } => None,
+            Failure::Exited { .. } | Failure::PlanUnpassable { .. } => None,
+            Failure::SessionRefused { .. } | Failure::Limit { .. } => None,
+            Failure::Red { .. } | Failure::ChildFailed { .. } => None,
+            Failure::FrozenInput { .. } | Failure::SessionNotStopped { .. } => None,
+            Failure::TimedOut { .. } | Failure::TokenBudget { .. } => None,
+            Failure::Template { .. } | Failure::ArtifactUnreadable { .. } => None,
+            Failure::ArtifactName { .. } | Failure::MountUnreachable { .. } => None,
+            Failure::GateChose { .. } | Failure::TestsAccepted { .. } => None,
+            Failure::ChildRefused { .. } | Failure::NestedTooDeep { .. } => None,
+            Failure::GateArtifactMissing { .. } | Failure::CapabilityMissing { .. } => None,
+            Failure::EngineFailed { .. } | Failure::CommandDenied { .. } => None,
+            Failure::SkillMissing { .. } | Failure::LoopCapped { .. } => None,
+            Failure::Confinement { .. } | Failure::FrozenRead { .. } => None,
+            Failure::ChildrenFailed { .. } | Failure::Uncertain { .. } => None,
+            Failure::Rejected { .. } | Failure::SentBack { .. } => None,
+            Failure::FindingsOpen { .. } | Failure::Interrupted { .. } => None,
+            Failure::ChangesRequested { .. } | Failure::PullRequestClosed { .. } => None,
+            Failure::LoopStalled { .. } | Failure::NoTasksDocument { .. } => None,
+            Failure::RunnerUnresolved { .. } | Failure::Message { .. } => None,
         }
     }
 }

@@ -21,10 +21,25 @@ pub struct CriterionEntry {
     pub exit_code: i32,
 }
 
+/// Every command the checks after the work ran, and how the tasks' own criteria and their
+/// guards came out apart: what the work had to make pass, and what had to keep passing.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CriteriaSummary {
     pub total: usize,
     pub green: usize,
+    /// The tasks whose work a check after it judged.
+    pub tasks: usize,
+    /// The tasks' own criteria among `total`: what failed before the work and passes once
+    /// it is done.
+    pub proving: usize,
+    /// How many of `proving` are green.
+    pub proved: usize,
+    /// How many of `proving` the task's check before the work found red, as each had to be.
+    pub red_before: usize,
+    /// The guards among `total`: what passed before the work and had to keep passing.
+    pub guards: usize,
+    /// How many of `guards` are green.
+    pub guards_green: usize,
     pub entries: Vec<CriterionEntry>,
 }
 
@@ -53,6 +68,23 @@ pub struct BaselineSummary {
 pub struct ScopeSummary {
     pub files_touched: usize,
     pub violations: Vec<PathBuf>,
+    /// How many of the files touched lie under a path a person granted a task.
+    pub granted: usize,
+}
+
+/// The findings the run's nodes posted that still stand, and how many of them a node
+/// answered.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FindingsSummary {
+    pub posted: usize,
+    pub answered: usize,
+}
+
+/// The pull request the run opened: its number on the forge, and where it is.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OpenedPullRequest {
+    pub number: u64,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -127,6 +159,10 @@ pub struct Receipt {
     /// The findings that still block the run, counted once each: a run
     /// that finished holding any is reported, not finished.
     pub blocking_findings: usize,
+    pub findings: FindingsSummary,
+    /// The pull request the run opened, once one of its nodes opened it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<OpenedPullRequest>,
 }
 
 /// A node that stands failed, and why, as the log recorded it.

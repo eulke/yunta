@@ -35,7 +35,8 @@ futures.workspace = true
 nix.workspace = true
 
 [dev-dependencies]
-# The states the target frames show, and the walk over every state the application reaches.
+# The states the target frames show, and the walk over every state the application reaches
+# with the interface's rules it holds.
 yunta-testkit-ui.workspace = true
 # A deep stack for the work a screen's state is built by, and the pseudo-terminal a test
 # runs its own binary on.

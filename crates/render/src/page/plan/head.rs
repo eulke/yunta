@@ -2,6 +2,8 @@
 //! for its reader, what it does, what keeps it from being proven, and what
 //! the person asked for.
 
+use std::collections::BTreeSet;
+
 use surco::components::{Fields, Gist, Marked, Title};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
@@ -44,7 +46,7 @@ pub(super) fn head(review: &PlanReview, steps: &[Vec<&Task>]) -> Doc {
 pub(in crate::page) fn facts(review: &PlanReview, steps: usize) -> Vec<String> {
     let plan = &review.plan;
     let mut facts = vec![size(review, steps)];
-    let decided = super::change::decided_for_you(review).count();
+    let decided = super::change::how_many_decided(review);
     if decided > 0 {
         facts.push(format!("{decided} decided for you"));
     }
@@ -64,6 +66,30 @@ pub(in crate::page) fn size(review: &PlanReview, steps: usize) -> String {
         0 | 1 => tasks,
         steps => format!("{tasks} in {steps} steps"),
     }
+}
+
+/// How many files `review`'s plan names for its work, each once: each path a task's scope
+/// names whole, each file a task's change is at, and each test file its spec writes. A
+/// pattern that matches files by a wildcard names no one file, and is not counted. Not the
+/// files a run changed, which a gate counts once the work is done.
+pub(in crate::page) fn files_named(review: &PlanReview) -> usize {
+    let tasks = &review.plan.tasks;
+    let scoped = tasks
+        .iter()
+        .flat_map(|task| &task.scope)
+        .filter_map(|glob| glob.exact_path().map(|_| glob.as_str()));
+    let changed = tasks
+        .iter()
+        .flat_map(|task| &task.changes)
+        .map(|change| change.file());
+    let tested = review
+        .spec
+        .iter()
+        .flat_map(|spec| &spec.specs)
+        .flat_map(|spec| &spec.files)
+        .map(|file| file.path.as_str());
+    let files: BTreeSet<&str> = scoped.chain(changed).chain(tested).collect();
+    files.len()
 }
 
 /// What keeps the plan from being proven, counted, when anything does.

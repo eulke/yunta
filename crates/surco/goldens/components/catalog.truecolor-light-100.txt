@@ -153,9 +153,15 @@
 
 ␛[1;38;2;158;47;155m◆ needs you␛[0m: ␛[1;38;2;14;12;18myunta resolve-gate 7E5PH4 approve␛[0m␛[38;2;123;117;111m (the plan waits for approval)␛[0m
 
-␛[1;38;2;158;47;155m◆␛[0m ␛[1;38;2;14;12;18mQ78GRR␛[0m␛[1;38;2;158;47;155m needs you␛[0m: the suite passed at baseline and now exits 101␛[38;2;200;194;187m · ␛[0m␛[1;38;2;14;12;18ma␛[0m␛[38;2;123;117;111m go there␛[0m
+␛[1;38;2;158;47;155m◆ needs you␛[0m: the plan waits for approval␛[38;2;200;194;187m  · ␛[0m␛[1;38;2;14;12;18ma␛[0m␛[38;2;123;117;111m go there␛[0m
+
+␛[1;38;2;158;47;155m◆␛[0m ␛[1;38;2;14;12;18mQ78GRR␛[0m␛[1;38;2;158;47;155m needs you␛[0m: the suite passed at baseline and now exits 101␛[38;2;200;194;187m  · ␛[0m␛[1;38;2;14;12;18ma␛[0m␛[38;2;123;117;111m go there␛[0m
 
 ␛[1;38;2;158;47;155m◆ needs you␛[0m: node `implement` asks at its terminal
+
+␛[1;38;2;158;47;155m◆␛[0m ␛[1;38;2;14;12;18mQ78GRR␛[0m␛[1;38;2;158;47;155m needs you␛[0m: node `grill` asks 3 questions: nothing is recorded until every one is answered
+
+␛[38;2;45;134;73m✓␛[0m Recorded: approve. On to `pr`.
 
 ␛[1;38;2;158;47;155;48;2;246;233;243m▎␛[0m␛[48;2;246;233;243m ␛[0m␛[1;38;2;158;47;155;48;2;246;233;243m◆␛[0m␛[48;2;246;233;243m ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243mgate `ship` needs a decision␛[0m␛[48;2;246;233;243m                                                      ␛[0m␛[38;2;123;117;111;48;2;246;233;243mapprove KQERFD␛[0m␛[48;2;246;233;243m␛[K␛[0m
 ␛[1;38;2;158;47;155;48;2;246;233;243m▎␛[0m␛[48;2;246;233;243m ␛[0m␛[48;2;246;233;243mthe change is reviewed and its findings settled␛[0m␛[48;2;246;233;243m␛[K␛[0m
@@ -165,38 +171,52 @@
 ␛[1;38;2;158;47;155;48;2;246;233;243m▎␛[0m␛[48;2;246;233;243m␛[K␛[0m
 ␛[1;38;2;158;47;155;48;2;246;233;243m▎␛[0m␛[48;2;246;233;243m ␛[0m␛[38;2;123;117;111;48;2;246;233;243mthen␛[0m␛[48;2;246;233;243m  ␛[0m␛[48;2;246;233;243mpr, then the run finishes␛[0m␛[48;2;246;233;243m␛[K␛[0m
 ␛[1;38;2;158;47;155;48;2;246;233;243m▎␛[0m␛[48;2;246;233;243m␛[K␛[0m
-␛[1;38;2;158;47;155;48;2;246;233;243m▎␛[0m␛[48;2;246;233;243m ␛[0m␛[38;2;123;117;111;48;2;246;233;243m↑↓ move · enter chooses · esc leaves the run waiting␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[1;38;2;158;47;155;48;2;246;233;243m▎␛[0m␛[48;2;246;233;243m ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243m↑↓␛[0m␛[38;2;123;117;111;48;2;246;233;243m choose␛[0m␛[38;2;200;194;187;48;2;246;233;243m · ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243menter␛[0m␛[38;2;123;117;111;48;2;246;233;243m answer␛[0m␛[38;2;200;194;187;48;2;246;233;243m · ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243mesc␛[0m␛[38;2;123;117;111;48;2;246;233;243m leave it waiting␛[0m␛[48;2;246;233;243m␛[K␛[0m
 
- ␛[1;38;2;14;12;18mplan␛[0m␛[38;2;123;117;111m · ␛[0m␛[38;2;123;117;111mA32BZY␛[0m␛[38;2;123;117;111m · ␛[0m␛[38;2;123;117;111mreviewed-plan (default)␛[0m␛[38;2;123;117;111m · ␛[0m␛[38;2;123;117;111m2 tasks␛[0m                          ␛[38;2;123;117;111mneeds you  approve-plan␛[0m
+ ␛[1;38;2;14;12;18mplan␛[0m␛[38;2;123;117;111m · ␛[0m␛[38;2;123;117;111mA32BZY␛[0m␛[38;2;123;117;111m · ␛[0m␛[38;2;123;117;111mreviewed-plan␛[0m␛[38;2;123;117;111m · ␛[0m␛[38;2;123;117;111m2 tasks␛[0m                                    ␛[38;2;123;117;111mneeds you  approve-plan␛[0m
  Make it
  ␛[38;2;123;117;111myou asked␛[0m  a file the run is about
 
      the change                ␛[38;2;200;194;187m │ ␛[0m␛[1;38;2;14;12;18mproof · T001␛[0m                                          ␛[38;2;123;117;111mstep 1 of 1␛[0m
+ ␛[48;2;252;245;250m1 ␛[0m␛[1;38;2;158;47;155;48;2;252;245;250m▸␛[0m␛[48;2;252;245;250m ␛[0m␛[1;38;2;14;12;18;48;2;252;245;250mT001␛[0m␛[48;2;252;245;250m                      ␛[0m␛[38;2;200;194;187m │ ␛[0m
+     T002                      ␛[38;2;200;194;187m │ ␛[0m␛[38;2;123;117;111mtested by    ␛[0mthe file exists
+                               ␛[38;2;200;194;187m │ ␛[0m             ␛[1;38;2;14;12;18mtest -f made.txt␛[0m
+ ␛[1;38;2;14;12;18mwhat it says␛[0m                  ␛[38;2;200;194;187m │ ␛[0m
+ decided for you          ␛[1;38;2;14;12;18m 2␛[0m␛[38;2;123;117;111m  d␛[0m␛[38;2;200;194;187m │ ␛[0m
                                ␛[38;2;200;194;187m │ ␛[0m
- ␛[1;38;2;14;12;18msteps␛[0m                         ␛[38;2;200;194;187m │ ␛[0m␛[38;2;123;117;111mtested by    ␛[0mthe file exists
- ␛[48;2;252;245;250m1 ␛[0m␛[1;38;2;158;47;155;48;2;252;245;250m▸␛[0m␛[48;2;252;245;250m ␛[0m␛[1;38;2;14;12;18;48;2;252;245;250mT001␛[0m␛[48;2;252;245;250m                      ␛[0m␛[38;2;200;194;187m │ ␛[0m             ␛[1;38;2;14;12;18mtest -f made.txt␛[0m
-     T002                      ␛[38;2;200;194;187m │ ␛[0m
-                               ␛[38;2;200;194;187m │ ␛[0m
- ␛[1;38;2;14;12;18mimpact␛[0m                        ␛[38;2;200;194;187m │ ␛[0m
- made.txt                  ␛[38;2;123;117;111mT001␛[0m␛[38;2;200;194;187m │ ␛[0m
- said.txt                  ␛[38;2;123;117;111mT002␛[0m␛[38;2;200;194;187m │ ␛[0m
-                               ␛[38;2;200;194;187m │ ␛[0m
- ␛[1;38;2;14;12;18mweighs␛[0m                        ␛[38;2;200;194;187m │ ␛[0m
- decided                  ␛[1;38;2;14;12;18m 2␛[0m␛[38;2;123;117;111m  d␛[0m␛[38;2;200;194;187m │ ␛[0m
+ ␛[1;38;2;14;12;18mwhat weighs on it␛[0m             ␛[38;2;200;194;187m │ ␛[0m
  ␛[38;2;148;101;0m▲␛[0m the suite is red at baseline␛[38;2;200;194;187m │ ␛[0m
- T001 → T002                   ␛[38;2;200;194;187m │ ␛[0m
                                ␛[38;2;200;194;187m │ ␛[0m
 
  ␛[1;38;2;158;47;155m◆␛[0m ␛[1;38;2;14;12;18mPlan registered. Approve?␛[0m
- ␛[1;38;2;14;12;18m1␛[0m approve   ␛[1;38;2;14;12;18m2␛[0m adjust   ␛[1;38;2;14;12;18m3␛[0m abort                  ␛[38;2;123;117;111mj k task · p the card · esc leaves the run waiting␛[0m
+ ␛[1;38;2;14;12;18m1␛[0m approve   ␛[1;38;2;14;12;18m2␛[0m adjust   ␛[1;38;2;14;12;18m3␛[0m abort                     ␛[1;38;2;14;12;18mtab␛[0m␛[38;2;123;117;111m next place␛[0m␛[38;2;200;194;187m · ␛[0m␛[1;38;2;14;12;18mp␛[0m␛[38;2;123;117;111m proof␛[0m␛[38;2;200;194;187m · ␛[0m␛[1;38;2;14;12;18mesc␛[0m␛[38;2;123;117;111m leave it waiting␛[0m
 
 ␛[1;38;2;14;12;18mproject name␛[0m␛[38;2;123;117;111m (enter keeps `yunta`)␛[0m
-> yunta-tui
+␛[38;2;123;117;111m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮␛[0m
+␛[38;2;123;117;111m│␛[0m ␛[1;38;2;14;12;18myunta-tui␛[0m                                                                                        ␛[38;2;123;117;111m│␛[0m
+␛[38;2;123;117;111m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯␛[0m
 
-␛[38;2;123;117;111mfilter ␛[0m␛[1;38;2;14;12;18mn␛[0m
-  one-node  one command whose exit code is the check
-␛[1;38;2;158;47;155;48;2;252;245;250m▸␛[0m␛[48;2;252;245;250m ␛[0m␛[1;38;2;14;12;18;48;2;252;245;250mlint-fix  ␛[0m␛[48;2;252;245;250ma check, and an agent that fixes what it finds␛[0m␛[48;2;252;245;250m␛[K␛[0m
-␛[38;2;123;117;111m↑↓ move · type to filter · enter chooses · esc takes the first␛[0m
+ ␛[38;2;123;117;111m▸␛[0m ␛[1;38;2;14;12;18mn␛[0m
+
+  one-node   one command whose exit code is the check
+␛[1;38;2;158;47;155;48;2;252;245;250m▸␛[0m␛[48;2;252;245;250m ␛[0m␛[1;38;2;14;12;18;48;2;252;245;250mlint-fix   ␛[0m␛[48;2;252;245;250ma check, and an agent that fixes what it finds␛[0m␛[48;2;252;245;250m␛[K␛[0m
+␛[1;38;2;14;12;18m↑↓␛[0m␛[38;2;123;117;111m choose␛[0m␛[38;2;200;194;187m · ␛[0m␛[1;38;2;14;12;18menter␛[0m␛[38;2;123;117;111m answer␛[0m␛[38;2;200;194;187m · ␛[0m␛[1;38;2;14;12;18mesc␛[0m␛[38;2;123;117;111m take the first␛[0m
+
+␛[38;2;123;117;111mYou never have to remember more than this.␛[0m
+
+␛[1;38;2;14;12;18m/          ␛[0manything: only what can be done here, with its command
+␛[1;38;2;14;12;18mn          ␛[0mstart a new run, wherever no prompt stands
+␛[1;38;2;14;12;18mj k        ␛[0mmove; the footer always says what they move
+␛[1;38;2;14;12;18mpgup pgdn  ␛[0mscroll the pane a page at a time
+␛[1;38;2;14;12;18menter      ␛[0mopen, answer, confirm
+␛[1;38;2;14;12;18mesc        ␛[0mone step back; what it leaves stays waiting
+␛[1;38;2;14;12;18ma          ␛[0mgo to what needs you
+␛[1;38;2;14;12;18mf          ␛[0mfollow what the run is doing
+␛[1;38;2;14;12;18ms g        ␛[0mwhat it cost, its graph
+␛[1;38;2;14;12;18mc          ␛[0mstop it and everything under it
+␛[1;38;2;14;12;18mo          ␛[0mthe whole page, in a browser
+␛[1;38;2;14;12;18mq          ␛[0mgo to the field; it keeps going
+␛[1;38;2;14;12;18mctrl-c     ␛[0mleave: every run keeps going without this window
 
   ␛[1;38;2;14;12;18m▸␛[0m ␛[1;38;2;14;12;18mlint-fix␛[0m: a check, and an agent that fixes what it finds
     ␛[38;2;123;117;111mrun         ␛[0m yunta run lint-fix
@@ -206,3 +226,27 @@
 
   ␛[38;2;45;134;73m✓␛[0m ␛[1;38;2;14;12;18macme/lint␛[0m    v1.2.0 (3f9c2e1), as its lock records it
 ␛[1;38;2;14;12;18m▸␛[0m ␛[38;2;148;101;0m▲␛[0m ␛[1;38;2;14;12;18macme/review␛[0m  v0.4.0 (91ab7d0), modified: its files no longer match its lock
+
+  ␛[38;2;45;134;73m✓␛[0m ␛[38;2;123;117;111mmajor   ␛[0m Global pack paths ignore the configured YUNTA_HOME
+             ␛[38;2;123;117;111mfixed: Global pack paths now use the shared user_state_root resolver, which honors YUN␛[0m␛[38;2;123;117;111m…␛[0m
+␛[1;38;2;158;47;155;48;2;252;245;250m▸␛[0m␛[48;2;252;245;250m ␛[0m␛[38;2;148;101;0;48;2;252;245;250m▲␛[0m␛[48;2;252;245;250m ␛[0m␛[38;2;123;117;111;48;2;252;245;250mmajor   ␛[0m␛[48;2;252;245;250m ␛[0m␛[1;38;2;14;12;18;48;2;252;245;250mGlobal pack commands ignore the configured YUNTA_HOME state root␛[0m␛[48;2;252;245;250m␛[K␛[0m
+  ␛[38;2;123;117;111m◌␛[0m ␛[38;2;123;117;111mminor   ␛[0m Pack audit cannot inspect globally installed packs
+  ␛[38;2;45;134;73m✓␛[0m ␛[38;2;123;117;111mblocking␛[0m Pack target API shapes are defined outside the declared file
+             ␛[38;2;123;117;111mfixed: PackTarget and its path functions are now defined in crates/cli/src/pack.rs.␛[0m
+
+␛[38;2;123;117;111m… 4 above␛[0m
+search  global pack
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+␛[38;2;123;117;111m… 4 under␛[0m
+
+967k tokens ␛[38;2;29;124;151m▃▂█▁▁▁▁▁▁▁▁▁▁▁▁␛[0m␛[38;2;200;194;187m · ␛[0m2m34s␛[38;2;123;117;111m at work␛[0m␛[38;2;200;194;187m · ␛[0m␛[1;38;2;158;47;155m5m00s␛[0m␛[38;2;123;117;111m waiting on you␛[0m
+
+    ␛[38;2;45;134;73m⢀⣀⣀⣀⣀⣀⣀⣀⣀⣤⣤⣤⣤⣤⣤⣤⣤⣴⣶⣶⣶⣶⣶⣶⡶⢶⣿⣿⣿⡿⢿⣿⣿⡿⠿⠿⣟⣛⠿⠯⠛⣒⠭⠒⠁ ⡇⠈⠒⠭⣒⠛⠽⠿⣛⣻⠿⠿⢿⣿⣿⡿⢿⣿⣿⣿⡶⢶⣶⣶⣶⣶⣶⣶⣦⣤⣤⣤⣤⣤⣤⣤⣤⣀⣀⣀⣀⣀⣀⣀⣀⡀␛[0m
+␛[38;2;45;134;73m⣿⣿⣿⣿⣿⣿⣿⣿⠿⠿⠿⠿⠿⠛⣛⣛⣛⣛⠭⠭⠭⠭⠛⣓⣒⣊⠭⠭⠭⠓⠒⠊⣉⣉⠥⠤⠒⠒⠉⠉ ⣀⠤⠒⠉     ⡇    ⠉⠒⠤⣀ ⠉⠉⠒⠒⠤⠬⣉⣉⠑⠒⠚⠫⠭⠭⣑⣒⣚⠛⠫⠭⠭⠭⣛⣛⣛⣛⠛⠿⠿⠿⠿⠿⣿⣿⣿⣿⣿⣿⣿⣿␛[0m
+␛[38;2;45;134;73m⣉⣉⠭⠤⠤⠤⠒⠒⠒⠒⠉⠉⢉⣉⠤⠤⠤⠒⠒⠒⠉⠉⠉  ⣀⠤⠤⠒⠒⠉⠉     ⢀⠤⠒⠉         ⡇        ⠉⠒⠤⡀     ⠉⠉⠒⠒⠤⠤⣀  ⠉⠉⠉⠒⠒⠒⠤⠤⠤⣉⡉⠉⠉⠒⠒⠒⠒⠤⠤⠤⠭⣉⣉␛[0m

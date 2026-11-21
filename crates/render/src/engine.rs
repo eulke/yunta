@@ -33,6 +33,19 @@ pub const NOT_DRIVEN: &str = not_driven!();
 /// What holds a run whose log says it is moving and whose engine is gone.
 pub const STALLED: &str = concat!(not_driven!(), ": the engine that ran it is gone");
 
+/// Where a question asked at a terminal is answered, which every saying of an asking ends
+/// with, written once as `not_driven` is.
+macro_rules! answer_it_there {
+    () => {
+        "answer it there"
+    };
+}
+
+/// That no key or act of an interface that did not ask a question answers it, and where it
+/// is answered: what a run's screen says under the question its engine asks at its own
+/// terminal.
+pub const NOTHING_HERE_ANSWERS: &str = concat!("nothing here answers it: ", answer_it_there!());
+
 /// What holds a run whose engine is asking a person at its terminal: who
 /// asks, at which terminal, and that the answer is given there.
 ///
@@ -58,9 +71,10 @@ fn asked(asking: &Asking, waited: Option<Duration>) -> String {
         .map_or_else(|| "the run".to_string(), |node| format!("node `{node}`"));
     let waited = waited.map(|waited| format!(" for {}", duration(waited)));
     format!(
-        "{who} is asking at its terminal (pid {}){}; answer it there",
+        "{who} is asking at its terminal (pid {}){}; {}",
         asking.pid,
-        waited.unwrap_or_default()
+        waited.unwrap_or_default(),
+        answer_it_there!()
     )
 }
 

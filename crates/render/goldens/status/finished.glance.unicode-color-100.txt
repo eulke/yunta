@@ -4,5 +4,6 @@
   ␛[2mprogress    ␛[0m 2 of 2 nodes done
 
 ␛[2mnext␛[0m
-  ␛[1myunta receipt 7E5PH4      ␛[0m   ␛[2mcertifies what it did␛[0m
+  ␛[1myunta receipt 7E5PH4      ␛[0m   ␛[2mwrite the receipt␛[0m
+  ␛[1myunta verify 7E5PH4       ␛[0m   ␛[2mverify its evidence␛[0m
   ␛[1myunta status 7E5PH4 --full␛[0m   ␛[2mthe whole story, node by node␛[0m

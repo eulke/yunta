@@ -135,7 +135,7 @@ mod tests {
     use yunta_testkit::wait_until_async;
     use yunta_testkit_core::{Captured, FixedClock, Log};
 
-    use crate::surface::feed::{Beat, Diagnostics, Feed};
+    use crate::surface::beats::{Beat, Beats, Diagnostics};
     use crate::surface::painter::{paint, Draw, Painter};
     use crate::surface::region::Region;
     use crate::surface::{Delivery, Screen, SurfaceEnv, Watched};
@@ -179,7 +179,7 @@ mod tests {
         }
     }
 
-    /// The run's first `n` events, each in the beat the feed carries it
+    /// The run's first `n` events, each in the beat the queue carries it
     /// in. A test takes as many as it needs, in order: what the surface
     /// does with an event never depends on which event it is, only on
     /// when it arrives.
@@ -198,7 +198,7 @@ mod tests {
     }
 
     /// The run's first event — what a test that only needs the surface
-    /// to have drawn something tells the feed.
+    /// to have drawn something tells the queue.
     fn beat() -> Beat {
         beats(1).next().expect("a log of one event holds it")
     }
@@ -207,7 +207,7 @@ mod tests {
     /// engine's side of the queue, the curtain a prompt takes its turn
     /// with, and the terminal both of them draw on.
     struct Drawing {
-        feed: Arc<Feed>,
+        beats: Arc<Beats>,
         curtain: Curtain,
         painter: tokio::task::JoinHandle<()>,
         screen: Watched,
@@ -248,14 +248,14 @@ mod tests {
                     "a test",
                 )),
             };
-            let (feed, beats) = Feed::open();
+            let (beats, received) = Beats::open();
             let (curtain, standby) = Curtain::open();
             Self {
-                feed,
+                beats,
                 curtain,
                 painter: tokio::spawn(paint(
                     Painter::seeded(&env, draw, Vec::new()),
-                    beats,
+                    received,
                     standby,
                 )),
                 screen,
@@ -277,7 +277,7 @@ mod tests {
         /// nothing" rather than "it has not drawn anything yet".
         async fn taken(&self) {
             wait_until_async(
-                || async { self.feed.taken() },
+                || async { self.beats.taken() },
                 || "the painter never took what it was sent".to_string(),
             )
             .await;
@@ -288,7 +288,7 @@ mod tests {
         /// by then, it never will.
         async fn drained(self) {
             assert!(
-                self.feed.tell(Beat::Close).await,
+                self.beats.tell(Beat::Close).await,
                 "the painter is still there"
             );
             self.painter.await.expect("the painter ran to its end");
@@ -312,7 +312,7 @@ mod tests {
             })
             .build();
         for event in events {
-            assert!(drawing.feed.deliver(event).await, "the painter is there");
+            assert!(drawing.beats.deliver(event).await, "the painter is there");
         }
         drawing.curtain.raise();
         let scrollback = drawing.scrollback.clone();
@@ -325,7 +325,7 @@ mod tests {
     async fn the_region_is_off_the_terminal_by_the_time_a_prompt_is_told_it_may_draw() {
         let at = tempfile::tempdir().expect("a directory for this test's store");
         let drawing = Drawing::open(Delivery::Live, at.path()).await;
-        drawing.feed.tell(beat()).await;
+        drawing.beats.tell(beat()).await;
         wait_until_async(
             || async { !drawing.shown().is_empty() },
             || "the region never drew anything to take down".to_string(),
@@ -346,7 +346,7 @@ mod tests {
         let drawing = Drawing::open(Delivery::Live, at.path()).await;
         let mut moves = beats(4);
         drawing
-            .feed
+            .beats
             .tell(moves.next().expect("the run's first event"))
             .await;
         wait_until_async(
@@ -364,7 +364,7 @@ mod tests {
             .interject(PROMPT)
             .expect("the terminal takes the prompt's own row");
         for moved in moves {
-            drawing.feed.tell(moved).await;
+            drawing.beats.tell(moved).await;
         }
         let screen = drawing.screen.clone();
         drawing.drained().await;
@@ -388,7 +388,7 @@ mod tests {
         drawing.curtain.lower().await;
         let held = drawing.scrollback.text();
         for moved in beats(3) {
-            drawing.feed.tell(moved).await;
+            drawing.beats.tell(moved).await;
         }
         drawing.taken().await;
         assert_eq!(
@@ -413,7 +413,7 @@ mod tests {
         drawing.curtain.lower().await;
         let held = drawing.scrollback.text();
         for moved in beats(3) {
-            drawing.feed.tell(moved).await;
+            drawing.beats.tell(moved).await;
         }
 
         // A run stopped from outside closes its surface with the prompt
@@ -435,7 +435,7 @@ mod tests {
 
         let at = tempfile::tempdir().expect("a directory for this test's store");
         let drawing = Drawing::open(Delivery::Live, at.path()).await;
-        drawing.feed.tell(beat()).await;
+        drawing.beats.tell(beat()).await;
         wait_until_async(
             || async { !drawing.shown().is_empty() },
             || "the region never drew anything to take down".to_string(),
@@ -444,7 +444,7 @@ mod tests {
         drawing.curtain.lower().await;
 
         let before = drawing.screen.written();
-        Diagnostics::through(&drawing.feed).raise(RAISED).await;
+        Diagnostics::through(&drawing.beats).raise(RAISED).await;
         drawing.taken().await;
         assert_eq!(
             drawing.screen.written(),
@@ -470,12 +470,12 @@ mod tests {
     async fn the_region_comes_back_when_the_prompt_gives_the_terminal_up() {
         let at = tempfile::tempdir().expect("a directory for this test's store");
         let drawing = Drawing::open(Delivery::Live, at.path()).await;
-        drawing.feed.tell(beat()).await;
+        drawing.beats.tell(beat()).await;
         drawing.curtain.lower().await;
 
         drawing.curtain.raise();
         wait_until_async(
-            || async { drawing.shown().contains("nodes ") },
+            || async { drawing.shown().contains(" at work") },
             || "the region never came back after the prompt ended".to_string(),
         )
         .await;

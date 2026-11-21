@@ -1,0 +1,14 @@
+ yunta › workflows › greet check          nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ✓ greet.yaml · can run here
+   at           .yunta/workflows/greet.yaml
+
+
+
+
+
+
+
+
+
+ esc back · n new run · ? keys

@@ -1,0 +1,36 @@
+ yunta :: BR0KEN :: approve                                                                  ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ! gated (default) ; broken ; in 2s                                                                              BR0KEN
+ approve after
+ ======= .....
+ seq 3: `node_finished` is missing node_id
+
+ * ? approve                     | approve ; gate                                                         assignee lead
+   . after                       |
+                                 | where its log stops making sense
+                                 | seq 3: `node_finished` is missing node_id
+                                 | it reads up to seq 2, where it waited on `approve`
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 0 tokens __ ; 0s at work
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; s stats ; g graph ; q field                                                             / anything ; ? keys

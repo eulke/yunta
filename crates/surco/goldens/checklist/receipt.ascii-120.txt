@@ -1,0 +1,11 @@
+  + criteria     1 of 1 green, red before the work
+  + baseline     cargo test --workspace still passes
+  + scope        6 files, 2 of them granted by you
+  + review       4 findings, 4 answered
+  + event chain  intact
+
+  . criteria     none declared, nothing to prove
+  . baseline     not used by this workflow
+  + scope        no file touched
+  ! review       1 finding, 0 answered
+  + event chain  intact

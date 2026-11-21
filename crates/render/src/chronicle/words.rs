@@ -12,11 +12,11 @@ use surco::text::{detailed, one_line};
 use surco::words::Standing;
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
-    artifacts, children, findings, gates, node, run, session, AgentMessageType,
+    artifacts, children, findings, gates, node, run, session, AgentMessageType, Channel,
     GateResolvedPayload, LoggedWords, NodeState, NodeWait, NoteDigest, TokenUsage,
 };
 use yunta_core::fence::Coverage;
-use yunta_core::NonEmpty;
+use yunta_core::{NonEmpty, Responder};
 use yunta_replay::frame::Happening;
 
 use crate::children::{child_standing, closed_as};
@@ -157,7 +157,8 @@ fn context_assembled(absent: &[String], sep: char) -> String {
 /// A task's check: how many criteria ran, and each one a post-check left
 /// red, named with the last thing it printed — the command's own output
 /// never reaches the terminal, so this line is where a person watching
-/// learns why.
+/// learns why. `red` stands alone between separators, as the proof's pill
+/// says it on a task's board.
 fn criteria_checked(
     task: &yunta_core::TaskId,
     (phase, checked): (yunta_core::events::Phase, usize),
@@ -177,7 +178,7 @@ fn criteria_checked(
                 None => format!("`{}` exit {}", red.cmd, red.exit_code),
             })
             .collect();
-        said.push_str(&format!(" {sep} red: {}", named.join("; ")));
+        said.push_str(&format!(" {sep} red {sep} {}", named.join("; ")));
     }
     said
 }
@@ -194,6 +195,7 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             tool,
             action,
             target,
+            ..
         } => crate::target::said(*action, tool.as_deref(), target.as_ref()),
         H::Message {
             kind,
@@ -215,16 +217,8 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             exit_code,
             timed_out,
         } => super::format_words::formatted(run, changed, *exit_code, *timed_out),
-        H::RunToolFailed { tool, cause } => {
-            format!("run tool call failed: {} ({})", tool.name(), cause.as_str())
-        }
-        H::RunToolRefused { tool, reason } => {
-            format!(
-                "run tool call refused: {} ({})",
-                tool.name(),
-                reason.as_str()
-            )
-        }
+        H::RunToolFailed { tool, cause } => run_tool_call(*tool, "failed", cause.as_str()),
+        H::RunToolRefused { tool, reason } => run_tool_call(*tool, "refused", reason.as_str()),
         H::CutOff { message } => service_words(Some(message), None),
         H::Reconnected { waited } => service_words(None, Some(*waited)),
         H::RailFailed { event, cause } => super::rail_words::rail_failed(*event, *cause),
@@ -233,6 +227,12 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
         }
         H::BestEffortFailed { step, cause } => best_effort(*step, cause),
     }
+}
+
+/// A call to a run tool that failed or that the engine refused: the tool,
+/// and the closed reason why.
+fn run_tool_call(tool: yunta_core::RunTool, what: &str, why: &str) -> String {
+    format!("run tool call {what}: {} ({why})", tool.name())
 }
 
 /// A step the run went on past: what the step was doing, then the cause
@@ -405,15 +405,27 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String)
         ),
         H::Answered { channel, responder } => (
             Some(Mark::Done),
-            match (channel, responder) {
-                (yunta_core::events::Channel::Assumed, _) => {
+            match channel {
+                Channel::Assumed => {
                     "nothing required: going on with what each question assumes".to_string()
                 }
-                (_, Some(by)) => format!("answered by {by} via {}", channel.as_str()),
-                (_, None) => format!("answered via {}", channel.as_str()),
+                Channel::Tty | Channel::Mcp => {
+                    format!("answered {}", who_answered(*channel, responder.as_ref()))
+                }
             },
         ),
         H::AskingOpened => (Some(Mark::NeedsYou), "asking a person".to_string()),
+    }
+}
+
+/// Who answered a round of questions and through what, in the log's words: by `responder`,
+/// where the channel says one, via `channel`, as the log spells it. Not a round closed on what
+/// each question assumes, which nobody answered: the engine closes one so only where the
+/// workflow lets it go unasked, in the step that asks it.
+pub(crate) fn who_answered(channel: Channel, responder: Option<&Responder>) -> String {
+    match responder {
+        Some(by) => format!("by {by} via {}", channel.as_str()),
+        None => format!("via {}", channel.as_str()),
     }
 }
 
@@ -450,7 +462,7 @@ fn fence_covered(coverage: &Coverage) -> String {
 
 /// How a gate was settled: who settled it and what they said, in each
 /// of the shapes the persisted object spells.
-fn resolution(payload: &GateResolvedPayload) -> String {
+pub(crate) fn resolution(payload: &GateResolvedPayload) -> String {
     match payload {
         GateResolvedPayload::Chosen(choice) => {
             format!("`{}` chosen by {}", choice.option, choice.by)

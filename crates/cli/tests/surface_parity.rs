@@ -299,7 +299,12 @@ fn decision_stands_on_the_page(decision: &Value, page: &str, run: &str, handle: 
     for option in options {
         let id = option["id"].as_str().expect("an option's id");
         let label = option["label"].as_str().expect("what it does");
-        let offered = folded(&format!("{id}: {label}"));
+        // An option whose name says what it does reads as its name, then what it costs.
+        let offered = match (label == id, option["tradeoff"].as_str()) {
+            (true, Some(tradeoff)) => folded(&format!("{id} {tradeoff}")),
+            (true, None) => folded(id),
+            (false, _) => folded(&format!("{id}: {label}")),
+        };
         assert!(page.contains(&offered), "`{offered}`: {page}");
         if let Some(tradeoff) = option["tradeoff"].as_str() {
             assert!(page.contains(&folded(tradeoff)), "`{tradeoff}`: {page}");

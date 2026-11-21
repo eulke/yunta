@@ -41,10 +41,10 @@ pub(crate) fn laid_out(state: &State) -> ScreenLaid {
         .side
         .as_ref()
         .map(|side| terminal.pane(&side.region, ROWS).laid);
-    let overlay = screen
-        .overlay
-        .as_ref()
-        .map(|overlay| terminal.boxed(overlay, ROWS + BOX_EDGES).laid);
+    let overlay = screen.overlay.as_ref().map(|overlay| {
+        let cells = terminal.look.width.cells();
+        terminal.boxed(overlay, cells, ROWS + BOX_EDGES).laid
+    });
     ScreenLaid {
         main,
         side,

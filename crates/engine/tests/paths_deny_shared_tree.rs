@@ -7,9 +7,6 @@ use yunta_core::protected::Protection;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git_output, write, Bench, MOCK_CONFIG};
 
-mod common;
-use common::answer_parked;
-
 fn denying_ci() -> String {
     format!("{MOCK_CONFIG}permissions:\n  paths:\n    deny: [\".github/**\"]\n")
 }
@@ -144,7 +141,7 @@ async fn a_persons_edit_to_a_denied_path_is_committed_as_found() {
         "a person's workflow\n",
     );
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, .. } = bench
         .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;

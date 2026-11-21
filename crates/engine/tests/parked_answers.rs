@@ -92,7 +92,8 @@ async fn a_run_on_the_cap_offers_its_own_decision() {
 async fn an_answer_waits_for_the_engine_that_takes_it() {
     let bench = parked_on_the_cap().await;
 
-    answer_parked(&bench, "continue")
+    bench
+        .answer_parked("continue", None)
         .await
         .expect("the cap's menu offers continue");
 
@@ -111,9 +112,9 @@ async fn an_answer_waits_for_the_engine_that_takes_it() {
 #[tokio::test]
 async fn a_second_answer_is_refused_and_records_nothing() {
     let bench = parked_on_the_cap().await;
-    answer_parked(&bench, "continue").await.unwrap();
+    bench.answer_parked("continue", None).await.unwrap();
 
-    assert!(answer_parked(&bench, "abort").await.is_err());
+    assert!(bench.answer_parked("abort", None).await.is_err());
 
     let answers = bench
         .events()
@@ -132,7 +133,7 @@ async fn a_second_answer_is_refused_and_records_nothing() {
 async fn an_option_off_the_menu_is_refused() {
     let bench = parked_on_the_cap().await;
     assert!(matches!(
-        answer_parked(&bench, "retry").await,
+        bench.answer_parked("retry", None).await,
         Err(yunta_engine::ResolveGateError::Refused(
             GateRefusal::UnknownOption { .. }
         ))
@@ -164,7 +165,7 @@ fn an_answer_counts_only_after_the_cap_s_pause_and_before_a_resume() {
 #[tokio::test]
 async fn an_engine_with_an_answer_waiting_takes_it_and_does_not_ask() {
     let bench = parked_on_the_cap().await;
-    answer_parked(&bench, "continue").await.unwrap();
+    bench.answer_parked("continue", None).await.unwrap();
 
     let woken = bench
         .wake_answering(&SequencedInteraction::choosing(&["abort"]))
@@ -178,7 +179,7 @@ async fn an_engine_with_an_answer_waiting_takes_it_and_does_not_ask() {
 #[tokio::test]
 async fn an_abort_waiting_stops_the_run_where_it_stood() {
     let bench = parked_on_the_cap().await;
-    answer_parked(&bench, "abort").await.unwrap();
+    bench.answer_parked("abort", None).await.unwrap();
 
     let woken = bench
         .wake_answering(&SequencedInteraction::choosing(&["continue"]))
@@ -234,7 +235,7 @@ async fn the_engine_after_the_one_that_took_the_answer_stops_on_the_cap() {
         first.terminal
     );
 
-    answer_parked(&bench, "continue").await.unwrap();
+    bench.answer_parked("continue", None).await.unwrap();
     let on_the_gate = bench.wake().await;
     assert!(
         matches!(on_the_gate.terminal, RunTerminal::Paused { .. }),
@@ -252,7 +253,7 @@ async fn the_engine_after_the_one_that_took_the_answer_stops_on_the_cap() {
         on_the_gate.terminal
     );
 
-    answer_parked(&bench, "approve").await.unwrap();
+    bench.answer_parked("approve", None).await.unwrap();
     let next = bench.wake().await;
     assert!(
         matches!(
@@ -316,7 +317,7 @@ async fn a_recorded_continue_runs_a_cut_session_past_its_share() {
         cut.terminal
     );
 
-    answer_parked(&bench, "continue").await.unwrap();
+    bench.answer_parked("continue", None).await.unwrap();
     assert!(RunState::replay(&bench.events()).answer_awaits_its_resume());
 
     let woken = bench.wake().await;
@@ -331,7 +332,7 @@ async fn an_engine_that_died_before_the_attempt_leaves_the_answer_standing() {
     bench
         .run_with_config(PAST_ITS_SHARE, PAST_ITS_SHARE_FIXTURE, BUDGET_CONFIG)
         .await;
-    answer_parked(&bench, "continue").await.unwrap();
+    bench.answer_parked("continue", None).await.unwrap();
     let woke_and_died =
         EventDraft::new(bench.run_id.clone(), None, resumed()).expect("a draft names its subject");
     bench.storage.append(&woke_and_died, &FixedClock).unwrap();
@@ -386,7 +387,7 @@ async fn a_retry_that_reached_the_cap_runs_after_continue() {
         failed.terminal
     );
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let on_the_cap = bench.wake().await;
     assert!(
         matches!(
@@ -409,7 +410,7 @@ async fn a_retry_that_reached_the_cap_runs_after_continue() {
         .expect("the cap is a pause with a menu");
     assert_eq!(on, DecisionOn::Run);
 
-    answer_parked(&bench, "continue").await.unwrap();
+    bench.answer_parked("continue", None).await.unwrap();
     let past_it = bench.wake().await;
     assert_eq!(past_it.terminal, RunTerminal::Finished);
 

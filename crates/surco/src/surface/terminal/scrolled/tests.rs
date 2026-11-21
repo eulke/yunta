@@ -81,6 +81,34 @@ fn the_line_a_pointer_stands_on_is_kept_in_sight() {
     assert_eq!(laid.top, 10);
 }
 
+/// A list's own pointer on the row it is narrowed on leads nothing a person picks: the row
+/// set on the selection is the one kept in sight.
+#[test]
+fn the_row_on_the_selection_is_kept_in_sight_past_a_lists_own_pointer() {
+    let names: Vec<String> = (0..20).map(|at| format!("row {at}")).collect();
+    let list = crate::components::ChoiceList {
+        choices: Some(crate::components::Choices {
+            rows: names
+                .iter()
+                .map(|name| crate::components::ChoiceRow {
+                    name: name.clone(),
+                    said: None,
+                    cost: None,
+                    key: None,
+                })
+                .collect(),
+            at: 15,
+        }),
+        filter: None,
+        legend: crate::components::Legend::new(),
+    };
+    let doc = Doc::new().with(list);
+    let (rows, laid) = terminal().scrolled(&doc, Sight::following_pointer(), 5);
+    assert_eq!(laid.top, 17, "{:?}", texts(&rows));
+    let pointed = format!("{} row 15", Glyphs::Unicode.pointer());
+    assert_eq!(rows.first().map(Line::text), Some(pointed));
+}
+
 #[test]
 fn a_document_that_fits_shows_whole_and_does_not_scroll() {
     let (rows, laid) = terminal().scrolled(&numbered(3, None), Sight::from_line(2), 5);

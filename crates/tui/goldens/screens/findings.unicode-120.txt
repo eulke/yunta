@@ -1,0 +1,36 @@
+ yunta › Q78GRR › review@reviewer                                                           ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h41m                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ━━━━━ ━━━━ ━━━━ ━━━━━━━ ━━━━━━━━━ ━━━━━━ ━━━━ ━━━━━━━ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄┄ ┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+   ✓ grill                  36s  │ findings · 0 of 4 answered · review@reviewer, review@reviewer-alt, conform
+   ✓ brief                  22s  │
+   ✓ plan                 6m25s  │ ▸ ▲ major    Global pack paths ignore the configured YUNTA_HOME
+   ✓ spec                13m53s  │   ▲ major    Global pack commands ignore the configured YUNTA_HOME state root
+   ✓ approve-plan        10m05s  │   ◌ minor    Pack audit cannot inspect globally installed packs
+   ✓ implement           41m05s  │   ✗ blocking Pack target API shapes are defined outside the declared file
+    └─ ✓ global-pack-install     │
+ ▸ ⠋ review@reviewer             │ review@reviewer      crates/cli/src/pack/target.rs:31-35
+   ⠋ review@reviewer-alt         │ global_data_dir uses only Env.home and appends /.yunta. With HOME=/home/alice and
+   ⠋ conform                     │ YUNTA_HOME=/scratch/yunta-state, pack add --global stores under
+   ◌ fix-findings                │ /home/alice/.yunta/packs instead of /scratch/yunta-state/packs.
+   ◌ lint                        │
+   ◌ fix-lint                    │ what it is doing · 3 calls
+   ◌ tests                       │ running: attempt 1
+   ◌ ship                        │ session opened on gpt-6-luna · fence widened to 1 root
+   ◌ pr                          │ read    crates/cli/src/pack/target.rs
+                                 │ run     git diff
+                                 │ finding global-paths-ignore-yunta-home major: Global pack paths ignore the configur…
+                                 │ call    yunta_post_finding
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 25.2M tokens ▁▁▂▂▁█▁▁▁▁▁▁▁▁▁ · 1h02m at work · 38m51s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ j k finding · tab nodes · s stats · q field, it keeps going                                        / anything · ? keys

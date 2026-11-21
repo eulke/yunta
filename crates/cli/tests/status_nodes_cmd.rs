@@ -416,8 +416,9 @@ fn status_lists_the_nodes_the_frame_declares_in_its_order() {
     assert_eq!(printed, carried, "{document:#}");
 }
 
-/// The chronicle says a node asked in the same words the page says it
-/// is waiting on: one modifier, built once, wherever a reader meets it.
+/// The chronicle says a node asked in the same words the page's row for
+/// the node says it is waiting on: one modifier, built once, wherever a
+/// reader meets it.
 #[test]
 fn the_chronicle_and_status_say_a_node_that_asked_with_the_same_bytes() {
     let (project, run_id, moments) = asking_run();
@@ -428,7 +429,7 @@ fn the_chronicle_and_status_say_a_node_that_asked_with_the_same_bytes() {
         "the chronicle says what the node asked as it happens: {moments}"
     );
     assert!(
-        status(&project, &run_id, &[]).contains(said),
+        status(&project, &run_id, &["--full"]).contains(said),
         "and the page says it the same way afterwards: {moments}"
     );
 }

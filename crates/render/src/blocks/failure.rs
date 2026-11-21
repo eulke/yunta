@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use surco::components::{Evidence, PathNote, Paths, Said, Whole};
 use surco::doc::Block;
-use yunta_core::events::{ExhaustedReroute, Failure, FailureMenu, OwedScope, Precondition, Stuck};
+use yunta_core::events::{ExhaustedReroute, Failure, FailureMenu, Precondition, Stuck, TaskCause};
 use yunta_core::protected::Protection;
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{listed_globs, ModeName};
@@ -62,6 +62,7 @@ impl FailureDetail<'_> {
             Failure::Exited { exited } => FailureSays::Evidence(Evidence {
                 tail: exited.tail.clone(),
                 whole: self.whole.clone(),
+                kept: None,
             }),
             Failure::SessionDied { died } => session_says(died),
             Failure::Artifacts { artifacts } => artifacts_says(artifacts),
@@ -140,7 +141,11 @@ fn session_says(died: &yunta_core::events::SessionDeath) -> FailureSays {
         .collect();
     match tail.is_empty() {
         true => FailureSays::Nothing,
-        false => FailureSays::Evidence(Evidence { tail, whole: None }),
+        false => FailureSays::Evidence(Evidence {
+            tail,
+            whole: None,
+            kept: None,
+        }),
     }
 }
 
@@ -184,60 +189,75 @@ fn lines_of(said: &str) -> Vec<String> {
 }
 
 /// How a retry starts, which is the same whatever input it waits for.
-const RETRY_STARTS: &str = "Starts a fresh attempt from the run's tree as it stands, under the \
-    same scope: what failed is asked again and what passed stays passed";
+const RETRY_STARTS: &str = "Starts a fresh attempt from the run's tree as it stands";
 
-/// What a failure's menu offers beside its abort, written from the menu's
-/// own facts. `None` for an option the menu does not write.
+/// What a retry asks again and what it keeps, whatever input it waits for.
+const RETRY_KEEPS: &str = "what failed is asked again and what passed stays passed";
+
+/// What a failure's menu offers beside its abort, written from the menu's own facts: what
+/// each option does and what it costs, either of which its name may say alone. `None` for
+/// an option the menu does not write.
 pub(crate) fn remedy_words(
     menu: &FailureMenu,
     option: ReservedOption,
-) -> Option<(String, Option<String>)> {
+) -> Option<(Option<String>, Option<String>)> {
+    let tasks = stopped_tasks(&menu.failure);
+    let departing = departing_tasks(&menu.failure);
     match option {
         ReservedOption::Retry if matches!(menu.failure, Failure::LoopCapped { .. }) => {
-            Some(loop_retry_words(menu.attempt))
+            Some(loop_retry_words())
         }
         ReservedOption::Retry => {
             let waits = retry_waits(menu)?;
-            Some(retry_words(menu.attempt, &waits))
+            Some(retry_words(&waits))
         }
         ReservedOption::Grant => Some(grant_words(menu)),
-        ReservedOption::Deny => Some(deny_words()),
-        ReservedOption::ContinueWork => Some(continue_words(menu.attempt)),
+        ReservedOption::Deny => Some((None, Some(crate::offers::goes_on_within(tasks)))),
+        ReservedOption::ContinueWork => Some((None, Some(continue_words(tasks)))),
         ReservedOption::Continue => Some(past_the_cap_words(menu.attempt)),
-        ReservedOption::Accept => Some(departed_words(menu.attempt, true)),
-        ReservedOption::SendBack => Some(departed_words(menu.attempt, false)),
+        ReservedOption::Accept => Some((None, Some(super::decision::accepted(departing)))),
+        ReservedOption::SendBack => Some((None, Some(super::decision::sent_back(departing)))),
         _ => None,
+    }
+}
+
+/// How many tasks the failure's answers are about: those that owe a scope request, or that
+/// a loop stopped on; one for any other failure.
+fn stopped_tasks(failure: &Failure) -> usize {
+    match failure {
+        Failure::ScopeOwed { owed } => owed.len().max(1),
+        Failure::TasksStopped { stopped } => stopped.len().max(1),
+        _ => 1,
+    }
+}
+
+/// How many of a loop's tasks the failure stopped on a departure from the plan; one for a
+/// failure that stopped none, whose answers speak of the one task they are about.
+fn departing_tasks(failure: &Failure) -> usize {
+    match failure {
+        Failure::TasksStopped { stopped } => stopped
+            .iter()
+            .filter(|stop| matches!(stop.cause, TaskCause::DeviationOwed { .. }))
+            .count()
+            .max(1),
+        _ => 1,
     }
 }
 
 /// The words of running a capped loop again, chosen by its failure so that a menu an older
 /// log holds, which waits for a person to lift the cap, says what a retry does.
-fn loop_retry_words(attempt: u32) -> (String, Option<String>) {
+fn loop_retry_words() -> (Option<String>, Option<String>) {
     (
-        format!("Run it again (attempt {attempt}): its iteration count starts over"),
-        Some(format!(
-            "{RETRY_STARTS}. It stops at the cap again if tasks remain"
-        )),
+        None,
+        Some("its iteration count starts over; it stops at the cap again if tasks remain".into()),
     )
 }
 
 /// The words of running a node again past the token cap that cut its session.
-fn past_the_cap_words(attempt: u32) -> (String, Option<String>) {
+fn past_the_cap_words(attempt: u32) -> (Option<String>, Option<String>) {
     (
-        format!("Run it again past the cap (attempt {attempt})"),
+        Some(format!("Run it again past the cap (attempt {attempt})")),
         Some(crate::offers::LIFTS_THE_CAP.to_string()),
-    )
-}
-
-/// The words of refusing an owed scope request: the choice is kept as the
-/// reason, and the task goes on inside the scope it declared.
-fn deny_words() -> (String, Option<String>) {
-    (
-        "Deny the request".to_string(),
-        Some(
-            "The denial becomes a finding; the task retries within its original scope".to_string(),
-        ),
     )
 }
 
@@ -259,37 +279,27 @@ fn retry_waits(menu: &FailureMenu) -> Option<Vec<Precondition>> {
     (!waits.is_empty()).then_some(waits)
 }
 
-/// The words of a retry that starts `attempt` and waits for each of `waits`:
-/// what it starts from, and what must change for it to end differently.
-fn retry_words(attempt: u32, waits: &[Precondition]) -> (String, Option<String>) {
+/// The words of a retry that waits for each of `waits`: what it starts from, what it asks
+/// again, and what must change for it to end differently.
+fn retry_words(waits: &[Precondition]) -> (Option<String>, Option<String>) {
     // A tree that already moved needs no waiting, so only the other inputs make
-    // the clause. When none is left, the label says the tree changed rather
-    // than promising a change still to come.
+    // the clause, and with none left the retry waits for nothing.
     let waiting: Vec<String> = waits
         .iter()
         .filter(|precondition| **precondition != Precondition::TreeChanged)
         .map(waits_for)
         .collect();
-    if waiting.is_empty() {
-        return (
-            format!("Run it again (attempt {attempt}): the tree changed since it failed"),
-            Some(format!(
-                "{RETRY_STARTS}; if the change does not fix what it failed on, it fails the \
-                 same way and asks again"
-            )),
-        );
-    }
-    let clause = and_list(&waiting);
-    (
-        format!("Run it again (attempt {attempt}) once {clause}"),
-        Some(format!(
-            "{RETRY_STARTS}. Until {clause}, it fails the same way and asks again"
-        )),
-    )
+    let costs = match waiting.is_empty() {
+        true => RETRY_KEEPS.to_string(),
+        false => format!(
+            "{RETRY_KEEPS}; until {}, it fails the same way and asks again",
+            and_list(&waiting)
+        ),
+    };
+    (Some(RETRY_STARTS.to_string()), Some(costs))
 }
 
-/// What a retry waits for, as the clause a label ends with after "once"
-/// or "until".
+/// What a retry waits for, as the clause what it costs says after "until".
 fn waits_for(precondition: &Precondition) -> String {
     match precondition {
         Precondition::TreeChanged => "the tree changes".to_string(),
@@ -315,45 +325,21 @@ fn and_list(clauses: &[String]) -> String {
 
 /// The words of a grant: the paths it adds to the node's scope, and the
 /// attempt it starts. A loop that ended owing its tasks' requests widens
-/// each task by its own request instead.
-fn grant_words(menu: &FailureMenu) -> (String, Option<String>) {
+/// each task by its own request instead, which the card's question names.
+fn grant_words(menu: &FailureMenu) -> (Option<String>, Option<String>) {
     if let Failure::ScopeOwed { owed } = &menu.failure {
-        return owed_grant_words(owed, menu.attempt);
+        let paths = owed.iter().map(|asked| asked.paths.len()).sum();
+        return (None, Some(crate::offers::may_also_touch(owed.len(), paths)));
     }
     (
-        format!(
+        Some(format!(
             "Allow the node to also write {} and run it again (attempt {})",
             wanted(&menu.failure),
             menu.attempt
-        ),
+        )),
         Some(
             "Adds these paths to the node's scope for the rest of this run; the new attempt \
              starts fresh, fenced and judged against the widened scope"
-                .to_string(),
-        ),
-    )
-}
-
-/// The words of granting what a loop's tasks asked for: one task by name
-/// with the paths it asked to write, several by their count.
-fn owed_grant_words(owed: &[OwedScope], attempt: u32) -> (String, Option<String>) {
-    let label = match owed {
-        [one] => format!(
-            "Allow task `{}` to also write {} and run it again (attempt {attempt})",
-            one.task_id,
-            listed_globs(&one.paths)
-        ),
-        _ => format!(
-            "Allow each of {} tasks to also write what it asked for and run them again (attempt \
-             {attempt})",
-            owed.len()
-        ),
-    };
-    (
-        label,
-        Some(
-            "Widens each task's scope by its own request for the rest of this run; the task \
-             picks its work back up, judged against the wider scope"
                 .to_string(),
         ),
     )
@@ -370,37 +356,13 @@ fn wanted(failure: &Failure) -> String {
     }
 }
 
-/// The words of answering the departures a loop's tasks declared, from the
-/// failure the loop ended owing them on: accepting them, or sending their
-/// tasks back to the plan.
-fn departed_words(attempt: u32, accepted: bool) -> (String, Option<String>) {
-    match accepted {
-        true => (
-            format!("Accept the departures and run it again (attempt {attempt})"),
-            Some(
-                "Each task that departed closes on its work as it stands, if its criteria \
-                 pass; the rest of the plan builds on what it did instead"
-                    .to_string(),
-            ),
-        ),
-        false => (
-            format!("Send the departing tasks back and run it again (attempt {attempt})"),
-            Some("Each one's session picks the work back up, held to the plan".to_string()),
-        ),
-    }
-}
-
-/// The words of a continuation from the work a loop's blocked tasks left.
-fn continue_words(attempt: u32) -> (String, Option<String>) {
-    (
-        format!("Continue from the work the blocked tasks left (attempt {attempt})"),
-        Some(
-            "Keeps each blocked task's last changes and judges them before any session opens; \
-             a task they close is done without one. Fix what they failed on first, or they \
-             fail the same way"
-                .to_string(),
-        ),
-    )
+/// What a continuation from the work a loop's blocked task, or each of `tasks`, left does.
+fn continue_words(tasks: usize) -> String {
+    let whose = match tasks {
+        1 => "the blocked task's",
+        _ => "each blocked task's",
+    };
+    format!("keeps {whose} last changes and judges them before any session opens")
 }
 
 /// The words of the options a reroute the failure exhausted offers: the
@@ -409,10 +371,10 @@ fn continue_words(attempt: u32) -> (String, Option<String>) {
 pub(crate) fn reroute_words(
     reroute: &ExhaustedReroute,
     option: ReservedOption,
-) -> Option<(String, Option<String>)> {
+) -> Option<(Option<String>, Option<String>)> {
     match option {
         ReservedOption::Retry => Some((
-            format!("Reroute to `{}` once more", reroute.goto),
+            Some(format!("Reroute to `{}` once more", reroute.goto)),
             Some(format!(
                 "Uses one extra correction attempt beyond the declared max_reroutes ({}); \
                  escalates again if `{}` doesn't fix it",
@@ -426,7 +388,7 @@ pub(crate) fn reroute_words(
 
 /// The words of a promotion to `next_mode`, which a reroute names when the
 /// workflow declares a mode after this one.
-fn promotion_words(next_mode: Option<&ModeName>) -> (String, Option<String>) {
+fn promotion_words(next_mode: Option<&ModeName>) -> (Option<String>, Option<String>) {
     let (label, target) = match next_mode {
         Some(mode) => (format!("Promote to mode `{mode}`"), format!("`{mode}`")),
         None => (
@@ -435,7 +397,7 @@ fn promotion_words(next_mode: Option<&ModeName>) -> (String, Option<String>) {
         ),
     };
     (
-        label,
+        Some(label),
         Some(format!(
             "Closes this run (`run_finished: promoted`) and starts a successor in {target}, \
              inheriting this run's artifacts; there's no mechanism to demote back to the mode \

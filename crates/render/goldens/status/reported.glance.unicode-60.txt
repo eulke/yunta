@@ -5,5 +5,6 @@
   progress     2 of 2 nodes done
 
 next
-  yunta receipt 7E5PH4         certifies what it did
+  yunta receipt 7E5PH4         write the receipt
+  yunta verify 7E5PH4          verify its evidence
   yunta status 7E5PH4 --full   the whole story, node by node

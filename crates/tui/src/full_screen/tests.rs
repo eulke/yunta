@@ -4,10 +4,12 @@
 
 use std::io::Write;
 
-use surco::paint::{ALT_SCREEN_OFF, ALT_SCREEN_ON, ALT_SCROLL_OFF, ALT_SCROLL_ON};
+use surco::paint::{
+    title_saved, ALT_SCREEN_OFF, ALT_SCREEN_ON, ALT_SCROLL_OFF, ALT_SCROLL_ON, TITLE_RESTORED,
+};
 use yunta_testkit::Terminal;
 
-use super::FullScreen;
+use super::{FullScreen, WindowTitle};
 
 /// What the binary run again writes once the terminal is held.
 const HELD: &str = "the terminal is held";
@@ -131,6 +133,38 @@ fn a_panic_unwinding_through_the_holding_gives_the_terminal_back_and_goes_on() {
     let drawn = terminal.drawn();
     assert!(drawn.contains(WENT_ON), "the process went on\n{drawn}");
     assert_eq!(terminal.exit_code(), Some(0), "{drawn}");
+}
+
+/// A title given keeps the window's own under it, and the same title again tells nothing; a
+/// changed one gives the one before back first, so the window's own is all the terminal
+/// keeps; none gives it back. Given back with the terminal, it is given back once.
+#[test]
+fn the_window_keeps_its_own_title_under_the_one_given_and_gets_it_back_once() {
+    let window = WindowTitle::default();
+    let told = |title: Option<&str>| {
+        let mut out = Vec::new();
+        window.give(title, &mut out).expect("a title told");
+        String::from_utf8(out).expect("escapes and words")
+    };
+    let given_back = || {
+        let mut out = Vec::new();
+        window.given_back(&mut out).expect("a title given back");
+        String::from_utf8(out).expect("escapes")
+    };
+    assert_eq!(told(Some("first")), title_saved("first"));
+    assert_eq!(told(Some("first")), "", "the same title tells nothing");
+    let changed = format!("{TITLE_RESTORED}{}", title_saved("second"));
+    assert_eq!(told(Some("second")), changed);
+    assert_eq!(told(None), TITLE_RESTORED);
+    assert_eq!(given_back(), "", "nothing left to give back");
+    assert_eq!(told(Some("third")), title_saved("third"));
+    assert_eq!(given_back(), TITLE_RESTORED);
+    assert_eq!(given_back(), "", "given back once");
+    assert_eq!(
+        told(Some("third")),
+        title_saved("third"),
+        "given again after"
+    );
 }
 
 /// What `a_panic_unwinding_through_the_holding_gives_the_terminal_back_and_goes_on` runs

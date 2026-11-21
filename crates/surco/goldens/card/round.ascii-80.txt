@@ -3,8 +3,10 @@
 |
 | + What changed?  one thing
 | ? Any risk?  optional, assumes none
-|     > the cache
+|     .------------------------------------------------------------------------.
+|     | the cache                                                              |
+|     '------------------------------------------------------------------------'
 |     ! say what it risks
 | . How deep?
 |
-| enter answers ; esc leaves it for later
+| enter answer ; esc leave it for later

@@ -12,12 +12,14 @@ use surco::look::{Look, Width};
 use surco::motion::Motion;
 use surco::paint::{Paint, SYNC_BEGIN, SYNC_END};
 use tokio::signal::unix::{signal, SignalKind};
+use yunta_core::events::Channel;
 use yunta_testkit::Terminal;
 use yunta_testkit_core::{fixed_now, FixedClock};
 use yunta_testkit_ui::sandbox::workspace;
-use yunta_ui::{Performer, State};
+use yunta_ui::{Address, Performer, State};
 
 use super::{Application, Synchronized};
+use crate::full_screen::WindowTitle;
 
 /// What the signpost, where the application opens outside a repository, says.
 const SIGNPOST: &str = "not in a repository";
@@ -140,14 +142,17 @@ fn after_ctrl_z_it_is_held_and_drawn_again_and_goes_on() {
 #[test]
 fn a_drawing_that_changes_no_cell_writes_nothing() {
     let root = tempfile::tempdir().expect("a directory for the run");
-    let performer = Arc::new(Performer::new(workspace(root.path(), root.path())));
+    let performer = Arc::new(Performer::new(
+        workspace(root.path(), root.path()),
+        Channel::Tty,
+    ));
     let look = Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::exact(78),
         motion: Motion::Still,
     };
-    let application = Application::new(performer, look, Arc::new(FixedClock), recorded);
+    let application = Application::new(performer, look, Arc::new(FixedClock), recorded, false);
     let drawing = Synchronized::default();
     let options = TerminalOptions {
         viewport: Viewport::Fixed(Rect::new(0, 0, 80, 24)),
@@ -161,6 +166,8 @@ fn a_drawing_that_changes_no_cell_writes_nothing() {
         drawing,
         laid: None,
         on_screen: None,
+        title: WindowTitle::default(),
+        ringing: false,
     };
     let (mut state, _) = State::opened(fixed_now());
     let mut first = Vec::new();
@@ -180,15 +187,15 @@ fn a_drawing_that_changes_no_cell_writes_nothing() {
     assert!(again.is_empty(), "{:?}", String::from_utf8_lossy(&again));
 }
 
-/// The pages a test's surface was handed to show, in the order it was handed them.
-static SHOWN: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+/// What a test's surface was handed to show, in the order it was handed it.
+static SHOWN: std::sync::Mutex<Vec<Address>> = std::sync::Mutex::new(Vec::new());
 
-/// A surface's way to show a page, which records it.
-fn recorded(page: &std::path::Path) -> std::io::Result<()> {
+/// A surface's way to show a page or a link, which records it.
+fn recorded(address: &Address) -> std::io::Result<()> {
     SHOWN
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push(page.to_path_buf());
+        .push(address.clone());
     Ok(())
 }
 
@@ -197,21 +204,26 @@ fn recorded(page: &std::path::Path) -> std::io::Result<()> {
 #[test]
 fn what_the_state_asks_is_carried_out_in_order_leaving_last() {
     let root = tempfile::tempdir().expect("a directory for the run");
-    let performer = Arc::new(Performer::new(workspace(root.path(), root.path())));
+    let performer = Arc::new(Performer::new(
+        workspace(root.path(), root.path()),
+        Channel::Tty,
+    ));
     let look = Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::exact(78),
         motion: Motion::Still,
     };
-    let application = Application::new(performer, look, Arc::new(FixedClock), recorded);
+    let application = Application::new(performer, look, Arc::new(FixedClock), recorded, false);
     let (inputs, _answered) = tokio::sync::mpsc::unbounded_channel();
-    let running = super::Running {
+    let mut running = super::Running {
         application: &application,
         inputs,
         drawing: Synchronized::default(),
         laid: None,
         on_screen: None,
+        title: WindowTitle::default(),
+        ringing: false,
     };
     let (mut state, _) = State::opened(fixed_now());
     let (first, second) = (
@@ -219,8 +231,8 @@ fn what_the_state_asks_is_carried_out_in_order_leaving_last() {
         root.path().join("second.html"),
     );
     let asked = vec![
-        yunta_ui::Request::ShowPage(first.clone()),
-        yunta_ui::Request::ShowPage(second.clone()),
+        yunta_ui::Request::ShowPage(Address::Page(first.clone())),
+        yunta_ui::Request::ShowPage(Address::Page(second.clone())),
         yunta_ui::Request::Leave,
     ];
     let exit: Option<super::Exit<()>> = running.carried_out(&mut state, asked, false);
@@ -231,7 +243,7 @@ fn what_the_state_asks_is_carried_out_in_order_leaving_last() {
         .clone();
     assert_eq!(
         shown,
-        [first, second],
+        [Address::Page(first), Address::Page(second)],
         "each page shown, in order, before leaving"
     );
 }
@@ -251,14 +263,17 @@ fn the_application_run_again() {
     let root = tempfile::tempdir().expect("a directory outside any repository");
     let outside = root.path().join("outside");
     std::fs::create_dir_all(&outside).expect("the directory");
-    let performer = Arc::new(Performer::new(workspace(&outside, root.path())));
+    let performer = Arc::new(Performer::new(
+        workspace(&outside, root.path()),
+        Channel::Tty,
+    ));
     let look = Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
         width: Width::exact(78),
         motion: Motion::Still,
     };
-    let application = Application::new(performer, look, Arc::new(FixedClock), |_| Ok(()));
+    let application = Application::new(performer, look, Arc::new(FixedClock), |_| Ok(()), false);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -1,0 +1,38 @@
+␛[36m●␛[0m ␛[1mnode implement of run Q78GRR␛[0m␛[2m ·␛[0m␛[36m running␛[0m
+
+  ␛[2mstands      ␛[0m running
+  ␛[2mtook        ␛[0m 20m21s
+  ␛[2mtokens      ␛[0m 6.09M tokens · 5.85M in / 240k out (5.62M cached)
+  ␛[2mkind        ␛[0m loop
+  ␛[2mattempt     ␛[0m 1
+  ␛[2mrunner      ␛[0m executor on mock/gpt-6-luna
+
+␛[36m●␛[0m ␛[1mglobal-pack-install␛[0m  Add explicit global pack install target␛[2m · attempt 1␛[0m
+
+  ␛[2mproved  ␛[0m␛[31m red␛[0m
+  ␛[2mby      ␛[0m␛[1mcargo test --workspace --test pack_global_spec global_pack_commands_use_the_per_user_stor␛[0m␛[1m…␛[0m
+  ␛[2mkeeps   ␛[0mlint, green at the baseline
+
+  ␛[2mits scope␛[0m
+  ␛[32m✓␛[0m crates/cli/src/pack.rs
+  ␛[32m✓␛[0m crates/cli/src/cli/pack.rs
+  ␛[32m✓␛[0m crates/cli/src/cli/dispatch.rs
+  ␛[32m✓␛[0m crates/cli/src/commands/pack.rs
+  ␛[2m◌␛[0m crates/cli/tests/pack_cmd.rs
+
+␛[2mwhat it is doing · 8 calls␛[0m
+running: attempt 1
+global-pack-install pre: 3 criteria
+session opened on gpt-6-luna · fence widened to 2 roots
+write refused: crates/cli/src/commands/pack_audit.rs
+call    yunta_task
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+␛[1medit    crates/cli/src/cli/dispatch.rs␛[0m
+
+␛[2mnext␛[0m
+  ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m

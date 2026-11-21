@@ -1,0 +1,24 @@
+ yunta › Q78GRR › approve-plan                       ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  plan · Q78GRR · fragua · 1 task, 6 files             needs you  approve-plan
+  Add explicit per-user global pack installation alongside project-level inst…
+  you asked  add support for installing a pack globally
+
+  the change                                                   1 of 2 · 1 task
+
+    Pack installation currently writes to the current project's .yunta/packs/
+    and .yunta/yunta.lock. Add an explicit --global mode that stores packs and
+    their lock in a per-user Yunta data directory, so the same pack can be
+    installed for broader use without changing project installs. Project and
+    global installs are selected explicitly; global installs do not shadow or
+    merge with project installs.
+
+    The selected install target determines both the vendor directory and lock
+    file. add, update, remove and list operate on one target at a time;
+    --global selects the per-user target and omission keeps the existing
+  … 2 more lines
+
+  ◆ Approve the plan: Add explicit per-user global pack installation alongsid…
+  1 approve   2 adjust   3 abort
+
+ 1 2 3 answer · tab next place · ↑↓ scroll · p proof · … · ? keys

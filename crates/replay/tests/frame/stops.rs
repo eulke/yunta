@@ -235,3 +235,98 @@ fn a_run_paused_on_a_reset_names_its_node_and_the_moment_it_resumes() {
     assert_eq!((node.as_str(), resumes), ("build", at));
     assert!(RunPhase::Running.reset_wait().is_none());
 }
+
+/// `pause` as the run's own `run_paused` writes it.
+fn paused(pause: PauseReason) -> EventPayload {
+    EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(&pause)))
+}
+
+/// A node whose failure the run is parked on for a person's decision is where the run
+/// waits on a person, though its log says it failed; a node waiting on a person's answer
+/// is so by its own standing; a stop a person made waits on nobody.
+#[test]
+fn a_failed_node_the_run_is_parked_on_for_a_person_is_where_it_waits_on_one() {
+    let workflow = chain();
+    let failure = Failure::Message {
+        outcome: "red".into(),
+    };
+    let failed_and_parked = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("build"), started(1)),
+        (2, Some("build"), failed("red")),
+        (
+            3,
+            None,
+            paused(PauseReason::NodeFailed {
+                node: "build".into(),
+                failure,
+            }),
+        ),
+    ]);
+    let parked = frame(&workflow, &failed_and_parked, 100);
+    assert_eq!(parked.nodes[1].standing, Standing::Failed);
+    assert_eq!(parked.waits_on_a_person_at(), Some(&NodeId::from("build")));
+
+    let gate = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("plan"), started(1)),
+        (2, Some("plan"), gate_waiting(None)),
+    ]);
+    let asked = frame(&workflow, &gate, 100);
+    assert_eq!(asked.waits_on_a_person_at(), Some(&NodeId::from("plan")));
+
+    let stopped = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("build"), started(1)),
+        (2, None, paused(PauseReason::Cancelled)),
+    ]);
+    assert_eq!(frame(&workflow, &stopped, 100).waits_on_a_person_at(), None);
+}
+
+/// A pause an older log kept with no menu names the node it waits on in its claim alone, as
+/// a gate that never started is named: the run waits on a person at that node.
+#[test]
+fn a_pause_that_names_its_node_only_in_its_claim_waits_on_a_person_at_it() {
+    let workflow = chain();
+    let escalation = Escalation::new(
+        Claim::ForgeUnreachable {
+            node: "plan".into(),
+            assignee: "reviewer".into(),
+        },
+        Menu::Gate(AuthorGate {
+            assignee: "reviewer".into(),
+            node: Some("plan".into()),
+        }),
+        NonEmpty::from((
+            GateOption::leading(
+                "approve".into(),
+                Leads::On {
+                    next: Vec::new(),
+                    settles: false,
+                },
+            ),
+            Vec::new(),
+        )),
+    );
+    let mut written = serde_json::to_value(PauseReason::Escalation(Box::new(escalation)))
+        .expect("a pause as its log keeps it");
+    let fields = written.as_object_mut().expect("a pause is an object");
+    fields.remove("gate");
+    let menuless: PauseReason = serde_json::from_value(written).expect("a pause with no menu");
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, None, paused(menuless)),
+    ]);
+    let parked = frame(&workflow, &events, 100);
+    assert!(
+        matches!(
+            &parked.phase,
+            RunPhase::Waiting {
+                on: WaitingOn::Run { .. }
+            }
+        ),
+        "no node says it waits: {:?}",
+        parked.phase
+    );
+    assert_eq!(parked.waits_on_a_person_at(), Some(&NodeId::from("plan")));
+}

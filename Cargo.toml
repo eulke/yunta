@@ -130,8 +130,45 @@ split-debuginfo = "off"
 [profile.dev.package."*"]
 debug = false
 
+# The packages that draw a screen and keep the application's state are
+# optimised in a debug build too. The test that walks every state the
+# application reaches runs them some hundred thousand times and finishes in
+# about half the time for it, where compiling the five this way costs a
+# few seconds; every other test of theirs runs faster as well.
+[profile.dev.package.yunta-surco]
+opt-level = 1
+
+[profile.dev.package.yunta-render]
+opt-level = 1
+
+[profile.dev.package.yunta-ui]
+opt-level = 1
+
+[profile.dev.package.yunta-testkit-ui]
+opt-level = 1
+
+[profile.dev.package.yunta-tui]
+opt-level = 1
+
 # The build a debugger wants: `--profile debugging`.
 [profile.debugging]
 inherits = "dev"
 debug = true
 split-debuginfo = "unpacked"
+
+# A debugger steps through code as it is written: the packages a debug
+# build optimises are built plain here.
+[profile.debugging.package.yunta-surco]
+opt-level = 0
+
+[profile.debugging.package.yunta-render]
+opt-level = 0
+
+[profile.debugging.package.yunta-ui]
+opt-level = 0
+
+[profile.debugging.package.yunta-testkit-ui]
+opt-level = 0
+
+[profile.debugging.package.yunta-tui]
+opt-level = 0

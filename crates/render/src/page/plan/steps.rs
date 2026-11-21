@@ -63,7 +63,7 @@ pub(super) fn steps(doc: Doc, steps: &[Vec<&Task>]) -> Doc {
 /// task, labelled by `labels` in the order the steps hold the tasks, and an
 /// arrow from each to every task that waits on it. `None` when no task waits
 /// on another: every task is in one step, which the index says.
-pub(in crate::page) fn order(steps: &[Vec<&Task>], labels: &[&str]) -> Option<Diagram> {
+fn order(steps: &[Vec<&Task>], labels: &[&str]) -> Option<Diagram> {
     let tasks: Vec<&Task> = steps.iter().flatten().copied().collect();
     let place = |id: &yunta_core::TaskId| tasks.iter().position(|task| task.id == *id);
     let links: Vec<(usize, usize)> = tasks
@@ -79,21 +79,4 @@ pub(in crate::page) fn order(steps: &[Vec<&Task>], labels: &[&str]) -> Option<Di
         return None;
     }
     Some(Diagram::linked(labels, &links))
-}
-
-/// What tells `ids` apart: each without the words they all open with, where they share
-/// any and each has something left. `global-pack-storage` and `global-pack-cli` are
-/// `storage` and `cli`; `T001` and `T002` share no word and stay as they are.
-pub(in crate::page) fn short_names(ids: &[&str]) -> Vec<String> {
-    let first = ids.first().copied().unwrap_or_default();
-    let shared = first
-        .match_indices('-')
-        .map(|(at, _)| at + 1)
-        .rfind(|at| {
-            ids.iter()
-                .all(|id| id.len() > *at && id.starts_with(&first[..*at]))
-        })
-        .unwrap_or(0);
-    let cut = if ids.len() > 1 { shared } else { 0 };
-    ids.iter().map(|id| id[cut..].to_string()).collect()
 }

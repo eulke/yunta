@@ -9,11 +9,17 @@
 //! rules are the engine's, asked of the engine: the round is validated again when it is
 //! submitted, and a surface that judged by its own rules would be telling a person
 //! something the engine might refuse.
+//!
+//! A round the engine refused the answers of stands with each refusal under the question
+//! it is about, one about no question under the first, while that question waits on a new
+//! answer: what the person types there does not take it away, an answer taken does. A
+//! refusal says what is wrong and what helps, not which question, since it stands under it.
 
 use surco::components::{Card, RoundRow, RoundStanding, TypedRow};
 use surco::doc::Block;
 use surco::look::Look;
-use yunta_core::{Answer, AnswerType, NodeId, Question, QuestionsFile};
+use yunta_core::diagnostic::{Diagnostic, Named, Report, Subject};
+use yunta_core::{Answer, AnswerType, NodeId, Question, QuestionId, QuestionsFile};
 use yunta_render::prompt::round::{self, SKIP};
 use yunta_render::prompt::{Escape, ANSWER};
 
@@ -66,6 +72,10 @@ impl Given {
 struct Step {
     question: Question,
     given: Option<Given>,
+    /// What the engine refused of the answer it was last given for it, standing under it
+    /// until an answer to it is taken here. Not the round's own refusal of what was just
+    /// given, which the next key takes away.
+    refused_before: Vec<String>,
 }
 
 /// A round of questions being answered, one at a time.
@@ -91,6 +101,7 @@ impl Round {
             .map(|question| Step {
                 question: question.clone(),
                 given: None,
+                refused_before: Vec::new(),
             })
             .collect();
         Self {
@@ -101,6 +112,39 @@ impl Round {
             refused: Vec::new(),
             escape,
         }
+    }
+
+    /// The round, with what the engine refused of the answers it was last given, as
+    /// `refused` says it where it refused them, standing under each question it is about; a
+    /// refusal about no one question of the round stands under the first.
+    pub fn refused_as(mut self, refused: Option<&Report>) -> Self {
+        let diagnostics = refused.map_or(&[][..], |report| report.diagnostics.as_slice());
+        for diagnostic in diagnostics {
+            let about = match &diagnostic.subject {
+                Subject::Question(named) => self.place_of(named),
+                _ => None,
+            };
+            if let Some(step) = self.steps.get_mut(about.unwrap_or(0)) {
+                step.refused_before.push(refusal(diagnostic));
+            }
+        }
+        self
+    }
+
+    /// Where the question `named` names stands in the round: by its id where its id was
+    /// read, else by its place among the questions. None for a question the round does not
+    /// hold.
+    fn place_of(&self, named: &Named<QuestionId>) -> Option<usize> {
+        match &named.id {
+            Some(id) => self.steps.iter().position(|step| step.question.id == *id),
+            None => (named.index < self.steps.len()).then_some(named.index),
+        }
+    }
+
+    /// Whether a question stands before the one being answered, for `shift-tab` to go
+    /// back to.
+    pub fn one_before(&self) -> bool {
+        self.at > 0
     }
 
     /// The question being answered, from what was given for it, as it is answered now.
@@ -164,6 +208,7 @@ impl Round {
         }
         if let Some(step) = self.steps.get_mut(self.at) {
             step.given = Some(given);
+            step.refused_before.clear();
         }
         self.refused.clear();
         if self.at + 1 == self.steps.len() {
@@ -178,7 +223,10 @@ impl Round {
     /// order, and each question said as a reader reads its answer.
     fn settled(&self) -> SettledAnswers {
         let mut settled = SettledAnswers::default();
-        for Step { question, given } in &self.steps {
+        for Step {
+            question, given, ..
+        } in &self.steps
+        {
             let Some(given) = given else { continue };
             settled.said.push((
                 question.text.clone(),
@@ -208,7 +256,7 @@ impl Round {
         round::card(
             &self.node,
             rows,
-            round::legend(picking, self.at > 0, self.escape),
+            round::legend(picking, self.at > 0, self.escape.does()),
         )
     }
 
@@ -233,8 +281,17 @@ impl Round {
     }
 
     /// The question being answered, as what is typed in its field or the list it is
-    /// picked from, with what the engine refused under it.
+    /// picked from, with what the engine refused under it: of what was just given, or else
+    /// of the answer it was last given before this round.
     fn answering_stands(&self) -> RoundStanding {
+        let refused = match self.refused.is_empty() {
+            true => self
+                .steps
+                .get(self.at)
+                .map(|step| step.refused_before.clone())
+                .unwrap_or_default(),
+            false => self.refused.clone(),
+        };
         match &self.answering {
             Answering::Typing(field) => {
                 let (before, after) = field.split();
@@ -244,13 +301,13 @@ impl Round {
                         before,
                         after,
                     },
-                    refused: self.refused.clone(),
+                    refused,
                 }
             }
             Answering::Picking(list) => RoundStanding::Picking {
                 choices: list.list(),
                 filter: list.filter().map(str::to_string),
-                refused: self.refused.clone(),
+                refused,
             },
         }
     }
@@ -369,12 +426,15 @@ fn violations(question: &Question, answer: Option<&Answer>) -> Vec<String> {
     };
     match yunta_core::AnswersFile::against(&alone, answer.cloned().into_iter().collect()) {
         Ok(_) => Vec::new(),
-        Err(report) => report
-            .diagnostics
-            .iter()
-            .map(|diagnostic| diagnostic.to_string())
-            .collect(),
+        Err(report) => report.diagnostics.iter().map(refusal).collect(),
     }
+}
+
+/// What `diagnostic` says under the question it is about: what is wrong and what helps,
+/// with no word of which question, since it stands under it.
+fn refusal(diagnostic: &Diagnostic) -> String {
+    let hints = surco::text::hinted(diagnostic.help());
+    format!("{}{hints}", diagnostic.problem)
 }
 
 #[cfg(test)]

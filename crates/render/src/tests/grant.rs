@@ -1,6 +1,6 @@
 //! The words of a grant: what it lets be written, and whose scope it
 //! widens, the node's or, for a loop that ended owing its tasks' requests,
-//! each task's own.
+//! each task's own, which the card's question names.
 
 use yunta_core::events::{Failure, FailureMenu, OwedScope, Remedy};
 use yunta_core::reserved::ReservedOption;
@@ -32,30 +32,23 @@ fn owed(task: &str, paths: &[&str]) -> OwedScope {
 }
 
 #[test]
-fn a_grant_of_what_a_task_owes_names_the_task_and_its_paths() {
+fn a_grant_of_what_a_task_owes_widens_the_task_by_its_paths() {
     let menu = grant_menu(Failure::ScopeOwed {
         owed: vec![owed("resolve", &["src/a.rs", "src/b.rs"])],
     });
-    let (label, tradeoff) =
-        remedy_words(&menu, ReservedOption::Grant).expect("a menu's grant has words");
-    assert_eq!(
-        label,
-        "Allow task `resolve` to also write src/a.rs, src/b.rs and run it again (attempt 2)"
-    );
-    let tradeoff = tradeoff.expect("a grant says what it widens");
-    assert!(tradeoff.contains("each task's scope"), "{tradeoff}");
+    let words = remedy_words(&menu, ReservedOption::Grant).expect("a menu's grant has words");
+    let widens = "the task may also touch these paths, and goes on".to_string();
+    assert_eq!(words, (None, Some(widens)));
 }
 
 #[test]
-fn a_grant_of_what_several_tasks_owe_counts_them() {
+fn a_grant_of_what_several_tasks_owe_widens_each_by_its_own() {
     let menu = grant_menu(Failure::ScopeOwed {
         owed: vec![owed("one", &["src/a.rs"]), owed("two", &["src/b.rs"])],
     });
-    let (label, _) = remedy_words(&menu, ReservedOption::Grant).expect("a menu's grant has words");
-    assert_eq!(
-        label,
-        "Allow each of 2 tasks to also write what it asked for and run them again (attempt 2)"
-    );
+    let words = remedy_words(&menu, ReservedOption::Grant).expect("a menu's grant has words");
+    let widens = "each task may also touch what it asked for, and goes on".to_string();
+    assert_eq!(words, (None, Some(widens)));
 }
 
 #[test]

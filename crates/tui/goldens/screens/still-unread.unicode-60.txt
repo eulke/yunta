@@ -1,0 +1,14 @@
+ yunta › Q78GRR › implement      ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 10m00s        Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ a task asks to touch a path outside its scope
+ implement · loop               executor on mock/gpt-6-luna
+ ▲ global-pack-install  Add explicit global pack install t…
+   what it is doing · 13 calls
+   … 20 above
+   global-pack-install asks for crates/cli/src/commands/pa…
+   failed: 1 request owes a person's decision about scope:…
+ 14.1M tokens · 49m36s at work · 25m05s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · s stats · g graph · q field · ? keys

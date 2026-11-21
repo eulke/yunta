@@ -1,0 +1,24 @@
+ yunta › Q78GRR › tests                              ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 0s                                Q78GRR
+ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄
+ regression: `cargo test --workspace` passed at baseline (exit 0) but now exit…
+
+ tests · check                                                 baseline_compare
+
+   │ … 2 above
+   │ assertion `left == right` failed: src_files_over_500_lines
+   │   left: Some(1)
+   │  right: Some(0)
+   │ test result: FAILED. 71 passed; 1 failed; 0 ignored; finished in 21.18s
+
+   kind         check, baseline_compare
+   took         32s
+ ▎ ◆ `tests` failed. What now?                                            tests
+ ▎
+ ▎ ▸ retry  Starts a fresh attempt from the run's tree as it stands: what
+ ▎          failed is asked again and what passed stays passed
+ ▎   abort  Pause here: nothing runs; this decision stays open
+ 27.1M tokens ▁▁▂▂▁█▁▁▁▂▁▁▁▁▁ · 1h12m at work · 39m51s waiting on you
+
+ j k choose · enter answer · n add a note · esc leave it waiting · ? keys

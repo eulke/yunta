@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use yunta_core::step::NextStep;
 use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::{git, stderr, stdout, yunta_at, yunta_in, yunta_on_terminal, Checkout};
 
@@ -67,7 +68,7 @@ fn the_catalog_checks_writes_a_new_workflow_as_new_does_and_runs_the_cases() {
     let ran = yunta_at!(&checkout, &["run", "done.yaml"]);
     assert!(ran.status.success(), "{}", stderr(&ran));
     let mut terminal = opened(&checkout);
-    taken_from_the_palette(&mut terminal, "yunta list");
+    taken_from_the_palette(&mut terminal, &NextStep::List);
     terminal.wait_on_screen("quick", "the catalog never listed the workflow");
     terminal.keys("c");
     terminal.wait_on_screen("can run here", "the workflow was never checked");
@@ -111,7 +112,7 @@ async fn the_packs_are_listed_and_one_is_audited() {
     assert!(ran.status.success(), "{}", stderr(&ran));
     let mut terminal = yunta_on_terminal!(&repo, root.path(), &[]);
     terminal.wait_on_screen("runs of this repository", "it never opened on the field");
-    taken_from_the_palette(&mut terminal, "yunta list");
+    taken_from_the_palette(&mut terminal, &NextStep::List);
     terminal.keys("p");
     terminal.wait_on_screen("acme/demo", "the packs were never listed");
     terminal.keys("a");
@@ -130,7 +131,7 @@ fn a_documents_shape_is_shown_as_schema_prints_it() {
     let ran = yunta_at!(&checkout, &["run", "done.yaml"]);
     assert!(ran.status.success(), "{}", stderr(&ran));
     let mut terminal = opened(&checkout);
-    taken_from_the_palette(&mut terminal, "yunta schema");
+    taken_from_the_palette(&mut terminal, &NextStep::Schemas);
     terminal.wait_on_screen("Which document's shape?", "the shapes were never asked");
     terminal.keys("tasks");
     terminal.keys("\r");

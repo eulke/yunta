@@ -63,14 +63,20 @@ pub struct HostClock {
 impl Default for HostClock {
     /// Starts at [`FIXED_NOW`], awake since the moment it is built.
     fn default() -> Self {
-        HostClock {
-            wall: Mutex::new(fixed_now()),
-            awake: Mutex::new(Instant::now()),
-        }
+        HostClock::at(fixed_now())
     }
 }
 
 impl HostClock {
+    /// Starts at `wall`, awake since the moment it is built: a host whose
+    /// work a test dates before or after [`FIXED_NOW`].
+    pub fn at(wall: DateTime<Utc>) -> Self {
+        HostClock {
+            wall: Mutex::new(wall),
+            awake: Mutex::new(Instant::now()),
+        }
+    }
+
     /// The host works for `by`: both readings move.
     pub fn advance(&self, by: Duration) {
         *self.wall.lock().expect("the wall reading") += by;

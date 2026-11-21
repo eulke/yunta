@@ -395,6 +395,27 @@ max_severity: major
     }
 }
 
+/// A check names its builtin as the tag its serialized form carries, so a screen says the
+/// word the workflow wrote.
+#[test]
+fn a_check_builtin_names_itself_as_its_yaml_tag() {
+    let builtins = [
+        CheckBuiltin::BaselineCompare,
+        CheckBuiltin::CoverageGate,
+        CheckBuiltin::FindingsGate {
+            max_severity: yunta_core::events::FindingSeverity::Major,
+        },
+    ];
+    for builtin in builtins {
+        let serialized = serde_json::to_value(&builtin).unwrap();
+        assert_eq!(
+            serialized["builtin"].as_str(),
+            Some(builtin.builtin_name()),
+            "{builtin:?}"
+        );
+    }
+}
+
 #[test]
 fn an_unknown_check_builtin_fails_to_parse() {
     let yaml = r#"

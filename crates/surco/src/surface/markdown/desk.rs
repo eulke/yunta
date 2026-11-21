@@ -4,6 +4,7 @@
 //! and its keys. What a terminal lays out in columns and scrolls, a file says
 //! whole and in order.
 
+use super::card::typed_line;
 use super::{plain_text, screen, Markdown, GLYPHS};
 use crate::components::{Desk, DeskFoot, FootRow, Pane, RailGroup, RailRow};
 use crate::glyphs::Mark;
@@ -78,13 +79,6 @@ fn rail_row(row: &RailRow) -> String {
             format!("{} {count}{key}", plain_text(what))
         }
         RailRow::Weighs(words) => plain_text(words),
-        RailRow::Pair { left, right } => format!(
-            "{} {} {}",
-            plain_text(left),
-            GLYPHS.sep(),
-            plain_text(right)
-        ),
-        RailRow::Order(diagram) => plain_text(&diagram.source),
     }
 }
 
@@ -101,7 +95,8 @@ fn pane(pane: &Pane) -> String {
 }
 
 /// What is being asked: the question under the mark of what needs a person, what
-/// answers it, and its keys.
+/// answers it, the words being typed for an option with what is asked of them and why
+/// they were not taken, and its keys.
 fn foot(foot: &DeskFoot) -> Vec<String> {
     let question = format!(
         "{} **{}**",
@@ -121,7 +116,7 @@ fn foot(foot: &DeskFoot) -> Vec<String> {
             }
             options.join(&sep)
         }
-        FootRow::Confirming(option) => {
+        FootRow::Confirming(option) | FootRow::Saying { chosen: option, .. } => {
             let mut said = format!("**{}**", plain_text(&option.name));
             for part in [&option.said, &option.cost].into_iter().flatten() {
                 said.push(' ');
@@ -130,9 +125,27 @@ fn foot(foot: &DeskFoot) -> Vec<String> {
             said
         }
     };
+    let typing =
+        match &foot.row {
+            FootRow::Saying {
+                asks,
+                typed,
+                refused,
+                ..
+            } => {
+                let mut typing = vec![format!("**{}**", plain_text(asks)), typed_line(typed)];
+                typing.extend(refused.as_deref().map(|refused| {
+                    format!("{} {}", GLYPHS.mark(Mark::Failed), plain_text(refused))
+                }));
+                typing
+            }
+            _ => Vec::new(),
+        };
     let keys = screen::legend(&foot.legend);
-    [question, answers, keys]
+    [question, answers]
         .into_iter()
+        .chain(typing)
+        .chain([keys])
         .filter(|part| !part.is_empty())
         .collect()
 }

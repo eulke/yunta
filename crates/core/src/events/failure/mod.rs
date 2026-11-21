@@ -289,6 +289,49 @@ impl From<TemplateError> for Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::{DepartsFrom, DeviationDeclaredPayload, TaskCause};
+
+    /// The task `task` stopped on a departure from the plan owed a person's answer.
+    fn departing(task: &str) -> TaskStop {
+        let declared = DeviationDeclaredPayload {
+            task_id: TaskId::from(task),
+            from: DepartsFrom::Shape("Greeting".to_string()),
+            planned: "Hello, and good night".to_string(),
+            instead: "Hello".to_string(),
+            why: "the second half needs the clock".to_string(),
+        };
+        TaskStop {
+            task_id: TaskId::from(task),
+            cause: TaskCause::DeviationOwed {
+                deviations: crate::NonEmpty::from((declared, Vec::new())),
+            },
+        }
+    }
+
+    #[test]
+    fn a_failure_owes_departures_only_where_every_task_it_stopped_departs() {
+        let two = Failure::TasksStopped {
+            stopped: vec![departing("greet"), departing("part")],
+        };
+        assert_eq!(two.departures_owed(), Some(2));
+        let owed_scope = TaskStop {
+            task_id: TaskId::from("part"),
+            cause: TaskCause::ScopeDecisionOwed,
+        };
+        let mixed = Failure::TasksStopped {
+            stopped: vec![departing("greet"), owed_scope],
+        };
+        assert_eq!(mixed.departures_owed(), None);
+        let none = Failure::TasksStopped {
+            stopped: Vec::new(),
+        };
+        assert_eq!(none.departures_owed(), None);
+        let capped = Failure::LoopCapped {
+            node: NodeId::from("implement"),
+            loop_cap: 2,
+        };
+        assert_eq!(capped.departures_owed(), None);
+    }
 
     #[test]
     fn a_regression_hands_over_the_tail_it_printed() {

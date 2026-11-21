@@ -153,9 +153,15 @@
 
 ␛[1;35m◆ needs you␛[0m: ␛[1myunta resolve-gate 7E5PH4 approve␛[0m␛[2m (the plan waits for approval)␛[0m
 
-␛[1;35m◆␛[0m ␛[1mQ78GRR␛[0m␛[1;35m needs you␛[0m: the suite passed at baseline and now exits 101␛[2m · ␛[0m␛[1ma␛[0m␛[2m go there␛[0m
+␛[1;35m◆ needs you␛[0m: the plan waits for approval␛[2m  · ␛[0m␛[1ma␛[0m␛[2m go there␛[0m
+
+␛[1;35m◆␛[0m ␛[1mQ78GRR␛[0m␛[1;35m needs you␛[0m: the suite passed at baseline and now exits 101␛[2m  · ␛[0m␛[1ma␛[0m␛[2m go there␛[0m
 
 ␛[1;35m◆ needs you␛[0m: node `implement` asks at its terminal
+
+␛[1;35m◆␛[0m ␛[1mQ78GRR␛[0m␛[1;35m needs you␛[0m: node `grill` asks 3 questions: nothing is recorded until every one is answered
+
+␛[32m✓␛[0m Recorded: approve. On to `pr`.
 
 ␛[1;35m▎␛[0m ␛[1;35m◆␛[0m ␛[1mgate `ship` needs a decision␛[0m                                                      ␛[2mapprove KQERFD␛[0m
 ␛[1;35m▎␛[0m the change is reviewed and its findings settled
@@ -165,38 +171,52 @@
 ␛[1;35m▎␛[0m
 ␛[1;35m▎␛[0m ␛[2mthen␛[0m  pr, then the run finishes
 ␛[1;35m▎␛[0m
-␛[1;35m▎␛[0m ␛[2m↑↓ move · enter chooses · esc leaves the run waiting␛[0m
+␛[1;35m▎␛[0m ␛[1m↑↓␛[0m␛[2m choose␛[0m␛[2m · ␛[0m␛[1menter␛[0m␛[2m answer␛[0m␛[2m · ␛[0m␛[1mesc␛[0m␛[2m leave it waiting␛[0m
 
- ␛[1mplan␛[0m␛[2m · ␛[0m␛[2mA32BZY␛[0m␛[2m · ␛[0m␛[2mreviewed-plan (default)␛[0m␛[2m · ␛[0m␛[2m2 tasks␛[0m                          ␛[2mneeds you  approve-plan␛[0m
+ ␛[1mplan␛[0m␛[2m · ␛[0m␛[2mA32BZY␛[0m␛[2m · ␛[0m␛[2mreviewed-plan␛[0m␛[2m · ␛[0m␛[2m2 tasks␛[0m                                    ␛[2mneeds you  approve-plan␛[0m
  Make it
  ␛[2myou asked␛[0m  a file the run is about
 
      the change                ␛[2m │ ␛[0m␛[1mproof · T001␛[0m                                          ␛[2mstep 1 of 1␛[0m
+ 1 ␛[1;35m▸␛[0m ␛[1mT001␛[0m                      ␛[2m │ ␛[0m
+     T002                      ␛[2m │ ␛[0m␛[2mtested by    ␛[0mthe file exists
+                               ␛[2m │ ␛[0m             ␛[1mtest -f made.txt␛[0m
+ ␛[1mwhat it says␛[0m                  ␛[2m │ ␛[0m
+ decided for you          ␛[1m 2␛[0m␛[2m  d␛[0m␛[2m │ ␛[0m
                                ␛[2m │ ␛[0m
- ␛[1msteps␛[0m                         ␛[2m │ ␛[0m␛[2mtested by    ␛[0mthe file exists
- 1 ␛[1;35m▸␛[0m ␛[1mT001␛[0m                      ␛[2m │ ␛[0m             ␛[1mtest -f made.txt␛[0m
-     T002                      ␛[2m │ ␛[0m
-                               ␛[2m │ ␛[0m
- ␛[1mimpact␛[0m                        ␛[2m │ ␛[0m
- made.txt                  ␛[2mT001␛[0m␛[2m │ ␛[0m
- said.txt                  ␛[2mT002␛[0m␛[2m │ ␛[0m
-                               ␛[2m │ ␛[0m
- ␛[1mweighs␛[0m                        ␛[2m │ ␛[0m
- decided                  ␛[1m 2␛[0m␛[2m  d␛[0m␛[2m │ ␛[0m
+ ␛[1mwhat weighs on it␛[0m             ␛[2m │ ␛[0m
  ␛[33m▲␛[0m the suite is red at baseline␛[2m │ ␛[0m
- T001 → T002                   ␛[2m │ ␛[0m
                                ␛[2m │ ␛[0m
 
  ␛[1;35m◆␛[0m ␛[1mPlan registered. Approve?␛[0m
- ␛[1m1␛[0m approve   ␛[1m2␛[0m adjust   ␛[1m3␛[0m abort                  ␛[2mj k task · p the card · esc leaves the run waiting␛[0m
+ ␛[1m1␛[0m approve   ␛[1m2␛[0m adjust   ␛[1m3␛[0m abort                     ␛[1mtab␛[0m␛[2m next place␛[0m␛[2m · ␛[0m␛[1mp␛[0m␛[2m proof␛[0m␛[2m · ␛[0m␛[1mesc␛[0m␛[2m leave it waiting␛[0m
 
 ␛[1mproject name␛[0m␛[2m (enter keeps `yunta`)␛[0m
-> yunta-tui
+␛[2m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[1myunta-tui␛[0m                                                                                        ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯␛[0m
 
-␛[2mfilter ␛[0m␛[1mn␛[0m
-  one-node  one command whose exit code is the check
-␛[1;35m▸␛[0m ␛[1mlint-fix  ␛[0ma check, and an agent that fixes what it finds
-␛[2m↑↓ move · type to filter · enter chooses · esc takes the first␛[0m
+ ␛[2m▸␛[0m ␛[1mn␛[0m
+
+  one-node   one command whose exit code is the check
+␛[1;35m▸␛[0m ␛[1mlint-fix   ␛[0ma check, and an agent that fixes what it finds
+␛[1m↑↓␛[0m␛[2m choose␛[0m␛[2m · ␛[0m␛[1menter␛[0m␛[2m answer␛[0m␛[2m · ␛[0m␛[1mesc␛[0m␛[2m take the first␛[0m
+
+␛[2mYou never have to remember more than this.␛[0m
+
+␛[1m/          ␛[0manything: only what can be done here, with its command
+␛[1mn          ␛[0mstart a new run, wherever no prompt stands
+␛[1mj k        ␛[0mmove; the footer always says what they move
+␛[1mpgup pgdn  ␛[0mscroll the pane a page at a time
+␛[1menter      ␛[0mopen, answer, confirm
+␛[1mesc        ␛[0mone step back; what it leaves stays waiting
+␛[1ma          ␛[0mgo to what needs you
+␛[1mf          ␛[0mfollow what the run is doing
+␛[1ms g        ␛[0mwhat it cost, its graph
+␛[1mc          ␛[0mstop it and everything under it
+␛[1mo          ␛[0mthe whole page, in a browser
+␛[1mq          ␛[0mgo to the field; it keeps going
+␛[1mctrl-c     ␛[0mleave: every run keeps going without this window
 
   ␛[1m▸␛[0m ␛[1mlint-fix␛[0m: a check, and an agent that fixes what it finds
     ␛[2mrun         ␛[0m yunta run lint-fix
@@ -206,3 +226,27 @@
 
   ␛[32m✓␛[0m ␛[1macme/lint␛[0m    v1.2.0 (3f9c2e1), as its lock records it
 ␛[1m▸␛[0m ␛[33m▲␛[0m ␛[1macme/review␛[0m  v0.4.0 (91ab7d0), modified: its files no longer match its lock
+
+  ␛[32m✓␛[0m ␛[2mmajor   ␛[0m Global pack paths ignore the configured YUNTA_HOME
+             ␛[2mfixed: Global pack paths now use the shared user_state_root resolver, which honors YUN␛[0m␛[2m…␛[0m
+␛[1;35m▸␛[0m ␛[33m▲␛[0m ␛[2mmajor   ␛[0m ␛[1mGlobal pack commands ignore the configured YUNTA_HOME state root␛[0m
+  ␛[2m◌␛[0m ␛[2mminor   ␛[0m Pack audit cannot inspect globally installed packs
+  ␛[32m✓␛[0m ␛[2mblocking␛[0m Pack target API shapes are defined outside the declared file
+             ␛[2mfixed: PackTarget and its path functions are now defined in crates/cli/src/pack.rs.␛[0m
+
+␛[2m… 4 above␛[0m
+search  global pack
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+␛[2m… 4 under␛[0m
+
+967k tokens ␛[36m▃▂█▁▁▁▁▁▁▁▁▁▁▁▁␛[0m␛[2m · ␛[0m2m34s␛[2m at work␛[0m␛[2m · ␛[0m␛[1;35m5m00s␛[0m␛[2m waiting on you␛[0m
+
+    ␛[32m⢀⣀⣀⣀⣀⣀⣀⣀⣀⣤⣤⣤⣤⣤⣤⣤⣤⣴⣶⣶⣶⣶⣶⣶⡶⢶⣿⣿⣿⡿⢿⣿⣿⡿⠿⠿⣟⣛⠿⠯⠛⣒⠭⠒⠁ ⡇⠈⠒⠭⣒⠛⠽⠿⣛⣻⠿⠿⢿⣿⣿⡿⢿⣿⣿⣿⡶⢶⣶⣶⣶⣶⣶⣶⣦⣤⣤⣤⣤⣤⣤⣤⣤⣀⣀⣀⣀⣀⣀⣀⣀⡀␛[0m
+␛[32m⣿⣿⣿⣿⣿⣿⣿⣿⠿⠿⠿⠿⠿⠛⣛⣛⣛⣛⠭⠭⠭⠭⠛⣓⣒⣊⠭⠭⠭⠓⠒⠊⣉⣉⠥⠤⠒⠒⠉⠉ ⣀⠤⠒⠉     ⡇    ⠉⠒⠤⣀ ⠉⠉⠒⠒⠤⠬⣉⣉⠑⠒⠚⠫⠭⠭⣑⣒⣚⠛⠫⠭⠭⠭⣛⣛⣛⣛⠛⠿⠿⠿⠿⠿⣿⣿⣿⣿⣿⣿⣿⣿␛[0m
+␛[32m⣉⣉⠭⠤⠤⠤⠒⠒⠒⠒⠉⠉⢉⣉⠤⠤⠤⠒⠒⠒⠉⠉⠉  ⣀⠤⠤⠒⠒⠉⠉     ⢀⠤⠒⠉         ⡇        ⠉⠒⠤⡀     ⠉⠉⠒⠒⠤⠤⣀  ⠉⠉⠉⠒⠒⠒⠤⠤⠤⣉⡉⠉⠉⠒⠒⠒⠒⠤⠤⠤⠭⣉⣉␛[0m

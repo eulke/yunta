@@ -28,8 +28,10 @@ yunta-render.workspace = true
 yunta-surco.workspace = true
 # The instant the application stands at, which every input that reads time hands in.
 chrono.workspace = true
-# The performer's runtime, as the API's: the work a stage asks for is async.
-tokio.workspace = true
+# The performer's runtime, as the API's: the work a stage asks for is async, each piece
+# on a task of its own, its news over channels, its following waiting on two at once,
+# and made again a pace after a try that failed.
+tokio = { workspace = true, features = ["rt", "sync", "macros", "time"] }
 
 [dev-dependencies]
 # The samples a test builds a question or a run from.

@@ -19,7 +19,8 @@ pub(super) async fn performed(
         EvidenceOperation::Verify { run } => {
             let verification = project.verification(&run).await?;
             let checks = verification.checks();
-            EvidenceOutcome::Verified { run, checks }
+            let chain = verification.chain;
+            EvidenceOutcome::Verified { run, chain, checks }
         }
         EvidenceOperation::WritePageForBrowser { run } => {
             let page = project.run(&run).await?.page_for_a_browser(remarks).await?;

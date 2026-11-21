@@ -10,5 +10,5 @@
 
 next
   yunta resume 7E5PH4          waits for the reset, then drives on
-  yunta close 7E5PH4           closes it for good
+  yunta close 7E5PH4           close it for good
   yunta status 7E5PH4 --full   the whole story, node by node

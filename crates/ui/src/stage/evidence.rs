@@ -16,10 +16,10 @@ use yunta_core::step::NextStep;
 use yunta_core::RunId;
 use yunta_render::page::{self, Opened, Page, Verified};
 
-use super::{Act, Want};
+use super::{Act, ItsRun, Want};
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
-use crate::{EvidenceOperation, EvidenceOutcome, Operation, Outcome};
+use crate::{Address, EvidenceOperation, EvidenceOutcome, Operation, Outcome};
 
 /// What a run leaves, one of it asked for.
 #[derive(Debug, Clone)]
@@ -59,6 +59,11 @@ enum Shown {
 }
 
 impl EvidenceStage {
+    /// What it is to its run: a record of what was written for it, which stays that run's.
+    pub(super) fn its_run(&self) -> ItsRun {
+        ItsRun::WroteFor(self.run.clone())
+    }
+
     /// `asked` of `run`, yet to be derived.
     pub(crate) fn of(run: RunId, asked: Evidence) -> Self {
         EvidenceStage {
@@ -152,7 +157,7 @@ impl EvidenceStage {
                     page: page.clone(),
                     unshown: false,
                 };
-                vec![Want::Show(page)]
+                vec![Want::Show(Address::Page(page))]
             }
             (Stroke::Decline, _) => vec![Want::Back],
             (Stroke::Insert('q') | Stroke::Interrupt, _) => vec![Want::Leave],
@@ -177,13 +182,16 @@ impl EvidenceStage {
         }
     }
 
-    /// The page `page` could not be shown: where it is the one this stage asked for, it
-    /// says so.
-    pub(crate) fn unshown(&mut self, page: &std::path::Path) {
-        if let Shown::Opened {
-            page: asked,
-            unshown,
-        } = &mut self.shown
+    /// What a surface was asked to show, `address`, could not be shown: where it is the
+    /// page this stage asked for, it says so.
+    pub(crate) fn unshown(&mut self, address: &Address) {
+        if let (
+            Shown::Opened {
+                page: asked,
+                unshown,
+            },
+            Address::Page(page),
+        ) = (&mut self.shown, address)
         {
             if asked == page {
                 *unshown = true;
@@ -214,7 +222,7 @@ impl EvidenceStage {
                     page: page.clone(),
                     unshown: false,
                 };
-                vec![Want::Show(page)]
+                vec![Want::Show(Address::Page(page))]
             }
             Outcome::Refused(refused) => {
                 self.said = Some(refused.to_string());
@@ -228,13 +236,7 @@ impl EvidenceStage {
             | Outcome::Catalog(_)
             | Outcome::Workflow(_)
             | Outcome::Pack(_)
-            | Outcome::Field { .. }
-            | Outcome::Followed
-            | Outcome::Page(_)
-            | Outcome::NodePage(_)
-            | Outcome::Questions(_)
-            | Outcome::Decision(_)
-            | Outcome::Stats(_)
+            | Outcome::PullRequest(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)

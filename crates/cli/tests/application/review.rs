@@ -1,16 +1,22 @@
-//! `yunta review <run>` at a terminal: the application opened on the plan the run waits on,
-//! over the run and the field, as a person walks there; an option chosen there is on the
-//! run's log, and the application goes on with the run. Off a terminal, and refused, it is
-//! `plan_desk.rs`'s.
+//! `yunta review <run>` at a terminal: the run's screen opened over the field on the plan the
+//! run waits on, the plan's desk in place, as a person reaches it from the field; `esc` puts
+//! the plan aside on the run, and `esc` again, or `q`, leaves the run for the field. An option
+//! chosen there is on the run's log, and the application goes on with the run. Off a
+//! terminal, and refused, it is `plan_desk.rs`'s.
 
+use yunta_core::RunId;
 use yunta_testkit::workflows::{PLANNER_HANDS_TWO_TASKS, PLANNER_ON_THE_MOCK, PLAN_THEN_GATE};
 use yunta_testkit::{stdout, wait_until, yunta_at, yunta_on_terminal, Checkout, Terminal};
 
-use super::{given_back, log, outcome, parked, FOLLOWED, THE_FIELD};
+use super::{given_back, left_through_the_field, log, outcome, parked, FOLLOWED, THE_FIELD};
 
-/// What the plan's desk says of `esc` where `review` opens it: the person goes back to the
-/// run, which still waits.
-const AT_THE_PLAN: &str = "esc leaves the run waiting";
+/// What the plan's desk says as its keys open, in place on the run's screen: a number
+/// answers, and `tab` goes on to the next place.
+const AT_THE_PLAN: &str = "1 2 3 answer · tab next place";
+
+/// What a run's screen says at its legend's end under 100 columns, the far keys every screen
+/// of the run's frame names: the plan stands in place on the run's screen.
+const ON_THE_RUNS_SCREEN: &str = "· ? keys";
 
 /// A repository whose run parks on its plan's gate, and that run's whole id.
 fn parked_on_its_plan() -> (Checkout, String) {
@@ -39,15 +45,41 @@ fn reviewing(checkout: &Checkout, id: &str) -> Terminal {
     terminal
 }
 
+/// The trail the run's screen stands under, on the node the run `id` waits at: the run's own
+/// screen, no stage of its own over it.
+fn on_its_gate(id: &str) -> String {
+    let run: RunId = id.parse().expect("a run's id");
+    format!("yunta › {} › approve-plan", run.handle())
+}
+
 #[test]
-fn review_opens_on_the_plan_over_the_run_and_the_field() {
+fn review_opens_the_runs_screen_on_the_plan_and_esc_puts_it_aside_then_reaches_the_field() {
     let (checkout, id) = parked_on_its_plan();
     let mut terminal = reviewing(&checkout, &id);
-    assert!(terminal.screen().holds("Plan registered. Approve?"));
+    let screen = terminal.screen();
+    let drawn = screen.rows.join("\n");
+    assert!(screen.holds("Plan registered. Approve?"), "{drawn}");
+    let trail = screen.rows.first().map(|row| row.trim_start());
+    assert!(
+        trail.is_some_and(|trail| trail.starts_with(&on_its_gate(&id))),
+        "the run's own trail heads the plan:\n{drawn}"
+    );
+    assert!(screen.holds(ON_THE_RUNS_SCREEN), "{drawn}");
     terminal.keys("\u{1b}");
-    terminal.wait_on_screen(FOLLOWED, "esc never reached the run");
+    terminal.wait_on_screen(FOLLOWED, "esc on the plan never put it aside on the run");
     terminal.keys("\u{1b}");
     terminal.wait_on_screen(THE_FIELD, "esc again never reached the field");
+    terminal.keys("q");
+    assert_eq!(given_back(&mut terminal), Some(0));
+    assert_eq!(outcome(&checkout, &id), "needs you", "nothing was decided");
+}
+
+#[test]
+fn q_on_the_plan_in_review_leaves_the_run_for_the_field() {
+    let (checkout, id) = parked_on_its_plan();
+    let mut terminal = reviewing(&checkout, &id);
+    terminal.keys("q");
+    terminal.wait_on_screen(THE_FIELD, "q on the plan never reached the field");
     terminal.keys("q");
     assert_eq!(given_back(&mut terminal), Some(0));
     assert_eq!(outcome(&checkout, &id), "needs you", "nothing was decided");
@@ -60,7 +92,7 @@ fn an_option_chosen_in_review_is_on_the_log_and_the_application_goes_on_with_the
     let (checkout, id) = parked_on_its_plan();
     let mut terminal = reviewing(&checkout, &id);
     terminal.keys("1");
-    terminal.wait_on_screen("enter confirms", "a number never asked to be confirmed");
+    terminal.wait_on_screen("enter confirm", "a number never asked to be confirmed");
     terminal.keys("\r");
     terminal.wait_on_screen(FOLLOWED, "the application never went on with the run");
     wait_until(
@@ -73,7 +105,7 @@ fn an_option_chosen_in_review_is_on_the_log_and_the_application_goes_on_with_the
         .find(|line| line.contains("\"gate_resolved\""))
         .unwrap_or_else(|| panic!("no decision on the log:\n{decided}"));
     assert!(decision.contains("\"approve\""), "{decision}");
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, None);
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 

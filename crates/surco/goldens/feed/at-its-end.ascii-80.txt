@@ -1,0 +1,6 @@
+... 3 above
+global-pack-install post: cargo test --workspace ; red ; 3 of 412 failed in...
+running: attempt 2
+session opened on gpt-6-luna ; fence widened to 1 root
+run     cargo test --workspace --test pack_global_spec global_pack_commands_u...
+edit    crates/cli/src/pack.rs

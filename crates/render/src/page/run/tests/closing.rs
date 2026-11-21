@@ -46,6 +46,7 @@ impl Stopped {
                 on,
                 escalation,
                 shown: Vec::new(),
+                ahead: yunta_core::ahead::NodesAhead::default(),
             }),
             plans: Vec::new(),
         }

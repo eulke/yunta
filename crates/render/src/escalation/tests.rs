@@ -48,8 +48,9 @@ fn a_budget_decision_shows_its_cap_and_what_the_run_spent() {
     assert_eq!(
         sentence(&budget),
         format!(
-            "run `{RUN}` exhausted its token budget (limits.max_tokens_per_run: 400; total \
-             input+output tokens derived from the event log: 500)"
+            "run `{}` exhausted its token budget (limits.max_tokens_per_run: 400; total \
+             input+output tokens derived from the event log: 500)",
+            RunId::from_static(RUN).handle()
         )
     );
 }

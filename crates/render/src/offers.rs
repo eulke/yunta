@@ -1,12 +1,14 @@
-//! The words of every option a decision offers: the label a person picks it
-//! by, what choosing it costs, and the question it asks. An option stores
-//! its id and where it leads, and its escalation's menu says the rest.
+//! The words of every option a decision offers: what it does, which its
+//! name may say alone, what choosing it costs, and the question it asks. An
+//! option stores its id and where it leads, and its escalation's menu says
+//! the rest, as a decision's card says it beside the name.
 
 use surco::components::DecisionOption;
 use surco::text;
+use yunta_core::ahead::{Ahead, NodesAhead};
 use yunta_core::events::{Asks, GateOption, GateWaitingPayload, Leads, Menu, ScopeWait};
 use yunta_core::reserved::ReservedOption;
-use yunta_core::{listed_globs, NodeId};
+use yunta_core::NodeId;
 
 use crate::blocks::{departure_words, remedy_words, reroute_words};
 
@@ -24,22 +26,42 @@ const NOTHING_WAITS: &str = "nothing in the workflow waits on it";
 /// decision stays open.
 pub const STAYS_OPEN: &str = "nothing runs; this decision stays open";
 
+/// What a card says an option asks of a task's scope that a person grants: that the
+/// task, or each of `tasks`, may touch the `paths` it asked for as well, and goes on.
+pub(crate) fn may_also_touch(tasks: usize, paths: usize) -> String {
+    match (tasks, paths) {
+        (1, 1) => "the task may also touch this path, and goes on".to_string(),
+        (1, _) => "the task may also touch these paths, and goes on".to_string(),
+        _ => "each task may also touch what it asked for, and goes on".to_string(),
+    }
+}
+
+/// What a card says denying a scope request does: the task, or each of `tasks`, goes on
+/// inside the scope it declared.
+pub(crate) fn goes_on_within(tasks: usize) -> String {
+    match tasks {
+        1 => "the task goes on within the scope it has".to_string(),
+        _ => "each task goes on within the scope it has".to_string(),
+    }
+}
+
 /// The label and the trade-off a person reads beside `option`: the words an
-/// older log stored with it, else the words its data and its menu give it.
-/// The label is the id when nothing else says it.
-pub fn option_words(payload: &GateWaitingPayload, option: &GateOption) -> (String, Option<String>) {
-    let (label, tradeoff) = written(payload, option).unzip();
+/// older log stored with it, else the words its data, its menu and what lies
+/// `ahead` at the nodes it leads to give it. The label is the id when nothing
+/// else says it.
+pub fn option_words(
+    payload: &GateWaitingPayload,
+    option: &GateOption,
+    ahead: &NodesAhead,
+) -> (String, Option<String>) {
+    let (label, tradeoff) = written(payload, option, ahead).unwrap_or_default();
     let label = option
         .logged
         .label()
         .map(str::to_string)
         .or(label)
         .unwrap_or_else(|| option.id.as_str().to_string());
-    let tradeoff = option
-        .logged
-        .tradeoff()
-        .map(str::to_string)
-        .or(tradeoff.flatten());
+    let tradeoff = option.logged.tradeoff().map(str::to_string).or(tradeoff);
     (label, tradeoff)
 }
 
@@ -58,13 +80,17 @@ pub fn asked(asks: &Asks) -> String {
 }
 
 /// Every option `escalation` offers, as a decision draws it: its id, the
-/// words it is read by, what choosing it costs and what it asks.
-pub fn decision_options(escalation: &GateWaitingPayload) -> Vec<DecisionOption> {
+/// words it is read by, what choosing it costs and what it asks, each read with
+/// what lies `ahead` at the nodes it leads to.
+pub fn decision_options(
+    escalation: &GateWaitingPayload,
+    ahead: &NodesAhead,
+) -> Vec<DecisionOption> {
     escalation
         .options()
         .iter()
         .map(|option| {
-            let (label, tradeoff) = option_words(escalation, option);
+            let (label, tradeoff) = option_words(escalation, option, ahead);
             DecisionOption {
                 id: option.id.to_string(),
                 label: Some(label),
@@ -75,11 +101,17 @@ pub fn decision_options(escalation: &GateWaitingPayload) -> Vec<DecisionOption> 
         .collect()
 }
 
-/// The words the option's data gives it: where an author's option leads,
-/// else what its menu offers, else the abort every menu ends with.
-fn written(payload: &GateWaitingPayload, option: &GateOption) -> Option<(String, Option<String>)> {
+/// The words the option's data gives it, what it does and what it costs, either of which
+/// its name may say alone: where an author's option leads, else what its menu offers, else
+/// the abort every menu ends with.
+fn written(
+    payload: &GateWaitingPayload,
+    option: &GateOption,
+    ahead: &NodesAhead,
+) -> Option<(Option<String>, Option<String>)> {
     if let Some(leads) = &option.leads {
-        return Some(leading(leads));
+        let (label, tradeoff) = leading(leads, ahead);
+        return Some((Some(label), tradeoff));
     }
     let id = ReservedOption::of(&option.id)?;
     let words = match payload.menu() {
@@ -97,8 +129,10 @@ fn written(payload: &GateWaitingPayload, option: &GateOption) -> Option<(String,
     words.or_else(|| aborting(id))
 }
 
-/// Where an author's option leads, and what going on settles.
-pub(crate) fn leading(leads: &Leads) -> (String, Option<String>) {
+/// Where an author's option leads, and what going on does there and settles: a node
+/// `ahead` says opens the run's pull request says on which forge and repository; nodes the
+/// run leaves out are said as not in it; any other node by its name alone.
+pub(crate) fn leading(leads: &Leads, ahead: &NodesAhead) -> (String, Option<String>) {
     match leads {
         Leads::Back { node, resumes } => {
             let tradeoff = if *resumes {
@@ -109,11 +143,21 @@ pub(crate) fn leading(leads: &Leads) -> (String, Option<String>) {
             (format!("Back to `{node}`"), Some(tradeoff))
         }
         Leads::On { next, settles } => {
-            let (label, tradeoff) = if next.is_empty() {
-                ("Resolve the gate".to_string(), NOTHING_WAITS.to_string())
-            } else {
-                let onward = text::listed(next.iter().map(|id| id.as_str()));
-                (format!("On to {onward}"), "resolves this gate".to_string())
+            let running: Vec<&NodeId> = next.iter().filter(|node| !left_out(node, ahead)).collect();
+            let (label, tradeoff) = match (next.is_empty(), running.as_slice()) {
+                (true, _) => ("Resolve the gate".to_string(), NOTHING_WAITS.to_string()),
+                (false, []) => ("Resolve the gate".to_string(), not_in_the_run(next, ahead)),
+                (false, [node]) => match ahead.at(node) {
+                    Some(Ahead::OpensPullRequest { repo }) => {
+                        let opens = format!("opens the pull request on github {repo}");
+                        return (format!("On to `{node}`"), Some(opens));
+                    }
+                    _ => (format!("On to `{node}`"), "resolves this gate".to_string()),
+                },
+                (false, running) => {
+                    let onward = text::listed(running.iter().map(|id| id.as_str()));
+                    (format!("On to {onward}"), "resolves this gate".to_string())
+                }
             };
             let tradeoff = if *settles {
                 format!("{tradeoff}, and settles every finding it shows")
@@ -122,6 +166,26 @@ pub(crate) fn leading(leads: &Leads) -> (String, Option<String>) {
             };
             (label, Some(tradeoff))
         }
+    }
+}
+
+/// Whether `ahead` says the run leaves `node` out.
+pub(crate) fn left_out(node: &NodeId, ahead: &NodesAhead) -> bool {
+    matches!(ahead.at(node), Some(Ahead::LeftOut(_)))
+}
+
+/// That every node of `next`, which `ahead` says the run leaves out, is not in it: one by
+/// name with why, several by name.
+fn not_in_the_run(next: &[NodeId], ahead: &NodesAhead) -> String {
+    match next {
+        [node] => match ahead.at(node) {
+            Some(Ahead::LeftOut(because)) => format!("`{node}` is not in this run: {because}"),
+            _ => format!("`{node}` is not in this run"),
+        },
+        _ => format!(
+            "{} are not in this run",
+            text::listed(next.iter().map(|id| id.as_str()))
+        ),
     }
 }
 
@@ -136,49 +200,36 @@ pub(crate) fn resolving(next: &[NodeId]) -> String {
     format!("resolves this gate; {onward} {runs} next")
 }
 
-/// The grant and the denial of a scope request, which name the paths it asks for.
-fn scoped(wait: &ScopeWait, id: ReservedOption) -> Option<(String, Option<String>)> {
+/// The grant and the denial of one task's scope request, whose paths the card's question
+/// names.
+fn scoped(wait: &ScopeWait, id: ReservedOption) -> Option<(Option<String>, Option<String>)> {
     match id {
-        ReservedOption::Grant => Some((
-            format!("Grant access to {}", listed_globs(&wait.paths)),
-            Some(
-                "The task's final diff is evaluated against its scope plus these paths".to_string(),
-            ),
-        )),
-        ReservedOption::Deny => Some((
-            "Deny the request".to_string(),
-            Some(
-                "The denial becomes a finding; the task retries within its original scope"
-                    .to_string(),
-            ),
-        )),
+        ReservedOption::Grant => Some((None, Some(may_also_touch(1, wait.paths.len())))),
+        ReservedOption::Deny => Some((None, Some(goes_on_within(1)))),
         _ => None,
     }
 }
 
-/// The continue of a run's token cap that is spent. Its abort is the one
-/// every menu offers.
-fn over_budget(id: ReservedOption) -> Option<(String, Option<String>)> {
+/// The continue of a run's token cap that is spent, which its name says. Its abort is the
+/// one every menu offers.
+fn over_budget(id: ReservedOption) -> Option<(Option<String>, Option<String>)> {
     match id {
-        ReservedOption::Continue => Some((
-            "Continue past the cap".to_string(),
-            Some(LIFTS_THE_CAP.to_string()),
-        )),
+        ReservedOption::Continue => Some((None, Some(LIFTS_THE_CAP.to_string()))),
         _ => None,
     }
 }
 
 /// The continue and the abort of a loop's iteration cap that is spent.
-fn over_iterations(id: ReservedOption) -> Option<(String, Option<String>)> {
+fn over_iterations(id: ReservedOption) -> Option<(Option<String>, Option<String>)> {
     match id {
         ReservedOption::Continue => Some((
-            "Keep iterating".to_string(),
+            Some("Keep iterating".to_string()),
             Some(
                 "Lifts the cap for this invocation only; a later resume will ask again".to_string(),
             ),
         )),
         ReservedOption::Abort => Some((
-            "Fail the loop node".to_string(),
+            Some("Fail the loop node".to_string()),
             Some(
                 "The node fails naming the limit and the run pauses; a resume re-runs the loop \
                  and re-asks"
@@ -190,14 +241,14 @@ fn over_iterations(id: ReservedOption) -> Option<(String, Option<String>)> {
 }
 
 /// The approve and the reject of a gate the forge could not be asked about.
-fn at_the_console(id: ReservedOption) -> Option<(String, Option<String>)> {
+fn at_the_console(id: ReservedOption) -> Option<(Option<String>, Option<String>)> {
     match id {
         ReservedOption::Approve => Some((
-            "Approve".to_string(),
+            Some("Approve".to_string()),
             Some("Marks the gate as passed; the run continues".to_string()),
         )),
         ReservedOption::Reject => Some((
-            "Reject".to_string(),
+            Some("Reject".to_string()),
             Some("Fails the node; its declared reroute (if any) takes over".to_string()),
         )),
         _ => None,
@@ -205,6 +256,7 @@ fn at_the_console(id: ReservedOption) -> Option<(String, Option<String>)> {
 }
 
 /// The abort every menu offers, which pauses the run.
-fn aborting(id: ReservedOption) -> Option<(String, Option<String>)> {
-    (id == ReservedOption::Abort).then(|| (PAUSE_HERE.to_string(), Some(STAYS_OPEN.to_string())))
+fn aborting(id: ReservedOption) -> Option<(Option<String>, Option<String>)> {
+    (id == ReservedOption::Abort)
+        .then(|| (Some(PAUSE_HERE.to_string()), Some(STAYS_OPEN.to_string())))
 }

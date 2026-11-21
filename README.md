@@ -120,8 +120,9 @@ yunta run .yunta/workflows/lint-fix.yaml
 ```
 
 `run` shows the run live while it works: a pinned region at the bottom of the
-terminal — a row for each node at work, what its session last said and what its last calls touched, and a footer
-that always says whether the run needs you or is waiting for a limit's reset — with each finished node scrolling above
+terminal — a row for each node at work, what its session last said and what its last calls touched, a row
+that says whether the run needs you or what it waits on, and under it what the run has spent: its tokens, a bar a
+node, its time at work and its time waiting on you — with each finished node scrolling above
 it into your own scrollback, where you can still scroll back through it and select
 text. A node that fails brings the end of what it printed with it. Piped into a file
 or running in CI, every moment of the run arrives as one line instead, in the words
@@ -184,7 +185,7 @@ work held to its plan, PR).
 | `yunta open <run> [--json]` | Writes the run's page into its folder as `page.html` and opens it in a browser: one file, no server, its buttons copy commands. |
 | `yunta resume <run> [--quiet] [--json]` | Resumes a run from its event log, restarting orphaned nodes per `on_interrupt`. Shows it exactly as `yunta run` does — the same live region, the same one line per moment without a terminal, the same closing block — and takes the same `--quiet` and `--json`: two commands that execute the same thing report it the same way. It refuses a run another engine is driving, and takes over from an engine that is gone. |
 | `yunta resolve-gate <run> [<option>] [--by] [--text] [--json]` | Answers a paused run's gate decision from a separate process; hands the run to a detached resume that applies it. Without an option, puts the run's own menu to this terminal — and off a terminal, lists the command that chooses each option. A run stopped on its token cap is answered the same way: `continue` lets one engine go past the cap, and `abort` leaves the decision open. An option the gate withholds — going on with a plan that cannot be proven — is refused with why. `--json` prints the answer as one document; it needs an option, since the menu is for a terminal, so without one it is refused. |
-| `yunta review <run>` | At a terminal, opens the application on the plan a parked run waits on, over the run and the field, and answers it there; off a terminal, prints it with the commands that answer it. |
+| `yunta review <run>` | At a terminal, opens the run's screen in the application on the plan a parked run waits on, its desk in place, and answers it there; off a terminal, prints it with the commands that answer it. |
 | `yunta cancel <run> [--json]` | Sends every running node's session an ordered interrupt, escalating to a full process-tree kill. A run `--detach` has just handed over is stopped once the engine it was handed to starts. `--json` prints the answer as one document. |
 | `yunta close <run> [--by] [--json]` | Closes a stopped run nobody is going to continue, as cancelled and by who closed it, so it stops waiting on a person. A run whose engine died is settled first, as `cancel` settles one; its branch and worktree stay until `gc` removes them. `--json` prints the answer as one document. |
 | `yunta graph <workflow> \| --run <id> [--format mermaid\|dot]` | Renders a workflow's DAG as Mermaid (or DOT): dependencies, reroutes, parallel groups drawn with their children inside them, gates. A path or a catalog name reads the workflow off disk; `--run <id>` draws the one that run froze, annotated with each node's derived state. A file that breaks its own rules is refused as every command refuses it; one that only the project's config cannot run is still drawn, with the verdict on stderr and in the exit code. |

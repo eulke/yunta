@@ -72,7 +72,10 @@ fn the_parent_of_a_stopped_child_offers_the_command_that_reaches_it() {
 
     let reached = yunta_in!(&repo, &home, &["status", &child]);
     let said = unwrapped(&stdout(&reached));
-    for words in ["decision on the run", "continue: Continue past the cap"] {
+    for words in [
+        "decision on the run",
+        "Lifts the cap for this invocation only",
+    ] {
         assert!(said.contains(words), "no `{words}` in: {said}");
     }
 }
@@ -122,5 +125,8 @@ fn a_continue_on_the_child_leaves_the_parent_under_its_own_cap() {
     let status = yunta_in!(&repo, &home, &["status", &id]);
     let said = unwrapped(&stdout(&status));
     assert!(said.contains("decision on the run"), "{said}");
-    assert!(said.contains("continue: Continue past the cap"), "{said}");
+    assert!(
+        said.contains("Lifts the cap for this invocation only"),
+        "{said}"
+    );
 }

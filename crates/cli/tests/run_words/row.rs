@@ -10,7 +10,7 @@ const NEXT: &str = "Now I add a test for the empty input.";
 /// sentence of what the node's session said, and when the session says
 /// something else, the row says that instead.
 ///
-/// Reached by: `crates/cli/src/surface/feed.rs`,
+/// Reached by: `crates/cli/src/surface/beats.rs`,
 /// `crates/cli/src/surface/painter.rs`, `crates/cli/src/surface/region.rs`,
 /// `crates/render/src/watched/heard.rs`
 #[test]
@@ -74,8 +74,8 @@ fn the_run(home: &std::path::Path) -> String {
 /// for the same session: what it had said before the follower came, read off
 /// the run's socket, and what it says after.
 ///
-/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/run/follow/following.rs`,
-/// `crates/api/src/run/follow/listening.rs`
+/// Reached by: `crates/cli/src/commands/status/follow.rs`, `crates/api/src/follow/following.rs`,
+/// `crates/api/src/follow/listening.rs`
 #[test]
 fn a_follower_shows_the_row_the_attached_run_shows() {
     let root = tempfile::tempdir().unwrap();

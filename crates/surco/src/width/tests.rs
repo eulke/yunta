@@ -136,6 +136,78 @@ fn text_with_nothing_in_it_wraps_to_one_empty_line() {
     assert_eq!(wrap("", COLUMN), vec![String::new()]);
 }
 
+/// A number is a run of digits with the marks that join a digit to a digit: a date, a time, a
+/// decimal, a duration. A cut never splits one, since half a number reads as another one: it
+/// falls before the number, which goes whole with what the cut leaves out. A number kept whole
+/// that a letter ends may end what the cut keeps.
+#[test]
+fn a_cut_never_splits_a_number() {
+    let limit = "hit a limit until 2026-01-01 00:00 UTC";
+    assert_eq!(
+        truncate(limit, 29, Glyphs::Ascii).trim_end(),
+        "hit a limit until..."
+    );
+    let stamped = "hit a limit until 2026-01-15T10:00:00Z";
+    assert_eq!(
+        truncate(stamped, 28, Glyphs::Unicode).trim_end(),
+        "hit a limit until…"
+    );
+    let took = "4 tasks in 3m31s total";
+    assert_eq!(
+        truncate(took, 14, Glyphs::Unicode).trim_end(),
+        "4 tasks in…"
+    );
+    assert_eq!(truncate(took, 17, Glyphs::Unicode), "4 tasks in 3m31s…");
+    assert_eq!(
+        truncate("it took 7m34s in all", 11, Glyphs::Unicode).trim_end(),
+        "it took…"
+    );
+    assert_eq!(
+        truncate("read at 14.1 cells", 11, Glyphs::Unicode).trim_end(),
+        "read at…"
+    );
+    assert_eq!(
+        truncate("at src/lib.rs:3:5 now", 16, Glyphs::Unicode).trim_end(),
+        "at src/lib.rs:…"
+    );
+}
+
+/// A link or a path is no number for the digits in it: a cut lands in it anywhere outside its
+/// numbers, as a cut lands in any word, and the link or the path still names where it goes.
+/// A handle is cut the same way, outside the digits it holds.
+#[test]
+fn a_cut_lands_in_a_link_or_a_path_outside_its_numbers() {
+    let link = "waiting on external gate: https://github.com/acme/web/pull/7";
+    assert_eq!(
+        truncate(link, 58, Glyphs::Unicode),
+        "waiting on external gate: https://github.com/acme/web/pul…"
+    );
+    let page = "/cut/runs/01M7DES1GNED00000000Q78GRR/page.html";
+    assert_eq!(
+        truncate(page, 43, Glyphs::Unicode),
+        "/cut/runs/01M7DES1GNED00000000Q78GRR/page.…"
+    );
+    assert_eq!(
+        truncate("run Q78GRR asks", 9, Glyphs::Unicode).trim_end(),
+        "run Q78G…"
+    );
+}
+
+/// A cut that would split a number, or end right after one, falls before it: `exits 1…` and
+/// `exits 101…` both read as numbers they are not. A cut past the number keeps it whole.
+#[test]
+fn a_cut_keeps_no_digit_of_a_number_it_cannot_keep_whole() {
+    assert_eq!(truncate("exits 101 now", 9, Glyphs::Unicode), "exits…   ");
+    assert_eq!(
+        truncate("exits 101 now", 11, Glyphs::Unicode),
+        "exits…     "
+    );
+    assert_eq!(
+        truncate("exits 101 now", 12, Glyphs::Unicode),
+        "exits 101 n…"
+    );
+}
+
 #[test]
 fn a_cut_value_closes_with_the_mark_of_its_glyph_set() {
     assert_eq!(truncate("verification", 6, Glyphs::Unicode), "verif…");
@@ -207,17 +279,17 @@ fn items_joined_by_a_separator_break_only_between_two_items() {
     assert_eq!(
         joined(
             &[
-                "arrows move",
+                "arrows choose",
                 "type to filter",
-                "enter chooses",
-                "esc parks the run"
+                "enter answer",
+                "esc leave it for later"
             ],
             ",",
             60
         ),
         [
-            "arrows move, type to filter, enter chooses,",
-            "esc parks the run"
+            "arrows choose, type to filter, enter answer,",
+            "esc leave it for later"
         ]
     );
 }

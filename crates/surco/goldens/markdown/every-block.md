@@ -29,6 +29,17 @@ error[E0425]: cannot find value `undefined_variable_name` in this scope, reporte
 - progress: 0 of 2 nodes done, 1 failed
 - tokens: 20.2k spent, 3 past runs, median 18k tokens
 
+… 4 above  
+search  global pack  
+read    crates/cli/src/pack.rs  
+read    crates/cli/src/commands/pack.rs  
+read    crates/testkit/src/bin.rs  
+edit    crates/cli/src/pack.rs  
+edit    crates/cli/src/cli/pack.rs  
+edit    crates/cli/src/commands/pack.rs  
+edit    crates/cli/src/cli/dispatch.rs  
+… 4 under
+
 **next**
 
 - `yunta status 7E5PH4`: where it stands

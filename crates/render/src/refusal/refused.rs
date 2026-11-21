@@ -210,19 +210,12 @@ impl Refused {
     /// in its sentence.
     pub fn advice(&self, reader: Reader) -> (Option<String>, Vec<(String, &'static str)>) {
         match self {
-            Refused::Moving { run, .. } => (
-                None,
-                vec![
-                    (
-                        command::line_for(&NextStep::Follow { run: run.clone() }, reader),
-                        "follows it",
-                    ),
-                    (
-                        command::line_for(&NextStep::Cancel { run: run.clone() }, reader),
-                        "stops it",
-                    ),
-                ],
-            ),
+            Refused::Moving { run, .. } => {
+                let follow = NextStep::Follow { run: run.clone() };
+                let cancel = NextStep::Cancel { run: run.clone() };
+                let said = |step: &NextStep| (command::line_for(step, reader), command::does(step));
+                (None, vec![said(&follow), said(&cancel)])
+            }
             Refused::UnknownRun { roots, .. } => (
                 Some(format!("looked in {}", roots.join(" and "))),
                 vec![

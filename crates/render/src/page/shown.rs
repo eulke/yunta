@@ -64,10 +64,7 @@ impl Page for Shown<'_> {
 /// A text document, `of` the node that produced it: titled by the heading it
 /// opens on, else by its artifact, and its words after.
 fn text_document(document: &ShownDocument, text: &str, of: &str) -> Doc {
-    let named = match &document.shown.artifact {
-        ArtifactId::Interpreted { kind } => format!("the {kind} document{of}"),
-        ArtifactId::Opaque { name } => format!("{name}{of}"),
-    };
+    let named = named(document, of);
     // A document that opens on a heading is called what it calls
     // itself — what a brief asks for, before which file it is.
     let (title, body) = match headed(text) {
@@ -86,18 +83,32 @@ fn text_document(document: &ShownDocument, text: &str, of: &str) -> Doc {
     }
 }
 
-/// What a document is called on a page that shows it beside others: the
-/// heading a text document opens on, else its artifact, named as its page
-/// names it without the producer it came from.
-pub(crate) fn called(document: &ShownDocument) -> String {
-    let heading = match &document.content {
-        ShownContent::Text(text) => headed(text).map(|(heading, _)| heading.to_string()),
-        _ => None,
+/// What `document`'s artifact is called, `of` the node that produced it.
+fn named(document: &ShownDocument, of: &str) -> String {
+    match &document.shown.artifact {
+        ArtifactId::Interpreted { kind } => format!("the {kind} document{of}"),
+        ArtifactId::Opaque { name } => format!("{name}{of}"),
+    }
+}
+
+/// A text document `text` as a run's pane holds it over a card standing in place: one
+/// block of its words at the pane's body column, the title its page gives it as their
+/// heading and its words right under it, no blank row between. Not [`Shown`]'s page, which
+/// sets the title apart at the page's edge.
+pub(crate) fn text_over_a_card(document: &ShownDocument, text: &str) -> Block {
+    let of = document
+        .shown
+        .producer
+        .as_ref()
+        .map(|node| format!(" of `{node}`"))
+        .unwrap_or_default();
+    let named = named(document, &of);
+    let (title, body) = match headed(text) {
+        Some((heading, body)) => (format!("{heading}: {named}"), body),
+        None => (named, text),
     };
-    heading.unwrap_or_else(|| match &document.shown.artifact {
-        ArtifactId::Interpreted { kind } => kind.to_string(),
-        ArtifactId::Opaque { name } => name.to_string(),
-    })
+    let body = body.trim_start_matches(['\n', '\r']);
+    Block::Markdown(format!("# {title}\n{body}"))
 }
 
 /// The heading `text` opens on, and what follows it; `None` when it

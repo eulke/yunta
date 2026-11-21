@@ -1,0 +1,36 @@
+ yunta :: /cut/worktree                                                                      ? 5 need you ; ^ 1 stalled
+........................................................................................................................
+  :: what do you want to build?  ; n                                          | ? fragua (standard) ; needs you  Q78GRR
+                                                                              | == = == == = == == = == == = == == . ..
+  asking now               . keys ----------------------------------------------------------.` asks at its terminal.
+  * ? Q78GRR standard  ====| You never have to remember more than this.                     |
+                           |                                                                |  12 of 15 nodes done, 1
+  needs you, oldest first  | /      anything: only what can be done here, with its command  |  reroute
+    ? EZRPE9 quick     = . | n      start a new run, wherever no prompt stands              |  26.1M in / 1.06M out
+    ? C0NS0E default   == .| j k    move; the footer always says what they move             |  (25M cached)
+    ? T0KENS default   == .| enter  open, answer, confirm                                   |  1h12m at work, 38m51s
+    ? B10CKD default   == .| space  mark it                                                 |  waiting on you
+                           | x      close the marked, or the pointed, once confirmed        |  implement 41m05s, spec
+  stalled                  | r      resume it                                               |  13m53s, plan 6m25s
+    ^ EKPBGE standard  = . | c      stop it and everything under it                         |  yunta/run/...Q78GRR off
+                           | s      what it cost                                            |  main
+  stopped                  | a      go to what needs you                                    |
+    # ST0PPD default   ==  | d      the closed too                                          |do
+    # AB0RTD default   == =| e      every run on this machine                               |t and everything under it
+                           | w      the workflows you can run                               |t cost
+  running                  | m      check adapters, git, forge, packs                       |
+    > TW0TSK default   == =| q      leave: every run keeps going without this window        |
+                           | ctrl-c leave: every run keeps going without this window        |
+  unreadable               |                                                                |
+    ! 0RPHAN               |                                                                |
+                           '----------------------------------------------------------------'
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ esc back

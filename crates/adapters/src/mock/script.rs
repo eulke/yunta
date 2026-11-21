@@ -32,6 +32,7 @@ use yunta_core::{ModelName, RunTool, SessionId, ToolNaming};
 
 use super::effects::{ask_hook, Asked};
 use super::run_tool::{call_run_tool, list_run_tools, RunToolCallError};
+use super::word::heard;
 use super::{KillBehavior, MockOutcome, MockStep, OnInterrupt, ToolExpectation, ID};
 use crate::dialect::DialectName;
 
@@ -119,8 +120,9 @@ impl Stops {
         }
     }
 
-    /// Waits for a stop and nothing else — what a hung session does.
-    async fn awaited(&self) {
+    /// Waits for a stop and nothing else — what a hung session does, and
+    /// what ends a session held by a word.
+    pub(super) async fn awaited(&self) {
         tokio::select! {
             _ = self.kill.notified() => {}
             _ = self.interrupt.notified(), if self.ends_on_interrupt => {}
@@ -204,9 +206,10 @@ impl Stream {
     }
 
     /// Plays one step. A run tool step calls the engine first, and a rejected
-    /// one is reported without a call; any other step is printed as its CLI
-    /// prints it.
-    async fn step(&mut self, step: MockStep) -> bool {
+    /// one is reported without a call; a step that awaits a word says nothing
+    /// and holds the session until the word stands; any other step is printed
+    /// as its CLI prints it.
+    async fn step(&mut self, step: MockStep, stops: &Stops) -> bool {
         match step {
             MockStep::RunTool {
                 tool,
@@ -217,6 +220,7 @@ impl Stream {
             MockStep::RunToolRejected { tool, .. } => {
                 self.send(AgentEvent::RunToolRejected { tool })
             }
+            MockStep::AwaitsWord { word, .. } => heard(&word, stops).await,
             step => self.say(step),
         }
     }
@@ -449,13 +453,14 @@ async fn stopped(
 }
 
 /// Plays `steps`, each after its delay. `false` once a stop arrives first,
-/// or the session has failed or gone unheard.
+/// a word awaited can no longer be given, or the session has failed or gone
+/// unheard.
 async fn stepped(steps: Vec<MockStep>, stream: &mut Stream, stops: &Stops) -> bool {
     for step in steps {
         if !stops.waited(step.after_ms()).await {
             return false;
         }
-        if !stream.step(step).await {
+        if !stream.step(step, stops).await {
             return false;
         }
     }

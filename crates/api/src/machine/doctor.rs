@@ -51,7 +51,7 @@ impl Project {
             Committer::Named(who) => Finding::Committer { who },
             Committer::Unnamed { git_said } => Finding::NoCommitter { git_said },
         });
-        findings.extend(forge::findings(self, remarks, stop).await?);
+        findings.extend(forge::findings(self, stop).await?);
         findings.push(self.checkouts(stop).await);
         findings.extend(first_run::first_run(&self.workspace.env).await);
         // A runner a pack lacks is declared on an adapter that answers here.

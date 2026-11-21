@@ -7,17 +7,18 @@ What the run did.
 the run is still open: this is its last step.
 
 - run: run-pr-golden
-- cost: nothing spent
-- changed: 1 file, +1
 
 - ◌ **criteria** none declared, nothing to prove
 - ◌ **baseline** not used by this workflow
-- ✓ **scope** 0 files touched, none outside it
+- ✓ **scope** no file touched
 - ◌ **review** 0 runners used, no fan-out review
-- ✓ **event chain** 5 events, hash-linked, replayable
+- ✓ **event chain** intact · 5 events, hash-linked, replayable
+
+- cost: nothing spent
+- changed: 1 file, +1
 
 **next**
 
-- `yunta verify golden`: checks this run's evidence again
+- `yunta verify golden`: verify its evidence
 
 <!-- yunta run_id: run-pr-golden -->

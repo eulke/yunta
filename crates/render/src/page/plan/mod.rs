@@ -1,10 +1,10 @@
 //! A plan as a person reads it: what it changes before how it is proven.
 //! It opens with what the plan is and what the person asked for, and with
 //! every departure from it a person accepted; then the change — what it
-//! does, what it decided for them and what they answered, what it leaves
-//! out, what it risks where the whole plan is shown, and how it is
-//! designed; then the steps it takes, and each task's card with the code
-//! it writes; then what proves it.
+//! does, what it decided for them, with what they answered beside a
+//! decision that restates it, what it leaves out, what it risks where the
+//! whole plan is shown, and how it is designed; then the steps it takes,
+//! and each task's card with the code it writes; then what proves it.
 //!
 //! A person deciding on a change reads the change. The code a task writes
 //! sits in its card, once; the code of the tests that prove it is not part

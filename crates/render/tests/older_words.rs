@@ -5,6 +5,7 @@
 //! the shape their fields had.
 
 use serde_json::{json, Value};
+use yunta_core::ahead::NodesAhead;
 use yunta_core::events::{
     ArtifactEvent, EventPayload, Failure, FindingEvent, GateEvent, GateWaitingPayload, LoggedWords,
     NodeEvent, NodeFailedPayload, SessionEvent, StoredEvent, SubmissionOutcome,
@@ -148,7 +149,7 @@ fn gate_option_words(event: &StoredEvent, line: &Value) {
     let stored = line["options"].as_array().expect("the options are listed");
     assert_eq!(payload.options().len(), stored.len());
     for (option, words) in payload.options().iter().zip(stored) {
-        let (label, tradeoff) = offers::option_words(payload, option);
+        let (label, tradeoff) = offers::option_words(payload, option, &NodesAhead::default());
         assert_eq!(label, words["label"].as_str().expect("a stored label"));
         assert_eq!(tradeoff.as_deref(), words["tradeoff"].as_str());
     }
@@ -167,20 +168,25 @@ fn gate_option_words(event: &StoredEvent, line: &Value) {
 /// never so.
 fn capped_loop_retry_words(event: &StoredEvent, _line: &Value) {
     let payload = waiting(event);
-    let (label, _) = offers::option_words(payload, &payload.options()[0]);
+    let (_, tradeoff) =
+        offers::option_words(payload, &payload.options()[0], &NodesAhead::default());
     assert_eq!(
-        label,
-        "Run it again (attempt 2): its iteration count starts over"
+        tradeoff.as_deref(),
+        Some("its iteration count starts over; it stops at the cap again if tasks remain")
     );
 }
 
 /// The retry of a cut session's older menu reads as that menu offered it.
 fn cut_session_retry_words(event: &StoredEvent, _line: &Value) {
     let payload = waiting(event);
-    let (label, _) = offers::option_words(payload, &payload.options()[0]);
-    assert_eq!(
-        label,
-        "Run it again (attempt 2) once something outside the tree changes"
+    let (_, tradeoff) =
+        offers::option_words(payload, &payload.options()[0], &NodesAhead::default());
+    let waits = "until something outside the tree changes, it fails the same way and asks again";
+    assert!(
+        tradeoff
+            .as_deref()
+            .is_some_and(|said| said.ends_with(waits)),
+        "{tradeoff:?}"
     );
 }
 

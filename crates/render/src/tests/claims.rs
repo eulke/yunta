@@ -1,11 +1,22 @@
 //! The words of an escalation's claim: an engine claim is written from its
 //! node, the assignee it names and the reroute it closes, and a written
-//! claim is kept.
+//! claim is kept. Beside it, what a decision's card asks and names at its far
+//! edge, and the gist a run parked on a person's answer says under its headline.
 
-use yunta_core::events::{Claim, ExhaustedReroute, Failure, FailureMenu};
-use yunta_core::{NodeId, RunId, TaskId};
+use surco::words::Standing;
+use yunta_core::events::{
+    Claim, DepartsFrom, DeviationDeclaredPayload, Escalation, ExhaustedReroute, Failure,
+    FailureMenu, GateOption, GateWaitingPayload, Menu, NodeWait, OwedScope, PauseReason, RedCheck,
+    TaskCause, TaskStop,
+};
+use yunta_core::reserved::ReservedOption;
+use yunta_core::{NodeId, NonEmpty, QuestionId, RunId, TaskId};
+use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
 
 use crate::claim::sentence;
+use crate::escalation::question;
+use crate::prompt::card::edge;
+use crate::state::gist;
 
 /// A failure menu whose reroutes to `fix-lint` are used up after `max_reroutes`.
 fn exhausted(max_reroutes: u32) -> FailureMenu {
@@ -121,6 +132,7 @@ fn a_gate_that_cannot_be_checked_again_names_the_reference_it_was_published_at()
     );
 }
 
+/// A run that spent its token budget is named by its handle, as a person names a run.
 #[test]
 fn a_run_that_spent_its_token_budget_says_so() {
     let claim = Claim::TokensSpent {
@@ -128,7 +140,7 @@ fn a_run_that_spent_its_token_budget_says_so() {
     };
     assert_eq!(
         sentence(&claim, None),
-        "run `01AAAAAAAAAAAAAAAAAAAAAAAA` exhausted its token budget"
+        "run `AAAAAA` exhausted its token budget"
     );
 }
 
@@ -194,5 +206,214 @@ fn a_question_about_a_plan_names_its_change() {
     assert_eq!(
         asked("line one\nline two"),
         "Approve the plan: line one line two?"
+    );
+}
+
+/// The run that waits on a person in these tests.
+const WAITING: RunId = RunId::from_static("01M7SMA11RVN00000000T0KENS");
+
+/// A check that passed at the baseline and exits 101 now.
+fn regression() -> Failure {
+    Failure::Red {
+        red: RedCheck::Regression {
+            cmd: "cargo test --workspace".to_string(),
+            exit_code: 101,
+            tail: Vec::new(),
+        },
+    }
+}
+
+/// A task that asks to touch one path outside its scope, with why.
+fn scope_owed() -> Failure {
+    Failure::ScopeOwed {
+        owed: vec![OwedScope {
+            task_id: TaskId::from("global-pack-install"),
+            paths: vec!["crates/cli/src/commands/pack_audit.rs".into()],
+            reason: Some("the shared helpers change under it".to_string()),
+        }],
+    }
+}
+
+/// A task whose session departs from the plan, which a person accepts or not.
+fn departure_owed() -> Failure {
+    let departs = DeviationDeclaredPayload {
+        task_id: TaskId::from("greet"),
+        from: DepartsFrom::Shape("Greeting".to_string()),
+        planned: "Hello, and good night".to_string(),
+        instead: "Hello".to_string(),
+        why: "the second half needs the clock".to_string(),
+    };
+    Failure::TasksStopped {
+        stopped: vec![TaskStop {
+            task_id: TaskId::from("greet"),
+            cause: TaskCause::DeviationOwed {
+                deviations: NonEmpty::from((departs, Vec::new())),
+            },
+        }],
+    }
+}
+
+/// The decision `claim` puts to a person on `menu`, whose one option pauses the run.
+fn asked(claim: Claim, menu: Menu) -> GateWaitingPayload {
+    let abort = GateOption::reserved(ReservedOption::Abort);
+    Escalation::new(claim, menu, NonEmpty::from((abort, Vec::new()))).into_payload()
+}
+
+/// The decision node `node`'s `failure` puts to a person.
+fn failed(node: &str, failure: Failure) -> GateWaitingPayload {
+    let menu = FailureMenu {
+        attempt: 2,
+        failure,
+        remedies: Vec::new(),
+        stuck: None,
+        reroute: None,
+    };
+    let claim = Claim::NodeFailed {
+        node: NodeId::from(node),
+    };
+    asked(claim, Menu::Failure(Box::new(menu)))
+}
+
+/// A failed check's card asks what now, naming the node that failed; one whose reroutes are
+/// used up says so, as its claim does.
+#[test]
+fn a_failed_check_s_card_asks_what_now() {
+    assert_eq!(
+        question(&failed("tests", regression())),
+        "`tests` failed. What now?"
+    );
+    let claim = Claim::NodeFailed {
+        node: NodeId::from("lint"),
+    };
+    let rerouted = asked(claim, Menu::Failure(Box::new(exhausted(0))));
+    assert_eq!(
+        question(&rerouted),
+        "node `lint` failed and its 0 reroutes to `fix-lint` are exhausted"
+    );
+}
+
+/// A card on what a task's scope owes asks to touch the path the task asked for, and on a
+/// departure asks whether to accept it.
+#[test]
+fn a_card_on_a_task_s_request_asks_it_in_the_task_s_place() {
+    assert_eq!(
+        question(&failed("implement", scope_owed())),
+        "It asks to touch crates/cli/src/commands/pack_audit.rs"
+    );
+    assert_eq!(
+        question(&failed("implement", departure_owed())),
+        "The task departs from its plan. Accept it?"
+    );
+}
+
+/// A card on a capped loop says the cap is spent, and one on a spent budget names the run by
+/// its handle.
+#[test]
+fn a_card_on_a_cap_says_what_is_spent() {
+    let capped = Failure::LoopCapped {
+        node: NodeId::from("implement"),
+        loop_cap: 2,
+    };
+    assert_eq!(
+        question(&failed("implement", capped)),
+        "loop `implement` needs another iteration and its cap is spent"
+    );
+    let budget = Menu::Budget(yunta_core::events::BudgetCap {
+        cap: 100,
+        spent: 200,
+    });
+    assert_eq!(
+        question(&asked(Claim::TokensSpent { run: WAITING }, budget)),
+        "run `T0KENS` exhausted its token budget"
+    );
+}
+
+/// A gate's card asks the question its message ends on, and a message of one sentence
+/// whole.
+#[test]
+fn a_gate_s_card_asks_the_question_its_message_ends_on() {
+    let gate = |message: &str| {
+        let menu = Menu::Gate(yunta_core::events::AuthorGate {
+            assignee: "lead".to_string(),
+            node: None,
+        });
+        question(&asked(Claim::Written(message.into()), menu))
+    };
+    let ship = "The work beside its plan, and every finding the run holds with its answer. \
+                Create the PR?";
+    assert_eq!(gate(ship), "Create the PR?");
+    let notes = "The release notes, as they will be published. Publish them?";
+    assert_eq!(gate(notes), "Publish them?");
+    assert_eq!(gate("Approve the plan?"), "Approve the plan?");
+}
+
+/// A card's far edge names the node it is on, and the run's handle where it is on none.
+#[test]
+fn a_card_s_edge_names_its_node_or_else_its_run() {
+    let node = NodeId::from("implement");
+    assert_eq!(
+        edge(Some(&node), Some(&WAITING)).as_deref(),
+        Some("implement")
+    );
+    assert_eq!(edge(None, Some(&WAITING)).as_deref(), Some("T0KENS"));
+    assert_eq!(edge(None, None), None);
+}
+
+/// A run that needs a person, parked on `on`.
+fn parked(on: WaitingOn) -> RunFrame {
+    RunFrame {
+        standing: Standing::NeedsYou,
+        phase: RunPhase::Waiting { on },
+        ..RunFrame::sample(&WAITING)
+    }
+}
+
+/// The gist of a run parked on node `node`'s `failure`.
+fn failed_gist(node: &str, failure: Failure) -> Option<String> {
+    let node = NodeId::from(node);
+    gist(&parked(WaitingOn::Run {
+        reason: PauseReason::NodeFailed { node, failure },
+    }))
+}
+
+/// A run parked on a check's red verdict says the verdict, one parked on a task's request
+/// for scope says that a task asks to touch a path outside it, and one parked on a task's
+/// departure says that a task departs from what the plan decided.
+#[test]
+fn a_gist_says_what_a_failed_node_s_card_decides() {
+    assert_eq!(
+        failed_gist("implement", scope_owed()).as_deref(),
+        Some("a task asks to touch a path outside its scope")
+    );
+    assert_eq!(
+        failed_gist("tests", regression()).as_deref(),
+        Some("regression: `cargo test --workspace` passed at baseline (exit 0) but now exits 101")
+    );
+    assert_eq!(
+        failed_gist("implement", departure_owed()).as_deref(),
+        Some("a task departs from what the plan decided")
+    );
+}
+
+/// A run parked on a round says how many questions its node asks, and that nothing is
+/// recorded until every one is answered.
+#[test]
+fn a_gist_says_a_round_records_nothing_until_it_is_answered() {
+    let asked: Vec<QuestionId> = ["where", "how", "beside"].map(QuestionId::from).to_vec();
+    let asked = NonEmpty::new(asked).expect("a round asks");
+    let node = NodeId::from("grill");
+    let on = WaitingOn::Node {
+        node: node.clone(),
+        on: NodeWait::Questions {
+            asked: asked.clone(),
+        },
+        reason: Some(PauseReason::Questions {
+            node,
+            pending: asked,
+        }),
+    };
+    assert_eq!(
+        gist(&parked(on)).as_deref(),
+        Some("node `grill` asks 3 questions: nothing is recorded until every one is answered")
     );
 }

@@ -4,8 +4,14 @@
 //! that here rather than folding the `node_started`/`node_finished`/
 //! `node_failed` triple itself — with three kinds per attempt, a second
 //! fold is a second answer.
+//!
+//! Beside the lifecycle, a record keeps for the run what its sessions did
+//! (`sessions`): which task each worked and which paths it wrote; and the
+//! scope checks of the node's own work (`scope`), with the union over the
+//! run of every scope check's paths, which the receipt prints.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -14,17 +20,20 @@ use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
 use crate::events::node::payloads::{
     DiscardedCandidate, NodeOutcome, NodeReroutedPayload, RerouteOrigin, RunnerResolvedPayload,
+    ScopeCheckedPayload,
 };
 use crate::events::{Failure, Spend, Suspensions, TokenUsage};
-use crate::ids::{NodeId, QuestionId, RunnerName, Seq};
+use crate::ids::{NodeId, QuestionId, RunnerName, Seq, SessionId, TaskId};
 use crate::{NonEmpty, RunnerCandidate, TreeId};
 
+mod scope;
 mod sessions;
 mod spend;
 mod standing;
 
 use standing::Tally;
 
+pub use scope::ScopeUnion;
 pub use sessions::{OpenSession, OrphanedSession, RefusedStop, RefusedWrite, ToolCall};
 
 /// One node's derived lifecycle state. An enum, not booleans: there is
@@ -216,6 +225,21 @@ pub struct NodeRecord {
     /// opened for a task — kept past the attempt's terminal: what a
     /// continuation after the answer to its scope request picks back up.
     pub last_session: Option<crate::ids::SessionId>,
+    /// The task each session a loop opened for one worked, by the
+    /// session's id, kept for the run past the session's close: what tells
+    /// which task a call of that session served. The node's own sessions
+    /// work none. Not `TaskRecord::last_session`, which keeps only a
+    /// task's latest session.
+    pub session_tasks: BTreeMap<SessionId, TaskId>,
+    /// The paths the write and edit calls of this node's sessions named,
+    /// each once, kept for the run: under the session a call names, or
+    /// under `None` for a call on a log older than calls that name their
+    /// session. Not a scope check's diff, which is what the tree shows
+    /// changed, whoever changed it.
+    pub written: BTreeMap<Option<SessionId>, BTreeSet<PathBuf>>,
+    /// Every scope check of the node's own work, naming no task, oldest
+    /// first. Not a task's scope check, which the task's record keeps.
+    pub scope_checks: Vec<ScopeCheckedPayload>,
 }
 
 /// A failed attempt as the next one remembers it.
@@ -270,6 +294,9 @@ pub struct NodeLedger {
     /// service: kept as each record changes, so a reader that asks on
     /// every event reads no record.
     tally: Tally,
+    /// Every path the run's scope checks found changed, and those outside
+    /// what the work may change.
+    scope_union: ScopeUnion,
 }
 
 impl NodeLedger {
@@ -371,6 +398,12 @@ impl NodeLedger {
         self.per_node.values()
     }
 
+    /// Every `node_rerouted` on the log, each booked on the node it left.
+    /// Not [`NodeRecord::reroutes`], one node's.
+    pub fn reroutes(&self) -> usize {
+        self.per_node.values().map(|r| r.reroutes as usize).sum()
+    }
+
     /// Whether the log names no node at all.
     pub fn is_empty(&self) -> bool {
         self.per_node.is_empty()
@@ -409,6 +442,11 @@ impl NodeLedger {
     /// Folds one node-domain event. `asleep` is the host's suspensions: a
     /// working stretch that ends here leaves out the time the host slept.
     pub fn apply(&mut self, event: &NodeEvent, meta: &EventMeta<'_>, asleep: &Suspensions) {
+        // The engine writes every scope check under its node; one a log
+        // carries without a node still counts in the run's union.
+        if let NodeEvent::ScopeChecked(p) = event {
+            self.scope_union.take(p);
+        }
         let Some(node) = meta.node else {
             // A node event with no node on its envelope states nothing
             // about any node. The replay that dispatches here refuses it
@@ -430,14 +468,15 @@ impl NodeLedger {
             NodeEvent::Failed(p) => record.failed(p, meta, asleep),
             NodeEvent::Rerouted(p) => record.rerouted(p, meta),
             NodeEvent::RunnerResolved(p) => record.resolved(p, meta),
-            // Audit: the engine ran a mechanical check around the node
-            // and recorded what it found. None of it moves the node's
-            // lifecycle — what a criterion or a scope diff decided
-            // reaches state through the terminal the node then gets.
+            NodeEvent::ScopeChecked(p) => record.scope_checked(p),
+            // The engine ran a hook or a criterion around the node,
+            // assembled its context or opened its pull request, and
+            // recorded it. None of it moves the node's record: what a
+            // criterion decided reaches state through the terminal the
+            // node then gets, and the tasks' ledger keeps the check.
             NodeEvent::HookExecuted(_)
             | NodeEvent::ContextAssembled(_)
             | NodeEvent::CriteriaChecked(_)
-            | NodeEvent::ScopeChecked(_)
             | NodeEvent::PullRequestOpened(_) => {}
         }
         let after = record.standing();

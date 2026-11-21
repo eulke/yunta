@@ -1,0 +1,14 @@
+ yunta › RESETS › pr            ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● opens (default) · waiting · for 0s                RESETS
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ node `pr` waits for its limit to reset at…
+ pr · pull_request
+ it goes on alone at 01:00 UTC
+ what it is doing · 0 calls
+ running: attempt 1
+ failed: the forge rate-limited its requests until…
+
+ 0 tokens · 0s at work
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · s stats · g graph · q field · ? keys

@@ -1,20 +1,21 @@
 //! See [`crate`]. What a piece of work came to, as the performer hands it back.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use surco::components::Check;
 use yunta_api::{
-    AuditedPack, FieldReading, HistoryReading, InitializedProject, ProjectDraft, Repository,
-    StatsReading, WaitingDecision, WaitingQuestions, WorkflowCheck,
+    AuditedPack, HistoryReading, InitializedProject, ProjectDraft, PullRequestPolled, Repository,
+    WorkflowCheck,
 };
-use yunta_core::receipt::Receipt;
+use yunta_core::receipt::{EventChainStatus, Receipt};
 use yunta_core::step::NextStep;
-use yunta_core::{CommitSha, PackAudit, PackManifest, PackRef, RunId, WorkflowShape};
+use yunta_core::{CommitSha, PackAudit, PackManifest, PackRef, PricingEntry, RunId, WorkflowShape};
 use yunta_render::page::doctor::Finding;
 use yunta_render::page::pack::{Cases, Listed, Needs, NewPackCheck};
 use yunta_render::page::Collected;
-use yunta_render::page::{CancelState, Catalog, Diagnosis, Graph, Node, Run, Tested};
+use yunta_render::page::{CancelState, Catalog, Diagnosis, Graph, Tested};
 use yunta_render::refusal::Refused;
 
 use crate::Ticket;
@@ -23,8 +24,9 @@ use crate::Ticket;
 /// and three for one that did not do what it was asked.
 #[derive(Debug, Clone)]
 pub enum Outcome {
-    /// The repository the application works in, as far as Yunta goes.
-    Repository(Repository),
+    /// The repository the application works in, as far as Yunta goes, with where the
+    /// project keeps its runs and its prices.
+    Repository(Box<RepositoryReading>),
     /// What setting the repository up found, and the ticket the performer holds the
     /// project detected under, which its setup is written with.
     Detected {
@@ -41,26 +43,12 @@ pub enum Outcome {
     Pack(PackOutcome),
     /// What a run leaves.
     Evidence(EvidenceOutcome),
-    /// The runs read, and where the project keeps them.
-    Field {
-        reading: FieldReading,
-        storage: PathBuf,
-    },
-    /// The run no longer moves, and its following ended.
-    Followed,
-    /// A run's page.
-    Page(Box<Run>),
-    /// The page of a run's node.
-    NodePage(Box<Node>),
-    /// The round of questions a run is parked on.
-    Questions(Box<WaitingQuestions>),
-    /// The decision a run waits on, with the documents it shows.
-    Decision(Box<WaitingDecision>),
-    /// What a run spent.
-    Stats(Box<StatsReading>),
+    /// The pull request of the gate a run waits at, as its forge answered a poll; none
+    /// where the run waits at no gate a forge holds, as one that went on reads.
+    PullRequest(Option<Box<PullRequestPolled>>),
     /// A workflow's past runs, and what their logs say of its checks.
     History(Box<HistoryReading>),
-    /// A workflow's graph, each node labelled with a run's state where it is a run's.
+    /// A workflow's graph, as written.
     Graph(Box<Graph>),
     /// What every check doctor made found, in the order it made them.
     Doctor(Vec<Finding>),
@@ -90,6 +78,50 @@ pub enum Outcome {
     Failed(String),
     /// The work was stopped before it ended.
     Stopped,
+}
+
+impl Outcome {
+    /// The run the work handed to a detached engine, which writes the run's registry once it
+    /// holds it: one started, one resumed, and one whose decision or answers were recorded,
+    /// which a resume then takes up. None for any other outcome.
+    pub(crate) fn handed_on(&self) -> Option<&RunId> {
+        match self {
+            Outcome::Started { run }
+            | Outcome::Resumed { run }
+            | Outcome::Decided { run }
+            | Outcome::Answered { run } => Some(run),
+            Outcome::Repository(_)
+            | Outcome::Detected { .. }
+            | Outcome::Initialized(_)
+            | Outcome::Catalog(_)
+            | Outcome::Workflow(_)
+            | Outcome::Pack(_)
+            | Outcome::Evidence(_)
+            | Outcome::PullRequest(_)
+            | Outcome::History(_)
+            | Outcome::Graph(_)
+            | Outcome::Doctor(_)
+            | Outcome::Collected(_)
+            | Outcome::Cancelled { .. }
+            | Outcome::Closed { .. }
+            | Outcome::Refused(_)
+            | Outcome::Failed(_)
+            | Outcome::Stopped => None,
+        }
+    }
+}
+
+/// The repository the application works in, read as it opens: where Yunta stands in it,
+/// where the project keeps its runs, and what it prices tokens at. Neither of the last
+/// two is followed, so the state keeps them from here for every stage to read. Not
+/// `yunta_api::Repository`, which says only how far Yunta went there.
+#[derive(Debug, Clone)]
+pub struct RepositoryReading {
+    pub repository: Repository,
+    /// The store the project's runs log their events in.
+    pub storage: PathBuf,
+    /// What the project prices each model's tokens at, where its configuration says.
+    pub prices: Option<BTreeMap<String, PricingEntry>>,
 }
 
 /// What work on a workflow came to: a [`WorkflowOperation`](crate::WorkflowOperation)'s
@@ -138,8 +170,13 @@ pub enum PackOutcome {
 pub enum EvidenceOutcome {
     /// The receipt, as it was written beside the run.
     Receipt(Box<Receipt>),
-    /// Each check of `run`'s evidence, in the order it ran.
-    Verified { run: RunId, checks: Vec<Check> },
+    /// Each check of `run`'s evidence, in the order it ran, and what its event chain's
+    /// check found, which a run's receipt says.
+    Verified {
+        run: RunId,
+        chain: EventChainStatus,
+        checks: Vec<Check>,
+    },
     /// Where the run's page for a browser was written.
     PageWritten { page: PathBuf },
 }

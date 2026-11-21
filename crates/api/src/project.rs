@@ -19,6 +19,7 @@ use crate::{Error, Failure, Workspace};
 /// checkouts and log live under, and the workspace it was resolved from,
 /// which everything asked of it reads where it works, its clock and its
 /// environment from.
+#[derive(Clone)]
 pub struct Project {
     pub config: ConfigLayer,
     pub runs_root: PathBuf,

@@ -95,7 +95,7 @@ async fn a_retry_answered_while_parked_reruns_the_guard_on_the_next_wake() {
     let bench = parked_on_a_red_guard(&ready).await;
     tokio::fs::write(&ready, "").await.unwrap();
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     let RunReport { terminal, state } = bench.wake().await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -109,7 +109,7 @@ async fn a_retry_keeps_what_passed() {
     let bench = parked_on_a_red_guard(&ready).await;
     tokio::fs::write(&ready, "").await.unwrap();
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     bench.wake().await;
 
     let red_before = last_pre_check(&bench, &format!("test -f {}", ready.display()));
@@ -171,9 +171,9 @@ async fn a_decision_answered_is_on_offer_to_nobody_until_its_resume_acts_on_it()
     let manifest = bench.manifest();
     assert!(awaits_decision(&manifest, &state_of(&bench)).is_some());
 
-    answer_parked(&bench, "go").await.unwrap();
+    bench.answer_parked("go", None).await.unwrap();
 
-    let second = answer_parked(&bench, "stop").await.unwrap_err();
+    let second = bench.answer_parked("stop", None).await.unwrap_err();
     assert!(
         matches!(second, ResolveGateError::Refused(GateRefusal::NotPaused)),
         "{second:?}"

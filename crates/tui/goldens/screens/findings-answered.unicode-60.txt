@@ -1,0 +1,14 @@
+ yunta › Q78GRR › fix-findings  ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h48m           Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ nothing needs you: it is moving
+ findings · 2 of 4 answered · review@reviewer, review@revi…
+ what it is doing · 6 calls
+ … 7 above
+ finding target-outside-declared-file of `conform` answere…
+ call    yunta_answer_finding
+ finding global-paths-ignore-yunta-home of `review@reviewe…
+ 26.9M tokens · 1h09m at work · 38m51s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k finding · tab nodes · s stats · … · ? keys

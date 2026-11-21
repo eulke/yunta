@@ -1,4 +1,4 @@
-␛[2m◌␛[0m ␛[1mworkflow checked␛[0m␛[2m ·␛[0m␛[2m as written␛[0m
+␛[2m◌␛[0m ␛[1mchecked␛[0m␛[2m ·␛[0m␛[2m the nodes it runs, in order ␛[0m                                                  as written
 
          ┌───────┐
          │ build │

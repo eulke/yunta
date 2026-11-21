@@ -1,0 +1,14 @@
+ yunta › Q78GRR › grill          ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆╭ what do you want to do? ─────────────────────────────╮R
+ ━│ ▸ type to filter                                     │
+ n│▸ answer what it asks                                 │
+ g│  continue it from its log                            │a
+ w│  close it for good                                   │
+ …│  what it cost, and where its time went               │
+ a│  draw its graph                                      │
+ s│  … 8 under                                           │
+ n╰──────────────────────────────────────────────────────╯…
+ 220k tokens · 36s at work · 5m00s waiting on you
+ ◆ Q78GRR needs you: node `grill` asks 3 questions: nothin…
+ ↑↓ move · enter do it · esc back

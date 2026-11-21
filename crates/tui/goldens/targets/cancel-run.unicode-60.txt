@@ -1,0 +1,14 @@
+ yunta › Q78GRR › plan          ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ●╭ stop Q78GRR? ────────────────────────────────────────╮R
+ ━│ It stops now, with every session under it, and waits │
+ n│ where it stopped until you continue it or close it.  │
+ p│                                                      │a
+ w│ yunta cancel Q78GRR                                  │
+ …│                                                      │
+ r╰──────────────────────────────────────────────────────╯
+ read    crates/cli/src/cli/pack.rs
+ read    crates/engine/src/catalog.rs
+ 967k tokens · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ enter stop it · esc keep it

@@ -1,0 +1,6 @@
+findings:
+- id: global-paths-ignore-yunta-home
+  severity: major
+  title: Global pack paths ignore the configured YUNTA_HOME
+  location: crates/cli/src/pack/target.rs:31-35
+  detail: global_data_dir uses only Env.home and appends /.yunta. With HOME=/home/alice and YUNTA_HOME=/scratch/yunta-state, pack add --global stores under /home/alice/.yunta/packs instead of /scratch/yunta-state/packs.

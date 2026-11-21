@@ -78,7 +78,14 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
     assert_eq!(reroute_goto(&escalation).as_deref(), Some("fix-lint"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
-    let words = |o| yunta_render::offers::option_words(&escalation, o).1;
+    let words = |o| {
+        yunta_render::offers::option_words(
+            &escalation,
+            o,
+            &yunta_core::ahead::NodesAhead::default(),
+        )
+        .1
+    };
     assert!(escalation.options().iter().all(|o| words(o).is_some()));
 }
 
@@ -116,7 +123,14 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
     assert_eq!(escalation.summary(), &written("Approve the plan?"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["proceed", "revise", "abort"]);
-    let words = |o| yunta_render::offers::option_words(&escalation, o).1;
+    let words = |o| {
+        yunta_render::offers::option_words(
+            &escalation,
+            o,
+            &yunta_core::ahead::NodesAhead::default(),
+        )
+        .1
+    };
     assert!(escalation.options().iter().all(|o| words(o).is_some()));
 }
 
@@ -138,7 +152,7 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     )
     .await;
 
-    answer_parked(&bench, "retry").await.unwrap();
+    bench.answer_parked("retry", None).await.unwrap();
     // resolve_gate writes ONLY the decision pair — the reroute
     // consequence is the engine's to apply, not this function's.
     assert_eq!(
@@ -201,7 +215,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     let report = bench.run(PROMOTABLE_WORKFLOW, NO_SESSIONS).await;
     assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
 
-    answer_parked(&bench, "promote").await.unwrap();
+    bench.answer_parked("promote", None).await.unwrap();
 
     let report = bench.wake_on_fixture(NO_SESSIONS).await;
     assert_eq!(
@@ -252,7 +266,7 @@ fn plan_runs(worktree: &std::path::Path) -> usize {
 async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume() {
     let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, NO_SESSIONS).await;
 
-    answer_parked(&bench, "proceed").await.unwrap();
+    bench.answer_parked("proceed", None).await.unwrap();
     let RunReport { terminal, state } = bench.wake_on_fixture(NO_SESSIONS).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -290,7 +304,7 @@ async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
     let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, NO_SESSIONS).await;
     assert_eq!(plan_runs(&bench.worktree), 1);
 
-    answer_parked(&bench, "revise").await.unwrap();
+    bench.answer_parked("revise", None).await.unwrap();
     let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
 
     // A reroute through a pre-seeded choice: plan re-ran, the gate came
@@ -307,7 +321,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
     )
     .await;
 
-    answer_parked(&bench, "abort").await.unwrap();
+    bench.answer_parked("abort", None).await.unwrap();
     let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the consumed abort to pause, got {terminal:?}");
@@ -388,7 +402,7 @@ sessions:
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
-    answer_parked(&seeded, "retry").await.unwrap();
+    seeded.answer_parked("retry", None).await.unwrap();
     let RunReport {
         terminal: seeded_terminal,
         state: seeded_state,

@@ -8,7 +8,7 @@ use super::Terminal;
 use crate::components::{Laid, Sight};
 use crate::doc::Doc;
 use crate::glyphs::Glyphs;
-use crate::line::{Line, Tone};
+use crate::line::{Fill, Line, Tone};
 use crate::text::counted;
 
 impl Terminal {
@@ -16,24 +16,44 @@ impl Terminal {
     /// stream's cells, and what was laid out of it. When lines lie below the last one
     /// shown, the row that counts them takes the last row.
     pub fn scrolled(&self, doc: &Doc, sight: Sight, rows: usize) -> (Vec<Line>, Laid) {
+        self.scrolled_lines(&self.lines(doc), sight, rows)
+    }
+
+    /// `lines`, a document already laid out, in at most `rows` rows as [`Terminal::scrolled`]
+    /// shows a document's.
+    pub(super) fn scrolled_lines(
+        &self,
+        lines: &[Line],
+        sight: Sight,
+        rows: usize,
+    ) -> (Vec<Line>, Laid) {
         let glyphs = self.look.glyphs;
-        let lines = self.lines(doc);
         let most = lines.len().saturating_sub(rows);
         let pointed = sight
             .follows_pointer
-            .then(|| {
-                lines
-                    .iter()
-                    .position(|line| line.text().trim_start().starts_with(glyphs.pointer()))
-            })
+            .then(|| pointed_line(lines, glyphs))
             .flatten();
         let laid = Laid {
             top: first_shown(sight.top, pointed, most, rows),
             page: rows,
             most,
         };
-        (shown(&lines, laid, self.look.width.cells(), glyphs), laid)
+        (shown(lines, laid, self.look.width.cells(), glyphs), laid)
     }
+}
+
+/// The line a pointer stands on: the one set on the selection, as every row a pointer moves
+/// along through [`Line::pointed`] stands; or where no line is, the first that opens with the
+/// pointer. A pointer that only leads a row, as a list's row it is narrowed on, is not one.
+fn pointed_line(lines: &[Line], glyphs: Glyphs) -> Option<usize> {
+    lines
+        .iter()
+        .position(|line| line.fill() == Some(Fill::Selection))
+        .or_else(|| {
+            lines
+                .iter()
+                .position(|line| line.text().trim_start().starts_with(glyphs.pointer()))
+        })
 }
 
 /// The first line shown: the one asked for, `top`, held within the last first line,

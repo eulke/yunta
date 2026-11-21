@@ -1,10 +1,14 @@
 //! What a node's record remembers across its attempts.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
 use yunta_core::events::{
-    EventMeta, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeLedger, NodeOutcome,
-    NodeStartedPayload, SessionEvent, Suspensions, TokenUsage,
+    AgentMessagePayload, AgentMessageType, EventMeta, EventPayload, Failure, NodeEvent,
+    NodeFailedPayload, NodeLedger, NodeOutcome, NodeStartedPayload, ScopeCheckedPayload,
+    SessionEvent, Suspensions, TokenUsage, ToolAction, ToolTarget,
 };
-use yunta_core::{NodeId, TreeId};
+use yunta_core::{NodeId, SessionId, TreeId};
 use yunta_testkit_core::all_kinds;
 
 /// Folds `events` onto one node, in order.
@@ -302,4 +306,153 @@ fn a_node_keeps_the_model_the_rail_heard_for_a_session_that_opened_without_one()
     let record = ledger.get(&NodeId::from_static("compare")).unwrap();
     let models: Vec<String> = record.models.iter().map(ToString::to_string).collect();
     assert_eq!(models, ["mock-model"]);
+}
+
+/// Folds node and session events onto `node`, in order.
+fn worked(node: &str, events: &[EventPayload]) -> NodeLedger {
+    let node = NodeId::from(node);
+    let mut ledger = NodeLedger::default();
+    for (seq, event) in events.iter().enumerate() {
+        let meta = EventMeta {
+            seq: (seq as u64 + 1).into(),
+            at: chrono::DateTime::UNIX_EPOCH,
+            node: Some(&node),
+        };
+        match event {
+            EventPayload::Node(event) => ledger.apply(event, &meta, &Suspensions::default()),
+            EventPayload::Session(event) => ledger.apply_session(event, &meta).unwrap(),
+            other => panic!("a node's ledger folds no `{}`", other.kind_name()),
+        }
+    }
+    ledger
+}
+
+/// A session a loop opened for `task`.
+fn opened_for(session: &str, task: &str) -> EventPayload {
+    let SessionEvent::Opened(mut opened) = sampled_session("agent_session_opened") else {
+        panic!("the registry samples an opened session");
+    };
+    opened.session_id = session.into();
+    opened.task_id = Some(task.into());
+    EventPayload::Session(SessionEvent::Opened(opened))
+}
+
+/// A call that does `action` to `path`, made in `session`; in none on a log
+/// older than calls that name their session.
+fn call(action: ToolAction, path: &str, session: Option<&str>) -> EventPayload {
+    EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
+        message_type: AgentMessageType::ToolUse,
+        tool_name: None,
+        action: Some(action),
+        target: Some(ToolTarget::of_path(Path::new(path))),
+        session: session.map(Into::into),
+        input_tokens: None,
+        output_tokens: None,
+        cached_input_tokens: None,
+        note: None,
+        text: None,
+    }))
+}
+
+/// A scope check of `task`, or of its node's own work when `task` is `None`.
+fn scope_check(task: Option<&str>, diff: &[&str], violations: &[&str]) -> ScopeCheckedPayload {
+    ScopeCheckedPayload {
+        task_id: task.map(Into::into),
+        diff: diff.iter().map(Into::into).collect(),
+        violations: violations.iter().map(Into::into).collect(),
+        denied: Vec::new(),
+    }
+}
+
+fn paths(paths: &[&str]) -> BTreeSet<PathBuf> {
+    paths.iter().map(Into::into).collect()
+}
+
+fn session(id: &str) -> SessionId {
+    id.into()
+}
+
+/// The node's own scope check in [`two_tasks_at_work`].
+fn node_check() -> ScopeCheckedPayload {
+    scope_check(None, &["src/a.rs", "src/b.rs"], &["src/b.rs"])
+}
+
+/// A loop's attempt with two tasks at work at once: each task's session
+/// edits its own path and reads another, a call from a log older than
+/// calls that name their session edits a third, and a task and the node
+/// each check their scope.
+fn two_tasks_at_work() -> Vec<EventPayload> {
+    vec![
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        opened_for("sess-a", "T001"),
+        opened_for("sess-b", "T002"),
+        call(ToolAction::Edit, "src/a.rs", Some("sess-a")),
+        call(ToolAction::Write, "src/b.rs", Some("sess-b")),
+        call(ToolAction::Read, "src/c.rs", Some("sess-b")),
+        call(ToolAction::Edit, "src/old.rs", None),
+        EventPayload::Node(NodeEvent::ScopeChecked(scope_check(
+            Some("T001"),
+            &["src/a.rs", "build.rs"],
+            &["build.rs"],
+        ))),
+        EventPayload::Node(NodeEvent::ScopeChecked(node_check())),
+    ]
+}
+
+#[test]
+fn an_open_session_names_its_task_and_a_call_its_session() {
+    let ledger = worked("loop", &two_tasks_at_work());
+    let record = ledger.get("loop").unwrap();
+    let tasks: Vec<String> = record
+        .sessions
+        .iter()
+        .flat_map(|open| &open.task)
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(tasks, ["T001", "T002"]);
+    let made_in: Vec<Option<SessionId>> = record
+        .calls
+        .iter()
+        .map(|call| call.session.clone())
+        .collect();
+    assert_eq!(
+        made_in,
+        [
+            Some(session("sess-a")),
+            Some(session("sess-b")),
+            Some(session("sess-b")),
+            None
+        ]
+    );
+}
+
+#[test]
+fn a_loop_node_keeps_each_session_s_task_and_what_it_wrote_past_their_close() {
+    let mut events = two_tasks_at_work();
+    events.push(EventPayload::Node(finished("b2b2b2b")));
+    let ledger = worked("loop", &events);
+    let record = ledger.get("loop").unwrap();
+    assert!(
+        record.sessions.is_empty(),
+        "both sessions closed with the attempt"
+    );
+    let tasks = BTreeMap::from([
+        (session("sess-a"), "T001".into()),
+        (session("sess-b"), "T002".into()),
+    ]);
+    assert_eq!(record.session_tasks, tasks, "a session's task outlives it");
+    let written = BTreeMap::from([
+        (None, paths(&["src/old.rs"])),
+        (Some(session("sess-a")), paths(&["src/a.rs"])),
+        (Some(session("sess-b")), paths(&["src/b.rs"])),
+    ]);
+    assert_eq!(record.written, written, "a read writes nothing");
+    assert_eq!(
+        record.scope_checks,
+        [node_check()],
+        "a task's check is kept on the task"
+    );
+    let union = ledger.scope_union();
+    assert_eq!(union.diff, paths(&["build.rs", "src/a.rs", "src/b.rs"]));
+    assert_eq!(union.violations, paths(&["build.rs", "src/b.rs"]));
 }

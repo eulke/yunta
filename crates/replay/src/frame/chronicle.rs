@@ -6,6 +6,11 @@
 //! frame says a node *is*, a moment says it *became* — the very
 //! [`NodeState`](yunta_core::events::NodeState) either way, so no
 //! surface has to invent a second vocabulary for the same fact.
+//!
+//! A reader that follows a run takes each event into its state and its
+//! chronicle at once, with [`RunState::chronicled`]: the one fold, so the
+//! state it holds is the one [`RunState::replay`] derives, and the moments
+//! it gathered read by read are the [`chronicle`] of the whole log.
 
 use std::time::Duration;
 
@@ -15,7 +20,7 @@ use crate::RunState;
 use yunta_core::events::meta::EventMeta;
 use yunta_core::events::{
     artifacts, children, findings, gates, node, run, scope, session, tasks, EventPayload,
-    StoredEvent,
+    NodeRecord, StoredEvent,
 };
 use yunta_core::{NodeId, Seq};
 
@@ -58,47 +63,65 @@ pub enum Happening {
 /// Reads the log as the sequence of moments a person met it as: one per
 /// event, in the log's order, each placed by the run's own elapsed.
 ///
-/// Pure, and monotone in the log: the chronicle of a prefix is a prefix
-/// of the chronicle. It folds the same `apply` the ledgers fold, and
-/// reads each moment against the state *at that event* — so the time a
-/// node worked and the children it dragged with it are the ones it had
-/// then, not the ones the run ended with.
+/// [`RunState::chronicled`] over the slice, from a fresh state. Pure, and
+/// monotone in the log: the chronicle of a prefix is a prefix of the
+/// chronicle.
 pub fn chronicle(events: &[StoredEvent]) -> Vec<Moment> {
     let mut state = RunState::default();
     events
         .iter()
-        .map(|event| {
-            let before = state.nodes.clone();
-            // Folded exactly as replay folds, break included: once the
-            // log stops making sense nothing further is applied, so the
-            // two derivations never disagree about a state. Every event
-            // still earns its moment — a reader not told the log carries
-            // more than the binary could fold is a reader misled.
-            if state.broken.is_none() {
-                if let Err(error) = state.apply(event) {
-                    state.broken = Some(error.to_string());
-                }
-            }
-            let meta = EventMeta::of(event);
-            Moment {
-                seq: event.seq,
-                at: event.timestamp,
-                // On the run's awake clock, read off the state this event
-                // leaves: a moment after the host slept sits where the
-                // run's own time put it, not an hour on.
-                elapsed: state.elapsed(Some(event.timestamp)).unwrap_or_default(),
-                node: event.node_id.clone(),
-                happening: happening(event, &meta, &before, &state),
-            }
-        })
+        .filter_map(|event| state.chronicled(event))
         .collect()
+}
+
+impl RunState {
+    /// Takes one event as [`fold`](RunState::fold) takes it, and hands
+    /// back the moment it is, read against the state *at that event* — so
+    /// the time a node worked and the children it dragged with it are the
+    /// ones it had then, not the ones the run ended with.
+    ///
+    /// `None` for an event at or below the head: it was taken already, so
+    /// news handed twice add no moment. Past the event where the log
+    /// broke, an event moves nothing but the head and still earns its
+    /// moment — a reader not told the log carries more than the binary
+    /// could fold is a reader misled.
+    ///
+    /// Of the state before the event, a moment reads only the record of
+    /// the node a node event names, so that record alone is kept across
+    /// the fold: a run read whole costs its events, never a copy of every
+    /// node's record, calls and all, at each of them.
+    pub fn chronicled(&mut self, event: &StoredEvent) -> Option<Moment> {
+        if self.has_taken(event.seq) {
+            return None;
+        }
+        let before = match event.payload() {
+            Some(EventPayload::Node(_)) => event
+                .node_id
+                .as_ref()
+                .and_then(|node| self.nodes.get(node))
+                .cloned(),
+            _ => None,
+        };
+        self.fold(event);
+        let meta = EventMeta::of(event);
+        Some(Moment {
+            seq: event.seq,
+            at: event.timestamp,
+            // On the run's awake clock, read off the state this event
+            // leaves: a moment after the host slept sits where the run's
+            // own time put it, not an hour on.
+            elapsed: self.elapsed(Some(event.timestamp)).unwrap_or_default(),
+            node: event.node_id.clone(),
+            happening: happening(event, &meta, before.as_ref(), self),
+        })
+    }
 }
 
 /// What one event says happened, in its own domain's words.
 fn happening(
     event: &StoredEvent,
     meta: &EventMeta<'_>,
-    before: &yunta_core::events::NodeLedger,
+    before: Option<&NodeRecord>,
     after: &RunState,
 ) -> Happening {
     let Some(payload) = event.payload() else {

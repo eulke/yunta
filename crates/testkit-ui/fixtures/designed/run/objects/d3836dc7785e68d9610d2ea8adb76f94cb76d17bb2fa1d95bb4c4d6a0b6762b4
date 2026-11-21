@@ -1,0 +1,77 @@
+summary: Add explicit per-user global pack installation alongside project-level installs
+description: Pack installation currently writes to the current project's .yunta/packs/ and .yunta/yunta.lock. Add an explicit --global mode that stores packs and their lock in a per-user Yunta data directory, so the same pack can be installed for broader use without changing project installs. Project and global installs are selected explicitly; global installs do not shadow or merge with project installs.
+design: The selected install target determines both the vendor directory and lock file. add, update, remove and list operate on one target at a time; --global selects the per-user target and omission keeps the existing project target. The pack manifest, audit, permission checks, atomic staging, lock integrity checks and output remain shared.
+decisions:
+- id: global-root
+  question: Where does a global pack live?
+  choice: Under the current user's platform data directory, in a Yunta-specific subdirectory, shared by that user's projects.
+  alternatives:
+  - A fixed home-directory path such as ~/.yunta
+  - A machine-wide directory shared across users
+  why: The platform data directory is intended for per-user application data and avoids coupling installations to a project checkout or requiring machine-wide permissions.
+  answers: where-global-lives
+- id: global-flag
+  question: How is a global install requested?
+  choice: --global on pack add, update, remove and list; without it, commands retain project-level behavior.
+  alternatives:
+  - A separate pack global command group
+  - A global-by-default install
+  why: An explicit flag makes the target visible in each operation and preserves the existing default for scripts and project workflows.
+  answers: how-requested
+- id: independent-stores
+  question: How do global and project packs interact?
+  choice: Stores and locks stay independent; no implicit precedence or fallback. Every operation affects only the selected target.
+  alternatives:
+  - Project packs override global packs
+  - Global packs override project packs
+  why: The brief does not define runtime lookup precedence; independent stores avoid silently changing current project behavior.
+risks:
+- A user who sets YUNTA_HOME expects every store of theirs beneath it
+- Two processes installing the same global pack at once race on its lock
+out_of_scope:
+- Resolving a workflow's pack from the global store at run time
+- A machine-wide installation shared across users
+- Moving an installed pack between the project and the global store
+tasks:
+- id: global-pack-install
+  title: Add explicit global pack install target
+  scope:
+  - crates/cli/src/pack.rs
+  - crates/cli/src/cli/pack.rs
+  - crates/cli/src/cli/dispatch.rs
+  - crates/cli/src/commands/pack.rs
+  - crates/cli/tests/pack_cmd.rs
+  criteria:
+  - cmd: cargo test --workspace --test pack_global_spec global_pack_commands_use_the_per_user_store_without_changing_the_project_store
+    proves: The new end-to-end test verifies global add, list, update and remove use the per-user store while the project store remains independent.
+  description: Adds the per-user install target, its store and its lock, and the --global flag that selects it.
+  changes:
+  - at: crates/cli/src/pack.rs
+    what: The target enum, global store root and corresponding lock path; project paths retain their current layout.
+    code: |
+      pub enum PackTarget {
+          Project,
+          Global,
+      }
+      
+      pub fn pack_target_root(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError>
+      pub fn pack_target_lock_path(target: PackTarget, cwd: &Path) -> Result<PathBuf, PackError>
+  - at: crates/cli/src/cli/pack.rs
+    what: Add a --global boolean to add, update, remove and list; preserve new and audit arguments.
+    code: |
+      pub(super) enum PackAction {
+          Add { source: String, yes: bool, run_tests: bool, global: bool },
+          Update { pack: PackRef, r#ref: String, yes: bool, global: bool },
+          New { pack: PackRef },
+          Remove { pack: PackRef, global: bool },
+          List { global: bool },
+          Audit { pack: PackRef },
+      }
+  - at: crates/cli/src/commands/pack.rs
+    what: Use the selected target for vendored directories, lock loading and saving, staging, and removal; share existing policy, audit and atomic replacement.
+    code: |
+      pub async fn add(source: &str, confirmed_executors: bool, run_tests: bool, target: PackTarget, look: &Look) -> Result<Outcome, CliError>
+      pub async fn update(pack: &PackRef, new_ref: &str, confirmed_executors: bool, target: PackTarget, look: &Look) -> Result<Outcome, CliError>
+      pub fn remove(pack: &PackRef, target: PackTarget, look: &Look) -> Result<Outcome, CliError>
+      pub fn list(target: PackTarget, look: &Look) -> Result<Outcome, CliError>
+  outcome: Before, yunta pack add, update, remove and list operate on the current project only. After, the same commands accept --global and show or change the per-user installation and lock, while omitting the flag continues to operate on the project installation.

@@ -20,15 +20,16 @@
 //! from samples beside the frame's types, every field it is not about filled
 //! in once.
 //!
-//! The root's own parts are private: `refuse` holds the events a log cannot
-//! take, `clock` books the run's wall clock, `activity` counts what sessions
-//! handed over, `attempt` reads what a node is doing now, `decisions` reads
-//! what a person decided about a node, and `tree` says whether the tree
-//! moved since a node's failure.
+//! The root's own parts are private: `fold` takes each event in, `refuse`
+//! holds the events a log cannot take, `clock` books the run's wall clock,
+//! `activity` counts what sessions handed over, `attempt` reads what a node
+//! is doing now, `decisions` reads what a person decided about a node, and
+//! `tree` says whether the tree moved since a node's failure.
 //!
-//! [`RunState::replay`] is the functional core: a pure function over an
-//! event slice, no IO, safe to call from a property test or from `yunta
-//! resume` alike. It derives node lifecycle
+//! [`RunState::fold`] is the functional core: one event taken into the
+//! state, no IO, alike for a reader that follows a run and for
+//! [`RunState::replay`], which folds a whole log for a property test or
+//! for `yunta resume`. It derives node lifecycle
 //! (`node_started`/`node_finished`/`node_failed`), task status and the
 //! node each task belongs to (`task_registered`/`task_status_changed`),
 //! what the run has spent, which `limits.max_tokens_per_run` is compared
@@ -41,12 +42,14 @@
 //! construction, so a node that asked comes back `Running`, owed the
 //! terminal its close deferred.
 //!
-//! A log that is insufficient or inconsistent — e.g. `node_finished` for a
-//! node that was never `node_started` — marks the result `broken` with a
-//! diagnostic naming the exact event, rather than panicking or guessing.
-//! Replay stops at the first such event; the state accumulated up to
-//! that point is still returned. There is no corrupt state between the
-//! two: the events derive a state, or the run is `broken`. A kind this
+//! The fold keeps two rules. An event at or below the state's
+//! [`head`](RunState::head) was taken already and moves nothing. And a log
+//! that is insufficient or inconsistent — e.g. `node_finished` for a node
+//! that was never `node_started` — marks the state `broken` with a
+//! diagnostic naming the exact event, rather than panicking or guessing;
+//! past it, an event moves the head and nothing else, so a reader never
+//! reads the broken log's tail again. There is no corrupt state between
+//! the two: the events derive a state, or the run is `broken`. A kind this
 //! binary does not know is neither: it is kept by position and name in
 //! `unknown_events`, counted by [`RunState::unknown_kinds`], and the fold
 //! goes on.
@@ -74,12 +77,10 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::artifacts::ArtifactLedger;
-use yunta_core::events::findings::FindingLedger;
-use yunta_core::events::tasks::ledger::UnknownTask;
+use yunta_core::events::findings::{FindingLedger, PostedFinding};
 use yunta_core::events::{
-    ChildLedger, DegradationLedger, EventMeta, EventPayload, Failure, Finding, GateLedger,
-    GrantLedger, NodeLedger, NodeState, RunEvent, RunLedger, RunMetrics, Spend, StoredEvent,
-    TaskLedger, TokenUsage, UnknownKindCount,
+    ChildLedger, DegradationLedger, Failure, Finding, FindingSeverity, GateLedger, GrantLedger,
+    NodeLedger, NodeState, RunLedger, RunMetrics, Spend, TaskLedger, TokenUsage, UnknownKindCount,
 };
 use yunta_core::{NodeId, RunId, Seq};
 
@@ -95,6 +96,7 @@ mod activity;
 mod attempt;
 mod clock;
 mod decisions;
+mod fold;
 mod refuse;
 mod tree;
 
@@ -147,12 +149,20 @@ pub struct RunState {
     /// The run this log is of, read off its events. Left out of the comparison: two
     /// runs that derive the same facts are the same state.
     run_id: Option<RunId>,
+    /// The seq of the last event folded. It moves past a break while the
+    /// ledgers stay at it, and is left out of the comparison.
+    head: Option<Seq>,
+    /// The seq of the last event applied: the head, until the log breaks,
+    /// and where it last made sense once it has. Left out of the comparison,
+    /// as the head is.
+    applied: Option<Seq>,
 }
 
-/// Two states are the same when they derive the same facts. The clock and
-/// the activity are read beside those facts and are left out of the
-/// comparison: an event delivered twice derives the same facts, while the
-/// activity counts both deliveries.
+/// Two states are the same when they derive the same facts. The clock, the
+/// activity and the head are read beside those facts and are left out of
+/// the comparison: a second event stating what the run already holds
+/// derives the same facts while the activity counts it, and an event that
+/// moves no ledger still moves the head.
 impl PartialEq for RunState {
     fn eq(&self, other: &Self) -> bool {
         self.run == other.run
@@ -172,20 +182,6 @@ impl PartialEq for RunState {
 }
 
 impl RunState {
-    /// The state `events` leave a run in, folded in `seq` order. Pure: same
-    /// input, same output, always — a property test relies on exactly
-    /// this.
-    pub fn replay(events: &[StoredEvent]) -> RunState {
-        let mut state = RunState::default();
-        for event in events {
-            if let Err(error) = state.apply(event) {
-                state.broken = Some(error.to_string());
-                break;
-            }
-        }
-        state
-    }
-
     /// How many events of each kind this binary does not know, which a
     /// newer engine wrote: grouped by kind and sorted by name, and empty
     /// for a log this binary interprets in full.
@@ -344,6 +340,24 @@ impl RunState {
         unsettled.map(|posted| posted.finding).collect()
     }
 
+    /// The findings that keep the run from being done, each by the node that posted it:
+    /// those of blocking severity among the unsettled ones, two that make the same complaint
+    /// at the same place counted once, as [`dedup_findings`] counts them, in the order each
+    /// was first posted. What a run's frame and its receipt count, and its receipt's pane
+    /// lists. Not [`RunState::unsettled_findings`], whatever their severity.
+    pub fn findings_that_block(&self) -> Vec<PostedFinding> {
+        let mut seen = std::collections::HashSet::new();
+        self.findings
+            .unsettled()
+            .into_iter()
+            .filter(|posted| {
+                let finding = &posted.finding;
+                seen.insert((finding.location.clone(), finding.complaint()))
+            })
+            .filter(|posted| posted.finding.severity == FindingSeverity::Blocking)
+            .collect()
+    }
+
     /// Whether `node`'s questions were answered and its close still owes
     /// it a terminal.
     ///
@@ -365,106 +379,6 @@ impl RunState {
             }
         });
         answered && owed
-    }
-
-    /// Folds one event into every ledger its domain reaches.
-    ///
-    /// The order is fixed. The event is refused first, so a refused event
-    /// moves nothing and books no time. A suspension the event states is
-    /// recorded next, before the stretch it ends is booked, so that
-    /// stretch leaves the sleep out. The stretch is then booked against
-    /// what the ledgers hold open, and each owner folds the event. The
-    /// activity counts it last.
-    ///
-    /// The dispatch names every domain: a kind this binary knows and no
-    /// ledger reads would be a kind that silently derives nothing, which
-    /// is the failure this shape exists to make impossible.
-    pub fn apply(&mut self, event: &StoredEvent) -> Result<(), ReplayError> {
-        self.refuse(event)?;
-        if self.run_id.is_none() {
-            self.run_id = Some(event.run_id.clone());
-        }
-        let meta = EventMeta::of(event);
-        if let Some(EventPayload::Run(e @ RunEvent::HostSuspended(_))) = event.payload() {
-            self.run.apply(e, &meta);
-        }
-        let open = Open::of(&self.run, &self.nodes, &self.gates, &self.tasks);
-        self.clock.book(event, &open, self.run.suspensions());
-        self.apply_owners(event, &meta)?;
-        self.activity.apply(event);
-        self.tail_paused = matches!(
-            event.payload(),
-            Some(EventPayload::Run(RunEvent::Paused(_)))
-        );
-        Ok(())
-    }
-
-    /// Hands the event to every ledger that reads its domain.
-    fn apply_owners(
-        &mut self,
-        event: &StoredEvent,
-        meta: &EventMeta<'_>,
-    ) -> Result<(), ReplayError> {
-        let Some(payload) = event.payload() else {
-            // A kind this binary does not know: counted, named, never a
-            // reason to stop deriving what it does know.
-            self.unknown_events
-                .push((event.seq, event.body.kind_name().to_string()));
-            return Ok(());
-        };
-        match payload {
-            EventPayload::Run(e) => self.apply_run(e, meta),
-            EventPayload::Node(e) => {
-                self.nodes.apply(e, meta, self.run.suspensions());
-                self.tasks.apply_criteria(e);
-            }
-            EventPayload::Session(e) => {
-                self.nodes
-                    .apply_session(e, meta)
-                    .map_err(|_| ReplayError::SessionWithoutNode {
-                        seq: event.seq,
-                        kind: event.body.kind_name().to_string(),
-                    })?;
-                self.tasks.apply_session(e);
-                self.degradations.apply(e, meta);
-            }
-            EventPayload::Tasks(e) => self.tasks.apply(e, meta).map_err(|UnknownTask(task)| {
-                ReplayError::StatusWithoutTask {
-                    seq: event.seq,
-                    task,
-                }
-            })?,
-            EventPayload::Scope(e) => self
-                .grants
-                .apply(e, meta)
-                .map_err(|_| ReplayError::UngrantableSubject { seq: event.seq })?,
-            EventPayload::Findings(e) => self.findings.apply(event.node_id.as_ref(), e),
-            EventPayload::Artifacts(e) => {
-                self.artifacts.apply(event.node_id.as_ref(), event.seq, e);
-            }
-            EventPayload::Gates(e) => {
-                self.gate_transition(e, event, meta)?;
-                self.gates.apply(e, meta);
-            }
-            EventPayload::Children(e) => self.children.apply(e, meta),
-        }
-        Ok(())
-    }
-
-    /// The run's own events. A host suspension was recorded before the clock
-    /// booked its stretch, so it is not folded again here; a pause, a resume
-    /// or a close ends every question the run still holds.
-    fn apply_run(&mut self, event: &RunEvent, meta: &EventMeta<'_>) {
-        if matches!(event, RunEvent::HostSuspended(_)) {
-            return;
-        }
-        self.run.apply(event, meta);
-        if matches!(
-            event,
-            RunEvent::Paused(_) | RunEvent::Resumed(_) | RunEvent::Finished(_)
-        ) {
-            self.gates.clear_asking();
-        }
     }
 }
 

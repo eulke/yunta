@@ -1,6 +1,10 @@
-//! Reading a run's log the way a test asks about it, and writing the
-//! events a run would have written.
+//! Reading a run's log the way a test asks about it, and where each run
+//! of a store stands, writing the events a run would have written,
+//! loading a log a run wrote into a store of its own, and setting a
+//! store's log aside, so every read of it fails, and putting it back.
 
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use yunta_core::events::artifacts::ArtifactRef;
@@ -28,6 +32,17 @@ pub fn accepted(events: &[StoredEvent]) -> Vec<ArtifactRef> {
             }),
             _ => None,
         })
+        .collect()
+}
+
+/// Each run's last seq in the log at `store`, by run: where a reader that
+/// stands caught up with the log has read each run to.
+pub fn heads(store: &Path) -> BTreeMap<RunId, Seq> {
+    let storage = Storage::open(store).expect("the store whose heads are read");
+    let heads = storage.heads().expect("the log's heads");
+    heads
+        .into_iter()
+        .map(|head| (head.run_id, head.seq))
         .collect()
 }
 
@@ -100,6 +115,55 @@ pub fn status_changed_carrying(
         "commit": commit.as_str(),
     });
     serde_json::from_value(wire).expect("the wire shape of a task_status_changed")
+}
+
+/// `events`, a log a run wrote, loaded into the store at `store` as it was
+/// written: each at its own instant, in the order given. A run's events
+/// are loaded from its first, no seq missed, so each takes the seq it
+/// holds; the store chains them afresh, as it chains every append.
+pub fn loaded(store: &Path, events: &[StoredEvent]) {
+    let storage = Storage::open(store).expect("the store a log is loaded into");
+    for event in events {
+        let payload = event
+            .payload()
+            .unwrap_or_else(|| panic!("seq {} is of a kind this binary reads", event.seq))
+            .clone();
+        let draft = EventDraft::new(event.run_id.clone(), event.node_id.clone(), payload)
+            .expect("a draft names its subject");
+        let seq = storage
+            .append_at(&draft, event.timestamp)
+            .expect("the store takes the event");
+        assert_eq!(
+            seq, event.seq,
+            "`{}`'s log is loaded from its first event, every seq in turn",
+            event.run_id
+        );
+    }
+}
+
+/// The table a log set aside keeps its events in: one no read of the log names.
+const EVENTS_ASIDE: &str = "events_set_aside";
+
+/// The log at `store` set aside, behind every connection open on it: from here every
+/// read of a run's events or of the runs' heads fails, so each look a following takes
+/// at it fails whole, until [`put_log_back`]. Not a broken payload, which makes one run
+/// unreadable.
+pub fn set_log_aside(store: &Path) {
+    renamed(store, "events", EVENTS_ASIDE);
+}
+
+/// The log at `store`, set aside by [`set_log_aside`], put back as it was: every read
+/// of it goes through again.
+pub fn put_log_back(store: &Path) {
+    renamed(store, EVENTS_ASIDE, "events");
+}
+
+/// The table `from` of the log at `store` renamed `to`, in one commit another
+/// connection reads at its next statement.
+fn renamed(store: &Path, from: &str, to: &str) {
+    let log = rusqlite::Connection::open(store).expect("the log at the store");
+    log.execute_batch(&format!("ALTER TABLE {from} RENAME TO {to}"))
+        .unwrap_or_else(|error| panic!("the log's `{from}` renamed `{to}`: {error}"));
 }
 
 /// The `run_created` a log written by hand opens with: a manifest named by

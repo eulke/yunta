@@ -1,0 +1,24 @@
+ yunta › Q78GRR › fix-findings                      ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h48m                               Q78GRR
+ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+ findings · 2 of 4 answered · review@reviewer, review@reviewer-alt, conform
+
+   ✓ major    Global pack paths ignore the configured YUNTA_HOME
+              fixed: Global pack paths now use the shared user_state_root reso…
+ ▸ ▲ major    Global pack commands ignore the configured YUNTA_HOME state root
+   ◌ minor    Pack audit cannot inspect globally installed packs
+   ✓ blocking Pack target API shapes are defined outside the declared file
+              fixed: PackTarget and its path functions are now defined in crat…
+
+ what it is doing · 6 calls
+ … 6 above
+ run     cargo test
+ finding target-outside-declared-file of `conform` answered fixed: PackTarget…
+ call    yunta_answer_finding
+ finding global-paths-ignore-yunta-home of `review@reviewer` answered fixed: G…
+ 26.9M tokens ▁▁▂▂▁█▁▁▁▂▁▁▁▁▁ · 1h09m at work · 38m51s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused…  · a go there
+ j k finding · tab nodes · s stats · q field, it keeps going · ? keys

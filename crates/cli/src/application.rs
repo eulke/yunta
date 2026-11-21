@@ -3,15 +3,19 @@
 //! works in it; anywhere else the command prints as it always has.
 //!
 //! The application is handed what the shell read: a performer over the workspace, the
-//! stdout look, the workspace's clock, the system's opener for a page, and the signals
-//! that ask the process to end; how it ended is the code the process exits with. A
-//! terminal that will not be held is printed to instead; one that fails once the
-//! application is open ends the command with the failure said.
+//! stdout look, the workspace's clock, the system's opener for a page, whether the project
+//! asks for the bell when a run needs the person (`terminal.bell`, as an attached run reads
+//! it), and the signals that ask the process to end; how it ended is the code the process
+//! exits with. A project whose configuration cannot be read asks for no bell: the
+//! application says why it cannot read it where it follows the project. A terminal that
+//! will not be held is printed to instead; one that fails once the application is open
+//! ends the command with the failure said.
 
 use std::io::IsTerminal;
 use std::sync::Arc;
 
 use surco::look::Look;
+use yunta_core::events::Channel;
 use yunta_tui::{Application, Exit, TerminalFailure};
 use yunta_ui::{Performer, Request, State};
 
@@ -38,12 +42,16 @@ pub(crate) async fn at_this_terminal(
     opened: (State, Vec<Request>),
 ) -> Result<Option<Outcome>, CliError> {
     let workspace = shell.workspace();
-    let performer = Arc::new(Performer::new(workspace.clone()));
+    let performer = Arc::new(Performer::new(workspace.clone(), Channel::Tty));
+    let bell = workspace
+        .project()
+        .is_ok_and(|project| project.config.terminal_bell());
     let application = Application::new(
         performer,
         *look,
         workspace.clock.clone(),
         crate::browser::open,
+        bell,
     );
     let asked_to_end = shell.asked_to_end()?;
     Ok(match application.run(opened, asked_to_end).await {

@@ -5,9 +5,8 @@
 //! remembering a decision that was never really made.
 
 use yunta_core::events::{
-    Approval, Claim, ConsoleGate, EngineFact, Escalation, EventPayload, Failure, GateEvent,
-    GateOption, GateResolvedPayload, Menu, NodeOutcome, PauseReason, Shown, TokenUsage,
-    WhyWithheld, Withheld,
+    Approval, Claim, ConsoleGate, EngineFact, Escalation, Failure, GateOption, Menu, NodeOutcome,
+    PauseReason, Shown, TokenUsage, WhyWithheld, Withheld,
 };
 use yunta_core::reserved::ReservedOption;
 use yunta_core::shown::Flaw;
@@ -35,18 +34,8 @@ pub(super) async fn degrade_to_console(
         ))));
     };
 
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload()))),
-    )
-    .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
-            choice.clone(),
-        ))),
-    )
-    .await?;
+    ctx.emit_decided(Some(&node.id), escalation, choice.clone())
+        .await?;
     emit_started(ctx, node).await?;
     if ReservedOption::of(&choice.option) == Some(ReservedOption::Approve) {
         finish_node(

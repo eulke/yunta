@@ -14,6 +14,7 @@ fn working_in(dir: &Path) -> Workspace {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SystemIdSource),
         secrets: Arc::new(ProcessSecrets),
+        forges: Arc::new(crate::DeclaredForge),
         binary: "yunta".into(),
     }
 }

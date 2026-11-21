@@ -1,0 +1,36 @@
+ yunta :: /cut/worktree                                                                      ? 5 need you ; ^ 1 stalled
+........................................................................................................................
+  :: what do you want to build?  ; n                                          | ? published (default) ; needs you
+                                                                              | =================== ...................
+  asking now                                                                  |   node `approve` wants an external gate
+    ? Q78GRR standard  ==============.. node `tests` asks at its ter...   0s  |   (assignee: reviewer) but no forge is
+                                                                              |   reachable from this machine (no
+  needs you, oldest first                                                     |   credentials, or none configured):
+    ? EZRPE9 quick     = . .. o .       node `grill` failed: session...  40d  |   resolve it here instead.
+  * ? C0NS0E default   == .             node `approve` wants an exte...   1h  |
+    ? T0KENS default   == .             its token budget is spent (...    1h  |   waiting      for 1h
+    ? B10CKD default   == .             no node is runnable: `ship`...    1h  |   branch       yunta/run/...C0NS0E off
+                                                                              |                main
+  stalled                                                                     |
+    ^ EKPBGE standard  = . .. . .       no process is driving it: th...  11d  | what you can do
+                                                                              | r      hand it back
+  stopped                                                                     | x      close it for good
+    # ST0PPD default   ==               interrupted by a person           1h  |
+    # AB0RTD default   == =             a person paused the run at n...   1h  |
+                                                                              |
+  running                                                                     |
+    > TW0TSK default   == =             1 of 2 nodes done                 1h  |
+                                                                              |
+  unreadable                                                                  |
+    ! 0RPHAN                            manifest missing or unreadab...       |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+ + C0NS0E resumed, driving forward independently.
+ j k move ; enter open ; n new run ; x close ; q quit                                               / anything ; ? keys

@@ -1,0 +1,14 @@
+ yunta › TW0TSK › implement     ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● independent-tasks (default) · running · for 2m27s
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ nothing needs you: it is moving
+ implement · loop               executor on mock/mock-model
+ ⠼ task-1  Write the greeting · attempt 1
+ ⠼ task-2  Write the farewell · attempt 1
+   what it is doing · 4 calls
+   … 8 above
+   write   task-2  farewell.txt
+ 0 tokens · 2m25s at work
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · s stats · g graph · … · ? keys

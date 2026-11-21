@@ -17,6 +17,9 @@ use crate::ids::{NodeId, RunId, Seq};
 /// One round of questions a node asked, and the answer it got.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuestionRound {
+    /// Where the log holds the `questions_asked` that opened the round: what
+    /// names the round while the run parks on it again.
+    pub asked_at: Seq,
     /// The answer, once one was recorded. A round with none is the round
     /// the node is waiting on.
     pub answered: Option<QuestionsAnsweredPayload>,
@@ -220,6 +223,7 @@ impl GateRecord {
                 self.waiting = None;
             }
             GateEvent::QuestionsAsked(_) => self.rounds.push(QuestionRound {
+                asked_at: seq,
                 answered: None,
                 answered_at: None,
             }),

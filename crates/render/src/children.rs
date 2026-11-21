@@ -1,11 +1,12 @@
 //! The children a run bore, as the rows a person reads them in: each
 //! under the node that bore it, saying where it stands and which run it
-//! is — a tree, never a number.
+//! is — a tree, never a number. A child shown in its parent's place says
+//! which run bore it, and by which node ([`child_of`]).
 
 use surco::glyphs::{Glyphs, Mark};
 use surco::words::Standing;
 use yunta_core::events::{ChildLink, TerminalState};
-use yunta_core::NodeId;
+use yunta_core::{NodeId, RunId};
 use yunta_replay::frame::RunFrame;
 
 /// What a child run whose link the log recorded under no node is filed
@@ -62,6 +63,16 @@ pub fn children_of<'a>(frame: &'a RunFrame, node: &NodeId) -> Vec<&'a ChildLink>
         .iter()
         .filter(|child| child.node.as_ref() == Some(node))
         .collect()
+}
+
+/// What a child shown in its parent's place says of where it came from:
+/// the `parent` that bore it, by its handle, and the `node` of the parent
+/// that opened it. Not [`child_row`], the row a parent lists a child on.
+pub fn child_of(parent: &RunId, node: &NodeId) -> String {
+    format!(
+        "a child of {}, opened by its node `{node}`",
+        parent.handle()
+    )
 }
 
 /// Where a child stands, as the mark that carries it for the eye and
@@ -177,6 +188,12 @@ mod tests {
             row.find("still open") < row.find(FIRST.handle()),
             "a row cut to a narrow terminal loses which child, never that there is one: {row}"
         );
+    }
+
+    #[test]
+    fn a_child_shown_in_its_parents_place_says_which_run_bore_it_and_by_which_node() {
+        let said = child_of(&RUN, &NodeId::from_static("feat"));
+        assert_eq!(said, "a child of T1Y0P5, opened by its node `feat`");
     }
 
     #[test]

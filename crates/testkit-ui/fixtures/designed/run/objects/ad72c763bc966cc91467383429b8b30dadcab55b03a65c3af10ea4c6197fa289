@@ -1,0 +1,28 @@
+specs:
+- task: global-pack-install
+  files:
+  - path: crates/cli/tests/pack_global_spec.rs
+    content: |
+      //! Global pack commands use the per-user store and leave the
+      //! project's store as it was.
+      
+      use yunta_testkit::{Checkout, PackSource};
+      
+      #[test]
+      fn global_pack_commands_use_the_per_user_store_without_changing_the_project_store() {
+          let home = tempfile::tempdir().unwrap();
+          let checkout = Checkout::new().committed();
+          let pack = PackSource::named("acme/demo");
+      
+          checkout.yunta_in(home.path(), &["pack", "add", "--global", pack.as_str(), "--yes"]);
+          let listed = checkout.yunta_in(home.path(), &["pack", "list", "--global"]);
+          assert!(listed.stdout.contains("acme/demo"));
+          assert!(home.path().join("packs/acme/demo").exists());
+          assert!(!checkout.path().join(".yunta/packs/acme/demo").exists());
+      
+          checkout.yunta_in(home.path(), &["pack", "remove", "--global", "acme/demo"]);
+          assert!(!home.path().join("packs/acme/demo").exists());
+      }
+  tests:
+  - cmd: cargo test --workspace --test pack_global_spec global_pack_commands_use_the_per_user_store_without_changing_the_project_store
+    proves: The new end-to-end test verifies global add, list, update and remove use the per-user store while the project store remains independent.

@@ -1,0 +1,14 @@
+ yunta › Q78GRR chronicle       ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h02m           Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ nothing needs you: it is moving
+ its whole chronicle · 104 moments
+ … 100 above
+ implement  run     cargo xtask
+ implement  run     cargo check
+ implement  read    crates/cli/src/commands/pack_audit.rs
+ implement  call    yunta_request_scope_expansion
+ 13.7M tokens · 47m47s at work · 15m05s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ ↑↓ scroll · esc back · n new run · ? keys

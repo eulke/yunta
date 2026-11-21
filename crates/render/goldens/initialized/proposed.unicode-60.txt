@@ -27,4 +27,4 @@ for `claude-code`:
     runner: implementer
 
 next
-  yunta doctor   confirms everything above is usable
+  yunta doctor   check adapters, git, forge, packs

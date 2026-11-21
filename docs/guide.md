@@ -690,16 +690,72 @@ on the first run, which asks what to build.
 
 The application follows runs and never runs one: a run it starts is handed to an engine
 of its own, as `yunta run --detach` hands it, and the application reads its log as
-`yunta status <run> --follow` does. Leaving leaves every run where it stands.
+`yunta status <run> --follow` does. The field and a run's screen move as their runs do,
+with no key to press, and a run stays followed under every screen opened over it. Leaving
+leaves every run where it stands.
 
-The last row says the keys of the screen; `?` lists every key it takes, and `/` opens the
-palette: what can be done from here, each row the command that does the same at a shell,
-narrowed by what is typed, `enter` taking a row. On the field, `enter` opens the run
-pointed at, `w` the workflows and `m` doctor. On a run, `a` answers what it waits on and
-`p` reads the plan it waits on, where it does; `s` and `g` open its numbers and its graph,
-`o` its page in a browser, and `e` the receipt of a run that finished. `esc` goes back where you came from, and `q` leaves. Ctrl-C leaves with
-the code an interrupt exits with, and Ctrl-Z stops it as any program, `fg` bringing it
-back.
+The last row says the keys of the screen; `?` lists them, each with what it does, and `/`
+opens the palette: what can be done from here, each row what it does, the key that does it
+there where one does, and the command that does the same at a shell, narrowed by what is
+typed, `enter` taking a row. The row above the keys names the run that needs you, and `a`
+goes there; right after a key that acts, that row says once what the act came to. On the
+field, `enter` opens the run pointed at, `w` the workflows and `m` doctor.
+
+A run's screen says across its top how the run stands and how far it has come; from 102
+columns its nodes stand beside what is shown, and its foot says what the run has spent.
+What is shown follows the run as it moves: the node at work and what it does as it
+happens, the newest last; a loop's board of tasks; or the findings reviewers post and the
+answers they get, where `j` and `k` move along the findings and `tab` hands them to the
+nodes and back. Scrolled back, what a node does stays where you left it, counting what
+comes under it, until `End`, `f` or scrolling to its last row takes it to its end again. A
+run that stands still says why: a pause nothing here answers, no room left on the disk,
+nodes left half done, a stop, or no process driving it. A run that waits on its pull
+request shows how the forge's review of it stands, and `o` opens it.
+
+`j` and `k` move along the run's nodes, the node pointed at shown as it stands, with what
+it handed over and what it does, and the trail names it; `f` gives the pointer back to the
+run. The arrows, `PgUp`, `PgDn`, `Home`, `End` and the space bar move through what is shown.
+`a` goes where the row above the keys says: to what the run waits on you for, or to the run
+it names, in place of this one. `r` continues the run from its log and `x` closes it where
+the last row names them; elsewhere the palette takes them where the run offers them. On a
+run with no room left on the disk, `u` opens upkeep over it, which makes room once you
+confirm it. `s` and `g` open its numbers and its graph, `o` its page in a browser, and,
+where no prompt stands in place, `n` starts a new run. `c` stops the run, `e` writes the
+receipt of a run that finished, and `v` verifies the evidence of a run that finished or
+whose log broke: the palette lists them with their keys. The palette also opens the run's
+whole chronicle, every moment of it as `yunta status <run> --follow` says each, the newest
+last, which keeps to its end the same way. `q` and `esc` leave the run for the field, which
+says until the next key whether the run keeps going, waits on someone or ended.
+
+A run that finished shows its receipt: its criteria, its baseline, its scope, its review and
+its event chain, each checked, then what it cost, what it changed and its pull request, and,
+for a run that reports, the findings that block it. Showing it verifies the event chain once
+and writes nothing; `e` writes `receipt.md`. A run that failed shows how, at the node that
+failed, and one whose log broke shows where the log stops making sense. A run promoted to
+another mode names its successor, which takes the screen as it comes while the pointer is
+the run's; where you point at a node, the screen stays on the run until `f` gives the
+pointer back, and the successor takes it then.
+
+A run that waits on you shows what it asks in place, and `esc` puts it aside with nothing
+recorded, pointing at the node that asks; `a` or `f` brings it back as you left it, and
+`esc` again leaves the run. A round of questions stands in place of the nodes and what is
+shown: every key types there or chooses with the arrows, `enter` answers and `shift-tab`
+goes back. A gate that shows its plan, where the plan's work has changed no file yet, shows
+the plan's desk between the rule and the row above the keys, on the plan's first task, its
+keys as the next section says. Any other decision shows its card at the foot of what is
+shown, under what the decision rests on, which the arrows scroll: `j`, `k`, `tab` or a
+number choose an option, `enter` answers and `n` adds a note. An option that asks for
+words, or a note, asks for them under the options, and `esc` there goes back to the
+options. Where the card offers the plan, `r` turns it to the plan's desk in its place, and
+`esc` there brings the card back. A decision answered elsewhere meanwhile, at a shell or by
+a session, takes its prompt away, and what was typed on it with it: the row above the keys
+says who answered. A run parked on a child run it started shows the child in its place, the
+trail naming the run and the node that started the child before it: there `esc` goes up to
+the run, pointed at that node, and `f` shows the child again.
+
+On a page opened over a run or the field, `esc` goes back where you came from, and `q`
+leaves, as `q` and `esc` do on the field. Ctrl-C leaves with the code an interrupt exits
+with, and Ctrl-Z stops it as any program, `fg` bringing it back.
 
 It needs 60 columns by 14 rows, and says so under them. It never takes the mouse:
 selecting and copying text works as at the shell.
@@ -733,10 +789,12 @@ opens on what it is: how many tasks in how many steps, what it decided for you, 
 it risks and leaves out, what keeps it from being proven when anything does, and
 what you asked the run for, quoted from the input the workflow declares as the
 request. Then the change: its description whole, with each diagram its author drew —
-in boxes on a terminal, as the Mermaid itself on a forge and in a file; each choice
-the plan made for you, what it chose instead of what and why; what you already
-answered when the run asked; what it leaves out and its design; its risks are said
-once, beside the decision. Then the
+in boxes on a terminal, as the Mermaid itself on a forge and in a file; every choice
+the plan made for you, in its order, what it chose instead of what and why, and
+beside a choice that restates what you answered when the run asked, your answer,
+after the question as you were asked it where the plan words the question
+otherwise; what it leaves out and its design; its risks are said once, beside the
+decision. Then the
 steps, each task under the step it runs in and the order they wait on each other in,
 drawn; and task by task a card: what you will see once it is done, the files it
 changes, the shapes of another task it builds on, what it keeps, what it implies and
@@ -808,15 +866,21 @@ forge the page ends on the question, what weighs on it and each option with what
 asks again.
 
 `r` opens the plan on the terminal's other screen, and `yunta review <run>` opens the
-application on it, over the run and the field, for a run parked on the decision: `esc`
-there goes back to the run, then the field. `j` and `k` go from task to task, the arrows, `PgUp`,
-`PgDn` and `space` move what is being read, and the mouse's wheel does too, with
-selecting text still working. `p` turns a task's card over to what proves it, and `d`
-shows what was decided, what the plan risks and what it leaves out. A number chooses an
-option and `enter` confirms it, since a person reading has their hands on the keyboard;
-an option that asks for words goes back to the card with its field open. `esc` goes
-back. Under 90 columns the rail goes and the pane says which task it is; under 12 rows
-or 40 columns `r` prints the plan above the card instead.
+run's screen in the application on it, the plan's desk in place, for a run parked on the
+decision: `esc` there puts the plan aside on the run, and `esc` again, or `q`, goes to the
+field. The desk reads the plan alone: what it says of itself, then each task; what else
+the gate shows is on the printed page. `j`, `k` and `tab` go from task to task, the arrows,
+`PgUp`, `PgDn` and `space` move what is being read, and the mouse's wheel does too, with
+selecting text still working. `p` turns a task's card over to what proves it, each test
+with what it proves and the command that runs it, and `d` shows every decision the plan
+made, with what it chose and why; the rail counts what the plan risks and what it leaves
+out, which its printed page says whole. A number chooses an option and `enter` confirms
+it, since a person reading has their hands on the keyboard;
+an option that asks for words then asks for them at the desk's foot, in place of the
+options, the plan still above: `enter` sends them, an empty line is refused, and `esc`
+goes back to the options, as it goes back from the desk itself. Under 90 columns the rail
+goes and the pane says which task it is; under 12 rows or 40 columns `r` prints the plan
+above the card instead.
 
 What weighs on the decision is said last on the page, right above the card, or between
 the question and its options on a forge: on a terminal the last lines printed are the

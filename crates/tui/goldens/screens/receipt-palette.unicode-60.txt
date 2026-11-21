@@ -1,0 +1,14 @@
+ yunta › Q78GRR › receipt       ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ✓╭ what do you want to do? ─────────────────────────────╮R
+ ━│ ▸ type to filter                                     │
+ e│▸ write the receipt                                   │
+  │  verify its evidence                                 │
+  │  what it cost, and where its time went               │
+  │  draw its graph                                      │
+  │  the whole page, in a browser                        │
+  │  … 7 under                                           │
+ …╰──────────────────────────────────────────────────────╯
+ 27.1M tokens · 1h12m at work · 39m51s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` r…
+ ↑↓ move · enter do it · esc back

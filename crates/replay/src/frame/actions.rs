@@ -7,7 +7,7 @@
 //! `yunta_render::command`'s; what a run offers is decided here, once.
 
 use surco::words::Standing;
-use yunta_core::events::{ArtifactId, GateWaitingPayload, PauseReason, Stuck};
+use yunta_core::events::{ArtifactId, GateWaitingPayload, Stuck};
 use yunta_core::step::NextStep;
 use yunta_core::{ArtifactKind, RunId};
 
@@ -34,7 +34,7 @@ pub enum Effect {
     Stops,
     Closes,
     Certifies,
-    FindsWhereLogStops,
+    Verifies,
 }
 
 impl RunFrame {
@@ -60,17 +60,13 @@ impl RunFrame {
                 vec![stops()]
             }
             Standing::NeedsYou => self.needs_you(decision),
-            Standing::Finished | Standing::Reported => {
-                vec![act(
-                    NextStep::Receipt { run: run.clone() },
-                    Effect::Certifies,
-                )]
-            }
+            // The receipt stands on the event chain verifying checks: the two go together.
+            Standing::Finished | Standing::Reported => vec![
+                act(NextStep::Receipt { run: run.clone() }, Effect::Certifies),
+                act(NextStep::Verify { run: run.clone() }, Effect::Verifies),
+            ],
             Standing::Broken => {
-                vec![act(
-                    NextStep::Verify { run: run.clone() },
-                    Effect::FindsWhereLogStops,
-                )]
+                vec![act(NextStep::Verify { run: run.clone() }, Effect::Verifies)]
             }
             Standing::Created | Standing::Running => vec![stops()],
             Standing::Stopped if open => goes_on(run, Effect::ContinuesWhereStopped),
@@ -129,13 +125,13 @@ fn goes_on(run: &RunId, resumes: Effect) -> Vec<Action> {
     ]
 }
 
-/// The child a parked run waits on. What it waits on stands on the child's log, so no
-/// answer given to the parent can reach it, and the way there is what a reader needs first.
+/// The child a parked run waits on, as [`WaitingOn::child_run`] reads it: the way there is
+/// what a reader needs first.
+///
+/// [`WaitingOn::child_run`]: super::WaitingOn::child_run
 fn child_parked_on(frame: &RunFrame) -> Option<&RunId> {
-    match frame.phase.waiting_on()?.reason()? {
-        PauseReason::ChildPaused { run, .. } => Some(run),
-        _ => None,
-    }
+    let (_, child) = frame.phase.waiting_on()?.child_run()?;
+    Some(child)
 }
 
 /// Whether a decision shows a plan, the tasks document a person reads and

@@ -1,0 +1,36 @@
+ yunta › workflows › yunta/fragua graph                                                     ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◌ fragua · the nodes it runs, in order                                                                      as written
+
+           ┌───────┐
+           │ grill │
+           └───────┘
+               │
+               ▼
+           ┌───────┐
+           │ brief │
+           └───────┘
+               │
+               ▼
+           ┌──────┐
+           │ plan │
+           └──────┘
+               │
+               ▼
+           ┌──────┐
+           │ spec │
+           └──────┘
+               │
+               ▼
+       ┌──────────────┐
+       │ approve-plan │
+       └──────────────┘
+               │
+               ▼
+         ┌───────────┐
+         │ implement │
+         └───────────┘
+        ┌──────┤
+ … 31 under
+ ◆ C0NS0E needs you: node `approve` wants an external gate (assignee: reviewer) but no forge is reachabl…  · a go there
+ ↑↓ scroll · esc back · n new run                                                                   / anything · ? keys

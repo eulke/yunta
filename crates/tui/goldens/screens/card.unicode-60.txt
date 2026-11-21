@@ -1,14 +1,14 @@
- yunta › Q78GRR › decision
+ yunta › RN0TES › publish        ◆ 2 need you · ▲ 1 stalled
 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
- ▎ ◆ Plan registered. Approve?        approve-plan · Q78GRR
- ▎
- ▎ ▸ approve  Resolve the gate: nothing in the workflow
- ▎            waits on it
- ▎   adjust   Back to `plan`: sends what you say, and asks
- ▎            again once it completes
- ▎   abort    Pause here: nothing runs; this decision stays
- ▎            open
- ▎
- ▎ ↑↓ move · enter chooses · n adds a note · r reads the
- ▎ plan · esc leaves the run waiting
- / what you can do here · ? the keys here
+ ◆ release-notes (default) · needs you · for 0s      RN0TES
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ The release notes, as they will be published. Publish the…
+ publish · gate                               assignee lead
+   CHANGELOG.md  +3   ███████████████████
+ ▎ ◆ Publish them?                                  publish
+ ▎ ▸ publish  Resolve the gate: nothing in the workflow wa…
+ ▎   revise   Back to `notes`: sends what you say, and ask…
+ ▎   abort    Pause here: nothing runs; this decision stay…
+ 0 tokens · 0s at work
+
+ j k choose · enter answer · n add a note · … · ? keys

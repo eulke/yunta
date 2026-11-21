@@ -1,0 +1,41 @@
+␛[2m╭␛[0m ␛[1mwhat do you want to do?␛[0m ␛[2m─────────────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[2m▸␛[0m ␛[2mtype to filter␛[0m                                                                 ␛[2m│␛[0m
+␛[2m│␛[0m                                                                                  ␛[2m│␛[0m
+␛[2m│␛[0m␛[1;35m▸␛[0m ␛[1mstop it and everything under it         ␛[0m␛[1mc     ␛[0m␛[2myunta cancel Q78GRR␛[0m               ␛[2m│␛[0m
+␛[2m│␛[0m  what it cost, and where its time went   ␛[1ms     ␛[0m␛[2myunta stats Q78GRR␛[0m                ␛[2m│␛[0m
+␛[2m│␛[0m  draw its graph                          ␛[1mg     ␛[0m␛[2myunta graph --run Q78GRR␛[0m          ␛[2m│␛[0m
+␛[2m│␛[0m  the whole page, in a browser            ␛[1mo     ␛[0m␛[2myunta open Q78GRR␛[0m                 ␛[2m│␛[0m
+␛[2m│␛[0m  the run's whole chronicle                     ␛[2myunta status Q78GRR --follow␛[0m      ␛[2m│␛[0m
+␛[2m│␛[0m  start a new run                         ␛[1mn     ␛[0m␛[2myunta run <workflow>␛[0m              ␛[2m│␛[0m
+␛[2m│␛[0m  every run of this repository                  ␛[2myunta list --runs␛[0m                 ␛[2m│␛[0m
+␛[2m│␛[0m  the workflows you can run                     ␛[2myunta list␛[0m                        ␛[2m│␛[0m
+␛[2m│␛[0m  check adapters, git, forge, packs             ␛[2myunta doctor␛[0m                      ␛[2m│␛[0m
+␛[2m│␛[0m  remove orphaned checkouts                     ␛[2myunta gc␛[0m                          ␛[2m│␛[0m
+␛[2m│␛[0m  the shape of every document yunta reads       ␛[2myunta schema␛[0m                      ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────────────────────────╯␛[0m
+
+␛[2m╭␛[0m ␛[1mwhat do you want to do?␛[0m ␛[2m─────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[2m▸␛[0m ␛[2mtype to filter␛[0m                                                         ␛[2m│␛[0m
+␛[2m│␛[0m                                                                          ␛[2m│␛[0m
+␛[2m│␛[0m␛[1;35m▸␛[0m ␛[1mstop it and everything under it␛[0m                                         ␛[2m│␛[0m
+␛[2m│␛[0m  what it cost, and where its time went                                   ␛[2m│␛[0m
+␛[2m│␛[0m  draw its graph                                                          ␛[2m│␛[0m
+␛[2m│␛[0m  the whole page, in a browser                                            ␛[2m│␛[0m
+␛[2m│␛[0m  the run's whole chronicle                                               ␛[2m│␛[0m
+␛[2m│␛[0m  start a new run                                                         ␛[2m│␛[0m
+␛[2m│␛[0m  every run of this repository                                            ␛[2m│␛[0m
+␛[2m│␛[0m  the workflows you can run                                               ␛[2m│␛[0m
+␛[2m│␛[0m  check adapters, git, forge, packs                                       ␛[2m│␛[0m
+␛[2m│␛[0m  remove orphaned checkouts                                               ␛[2m│␛[0m
+␛[2m│␛[0m  the shape of every document yunta reads                                 ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────────────────╯␛[0m
+
+␛[2m╭␛[0m ␛[1mwhat do you want to do?␛[0m ␛[2m─────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[2m▸␛[0m ␛[2mtype to filter␛[0m                                     ␛[2m│␛[0m
+␛[2m│␛[0m␛[1;35m▸␛[0m ␛[1mstop it and everything under it␛[0m                     ␛[2m│␛[0m
+␛[2m│␛[0m  what it cost, and where its time went               ␛[2m│␛[0m
+␛[2m│␛[0m  draw its graph                                      ␛[2m│␛[0m
+␛[2m│␛[0m  the whole page, in a browser                        ␛[2m│␛[0m
+␛[2m│␛[0m  the run's whole chronicle                           ␛[2m│␛[0m
+␛[2m│␛[0m  ␛[2m… 6 under␛[0m                                           ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────╯␛[0m

@@ -38,7 +38,9 @@
 //!   [`RanCase`] and how its run ended ([`CaseRun`]).
 //! - [`pack`]: a pack's pages: its inventory, and what `pack add`, `update`,
 //!   `remove`, `list` and `new` answer.
-//! - [`Receipt`]: a run's receipt, in a file, a pull request or a terminal.
+//! - [`Receipt`]: a run's receipt, in a file, a pull request or a terminal;
+//!   [`verdicts`], its findings and its criteria in a line, as a gate that ships the
+//!   work says them above its card before the run closes.
 //! - [`Findings`]: what a review found, or the run's findings.
 //! - [`Gate`]: a gate's decision, above what answers it, as the place it
 //!   is drawn in says.
@@ -98,17 +100,18 @@ pub use initialized::Initialized;
 pub use left_running::LeftRunning;
 pub use new_workflow::NewWorkflow;
 pub use node::Node;
-pub use opened::Opened;
+pub use opened::{unopened, Opened};
 pub use plan::{Form, Plan};
-pub use receipt::Receipt;
+pub use receipt::{verdicts, Receipt, Told};
 pub use review::Review;
+pub(crate) use run::stood_open;
 pub use run::{Places, Run, RunInABrowser, RunScope};
 pub use schema::Schema;
 pub use setup::Setup;
 pub use shown::Shown;
 pub use signpost::Signpost;
 pub use spec::Spec;
-pub use stats::{History, Stats};
+pub use stats::{History, Stats, StatsTold};
 pub use tested::{not_a_final_state, CaseProblem, CaseRun, RanCase, Tested, TestedCase};
 pub(crate) use verified::Integrity;
 pub use verified::{FaultCause, ObjectFault, ObjectsChecked, ObjectsRead, Verification, Verified};

@@ -1,10 +1,28 @@
-//! The walk laid out: every state `yunta_testkit_ui`'s walk reaches, drawn with
-//! [`yunta_tui::drawn`] on Ratatui's test backend at 80×24 in ASCII and at 60×14 in
-//! Unicode, holds the layout's rules. No drawing panics; nothing is written in a margin
+//! The walk, held whole: every state `yunta_testkit_ui`'s walk reaches, reached once and
+//! held to the interface's rules and to a terminal's layout alike. The interface's are the
+//! test kit's ([`InterfaceChecks`]): no work that stops, closes, removes or spends is asked
+//! but on its confirmation, every screen draws on Markdown and HTML, a trail that names a run
+//! names the one the state follows, every row of a palette and every help hold as every
+//! input does, a remark asks nothing, and every screen, page and command the walk must meet
+//! is met. The layout's are stated here.
+//!
+//! Every state is drawn with [`yunta_tui::drawn`] on Ratatui's test backend at the design's
+//! own size, 120×36, in ASCII, where a side region stands beside the main one, and at the
+//! least, 60×14, in Unicode, where it gives way, and holds the layout's rules. 80×24 is held
+//! by each scene's goldens. No drawing panics; nothing is written in a margin
 //! but the rule; the side region's edge stands whole on every row it spans; the legend is
-//! on the last row, the box's where a box is open, with the attention right above it; the
-//! cursor shows wherever a field is open, only where a prompt is held, and inside what is
-//! laid out. A state that breaks one is named with the inputs that reach it, and its frame.
+//! on the last row, the box's where a box is open, with the note right above it where one
+//! stands and the attention otherwise, and what the run spent on the row over that where
+//! the screen says it, a box open or not; a box stands between the rule and the meter's
+//! row, its corners the round ones, and every cell inside it the box's own, as it draws over
+//! nothing, with no glyph, tone or ground of what stood under it; a list held where the
+//! person is shows the cursor if and only if the row it is narrowed on stands in sight, on
+//! that row where typing lands, read off the frame; anywhere else the cursor shows wherever
+//! a line is typed, only where a prompt is held, and inside what is laid out. A state that
+//! breaks one is named with the inputs that reach it, and its frame.
+//!
+//! Every state is drawn on 24 bits, where a pane paints grounds of its own, so a ground kept
+//! from under a box shows; the other rules read the frame's glyphs alone.
 //!
 //! Each distinct screen is drawn once on each terminal, as the walk keeps each state once:
 //! a drawing is a function of the screen alone, and states the walk tells apart by the
@@ -12,11 +30,16 @@
 //! regions say, as Markdown draws them whole, where each is scrolled to, and whether a
 //! field is open.
 //!
-//! The rules are stated here apart from the crate's `layout`, as the target frames state
-//! them: what each row holds is Surco's, where it stands is checked.
+//! The layout's rules are stated here apart from the crate's `layout`, as the target frames
+//! state them: what each row holds is Surco's, where it stands is checked.
+
+mod covered;
+#[path = "walk/cursor.rs"]
+mod cursor;
 
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::ops::RangeInclusive;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Instant;
 
@@ -24,57 +47,69 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::Terminal as Drawing;
-use surco::components::Screen;
+use surco::components::{Legend, Overlay, Screen, SideAt};
+use surco::diagram::{Shape, Stroke};
 use surco::glyphs::Glyphs;
 use surco::look::{Look, Width};
 use surco::motion::Motion;
-use surco::paint::Paint;
 use surco::surface::Terminal;
 use surco::width::cell_width;
 use yunta_testkit_ui::home::Home;
 use yunta_testkit_ui::recorded::Recordings;
+use yunta_testkit_ui::walk::interface::InterfaceChecks;
 use yunta_testkit_ui::walk::{Checks, Reached, Walk};
 use yunta_ui::{Input, Request, State};
 
 /// The cells a margin takes at each side of the terminal, but on the rule's row.
 const MARGIN: u16 = 1;
 
-/// The cells the side region takes, beside its edge.
-const SIDE: u16 = 22;
+/// The fewest columns a side region stands on, at either edge, as the target frames draw
+/// it: a screen 100 cells wide inside its margins. Under them it gives way.
+const SIDE_FROM: u16 = 102;
 
-/// The fewest cells the main region keeps before the side region gives way.
-const LEAST_MAIN: u16 = 40;
+/// The cells a side region at the left takes inside the left margin, as the target frames
+/// draw a run's nodes.
+const SIDE_AT_LEFT: u16 = 31;
 
-/// The rows every screen keeps whatever it holds: the trail, the rule and the legend.
-const ALWAYS: u16 = 3;
+/// The cells a side region at the right takes inside the right margin, as the target
+/// frames draw what is read beside the field's runs.
+const SIDE_AT_RIGHT: u16 = 39;
+
+/// The rows every screen keeps whatever it holds: the trail, the rule, the row over the
+/// legend and the legend.
+const ALWAYS: u16 = 4;
+
+/// The signs of a box's title its top edge is found by: as many as the narrowest box holds
+/// whole of any title, so a title cut at the box's edge is still found.
+const TITLE_SEEN: usize = 8;
 
 /// The row the rule stands on, under the trail: the one row that takes every cell.
 const RULE_ROW: u16 = 1;
 
-/// The fewest rows a region keeps before what the screen is about gives way: the line a
-/// pointer stands on, with one above it and one below.
-const LEAST_REGION: u16 = 3;
+/// The fewest rows the regions keep before what the screen is about gives way, as the
+/// target frames draw a run's pane at 60×14: its title, the row that says what its node
+/// works on, its feed's heading and the three rows a feed's window keeps at the least.
+const LEAST_REGIONS: u16 = 6;
 
-/// What a terminal's layout holds over the walk: the terminals it draws every state on.
-struct LayoutChecks {
-    terminals: Vec<OnATerminal>,
-}
-
-/// A terminal the walk's states are drawn on: its name, its glyphs, what draws on it, and
-/// the screens drawn on it, each by its fingerprint.
+/// A terminal the walk's states are drawn on, which holds the layout's rules over the walk:
+/// its name, its glyphs, what draws on it, what draws a box open over a screen over nothing
+/// beside it, and the screens drawn on it, each by its fingerprint.
 struct OnATerminal {
     name: &'static str,
     glyphs: Glyphs,
     drawing: Drawing<TestBackend>,
+    alone: Drawing<TestBackend>,
     drawn: HashSet<u64>,
 }
 
 impl OnATerminal {
     fn new(name: &'static str, glyphs: Glyphs, columns: u16, rows: u16) -> Self {
+        let backend = || Drawing::new(TestBackend::new(columns, rows)).expect("a test backend");
         OnATerminal {
             name,
             glyphs,
-            drawing: Drawing::new(TestBackend::new(columns, rows)).expect("a test backend"),
+            drawing: backend(),
+            alone: backend(),
             drawn: HashSet::new(),
         }
     }
@@ -86,7 +121,7 @@ impl OnATerminal {
         let area = self.drawing.backend().buffer().area;
         let look = Look {
             glyphs: self.glyphs,
-            paint: Paint::Plain,
+            paint: covered::PAINTED,
             width: Width::exact(usize::from(area.width - 2 * MARGIN)),
             motion: Motion::Still,
         };
@@ -106,32 +141,48 @@ impl OnATerminal {
         {
             return;
         }
-        let drawing = &mut self.drawing;
-        let drew = catch_unwind(AssertUnwindSafe(|| {
-            drawing
-                .draw(|frame| {
-                    yunta_tui::drawn(frame, &screen, &look);
-                })
-                .map(|_| ())
-        }));
-        match drew {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => named(&format!("the drawing failed: {error}"), String::new()),
-            Err(_) => named("the drawing panicked", String::new()),
+        if let Some(failed) = drawn_on(&mut self.drawing, &screen, &look) {
+            named(&failed, String::new());
         }
         let backend = self.drawing.backend();
         let cursor = backend.cursor_visible().then(|| backend.cursor_position());
         if let Some(rule) = broken(&screen, &look, backend.buffer(), cursor, state.typing()) {
             named(&rule, framed(backend.buffer()));
         }
+        let Some(overlay) = screen.overlay else {
+            return;
+        };
+        let alone = covered::alone(overlay);
+        if let Some(failed) = drawn_on(&mut self.alone, &alone, &look) {
+            named(&format!("the box over nothing: {failed}"), String::new());
+        }
+        let over = self.drawing.backend().buffer();
+        if let Some(rule) = covered::kept_under(over, self.alone.backend().buffer(), &look) {
+            named(&rule, framed(over));
+        }
     }
 }
 
-impl Checks for LayoutChecks {
+/// `screen` drawn in `look` by `drawing`; how the drawing failed, where it failed or
+/// panicked.
+fn drawn_on(drawing: &mut Drawing<TestBackend>, screen: &Screen, look: &Look) -> Option<String> {
+    let drew = catch_unwind(AssertUnwindSafe(|| {
+        drawing
+            .draw(|frame| {
+                yunta_tui::drawn(frame, screen, look);
+            })
+            .map(|_| ())
+    }));
+    match drew {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(format!("the drawing failed: {error}")),
+        Err(_) => Some("the drawing panicked".to_string()),
+    }
+}
+
+impl Checks for OnATerminal {
     fn reached(&mut self, state: &State, markdown: &str, reached: &Reached<'_>) {
-        for terminal in &mut self.terminals {
-            terminal.laid_out(state, markdown, reached);
-        }
+        self.laid_out(state, markdown, reached);
     }
 
     fn handed(&mut self, _from: &State, _input: &Input, _asked: &[Request], _: &Reached<'_>) {}
@@ -139,29 +190,35 @@ impl Checks for LayoutChecks {
 
 /// On a deep stack: the recordings run the repository's cases, each driving a run whole
 /// inside the test, which a debug build's futures make deeper than a test thread's stack.
+/// The interface's rules and each terminal's layout hold the walk's states each on a thread
+/// of its own.
 #[test]
-fn every_state_the_walk_reaches_lays_out_at_both_sizes() {
+fn every_state_the_application_reaches_holds_and_lays_out_at_both_sizes() {
     yunta_testkit::on_a_deep_stack(|| async {
         let home = Home::built().await;
         let recordings = Recordings::made(&home).await;
         let started = Instant::now();
-        let mut checks = LayoutChecks {
-            terminals: vec![
-                OnATerminal::new("ascii-80", Glyphs::Ascii, 80, 24),
-                OnATerminal::new("unicode-60", Glyphs::Unicode, 60, 14),
-            ],
-        };
+        let mut interface = InterfaceChecks::new(&recordings, home.runs());
+        let mut terminals = [
+            OnATerminal::new("ascii-120", Glyphs::Ascii, 120, 36),
+            OnATerminal::new("unicode-60", Glyphs::Unicode, 60, 14),
+        ];
+        let [ascii_120, unicode_60] = &mut terminals;
+        let mut checks: [&mut dyn Checks; 3] = [&mut interface, ascii_120, unicode_60];
         let states = Walk::over(&recordings).walked(&mut checks);
-        let drawn: Vec<String> = checks
-            .terminals
+        let drawn: Vec<String> = terminals
             .iter()
-            .map(|terminal| format!("{} at {}", terminal.drawn.len(), terminal.name))
+            .map(|terminal| format!("{} screens at {}", terminal.drawn.len(), terminal.name))
             .collect();
         eprintln!(
-            "the walk reached {states} states and drew {} screens, in {:?}",
+            "the walk reached {states} states, took {} palettes row by row, opened {} helps \
+             and drew {}, in {:?}",
+            interface.palettes_taken(),
+            interface.helps_opened(),
             drawn.join(" and "),
             started.elapsed()
         );
+        interface.met_all_it_must();
     });
 }
 
@@ -182,92 +239,149 @@ fn broken(
             return Some(format!("row {} writes in a margin", y + 1));
         }
     }
-    let legend = screen
+    let none = Legend::new();
+    let (legend, anywhere) = screen
         .overlay
         .as_ref()
-        .map_or(&screen.legend, |overlay| &overlay.legend);
-    if !said_on(frame, height - 1, &inner.legend(legend).text()) {
+        .map_or((&screen.legend, &screen.anywhere), |overlay| {
+            (&overlay.legend, &none)
+        });
+    if !said_on(frame, height - 1, &inner.legend(legend, anywhere).text()) {
         return Some("the legend is not on the last row".to_string());
     }
-    let edge = Terminal::on(*look).edge().text();
-    let edge_cells = u16::try_from(cell_width(&edge)).expect("an edge's cells");
-    let side = screen
-        .side
-        .as_ref()
-        .filter(|_| width - 2 * MARGIN >= SIDE + edge_cells + LEAST_MAIN);
-    let titled =
-        screen.main.title.is_some() || side.is_some_and(|side| side.region.title.is_some());
+    let side = screen.side.as_ref().filter(|_| width >= SIDE_FROM);
     let about = screen
         .about
         .as_ref()
-        .map_or(0, |about| inner.lines(about).len());
-    let (about_rows, attention_row) = rows_kept(height, about, screen.attention.is_some(), titled);
-    if let Some(attention) = screen.attention.as_ref().filter(|_| attention_row) {
-        if screen.overlay.is_none()
-            && !said_on(frame, height - 2, &inner.attention(attention).text())
-        {
-            return Some("the attention is not right above the legend".to_string());
-        }
+        .map_or(0, |about| inner.across(about, usize::MAX).len());
+    let over_the_legend = match (&screen.noted, &screen.attention) {
+        (Some(noted), _) => (inner.noted(noted).text(), "the note"),
+        (None, Some(attention)) => (inner.attention(attention).text(), "the attention"),
+        (None, None) => (String::new(), "a blank row"),
+    };
+    let (said, which) = over_the_legend;
+    if !said_on(frame, height - 2, &said) {
+        return Some(format!("{which} is not right above the legend"));
     }
-    if side.is_some() && screen.overlay.is_none() {
-        let top = 2 + about_rows;
-        let bottom = height - 2 - u16::from(attention_row);
-        let edge_at = |y: u16| {
-            (MARGIN + SIDE..MARGIN + SIDE + edge_cells)
-                .map(|x| frame[(x, y)].symbol())
-                .collect::<String>()
-        };
-        if let Some(y) = (top..=bottom).find(|y| edge_at(*y) != edge) {
-            return Some(format!("row {} breaks the side region's edge", y + 1));
-        }
+    let meter = u16::from(screen.meter.is_some());
+    let across = across_kept(height - meter, about);
+    // Short of rows, the blank row under what stands across gave way.
+    let short_of_rows = about > 0 && usize::from(across) <= about;
+    if let Some(rule) = meter_broken(screen, &inner, frame, short_of_rows) {
+        return Some(rule);
     }
-    cursor_broken(screen, cursor, typing, (width, height))
+    let spans = 2 + across..=height - 3 - meter;
+    side.filter(|_| screen.overlay.is_none())
+        .and_then(|side| edge_broken(side.at, look, frame, spans))
+        .or_else(|| {
+            screen
+                .overlay
+                .as_ref()
+                .and_then(|overlay| box_broken(overlay, look, frame))
+        })
+        .or_else(|| cursor::broken(screen, look, frame, cursor, typing))
 }
 
-/// Where the cursor breaks the layout's rules: hidden while a field is open, shown where
-/// no prompt is held, or standing outside what is laid out.
-fn cursor_broken(
+/// Where what the run of `screen` spent breaks on `frame`, drawn at `inner`'s width, a box
+/// standing over the screen or not: on the row over the one over the legend, in figures
+/// alone where the screen stands `short_of_rows`, its bars kept where they fit anywhere else.
+fn meter_broken(
     screen: &Screen,
-    cursor: Option<Position>,
-    typing: bool,
-    (width, height): (u16, u16),
+    inner: &Terminal,
+    frame: &Buffer,
+    short_of_rows: bool,
 ) -> Option<String> {
-    let held = [
-        screen.overlay.as_ref().map(|overlay| &overlay.doc),
-        screen.side.as_ref().map(|side| &side.region.doc),
-        Some(&screen.main.doc),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|doc| doc.prompt_at().is_some());
-    match cursor {
-        None if typing => Some("a field is open and no cursor shows".to_string()),
-        Some(_) if !held => Some("the cursor shows where no prompt is held".to_string()),
-        Some(Position { x, y })
-            if x < MARGIN || x >= width - MARGIN || y <= 1 || y >= height - 1 =>
-        {
-            Some(format!(
-                "the cursor stands outside what is laid out, at {x},{y}"
-            ))
-        }
-        _ => None,
+    let spent = screen.meter.as_ref()?;
+    let said = match short_of_rows {
+        true => inner.meter_figures(spent),
+        false => inner.meter(spent),
+    };
+    let row = frame.area.height - 3;
+    (!said_on(frame, row, &said.text()))
+        .then(|| "what the run spent is not over the row over the legend".to_string())
+}
+
+/// Where the box `overlay` is drawn in on `frame` breaks: its top edge, a round corner then
+/// its title, stands under the rule; the uprights under that corner run down to the round
+/// corner of its bottom edge, which stands over the meter's row.
+fn box_broken(overlay: &Overlay, look: &Look, frame: &Buffer) -> Option<String> {
+    let [top_left, _, bottom_left, _] = look.glyphs.corners(Shape::Round);
+    let (width, height) = (frame.area.width, frame.area.height);
+    let opening: Vec<String> = std::iter::once(top_left.to_string())
+        .chain(std::iter::once(" ".to_string()))
+        .chain(overlay.title.chars().take(TITLE_SEEN).map(String::from))
+        .collect();
+    let opens_at = |x: u16, y: u16| {
+        opening
+            .iter()
+            .enumerate()
+            .all(|(at, sign)| frame[(x + at as u16, y)].symbol() == sign)
+    };
+    let Some((x, top)) = (0..height)
+        .flat_map(|y| (0..width.saturating_sub(opening.len() as u16)).map(move |x| (x, y)))
+        .find(|(x, y)| opens_at(*x, *y))
+    else {
+        return Some("no box's top edge opens with its round corner and its title".to_string());
+    };
+    if top <= RULE_ROW {
+        return Some(format!(
+            "the box's top edge, row {}, is not under the rule",
+            top + 1
+        ));
+    }
+    let upright = look
+        .glyphs
+        .joint(true, true, false, false, Stroke::Open)
+        .to_string();
+    let bottom = (top + 1..height).find(|y| frame[(x, *y)].symbol() != upright);
+    match bottom {
+        Some(y) if frame[(x, y)].symbol() == bottom_left.to_string() && y < height - 3 => None,
+        Some(y) => Some(format!(
+            "the box's left side breaks on row {}, on the rows under the regions or with no \
+             round corner",
+            y + 1
+        )),
+        None => Some("the box has no bottom edge".to_string()),
     }
 }
 
-/// The rows what the screen is about keeps, with the blank under it, and whether the
-/// attention keeps its row, on a terminal `height` rows high: what it is about gives way
-/// from its last row while the regions would get fewer than [`LEAST_REGION`], then the
-/// attention.
-fn rows_kept(height: u16, about: usize, attention: bool, titled: bool) -> (u16, bool) {
-    let block = |about: u16| if about > 0 { about + 1 } else { 0 };
-    let fixed = ALWAYS + u16::from(attention) + u16::from(titled);
-    let room = height.saturating_sub(fixed + LEAST_REGION);
-    let mut about = u16::try_from(about).unwrap_or(u16::MAX);
-    while about > 0 && block(about) > room {
-        about -= 1;
+/// Where the edge of a side region standing at `at`, drawn in `look`, breaks on `frame`:
+/// the first of the rows it `spans` that does not hold it whole.
+fn edge_broken(
+    at: SideAt,
+    look: &Look,
+    frame: &Buffer,
+    spans: RangeInclusive<u16>,
+) -> Option<String> {
+    let edge = Terminal::on(*look).edge().text();
+    let cells = u16::try_from(cell_width(&edge)).expect("an edge's cells");
+    let from = match at {
+        SideAt::Left => MARGIN + SIDE_AT_LEFT,
+        SideAt::Right => frame.area.width - MARGIN - SIDE_AT_RIGHT - cells,
+    };
+    let edge_at = |y: u16| {
+        (from..from + cells)
+            .map(|x| frame[(x, y)].symbol())
+            .collect::<String>()
+    };
+    spans
+        .into_iter()
+        .find(|y| edge_at(*y) != edge)
+        .map(|y| format!("row {} breaks the side region's edge", y + 1))
+}
+
+/// The rows what the screen is about keeps, with the blank row under it while that stands,
+/// on a terminal `height` rows high less the meter's: the blank row gives way first, then
+/// what it is about from its whole, a row at a time, while the regions would get fewer than
+/// [`LEAST_REGIONS`].
+fn across_kept(height: u16, about: usize) -> u16 {
+    let room = height.saturating_sub(ALWAYS + LEAST_REGIONS);
+    let about = u16::try_from(about).unwrap_or(u16::MAX);
+    match about {
+        0 => 0,
+        about if about < room => about + 1,
+        about => about.min(room),
     }
-    let regions = height.saturating_sub(fixed + block(about));
-    (block(about), attention && regions >= LEAST_REGION)
 }
 
 /// Whether row `y` of `frame` says `said` from its margin, as far as either goes.

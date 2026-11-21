@@ -8,5 +8,5 @@
 
 next
   yunta resume 7E5PH4          continues it where it stopped
-  yunta close 7E5PH4           closes it for good
+  yunta close 7E5PH4           close it for good
   yunta status 7E5PH4 --full   the whole story, node by node

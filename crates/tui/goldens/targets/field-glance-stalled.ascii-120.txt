@@ -1,0 +1,36 @@
+ yunta :: /cut/worktree                                                                      ? 5 need you ; ^ 1 stalled
+........................................................................................................................
+  :: what do you want to build?  ; n                                          | ^ fragua (standard) ; stalled    EKPBGE
+                                                                              | ======= ....... ....... ....... .......
+  asking now                                                                  |   no process is driving it: the engine
+    ? Q78GRR standard  ==============.. node `tests` asks at its ter...   0s  |   that ran it is gone.
+                                                                              |
+  needs you, oldest first                                                     |   waiting      for 11d
+    ? EZRPE9 quick     = . .. o .       node `grill` failed: session...  40d  |   branch       yunta/run/...EKPBGE off
+    ? C0NS0E default   == .             node `approve` wants an exte...   1h  |                main
+    ? T0KENS default   == .             its token budget is spent (...    1h  |
+    ? B10CKD default   == .             no node is runnable: `ship`...    1h  | what you can do
+                                                                              | r      continue it from its log
+  stalled                                                                     | x      close it for good
+  * ^ EKPBGE standard  = . .. . .       no process is driving it: th...  11d  |
+                                                                              |
+  stopped                                                                     |
+    # ST0PPD default   ==               interrupted by a person           1h  |
+    # AB0RTD default   == =             a person paused the run at n...   1h  |
+                                                                              |
+  running                                                                     |
+    > TW0TSK default   == =             1 of 2 nodes done                 1h  |
+                                                                              |
+  unreadable                                                                  |
+    ! 0RPHAN                            manifest missing or unreadab...       |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+                                                                              |
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k move ; enter open ; n new run ; x close ; q quit                                               / anything ; ? keys

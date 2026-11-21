@@ -27,7 +27,10 @@ async fn a_parked_round_answered_is_resumed_with_its_answers() {
     let parked = yunta_at!(&checkout, &arguments);
     assert_eq!(parked.status.code(), Some(3), "the run parks on its round");
     let id = full_run_id(&checkout.home, &run_id_from(&parked));
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
 
     let mut answered = vec![Stroke::Enter, Stroke::Insert('a')];

@@ -1,0 +1,36 @@
+ yunta › Q78GRR › plan                                                                      ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 7m34s                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ━━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄┄┄ ┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄┄ ┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is╭ keys ──────────────────────────────────────────────────────────────╮
+                         │ You never have to remember more than this.                         │
+   ✓ grill               │                                                                    │anner on mock/gpt-6-luna
+   ✓ brief               │ /          anything: only what can be done here, with its command  │
+ ▸ ⠹ plan                │ n          start a new run, wherever no prompt stands              │
+   ◌ spec                │ j k        move; the footer always says what they move             │
+   ◌ approve-plan        │ pgup pgdn  scroll the pane a page at a time                        │
+   ◌ implement           │ enter      open, answer, confirm                                   │
+   ◌ review@reviewer     │ esc        one step back; what it leaves stays waiting             │
+   ◌ review@reviewer-alt │ a          go to what needs you                                    │
+   ◌ conform             │ f          follow what the run is doing                            │
+   ◌ fix-findings        │ s g        what it cost, its graph                                 │
+   ◌ lint                │ c          stop it and everything under it                         │
+   ◌ fix-lint            │ o          the whole page, in a browser                            │
+   ◌ tests               │ q          go to the field; it keeps going                         │
+   ◌ ship                │ ctrl-c     leave: every run keeps going without this window        │
+   ◌ pr                  │                                                                    │
+                         │                                                                    │
+                         ╰────────────────────────────────────────────────────────────────────╯
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ esc back

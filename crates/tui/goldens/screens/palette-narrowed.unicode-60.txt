@@ -1,0 +1,14 @@
+ yunta › Q78GRR › plan          ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ●╭ what do you want to do? ─────────────────────────────╮R
+ ━│ ▸ st                                                 │
+ n│▸ stop it and everything under it                     │
+ p│  start a new run                                     │a
+ w│  what it cost, and where its time went               │
+ …│  every run of this repository                        │
+ r│  check adapters, git, forge, packs                   │
+ r│  the shape of every document yunta reads             │
+ r╰──────────────────────────────────────────────────────╯
+ 967k tokens · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` r…
+ ↑↓ move · enter do it · esc back

@@ -28,8 +28,8 @@ pub mod session;
 mod session_env;
 
 pub use forge::{
-    Forge, ForgeError, ForgeProbe, GateDecision, PolledGate, PublishRequest, PullRequestRef,
-    PullRequestRequest, ReviewComment, ReviewOutcome,
+    Forge, ForgeError, ForgeProbe, ForgeUnanswered, GateDecision, PolledGate, PublishRequest,
+    PullRequestRef, PullRequestRequest, ReviewComment, ReviewOutcome,
 };
 pub use observer::{Observed, RunObserver, Said};
 pub use person::{DecisionAsked, HumanInteraction, NoInteraction, QuestionsReply};

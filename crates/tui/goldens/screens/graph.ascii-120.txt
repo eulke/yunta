@@ -1,0 +1,36 @@
+ yunta :: fragua graph                                                                       ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ > fragua ; the nodes it runs, in order                                                                        standard
+
+                             +-------+
+                             | grill |
+                             +-------+
+                                 |
+                                 v
+                             +-------+
+                             | brief |
+                             +-------+
+                                 |
+                                 v
+                             +------+
+                             | plan |
+                             +------+
+                                 |
+                                 v
+                             +------+
+                             | spec |
+                             +------+
+                                 |
+                                 v
+                         +--------------+
+                         | approve-plan |
+                         +--------------+
+                                 |
+                                 v
+                           +-----------+
+                           | implement |
+                           +-----------+
+            +--------------------+
+ ... 34 more lines
+ ? Q78GRR needs you: The work beside its plan, and every finding the run holds with its answer. Create...  ; a go there
+ up/down scroll ; esc back ; n new run                                                              / anything ; ? keys

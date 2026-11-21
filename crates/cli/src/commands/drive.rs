@@ -126,6 +126,11 @@ impl Closed<'_> {
     /// The block that closes the run out, from what its log says once it
     /// stopped.
     pub(crate) fn closing(&self, reading: ClosingReading) -> Closing {
+        let ahead = yunta_core::ahead::NodesAhead::of(
+            &self.manifest.workflow,
+            &self.manifest.config,
+            reading.state.run.left_out(),
+        );
         Closing::of(ClosingEnv {
             run_id: self.run_id,
             workflow: &self.manifest.workflow,
@@ -134,6 +139,7 @@ impl Closed<'_> {
             now: reading.now,
             decision: reading.decision,
             shown: reading.shown,
+            ahead,
             places: Places {
                 run_dir: self.run_dir.to_path_buf(),
                 worktree: self.worktree.to_path_buf(),

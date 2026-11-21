@@ -36,8 +36,8 @@ use crate::stats::RunStats;
 use crate::RunState;
 use yunta_core::caution::Caution;
 use yunta_core::events::{
-    ChildLink, Degradation, EngineFact, Failure, FindingSeverity, NodeOutcome, NodeState,
-    PauseReason, TaskStatus, TokenUsage, UnknownKindCount,
+    ChildLink, Degradation, EngineFact, Failure, NodeOutcome, NodeState, PauseReason, TaskStatus,
+    TokenUsage, UnknownKindCount,
 };
 use yunta_core::{ModeName, NodeId, RunId, Workflow, WorkflowName};
 
@@ -223,7 +223,7 @@ impl RunFrame {
             .map(|(node, group)| reading.node(node, group))
             .collect();
 
-        let blocking_findings = findings_that_block(state);
+        let blocking_findings = state.findings_that_block().len();
         RunFrame {
             run_id: run_id.clone(),
             workflow: workflow.name.clone(),
@@ -236,7 +236,7 @@ impl RunFrame {
             asking: engine.asking(now),
             flow: flow_counter(&nodes, &mode),
             tasks: task_counter(state),
-            reroutes: reroutes(state),
+            reroutes: state.nodes.reroutes(),
             tokens: state.spend().so_far(),
             prior: prior.cloned(),
             nodes,
@@ -254,6 +254,28 @@ impl RunFrame {
     pub fn moves(&self) -> bool {
         matches!(self.phase, RunPhase::Created | RunPhase::Running)
             && self.standing != Standing::Stalled
+    }
+
+    /// The node the run waits on a person at: the first, in declaration order, whose own
+    /// standing says it needs them; else the node of its own the pause it stands at names,
+    /// where that pause waits on a person, a node whose log says it failed and whose failure
+    /// the run is parked on for a decision among them. None where nothing waits on a person,
+    /// or where what does names no node: a cap, no room, a stop a person made. Every surface
+    /// reads where a run waits on its person here, the node a pointer goes to and the mark
+    /// a node's row carries alike.
+    pub fn waits_on_a_person_at(&self) -> Option<&NodeId> {
+        let needs_you = self
+            .nodes
+            .iter()
+            .find(|node| node.standing == Standing::NeedsYou);
+        if let Some(node) = needs_you {
+            return Some(&node.id);
+        }
+        let waiting_on = self.phase.waiting_on()?;
+        let asks = waiting_on.reason()?.waits_on_a_person();
+        let named = waiting_on.names().filter(|_| asks)?;
+        let held = self.nodes.iter().any(|node| node.id == *named);
+        held.then_some(named)
     }
 
     /// The nodes that stand failed, each with its failure, in declaration
@@ -315,23 +337,6 @@ impl RunFrame {
 pub struct PullRequest<'a> {
     pub number: u64,
     pub url: &'a str,
-}
-
-/// Every `node_rerouted` on the log, over all the run's nodes.
-fn reroutes(state: &RunState) -> usize {
-    state
-        .nodes
-        .values()
-        .map(|record| record.reroutes as usize)
-        .sum()
-}
-
-/// How many findings the run has not settled that keep it from being done.
-fn findings_that_block(state: &RunState) -> usize {
-    crate::dedup_findings(&state.unsettled_findings())
-        .iter()
-        .filter(|finding| finding.severity == FindingSeverity::Blocking)
-        .count()
 }
 
 /// The word the run is called by, decided once from its phase, the words

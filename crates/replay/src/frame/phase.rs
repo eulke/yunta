@@ -10,8 +10,10 @@
 //! node is asking. No surface goes back to the log for it.
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::{Failure, LoggedWords, NodeState, NodeWait, PauseReason, TerminalState};
-use yunta_core::{ModeName, NodeId, Workflow};
+use yunta_core::events::{
+    Claim, Failure, LoggedWords, NodeState, NodeWait, PauseReason, TerminalState,
+};
+use yunta_core::{ModeName, NodeId, RunId, Workflow};
 
 use crate::RunState;
 use yunta_core::events::RunPhaseRaw;
@@ -129,6 +131,68 @@ impl WaitingOn {
             WaitingOn::Node { reason, .. } => reason.as_ref(),
             WaitingOn::Run { reason } => Some(reason),
         }
+    }
+
+    /// The node the pause the run stands at names, where it names one: the node it holds
+    /// the run at, or the node its escalation's claim is about, as an older log's escalation
+    /// with no menu names a gate that never started. A pause about the run itself, about
+    /// several nodes, or about a task names none. Not the node the run waits on a person at,
+    /// which a pause a person made, or a clock ends, does not name
+    /// ([`RunFrame::waits_on_a_person_at`](super::RunFrame::waits_on_a_person_at)).
+    pub fn names(&self) -> Option<&NodeId> {
+        self.reason().and_then(named_by)
+    }
+
+    /// The child run whose pause the run stands at, with the node of the run that bore it,
+    /// where the run stands parked on a child: what it waits on stands on the child's own
+    /// log, so no answer given to the run reaches it. Not [`WaitingOn::names`], the node
+    /// alone.
+    pub fn child_run(&self) -> Option<(&NodeId, &RunId)> {
+        match self.reason()? {
+            PauseReason::ChildPaused { node, run, .. } => Some((node, run)),
+            _ => None,
+        }
+    }
+}
+
+/// The node `pause` names, where it names one: the node it holds the run at, or the node
+/// its escalation's claim is about.
+fn named_by(pause: &PauseReason) -> Option<&NodeId> {
+    match pause {
+        PauseReason::Escalation(escalation) => claimed_about(escalation.summary()),
+        PauseReason::LoopOverrun { node, .. }
+        | PauseReason::NodeFailed { node, .. }
+        | PauseReason::AwaitingReset { node, .. }
+        | PauseReason::Blocked { node, .. }
+        | PauseReason::GateAborted { node, .. }
+        | PauseReason::PullRequestClosed { node, .. }
+        | PauseReason::ChildPaused { node, .. }
+        | PauseReason::Questions { node, .. }
+        | PauseReason::AnswersRefused { node, .. } => Some(node),
+        PauseReason::Cancelled
+        | PauseReason::CancelledAfterCrash
+        | PauseReason::BudgetExhausted { .. }
+        | PauseReason::NoRoom { .. }
+        | PauseReason::ExternalGate { .. }
+        | PauseReason::UncertainOrphans { .. }
+        | PauseReason::Recorded { .. } => None,
+    }
+}
+
+/// The node `claim` says an escalation is about, where it names one.
+fn claimed_about(claim: &Claim) -> Option<&NodeId> {
+    match claim {
+        Claim::NeedsDecision { node }
+        | Claim::NodeFailed { node }
+        | Claim::AwaitsReview { node, .. }
+        | Claim::ForgeUnreachable { node, .. }
+        | Claim::RecheckUnreachable { node, .. }
+        | Claim::LoopCapSpent { node } => Some(node),
+        Claim::ApprovePlan { .. }
+        | Claim::TokensSpent { .. }
+        | Claim::ScopeAsked { .. }
+        | Claim::Departs { .. }
+        | Claim::Written(_) => None,
     }
 }
 

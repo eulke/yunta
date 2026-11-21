@@ -23,14 +23,17 @@ fn a_console_prompt_does_not_stall_the_run_tools_listener() {
 fn the_live_region_comes_off_the_terminal_before_a_prompt_draws_on_it() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for("nodes ", "the run never pinned its region to the terminal");
+    terminal.wait_for(
+        " at work",
+        "the run never pinned its region to the terminal",
+    );
     terminal.wait_on_screen(POINTED, "the gate never put its decision on the console");
 
     // The region and the prompt write to the same stream, and the one
     // that draws second lands on what the other put there. So the
     // region comes down first, and stays down until the prompt ends.
     assert!(
-        terminal.cleared_before("nodes ", POINTED),
+        terminal.cleared_before(" at work", POINTED),
         "the region was still pinned to the terminal the prompt drew on:\n{}",
         terminal.drawn()
     );

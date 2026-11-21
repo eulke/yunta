@@ -1,0 +1,36 @@
+ yunta › Q78GRR › brief                                                                     ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 7m34s                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ━━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄┄┄ ┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄┄ ┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+   ✓ grill                  36s  │ brief · prompt                                            planner on mock/gpt-6-luna
+ ▸ ✓ brief                  22s  │
+   ⠹ plan                        │   stands       finished
+   ◌ spec                        │   took         22s
+   ◌ approve-plan                │   tokens       112k tokens
+   ◌ implement                   │
+   ◌ review@reviewer             │   Wrote and verified brief.md. It captures the idea and lists unsettled details as
+   ◌ review@reviewer-alt         │   open points with planning assumptions.
+   ◌ conform                     │
+   ◌ fix-findings                │ what it is doing · 2 calls
+   ◌ lint                        │ running: attempt 1
+   ◌ fix-lint                    │ session opened on gpt-6-luna · fence widened to 3 roots
+   ◌ tests                       │ write   brief.md
+   ◌ ship                        │ read    brief.md
+   ◌ pr                          │ accepted brief.md
+                                 │ finished: Wrote and verified brief.md. It captures the idea and lists unsettled det…
+  f follow what it is doing      │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ j k node · f follow it · s stats · q field, it keeps going                                         / anything · ? keys

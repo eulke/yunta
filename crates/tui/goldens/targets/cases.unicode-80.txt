@@ -1,0 +1,24 @@
+ yunta › workflows › cases                                    nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ✓ cases · 1 case, 0 failed
+
+   ✓ greets  ok
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ esc back · n new run · ? keys

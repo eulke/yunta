@@ -158,7 +158,7 @@ impl HumanInteraction for ConsoleInteraction {
         let questions = questions.clone();
         let node = node.clone();
         let env = self.env.clone();
-        self.prompted(move |console| answer(console, &env, &node, &questions))
+        self.prompted(move |console| answer(console, &env, (&node, &questions), None))
             .await
     }
 }

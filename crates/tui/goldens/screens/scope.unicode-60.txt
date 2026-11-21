@@ -1,0 +1,14 @@
+ yunta › Q78GRR › implement      ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 10m00s        Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ a task asks to touch a path outside its scope
+ ▎ ◆ It asks to touch crates/cli/src/commands/p…  implement
+ ▎ The target-aware vendor_dir and packs_root APIs are used
+ ▎ by project-local pack audit; this path must retain its
+ ▎ existing project behavior and compile after changing th…
+ ▎ ▸ grant  the task may also touch this path, and goes on
+ ▎   deny   the task goes on within the scope it has
+ 14.1M tokens · 49m36s at work · 25m05s waiting on you
+
+ j k choose · enter answer · n add a note · … · ? keys

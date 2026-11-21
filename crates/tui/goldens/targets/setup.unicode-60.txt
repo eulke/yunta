@@ -1,0 +1,14 @@
+ yunta › set up                           nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ … 8 above
+ who does the work
+   ✓ planner       claude-code
+   ✓ executor      claude-code
+   ✓ reviewer      claude-code
+   ✓ reviewer-alt  claude-code
+   ✓ mechanical    claude-code
+
+  ▸ write .yunta/config.yaml and install yunta/fragua
+
+
+ j k step · enter write it · … · ? keys

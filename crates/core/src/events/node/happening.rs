@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use crate::events::meta::EventMeta;
-use crate::events::{ChildLedger, ChildLink, NodeEvent, NodeLedger, NodeState, Reroute};
+use crate::events::{
+    ChildLedger, ChildLink, NodeEvent, NodeLedger, NodeRecord, NodeState, Reroute,
+};
 use crate::events::{HookPhase, Phase, ResolvedRunner, Suspensions};
 use crate::TaskId;
 
@@ -80,17 +82,18 @@ impl Happening {
     /// What `event` did to the node it names, with the state and the
     /// children that node had *at this event*.
     ///
-    /// Two readings of the node ledger, because the moment spans the
-    /// event: the state a node reached is a fact of the ledger `after`
-    /// the event, and how long the attempt worked is a fact of the one
-    /// `before` it — the close is what ends the attempt, so the ledger
-    /// that still has it open is the only one that can measure it. Both
-    /// are the ledgers as they stood here, never at the end of the log,
-    /// so a node that settles twice reads as two different moments.
+    /// Two readings of the node, because the moment spans the event: the
+    /// state a node reached is a fact of the ledger `after` the event, and
+    /// how long the attempt worked is a fact of the node's record `before`
+    /// it — the close is what ends the attempt, so the record that still
+    /// has it open is the only one that can measure it. `before` is that
+    /// one node's record, so a reader keeps no copy of the others to read
+    /// a moment. Both are as they stood here, never at the end of the
+    /// log, so a node that settles twice reads as two different moments.
     pub fn of(
         event: &NodeEvent,
         meta: &EventMeta<'_>,
-        before: &NodeLedger,
+        before: Option<&NodeRecord>,
         after: &NodeLedger,
         children: &ChildLedger,
         asleep: &Suspensions,
@@ -108,9 +111,7 @@ impl Happening {
                         .and_then(|node| after.state(node))
                         .cloned()
                         .unwrap_or_else(|| said(event)),
-                    elapsed: meta
-                        .node
-                        .and_then(|node| worked(before, node, meta, asleep)),
+                    elapsed: before.and_then(|record| worked(record, meta, asleep)),
                     children: meta
                         .node
                         .map(|node| bore(children, node))
@@ -179,17 +180,12 @@ fn said(event: &NodeEvent) -> NodeState {
     }
 }
 
-/// How long the attempt this event closed had been working, or `None`
-/// for a node with no attempt open — one that is starting has worked no
-/// time at all, and saying `0s` would read as a measurement. The time the
-/// host slept inside the attempt is not time it worked.
-fn worked(
-    before: &NodeLedger,
-    node: &crate::NodeId,
-    meta: &EventMeta<'_>,
-    asleep: &Suspensions,
-) -> Option<Duration> {
-    let record = before.get(node)?;
+/// How long the attempt this event closed had been working, read off the
+/// node's record before the event, or `None` for a node with no attempt
+/// open — one that is starting has worked no time at all, and saying `0s`
+/// would read as a measurement. The time the host slept inside the
+/// attempt is not time it worked.
+fn worked(record: &NodeRecord, meta: &EventMeta<'_>, asleep: &Suspensions) -> Option<Duration> {
     record.open_since?;
     let stretch = match record.working_since {
         Some(since) => asleep.awake_between(since, meta.at),

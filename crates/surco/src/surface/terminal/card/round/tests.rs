@@ -40,6 +40,7 @@ fn value(name: &str) -> ChoiceRow {
         name: name.to_string(),
         said: None,
         cost: None,
+        key: None,
     }
 }
 
@@ -100,7 +101,7 @@ fn a_round_holds_what_was_answered_what_is_asked_and_what_is_to_come() {
             picking("Which tier?"),
             ahead("Anything to add?", Some("optional, assumes nothing")),
         ],
-        Legend::new().arrows("move").key("enter", "answers"),
+        Legend::new().arrows("choose").key("enter", "answer"),
     );
     assert_eq!(
         drawn(&card, &look(Glyphs::Unicode, 80), usize::MAX),
@@ -110,11 +111,12 @@ fn a_round_holds_what_was_answered_what_is_asked_and_what_is_to_come() {
             "▎",
             "▎ ✓ Which environment?  production",
             "▎ ◆ Which tier?",
+            "▎      ▸ type to filter",
             "▎     ▸ basic",
             "▎       pro",
             "▎ ◌ Anything to add?  optional, assumes nothing",
             "▎",
-            "▎ ↑↓ move · enter answers",
+            "▎ ↑↓ choose · enter answer",
         ]
     );
 }
@@ -127,18 +129,19 @@ fn ascii_draws_its_own_marks() {
             picking("Which tier?"),
             ahead("Anything to add?", None),
         ],
-        Legend::new().key("enter", "answers"),
+        Legend::new().key("enter", "answer"),
     );
     let rows = drawn(&card, &look(Glyphs::Ascii, 80), usize::MAX);
     assert_eq!(rows[3], "| + Which environment?  production");
     assert_eq!(rows[4], "| ? Which tier?");
-    assert_eq!(rows[5], "|     * basic");
-    assert_eq!(rows[7], "| . Anything to add?");
+    assert_eq!(rows[5], "|      * type to filter");
+    assert_eq!(rows[6], "|     * basic");
+    assert_eq!(rows[8], "| . Anything to add?");
 }
 
-/// A question being typed opens its field under it with the cursor on it, past its
-/// mark and what stands before the cursor, and what the engine refused stands under
-/// the field.
+/// A question being typed opens its boxed field under it with the cursor in the box,
+/// past its margin, the box's upright and the cell inside it, and what stands before
+/// the cursor; what the engine refused stands under the box.
 #[test]
 fn a_typed_question_opens_its_field_under_it_and_says_what_was_refused() {
     let card = card(
@@ -152,23 +155,25 @@ fn a_typed_question_opens_its_field_under_it_and_says_what_was_refused() {
             ),
             ahead("Anything to add?", None),
         ],
-        Legend::new().key("enter", "answers"),
+        Legend::new().key("enter", "answer"),
     );
     let placed = card.drawn(&look(Glyphs::Unicode, 80), usize::MAX);
     let rows: Vec<String> = placed.lines.iter().map(|line| line.text()).collect();
     assert_eq!(
-        rows[4..=6],
+        rows[4..=8],
         [
-            "▎ ◆ What changed?",
-            "▎     > the auth middle",
-            "▎     ✗ `summary` is `required` and nothing answers it",
+            "▎ ◆ What changed?".to_string(),
+            format!("▎     ╭{}╮", "─".repeat(72)),
+            format!("▎     │ the auth middle{} │", " ".repeat(55)),
+            format!("▎     ╰{}╯", "─".repeat(72)),
+            "▎     ✗ `summary` is `required` and nothing answers it".to_string(),
         ]
     );
-    assert_eq!(placed.cursor, Some((5, 17)));
+    assert_eq!(placed.cursor, Some((6, 17)));
 }
 
-/// What was typed to narrow a list stands over it, and a list it leaves nothing of
-/// says so.
+/// What was typed to narrow a list stands over it after the pointer, a cell right of the
+/// choices' pointer, and a list it leaves nothing of says so where its choices stand.
 #[test]
 fn a_filter_stands_over_its_list() {
     let row = |choices: Option<Choices>, filter: &str| RoundRow {
@@ -188,22 +193,18 @@ fn a_filter_stands_over_its_list() {
             }),
             "pr",
         )],
-        Legend::new().key("enter", "answers"),
+        Legend::new().key("enter", "answer"),
     );
     let rows = drawn(&narrowed, &look(Glyphs::Unicode, 80), usize::MAX);
     assert_eq!(
         rows[3..=5],
-        ["▎ ◆ Which tier?", "▎     filter pr", "▎     ▸ pro"]
+        ["▎ ◆ Which tier?", "▎      ▸ pr", "▎     ▸ pro"]
     );
-    let none = card(vec![row(None, "zz")], Legend::new().key("enter", "answers"));
+    let none = card(vec![row(None, "zz")], Legend::new().key("enter", "answer"));
     let rows = drawn(&none, &look(Glyphs::Unicode, 80), usize::MAX);
     assert_eq!(
         rows[3..=5],
-        [
-            "▎ ◆ Which tier?",
-            "▎     filter zz",
-            "▎     nothing matches"
-        ]
+        ["▎ ◆ Which tier?", "▎      ▸ zz", "▎       nothing matches"]
     );
 }
 
@@ -220,7 +221,7 @@ fn a_long_answer_is_cut_and_a_long_question_wraps() {
                 None,
             ),
         ],
-        Legend::new().key("enter", "answers"),
+        Legend::new().key("enter", "answer"),
     );
     for cells in 30..=100 {
         for row in drawn(&card, &look(Glyphs::Unicode, cells), usize::MAX) {
@@ -284,7 +285,7 @@ fn a_long_question_gives_way_before_its_answer() {
             "Which environment should this change be deployed to first?",
             "staging",
         )],
-        Legend::new().key("enter", "answers"),
+        Legend::new().key("enter", "answer"),
     );
     let rows = drawn(&card, &look(Glyphs::Unicode, 60), usize::MAX);
     assert!(rows[3].ends_with("…  staging"), "{rows:#?}");
@@ -292,54 +293,132 @@ fn a_long_question_gives_way_before_its_answer() {
     assert!(cell_width(&rows[3]) <= 60, "{rows:#?}");
 }
 
-/// What a field may fill in a round is what the field's own margin leaves too.
+/// The box a field in a round is typed in spans what the field's own margin leaves too.
 #[test]
-fn a_field_in_a_round_fills_what_its_margin_leaves() {
-    assert_eq!(
-        Card::typed_room_in_round(&look(Glyphs::Unicode, 80), "> "),
-        71
-    );
+fn a_fields_box_in_a_round_spans_what_its_margin_leaves() {
+    assert_eq!(Card::typed_room_in_round(&look(Glyphs::Unicode, 80)), 74);
 }
 
-/// A round longer than the terminal folds what was answered first, and what is to
-/// come next. What is being answered is never folded.
+/// A round longer than the terminal folds the questions above the one being answered
+/// first, and those under it next, each run of them counted on a row of its own where
+/// the questions stand. What is being answered is never folded, its box whole.
 #[test]
 fn a_long_round_folds_what_was_answered_and_then_what_is_to_come() {
-    let card = card(long_round(), Legend::new().key("enter", "answers"));
-    let tall = drawn(&card, &look(Glyphs::Unicode, 80), 12);
+    let card = card(long_round(), Legend::new().key("enter", "answer"));
+    let [top, field, bottom] = [
+        format!("▎     ╭{}╮", "─".repeat(72)),
+        format!("▎     │{}│", " ".repeat(72)),
+        format!("▎     ╰{}╯", "─".repeat(72)),
+    ];
+    let tall = drawn(&card, &look(Glyphs::Unicode, 80), 14);
     assert_eq!(
         tall,
         [
-            "▎ ◆ 3 answers before `grill` goes on",
-            "▎ nothing is recorded until every one is answered",
-            "▎",
-            "▎ ✓ 4 of 8 answered",
-            "▎ ◆ Five?",
-            "▎     > ",
-            "▎ ◌ Six?",
-            "▎ ◌ Seven?",
-            "▎ ◌ Eight?",
-            "▎",
-            "▎ enter answers",
+            "▎ ◆ 3 answers before `grill` goes on".to_string(),
+            "▎ nothing is recorded until every one is answered".to_string(),
+            "▎".to_string(),
+            "▎ … 4 above".to_string(),
+            "▎ ◆ Five?".to_string(),
+            top.clone(),
+            field.clone(),
+            bottom.clone(),
+            "▎ ◌ Six?".to_string(),
+            "▎ ◌ Seven?".to_string(),
+            "▎ ◌ Eight?".to_string(),
+            "▎".to_string(),
+            "▎ enter answer".to_string(),
         ]
     );
-    let short = drawn(&card, &look(Glyphs::Unicode, 80), 9);
+    let short = drawn(&card, &look(Glyphs::Unicode, 80), 11);
     assert_eq!(
-        short[3..=6],
+        short[3..=8],
         [
-            "▎ ✓ 4 of 8 answered",
-            "▎ ◆ Five?",
-            "▎     > ",
-            "▎ ◌ 3 of 8 to answer"
+            "▎ … 4 above".to_string(),
+            "▎ ◆ Five?".to_string(),
+            top,
+            field,
+            bottom,
+            "▎ … 3 under".to_string(),
         ]
     );
-    assert!(short.len() <= 9, "{short:#?}");
+    assert!(short.len() <= 11, "{short:#?}");
 }
 
-/// The cursor stands on the field wherever folding leaves it.
+/// Short of the rows its folds leave, a round's card gives its head way, the round's own
+/// questions saying what is asked; then the question being answered keeps one row, and the
+/// row its list is narrowed on gives way while nothing is typed there. Its choices stand.
+#[test]
+fn shorter_still_its_head_gives_way_then_the_question_keeps_one_row() {
+    let card = card(
+        vec![
+            answered("Which environment?", "production"),
+            picking("Which tier of the service should this release be deployed on?"),
+            ahead("Anything to add?", None),
+        ],
+        Legend::new(),
+    );
+    assert_eq!(
+        drawn(&card, &look(Glyphs::Unicode, 40), 6),
+        [
+            "▎ … 1 above",
+            "▎ ◆ Which tier of the service should th…",
+            "▎      ▸ type to filter",
+            "▎     ▸ basic",
+            "▎       pro",
+            "▎ … 1 under",
+        ]
+    );
+    assert_eq!(
+        drawn(&card, &look(Glyphs::Unicode, 40), 5),
+        [
+            "▎ … 1 above",
+            "▎ ◆ Which tier of the service should th…",
+            "▎     ▸ basic",
+            "▎       pro",
+            "▎ … 1 under",
+        ]
+    );
+}
+
+/// The cursor stands in the field's box wherever folding leaves it.
 #[test]
 fn the_cursor_follows_the_field_through_a_fold() {
-    let card = card(long_round(), Legend::new().key("enter", "answers"));
+    let card = card(long_round(), Legend::new().key("enter", "answer"));
     let placed = card.drawn(&look(Glyphs::Unicode, 80), 12);
-    assert_eq!(placed.cursor, Some((5, 8)));
+    assert_eq!(placed.cursor, Some((6, 8)));
+}
+
+/// On a question picked from a list every printable key types on the row it is narrowed
+/// on, so the cursor stands there: at the first cell of `type to filter` while nothing is
+/// typed, after the words typed otherwise, at any width and through the folds that keep
+/// that row.
+#[test]
+fn the_cursor_stands_on_the_row_a_list_is_narrowed_on() {
+    let rows = |filter: Option<&str>| {
+        let mut asked = picking("Which tier?");
+        if let RoundStanding::Picking { filter: typed, .. } = &mut asked.stands {
+            *typed = filter.map(str::to_string);
+        }
+        vec![answered("Which environment?", "production"), asked]
+    };
+    let legend = || Legend::new().arrows("choose").key("enter", "answer");
+    for cells in [120, 60] {
+        let open = card(rows(None), legend());
+        let placed = open.drawn(&look(Glyphs::Unicode, cells), usize::MAX);
+        assert_eq!(placed.cursor, Some((5, 9)), "{cells} cells, nothing typed");
+        let narrowed = card(rows(Some("pr")), legend());
+        let placed = narrowed.drawn(&look(Glyphs::Ascii, cells), usize::MAX);
+        assert_eq!(placed.cursor, Some((5, 11)), "{cells} cells, `pr` typed");
+    }
+    let folded = card(rows(Some("pr")), legend()).drawn(&look(Glyphs::Unicode, 40), 4);
+    let at = folded.cursor.expect("a cursor through the fold");
+    assert!(
+        folded.lines[at.0].text().ends_with("▸ pr"),
+        "{:#?}",
+        folded
+            .lines
+            .iter()
+            .map(|line| line.text())
+            .collect::<Vec<_>>()
+    );
 }

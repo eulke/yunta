@@ -1,26 +1,30 @@
 //! Where one run's wall-clock went: the sentence that says where most of it
-//! went, and a bar of its parts with each part in words under it.
+//! went, and, under its heading, a bar of its parts across the line with
+//! each part's mark and words under it.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use surco::bars::parts as apportioned;
 use surco::figures::duration;
+use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::look::Look;
-use surco::width::{cell_width, id_column, middle_cut, INDENT};
+use surco::width::{id_column, middle_cut, INDENT};
 use surco::words::{AT_WORK, WAITING_ON_YOU};
 use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
 use yunta_core::NodeId;
 use yunta_replay::TimeSpent;
 
-/// The block `yunta stats <run>` shows of `time`: a bar of its parts, side
-/// by side in the one order two runs are read in, each part as many cells
-/// as its share and in its tone, and under it each part in words, in the
-/// same tone, with what it took. A part under a second is no part. What of
-/// the checks a red criterion had already decided is said under them.
-/// Nothing for a run that spent no time at all.
+/// The block `yunta stats <run>` shows of `time`, under its heading: a bar
+/// of its parts across the line's whole width, side by side in the one
+/// order two runs are read in, each part as many cells as its share and in
+/// its tone, and under it each part, its mark in its tone, its name and
+/// what it took muted, apart by a faint separator and wrapped where the
+/// line ends. A part under a second is no part, so a run whose time holds
+/// no checks, measuring or time between draws none of them. Nothing for a
+/// run that spent no time at all.
 pub(super) fn render(time: &TimeSpent, look: &Look) -> Vec<Line> {
     let parts: Vec<(&str, Duration, Tone)> = parts(time)
         .into_iter()
@@ -29,7 +33,7 @@ pub(super) fn render(time: &TimeSpent, look: &Look) -> Vec<Line> {
     if parts.is_empty() {
         return Vec::new();
     }
-    let room = look.width.cells().saturating_sub(cell_width(INDENT));
+    let room = look.width.cells();
     let seconds: Vec<f64> = parts
         .iter()
         .map(|(_, spent, _)| spent.as_secs_f64())
@@ -39,29 +43,38 @@ pub(super) fn render(time: &TimeSpent, look: &Look) -> Vec<Line> {
         .fine_steps()
         .last()
         .map_or_else(String::new, char::to_string);
-    let mut bar = Line::new().plain(INDENT);
+    let mut bar = Line::new();
     for ((_, _, tone), cells) in parts.iter().zip(apportioned(&seconds, room)) {
         bar = bar.push(*tone, whole.repeat(cells));
     }
+    let mark = look.glyphs.mark(Mark::Running).to_string();
     let mut words = Line::new();
     for (at, (name, spent, tone)) in parts.iter().enumerate() {
         if at > 0 {
-            words = words.push(Tone::Muted, format!(" {} ", look.glyphs.sep()));
+            words = words.push(Tone::Faint, format!(" {} ", look.glyphs.sep()));
         }
-        words = words.push(*tone, format!("{name} {}", duration(*spent)));
+        words = words
+            .push(*tone, mark.as_str())
+            .push(Tone::Muted, format!(" {name} {}", duration(*spent)));
     }
-    let mut lines = vec![Line::new(), Line::new().plain("time:"), bar];
-    lines.extend(words.wrap(room).into_iter().map(|line| line.under(INDENT)));
-    if time.decided_checks.as_secs() > 0 {
-        lines.push(Line::new().plain(INDENT).push(
+    let heading = Line::new().push(Tone::Muted, "where its time went");
+    let mut lines = vec![Line::new(), heading, bar];
+    lines.extend(words.wrap(room));
+    lines
+}
+
+/// What of the checks of `time` a red criterion had already decided, said under where its
+/// time went on the printed page: none where no check was decided so.
+pub(super) fn decided(time: &TimeSpent) -> Option<Line> {
+    (time.decided_checks.as_secs() > 0).then(|| {
+        Line::new().push(
             Tone::Muted,
             format!(
                 "{} of the checks were guards a red criterion had already decided",
                 duration(time.decided_checks)
             ),
-        ));
-    }
-    lines
+        )
+    })
 }
 
 /// Where most of a run's time went, as the sentence under its headline: the
@@ -160,9 +173,11 @@ mod tests {
             .collect()
     }
 
-    /// A bar of the parts, each as long as its share, then each part in
-    /// words with what it took, in one order; a part under a second is no
-    /// part, and what of the checks was decided already is said under them.
+    /// Under its heading, a bar of the parts across the line's whole width,
+    /// each as long as its share, then each part with its mark, in words
+    /// with what it took, in one order; a part under a second is no part,
+    /// and what of the checks was decided already is said under them where
+    /// the printed page says it.
     #[test]
     fn the_time_a_run_spent_reads_as_a_bar_of_its_parts() {
         let time = TimeSpent {
@@ -173,19 +188,21 @@ mod tests {
             people: Duration::from_millis(400),
             ..Default::default()
         };
-        let drawn = text(&render(&time, &Look::plain()));
+        let mut lines = render(&time, &Look::plain());
+        lines.extend(decided(&time));
+        let drawn = text(&lines);
         let rows: Vec<&str> = drawn
             .lines()
-            .skip_while(|line| *line != "time:")
+            .skip_while(|line| *line != "where its time went")
             .skip(1)
             .collect();
-        let bar = format!("  {}", "#".repeat(78));
+        let bar = "#".repeat(80);
         assert_eq!(
             rows,
             [
                 bar.as_str(),
-                "  working 10m00s ; checks 5m00s ; measuring 2m00s",
-                "  4m00s of the checks were guards a red criterion had already decided",
+                "> working 10m00s ; > checks 5m00s ; > measuring 2m00s",
+                "4m00s of the checks were guards a red criterion had already decided",
             ]
         );
     }
@@ -198,13 +215,13 @@ mod tests {
             decided_checks: Duration::from_millis(400),
             ..Default::default()
         };
-        let drawn = text(&render(&time, &Look::plain()));
-        assert!(!drawn.contains("of the checks were guards"), "{drawn}");
+        assert!(decided(&time).is_none());
     }
 
-    /// Each part's words are in its tone, a person's in the person's.
+    /// Each part's mark is in its tone, a person's in the person's, and its
+    /// words muted, apart by a faint separator.
     #[test]
-    fn each_part_s_words_take_its_tone() {
+    fn each_part_s_mark_takes_its_tone() {
         let time = TimeSpent {
             working: Duration::from_secs(60),
             people: Duration::from_secs(120),
@@ -214,14 +231,16 @@ mod tests {
         let toned: Vec<(&str, Tone)> = lines[3]
             .spans()
             .iter()
-            .filter(|span| !matches!(span.tone, Tone::Plain | Tone::Muted))
             .map(|span| (span.text.as_str(), span.tone))
             .collect();
         assert_eq!(
             toned,
             [
-                ("working 1m00s", Tone::Running),
-                ("waiting on you 2m00s", Tone::NeedsYou),
+                (">", Tone::Running),
+                (" working 1m00s", Tone::Muted),
+                (" ; ", Tone::Faint),
+                (">", Tone::NeedsYou),
+                (" waiting on you 2m00s", Tone::Muted),
             ]
         );
     }

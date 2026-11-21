@@ -4,6 +4,7 @@
 
 use super::*;
 
+use surco::doc::Block;
 use surco::glyphs::Glyphs;
 use surco::look::{Look, Width};
 use surco::paint::Paint;
@@ -12,8 +13,8 @@ use yunta_testkit::{
     full_run_id, run_id_from, runs_root, wait_until, yunta_at, yunta_on_terminal, Checkout,
 };
 
-/// A run parked on its gate, answered at its card with its first option, is recorded
-/// and resumed detached, to its end.
+/// A run parked on its gate, answered at its card in place with its first option, is
+/// recorded and resumed detached, to its end.
 #[tokio::test]
 async fn a_parked_gate_decided_is_resumed_detached_to_its_end() {
     let checkout = Checkout::new()
@@ -22,10 +23,13 @@ async fn a_parked_gate_decided_is_resumed_detached_to_its_end() {
         .committed();
     let parked = yunta_at!(&checkout, &["run", "wf.yaml"]);
     let id = full_run_id(&checkout.home, &run_id_from(&parked));
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
 
-    let answered = [Stroke::Enter, Stroke::Insert('a'), Stroke::Enter];
+    let answered = [Stroke::Enter, Stroke::Enter];
     let (state, _) = drive(opened, asked, &performer, &answered).await;
     let screen = Markdown.screen(&state.screen(&Markdown.look()));
 
@@ -44,8 +48,9 @@ async fn a_parked_gate_decided_is_resumed_detached_to_its_end() {
     assert_eq!(document["outcome"], "finished", "{document:#}");
 }
 
-/// The card the application puts a parked gate on is the one `resolve-gate` holds at a
-/// terminal of the same width: every line of it, its question, options, words and keys.
+/// The card the application puts a parked gate on, in place at its pane's foot, is the one
+/// `resolve-gate` holds at a terminal of the same width: every line of it, its question,
+/// options and words, its keys standing in the screen's legend.
 #[tokio::test]
 async fn the_card_is_the_one_resolve_gate_holds_at_a_terminal() {
     let checkout = Checkout::new()
@@ -57,16 +62,13 @@ async fn the_card_is_the_one_resolve_gate_holds_at_a_terminal() {
     let mut terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &["resolve-gate", &id]);
     terminal.wait_on_screen("▸ go", "resolve-gate never put the card");
     let held = terminal.screen();
-    let performer = Arc::new(Performer::new(workspace(&checkout.repo, &checkout.home)));
+    let performer = Arc::new(Performer::new(
+        workspace(&checkout.repo, &checkout.home),
+        Channel::Tty,
+    ));
     let (opened, asked) = State::opened(now());
 
-    let (state, _) = drive(
-        opened,
-        asked,
-        &performer,
-        &[Stroke::Enter, Stroke::Insert('a')],
-    )
-    .await;
+    let (state, _) = drive(opened, asked, &performer, &[Stroke::Enter]).await;
 
     let look = Look {
         glyphs: Glyphs::Unicode,
@@ -75,8 +77,8 @@ async fn the_card_is_the_one_resolve_gate_holds_at_a_terminal() {
         motion: surco::motion::Motion::Moves,
     };
     let screen = state.screen(&look);
-    let [card] = screen.main.doc.blocks() else {
-        panic!("the card alone in the main region");
+    let Some(card @ Block::Card(_)) = screen.main.doc.blocks().last() else {
+        panic!("the card at the main region's foot");
     };
     let drawn = surco::surface::Terminal::on(look).block(card);
     for line in drawn.iter().map(|line| Paint::Plain.line(line)) {

@@ -135,6 +135,14 @@ pub struct PullRequestRef {
     pub number: u64,
 }
 
+impl PullRequestRef {
+    /// The pull request a gate's `handle` names, as the log keeps it beside the gate that
+    /// published it: read here once, for every crate that reads a handle back.
+    pub fn of_handle(handle: &str) -> Result<PullRequestRef, serde_json::Error> {
+        serde_json::from_str(handle)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReviewComment {
     pub author: String,
@@ -199,6 +207,17 @@ pub struct ForgeProbe {
     /// Whether they may push to the repository; `None` when the forge
     /// does not say.
     pub can_push: Option<bool>,
+}
+
+/// Why no forge answered for a run: its configuration declares none; it declares one
+/// whose token is in `token_env`, which is not set here; or the forge was reached and
+/// failed, as `said` says. Not a [`ForgeError`], what one call to a forge came to, which
+/// `Failed` carries in words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForgeUnanswered {
+    Undeclared,
+    TokenUnset { token_env: String },
+    Failed { said: String },
 }
 
 #[async_trait]

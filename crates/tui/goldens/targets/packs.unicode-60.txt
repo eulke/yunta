@@ -1,0 +1,14 @@
+ yunta › workflows › packs                nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ✓ packs · 1 installed
+ ▸ ✓ acme/demo  main ({commit}), as its lock records it
+   lock         .yunta/yunta.lock
+
+
+
+
+
+
+
+
+ j k move · a audit it · u update it · … · ? keys

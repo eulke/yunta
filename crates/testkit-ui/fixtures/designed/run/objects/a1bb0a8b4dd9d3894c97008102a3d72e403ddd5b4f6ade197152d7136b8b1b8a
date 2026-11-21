@@ -1,0 +1,11 @@
+findings:
+- id: global-commands-ignore-yunta-home
+  severity: major
+  title: Global pack commands ignore the configured YUNTA_HOME state root
+  location: crates/cli/src/pack/target.rs:29-33
+  detail: Other user-level state resolves beneath YUNTA_HOME, but global_data_dir appends ~/.yunta, so users who rely on YUNTA_HOME cannot find the global installation.
+- id: audit-misses-global-packs
+  severity: minor
+  title: Pack audit cannot inspect globally installed packs
+  location: crates/cli/src/cli/pack.rs:76-88
+  detail: After pack add --global, pack audit publisher/name still resolves only the project .yunta/packs directory and returns not installed.

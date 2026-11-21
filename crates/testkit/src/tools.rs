@@ -296,13 +296,20 @@ impl ToolsHost {
 /// the view the engine writes, and the working space every node stages in.
 fn born_run_dir(root: &std::path::Path) -> PathBuf {
     let run_dir = root.join("run");
+    born_dirs(&run_dir);
+    run_dir
+}
+
+/// What `create_run` gives every run, made in its directory `run_dir` where it
+/// is not: the view the engine writes, and the working space every node stages
+/// in, where a run handed on to a detached engine keeps that engine's log.
+pub fn born_dirs(run_dir: &std::path::Path) {
     for dir in [
         yunta_core::run_dir::ARTIFACTS_DIR,
         yunta_engine::run_dir::SCRATCH_DIR,
     ] {
         std::fs::create_dir_all(run_dir.join(dir)).expect("create the run's own directories");
     }
-    run_dir
 }
 
 /// The environment a [`ToolsHost`] reports its commands running with —

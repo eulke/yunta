@@ -5,15 +5,15 @@ use std::collections::BTreeMap;
 use super::NoteDigest;
 use crate::best_effort::BestEffortStep;
 use crate::events::{
-    AgentMessageType, LoggedWords, RailFailedPayload, RailSummaryPayload, RunToolFailedPayload,
-    RunToolRefusedPayload, SessionEvent, ToolAction, ToolTarget,
+    AgentMessagePayload, AgentMessageType, LoggedWords, RailFailedPayload, RailSummaryPayload,
+    RunToolFailedPayload, RunToolRefusedPayload, SessionEvent, ToolAction, ToolTarget,
 };
 use crate::fence::Coverage;
 use crate::port::PolicyApplied;
 use crate::rail::hook::RailFailureCause;
 use crate::rail::timing::Histogram;
 use crate::rail::RailEvent;
-use crate::{AdapterId, AgentName, Capability, ModelName};
+use crate::{AdapterId, AgentName, Capability, ModelName, SessionId};
 
 /// One thing that happened inside a node's session.
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +32,9 @@ pub enum Happening {
         tool: Option<String>,
         action: ToolAction,
         target: Option<ToolTarget>,
+        /// The session the call was made in; `None` on a log older than
+        /// calls that name it.
+        session: Option<SessionId>,
     },
     /// Anything else the session said: what kind of message it was,
     /// what the log kept of it — for a note, its size and digest, never
@@ -102,20 +105,7 @@ impl From<&SessionEvent> for Happening {
                 model: p.model.clone(),
                 fence: p.fence.clone(),
             },
-            SessionEvent::Message(p) => match &p.tool_name {
-                Some(_) => Happening::Called {
-                    tool: p.tool_name.clone(),
-                    action: p.tool_action(),
-                    target: p.target.clone(),
-                },
-                None => Happening::Message {
-                    kind: p.message_type,
-                    note: p.note.clone(),
-                    text: p.text.clone(),
-                    input_tokens: p.input_tokens,
-                    output_tokens: p.output_tokens,
-                },
-            },
+            SessionEvent::Message(p) => p.into(),
             SessionEvent::CapabilityDegraded(p) => Happening::Degraded {
                 capability: p.capability,
                 adapter: p.adapter.clone(),
@@ -142,6 +132,28 @@ impl From<&SessionEvent> for Happening {
             SessionEvent::BestEffortFailed(p) => Happening::BestEffortFailed {
                 step: p.step,
                 cause: p.cause.clone(),
+            },
+        }
+    }
+}
+
+/// A message that names a tool is a call, with the session it was made in;
+/// any other is what the session said.
+impl From<&AgentMessagePayload> for Happening {
+    fn from(payload: &AgentMessagePayload) -> Self {
+        match &payload.tool_name {
+            Some(_) => Happening::Called {
+                tool: payload.tool_name.clone(),
+                action: payload.tool_action(),
+                target: payload.target.clone(),
+                session: payload.session.clone(),
+            },
+            None => Happening::Message {
+                kind: payload.message_type,
+                note: payload.note.clone(),
+                text: payload.text.clone(),
+                input_tokens: payload.input_tokens,
+                output_tokens: payload.output_tokens,
             },
         }
     }

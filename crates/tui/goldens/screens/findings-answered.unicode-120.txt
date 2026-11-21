@@ -1,0 +1,36 @@
+ yunta › Q78GRR › fix-findings                                                              ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h48m                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ━━━━━ ━━━━ ━━━━ ━━━━━━━ ━━━━━━━━━ ━━━━━━ ━━━━ ━━━━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄┄┄┄┄ ┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+   ✓ grill                  36s  │ findings · 2 of 4 answered · review@reviewer, review@reviewer-alt, conform
+   ✓ brief                  22s  │
+   ✓ plan                 6m25s  │   ✓ major    Global pack paths ignore the configured YUNTA_HOME
+   ✓ spec                13m53s  │              fixed: Global pack paths now use the shared user_state_root resolver,…
+   ✓ approve-plan        10m05s  │ ▸ ▲ major    Global pack commands ignore the configured YUNTA_HOME state root
+   ✓ implement           41m05s  │   ◌ minor    Pack audit cannot inspect globally installed packs
+    └─ ✓ global-pack-install     │   ✓ blocking Pack target API shapes are defined outside the declared file
+   ✓ review@reviewer      2m00s  │              fixed: PackTarget and its path functions are now defined in crates/cli…
+   ✓ review@reviewer-alt    42s  │
+   ✓ conform                25s  │ review@reviewer-alt  crates/cli/src/pack/target.rs:29-33
+ ▸ ⠴ fix-findings                │ Other user-level state resolves beneath YUNTA_HOME, but global_data_dir appends
+   ◌ lint                        │ ~/.yunta, so users who rely on YUNTA_HOME cannot find the global installation.
+   ◌ fix-lint                    │
+   ◌ tests                       │ what it is doing · 6 calls
+   ◌ ship                        │ running: attempt 1
+   ◌ pr                          │ session opened on gpt-6-luna · fence widened to 2 roots
+                                 │ call    yunta_findings
+                                 │ edit    crates/cli/src/pack/target.rs
+                                 │ edit    crates/cli/src/commands/pack_audit.rs
+                                 │ run     cargo xtask
+                                 │ run     cargo test
+                                 │ finding target-outside-declared-file of `conform` answered fixed: PackTarget and it…
+                                 │ call    yunta_answer_finding
+                                 │ finding global-paths-ignore-yunta-home of `review@reviewer` answered fixed: Global…
+                                 │
+                                 │
+ 26.9M tokens ▁▁▂▂▁█▁▁▁▂▁▁▁▁▁ · 1h09m at work · 38m51s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ j k finding · tab nodes · s stats · q field, it keeps going                                        / anything · ? keys

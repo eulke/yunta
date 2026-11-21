@@ -12,10 +12,7 @@
 //! and with none waiting a resume asks again. Whoever answers, the decision
 //! is audited in the log as a run-level gate pair (`node_id: None`).
 
-use yunta_core::events::{
-    BudgetCap, Claim, Escalation, EventPayload, GateEvent, GateOption, GateResolvedPayload,
-    LoopCap, Menu, PauseReason,
-};
+use yunta_core::events::{BudgetCap, Claim, Escalation, GateOption, LoopCap, Menu, PauseReason};
 use yunta_core::{NonEmpty, RunId};
 
 use super::{RunCtx, RunError};
@@ -45,16 +42,7 @@ pub async fn escalate(
     match ctx.ask_human(node_id, None, &escalation).await? {
         Some(choice) => {
             let continues = ReservedOption::of(&choice.option) == Some(ReservedOption::Continue);
-            ctx.emit(
-                node_id,
-                EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload()))),
-            )
-            .await?;
-            ctx.emit(
-                node_id,
-                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(choice))),
-            )
-            .await?;
+            ctx.emit_decided(node_id, escalation, choice).await?;
             if continues {
                 Ok(BudgetDecision::Continue)
             } else {

@@ -14,7 +14,7 @@ use yunta_testkit::Bench;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Outcome, Request, State, Ticket};
 
-use support::{on_the_field, performed, stopped};
+use support::{on_the_field, performed};
 
 /// The screen's main region, as Markdown writes it.
 fn main_region(state: &State) -> String {
@@ -30,9 +30,9 @@ fn drawn(page: &impl Page) -> String {
 
 /// Doctor opened from a field of one stopped run: the state, and the ticket its checks
 /// are asked under.
-fn opened() -> (State, Ticket) {
+async fn opened() -> (State, Ticket) {
     let run = "01M7DOCTOR0000000000000000".parse().expect("a run's id");
-    let mut state = on_the_field(vec![stopped(&run)]);
+    let (mut state, _) = on_the_field(&[&run]).await;
     let asked = state.update(Input::Stroke(Stroke::Insert('m')));
     let [Request::Perform(ticket, Operation::Doctor { sessions: false })] = asked.as_slice() else {
         panic!("doctor checks the machine as it opens: {asked:?}");
@@ -43,7 +43,7 @@ fn opened() -> (State, Ticket) {
 #[tokio::test]
 async fn the_findings_are_those_doctor_prints_at_a_glance_and_whole() {
     let bench = Bench::new();
-    let (mut state, checks) = opened();
+    let (mut state, checks) = opened().await;
     let (_, outcome) = performed(&bench, Operation::Doctor { sessions: false }).await;
     let Outcome::Doctor(findings) = &outcome else {
         panic!("doctor's checks come to their findings: {outcome:?}");
@@ -77,9 +77,9 @@ async fn the_findings_are_those_doctor_prints_at_a_glance_and_whole() {
     assert_eq!(main_region(&state), printed(false));
 }
 
-#[test]
-fn a_session_per_binding_is_opened_once_confirmed_and_stopped_with_escape() {
-    let (mut state, checks) = opened();
+#[tokio::test]
+async fn a_session_per_binding_is_opened_once_confirmed_and_stopped_with_escape() {
+    let (mut state, checks) = opened().await;
     let found = vec![Finding::Committer {
         who: "Ada <ada@example.com>".to_string(),
     }];
@@ -128,9 +128,9 @@ fn a_session_per_binding_is_opened_once_confirmed_and_stopped_with_escape() {
     assert_eq!(trail, ["yunta", "doctor"]);
 }
 
-#[test]
-fn sessions_under_way_go_on_while_the_person_looks_elsewhere_and_comes_back() {
-    let (mut state, checks) = opened();
+#[tokio::test]
+async fn sessions_under_way_go_on_while_the_person_looks_elsewhere_and_comes_back() {
+    let (mut state, checks) = opened().await;
     state.update(Input::Outcome(checks, Outcome::Doctor(Vec::new())));
     state.update(Input::Stroke(Stroke::Insert('s')));
     let asked = state.update(Input::Stroke(Stroke::Enter));
@@ -139,9 +139,9 @@ fn sessions_under_way_go_on_while_the_person_looks_elsewhere_and_comes_back() {
         panic!("confirmed, a session is opened per binding: {asked:?}");
     };
     let sessions = *sessions;
-    // Upkeep, opened from the palette over doctor, then back to doctor.
+    // Upkeep, opened from the palette over doctor by what its row does, then back to doctor.
     let mut asked = Vec::new();
-    for stroke in "/gc"
+    for stroke in "/orphan"
         .chars()
         .map(Stroke::Insert)
         .chain([Stroke::Enter, Stroke::Decline])

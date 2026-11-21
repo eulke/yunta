@@ -1,9 +1,7 @@
 //! A plan's desk on a terminal of an exact size. Every expected row here is written by
 //! hand, and what a row ends in spaces is gone before it is compared.
 
-use crate::components::{
-    ChoiceRow, Desk, DeskFoot, FootRow, Laid, Legend, Pane, RailGroup, RailRow, Sight,
-};
+use crate::components::{Desk, DeskFoot, FootRow, Laid, Legend, Pane, RailGroup, RailRow, Sight};
 use crate::doc::{Block, Doc};
 use crate::glyphs::Glyphs;
 use crate::line::{Fill, Line};
@@ -47,39 +45,36 @@ pub(super) fn stop(lead: &str, name: &str, pointed: bool) -> RailRow {
     }
 }
 
+/// The rail as a plan's desk composes it: its places in one untitled group, what it says
+/// counted, and what weighs on it.
 fn rail() -> Vec<RailGroup> {
+    let tally = |what: &str, count: usize, key: Option<char>| RailRow::Tally {
+        what: what.to_string(),
+        count,
+        key,
+    };
     vec![
-        RailGroup {
-            title: Some("steps".to_string()),
-            rows: vec![stop("1", "storage", true), stop("2", "catalog", false)],
-        },
         RailGroup {
             title: None,
             rows: vec![
-                RailRow::Tally {
-                    what: "decided for you".to_string(),
-                    count: 4,
-                    key: Some('d'),
-                },
-                RailRow::Tally {
-                    what: "risks".to_string(),
-                    count: 2,
-                    key: None,
-                },
+                stop("", "the change", false),
+                stop("1", "storage", true),
+                stop("2", "catalog", false),
             ],
         },
         RailGroup {
-            title: Some("implies".to_string()),
-            rows: vec![RailRow::Weighs(
-                "what it changes is named in 6 files outside every task".to_string(),
-            )],
+            title: Some("what it says".to_string()),
+            rows: vec![
+                tally("decided for you", 4, Some('d')),
+                tally("out of scope", 3, None),
+                tally("risks", 2, None),
+            ],
         },
         RailGroup {
-            title: Some("impact".to_string()),
-            rows: vec![RailRow::Pair {
-                left: "cli/src/pack.rs".to_string(),
-                right: "storage".to_string(),
-            }],
+            title: Some("what weighs on it".to_string()),
+            rows: vec![RailRow::Weighs(
+                "the tests fail before the work, as they must".to_string(),
+            )],
         },
     ]
 }
@@ -110,7 +105,7 @@ pub(in crate::surface::terminal) fn desk(lines: Vec<Line>) -> Desk {
                 more: 0,
             },
             legend: Legend::new()
-                .key("j k", "task")
+                .key("tab", "next place")
                 .key("p", "proof")
                 .key("esc", "back"),
         },
@@ -132,7 +127,7 @@ fn row(rail: &str, pane: &str) -> String {
 }
 
 /// `left` and `right` at the two ends of `cells` cells.
-fn ends(left: &str, right: &str, cells: usize) -> String {
+pub(super) fn ends(left: &str, right: &str, cells: usize) -> String {
     let gap = cells - left.chars().count() - right.chars().count();
     format!("{left}{}{right}", " ".repeat(gap))
 }
@@ -160,7 +155,7 @@ fn options_row(cells: usize) -> String {
         " {}",
         ends(
             "1 approve   2 adjust",
-            "j k task · p proof · esc back",
+            "tab next place · p proof · esc back",
             cells - 2
         )
     )
@@ -181,19 +176,19 @@ fn a_wide_terminal_has_the_head_the_rail_the_pane_and_the_foot() {
             " Install packs in the state directory.".to_string(),
             " you asked  add global install".to_string(),
             String::new(),
-            row("steps", &pane_title()),
+            row("    the change", &pane_title()),
             row("1 ▸ storage", ""),
             row("2   catalog", "line 1"),
             row("", "line 2"),
-            row("decided for you           4  d", "line 3"),
+            row("what it says", "line 3"),
+            row("decided for you           4  d", ""),
+            row("out of scope              3", ""),
             row("risks                     2", ""),
             row("", ""),
-            row("implies", ""),
-            row("▲ what it changes is named in", ""),
-            row("  6 files outside every task", ""),
+            row("what weighs on it", ""),
+            row("▲ the tests fail before the", ""),
+            row("  work, as they must", ""),
             row("", ""),
-            row("impact", ""),
-            row("cli/src/pack.rs        storage", ""),
             row("", ""),
             row("", ""),
             row("", ""),
@@ -242,12 +237,12 @@ fn a_short_terminal_keeps_the_pointer_the_pane_and_the_question() {
         [
             title_row(100),
             String::new(),
-            row("steps", &pane_title()),
+            row("    the change", &pane_title()),
             row("1 ▸ storage", ""),
             row("2   catalog", "line 1"),
             row("", "line 2"),
-            row("decided for you           4  d", "line 3"),
-            row("risks                     2", "line 4"),
+            row("", "line 3"),
+            row("", "line 4"),
             row("", "line 5"),
             row("", "… 25 more lines"),
             String::new(),
@@ -320,55 +315,10 @@ fn the_row_a_pointer_stands_on_stays_in_sight() {
 
 /// A choice about to be made says what it does and how to make it.
 #[test]
-fn a_choice_being_confirmed_says_what_it_does() {
-    let mut confirming = desk(numbered(1));
-    confirming.foot.row = FootRow::Confirming(ChoiceRow {
-        name: "approve".to_string(),
-        said: Some("On to `implement`".to_string()),
-        cost: Some("resolves this gate".to_string()),
-    });
-    confirming.foot.legend = Legend::new()
-        .key("enter", "confirms")
-        .key("esc", "goes back");
-    let rows = drawn(&confirming, &look(Glyphs::Unicode, 100), 24);
-    assert_eq!(
-        rows.last().map(String::as_str),
-        Some(
-            format!(
-                " {}",
-                ends(
-                    "approve  On to `implement`: resolves this gate",
-                    "enter confirms · esc goes back",
-                    98
-                )
-            )
-            .as_str()
-        ),
-    );
-}
-
-/// Keys that do not fit beside the options take a row of their own under them.
-#[test]
-fn keys_that_do_not_fit_beside_the_options_go_under_them() {
-    let mut crowded = desk(numbered(1));
-    crowded.foot.legend = (0..3).fold(Legend::new(), |legend, _| {
-        legend.key("a", "very long way to say what a key does")
-    });
-    let rows = drawn(&crowded, &look(Glyphs::Unicode, 100), 24);
-    let at = rows
-        .iter()
-        .position(|row| row.contains("1 approve"))
-        .expect("the options");
-    assert_eq!(rows[at], " 1 approve   2 adjust", "{rows:#?}");
-    assert!(rows[at + 1].contains("a very long way"), "{rows:#?}");
-    assert_eq!(rows.len(), 23, "the pane gave up the rows: {rows:#?}");
-}
-
-#[test]
 fn ascii_draws_it_with_what_ascii_has() {
     let mut plain = desk(numbered(3));
     plain.title = vec!["plan".to_string(), "EKPBGE".to_string()];
-    plain.foot.legend = Legend::new().key("j k", "task").key("p", "proof");
+    plain.foot.legend = Legend::new().key("tab", "next place").key("p", "proof");
     let rows = drawn(&plain, &look(Glyphs::Ascii, 100), 24);
     assert!(rows.iter().all(|row| row.is_ascii()), "{rows:#?}");
     assert!(
@@ -381,26 +331,23 @@ fn ascii_draws_it_with_what_ascii_has() {
     );
 }
 
-/// A title or a path too long for its place is cut, and what stands at the far end
-/// stays.
+/// A title or a path too long for its place is cut, what stands at the title's far end
+/// having given way first.
 #[test]
 fn what_does_not_fit_its_place_is_cut() {
     let mut long = desk(numbered(1));
     long.title = vec!["w".repeat(200)];
     long.gist = Some("g".repeat(300));
     long.foot.question = "q".repeat(300);
-    long.rail[3].rows = vec![RailRow::Pair {
-        left: format!("crates/{}/src/pack.rs", "x".repeat(60)),
-        right: "storage".to_string(),
-    }];
+    long.rail[0].rows = vec![stop("1", &format!("storage-{}", "x".repeat(60)), true)];
     let rows = drawn(&long, &look(Glyphs::Unicode, 100), 30);
-    assert!(rows[0].ends_with("needs you  approve-plan"), "{rows:#?}");
-    assert!(rows[0].contains('…'), "{rows:#?}");
+    assert!(!rows[0].contains("needs you"), "{rows:#?}");
+    assert!(rows[0].ends_with('…'), "{rows:#?}");
     assert!(rows[1].ends_with('…'), "{rows:#?}");
     assert!(
         rows.iter()
-            .any(|row| row.contains("crates/") && row.contains("pack.rs") && row.contains('…')),
-        "both ends of a path stay: {rows:#?}"
+            .any(|row| row.contains("1 ▸ storage-x") && row.contains("x… │")),
+        "a place's name is cut at the rail's edge: {rows:#?}"
     );
     assert!(rows.iter().any(|row| row.contains("q…")), "{rows:#?}");
 }
@@ -424,21 +371,46 @@ fn the_pane_says_where_it_is_as_long_as_there_is_room() {
     );
 }
 
-/// A title keeps as many of its parts whole as fit: a handle is never half said.
+/// What stands at the far end of the title's row gives way whole before the title gives
+/// up a part, as the trail names the node too; then the title keeps as many of its parts
+/// whole as fit: a handle is never half said.
 #[test]
 fn a_title_gives_up_whole_parts_from_its_end() {
     let mut named = desk(numbered(1));
-    named.title = vec![
-        "plan".to_string(),
-        "EKPBGE".to_string(),
-        "reviewed (default)".to_string(),
-        "2 tasks in 2 steps".to_string(),
-    ];
-    let rows = drawn(&named, &look(Glyphs::Unicode, 60), 24);
+    named.title = ["plan", "EKPBGE", "reviewed", "2 tasks in 2 steps"]
+        .map(str::to_string)
+        .to_vec();
+    let whole = "plan · EKPBGE · reviewed · 2 tasks in 2 steps";
+    let first = |cells: usize| drawn(&named, &look(Glyphs::Unicode, cells), 24).remove(0);
+    let edge = "needs you  approve-plan";
+    assert_eq!(first(100), format!(" {}", ends(whole, edge, 98)));
+    assert_eq!(first(60), format!(" {whole}"));
+    assert_eq!(first(30), " plan · EKPBGE · reviewed");
+}
+
+/// Held close, as a pane on a screen short of rows holds it, a desk lets its own blank rows
+/// go, under its head, under its pane's title and over its question, and reads its pane in
+/// the rows they leave; held aired in as many rows, it keeps them.
+#[test]
+fn a_desk_held_close_reads_its_pane_in_its_own_blank_rows() {
+    let (desk, look) = (desk(numbered(9)), look(Glyphs::Unicode, 60));
+    let rows = |laid: Placed| laid.lines.iter().map(Line::text).collect::<Vec<_>>();
+    let close = rows(desk.drawn_close(&look, 10));
+    assert!(close.iter().all(|row| !row.trim().is_empty()), "{close:#?}");
+    assert!(close[1].starts_with(" Store packs"), "{close:#?}");
     assert_eq!(
-        rows[0],
-        format!(" {}", ends("plan · EKPBGE", "needs you  approve-plan", 58)),
+        close[2..8],
+        [
+            " line 1",
+            " line 2",
+            " line 3",
+            " line 4",
+            " line 5",
+            " … 4 more lines"
+        ]
     );
+    let aired = rows(desk.drawn(&look, 10));
+    assert_eq!([aired[1].trim(), aired[3].trim()], ["", ""], "{aired:#?}");
 }
 
 /// A pointed row is set apart across the rail where a layer draws fills, and the fill
@@ -467,7 +439,7 @@ fn the_row_pointed_at_is_set_apart_up_to_the_rule() {
 #[test]
 fn a_held_desk_is_as_wide_as_the_terminal() {
     let line = look(Glyphs::Unicode, 100);
-    let held = Terminal::on(line).held(&Block::Desk(desk(numbered(3))), 180, 30);
+    let held = Terminal::on(line).held(&Block::from(desk(numbered(3))), 180, 30);
     let widest = held
         .lines
         .iter()

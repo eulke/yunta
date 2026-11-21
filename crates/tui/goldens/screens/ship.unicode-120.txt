@@ -1,0 +1,36 @@
+ yunta › Q78GRR › ship                                                                       ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 0s                                                                        Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ━━━━━ ━━━━ ━━━━ ━━━━━━━ ━━━━━━━━━ ━━━━━━ ━━━━ ━━━━━━━ ━━━━ ━━━━ ━━━━━━━━ ━━━━━ ━━━━ ┄┄┄┄
+ The work beside its plan, and every finding the run holds with its answer. Create the PR?
+
+   ✓ grill                  36s  │ ship · gate                                                            assignee lead
+   ✓ brief                  22s  │
+   ✓ plan                 6m25s  │   crates/cli/src/pack.rs                +22 −6  ██████████████▉████▏
+   ✓ spec                13m53s  │   crates/cli/tests/pack_global_spec.rs  +20     █████████████▋
+   ✓ approve-plan        10m05s  │   crates/cli/src/commands/pack.rs        +7 −7  ████▊████▊
+   ✓ implement           41m05s  │   crates/cli/src/cli/dispatch.rs         +5 −4  ███▍██▊
+    └─ ✓ global-pack-install     │   3 more files, +11 −7
+   ✓ review@reviewer      2m00s  │
+   ✓ review@reviewer-alt    42s  │ ✓ 4 findings, 4 answered · 1 task, 1 criterion green
+   ✓ conform                25s  │
+   ✓ fix-findings         5m31s  │
+   ✓ lint                   11s  │
+   ✓ fix-lint             1m31s  │
+   ✓ tests                1m04s  │
+ ▸ ◆ ship                        │
+   ◌ pr                          │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │ ▎ ◆ Create the PR?                                                              ship
+                                 │ ▎
+                                 │ ▎ ▸ approve  On to `pr`: opens the pull request on github eulke/yunta
+                                 │ ▎   abort    Pause here: nothing runs; this decision stays open
+ 27.1M tokens ▁▁▂▂▁█▁▁▁▂▁▁▁▁▁ · 1h12m at work · 39m51s waiting on you
+
+ j k choose · enter answer · n add a note · r read the plan · esc leave it waiting                  / anything · ? keys

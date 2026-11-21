@@ -99,6 +99,13 @@ pub enum Fill {
     Pill,
 }
 
+/// Where the rows a list hides stand from the rows in sight: over them, or under them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hidden {
+    Above,
+    Under,
+}
+
 /// A run of text in one tone, and — for a path a reader opens — what it
 /// links to where a terminal opens links.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +168,36 @@ impl Line {
             });
         }
         self
+    }
+
+    /// How a row a pointer moves along opens, `on` the row pointed at or not: led by the
+    /// pointer in the needs-you tone and a space, the row standing on the selection to its
+    /// region's edge; or by the blank cells they take, with no fill, so no row moves when the
+    /// pointer does. The row's words follow. Not [`Glyphs::pointer`], the glyph alone.
+    pub fn pointed(on: bool, glyphs: Glyphs) -> Line {
+        let pointer = glyphs.pointer().to_string();
+        match on {
+            true => Line::new()
+                .push(Tone::NeedsYou, pointer)
+                .plain(" ")
+                .filled(Fill::Selection),
+            false => Line::new()
+                .plain(" ".repeat(cell_width(&pointer)))
+                .plain(" "),
+        }
+    }
+
+    /// The row that says how many rows a list hides on one `side` of those in sight, as a
+    /// reader skims past it: the ellipsis, the count and where they stand, muted; none where
+    /// it hides none. Every list that hides rows says them so, a feed, a list of choices and
+    /// a round's questions alike. Not a card's count of the options it leaves out.
+    pub fn hidden(count: usize, side: Hidden, glyphs: Glyphs) -> Option<Line> {
+        let side = match side {
+            Hidden::Above => "above",
+            Hidden::Under => "under",
+        };
+        (count > 0)
+            .then(|| Line::new().push(Tone::Muted, format!("{} {count} {side}", glyphs.ellipsis())))
     }
 
     /// The line with `text` appended in the terminal's own color.
@@ -293,7 +330,8 @@ impl Line {
 
     /// The line as rows inside `cells`, for a pane whose edge cuts what
     /// passes it: whole when it fits; else broken at the last space before
-    /// the edge, or at the edge inside a word wider than what the row has
+    /// the edge or right on it, a word that ends on the last cell keeping its
+    /// row; or at the edge inside a word wider than what the row has
     /// left, each further row hung under where the line's text starts, and
     /// each part in the tone, fill and link of its span. Not [`Line::wrap`],
     /// which keeps a word whole past a stream's edge, where the terminal
@@ -400,22 +438,24 @@ impl Line {
 /// Where the row of `text` that starts at byte `start` ends inside `room`
 /// cells, its trailing spaces left out, and where the next row starts, past
 /// the spaces between them. It ends at its last space past byte `after`
-/// when it has one, and else at the edge, one character at least, so every
-/// row moves on.
+/// when it has one, the space right past the edge among them, since the
+/// row before it fills the room, as [`wrap_unbroken`](crate::width::wrap_unbroken)
+/// fits a word that ends there; and else at the edge, one character at
+/// least, so every row moves on.
 fn row_end(text: &str, start: usize, room: usize, after: usize) -> (usize, usize) {
     let rest = &text[start..];
     let mut end = text.len();
     if cell_width(rest) > room {
         let (mut used, mut edge, mut space) = (0, start, None);
         for (at, c) in rest.char_indices() {
+            if c == ' ' && start + at > after {
+                space = Some(start + at);
+            }
             used += cell_width(c.encode_utf8(&mut [0; 4]));
             if used > room {
                 break;
             }
             edge = start + at + c.len_utf8();
-            if c == ' ' && start + at > after {
-                space = Some(start + at);
-            }
         }
         let first = rest.chars().next().map_or(0, char::len_utf8);
         end = space.unwrap_or(edge.max(start + first));

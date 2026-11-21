@@ -26,6 +26,7 @@ mod story;
 pub use browser::RunInABrowser;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use super::Page;
 use crate::command::{self, Reader};
@@ -188,22 +189,15 @@ impl Run {
         stood
     }
 
-    /// How long an open run has stood at its word: since it was asked at
-    /// a terminal, since its last event for one that went quiet or parked,
-    /// and since it started for one that moves.
+    /// How long an open run has stood at its word ([`stood_open`]), said as gone quiet for
+    /// one that stalled with nobody asked.
     fn open_for(&self) -> Option<String> {
-        if let Some(asking) = &self.frame.asking {
-            return Some(format!("for {}", duration(asking.waited)));
-        }
-        let quiet = self.frame.since_last_event;
-        match (self.frame.standing, &self.frame.phase) {
-            (Standing::Stalled, _) => quiet.map(|quiet| format!("quiet for {}", duration(quiet))),
-            (_, RunPhase::Waiting { .. }) => quiet.map(|stood| format!("for {}", duration(stood))),
-            _ => self
-                .frame
-                .elapsed
-                .map(|took| format!("for {}", duration(took))),
-        }
+        let stood = duration(stood_open(&self.frame)?);
+        let quiet = self.frame.asking.is_none() && self.frame.standing == Standing::Stalled;
+        Some(match quiet {
+            true => format!("quiet for {stood}"),
+            false => format!("for {stood}"),
+        })
     }
 
     /// The decision the run waits on, as the section the page ends on, and
@@ -318,6 +312,19 @@ impl Run {
     pub(crate) fn tokens(&self) -> Option<String> {
         let spend = &self.frame.tokens;
         (spend.total() > 0).then(|| Breakdown(spend).to_string())
+    }
+}
+
+/// How long `frame`, an open run, has stood at its word: since it was asked at a terminal,
+/// since its last event for one that stalled or parked, and since it started for one that
+/// moves. None where the frame cannot say, as for a log with no event.
+pub(crate) fn stood_open(frame: &RunFrame) -> Option<Duration> {
+    if let Some(asking) = &frame.asking {
+        return Some(asking.waited);
+    }
+    match (frame.standing, &frame.phase) {
+        (Standing::Stalled, _) | (_, RunPhase::Waiting { .. }) => frame.since_last_event,
+        _ => frame.elapsed,
     }
 }
 

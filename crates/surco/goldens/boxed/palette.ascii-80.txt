@@ -1,0 +1,41 @@
+. what do you want to do? ---------------------------------------------------------.
+| * type to filter                                                                 |
+|                                                                                  |
+|* stop it and everything under it         c     yunta cancel Q78GRR               |
+|  what it cost, and where its time went   s     yunta stats Q78GRR                |
+|  draw its graph                          g     yunta graph --run Q78GRR          |
+|  the whole page, in a browser            o     yunta open Q78GRR                 |
+|  the run's whole chronicle                     yunta status Q78GRR --follow      |
+|  start a new run                         n     yunta run <workflow>              |
+|  every run of this repository                  yunta list --runs                 |
+|  the workflows you can run                     yunta list                        |
+|  check adapters, git, forge, packs             yunta doctor                      |
+|  remove orphaned checkouts                     yunta gc                          |
+|  the shape of every document yunta reads       yunta schema                      |
+'----------------------------------------------------------------------------------'
+
+. what do you want to do? -------------------------------------------------.
+| * type to filter                                                         |
+|                                                                          |
+|* stop it and everything under it                                         |
+|  what it cost, and where its time went                                   |
+|  draw its graph                                                          |
+|  the whole page, in a browser                                            |
+|  the run's whole chronicle                                               |
+|  start a new run                                                         |
+|  every run of this repository                                            |
+|  the workflows you can run                                               |
+|  check adapters, git, forge, packs                                       |
+|  remove orphaned checkouts                                               |
+|  the shape of every document yunta reads                                 |
+'--------------------------------------------------------------------------'
+
+. what do you want to do? -----------------------------.
+| * type to filter                                     |
+|* stop it and everything under it                     |
+|  what it cost, and where its time went               |
+|  draw its graph                                      |
+|  the whole page, in a browser                        |
+|  the run's whole chronicle                           |
+|  ... 6 under                                         |
+'------------------------------------------------------'

@@ -1,0 +1,14 @@
+ yunta › /cut/worktree           ◆ 5 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  ╭ close EZRPE9? ───────────────────────────────────────╮
+  │ It closes as cancelled, by you, and stops waiting on │
+  │ a person. Its branch and worktree stay until gc      │
+  │ removes them.                                        │
+  │ Q78GRR is not closed: an engine is driving the run.  │
+  │                                                      │
+  │ yunta close EZRPE9                                   │
+  │                                                      │
+  ╰──────────────────────────────────────────────────────╯
+  x      close it for good
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ enter close it · esc keep it

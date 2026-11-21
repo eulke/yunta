@@ -7,11 +7,12 @@
 //! stage, which takes this one's place.
 //!
 //! Opened from the catalog, the workflow is picked already and no request was typed:
-//! the input the workflow reads its request from is asked as every other is.
+//! the input the workflow reads its request from is asked as every other is. Opened from a
+//! run's screen with `n`, nothing is picked or typed: the workflow is asked first.
 //!
 //! A refusal is said where the person stands, and the questions are asked again, to
 //! change what was refused. Escape goes back to where the start was opened from: the
-//! first run, or the catalog.
+//! first run, the catalog, or a run's screen.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -80,6 +81,20 @@ impl StartStage {
         let asking = Asking::Workflow(workflows(&catalog));
         StartStage {
             request: Some(request),
+            catalog,
+            chosen: Chosen::default(),
+            asking,
+            remarked: Vec::new(),
+            said: None,
+        }
+    }
+
+    /// A run of a workflow `catalog` offers, nothing chosen and nothing asked for yet: which
+    /// workflow is asked first.
+    pub(crate) fn new(catalog: Box<Catalog>) -> Self {
+        let asking = Asking::Workflow(workflows(&catalog));
+        StartStage {
+            request: None,
             catalog,
             chosen: Chosen::default(),
             asking,
@@ -197,7 +212,7 @@ impl StartStage {
         match outcome {
             // A run another start asked for, left before it started, is not this one's.
             Outcome::Started { run } if matches!(self.asking, Asking::Starting) => {
-                let followed = Stage::opened_by(&NextStep::Follow { run });
+                let followed = Stage::opened_by(&NextStep::status(&run));
                 followed.map(Want::Replace).into_iter().collect()
             }
             Outcome::Started { .. } => Vec::new(),
@@ -208,13 +223,7 @@ impl StartStage {
             | Outcome::Workflow(_)
             | Outcome::Pack(_)
             | Outcome::Evidence(_)
-            | Outcome::Field { .. }
-            | Outcome::Followed
-            | Outcome::Page(_)
-            | Outcome::NodePage(_)
-            | Outcome::Questions(_)
-            | Outcome::Decision(_)
-            | Outcome::Stats(_)
+            | Outcome::PullRequest(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)

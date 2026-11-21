@@ -1,0 +1,14 @@
+ yunta › set up › yunta/fragua            nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ●╭ install yunta/fragua? ───────────────────────────────╮
+  │ It writes .yunta/config.yaml and installs            │
+  │ yunta/fragua. Nothing else is touched.               │
+  │                                                      │
+  │ yunta pack add \                                     │
+  │   https://github.com/eulke/yunta//packs/fragua@v0.0.5│
+  │ yunta init                                           │
+  │                                                      │
+  ╰──────────────────────────────────────────────────────╯
+ … 514 more lines
+
+ enter install it · esc write without it

@@ -1,9 +1,11 @@
 //! A round of questions a run parked on, answered from another terminal: the round
 //! is put to the person there as the run itself asks it, and the run goes on with
-//! the answers on its log.
+//! the answers on its log. Where the engine refused the answers the round was last given,
+//! each refusal stands under the question it is about.
 
 use yunta_core::events::{EventPayload, RunEvent};
 use yunta_testkit::{run_id_from, yunta_in};
+use yunta_testkit_ui::cut::Cut;
 
 use super::*;
 
@@ -75,4 +77,24 @@ fn a_parked_round_is_answered_with_resolve_gate_and_the_run_goes_on() {
         recorded.contains("the greeting names the person"),
         "the answer is on the run:\n{recorded}"
     );
+}
+
+/// A run whose answers the engine refused, its required question left without one, asked
+/// again with `resolve-gate` at a terminal: the refusal stands under the question it is
+/// about, in the engine's words, while the person types there.
+#[tokio::test]
+async fn a_refused_round_says_each_refusal_under_its_question_at_resolve_gate() {
+    let cut = Cut::of_target("round-refused").await;
+    let run = cut.runs()[0].to_string();
+    let mut terminal = yunta_on_terminal!(&cut.repository(), cut.root(), &["resolve-gate", &run]);
+    terminal.wait_on_screen(
+        "◆ What is the release called?",
+        "the refused round was never asked",
+    );
+    terminal.keys("Spring release");
+    terminal.wait_on_screen("│ Spring release", "the words never reached the line");
+    let refusal = "✗ this question is `required` and nothing answers it";
+    assert!(terminal.screen().holds(refusal), "{:#?}", terminal.screen());
+    terminal.keys("\x1b");
+    terminal.ended();
 }

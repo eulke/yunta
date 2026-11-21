@@ -1,0 +1,24 @@
+ yunta › Q78GRR › pr                                ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h52m                               Q78GRR
+ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━
+ nothing needs you: it is moving
+
+ pr · pull_request
+
+ what it is doing · 0 calls
+ running: attempt 1
+
+
+
+
+
+
+
+
+
+
+
+ 27.1M tokens ▁▁▂▂▁█▁▁▁▂▁▁▁▁▁ · 1h12m at work · 39m51s waiting on you
+ ✓ Recorded: approve. On to `pr`.
+ j k node · s stats · g graph · q field, it keeps going · ? keys

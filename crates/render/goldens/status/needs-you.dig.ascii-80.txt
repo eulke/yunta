@@ -37,5 +37,5 @@ tasks
   |   nothing runs; this decision stays open
   |   yunta resolve-gate 7E5PH4 abort
   | or
-  |   yunta close 7E5PH4   closes it for good
+  |   yunta close 7E5PH4   close it for good
   |   yunta open 7E5PH4    the whole page, in a browser

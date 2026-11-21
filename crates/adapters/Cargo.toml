@@ -61,6 +61,9 @@ rmcp = { workspace = true, features = [
 
 [dev-dependencies]
 yunta-testkit-core.workspace = true
+# A mock session is held at a word by the same marks a test holds a run's
+# node by, so the word a test names and gives is `Hold`'s.
+yunta-testkit.workspace = true
 # The tests read back what `config.rs` renders, which needs the parser
 # the adapter itself has no use for.
 toml = { workspace = true, features = ["parse"] }

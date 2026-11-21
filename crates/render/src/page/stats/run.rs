@@ -1,5 +1,7 @@
 //! `yunta stats <run>`: where one run's time went, by node and by runner,
-//! what it spent, and what it handed over and found.
+//! what it spent, and what it handed over and found. A run's screen shows its
+//! facts, where its time went and who spent it; what only the printed page has
+//! room for, it leaves to it ([`StatsTold`]).
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -14,7 +16,9 @@ use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::text::counted;
-use surco::width::{cell_width, id_column, middle_cut, truncate, INDENT, INDENT_WIDTH};
+use surco::width::{
+    cell_width, id_column, middle_cut, truncate, INDENT, INDENT_WIDTH, LABEL_WIDTH,
+};
 use surco::words::{Standing, WAITING_ON_YOU};
 use yunta_core::NodeId;
 use yunta_replay::frame::{NodeFrame, RunFrame, RunPhase};
@@ -23,67 +27,101 @@ use yunta_replay::stats::{NodeStat, RunStats};
 use super::facts::{answers, cache, cptv, findings, rework, spent, submissions};
 
 /// What the `yunta stats <run_id>` block is drawn from: one run's stats,
-/// the run as its frame stands it, what its model is priced at, and how
-/// much of it the reader asked for.
+/// the run as its frame stands it, what its model is priced at, and where
+/// and how much of it the reader is told.
 pub struct Stats<'a> {
     /// The run's word, workflow, mode and nodes: the word a node's row
     /// says here is the one `status` says.
     pub frame: &'a RunFrame,
     pub stats: &'a RunStats,
     pub pricing: Option<&'a BTreeMap<String, yunta_core::PricingEntry>>,
-    /// `--full` adds what is the run's own business: its rails, and each
-    /// node's blocked share and models.
-    pub depth: Depth,
+    pub told: StatsTold,
+}
+
+/// Where a run's stats are read, and how much they tell there: a run's screen tells its
+/// facts, where its time went and who spent it; a printed page adds what only a page has
+/// room for (what it cost, the host asleep, the answers, the kinds left unread, the checks a
+/// red criterion had already decided, its nodes), and at `--full` what is the run's own
+/// business, its rails and each node's blocked share and models. Not the receipt's
+/// `Told`, which words a receipt's rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatsTold {
+    OnScreen,
+    Printed(Depth),
 }
 
 impl Page for Stats<'_> {
     /// The whole `yunta stats <run_id>` block: the run's headline and
     /// furrow, where most of its time went, its facts — a row each that
-    /// has something to say — then its time, at `--full` its rails, its
-    /// nodes and its runners.
+    /// has something to say — then where its time went and who spent it,
+    /// and after them what the printed page adds: at `--full` its rails,
+    /// and its nodes. On a run's screen, the facts only a page has room for,
+    /// the checks a red criterion decided, the rails and the nodes stay out.
     ///
     /// A block rather than a run of `println!`s: what this command says
     /// about a run is one thing a test reads whole, and a number nobody can
     /// assert is a number nobody is holding to anything.
     fn document(&self, look: &Look) -> Doc {
         let stats = self.stats;
-        let asleep = match stats.asleep.is_zero() {
+        let furrow = self.frame.nodes.iter().map(|node| node.standing).collect();
+        let gist = super::time::gist(&stats.time, self.person());
+        let doc = Doc::new()
+            .with(self.headline())
+            .with(Furrow(furrow))
+            .with_all(gist.map(|gist| Gist::new(gist).into()))
+            .with(self.facts(look));
+        let StatsTold::Printed(depth) = self.told else {
+            return doc
+                .with(Block::Lines(super::time::render(&stats.time, look)))
+                .with(Block::Lines(spent_lines(stats, look)));
+        };
+        let mut time = super::time::render(&stats.time, look);
+        time.extend(super::time::decided(&stats.time));
+        let mut doc = doc
+            .with(Block::Lines(time))
+            .with(Block::Lines(spent_lines(stats, look)));
+        if depth.reaches(Depth::Full) {
+            doc = doc.with(Block::Lines(super::time::rail_latency(&stats.rails, look)));
+        }
+        doc.with(Block::Lines(self.nodes_lines(look)))
+    }
+}
+
+impl Stats<'_> {
+    /// The run's facts, a row each that has something to say: what a verified task cost,
+    /// what retries took, what the cache served, what it spent, handed over and found; and
+    /// printed, what it cost, the host asleep, the answers given and the kinds left unread
+    /// among them.
+    fn facts(&self, look: &Look) -> Fields {
+        let stats = self.stats;
+        let printed = matches!(self.told, StatsTold::Printed(_));
+        let asleep = match stats.asleep.is_zero() || !printed {
             true => String::new(),
             false => format!("{}, left out of every duration", duration(stats.asleep)),
         };
-        let fields = Fields::new()
-            .push_if("task cost", cptv(stats, look.glyphs))
+        let only_printed = |said: String| match printed {
+            true => said,
+            false => String::new(),
+        };
+        let cost = crate::spend::cost(stats.total_tokens.total(), self.pricing);
+        let unread = crate::state::unknown_kinds(&stats.unknown_kinds);
+        Fields::new()
+            .push_if("task cost", cptv(stats))
             .push_if("rework", rework(stats, look.glyphs))
             .push_if("cache", cache(stats, look.glyphs))
             .push_if("tokens", spent(stats))
-            .push_if(
-                "cost",
-                crate::spend::cost(stats.total_tokens.total(), self.pricing).unwrap_or_default(),
-            )
+            .push_if("cost", only_printed(cost.unwrap_or_default()))
             .push_if("host asleep", asleep)
             .push_if("documents", submissions(&stats.artifact_submissions))
             .push_if(
                 "findings",
                 findings(&stats.findings, stats.findings_effective),
             )
-            .push_if("answers", answers(&stats.findings, stats.findings_settled))
             .push_if(
-                "unread",
-                crate::state::unknown_kinds(&stats.unknown_kinds).unwrap_or_default(),
-            );
-        let furrow = self.frame.nodes.iter().map(|node| node.standing).collect();
-        let gist = super::time::gist(&stats.time, self.person());
-        let mut doc = Doc::new()
-            .with(self.headline())
-            .with(Furrow(furrow))
-            .with_all(gist.map(|gist| Gist::new(gist).into()))
-            .with(fields)
-            .with(Block::Lines(super::time::render(&stats.time, look)));
-        if self.depth.reaches(Depth::Full) {
-            doc = doc.with(Block::Lines(super::time::rail_latency(&stats.rails, look)));
-        }
-        doc.with(Block::Lines(self.nodes_lines(look)))
-            .with(Block::Lines(runner_lines(stats, look)))
+                "answers",
+                only_printed(answers(&stats.findings, stats.findings_settled)),
+            )
+            .push_if("unread", only_printed(unread.unwrap_or_default()))
     }
 }
 
@@ -136,9 +174,13 @@ impl Stats<'_> {
         if self.stats.nodes.is_empty() {
             return Vec::new();
         }
+        let depth = match self.told {
+            StatsTold::Printed(depth) => depth,
+            StatsTold::OnScreen => Depth::Glance,
+        };
         let rows: Vec<NodeRow<'_>> = self.stats.nodes.iter().map(|stat| self.row(stat)).collect();
-        let (rows, shape) = fitted(rows, look, self.depth.reaches(Depth::Dig));
-        let full = self.depth.reaches(Depth::Full);
+        let (rows, shape) = fitted(rows, look, depth.reaches(Depth::Dig));
+        let full = depth.reaches(Depth::Full);
         let mut lines = vec![Line::new(), Line::new().plain("nodes:")];
         for row in &rows {
             lines.push(node_line(row, &shape, look.glyphs));
@@ -294,38 +336,56 @@ fn tail_of(row: &NodeRow<'_>, attempts: usize) -> (String, String) {
     (format!("  {:<attempts$}  ", row.attempts), last)
 }
 
-/// The same tokens grouped by the runner that spent them: where the
-/// run's cost went, across however many nodes each runner was given, each
-/// with a fine bar against the runner that spent the most.
-fn runner_lines(stats: &RunStats, look: &Look) -> Vec<Line> {
-    // A runner that spent nothing says nothing.
-    let by_runner: Vec<_> = stats
+/// The cells a role's name takes in who spent it: the widest label a column
+/// holds, [`LABEL_WIDTH`], and a gap of two before its bar.
+const ROLE_COLUMN: usize = LABEL_WIDTH + 2;
+
+/// The cells a role's bar is drawn in, against the role that spent the
+/// most: twenty-eight, so the name's column, the bar's track and the widest
+/// figure of tokens stand on the line of the least terminal, 58 cells
+/// inside its margins.
+const SPENT_BAR: usize = 28;
+
+/// The cells of the track a role's bar stands on: the bar's, and a gap of
+/// two before its tokens, so every row's tokens start in one column.
+const SPENT_TRACK: usize = SPENT_BAR + 2;
+
+/// Who spent the run's tokens, under its heading: a role a row, across
+/// however many nodes each role was given, the one that spent the most
+/// first; its name in a column, a fine bar of its tokens against that most
+/// in the running tone on a track of fixed cells, then its tokens, muted.
+/// A role that spent nothing says nothing, and a line too narrow for the
+/// track draws no bar.
+fn spent_lines(stats: &RunStats, look: &Look) -> Vec<Line> {
+    let mut by_runner: Vec<(String, u64)> = stats
         .tokens_by_runner()
         .into_iter()
-        .filter(|(_, tokens)| tokens.total() > 0)
+        .map(|(runner, tokens)| (runner.to_string(), tokens.total()))
+        .filter(|(_, total)| *total > 0)
         .collect();
-    if by_runner.is_empty() {
+    by_runner.sort_by_key(|(_, total)| std::cmp::Reverse(*total));
+    let Some(&(_, most)) = by_runner.first() else {
         return Vec::new();
-    }
-    let most = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
-    let width = look.width.cells();
-    let column = id_column(by_runner.iter().map(|(runner, _)| runner.as_str())).min(width / 3);
-    let cells = bar_cells(width, cell_width(INDENT) + column + Tokens::WIDEST + 10);
-    let mut lines = vec![Line::new(), Line::new().plain("runners:")];
-    for (runner, tokens) in &by_runner {
-        let total = tokens.total();
-        let line = Line::new().plain(format!(
-            "{INDENT}{}",
-            middle_cut(runner.as_str(), column, look.glyphs)
-        ));
-        let line = measured(
-            line,
-            total as f64,
-            most as f64,
-            cells,
-            (Tone::Running, look.glyphs),
-        );
-        lines.push(line.plain(format!("  {}", Tokens(total).column().trim_end())));
+    };
+    let figures: Vec<String> = by_runner
+        .iter()
+        .map(|(_, total)| Tokens(*total).to_string())
+        .collect();
+    let widest = figures.iter().map(|figure| cell_width(figure)).max();
+    let barred = ROLE_COLUMN + SPENT_TRACK + widest.unwrap_or(0) <= look.width.cells();
+    let mut lines = vec![Line::new(), Line::new().push(Tone::Muted, "who spent it")];
+    let gap = " ".repeat(ROLE_COLUMN - LABEL_WIDTH);
+    for ((runner, total), figure) in by_runner.iter().zip(figures) {
+        let line = Line::new().plain(middle_cut(runner, LABEL_WIDTH, look.glyphs) + &gap);
+        let line = match barred {
+            true => {
+                let drawn = fine_bar(*total as f64, most as f64, SPENT_BAR, look.glyphs).drawn();
+                let pad = SPENT_TRACK.saturating_sub(cell_width(&drawn));
+                line.push(Tone::Running, drawn).plain(" ".repeat(pad))
+            }
+            false => line,
+        };
+        lines.push(line.push(Tone::Muted, figure));
     }
     lines
 }

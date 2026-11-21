@@ -1,0 +1,36 @@
+ yunta › Q78GRR › spec                                                                      ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 7m34s                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ━━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄┄┄ ┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄┄ ┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+   ✓ grill                  36s  │ spec · prompt                                             planner on mock/gpt-6-luna
+   ✓ brief                  22s  │
+   ⠹ plan                        │   It has not run yet.
+ ▸ ◌ spec                        │
+   ◌ approve-plan                │
+   ◌ implement                   │
+   ◌ review@reviewer             │
+   ◌ review@reviewer-alt         │
+   ◌ conform                     │
+   ◌ fix-findings                │
+   ◌ lint                        │
+   ◌ fix-lint                    │
+   ◌ tests                       │
+   ◌ ship                        │
+   ◌ pr                          │
+                                 │
+  f follow what it is doing      │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ j k node · f follow it · s stats · q field, it keeps going                                         / anything · ? keys

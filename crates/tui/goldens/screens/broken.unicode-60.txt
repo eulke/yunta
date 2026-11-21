@@ -1,0 +1,14 @@
+ yunta › BR0KEN › approve        ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ✗ gated (default) · broken · in 2s                  BR0KEN
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ seq 3: `node_finished` is missing node_id
+ approve · gate                               assignee lead
+ where its log stops making sense
+ seq 3: `node_finished` is missing node_id
+ it reads up to seq 2, where it waited on `approve`
+
+
+ 0 tokens · 0s at work
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · s stats · g graph · q field · ? keys

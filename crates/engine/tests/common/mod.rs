@@ -926,41 +926,6 @@ pub async fn parked(workflow_yaml: &str, fixture_yaml: &str) -> Bench {
     bench
 }
 
-/// Records `option` as the answer to whatever escalation the bench's run
-/// is parked on — the write a separate `yunta mcp` process makes, with
-/// nothing of the run's own process behind it.
-pub async fn answer_parked(
-    bench: &Bench,
-    option: &str,
-) -> Result<(), yunta_engine::ResolveGateError> {
-    answer_parked_saying(bench, option, None).await
-}
-
-/// [`answer_parked`], with the words the person gives with the option.
-pub async fn answer_parked_saying(
-    bench: &Bench,
-    option: &str,
-    said: Option<&str>,
-) -> Result<(), yunta_engine::ResolveGateError> {
-    let manifest = bench.manifest();
-    let redactor = yunta_engine::run_redactor(&manifest, &*yunta_testkit::no_secrets())
-        .expect("the bench's config names no secret too short to keep out of a log");
-    yunta_engine::resolve_gate(
-        &manifest,
-        &bench.run_dir(),
-        &bench.storage.async_handle(),
-        &bench.run_id,
-        &yunta_testkit_core::FixedClock,
-        yunta_core::events::HumanChoice {
-            option: option.into(),
-            by: "mcp".into(),
-            free_text: said.map(str::to_string),
-        },
-        &redactor,
-    )
-    .await
-}
-
 /// How many of the run's events carry a payload `pred` accepts.
 pub fn events_matching(
     bench: &Bench,

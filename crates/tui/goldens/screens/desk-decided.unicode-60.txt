@@ -1,0 +1,14 @@
+ yunta › Q78GRR › approve-plan   ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  plan · Q78GRR · fragua · 1 task, 6 files
+  decided for you                                3 choices
+  Where does a global pack live?
+    Under the current user's platform data directory, in a
+    Yunta-specific subdirectory, shared by that user's
+    projects.
+
+  … 21 more lines
+  ◆ Approve the plan: Add explicit per-user global pack i…
+  1 approve   2 adjust   3 abort
+
+ 1 2 3 answer · tab next place · ↑↓ scroll · … · ? keys

@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use yunta_api::WaitingDecision;
+use yunta_core::ahead::NodesAhead;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload};
 use yunta_core::port::DecisionAsked;
 use yunta_core::shown::ShownDocument;
@@ -13,7 +14,7 @@ use yunta_render::escalation::Route;
 
 /// A decision put to a person: the escalation, the documents it shows in the run they
 /// belong to, what the run changed, what follows each answer, the node it is on, and
-/// the workflow and mode the run follows. Not core's [`DecisionAsked`], what the engine
+/// the workflow the run follows. Not core's [`DecisionAsked`], what the engine
 /// driving a run hands a person beside the escalation, which this is put from.
 #[derive(Debug, Clone)]
 pub struct DecisionPut {
@@ -26,8 +27,10 @@ pub struct DecisionPut {
     pub routes: BTreeMap<OptionId, Route>,
     /// The node it is on.
     pub node: Option<NodeId>,
-    /// The workflow and the mode the run follows, as a person reads them.
-    pub called: Option<String>,
+    /// The workflow the run follows, by its name.
+    pub workflow: Option<String>,
+    /// What lies ahead at the nodes its options lead to; nothing where it was not read.
+    pub ahead: NodesAhead,
 }
 
 impl DecisionPut {
@@ -40,7 +43,8 @@ impl DecisionPut {
             changed: None,
             routes: BTreeMap::new(),
             node: None,
-            called: None,
+            workflow: None,
+            ahead: NodesAhead::default(),
         }
     }
 
@@ -52,7 +56,8 @@ impl DecisionPut {
             changed: waiting.changed.clone(),
             routes: waiting.routes.clone(),
             node: waiting.on.node().cloned(),
-            called: Some(waiting.called.clone()),
+            workflow: Some(waiting.workflow.clone()),
+            ahead: waiting.ahead.clone(),
         }
     }
 
@@ -70,10 +75,8 @@ impl DecisionPut {
                 asking.node,
             ),
             node: asking.node.cloned(),
-            called: Some(yunta_render::state::called(
-                &asking.workflow.name,
-                asking.mode,
-            )),
+            workflow: Some(asking.workflow.name.to_string()),
+            ahead: asking.ahead.clone(),
         }
     }
 

@@ -64,6 +64,7 @@ impl Shell {
                 clock: Arc::new(SystemClock),
                 ids: Arc::new(SystemIdSource),
                 secrets: Arc::new(ProcessSecrets),
+                forges: Arc::new(yunta_api::DeclaredForge),
                 // A host that will not say where this binary lives falls back
                 // to the name on `PATH`.
                 binary: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta")),

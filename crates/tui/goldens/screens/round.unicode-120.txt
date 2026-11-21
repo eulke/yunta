@@ -1,0 +1,36 @@
+ yunta › Q78GRR › grill                                                                      ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 5m00s                                                                     Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄┄┄ ┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄┄ ┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ node `grill` asks 3 questions: nothing is recorded until every one is answered
+
+ you asked  add support for installing a pack globally
+
+ ▎ ◆ grill asks                                                                                          Q78GRR
+ ▎
+ ▎ ◆ What does global mean in terms of where a pack is installed and which users or projects can access it?
+ ▎      ▸ type to filter
+ ▎     ▸ The current user's platform data directory, shared by that user's projects
+ ▎       A fixed home-directory path such as ~/.yunta
+ ▎       A machine-wide directory shared across users
+ ▎ ◌ How should someone request a global installation, and how does that differ from project-level
+ ▎   installation?
+ ▎ ◌ How should global installations interact with project-level packs, including precedence and conflicts?
+ ▎   optional, assumes Independent stores and locks; each operation affects the selected target
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 220k tokens █▁▁▁▁▁▁▁▁▁▁▁▁▁▁ · 36s at work · 5m00s waiting on you
+
+ ↑↓ choose · enter answer · esc leave it for later

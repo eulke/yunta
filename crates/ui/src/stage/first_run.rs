@@ -1,18 +1,21 @@
 //! See [`super`]. The first run, in a repository Yunta was set up in that has no run
 //! yet: what the person wants built, asked over the catalog of the workflows the
 //! repository can run. What they type is taken to the start stage, which picks the
-//! workflow for it. A person who comes back once the repository has a run finds its
-//! field in place of the question.
+//! workflow for it.
+//!
+//! The question stands while the person is on it, whatever the field followed beneath
+//! it says: a run that comes into the field never takes what they are typing away. A
+//! person who comes back to it once the field holds a run finds the field in its place,
+//! as the state keeps it.
 
 use surco::components::{Note, Region, Screen, Sight};
 use surco::doc::Doc;
 use surco::look::Look;
-use yunta_api::FieldReach;
 use yunta_render::page::{Catalog, Page};
 
 use super::{FieldStage, Stage, StartStage, Want};
 use crate::prompt::{Answerable, LineAsked, Press, Stroke};
-use crate::{Operation, Outcome};
+use crate::{FollowedRuns, Operation, Outcome};
 
 /// The first run being asked for.
 #[derive(Debug, Clone)]
@@ -40,12 +43,14 @@ impl FirstRunStage {
         vec![Want::Work(Operation::ReadCatalog)]
     }
 
-    /// What the stage asks for when a person comes back to it: the repository's runs,
-    /// which a run started since has given it.
-    pub(crate) fn returned(&self) -> Vec<Want> {
-        vec![Want::Work(Operation::Field {
-            reach: FieldReach::Here,
-        })]
+    /// What the stage asks for when a person comes back to it: the field `followed` keeps
+    /// in its place, where a run started since stands in it, read or not.
+    pub(crate) fn returned(&self, followed: &FollowedRuns) -> Vec<Want> {
+        let field = followed.field.as_ref().filter(|field| field.holds_a_run());
+        field
+            .map(|field| Want::Replace(Stage::Field(FieldStage::reaching(field.reach))))
+            .into_iter()
+            .collect()
     }
 
     /// The question over the catalog, and the keys.
@@ -85,20 +90,13 @@ impl FirstRunStage {
         self.request.typing()
     }
 
-    /// What an answer to work the stage asked for does: the catalog read, or the
-    /// repository's runs, which once there are any give the field the question's
-    /// place; what refused or failed is said.
+    /// What an answer to work the stage asked for does: the catalog read; what refused
+    /// or failed is said.
     pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
         match outcome {
             Outcome::Catalog(catalog) => {
                 self.catalog = Some(catalog);
                 Vec::new()
-            }
-            Outcome::Field { reading, storage }
-                if !reading.rows.is_empty() || !reading.unreadable.is_empty() =>
-            {
-                let field = FieldStage::read(reading, storage, FieldReach::Here);
-                vec![Want::Replace(Stage::Field(field))]
             }
             Outcome::Refused(refused) => {
                 self.said = Some(refused.to_string());
@@ -109,14 +107,8 @@ impl FirstRunStage {
                 Vec::new()
             }
             Outcome::Repository(_)
-            | Outcome::Field { .. }
             | Outcome::Started { .. }
-            | Outcome::Followed
-            | Outcome::Page(_)
-            | Outcome::NodePage(_)
-            | Outcome::Questions(_)
-            | Outcome::Decision(_)
-            | Outcome::Stats(_)
+            | Outcome::PullRequest(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)

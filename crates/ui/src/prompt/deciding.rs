@@ -3,15 +3,18 @@
 //!
 //! The turns between the two are the decision's, wherever it is held: asking to read
 //! turns to the plan; leaving the plan turns back to the card or, where a person came
-//! to read the plan, leaves the decision waiting; a number picked at the desk answers
-//! the card with that option. A surface that holds the two alike holds the decision as
-//! one [`Answerable`]; a terminal, which reads a plan on its other screen, holds the one
-//! [`Deciding::in_front`] and hands back what it came to, through
-//! [`Deciding::replied`] and [`Deciding::left`]. Both turn the same way.
+//! to read the plan, leaves the decision waiting; an option confirmed at the desk answers
+//! the decision, with the words it asks for typed at the desk's foot, the desk staying in
+//! front while they are. A surface that holds the two alike holds the decision as
+//! one [`Answerable`], the desk staying in front of what was answered there; a terminal,
+//! which reads a plan on its other screen, holds the one [`Deciding::in_front`] and hands
+//! back what it came to, through [`Deciding::replied`] and [`Deciding::left`], the other
+//! screen closing on an answer. Both turn the same way otherwise.
 
 use surco::components::Laid;
 use surco::doc::Block;
 use surco::look::Look;
+use yunta_core::OptionId;
 use yunta_render::escalation::claim_words;
 use yunta_render::page::desk::{self, Reading};
 use yunta_render::prompt::Escape;
@@ -64,12 +67,12 @@ impl Deciding {
         let reading = put
             .shown
             .as_ref()
-            .and_then(|(run, documents)| desk::reading(documents, run));
+            .and_then(|(_, documents)| desk::reading(documents));
         let asked = Asked {
             question: claim_words(&put.escalation),
             node: put.node.as_ref().map(ToString::to_string),
             run: put.run().map(|run| run.handle().to_string()),
-            called: put.called.clone(),
+            workflow: put.workflow.clone(),
         };
         let card = DecisionCard::new(put.clone(), escape);
         match reading {
@@ -83,9 +86,28 @@ impl Deciding {
         Self { card, plan: None }
     }
 
+    /// It with the plan's desk, where it has one, standing on the plan's first task, as a
+    /// run's screen opens the plan.
+    pub(crate) fn on_its_plans_first_task(mut self) -> Self {
+        if let Some(plan) = self.plan.take() {
+            self.plan = Some(Plan {
+                desk: plan.desk.on_its_first_task(),
+                ..plan
+            });
+        }
+        self
+    }
+
+    /// It with its card leaving out `option`, which another key does there; the plan's
+    /// desk behind it, where one is, keeps every option, each chosen there by its id.
+    pub(crate) fn leaving_out(mut self, option: &OptionId) -> Self {
+        self.card = self.card.leaving_out(option);
+        self
+    }
+
     /// The decision on `card` with the plan `reading` behind it, read at a desk headed
     /// by `asked`, opening on `opens`. The card offers reading the plan, and the desk
-    /// lists the card's options; Escape at the desk goes back to the card, or, for a
+    /// offers the card's options; Escape at the desk goes back to the card, or, for a
     /// person who came to read the plan, does what it does at the card.
     pub(crate) fn on_plan(
         card: DecisionCard,
@@ -99,7 +121,7 @@ impl Deciding {
             Opens::ThePlan => Leaving::TheCommand(card.escape()),
         };
         let plan = Plan {
-            desk: PlanDesk::new(reading, asked, card.rows(), leaving),
+            desk: PlanDesk::new(reading, asked, card.offered(), leaving),
             opens,
             in_front: opens == Opens::ThePlan,
         };
@@ -136,9 +158,9 @@ impl Deciding {
     }
 
     /// What leaving the plan comes to, the card in front again: going back to the card,
-    /// or, where a person came to read the plan, the decision left waiting; a number
-    /// picked answers the card with that option, or opens its field where the option
-    /// asks for words; Ctrl-C stops the run.
+    /// or, where a person came to read the plan, the decision left waiting; an option
+    /// chosen at the desk answers the decision, with the words typed there; Ctrl-C stops
+    /// the run.
     pub fn left(&mut self, left: Left) -> Press<PickedOption> {
         self.plan_unshown();
         let came_to_read = self
@@ -148,10 +170,7 @@ impl Deciding {
         match left {
             Left::Back if came_to_read => Press::Decline,
             Left::Back => Press::Moved,
-            Left::Picked(index) => match self.card.pick(index) {
-                Some(picked) => Press::Answer(picked),
-                None => Press::Moved,
-            },
+            Left::Chose(picked) => Press::Answer(picked),
             Left::Interrupted => Press::Interrupt,
         }
     }
@@ -159,6 +178,11 @@ impl Deciding {
     /// The decision put to the person.
     pub fn decision(&self) -> &DecisionPut {
         self.card.decision()
+    }
+
+    /// The card it is answered on, whether or not the plan stands in front of it.
+    pub(crate) fn card(&self) -> &DecisionCard {
+        &self.card
     }
 
     /// Whether the plan stands in front of the card.
@@ -174,21 +198,32 @@ impl Deciding {
     }
 
     /// The desk, while the plan is in front.
-    fn desk_in_front(&self) -> Option<&PlanDesk> {
+    pub(crate) fn desk_in_front(&self) -> Option<&PlanDesk> {
         self.plan
             .as_ref()
             .filter(|plan| plan.in_front)
             .map(|plan| &plan.desk)
+    }
+
+    /// The desk, while the plan is in front, for what a surface laid out of its pane.
+    pub(crate) fn desk_in_front_mut(&mut self) -> Option<&mut PlanDesk> {
+        self.plan
+            .as_mut()
+            .filter(|plan| plan.in_front)
+            .map(|plan| &mut plan.desk)
     }
 }
 
 impl Answerable for Deciding {
     type Answer = PickedOption;
 
-    /// A stroke goes to the one in front, and what it comes to turns the decision.
+    /// A stroke goes to the one in front, and what it comes to turns the decision, but that
+    /// an option chosen at the desk leaves the desk in front: a surface that holds the two
+    /// alike shows what was answered where it was answered while it is recorded.
     fn press(&mut self, stroke: Stroke) -> Press<PickedOption> {
         match self.in_front() {
             InFront::ThePlan(desk) => match desk.press(stroke) {
+                Press::Answer(Left::Chose(picked)) => Press::Answer(picked),
                 Press::Answer(left) => self.left(left),
                 Press::Stay => Press::Stay,
                 Press::Moved => Press::Moved,

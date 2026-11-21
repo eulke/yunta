@@ -9,6 +9,13 @@
 //! read the same run out of a CI log met the same sentences. What a surface
 //! keeps of a moment is that surface's.
 //!
+//! A node's feed is one more of those surfaces: `in_feed` says which of a
+//! node's moments it lists, and each row says what `line` says of its moment
+//! without the subject the node's pane already names, a call's verb in a
+//! column of its own. The run's whole chronicle, as the application shows it,
+//! is a feed too (`whole`): every moment, each row's subject set apart before
+//! its words.
+//!
 //! Every state word comes from [`crate::state::NodeDisplay`], every run or
 //! child close from [`crate::children::closed_as`], every capability from
 //! `Capability::as_str`. Nothing here formats a domain type with `Debug`: a
@@ -16,6 +23,7 @@
 
 mod baseline_words;
 mod capability_words;
+mod feed;
 mod format_words;
 mod rail_words;
 mod scope_words;
@@ -36,7 +44,9 @@ use yunta_replay::frame::{Happening, Moment};
 
 use crate::blocks::FailureDetail;
 use crate::command;
+pub use feed::{feed, feed_heading, in_feed, open_attempt_calls, whole, whole_heading};
 use words::carried;
+pub(crate) use words::{resolution, who_answered};
 
 /// One moment as a surface says it, before any layout decides where it
 /// goes.
@@ -50,34 +60,57 @@ pub struct Said {
 
 /// The words for `moment`. One match per domain, and the only ones.
 pub fn say(moment: &Moment, glyphs: Glyphs) -> Said {
+    let phrased = phrased(moment, glyphs);
+    Said {
+        mark: phrased.mark,
+        text: format!("{}{}{}", phrased.subject, phrased.joint, phrased.words),
+    }
+}
+
+/// One moment said in its parts: what it is about, the mark it carries, and the words that
+/// follow its subject with what joins them to it. Not [`Said`], the line those parts make.
+struct Phrased {
+    subject: String,
+    mark: Option<Mark>,
+    joint: &'static str,
+    words: String,
+}
+
+/// `moment` said in its parts, the one way every surface says it.
+fn phrased(moment: &Moment, glyphs: Glyphs) -> Phrased {
     let subject = match &moment.node {
         Some(node) => node.to_string(),
         None => "run".to_string(),
     };
     let (mark, carried) = carried(&moment.happening, glyphs);
-    let text = joined(
+    let (joint, words) = following(
         &subject,
-        &one_line(&carried),
+        one_line(&carried),
         of_its_subject(&moment.happening),
     );
-    Said { mark, text }
+    Phrased {
+        subject,
+        mark,
+        joint,
+        words,
+    }
 }
 
-/// The subject and its words as one line: what the subject did or became
-/// reads after it as a sentence (`lint failed`), a remark about it after a
-/// colon (`lint: called Read`), and words that open by naming the subject
-/// name it once (`approve needs a decision`, not `approve gate `approve`
-/// needs a decision`).
-fn joined(subject: &str, carried: &str, predicate: bool) -> String {
+/// The words that follow the subject on its line, and what joins them to it: what the
+/// subject did or became reads after it as a sentence (`lint failed`), a remark about it
+/// after a colon (`lint: called Read`), and words that open by naming the subject name it
+/// once (`approve needs a decision`, not `approve gate `approve` needs a decision`). A
+/// moment that carries no words leaves the subject alone.
+fn following(subject: &str, carried: String, predicate: bool) -> (&'static str, String) {
     if carried.is_empty() {
-        return subject.to_string();
+        return ("", carried);
     }
-    if let Some(rest) = naming(subject, carried) {
-        return format!("{subject} {rest}");
+    if let Some(rest) = naming(subject, &carried) {
+        return (" ", rest.to_string());
     }
     match predicate {
-        true => format!("{subject} {carried}"),
-        false => format!("{subject}: {carried}"),
+        true => (" ", carried),
+        false => (": ", carried),
     }
 }
 

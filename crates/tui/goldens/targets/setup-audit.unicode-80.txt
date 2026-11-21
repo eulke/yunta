@@ -1,0 +1,24 @@
+ yunta › set up › yunta/fragua                                nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● pack yunta/fragua · installing · 0.1.0
+
+   permissions  edit
+   network      none
+   executors    none
+   runners      planner, executor, mechanical, reviewer, reviewer-alt
+
+   workflow .yunta/workflows/fragua.yaml
+
+     node `grill` prompt
+       permissions  read-only
+       prompt
+         │ Find what in "{{inputs.idea}}" only a person can decide. Read the
+         │   ↪ code
+         │ first: what it already answers is not a question, and neither is
+         │ anything a sensible default settles. Ask only what changes what gets
+         │ built — its behavior, its reach, what it must not break.
+         │
+         │ A person answers every question at once, without the code in front
+ … 471 more lines
+
+ ↑↓ scroll · enter install it · esc back · ? keys

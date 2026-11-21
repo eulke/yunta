@@ -50,11 +50,11 @@ impl Page for NewWorkflow<'_> {
 }
 
 impl NewWorkflow<'_> {
-    /// The step that runs the workflow just written.
+    /// The step that starts a run of the workflow just written.
     fn runs_it(&self) -> (String, &'static str) {
         let run = NextStep::Run {
             workflow: Arg::Given(self.name.to_string()),
         };
-        (command::line(&run), "runs it")
+        (command::line(&run), command::does(&run))
     }
 }

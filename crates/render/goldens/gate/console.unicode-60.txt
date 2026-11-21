@@ -1,6 +1,6 @@
 ◆ decision · needs you
 
-plan: 2 tasks in 2 steps, 1 decided for you, 1 risk,
+plan: 2 tasks in 2 steps, 2 decided for you, 1 risk,
       1 left out
   Greet a person by name, and say goodbye too.
 
@@ -27,11 +27,10 @@ plan: 2 tasks in 2 steps, 1 decided for you, 1 risk,
       because      A program run with no arguments should
                    still say something.
 
-  you answered
-
-    1  Which word should the greeting use?
-      you said     hello
-      the plan     It says `hello`.
+    2  Which word greets?
+      chose        It says `hello`.
+      asked        Which word should the greeting use?
+      you answered hello
 
   left out
     ◌ Greeting in other languages.

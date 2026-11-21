@@ -32,14 +32,25 @@ impl Whole {
 pub struct Evidence {
     pub tail: Vec<String>,
     pub whole: Option<Whole>,
+    /// The last lines a pane short of rows keeps of what it quotes, the lines it cuts from
+    /// their top counted above them: `None` where it quotes the whole of what it quotes.
+    pub kept: Option<usize>,
 }
 
 impl Evidence {
     /// The lines quoted: the last `QUOTED` of the tail, where a
-    /// compiler or a test runner says what failed.
+    /// compiler or a test runner says what failed, or as many of those as it
+    /// keeps where a pane short of rows cut it.
     pub fn quoted(&self) -> &[String] {
-        let skipped = self.tail.len().saturating_sub(QUOTED);
+        let most = self.kept.map_or(QUOTED, |kept| kept.min(QUOTED));
+        let skipped = self.tail.len().saturating_sub(most);
         self.tail.get(skipped..).unwrap_or_default()
+    }
+
+    /// Whether a pane short of rows cut lines from the top of what it quotes, so the lines
+    /// above those it keeps are counted at their place.
+    pub fn cut(&self) -> bool {
+        self.kept.is_some() && self.above() > 0
     }
 
     /// How many lines of the tail are left above what is quoted.

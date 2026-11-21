@@ -6,12 +6,13 @@ use std::sync::Arc;
 
 use std::path::Path;
 
-use yunta_core::{Clock, Env, IdSource, SecretSource};
+use yunta_core::port::{Forge, ForgeUnanswered};
+use yunta_core::{Clock, ConfigLayer, Env, IdSource, SecretSource};
 
 use yunta_engine::process::Supervision;
 
 use crate::project::resolve;
-use crate::{Error, Failure, Project, Stop};
+use crate::{Error, Failure, ForgeSource, Project, Stop};
 
 /// What an interface hands the API instead of the API reading its process:
 /// where it works, the environment it was started with, and the boundaries
@@ -30,6 +31,9 @@ pub struct Workspace {
     pub ids: Arc<dyn IdSource>,
     /// What a run or a forge reads a secret's value from, by its name.
     pub secrets: Arc<dyn SecretSource>,
+    /// Where the forge a run's config declares is reached from, with `secrets`:
+    /// [`DeclaredForge`](crate::DeclaredForge) for every interface.
+    pub forges: Arc<dyn ForgeSource>,
     /// The binary a detached run, a resume handed on and the rail hook
     /// start: Yunta itself.
     pub binary: PathBuf,
@@ -51,6 +55,12 @@ impl Workspace {
             ..self.clone()
         };
         resolve(workspace).map_err(|failed| Error::Failed(Failure::new(failed)))
+    }
+
+    /// The forge `config` declares, reached from this workspace's forges with its
+    /// secrets; why none answers where none does.
+    pub(crate) fn forge(&self, config: &ConfigLayer) -> Result<Arc<dyn Forge>, ForgeUnanswered> {
+        self.forges.forge(config, self.secrets.as_ref())
     }
 
     /// What a process an operation starts outside any run answers to: the

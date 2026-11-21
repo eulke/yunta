@@ -20,6 +20,9 @@ pub struct LeftRunning<'a> {
 impl Page for LeftRunning<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let handle = self.run_id.handle();
+        let follow = NextStep::Follow {
+            run: self.run_id.clone(),
+        };
         Doc::new()
             .with(Headline::new(
                 Standing::Running.mark(),
@@ -30,12 +33,7 @@ impl Page for LeftRunning<'_> {
                 "this terminal stopped following it; the run goes on without it",
             ))
             .with(Next {
-                steps: vec![(
-                    command::line(&NextStep::Follow {
-                        run: self.run_id.clone(),
-                    }),
-                    "follows it again",
-                )],
+                steps: vec![(command::line(&follow), command::does(&follow))],
             })
     }
 }

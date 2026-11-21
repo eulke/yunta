@@ -341,19 +341,94 @@ fn a_decision_is_numbered_and_says_what_it_chose_instead_of_what() {
     assert!(row("chose") < row("instead of") && row("instead of") < row("because"));
 }
 
+/// Where the row labelled `label` stands among `lines`, at a terminal or in a file, and what it
+/// says: `None` where no row is labelled so.
+fn row<'a>(lines: &'a str, label: &str) -> Option<(usize, &'a str)> {
+    lines.lines().enumerate().find_map(|(at, line)| {
+        let row = line.trim_start().trim_start_matches("- ");
+        let said = row.strip_prefix(label)?;
+        Some((at, said.trim_start_matches(':').trim()))
+    })
+}
+
+/// The entry of the decision that restates an answer in `drawn`, up to the section after
+/// what was decided.
+fn restated(drawn: &str) -> &str {
+    let rest = &drawn[drawn.find("2  Which word greets?").expect(drawn)..];
+    &rest[..rest.find("left out").expect(drawn)]
+}
+
+/// Every decision the plan made is decided for the person: the head counts them all, and its
+/// section lists them in the plan's order under one numbering. One that restates what the
+/// person answered says everything a decision says, then the question as they were asked it,
+/// in words that are not the decision's own, then their answer; no section stands apart for
+/// what they answered. The same at a terminal and in a file.
 #[test]
-fn an_answered_decision_is_yours_and_the_rest_were_decided_for_you() {
-    let drawn = read(&review(), Form::Review);
-    let ours = drawn
-        .find("decided for you")
-        .expect("what the plan decided");
-    let yours = drawn.find("you answered").expect("what you answered");
-    assert!(ours < yours, "{drawn}");
-    assert!(drawn.contains("you said     hello"), "{drawn}");
+fn every_decision_is_decided_for_you_and_one_that_restates_an_answer_carries_it() {
+    let mut review = review();
+    let restating = &mut review.plan.decisions[1];
     assert!(
-        !drawn[ours..yours].contains("Which word greets?"),
-        "{drawn}"
+        restating.answers.is_some(),
+        "the second decision restates an answer"
     );
+    restating.alternatives = vec!["It says `hi`.".to_string()];
+    restating.why = Some("The person chose the word.".to_string());
+    for drawn in [read(&review, Form::Review), written(&review)] {
+        let head = drawn.lines().find(|line| line.contains("plan: "));
+        assert!(
+            head.is_some_and(|head| head.contains("2 decided for you")),
+            "{drawn}"
+        );
+        let titled = |title: &str| {
+            drawn
+                .lines()
+                .any(|line| line.trim_start_matches('#').trim() == title)
+        };
+        assert!(titled("decided for you"), "{drawn}");
+        assert!(!titled("you answered"), "{drawn}");
+        let first = drawn
+            .find("1  What does it say when no name is given?")
+            .expect(&drawn);
+        let second = drawn.find("2  Which word greets?").expect(&drawn);
+        assert!(first < second, "{drawn}");
+        assert_eq!(row(&drawn[first..second], "you answered"), None, "{drawn}");
+        let entry = restated(&drawn);
+        let mut before = None;
+        for (label, said) in [
+            ("chose", "It says `hello`."),
+            ("instead of", "It says `hi`."),
+            ("because", "The person chose the word."),
+            ("asked", "Which word should the greeting use?"),
+            ("you answered", "hello"),
+        ] {
+            let (at, says) = row(entry, label).unwrap_or_else(|| panic!("{label}:\n{drawn}"));
+            assert_eq!(says, said, "{label}:\n{drawn}");
+            assert!(before < Some(at), "{label} in its order:\n{drawn}");
+            before = Some(at);
+        }
+    }
+}
+
+/// A decision that restates a question asked in its own words says the question once, as its
+/// title, and the person's answer under it. The same at a terminal and in a file.
+#[test]
+fn a_question_asked_in_the_decision_s_own_words_is_said_once() {
+    let mut review = review();
+    review.answered[0].question = review.plan.decisions[1].question.clone();
+    for drawn in [read(&review, Form::Review), written(&review)] {
+        let entry = restated(&drawn);
+        assert_eq!(
+            row(entry, "asked"),
+            None,
+            "said once, as its title:\n{drawn}"
+        );
+        assert_eq!(
+            row(entry, "you answered").map(|(_, said)| said),
+            Some("hello"),
+            "{drawn}"
+        );
+        assert_eq!(drawn.matches("Which word greets?").count(), 1, "{drawn}");
+    }
 }
 
 #[test]

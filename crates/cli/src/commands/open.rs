@@ -7,6 +7,7 @@ use std::io::IsTerminal;
 use surco::look::Look;
 use yunta_core::RunId;
 use yunta_render::page::{Opened, Page};
+use yunta_ui::Address;
 
 use crate::error::CliError;
 use crate::output::Outcome;
@@ -29,7 +30,9 @@ pub async fn open(
         .page_for_a_browser(&remarks)
         .await?;
     let opened = match output {
-        Mode::Human if std::io::stdout().is_terminal() => Some(crate::browser::open(&path).is_ok()),
+        Mode::Human if std::io::stdout().is_terminal() => {
+            Some(crate::browser::open(&Address::Page(path.clone())).is_ok())
+        }
         _ => None,
     };
     emit(

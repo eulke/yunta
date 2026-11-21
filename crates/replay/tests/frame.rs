@@ -220,6 +220,7 @@ fn tool_use(tool: &str) -> EventPayload {
         cached_input_tokens: None,
         note: None,
         text: None,
+        session: None,
     }))
 }
 
@@ -235,6 +236,7 @@ fn usage_message(input: u64, output: u64) -> EventPayload {
         cached_input_tokens: None,
         note: None,
         text: None,
+        session: None,
     }))
 }
 

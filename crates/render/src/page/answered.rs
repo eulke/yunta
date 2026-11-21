@@ -111,12 +111,7 @@ impl Page for QuestionsAnswered<'_> {
                 ))
                 .with(Gist::new(CARRIED_ON))
                 .with(Next {
-                    steps: vec![(
-                        command::line(&NextStep::Follow {
-                            run: self.run_id.clone(),
-                        }),
-                        "follows it",
-                    )],
+                    steps: vec![following(self.run_id)],
                 }),
             RoundAnswer::Declined { node } => Doc::new()
                 .with(Headline::new(
@@ -182,13 +177,14 @@ fn resolved(run_id: &RunId, option: &OptionId) -> Doc {
         ))
         .with(Gist::new(APPLIED))
         .with(Next {
-            steps: vec![(
-                command::line(&NextStep::Follow {
-                    run: run_id.clone(),
-                }),
-                "follows it",
-            )],
+            steps: vec![following(run_id)],
         })
+}
+
+/// The step that follows `run` on from its answer, with what it does.
+fn following(run: &RunId) -> (String, &'static str) {
+    let follow = NextStep::Follow { run: run.clone() };
+    (command::line(&follow), command::does(&follow))
 }
 
 #[cfg(test)]

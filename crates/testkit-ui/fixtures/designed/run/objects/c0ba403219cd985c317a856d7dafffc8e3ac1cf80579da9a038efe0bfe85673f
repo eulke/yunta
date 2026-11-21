@@ -1,0 +1,26 @@
+questions:
+- id: where-global-lives
+  text: What does global mean in terms of where a pack is installed and which users or projects can access it?
+  answer_type: choice
+  values:
+  - The current user's platform data directory, shared by that user's projects
+  - A fixed home-directory path such as ~/.yunta
+  - A machine-wide directory shared across users
+  required: true
+- id: how-requested
+  text: How should someone request a global installation, and how does that differ from project-level installation?
+  answer_type: choice
+  values:
+  - --global on pack add, update, remove and list
+  - A separate pack global command group
+  - A global-by-default install
+  required: true
+- id: beside-project-packs
+  text: How should global installations interact with project-level packs, including precedence and conflicts?
+  answer_type: choice
+  values:
+  - Independent stores and locks; each operation affects the selected target
+  - Project packs override global packs
+  - Global packs override project packs
+  required: false
+  assumes: Independent stores and locks; each operation affects the selected target

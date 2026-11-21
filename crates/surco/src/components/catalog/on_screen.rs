@@ -1,10 +1,10 @@
 //! The blocks a screen that stays open is made of, for the catalog: what a
-//! terminal, a page and a desktop draw at the top of a run and at its foot.
+//! terminal, a page and a desktop draw at the top of a run, in its pane and at its foot.
 
 use super::*;
 use crate::components::{
-    Attention, Card, CardBody, Checklist, ChoiceRow, Choices, Fields, Found, Lead, Legend, Ribbon,
-    Section, Stretch,
+    Attention, Card, CardBody, Checklist, ChoiceRow, Choices, Fields, Found, Horizon, Lead, Legend,
+    Noted, Ribbon, Section, Stretch,
 };
 
 /// A run's ribbon: two nodes finished, the one running with its plow, and the
@@ -40,6 +40,7 @@ fn card() -> Card {
         name: name.to_string(),
         said: Some(said.to_string()),
         cost: None,
+        key: None,
     };
     Card {
         question: "gate `ship` needs a decision".to_string(),
@@ -56,9 +57,9 @@ fn card() -> Card {
             then: Some("pr, then the run finishes".to_string()),
         },
         legend: Legend::new()
-            .arrows("move")
-            .key("enter", "chooses")
-            .key("esc", "leaves the run waiting"),
+            .arrows("choose")
+            .key("enter", "answer")
+            .key("esc", "leave it waiting"),
     }
 }
 
@@ -74,6 +75,7 @@ pub(super) fn on_a_screen() -> Vec<Block> {
             "yunta resolve-gate 7E5PH4 approve",
         )
         .into(),
+        Attention::key("the plan waits for approval", "a", "go there").into(),
         Attention::key(
             "the suite passed at baseline and now exits 101",
             "a",
@@ -82,13 +84,28 @@ pub(super) fn on_a_screen() -> Vec<Block> {
         .of("Q78GRR")
         .into(),
         Attention::elsewhere("node `implement` asks at its terminal").into(),
+        Attention::unkeyed(
+            "node `grill` asks 3 questions: nothing is recorded until every one is answered",
+        )
+        .of("Q78GRR")
+        .into(),
+        Noted {
+            mark: Mark::Done,
+            said: "Recorded: approve. On to `pr`.".to_string(),
+        }
+        .into(),
         card().into(),
         crate::components::desk::tests::plan().into(),
         crate::components::typed_answer::tests::named().into(),
         crate::components::choice_list::tests::shapes().into(),
+        crate::components::key_list::tests::help().into(),
         moved_through(true).into(),
         moved_through(false).into(),
         installed().into(),
+        crate::components::finding_list::tests::answered().into(),
+        crate::components::feed::tests::scrolled_back().into(),
+        crate::components::meter::tests::waited_on_you().into(),
+        Horizon { tone: Tone::Done }.into(),
     ]
 }
 

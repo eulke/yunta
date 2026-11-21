@@ -3,8 +3,8 @@
 //! refusal the person's choice makes.
 
 use yunta_core::events::{
-    Claim, Decider, Escalation, EventPayload, Failure, GateEvent, GateOption, GateResolvedPayload,
-    HumanChoice, Menu, OwedScope, ProposedCheck, ScopeWait, TaskEvent,
+    Claim, Decider, Escalation, EventPayload, Failure, GateOption, HumanChoice, Menu, OwedScope,
+    ProposedCheck, ScopeWait, TaskEvent,
 };
 use yunta_core::expansion::{Decision, Precheck, Waiting};
 use yunta_core::reserved::ReservedOption;
@@ -72,20 +72,11 @@ async fn resolve_one(
         return Ok(Some(pending));
     };
     // Same convention as every other gate: waiting and resolved land
-    // together, only once actually resolved — an unresolved question
-    // re-asks on resume instead of remembering a decision nobody made.
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload()))),
-    )
-    .await?;
+    // together, in one commit, only once actually resolved — an unresolved
+    // question re-asks on resume instead of remembering a decision nobody
+    // made.
     let resolved_seq = ctx
-        .emit(
-            Some(&node.id),
-            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
-                choice.clone(),
-            ))),
-        )
+        .emit_decided(Some(&node.id), escalation, choice.clone())
         .await?;
     record_choice(ctx, node, &pending, paths, &choice, grants).await?;
     if pending.was_blocked {

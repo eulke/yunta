@@ -3,25 +3,26 @@
 //! an agent wrote. "The receipt IS the evidence": every number here traces
 //! back to a specific event kind, the same discipline [`crate::stats`]
 //! and [`crate::RunState::replay`] hold to. No new bookkeeping — this
-//! module only reads what the engine already recorded. Drawing it for a
-//! person is for whoever shows it; this hands over the data.
+//! module reads the ledgers the log folds into, once, and walks no event
+//! of its own: a second reading of the events would be a second answer.
+//! Drawing it for a person is for whoever shows it; this hands over the
+//! data.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
 
 use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
 use yunta_core::events::{
-    EventPayload, Failure, FindingSeverity, NodeState, Phase, RunMetrics, StoredEvent,
+    CriterionType, EngineFact, Failure, NodeOutcome, NodeState, RunMetrics, StoredEvent,
     TerminalState,
 };
 use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId, Seq};
 
 use crate::RunState;
-use yunta_core::events::NodeEvent;
 
 use yunta_core::receipt::{
     BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry, DiagnosticCount,
-    EventChainStatus, FailedNode, Receipt, RunnerUsage, ScopeSummary,
+    EventChainStatus, FailedNode, FindingsSummary, OpenedPullRequest, Receipt, RunnerUsage,
+    ScopeSummary,
 };
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -121,15 +122,25 @@ pub fn closed(
     events: &[StoredEvent],
     event_chain: EventChainStatus,
 ) -> Result<Receipt, ReceiptError> {
-    let state = RunState::replay(events);
+    closed_as_kept(run_id, manifest, &RunState::replay(events), event_chain)
+}
+
+/// The receipt of a closed run as [`closed`] derives it, from `state`, the state its events
+/// fold into, as a reader that keeps the fold holds it: nothing is replayed. What a run's
+/// screen shows of a run it follows.
+pub fn closed_as_kept(
+    run_id: &RunId,
+    manifest: &Manifest,
+    state: &RunState,
+    event_chain: EventChainStatus,
+) -> Result<Receipt, ReceiptError> {
     let Some(finished) = state.run.finished() else {
         return Err(ReceiptError::NotFinished(run_id.clone()));
     };
     Ok(receipt(
         run_id,
         manifest,
-        events,
-        &state,
+        state,
         event_chain,
         Some(finished.terminal),
         finished.metrics.clone(),
@@ -147,35 +158,23 @@ pub fn so_far(
 ) -> Receipt {
     let state = RunState::replay(events);
     let metrics = state.metrics();
-    receipt(run_id, manifest, events, &state, event_chain, None, metrics)
+    receipt(run_id, manifest, &state, event_chain, None, metrics)
 }
 
-/// The receipt of `state`'s run. The criteria, scope and reroute counts
-/// are read from the log's own events; every other answer comes from
-/// `state`.
+/// The receipt of `state`'s run: every answer comes from its ledgers.
 fn receipt(
     run_id: &RunId,
     manifest: &Manifest,
-    events: &[StoredEvent],
     state: &RunState,
     event_chain: EventChainStatus,
     terminal_state: Option<TerminalState>,
     metrics: RunMetrics,
 ) -> Receipt {
-    let criteria = criteria_summary(events);
+    let criteria = criteria_summary(state);
     let baseline = baseline_summary(manifest, state);
-    let scope = scope_summary(events);
+    let scope = scope_summary(state);
     let runners = runner_usage(state);
     let unknown_kinds = state.unknown_kinds();
-    let reroutes = events
-        .iter()
-        .filter(|e| {
-            matches!(
-                e.payload(),
-                Some(EventPayload::Node(NodeEvent::Rerouted(_)))
-            )
-        })
-        .count();
     Receipt {
         schema_version: Receipt::SCHEMA_VERSION,
         run_id: run_id.clone(),
@@ -190,17 +189,44 @@ fn receipt(
         cost: CostSummary {
             tokens: metrics.tokens,
             cptv: metrics.cptv,
-            reroutes,
+            reroutes: state.nodes.reroutes(),
         },
         event_chain,
         unknown_kinds,
         diagnostics: diagnostic_counts(state),
         failed: failed_nodes(manifest, state),
-        blocking_findings: crate::dedup_findings(&state.unsettled_findings())
+        blocking_findings: state.findings_that_block().len(),
+        findings: findings_summary(state),
+        pull_request: pull_request(state),
+    }
+}
+
+/// The findings that stand, as the findings' ledger keeps them, and how many a node
+/// answered: what a receipt counts, and what a gate that ships the work says above its
+/// card before the run closes.
+pub fn findings_summary(state: &RunState) -> FindingsSummary {
+    let standing = state.findings.standing().findings;
+    FindingsSummary {
+        posted: standing.len(),
+        answered: standing
             .iter()
-            .filter(|finding| finding.severity == FindingSeverity::Blocking)
+            .filter(|finding| !finding.answers.is_empty())
             .count(),
     }
+}
+
+/// The pull request a node of the run opened, as the node closed on it.
+fn pull_request(state: &RunState) -> Option<OpenedPullRequest> {
+    state.nodes.values().find_map(|record| match &record.state {
+        Some(NodeState::Finished {
+            outcome: NodeOutcome::Fact(EngineFact::PullRequestOpened { number, url }),
+            ..
+        }) => Some(OpenedPullRequest {
+            number: *number,
+            url: url.clone(),
+        }),
+        _ => None,
+    })
 }
 
 /// Each node that stands failed, in the order the workflow declares it.
@@ -218,36 +244,63 @@ fn failed_nodes(manifest: &Manifest, state: &RunState) -> Vec<FailedNode> {
         .collect()
 }
 
-/// The latest post-check `criteria_checked` per task — a retried task's
-/// earlier, superseded attempts don't get counted twice: the log keeps
-/// every attempt, but the receipt certifies only the final verdict.
-fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
-    let mut latest_post: HashMap<String, &yunta_core::events::CriteriaCheckedPayload> =
-        HashMap::new();
-    for event in events {
-        if let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() {
-            if p.phase == Phase::Post {
-                latest_post.insert(p.task_id.to_string(), p);
+/// Each task's check after its work, as the tasks' ledger keeps it: the
+/// latest, so a retried task's earlier, superseded attempts don't get
+/// counted twice. The log keeps every attempt, but the receipt certifies
+/// only the final verdict, and a gate that ships the work says it above its
+/// card before the run closes.
+pub fn criteria_summary(state: &RunState) -> CriteriaSummary {
+    let checked: Vec<_> = state
+        .tasks
+        .iter()
+        .filter_map(|(task, record)| Some((task, record, record.checked.as_ref()?)))
+        .collect();
+    let mut summary = CriteriaSummary {
+        total: 0,
+        green: 0,
+        tasks: checked.len(),
+        proving: 0,
+        proved: 0,
+        red_before: 0,
+        guards: 0,
+        guards_green: 0,
+        entries: Vec::new(),
+    };
+    for (task, record, after) in checked {
+        for result in &after.results {
+            let green = result.exit_code == 0;
+            summary.total += 1;
+            summary.green += usize::from(green);
+            if result.r#type == Some(CriterionType::Guard) {
+                summary.guards += 1;
+                summary.guards_green += usize::from(green);
+            } else {
+                summary.proving += 1;
+                summary.proved += usize::from(green);
+                summary.red_before += usize::from(red_before(record, &result.cmd));
             }
+            summary.entries.push(CriterionEntry {
+                task_id: task.to_string(),
+                cmd: result.cmd.clone(),
+                exit_code: result.exit_code,
+            });
         }
     }
-    let mut entries: Vec<CriterionEntry> = latest_post
-        .values()
-        .flat_map(|p| {
-            p.results.iter().map(|r| CriterionEntry {
-                task_id: p.task_id.to_string(),
-                cmd: r.cmd.clone(),
-                exit_code: r.exit_code,
-            })
-        })
-        .collect();
-    entries.sort_by(|a, b| (&a.task_id, &a.cmd).cmp(&(&b.task_id, &b.cmd)));
-    let green = entries.iter().filter(|e| e.exit_code == 0).count();
-    CriteriaSummary {
-        total: entries.len(),
-        green,
-        entries,
-    }
+    summary
+        .entries
+        .sort_by(|a, b| (&a.task_id, &a.cmd).cmp(&(&b.task_id, &b.cmd)));
+    summary
+}
+
+/// Whether the task's check before its work found `cmd` red, as a criterion the work has
+/// to make pass must be.
+fn red_before(record: &yunta_core::events::TaskRecord, cmd: &str) -> bool {
+    record.checked_before.as_ref().is_some_and(|before| {
+        before
+            .results
+            .iter()
+            .any(|result| result.cmd == cmd && result.exit_code != 0)
+    })
 }
 
 fn baseline_summary(manifest: &Manifest, state: &RunState) -> Option<BaselineSummary> {
@@ -290,18 +343,26 @@ fn baseline_summary(manifest: &Manifest, state: &RunState) -> Option<BaselineSum
     })
 }
 
-fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
-    let mut files: BTreeSet<PathBuf> = BTreeSet::new();
-    let mut violations: BTreeSet<PathBuf> = BTreeSet::new();
-    for event in events {
-        if let Some(EventPayload::Node(NodeEvent::ScopeChecked(p))) = event.payload() {
-            files.extend(p.diff.iter().cloned());
-            violations.extend(p.violations.iter().cloned());
-        }
-    }
+/// Every path the run's scope checks found changed, and those it may not
+/// change, each once: the union the node ledger keeps over every check.
+fn scope_summary(state: &RunState) -> ScopeSummary {
+    let union = state.nodes.scope_union();
+    let granted: Vec<_> = state
+        .tasks
+        .iter()
+        .flat_map(|(task, _)| state.grants.person_granted_to_task(task).iter().cloned())
+        .collect();
+    // A glob the log holds was checked when it was granted; one that no longer compiles
+    // grants nothing here.
+    let granted = yunta_core::scope_globset(&granted).ok();
     ScopeSummary {
-        files_touched: files.len(),
-        violations: violations.into_iter().collect(),
+        files_touched: union.diff.len(),
+        violations: union.violations.iter().cloned().collect(),
+        granted: union
+            .diff
+            .iter()
+            .filter(|path| granted.as_ref().is_some_and(|set| set.is_match(path)))
+            .count(),
     }
 }
 

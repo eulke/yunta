@@ -4,56 +4,68 @@
 //! A stage says what its screen shows, what it asks for as it opens and as a person
 //! comes back to it, what a stroke does there and what news and answers of its work
 //! do, each as what it wants of the state ([`Want`]): work, work let go, a
-//! confirmation, another stage opened over it, going back, or leaving. The state
+//! confirmation, another stage opened over it, going back, going down to the field, or
+//! leaving. The state
 //! carries those out; an act a confirmation stood before is handed back to the stage
 //! that asked for it once confirmed ([`Stage::confirmed`]), which asks for its work.
 //!
 //! A stage says what it offers as [`Act`]s, each a step as a command line names it and
 //! the key that takes it there, which the palette lists over it before what every stage
-//! offers ([`Stage::always`]), each of those opening the stage that takes it. A stage whose work found something the performer holds for later
-//! work says the ticket it is held under ([`Stage::held`]), which the state lets go
-//! when the stage is left. Each stage that joins adds its variant here and its module
-//! beside this one.
+//! offers ([`Stage::always`]), each of those taken as its step is (`want`), and the keys
+//! help lists over it ([`Stage::help`]). A stage over a run says what it is to it
+//! (`its_run`): a view of the run as it moves, or a record of what was written for it. A stage
+//! whose work found something the performer holds for later work says the ticket it is held
+//! under ([`Stage::held`]), which the state lets go when the stage is left. What a stage wants
+//! of the state is `want`'s. Each stage that joins adds its variant here and its module beside
+//! this one.
 
+mod act;
 mod catalog;
-mod decision;
+mod chronicle;
 mod doctor;
 mod evidence;
 mod field;
 mod first_run;
 mod graph;
+mod its_run;
+mod over_the_run;
 mod run;
 mod schema;
 mod setup;
 mod signpost;
 mod start;
 mod stats;
+mod steps;
 mod upkeep;
+mod want;
 
+pub(crate) use act::Act;
 pub use catalog::CatalogStage;
-pub use decision::DecisionStage;
+pub use chronicle::ChronicleStage;
 pub use doctor::DoctorStage;
 pub use evidence::{Evidence, EvidenceStage};
 pub use field::FieldStage;
 pub use first_run::FirstRunStage;
 pub use graph::GraphStage;
-pub use run::RunStage;
+pub use its_run::ItsRun;
+pub use run::{Grounds, RunStage, Scene, Standstill};
 pub use schema::SchemaStage;
 pub use setup::SetupStage;
 pub use start::StartStage;
 pub use stats::StatsStage;
 pub use upkeep::UpkeepStage;
+pub(crate) use want::Want;
 
 use chrono::{DateTime, Utc};
-use surco::components::{Screen, ScreenLaid};
+use surco::components::{Legend, Screen, ScreenLaid};
+use surco::doc::Doc;
 use surco::look::Look;
 
-use yunta_api::Remark;
-use yunta_core::step::{Arg, NextStep};
+use yunta_api::{FieldReach, Remark};
+use yunta_core::RunId;
 
-use crate::dialog::Confirmation;
-use crate::prompt::{Opens, Stroke};
-use crate::{News, Operation, Outcome, Ticket};
+use crate::prompt::Stroke;
+use crate::{Address, FollowedRuns, News, Operation, Outcome, Ticket};
 
 /// Where a person is.
 #[derive(Debug, Clone)]
@@ -64,8 +76,8 @@ pub enum Stage {
     Field(FieldStage),
     /// A run, followed.
     Run(RunStage),
-    /// The decision a run waits on, being answered.
-    Decision(DecisionStage),
+    /// A run's whole chronicle, a feed of its own over the run.
+    Chronicle(ChronicleStage),
     /// The first run, in a repository set up with none yet.
     FirstRun(FirstRunStage),
     /// A run being started.
@@ -88,188 +100,89 @@ pub enum Stage {
     Schema(SchemaStage),
 }
 
-/// An act a stage offers: the step it takes, as a command line names it, and the key
-/// that takes it there. Not the step alone: the palette takes an act by its key, so a
-/// row chosen there does what pressing the key does.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Act {
-    pub(crate) step: NextStep,
-    pub(crate) key: Stroke,
-}
-
-impl Act {
-    /// `step`, taken here by `key`.
-    pub(crate) fn by(key: Stroke, step: NextStep) -> Self {
-        Act { step, key }
-    }
-}
-
-/// What a stage wants of the state after a stroke, a piece of news or an answer.
-pub(crate) enum Want {
-    /// Work Yunta does.
-    Work(Operation),
-    /// Work the stage asked for and wants no more: stopped where it is under way, and
-    /// what it would answer dropped.
-    LetGo(Operation),
-    /// What the performer holds under a ticket for the stage, no longer wanted:
-    /// dropped.
-    Release(Ticket),
-    /// A page a browser reads, shown: by a terminal through the system's opener,
-    /// by the desktop in a window.
-    Show(std::path::PathBuf),
-    /// An act confirmed before it is done.
-    Confirm(Confirmation),
-    /// A stage opened over this one, which the person comes back from.
-    Open(Stage),
-    /// A stage in this one's place: what this one was opened over stays under it.
-    Replace(Stage),
-    /// Back to the stage this one was opened over.
-    Back,
-    /// The person leaves the application.
-    Leave,
-}
-
-impl Want {
-    /// What taking `step` wants: the stage it opens ([`Stage::opened_by`]), opened over
-    /// this one; nothing where no stage takes it.
-    pub(crate) fn taking(step: &NextStep) -> Vec<Want> {
-        Stage::opened_by(step).map(Want::Open).into_iter().collect()
-    }
-}
-
 impl Stage {
-    /// What every stage's palette offers after the stage's own acts, in their order:
-    /// the workflows, doctor, upkeep and the shapes of the documents Yunta reads, each
-    /// opening the stage that takes it ([`Stage::opened_by`]).
-    pub(crate) fn always() -> [NextStep; 4] {
-        [
-            NextStep::List,
-            NextStep::Doctor {
-                sessions: false,
-                full: false,
-            },
-            NextStep::Gc { dry_run: true },
-            NextStep::Schemas,
-        ]
-    }
-
-    /// The stage `step` opens: one of [`Stage::always`]; a run's step that shows or
-    /// follows the run, its decision on its card or on its plan, its evidence, its
-    /// numbers or its graph; or a workflow's past runs or its graph. None for a step that
-    /// is work or asks a confirmation first, which the stage it is taken on carries out.
-    /// The one mapping from a step to the stage that takes it: every stage and every
-    /// opening reads it.
-    pub(crate) fn opened_by(step: &NextStep) -> Option<Stage> {
-        Some(match step {
-            NextStep::List => Stage::Catalog(CatalogStage::new()),
-            NextStep::Doctor {
-                sessions: false,
-                full: false,
-            } => Stage::Doctor(DoctorStage::new()),
-            NextStep::Gc { dry_run: true } => Stage::Upkeep(UpkeepStage::new()),
-            NextStep::Schemas => Stage::Schema(SchemaStage::new()),
-            NextStep::Status { run, .. } | NextStep::Follow { run } => {
-                Stage::Run(RunStage::of(run.clone()))
-            }
-            NextStep::ResolveGate { run, .. } => {
-                Stage::Decision(DecisionStage::of(run.clone(), Opens::TheCard))
-            }
-            NextStep::Review { run } => {
-                Stage::Decision(DecisionStage::of(run.clone(), Opens::ThePlan))
-            }
-            NextStep::Receipt { run } => {
-                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::Receipt))
-            }
-            NextStep::Verify { run } => {
-                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::Verification))
-            }
-            NextStep::Open { run } => {
-                Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::PageForABrowser))
-            }
-            NextStep::Stats { run } => Stage::Stats(StatsStage::of_run(run.clone())),
-            NextStep::RunGraph { run } => Stage::Graph(GraphStage::of_run(run.clone())),
-            NextStep::History { workflow } => {
-                Stage::Stats(StatsStage::of_workflow(workflow.clone()))
-            }
-            NextStep::Graph {
-                workflow: Arg::Given(workflow),
-            } => Stage::Graph(GraphStage::of_workflow(workflow.clone())),
-            _ => return None,
-        })
-    }
-
-    /// The step of [`Stage::always`] whose command shows what this stage shows: a
-    /// palette over it does not offer opening it again.
-    pub(crate) fn showing(&self) -> Option<NextStep> {
+    /// The run this stage shows, which the state follows under every stage opened over it.
+    pub(crate) fn run_shown(&self) -> Option<&RunId> {
         match self {
-            Stage::Catalog(_) => Some(NextStep::List),
-            Stage::Doctor(_) => Some(NextStep::Doctor {
-                sessions: false,
-                full: false,
-            }),
-            Stage::Upkeep(_) => Some(NextStep::Gc { dry_run: true }),
-            Stage::Schema(_) => Some(NextStep::Schemas),
-            Stage::Signpost
-            | Stage::Field(_)
-            | Stage::Run(_)
-            | Stage::Decision(_)
-            | Stage::FirstRun(_)
-            | Stage::Start(_)
-            | Stage::Setup(_)
-            | Stage::Evidence(_)
-            | Stage::Stats(_)
-            | Stage::Graph(_) => None,
+            Stage::Run(run) => Some(&run.run),
+            _ => None,
         }
     }
 
-    /// What the stage offers at `now`, each with the key that takes it here: what a
-    /// palette over it lists first. A stage whose prompt is the act, a decision's card,
-    /// a question, a form, offers none of its own.
-    pub(crate) fn offered(&self, now: DateTime<Utc>) -> Vec<Act> {
+    /// The reach of the field this stage reads, which the state follows wherever it
+    /// stands: the field's own, and here for the first request, which waits on a run.
+    pub(crate) fn field_reach(&self) -> Option<FieldReach> {
         match self {
-            Stage::Field(field) => field.offered(),
-            Stage::Run(run) => run.offered(now),
+            Stage::Field(field) => Some(field.reach),
+            Stage::FirstRun(_) => Some(FieldReach::Here),
+            _ => None,
+        }
+    }
+
+    /// What the stage offers over what `followed` keeps at `now`, each with the key that
+    /// takes it here: what a palette over it lists first. A stage whose prompt is the act,
+    /// a form or a question, offers none of its own.
+    pub(crate) fn offered(&self, followed: &FollowedRuns, now: DateTime<Utc>) -> Vec<Act> {
+        match self {
+            Stage::Field(field) => field.offered(followed, now),
+            Stage::Run(run) => run.offered(followed, now),
             Stage::Catalog(catalog) => catalog.offered(),
             Stage::Evidence(evidence) => evidence.offered(),
             Stage::Doctor(doctor) => doctor.offered(),
             Stage::Upkeep(upkeep) => upkeep.offered(),
             Stage::Signpost
-            | Stage::Decision(_)
             | Stage::FirstRun(_)
             | Stage::Start(_)
             | Stage::Setup(_)
+            | Stage::Chronicle(_)
             | Stage::Stats(_)
             | Stage::Graph(_)
             | Stage::Schema(_) => Vec::new(),
         }
     }
 
-    /// The stage as a screen at `now`.
-    pub(crate) fn screen(&self, look: &Look, now: DateTime<Utc>) -> Screen {
+    /// The stage as a screen of what `followed` keeps at `now`, a line typed in what stands
+    /// over it where `typed`: the palette's, where every key types.
+    pub(crate) fn screen(
+        &self,
+        look: &Look,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+        typed: bool,
+    ) -> Screen {
         match self {
             Stage::Signpost => signpost::screen(look),
-            Stage::Field(field) => field.screen(look),
-            Stage::Run(run) => run.screen(look, now),
-            Stage::Decision(decision) => decision.screen(look),
+            Stage::Field(field) => field.screen(look, followed, now),
+            Stage::Run(run) => run.screen(look, followed, now, typed),
+            Stage::Chronicle(chronicle) => chronicle.screen(look, followed, now, typed),
             Stage::FirstRun(first_run) => first_run.screen(look),
             Stage::Start(start) => start.screen(look),
             Stage::Setup(setup) => setup.screen(look),
             Stage::Catalog(catalog) => catalog.screen(look),
             Stage::Evidence(evidence) => evidence.screen(look),
-            Stage::Stats(stats) => stats.screen(look),
-            Stage::Graph(graph) => graph.screen(look),
+            Stage::Stats(stats) => stats.screen(look, followed, now, typed),
+            Stage::Graph(graph) => graph.screen(look, followed, now, typed),
             Stage::Doctor(doctor) => doctor.screen(look),
             Stage::Upkeep(upkeep) => upkeep.screen(look),
             Stage::Schema(schema) => schema.screen(look),
         }
     }
 
+    /// The keys help lists over the stage, whose screen's legend is `legend`, of what
+    /// `followed` keeps at `now`: over a run, its keys and its scene's acts in render's
+    /// words; over any other stage, each key its legend names, then those every stage
+    /// answers to.
+    pub(crate) fn help(&self, legend: &Legend, followed: &FollowedRuns, now: DateTime<Utc>) -> Doc {
+        match self {
+            Stage::Run(run) => run.help(legend, followed, now),
+            _ => yunta_render::screen::help(legend),
+        }
+    }
+
     /// What the stage asks for as it opens.
     pub(crate) fn opening(&self) -> Vec<Want> {
         match self {
-            Stage::Signpost | Stage::Field(_) => Vec::new(),
-            Stage::Run(run) => run.opening(),
-            Stage::Decision(decision) => decision.opening(),
+            Stage::Signpost | Stage::Field(_) | Stage::Run(_) => Vec::new(),
             Stage::FirstRun(first_run) => first_run.opening(),
             Stage::Setup(setup) => setup.opening(),
             Stage::Catalog(catalog) => catalog.opening(),
@@ -278,7 +191,7 @@ impl Stage {
             Stage::Graph(graph) => graph.opening(),
             Stage::Doctor(doctor) => doctor.opening(),
             Stage::Upkeep(upkeep) => upkeep.opening(),
-            Stage::Start(_) | Stage::Schema(_) => Vec::new(),
+            Stage::Chronicle(_) | Stage::Start(_) | Stage::Schema(_) => Vec::new(),
         }
     }
 
@@ -291,7 +204,7 @@ impl Stage {
             Stage::Signpost
             | Stage::Field(_)
             | Stage::Run(_)
-            | Stage::Decision(_)
+            | Stage::Chronicle(_)
             | Stage::FirstRun(_)
             | Stage::Start(_)
             | Stage::Evidence(_)
@@ -303,11 +216,13 @@ impl Stage {
         }
     }
 
-    /// What the stage asks for when a person comes back to it.
-    pub(crate) fn returned(&mut self) -> Vec<Want> {
+    /// What the stage asks for when a person comes back to it, `followed` what the state
+    /// keeps of what it follows.
+    pub(crate) fn returned(&mut self, followed: &FollowedRuns) -> Vec<Want> {
         match self {
             Stage::Signpost
-            | Stage::Decision(_)
+            | Stage::Field(_)
+            | Stage::Chronicle(_)
             | Stage::Start(_)
             | Stage::Setup(_)
             | Stage::Evidence(_)
@@ -316,30 +231,89 @@ impl Stage {
             | Stage::Upkeep(_)
             | Stage::Schema(_) => Vec::new(),
             Stage::Doctor(doctor) => doctor.returned(),
-            Stage::Field(field) => field.returned(),
             Stage::Catalog(catalog) => catalog.opening(),
-            Stage::FirstRun(first_run) => first_run.returned(),
-            Stage::Run(run) => run.returned(),
+            Stage::FirstRun(first_run) => first_run.returned(followed),
+            Stage::Run(run) => run.returned(followed),
         }
     }
 
-    /// What `stroke` asks for here at `now`.
-    pub(crate) fn pressed(&mut self, stroke: Stroke, now: DateTime<Utc>) -> Vec<Want> {
+    /// What the stage the person is at asks once the state folded a piece of what it
+    /// follows into `followed`: a run's stage, what its scene reads beyond the log where the
+    /// run came to stand for it. Not [`Stage::heard`], news of work the stage asked for.
+    pub(crate) fn followed_on(&mut self, followed: &FollowedRuns) -> Vec<Want> {
+        match self {
+            Stage::Run(run) => run.followed_on(followed),
+            Stage::Signpost
+            | Stage::Field(_)
+            | Stage::Chronicle(_)
+            | Stage::FirstRun(_)
+            | Stage::Start(_)
+            | Stage::Setup(_)
+            | Stage::Catalog(_)
+            | Stage::Evidence(_)
+            | Stage::Stats(_)
+            | Stage::Graph(_)
+            | Stage::Doctor(_)
+            | Stage::Upkeep(_)
+            | Stage::Schema(_) => Vec::new(),
+        }
+    }
+
+    /// The stage, where it shows `run`, moved onto `by`, the successor a promotion handed
+    /// the run's work to: a run's stage shows the successor's own screen, its pane from its
+    /// first line, as the state follows the successor in the run's place; a run's stats and
+    /// its graph show the successor's, from their first line, and its whole chronicle the
+    /// successor's, from its end. Not a stage opened on `by`, which stands on it from nothing.
+    pub(crate) fn succeeded(&mut self, run: &RunId, by: &RunId) {
+        match self {
+            Stage::Run(stage) => stage.succeeded(run, by),
+            Stage::Chronicle(chronicle) => chronicle.succeeded(run, by),
+            Stage::Stats(stats) => stats.succeeded(run, by),
+            Stage::Graph(graph) => graph.succeeded(run, by),
+            Stage::Signpost
+            | Stage::Field(_)
+            | Stage::FirstRun(_)
+            | Stage::Start(_)
+            | Stage::Setup(_)
+            | Stage::Catalog(_)
+            | Stage::Evidence(_)
+            | Stage::Doctor(_)
+            | Stage::Upkeep(_)
+            | Stage::Schema(_) => {}
+        }
+    }
+
+    /// What `stroke` asks for here, over what `followed` keeps at `now`.
+    pub(crate) fn pressed(
+        &mut self,
+        stroke: Stroke,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Vec<Want> {
         match self {
             Stage::Signpost => signpost::pressed(stroke),
-            Stage::Field(field) => field.pressed(stroke),
-            Stage::Run(run) => run.pressed(stroke, now),
-            Stage::Decision(decision) => decision.pressed(stroke),
+            Stage::Field(field) => field.pressed(stroke, followed, now),
+            Stage::Run(run) => run.pressed(stroke, followed, now),
+            Stage::Chronicle(chronicle) => chronicle.pressed(stroke, followed, now),
             Stage::FirstRun(first_run) => first_run.pressed(stroke),
             Stage::Start(start) => start.pressed(stroke),
             Stage::Setup(setup) => setup.pressed(stroke),
             Stage::Catalog(catalog) => catalog.pressed(stroke),
             Stage::Evidence(evidence) => evidence.pressed(stroke),
-            Stage::Stats(stats) => stats.pressed(stroke),
-            Stage::Graph(graph) => graph.pressed(stroke),
+            Stage::Stats(stats) => stats.pressed(stroke, followed, now),
+            Stage::Graph(graph) => graph.pressed(stroke, followed, now),
             Stage::Doctor(doctor) => doctor.pressed(stroke),
             Stage::Upkeep(upkeep) => upkeep.pressed(stroke),
             Stage::Schema(schema) => schema.pressed(stroke),
+        }
+    }
+
+    /// A key that opens a dialog over the stage, taken there: on a run's, the note it stood
+    /// on goes, as it goes with any key, and the next remark not yet said of what `followed`
+    /// keeps takes its place.
+    pub(crate) fn opened_over(&mut self, followed: &FollowedRuns) {
+        if let Stage::Run(run) = self {
+            run.noted_away(followed);
         }
     }
 
@@ -352,7 +326,7 @@ impl Stage {
             Stage::Signpost
             | Stage::Field(_)
             | Stage::Run(_)
-            | Stage::Decision(_)
+            | Stage::Chronicle(_)
             | Stage::FirstRun(_)
             | Stage::Start(_)
             | Stage::Setup(_)
@@ -364,17 +338,18 @@ impl Stage {
         }
     }
 
-    /// Whether a field is open here.
-    pub(crate) fn typing(&self) -> bool {
+    /// Whether a field is open here, over what `followed` keeps at `now`: a run's, where
+    /// words are typed on the prompt in place it holds in sight.
+    pub(crate) fn typing(&self, followed: &FollowedRuns, now: DateTime<Utc>) -> bool {
         match self {
-            Stage::Decision(decision) => decision.typing(),
+            Stage::Run(run) => run.typing(followed, now),
             Stage::FirstRun(first_run) => first_run.typing(),
             Stage::Start(start) => start.typing(),
             Stage::Setup(setup) => setup.typing(),
             Stage::Catalog(catalog) => catalog.typing(),
             Stage::Signpost
             | Stage::Field(_)
-            | Stage::Run(_)
+            | Stage::Chronicle(_)
             | Stage::Evidence(_)
             | Stage::Stats(_)
             | Stage::Graph(_)
@@ -384,21 +359,25 @@ impl Stage {
         }
     }
 
-    /// The page `page`, which this stage asked a surface to show, could not be shown: the
-    /// evidence stage says so, the one stage that shows pages.
-    pub(crate) fn unshown(&mut self, page: &std::path::Path) {
-        if let Stage::Evidence(evidence) = self {
-            evidence.unshown(page);
+    /// What this stage asked a surface to show, `address`, could not be shown: the
+    /// evidence stage says so of the page it wrote, a run's stage of the pull request's
+    /// link, each with where to find it.
+    pub(crate) fn unshown(&mut self, address: &Address) {
+        match self {
+            Stage::Evidence(evidence) => evidence.unshown(address),
+            Stage::Run(run) => run.unshown(address),
+            _ => {}
         }
     }
 
     /// What a surface laid out of the screen's regions, which the stage reads on the
-    /// next stroke where it scrolls one: a decision's desk and a page in the main region,
-    /// a run's page beside its nodes.
-    pub(crate) fn laid(&mut self, laid: ScreenLaid) {
+    /// next stroke where it scrolls one: a page in the main region, a run's pane beside its
+    /// nodes, its feed or what is read in its prompt in place as the run `followed` keeps
+    /// stands at `now`, and a run's whole chronicle.
+    pub(crate) fn laid(&mut self, laid: ScreenLaid, followed: &FollowedRuns, now: DateTime<Utc>) {
         match self {
-            Stage::Decision(decision) => decision.laid(laid.main),
-            Stage::Run(run) => run.laid(laid.main),
+            Stage::Run(run) => run.laid(laid.main, followed, now),
+            Stage::Chronicle(chronicle) => chronicle.laid(laid.main),
             Stage::Evidence(evidence) => evidence.laid(laid.main),
             Stage::Stats(stats) => stats.laid(laid.main),
             Stage::Graph(graph) => graph.laid(laid.main),
@@ -414,12 +393,14 @@ impl Stage {
         }
     }
 
-    /// What news of lasting work the stage asked for does here at `now`.
-    pub(crate) fn heard(&mut self, news: News, now: DateTime<Utc>) -> Vec<Want> {
+    /// What news of lasting work the stage asked for does here: the cases', which the
+    /// catalog asks to run. Not what the state follows, which no stage asks for.
+    pub(crate) fn heard(&mut self, news: News) -> Vec<Want> {
         match self {
             Stage::Signpost
             | Stage::Field(_)
-            | Stage::Decision(_)
+            | Stage::Run(_)
+            | Stage::Chronicle(_)
             | Stage::FirstRun(_)
             | Stage::Start(_)
             | Stage::Setup(_)
@@ -429,18 +410,19 @@ impl Stage {
             | Stage::Doctor(_)
             | Stage::Upkeep(_)
             | Stage::Schema(_) => Vec::new(),
-            Stage::Run(run) => run.heard(news, now),
             Stage::Catalog(catalog) => catalog.heard(news),
         }
     }
 
-    /// What an answer to work the stage asked for does here.
-    pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
+    /// What an answer to the work `asked`, which the stage asked for, does here: a run's
+    /// stage tells by it an answer given on its prompt in place, and the chain it verified,
+    /// from any other act it took.
+    pub(crate) fn answered(&mut self, asked: &Operation, outcome: Outcome) -> Vec<Want> {
         match self {
             Stage::Signpost => Vec::new(),
             Stage::Field(field) => field.answered(outcome),
-            Stage::Run(run) => run.answered(outcome),
-            Stage::Decision(decision) => decision.answered(outcome),
+            Stage::Run(run) => run.answered(asked, outcome),
+            Stage::Chronicle(chronicle) => chronicle.answered(outcome),
             Stage::FirstRun(first_run) => first_run.answered(outcome),
             Stage::Start(start) => start.answered(outcome),
             Stage::Setup(setup) => setup.answered(outcome),
@@ -464,7 +446,7 @@ impl Stage {
             Stage::Signpost
             | Stage::Field(_)
             | Stage::Run(_)
-            | Stage::Decision(_)
+            | Stage::Chronicle(_)
             | Stage::FirstRun(_)
             | Stage::Setup(_)
             | Stage::Evidence(_)

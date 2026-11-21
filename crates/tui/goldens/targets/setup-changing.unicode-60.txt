@@ -1,0 +1,14 @@
+ yunta › set up                           nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ … 11 above
+   ✓ reviewer-alt  claude-code
+ ▸ ✓ mechanical  ▸ claude-code   codex
+                   ╭ model ───────────────────────╮
+                   │                              │
+                   ╰──────────────────────────────╯
+                   enter with none leaves it to declare
+                   later
+
+    write .yunta/config.yaml and install yunta/fragua
+
+ ←→ adapter · enter take it · …

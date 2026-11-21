@@ -10,9 +10,8 @@
 use std::sync::Arc;
 
 use yunta_core::events::{
-    Claim, DecisionOn, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu,
-    GateOption, GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal,
-    Remedy,
+    Claim, DecisionOn, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption,
+    GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal, Remedy,
 };
 use yunta_core::protected::Protected;
 use yunta_core::refusal::GateRefusal;
@@ -23,7 +22,7 @@ use yunta_replay::RunState;
 use super::schedule::{self, Decision};
 use super::{RunCtx, RunError};
 use crate::run_log::RunLog;
-use yunta_core::events::{GateEvent, PauseReason};
+use yunta_core::events::PauseReason;
 
 /// The escalation object for a node whose reroutes are exhausted: retry once
 /// more, abort, or — when `modes:` has somewhere later to go — promote. The
@@ -340,12 +339,8 @@ pub async fn resolve_gate(
                 withheld,
             }),
         })?;
-    let resolution = GateResolvedPayload::Chosen(choice);
     let log = RunLog::new(storage, run_id, clock, redactor);
-    let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())));
-    log.record(on.node(), waiting).await?;
-    let resolved = EventPayload::Gates(GateEvent::Resolved(resolution));
-    log.record(on.node(), resolved).await?;
+    log.record_decided(on.node(), escalation, choice).await?;
     Ok(())
 }
 
@@ -390,8 +385,9 @@ pub(crate) fn pre_seeded_resolution(
 /// parked is consumed here, never re-asked, and its escalation pair is
 /// already recorded so it is never re-emitted. The option is re-validated
 /// against the re-derived menu: a mismatch means ask normally. A decision
-/// made here is recorded as the same pair, after the answer, so a crash
-/// never leaves a question standing that nobody is asking.
+/// made here is recorded as the same pair, after the answer and in one
+/// commit, so neither a crash nor a reader between two commits finds a
+/// question standing that nobody is asking.
 pub(super) async fn decided(
     ctx: &RunCtx<'_>,
     state: &RunState,
@@ -405,20 +401,8 @@ pub(super) async fn decided(
     let Some(choice) = ctx.ask_human(Some(node), task, escalation).await? else {
         return Ok(None);
     };
-    ctx.emit(
-        Some(node),
-        EventPayload::Gates(GateEvent::Waiting(Box::new(
-            escalation.clone().into_payload(),
-        ))),
-    )
-    .await?;
     let resolved = ctx
-        .emit(
-            Some(node),
-            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
-                choice.clone(),
-            ))),
-        )
+        .emit_decided(Some(node), escalation.clone(), choice.clone())
         .await?;
     Ok(Some((choice, resolved)))
 }

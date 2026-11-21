@@ -560,7 +560,7 @@ fn a_diagnostic_raised_while_the_region_is_drawn_goes_out_above_it() {
     let (repo, home) = project(root.path(), HOLDING);
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
     terminal.wait_for(
-        " done · ",
+        " at work",
         "the run never pinned its region to the terminal",
     );
 
@@ -575,7 +575,7 @@ fn a_diagnostic_raised_while_the_region_is_drawn_goes_out_above_it() {
     // copy it left there — so the confirmation a person just asked for
     // is on the terminal for under a second.
     assert!(
-        terminal.cleared_before(" done · ", "interrupt received"),
+        terminal.cleared_before(" at work", "interrupt received"),
         "the note landed inside the rows the region was redrawing:\n{}",
         terminal.drawn()
     );
@@ -732,10 +732,7 @@ fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
     let (repo, home) = project(root.path(), EXHAUSTED);
 
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    terminal.wait_on_screen(
-        "esc leaves it for later",
-        "the card was never put to anyone",
-    );
+    terminal.wait_on_screen("esc leave it for later", "the card was never put to anyone");
     terminal.keys("\x1b");
 
     let drawn = terminal.ended();
@@ -973,6 +970,8 @@ fn a_failed_bash_node_is_quoted_in_the_lines_a_pipe_gets() {
     );
 }
 
+/// What this workflow's past runs took is said once three are behind it, by the block that
+/// closes the run out; the region's meter says what this run spends, never what is usual.
 #[test]
 fn the_estimate_appears_after_three_runs() {
     let root = tempfile::tempdir().unwrap();
@@ -985,12 +984,20 @@ fn the_estimate_appears_after_three_runs() {
     let mut third = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
     let drawn = third.ended();
     assert!(third.ran_to_the_end(), "{drawn}");
-    assert!(!drawn.contains("usually"), "{drawn}");
+    assert!(!drawn.contains("past runs"), "{drawn}");
 
-    let fourth = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    fourth.wait_for(
-        "usually ~",
-        "three runs behind it, the footer never said how long this workflow usually takes",
+    let mut fourth = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
+    let drawn = fourth.ended();
+    assert!(fourth.ran_to_the_end(), "{drawn}");
+    assert!(
+        drawn.contains(" at work"),
+        "the region's meter never said the run's time at work:\n{drawn}"
+    );
+    assert!(!drawn.contains("usually"), "{drawn}");
+    assert!(
+        drawn.contains("3 past runs"),
+        "three runs behind it, the closing block never said what this workflow usually \
+         takes:\n{drawn}"
     );
 }
 

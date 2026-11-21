@@ -1,0 +1,24 @@
+ yunta › Q78GRR › tests                             ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h51m                               Q78GRR
+ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+ tests · check                                                 baseline_compare
+
+ what it runs
+ cargo test --workspace
+
+ what it is doing · 0 calls
+ running: attempt 1
+ failed: regression: `cargo test --workspace` passed at baseline (exit 0) but…
+ `retry` chosen by mcp
+ running: attempt 2
+
+
+
+
+
+ 27.1M tokens ▁▁▂▂▁█▁▁▁▂▁▁▁▁▁ · 1h12m at work · 39m51s waiting on you
+ ✓ Recorded: retry. A fresh attempt starts from the run's tree.
+ j k node · s stats · g graph · q field, it keeps going · ? keys

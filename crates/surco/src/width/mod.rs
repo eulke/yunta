@@ -267,7 +267,7 @@ fn pieces(word: &str, width: usize) -> Vec<String> {
 
 /// `text` in exactly `width` display cells: padded with spaces when it
 /// is narrower, cut and closed with `glyphs`' truncation mark when it is
-/// wider.
+/// wider. Every cut Surco draws is this one.
 ///
 /// The caller gets `width` cells for any input, which is what lets the
 /// columns of a row line up. The cut lands between clusters, never
@@ -275,6 +275,18 @@ fn pieces(word: &str, width: usize) -> Vec<String> {
 /// different one, and a terminal draws the leftover mark on whatever
 /// follows or as a replacement box — either way wider than the cell it
 /// was given.
+///
+/// Nor does it land inside a number or right after a digit. A number is a
+/// run of digits with the marks that join a digit to a digit, one mark
+/// between two digits: a date and a time (`2026-01-15T10:00:00`), a place
+/// in a file (`3:5`), a decimal (`14.1`), a duration (`7m34`). Half a number
+/// reads as another one, `exits 1…` for `exits 101`, `2026-01-…` for a day,
+/// and a cut right after a digit reads as the start of a larger number, so
+/// the cut falls before the number, which goes whole with what the cut
+/// leaves out. A link or a path is no number for the digits in it: its words
+/// still say where it goes when the cut lands in it outside its numbers, as
+/// they do in any word (`https://github.com/acme/web/pul…`), and a handle is
+/// cut the same way.
 pub fn truncate(text: &str, width: usize, glyphs: Glyphs) -> String {
     let total = cell_width(text);
     if total <= width {
@@ -298,11 +310,54 @@ pub fn truncate(text: &str, width: usize, glyphs: Glyphs) -> String {
         out.push_str(cluster);
         used += cells;
     }
-    // A cut closes on the last word it kept, never on the space after it.
-    out.truncate(out.trim_end().len());
+    // A cut closes on what it kept, never on the space after it, nor inside a number or
+    // right after a digit.
+    out.truncate(clear_of_numbers(text, out.len()));
     out.push_str(mark);
     let cells = cell_width(&out);
     pad(out, width.saturating_sub(cells))
+}
+
+/// Where a cut that keeps `text[..end]` falls so that it splits no number and ends on no
+/// digit: before the number it would split or end on, with the whitespace before the cut left
+/// out. Each turn moves the cut back to the start of a number, so it ends.
+fn clear_of_numbers(text: &str, end: usize) -> usize {
+    let numbers = numbers(text);
+    let mut end = end;
+    loop {
+        let kept = text[..end].trim_end().len();
+        let split = numbers
+            .iter()
+            .find(|number| number.start < kept && kept <= number.end);
+        match split {
+            Some(number) => end = number.start,
+            None => return kept,
+        }
+    }
+}
+
+/// Where each number of `text` stands, by byte: a run of digits, each digit joined to the
+/// next by nothing or by one mark that is neither a digit nor whitespace, so a number begins
+/// and ends on a digit.
+fn numbers(text: &str) -> Vec<std::ops::Range<usize>> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let digit = |at: usize| chars.get(at).is_some_and(|(_, c)| c.is_ascii_digit());
+    let joins = |at: usize| {
+        let mark = chars.get(at).is_some_and(|(_, c)| !c.is_whitespace());
+        mark && at > 0 && digit(at - 1) && digit(at + 1)
+    };
+    let mut numbers: Vec<std::ops::Range<usize>> = Vec::new();
+    for (at, (byte, c)) in chars.iter().enumerate() {
+        if !(c.is_ascii_digit() || joins(at)) {
+            continue;
+        }
+        let after = byte + c.len_utf8();
+        match numbers.last_mut() {
+            Some(number) if number.end == *byte => number.end = after,
+            _ => numbers.push(*byte..after),
+        }
+    }
+    numbers
 }
 
 /// The cells a column of `ids` takes: the widest of them, so that no id

@@ -1,0 +1,5 @@
+what it is doing · 3 calls
+… 2 above
+read    crates/cli/src/commands/pack.rs
+read    crates/cli/src/cli/pack.rs
+read    crates/engine/src/catalog.rs

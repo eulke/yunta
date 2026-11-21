@@ -2,8 +2,7 @@
 //! can stand on and what the plan says of itself as a whole, what is being read, and what
 //! is being asked. Data: a surface lays it out for a size.
 
-use super::{ChoiceRow, Legend, Sight};
-use crate::diagram::Diagram;
+use super::{ChoiceRow, Legend, Sight, TypedRow};
 use crate::doc::Doc;
 
 /// One screen of a plan.
@@ -44,10 +43,6 @@ pub enum RailRow {
     },
     /// Something that weighs on the decision.
     Weighs(String),
-    /// Two things that go together on a row: a path and what changes it.
-    Pair { left: String, right: String },
-    /// The order things go in, as chains of names.
-    Order(Diagram),
 }
 
 /// What is being read.
@@ -78,6 +73,15 @@ pub enum FootRow {
     Options { named: Vec<String>, more: usize },
     /// One of them about to be chosen, with what it does and what it costs.
     Confirming(ChoiceRow),
+    /// Words being typed for one of them, in place of the options: the option, what is
+    /// asked of the words, the row they are typed on, and why the words given were not
+    /// taken.
+    Saying {
+        chosen: ChoiceRow,
+        asks: String,
+        typed: TypedRow,
+        refused: Option<String>,
+    },
 }
 
 #[cfg(test)]

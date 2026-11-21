@@ -16,7 +16,8 @@
 //!   pack's own workflows would do, and `detected`, what a repository and the
 //!   machine it is on answer for.
 //! - What a person is shown and may answer: `shown`, `reserved`, `step` and
-//!   `caution`; `best_effort` names a step a run carries on past.
+//!   `caution`; `ahead`, what the nodes a decision's options lead to do, as a
+//!   run froze them; `best_effort` names a step a run carries on past.
 //! - What Yunta refuses, as data a surface says: `check`, what `yunta check`
 //!   finds in a workflow, and `refusal`, a decision, a reply or a close a run
 //!   will not take, and a pack, a file or a case a project will not.
@@ -42,6 +43,7 @@
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 pub mod agent;
+pub mod ahead;
 pub mod best_effort;
 mod capabilities;
 pub mod caution;

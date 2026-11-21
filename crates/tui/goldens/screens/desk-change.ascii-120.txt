@@ -1,0 +1,36 @@
+ yunta :: Q78GRR :: approve-plan                                                             ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+  plan ; Q78GRR ; fragua ; 1 task, 6 files                                                     needs you  approve-plan
+  Add explicit per-user global pack installation alongside project-level installs
+  you asked  add support for installing a pack globally
+
+    * the change                      | the change                                                              1 task
+  1   global-pack-install             |
+                                      |   Pack installation currently writes to the current project's .yunta/packs/
+  what it says                        |   and .yunta/yunta.lock. Add an explicit --global mode that stores packs and
+  decided for you                3  d |   their lock in a per-user Yunta data directory, so the same pack can be
+  out of scope                   3    |   installed for broader use without changing project installs. Project and
+  risks                          2    |   global installs are selected explicitly; global installs do not shadow or
+                                      |   merge with project installs.
+                                      |
+                                      |   The selected install target determines both the vendor directory and lock
+                                      |   file. add, update, remove and list operate on one target at a time; --global
+                                      |   selects the per-user target and omission keeps the existing project target.
+                                      |   The pack manifest, audit, permission checks, atomic staging, lock integrity
+                                      |   checks and output remain shared.
+                                      |
+                                      |
+                                      |
+                                      |
+                                      |
+                                      |
+                                      |
+                                      |
+                                      |
+                                      |
+                                      |
+
+  ? Approve the plan: Add explicit per-user global pack installation alongside project-level installs?
+  1 approve   2 adjust   3 abort
+
+ 1 2 3 answer ; tab next place ; up/down scroll ; p proof ; d decided for you ; ...                 / anything ; ? keys

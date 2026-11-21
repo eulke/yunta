@@ -16,7 +16,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use yunta_adapters::{MockAdapter, MockFixture, RunPaths};
 use yunta_core::events::{self, DecisionOn, GateWaitingPayload, PauseReason};
-use yunta_core::port::{Forge, HumanInteraction, RunObserver};
+use yunta_core::port::{Forge, ForgeUnanswered, HumanInteraction, RunObserver};
 use yunta_core::rail::RailCommand;
 use yunta_core::shown::ShownDocument;
 use yunta_core::{Env, Manifest, ModeName, NodeId, Pid, RunAdapter, RunId};
@@ -28,7 +28,7 @@ use yunta_replay::RunState;
 use yunta_storage::AsyncStorage;
 
 use crate::machine::Adapters;
-use crate::{Error, Failure, HeldRun, Project, Remarks, Stop};
+use crate::{Error, Failure, HeldRun, Project, Remark, Remarks, Stop};
 
 /// What a surface lends a run it drives here: who the run asks when it needs
 /// a person, and who watches what it does as it does it.
@@ -122,11 +122,7 @@ impl<'p> HeldRun<'p> {
         let storage = project.storage().await?;
         let means = Means {
             adapters,
-            forge: crate::forge::forge_for(
-                &self.manifest.config,
-                project.workspace.secrets.as_ref(),
-                remarks,
-            ),
+            forge: reached(project.workspace.forge(&self.manifest.config), remarks),
             storage,
             ports,
             ambient: &project.workspace.env,
@@ -401,6 +397,23 @@ impl Project {
     fn run_dir_of(&self, id: &RunId) -> PathBuf {
         self.run_dir(id.as_str())
             .unwrap_or_else(|| self.runs_root.join(id.as_str()))
+    }
+}
+
+/// The forge a run is driven with, where `forge` answers: none otherwise, the
+/// run's gates falling back to the person; one the config declares that
+/// failed is said through `remarks`.
+fn reached(
+    forge: Result<Arc<dyn Forge>, ForgeUnanswered>,
+    remarks: &dyn Remarks,
+) -> Option<Arc<dyn Forge>> {
+    match forge {
+        Ok(forge) => Some(forge),
+        Err(ForgeUnanswered::Failed { said }) => {
+            remarks.remark(Remark::ForgeUnavailable { said });
+            None
+        }
+        Err(ForgeUnanswered::Undeclared | ForgeUnanswered::TokenUnset { .. }) => None,
     }
 }
 

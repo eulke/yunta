@@ -1,0 +1,36 @@
+ yunta :: SK1PPD :: extra                                                                   ? 1 needs you ; ^ 1 stalled
+........................................................................................................................
+ + mode-scenario (alpha) ; finished ; in 2s                                                                      SK1PPD
+ start extra ship
+ ===== ooooo ====
+
+
+   + start                   0s  | extra ; bash
+ * o extra                       |
+   + ship                    0s  |   The mode `alpha` leaves it out.
+                                 |
+  f follow what it is doing      |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 0 tokens ___ ; 0s at work
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; f follow it ; s stats ; q field                                                         / anything ; ? keys

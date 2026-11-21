@@ -169,7 +169,8 @@ async fn what_the_gate_showed_is_kept_by_its_hash() {
 async fn a_parked_gate_answered_elsewhere_names_the_same_findings() {
     let bench = parked(WORKFLOW, &fixture()).await;
 
-    answer_parked(&bench, "approve")
+    bench
+        .answer_parked("approve", None)
         .await
         .expect("the escalation rebuilt from the log takes the answer");
     let RunReport { terminal, .. } = bench.wake().await;
@@ -227,9 +228,14 @@ async fn going_on_settles_each_finding_shown_and_the_run_succeeds() {
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::Gates(GateEvent::Waiting(p))) => {
-                Some(yunta_render::offers::option_words(p, &p.options()[0]).1)
-            }
+            Some(EventPayload::Gates(GateEvent::Waiting(p))) => Some(
+                yunta_render::offers::option_words(
+                    p,
+                    &p.options()[0],
+                    &yunta_core::ahead::NodesAhead::default(),
+                )
+                .1,
+            ),
             _ => None,
         })
         .unwrap()
@@ -280,7 +286,7 @@ async fn an_option_that_sends_the_run_back_settles_nothing() {
 async fn a_decision_recorded_while_parked_settles_what_the_gate_showed() {
     let bench = parked(WORKFLOW, &fixture()).await;
 
-    answer_parked(&bench, "approve").await.unwrap();
+    bench.answer_parked("approve", None).await.unwrap();
     bench.wake().await;
 
     assert_eq!(settled(&bench).len(), 3, "{:?}", settled(&bench));

@@ -15,6 +15,7 @@ fn kind_of(block: &Block) -> &'static str {
         Block::Ribbon(_) => "ribbon",
         Block::Gist(_) => "gist",
         Block::Fields(_) => "fields",
+        Block::Labelled(_) => "labelled",
         Block::Table(_) => "table",
         Block::Nodes(_) => "nodes",
         Block::Runs(_) => "runs",
@@ -28,11 +29,14 @@ fn kind_of(block: &Block) -> &'static str {
         Block::TypedAnswer(_) => "typed answer",
         Block::ChoiceList(_) => "choice list",
         Block::Checklist(_) => "checklist",
+        Block::Findings(_) => "findings",
         Block::Problem(_) => "problem",
         Block::Refusal(_) => "refusal",
         Block::Next(_) => "next",
         Block::Legend(_) => "legend",
+        Block::KeyList(_) => "key list",
         Block::Attention(_) => "attention",
+        Block::Noted(_) => "noted",
         Block::Title(_) => "title",
         Block::Heading(_) => "heading",
         Block::Section(_) => "section",
@@ -46,11 +50,14 @@ fn kind_of(block: &Block) -> &'static str {
         Block::Code(_) => "code",
         Block::Lines(_) => "lines",
         Block::Rows(_) => "rows",
+        Block::Feed(_) => "feed",
+        Block::Meter(_) => "meter",
+        Block::Horizon(_) => "horizon",
     }
 }
 
 /// Every kind there is, as [`kind_of`] names it.
-const KINDS: [&str; 35] = [
+const KINDS: [&str; 41] = [
     "headline",
     "furrow",
     "ribbon",
@@ -69,11 +76,14 @@ const KINDS: [&str; 35] = [
     "typed answer",
     "choice list",
     "checklist",
+    "findings",
     "problem",
     "refusal",
     "next",
     "legend",
+    "key list",
     "attention",
+    "noted",
     "title",
     "heading",
     "section",
@@ -86,6 +96,9 @@ const KINDS: [&str; 35] = [
     "diagram",
     "code",
     "lines",
+    "feed",
+    "meter",
+    "horizon",
 ];
 
 /// Adds to `seen` what `blocks` are, and what each of them holds.

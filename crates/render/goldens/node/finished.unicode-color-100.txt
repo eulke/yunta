@@ -1,0 +1,26 @@
+␛[32m✓␛[0m ␛[1mnode brief of run Q78GRR␛[0m␛[2m ·␛[0m␛[32m finished␛[0m
+
+  Wrote and verified brief.md. It captures the idea and lists unsettled details as open points with
+  planning assumptions.
+
+  ␛[2mstands      ␛[0m finished
+  ␛[2mtook        ␛[0m 22s
+  ␛[2mtokens      ␛[0m 112k tokens · 106k in / 6k out (102k cached)
+  ␛[2mkind        ␛[0m prompt
+  ␛[2mattempt     ␛[0m 1
+  ␛[2mrunner      ␛[0m planner on mock/gpt-6-luna
+  ␛[2mproduced    ␛[0m ~/.yunta/runs/01M7DES1GNED00000000Q78GRR/artifacts/brief/brief.md
+
+␛[2mwhat it hands over␛[0m
+␛[32m✓␛[0m brief.md  the engine read it and accepted it
+
+␛[2mwhat it is doing · 2 calls␛[0m
+running: attempt 1
+session opened on gpt-6-luna · fence widened to 3 roots
+write   brief.md
+read    brief.md
+accepted brief.md
+␛[1mfinished: Wrote and verified brief.md. It captures the idea and lists unsettled details as open poi␛[0m␛[1m…␛[0m
+
+␛[2mnext␛[0m
+  ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m

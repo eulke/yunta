@@ -110,7 +110,7 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
   ● 1  cli-global  Global and project flags
 
               node                              time  tokens
-  ✓ finished  plan             4 tasks in 3…   1m31s   1.94M
+  ✓ finished  plan             4 tasks in…     1m31s   1.94M
   ✓ finished  approve-plan     approved on i…  6h27m
   ◌ never ran ├─ review
   ◌ never ran └─ conform
@@ -160,9 +160,15 @@ grill brief plan build review lint ship
 
 ◆ needs you: yunta resolve-gate 7E5PH4 approve (the plan wa…
 
-◆ Q78GRR needs you: the suite passed at baseli… · a go there
+◆ needs you: the plan waits for approval  · a go there
+
+◆ Q78GRR needs you: the suite passed at basel…  · a go there
 
 ◆ needs you: node `implement` asks at its terminal
+
+◆ Q78GRR needs you: node `grill` asks 3 questions: nothing…
+
+✓ Recorded: approve. On to `pr`.
 
 ▎ ◆ gate `ship` needs a decision              approve KQERFD
 ▎ the change is reviewed and its findings settled
@@ -172,9 +178,9 @@ grill brief plan build review lint ship
 ▎
 ▎ then  pr, then the run finishes
 ▎
-▎ ↑↓ move · enter chooses · esc leaves the run waiting
+▎ ↑↓ choose · enter answer · esc leave it waiting
 
- plan · A32BZY                      needs you  approve-plan
+ plan · A32BZY · reviewed-plan · 2 tasks
  Make it
  you asked  a file the run is about
 
@@ -191,16 +197,34 @@ grill brief plan build review lint ship
 
  ◆ Plan registered. Approve?
  1 approve   2 adjust   3 abort
- j k task · p the card · esc leaves the run waiting
+ tab next place · p proof · esc leave it waiting
 
 project name (enter keeps `yunta`)
-> yunta-tui
+╭──────────────────────────────────────────────────────────╮
+│ yunta-tui                                                │
+╰──────────────────────────────────────────────────────────╯
 
-filter n
-  one-node  one command whose exit code is the check
-▸ lint-fix  a check, and an agent that fixes what it finds
-↑↓ move · type to filter · enter chooses · esc takes the
-first
+ ▸ n
+
+  one-node   one command whose exit code is the check
+▸ lint-fix   a check, and an agent that fixes what it finds
+↑↓ choose · enter answer · esc take the first
+
+You never have to remember more than this.
+
+/          anything: only what can be done here, with its c…
+n          start a new run, wherever no prompt stands
+j k        move; the footer always says what they move
+pgup pgdn  scroll the pane a page at a time
+enter      open, answer, confirm
+esc        one step back; what it leaves stays waiting
+a          go to what needs you
+f          follow what the run is doing
+s g        what it cost, its graph
+c          stop it and everything under it
+o          the whole page, in a browser
+q          go to the field; it keeps going
+ctrl-c     leave: every run keeps going without this window
 
   ▸ lint-fix: a check, and an agent that fixes what it finds
     run          yunta run lint-fix
@@ -212,3 +236,27 @@ first
   ✓ acme/lint    v1.2.0 (3f9c2e1), as its lock records it
 ▸ ▲ acme/review  v0.4.0 (91ab7d0), modified: its files no
                  longer match its lock
+
+  ✓ major    Global pack paths ignore the configured YUNTA_…
+             fixed: Global pack paths now use the shared us…
+▸ ▲ major    Global pack commands ignore the configured YUN…
+  ◌ minor    Pack audit cannot inspect globally installed p…
+  ✓ blocking Pack target API shapes are defined outside the…
+             fixed: PackTarget and its path functions are n…
+
+… 4 above
+search  global pack
+read    crates/cli/src/pack.rs
+read    crates/cli/src/commands/pack.rs
+read    crates/testkit/src/bin.rs
+edit    crates/cli/src/pack.rs
+edit    crates/cli/src/cli/pack.rs
+edit    crates/cli/src/commands/pack.rs
+edit    crates/cli/src/cli/dispatch.rs
+… 4 under
+
+967k tokens · 2m34s at work · 5m00s waiting on you
+
+   ⣀⣀⣀⣀⣀⣤⣤⣤⣤⣤⣶⣶⣶⣶⢶⣿⣿⢿⣿⡿⠿⣛⠿⠛⡩⠊ ⡇⠑⢍⠛⠿⣛⠿⢿⣿⡿⣿⣿⡶⣶⣶⣶⣶⣤⣤⣤⣤⣤⣀⣀⣀⣀⣀
+⣿⣿⣿⣿⣿⠿⠿⠿⢛⣛⡻⠭⠭⠛⣒⡪⠭⠕⠒⣉⡡⠔⠊⠉⢀⠤⠊   ⡇  ⠑⠢⡀⠉⠑⠢⢌⣉⠒⠚⠭⢕⣒⠛⠭⠭⢟⣛⡛⠿⠿⠿⣿⣿⣿⣿⣿
+⣉⡩⠤⠔⠒⠒⠉⢉⡡⠤⠔⠒⠉⠉ ⣀⠤⠒⠉   ⢀⠔⠁     ⡇    ⠈⠢⡀   ⠉⠒⠤⣀ ⠉⠉⠒⠢⠤⢌⡉⠉⠒⠒⠢⠤⢍⣉

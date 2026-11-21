@@ -1,0 +1,36 @@
+ yunta :: 0RPHAN :: only                                                                     ? 2 need you ; ^ 1 stalled
+........................................................................................................................
+ ? uncertain-on-crash (default) ; needs you ; for 0s                                                             0RPHAN
+ only
+ ====
+ a node was running with no terminal event when the engine last stopped: `only`; `on_interrupt: fail_if_uncertain` r...
+
+ * # only                        | only ; bash
+                                 |
+                                 | what it waits on
+                                 | a node was running with no terminal event when the engine last stopped: `only`;
+                                 | `on_interrupt: fail_if_uncertain` refuses to guess how each ended; verify manually
+                                 | before resuming
+                                 |
+                                 | left half done
+                                 | # only  attempt 1, after 15m00s
+                                 | branch  yunta/run/01M7SMA11RVN000000000RPHAN off main
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 0 tokens _ ; 15m00s at work
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; r hand it back ; s stats ; g graph ; q field                                            / anything ; ? keys

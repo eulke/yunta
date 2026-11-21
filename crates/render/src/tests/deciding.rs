@@ -249,3 +249,95 @@ fn withholding_nothing() -> GateWaitingPayload {
     )
     .into_payload()
 }
+
+/// The release notes a gate shows, which `notes` produced.
+fn release_notes() -> yunta_core::shown::ShownDocument {
+    yunta_core::shown::ShownDocument {
+        shown: yunta_core::events::Shown {
+            producer: Some("notes".into()),
+            artifact: yunta_core::events::ArtifactId::Opaque {
+                name: "release-notes.md".to_string(),
+            },
+            content_hash: yunta_core::ContentHash::sha256(b"release notes"),
+        },
+        path: PathBuf::from("artifacts/notes/release-notes.md"),
+        content: yunta_core::shown::ShownContent::Text(
+            "# Release notes\n\n- `yunta pack add --global` installs a pack once for every \
+             project of yours.\n- `yunta pack list --global` lists the packs installed that way.\n"
+                .to_string(),
+        ),
+    }
+}
+
+/// A change of three lines added to the changelog.
+fn changelog() -> yunta_core::events::ChangesCountedPayload {
+    yunta_core::events::ChangesCountedPayload {
+        tree: "0a72e028".into(),
+        files: 1,
+        added: 3,
+        removed: 0,
+        largest: vec![yunta_core::events::FileChange {
+            path: "CHANGELOG.md".to_string(),
+            added: 3,
+            removed: 0,
+        }],
+    }
+}
+
+/// A run that posted no finding and whose checks judged no task.
+fn nothing_judged() -> (
+    yunta_core::receipt::FindingsSummary,
+    yunta_core::receipt::CriteriaSummary,
+) {
+    let findings = yunta_core::receipt::FindingsSummary {
+        posted: 0,
+        answered: 0,
+    };
+    let criteria = yunta_core::receipt::CriteriaSummary {
+        total: 0,
+        green: 0,
+        tasks: 0,
+        proving: 0,
+        proved: 0,
+        red_before: 0,
+        guards: 0,
+        guards_green: 0,
+        entries: Vec::new(),
+    };
+    (findings, criteria)
+}
+
+/// Over a card standing in place at a run's pane's foot, a document the gate shows stands at
+/// the pane's body column, its title with its words right under it, no blank row between,
+/// and the change by file under them, as the target `card` draws its rows 10 to 14 at 120
+/// columns.
+#[test]
+fn over_a_card_in_place_a_document_stands_with_its_words_right_under_its_title() {
+    let (run, shown, changed) = (run(), [release_notes()], changelog());
+    let (findings, criteria) = nothing_judged();
+    let look = Look {
+        glyphs: surco::glyphs::Glyphs::Unicode,
+        width: surco::look::Width::exact(84),
+        ..Look::plain()
+    };
+    let page = Gate::OverTheCardInPlace {
+        shown: (&run, &shown),
+        changed: Some(&changed),
+        findings: &findings,
+        criteria: &criteria,
+    }
+    .document(&look);
+    let drawn = Terminal::on(look).draw(&page);
+    let rows: Vec<&str> = drawn.lines().collect();
+    assert_eq!(
+        rows,
+        [
+            "  Release notes: release-notes.md of `notes`",
+            "  - `yunta pack add --global` installs a pack once for every project of yours.",
+            "  - `yunta pack list --global` lists the packs installed that way.",
+            "",
+            "  CHANGELOG.md  +3   ███████████████████",
+        ],
+        "{drawn}"
+    );
+}

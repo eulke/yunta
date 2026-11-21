@@ -26,13 +26,24 @@ impl RunState {
     /// acts on it: the instant a recorded decision takes to reach another process. Nobody
     /// is needed in that instant, and what was answered is on offer to nobody.
     pub fn answer_awaits_its_resume(&self) -> bool {
-        match self.run.paused() {
-            None => false,
-            Some((PauseReason::BudgetExhausted { .. }, _)) => self.cap_answer().is_some(),
-            Some(_) => self
+        self.answer_awaiting_its_resume().is_some()
+    }
+
+    /// The person's answer to what the run is parked on that waits for the resume acting
+    /// on it, as the log recorded it: the token cap's answer the next engine takes
+    /// ([`Self::cap_answer`]), or any other resolution nothing consumed yet
+    /// ([`Self::pre_seeded`]). None while no answer waits.
+    pub fn answer_awaiting_its_resume(&self) -> Option<&GateResolvedPayload> {
+        match self.run.paused()? {
+            (PauseReason::BudgetExhausted { .. }, _) => {
+                let (answer, _) = self.cap_answer().and(self.gates.run_answer())?;
+                Some(answer)
+            }
+            _ => self
                 .gates
                 .nodes()
-                .any(|node| self.pre_seeded(node).is_some()),
+                .find_map(|node| self.pre_seeded(node))
+                .map(|(answer, _)| answer),
         }
     }
 

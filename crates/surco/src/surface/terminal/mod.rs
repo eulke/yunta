@@ -14,7 +14,7 @@ mod asked;
 mod attention;
 mod boxed;
 mod card;
-pub use card::{narrowed, said_whole, Placed};
+pub use card::{said_whole, Placed};
 mod checklist;
 pub(in crate::surface) use checklist::{FIX, SO};
 mod concern;
@@ -24,10 +24,16 @@ mod diagram;
 mod diffstat;
 mod document;
 mod evidence;
+mod feed;
 mod fields;
+mod finding_list;
 mod headline;
+mod horizon;
+mod key_list;
+mod labelled;
 mod legend;
 pub(in crate::surface) mod markdown;
+mod meter;
 mod next;
 mod pane;
 pub use pane::Paned;
@@ -45,6 +51,11 @@ mod table;
 /// The cells between what stands at the two ends of a row, when both stand on it: two, so
 /// the gap reads as a parting, where one would read as the space between two words.
 const APART: usize = 2;
+
+/// The fewest cells a screen's rows hold inside its margins for it to be the design's own
+/// wide screen, a terminal of 100 columns: the legend's far keys and a palette's key and
+/// command columns stand from there.
+const WIDE_FROM: usize = 98;
 
 /// `left` at the start of `cells` cells and `right` at its far end, with the space between
 /// them as wide as the row needs. Without a `right`, `left` stands alone.
@@ -65,6 +76,13 @@ pub struct Terminal {
 impl Terminal {
     pub fn on(look: Look) -> Self {
         Terminal { look }
+    }
+
+    /// Whether this terminal's rows are the design's wide screen's, 98 cells inside the
+    /// margins of 100 columns or more: there the legend's far keys stand at its far end, and
+    /// a palette's box holds each act's key and command beside what it does.
+    fn wide(&self) -> bool {
+        self.look.width.cells() >= WIDE_FROM
     }
 
     /// The strokes of a run's furrow in at most `room` cells, two a node at
@@ -179,6 +197,7 @@ impl Terminal {
             Block::Ribbon(block) => block.lines(look),
             Block::Gist(block) => block.lines(look),
             Block::Fields(block) => block.lines(look),
+            Block::Labelled(block) => self.rows(&block.laid(look.width.cells(), look.glyphs)),
             Block::Table(block) => block.lines(look),
             Block::Nodes(block) => block.table(look.glyphs).lines(look),
             Block::Runs(block) => block.lines(look),
@@ -194,18 +213,15 @@ impl Terminal {
             Block::TypedAnswer(block) => block.drawn(look).lines,
             Block::ChoiceList(block) => block.drawn(look, usize::MAX).lines,
             Block::Checklist(block) => block.lines(look),
+            Block::Findings(block) => block.lines(look),
             Block::Problem(block) => block.lines(look),
             Block::Refusal(block) => block.lines(look),
             Block::Next(block) => block.lines(look),
             Block::Legend(block) => block.lines(look),
+            Block::KeyList(block) => block.lines(look),
             Block::Attention(block) => block.lines(look),
-            Block::Heading(title) => std::iter::once(Line::new())
-                .chain(
-                    crate::width::wrap_unbroken(title, look.width.cells())
-                        .into_iter()
-                        .map(|part| Line::new().push(Tone::Muted, part)),
-                )
-                .collect(),
+            Block::Noted(block) => vec![self.noted(block)],
+            Block::Heading(title) => self.heading(title),
             Block::Title(title) => title.lines(look),
             Block::Section(section) => self.section(section),
             Block::Fold(fold) => self.section(&fold.0),
@@ -217,15 +233,37 @@ impl Terminal {
             Block::Diagram(block) => block.lines(look),
             Block::Code(block) => block.lines(look),
             Block::Lines(lines) => lines.clone(),
-            Block::Rows(rows) => rows
-                .iter()
-                .map(|row| row.cut(look.width.cells(), look.glyphs))
-                .collect(),
+            Block::Rows(rows) => self.rows(rows),
+            Block::Feed(block) => block.lines(look),
+            Block::Meter(block) => vec![self.meter(block)],
+            // A document leaves no rows to fill: the field takes the least it stands in. A
+            // region that ends with it gives it the rows its blocks leave.
+            Block::Horizon(block) => self.horizon(block, horizon::LEAST),
         }
     }
 }
 
 impl Terminal {
+    /// Rows a pointer moves along, each one row: cut at the stream's width with the ellipsis,
+    /// never folded onto the row under it.
+    fn rows(&self, rows: &[Line]) -> Vec<Line> {
+        rows.iter()
+            .map(|row| row.cut(self.look.width.cells(), self.look.glyphs))
+            .collect()
+    }
+
+    /// The title of what follows it, inside a document: a blank line, then its words muted,
+    /// going on in the lines under it where they pass the line.
+    fn heading(&self, title: &str) -> Vec<Line> {
+        std::iter::once(Line::new())
+            .chain(
+                crate::width::wrap_unbroken(title, self.look.width.cells())
+                    .into_iter()
+                    .map(|part| Line::new().push(Tone::Muted, part)),
+            )
+            .collect()
+    }
+
     /// Markdown an author wrote: its text as prose and code, and each
     /// diagram in it drawn as one.
     fn markdown(&self, text: &str) -> Vec<Line> {
@@ -251,14 +289,46 @@ impl Terminal {
     /// A section: its title, and its blocks one step under it, laid out
     /// for what is left of the line there.
     fn section(&self, section: &Section) -> Vec<Line> {
-        let inner = Terminal::on(Look {
+        let inner = self.one_step_under();
+        let mut lines = self.section_title(section);
+        let mut after_section = false;
+        for block in &section.blocks {
+            let drawn = inner.block(block);
+            let Some(first) = drawn.first() else {
+                continue;
+            };
+            // A section or a fold inside this one ends a block of its own:
+            // what follows it stands apart from it.
+            if after_section && !first.text().is_empty() {
+                lines.push(Line::new());
+            }
+            // A blank line stays blank: a margin on it is trailing space a
+            // reader cannot see and a diff can.
+            lines.extend(drawn.into_iter().map(|line| match line.text().is_empty() {
+                true => line,
+                false => line.under(INDENT),
+            }));
+            after_section = matches!(block, Block::Section(_) | Block::Fold(_));
+        }
+        lines
+    }
+
+    /// This stream one step in: what is left of the line under [`INDENT`], where a section's
+    /// blocks are laid out.
+    fn one_step_under(&self) -> Terminal {
+        Terminal::on(Look {
             width: self
                 .look
                 .width
                 .within(self.look.width.cells().saturating_sub(cell_width(INDENT))),
             ..self.look
-        });
-        // A title wider than the line goes on under itself, past its lead.
+        })
+    }
+
+    /// A section's title, one step in, after a blank line: led by its lead, and going on
+    /// under itself, past its lead, where it is wider than the line.
+    fn section_title(&self, section: &Section) -> Vec<Line> {
+        let inner = self.one_step_under();
         let lead = match section.lead {
             Some(Lead::Mark(mark)) => Line::new()
                 .push(Tone::of(mark), self.look.glyphs.mark(mark).to_string())
@@ -279,25 +349,6 @@ impl Terminal {
                 _ => part.under(&hang),
             };
             lines.push(part.under(INDENT));
-        }
-        let mut after_section = false;
-        for block in &section.blocks {
-            let drawn = inner.block(block);
-            let Some(first) = drawn.first() else {
-                continue;
-            };
-            // A section or a fold inside this one ends a block of its own:
-            // what follows it stands apart from it.
-            if after_section && !first.text().is_empty() {
-                lines.push(Line::new());
-            }
-            // A blank line stays blank: a margin on it is trailing space a
-            // reader cannot see and a diff can.
-            lines.extend(drawn.into_iter().map(|line| match line.text().is_empty() {
-                true => line,
-                false => line.under(INDENT),
-            }));
-            after_section = matches!(block, Block::Section(_) | Block::Fold(_));
         }
         lines
     }

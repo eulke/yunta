@@ -1,0 +1,24 @@
+ yunta › Q78GRR › review@reviewer                   ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h41m                               Q78GRR
+ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+ findings · 0 of 4 answered · review@reviewer, review@reviewer-alt, conform
+
+ ▸ ▲ major    Global pack paths ignore the configured YUNTA_HOME
+   ▲ major    Global pack commands ignore the configured YUNTA_HOME state root
+   ◌ minor    Pack audit cannot inspect globally installed packs
+   ✗ blocking Pack target API shapes are defined outside the declared file
+
+ what it is doing · 3 calls
+ running: attempt 1
+ session opened on gpt-6-luna · fence widened to 1 root
+ read    crates/cli/src/pack/target.rs
+ run     git diff
+ finding global-paths-ignore-yunta-home major: Global pack paths ignore the co…
+ call    yunta_post_finding
+
+ 25.2M tokens ▁▁▂▂▁█▁▁▁▁▁▁▁▁▁ · 1h02m at work · 38m51s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused…  · a go there
+ j k finding · tab nodes · s stats · q field, it keeps going · ? keys

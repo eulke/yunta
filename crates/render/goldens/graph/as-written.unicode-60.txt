@@ -1,4 +1,4 @@
-◌ workflow checked · as written
+◌ checked · the nodes it runs, in order           as written
 
          ┌───────┐
          │ build │

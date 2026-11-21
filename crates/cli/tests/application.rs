@@ -1,8 +1,14 @@
 //! The application at a terminal, opened by this build's `yunta`: each slice of what a
 //! person does in it in a file of its own beside this one, driven at a pseudo-terminal.
 
+#[path = "application/calling.rs"]
+mod calling;
 #[path = "application/deciding.rs"]
 mod deciding;
+#[path = "application/feed.rs"]
+mod feed;
+#[path = "application/field.rs"]
+mod field;
 #[path = "application/machine.rs"]
 mod machine;
 #[path = "application/opening.rs"]
@@ -19,9 +25,11 @@ mod starting;
 mod watching;
 
 use serde_json::Value;
+use yunta_core::step::NextStep;
+use yunta_render::screen::Leaving;
 use yunta_testkit::{
-    full_run_id, run_id_from, runs_root, stderr, stdout, yunta_at, yunta_on_terminal, Checkout,
-    Terminal,
+    full_run_id, run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, yunta_on_terminal,
+    Checkout, Terminal,
 };
 
 /// What the field says of a repository with runs.
@@ -44,17 +52,26 @@ fn opened_with(checkout: &Checkout, environment: &[(&str, &str)]) -> Terminal {
     terminal
 }
 
-/// The palette opened over where `terminal` stands, and its row `named` taken: the whole
-/// name typed, which no other row answers as well.
-fn taken_from_the_palette(terminal: &mut Terminal, named: &str) {
+/// The palette opened over where `terminal` stands, and the row of `step` taken: what it
+/// does typed whole, in render's words, which no other row answers as well.
+fn taken_from_the_palette(terminal: &mut Terminal, step: &NextStep) {
+    let does = yunta_render::command::does(step);
     terminal.keys("/");
-    terminal.wait_on_screen("what you can do here", "the palette never opened");
-    terminal.keys(named);
-    terminal.wait_on_screen(
-        &format!("▸ {named}"),
-        "the palette never pointed at the row",
-    );
+    terminal.wait_on_screen("what do you want to do?", "the palette never opened");
+    terminal.keys(does);
+    terminal.wait_on_screen(&format!("▸ {does}"), "the palette never pointed at the row");
     terminal.keys("\r");
+}
+
+/// `terminal`, on a run's screen, left with `q` for the field, which notes where the run is
+/// left, as `said` says where the test knows it; then `q` there leaves the application.
+fn left_through_the_field(terminal: &mut Terminal, said: Option<Leaving>) {
+    terminal.keys("q");
+    terminal.wait_on_screen(THE_FIELD, "`q` on the run never went to the field");
+    if let Some(said) = said {
+        terminal.wait_on_screen(said.said(), "the field never noted where the run is left");
+    }
+    terminal.keys("q");
 }
 
 /// `terminal` given back as the binary found it, once it ended, and the code it exited
@@ -76,16 +93,45 @@ fn given_back(terminal: &mut Terminal) -> Option<i32> {
     terminal.exit_code()
 }
 
-/// What the run's legend says once its nodes stand beside its page, the pointer on one:
+/// What the run's legend says once its nodes stand beside its pane, the pointer on one:
 /// what only the run's following brings, since a run not yet read has no nodes to point at.
-const FOLLOWED: &str = "move along its nodes";
+const FOLLOWED: &str = "j k node";
+
+/// What the run's legend says once the decision it waits on stands in place on its screen,
+/// its card's keys in the legend: what only the run's following brings too, the decision
+/// read.
+const ITS_CARD_STANDS: &str = "j k choose";
+
+/// What the run's legend says once the plan's desk stands in place on its screen, the desk's
+/// keys in the legend: what only the run's following brings too, the decision read.
+const ITS_DESK_STANDS: &str = "tab next place";
+
+/// What the run's legend says once the round of questions it waits on stands in place on its
+/// screen, the round's keys in the legend, its questions typed or picked from a list: what
+/// only the run's following brings too, the round read. A run parked on a round may stand
+/// as it at the first screen its following draws, its nodes never beside its pane.
+const ITS_ROUND_STANDS: &str = "esc leave it for later";
 
 /// Bare `yunta` in `checkout`'s repository, its first run opened from the field and
-/// followed.
+/// followed: its nodes stand beside its pane, or what it waits on stands in place, the
+/// decision on its card or at the plan's desk, or the round of questions.
 fn following(checkout: &Checkout) -> Terminal {
     let mut terminal = opened(checkout);
     terminal.keys("\r");
-    terminal.wait_on_screen(FOLLOWED, "the run opened from the field was never followed");
+    wait_until(
+        || {
+            let screen = terminal.screen();
+            [FOLLOWED, ITS_CARD_STANDS, ITS_DESK_STANDS, ITS_ROUND_STANDS]
+                .iter()
+                .any(|said| screen.holds(said))
+        },
+        || {
+            format!(
+                "the run opened from the field was never followed\non the screen:\n{}",
+                terminal.screen().rows.join("\n")
+            )
+        },
+    );
     terminal
 }
 
@@ -115,8 +161,8 @@ fn log(checkout: &Checkout, id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// What the run's page says at its head once the run finished: in sight however long its
-/// chronicle grows below.
+/// What the run's headline says across its screen once the run finished: in sight whatever
+/// its pane shows, a page from its head or a feed at its end.
 const FINISHED: &str = "(default) · finished";
 
 /// The process the engine of the run `id` runs in, as the run's registry names it while the

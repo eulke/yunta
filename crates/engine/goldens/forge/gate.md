@@ -49,6 +49,6 @@ _1 line_
 on the machine that holds the run
 
 - `yunta resume gate-1`: reads the answer and acts on it
-- `yunta close gate-1`: closes the run for good
+- `yunta close gate-1`: close it for good
 
 <!-- yunta run_id: run-gate-1 -->

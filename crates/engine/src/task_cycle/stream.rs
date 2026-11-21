@@ -8,6 +8,10 @@
 //! A note leaves by two doors: the log gets its size and digest, and its
 //! words, with every secret the session holds taken out, go to whoever
 //! watches the run ([`crate::said`]) and to nothing that lasts.
+//!
+//! What the session spent is read against its token cap in [`token_cap`].
+
+mod token_cap;
 
 use std::time::Duration;
 
@@ -255,10 +259,12 @@ pub(super) async fn apply_agent_event(
             input_tokens,
             output_tokens,
             cached_input_tokens,
-        } => return usage(ctx, input_tokens, output_tokens, cached_input_tokens).await,
+        } => {
+            return token_cap::usage(ctx, input_tokens, output_tokens, cached_input_tokens).await;
+        }
         AgentEvent::Completed {
             result: AgentOutcome { summary },
-        } => return Ok(Some(completed(ctx, summary))),
+        } => return Ok(Some(token_cap::completed(ctx, summary))),
         AgentEvent::Failed { error, cause } => {
             *ctx.cut_off = cause == FailureCause::Refused(RefusalCause::Unreachable);
             // The error travels whole: what the adapter caught under its
@@ -333,7 +339,8 @@ async fn rejected_tool(
     Ok(())
 }
 
-/// Records a tool the session called and what the call acted on.
+/// Records a tool the session called, what the call acted on, and the
+/// session it was made in.
 async fn tool_use(
     ctx: &AgentEventCtx<'_>,
     name: String,
@@ -353,6 +360,9 @@ async fn tool_use(
                 cached_input_tokens: None,
                 note: None,
                 text: None,
+                // `SessionOpened` is every session's first event, so a call
+                // always has its session.
+                session: ctx.opened.clone(),
             },
         )),
     )
@@ -384,6 +394,7 @@ async fn note(ctx: &AgentEventCtx<'_>, text: String) -> Result<(), DispatchError
                     // contained.
                     note: Some(yunta_core::events::NoteDigest::of(&text)),
                     text: None,
+                    session: None,
                 },
             )),
         )
@@ -401,65 +412,6 @@ async fn note(ctx: &AgentEventCtx<'_>, text: String) -> Result<(), DispatchError
         observer.said(node_id, spoken);
     }
     Ok(())
-}
-
-/// Records what the CLI reported it spent and folds it into the running
-/// total. When the adapter counts the cap mid-session, a total past the cap
-/// ends the stream here.
-async fn usage(
-    ctx: &mut AgentEventCtx<'_>,
-    input_tokens: Option<u64>,
-    output_tokens: Option<u64>,
-    cached_input_tokens: Option<u64>,
-) -> Result<Option<DispatchOutcome>, DispatchError> {
-    emit_audit(
-        ctx.audit,
-        EventPayload::Session(SessionEvent::Message(
-            yunta_core::events::AgentMessagePayload {
-                message_type: yunta_core::events::AgentMessageType::Usage,
-                tool_name: None,
-                action: None,
-                target: None,
-                input_tokens,
-                output_tokens,
-                cached_input_tokens,
-                note: None,
-                text: None,
-            },
-        )),
-    )
-    .await
-    .map_err(DispatchError::Audit)?;
-    // A count the CLI did not report adds nothing: a session that said
-    // nothing about its input has not said zero.
-    ctx.tokens.input += input_tokens.unwrap_or(0);
-    ctx.tokens.output += output_tokens.unwrap_or(0);
-    if let Some(cached) = cached_input_tokens {
-        ctx.tokens.cached = Some(ctx.tokens.cached.unwrap_or(0) + cached);
-    }
-    if !ctx.counts_cap_mid_session {
-        return Ok(None);
-    }
-    Ok(over_cap(ctx.max_tokens, ctx.tokens.total()))
-}
-
-/// What a session that completed its turn ends on: `Completed`, unless the
-/// adapter does not count the cap mid-session and the session spent past it.
-fn completed(ctx: &AgentEventCtx<'_>, summary: String) -> DispatchOutcome {
-    if ctx.counts_cap_mid_session {
-        return DispatchOutcome::Completed { summary };
-    }
-    over_cap(ctx.max_tokens, ctx.tokens.total()).unwrap_or(DispatchOutcome::Completed { summary })
-}
-
-/// The stop a token total earns against the cap: `BudgetExceeded` once the
-/// total is above it. Nothing while the total is within the cap or no cap is
-/// set. Both places the cap is read give this one reason.
-fn over_cap(max_tokens: Option<u64>, used: u64) -> Option<DispatchOutcome> {
-    let max = max_tokens.filter(|max| used > *max)?;
-    Some(DispatchOutcome::BudgetExceeded {
-        cause: Failure::TokenBudget { used, max },
-    })
 }
 
 /// Whether the adapter counts the token cap while the session runs, so the

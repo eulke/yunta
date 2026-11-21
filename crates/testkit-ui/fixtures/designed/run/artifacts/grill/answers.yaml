@@ -1,0 +1,5 @@
+answers:
+- id: where-global-lives
+  value: The current user's platform data directory, shared by that user's projects
+- id: how-requested
+  value: --global on pack add, update, remove and list

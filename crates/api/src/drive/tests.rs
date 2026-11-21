@@ -85,6 +85,7 @@ async fn chased() -> Chased {
             clock: Arc::new(yunta_testkit_core::FixedClock),
             ids: Arc::new(SystemIdSource),
             secrets: Arc::new(ProcessSecrets),
+            forges: Arc::new(crate::DeclaredForge),
             binary: PathBuf::from("yunta"),
         },
     };

@@ -89,7 +89,7 @@ fn render_run_stats(
         frame: &frame,
         stats,
         pricing,
-        depth: Depth::Glance,
+        told: StatsTold::Printed(Depth::Glance),
     };
     surco::surface::Surface::draw(&Terminal::on(*look), &page.document(look))
 }
@@ -111,7 +111,7 @@ fn stats_renders_to_a_string_a_test_can_read() {
         frame: &frame,
         stats: &run_stats,
         pricing: None,
-        depth: Depth::Glance,
+        told: StatsTold::Printed(Depth::Glance),
     };
     let rows: Vec<String> = Terminal::on(look)
         .lines(&page.document(&look))
@@ -119,7 +119,7 @@ fn stats_renders_to_a_string_a_test_can_read() {
         .map(Line::text)
         .collect();
     for row in [
-        "  task cost    500 tokens per verified task ; 1 task done",
+        "  task cost    500 tokens per verified task, 1 task done",
         "  documents    3 accepted, 1 refused",
         "  findings     5 posted, 1 updated, 1 withdrawn; 4 standing",
         "  answers      2 given, 1 proved; 1 settled",
@@ -308,7 +308,7 @@ fn lines_at(run: &RunStats, nodes: &[NodeFrame], depth: Depth, look: &Look) -> V
         frame: &view,
         stats: run,
         pricing: None,
-        depth,
+        told: StatsTold::Printed(depth),
     };
     Terminal::on(*look)
         .lines(&page.document(look))
@@ -477,22 +477,4 @@ fn the_whole_story_adds_the_rails_the_blocked_share_and_the_models() {
     assert_eq!(rows[1].trim(), "19% blocked · haiku-5", "{}", rows[1]);
 }
 
-/// Each runner's tokens are a fine bar against the runner that spent the
-/// most, and that runner's own bar is whole.
-#[test]
-fn each_runner_is_a_fine_bar_of_its_tokens_against_the_one_that_spent_most() {
-    let (run, frames) = asked_run(2);
-    let lines = lines_at(&run, &frames, Depth::Glance, &unicode(120));
-    let rows = rows_under(&lines, "runners:");
-    assert_eq!(rows.len(), 2, "{lines:?}");
-    assert!(
-        rows[0].contains(&format!(" █████▊{}", " ".repeat(14))),
-        "{}",
-        rows[0]
-    );
-    assert!(
-        rows[1].contains(&format!(" {}", "█".repeat(20))),
-        "{}",
-        rows[1]
-    );
-}
+mod spent;

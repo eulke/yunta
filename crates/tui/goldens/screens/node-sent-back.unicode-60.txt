@@ -1,0 +1,14 @@
+ yunta › ADJVST › plan          ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● reviewed (default) · running · for 4m37s          ADJVST
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ nothing needs you: it is moving
+ plan · prompt                   planner on mock/mock-model
+ what it is doing · 0 calls
+ … 4 above
+ finished: planned · 1m35s
+ running: attempt 2
+ session opened on mock-model · fence widened to 1 root
+ 0 tokens · 1m35s at work · 3m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · f follow it · s stats · … · ? keys

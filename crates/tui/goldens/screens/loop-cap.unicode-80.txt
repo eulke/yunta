@@ -1,0 +1,24 @@
+ yunta › CAPPED › implement                          ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ loop-cap (default) · needs you · for 0s                               CAPPED
+ plan implement
+ ━━━━ ━━━━━━━━━
+ node `implement` failed: loop `implement` exceeded `limits.max_loop_iteration…
+
+ implement · loop                                   executor on mock/mock-model
+
+   limits.max_loop_iterations                2
+   iterations already run this invocation    2
+   the tasks document still has ready tasks
+
+
+
+
+ ▎ ◆ loop `implement` needs another iteration and its cap is spent    implement
+ ▎
+ ▎ ▸ retry  its iteration count starts over; it stops at the cap again if tasks
+ ▎          remain
+ ▎   abort  Pause here: nothing runs; this decision stays open
+ 0 tokens ▁▁ · 0s at work
+
+ j k choose · enter answer · n add a note · esc leave it waiting · ? keys

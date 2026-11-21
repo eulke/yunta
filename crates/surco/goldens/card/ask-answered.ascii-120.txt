@@ -1,0 +1,11 @@
+| ? grill asks                                                                                          Q78GRR
+|
+| + What does global mean in terms of where a pack is...  The current user's platform data directory, share...
+| ? How should someone request a global installation, and how does that differ from project-level
+|   installation?
+|      * type to filter
+|     * --global on pack add, update, remove and list
+|       A separate pack global command group
+|       A global-by-default install
+| . How should global installations interact with project-level packs, including precedence and conflicts?
+|   optional, assumes Independent stores and locks; each operation affects the selected target

@@ -1,5 +1,6 @@
 //! The receipt as a person reads it — in a file, a pull request or a
-//! terminal.
+//! terminal — and the rows a run's screen says it in: the same rows, a
+//! printed receipt keeping after each what only a page has room for.
 //!
 //! Every number here is already on the run's receipt — this page chooses
 //! wording and order, never derives a fact. Keeping it apart from the
@@ -8,25 +9,49 @@
 
 use surco::components::{Checklist, Fields, Found, Gist, Headline, Next, Section, Whole};
 use surco::doc::{Block, Depth, Doc};
-use surco::figures::Tokens;
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::text::counted;
 use surco::words::Standing;
-use yunta_core::events::{BaselineOrigin, TerminalState};
-use yunta_core::receipt::{self, BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode};
+use yunta_core::events::TerminalState;
+use yunta_core::receipt::{self, CriteriaSummary, EventChainStatus, FailedNode, FindingsSummary};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
 
 use crate::blocks::FailureDetail;
 use crate::page::Page;
-use crate::spend::Breakdown;
+
+mod rows;
+
+use rows::{
+    baseline, caution_checks, changed, cost, criteria_check, event_chain_check, review_checks,
+    said, scope_check,
+};
 
 /// The receipt of a run, as the page a person reads it on.
 #[derive(Debug, Clone, Copy)]
 pub struct Receipt<'a> {
     pub receipt: &'a receipt::Receipt,
+}
+
+/// Where a receipt's rows are read, in the glyphs it draws with, which says how much each
+/// tells: a run's screen says what each found in the words its pane has room for, and a
+/// printed receipt keeps after them, past the separator, the detail only a page has room
+/// for.
+#[derive(Debug, Clone, Copy)]
+pub enum Told {
+    OnScreen(Glyphs),
+    Printed(Glyphs),
+}
+
+impl Told {
+    /// The glyphs the rows are drawn with.
+    fn glyphs(self) -> Glyphs {
+        match self {
+            Told::OnScreen(glyphs) | Told::Printed(glyphs) => glyphs,
+        }
+    }
 }
 
 impl Page for Receipt<'_> {
@@ -38,14 +63,110 @@ impl Page for Receipt<'_> {
     }
 }
 
+impl Receipt<'_> {
+    /// The one line a run's screen says the receipt in, under its ribbon, when its work
+    /// holds: every criterion green, every finding answered and the log's chain intact.
+    /// `None` when any of them does not hold, or no criterion proved the work.
+    pub fn gist(&self) -> Option<String> {
+        let receipt = self.receipt;
+        let criteria = &receipt.criteria;
+        let findings = &receipt.findings;
+        let holds = criteria.total > 0
+            && criteria.green == criteria.total
+            && findings.answered == findings.posted
+            && matches!(receipt.event_chain, EventChainStatus::Intact { .. });
+        holds.then(|| {
+            "every criterion green, every finding answered, the log's chain intact".to_string()
+        })
+    }
+
+    /// One check per thing the run held its work to, in the order a reader meets them, as
+    /// `told` says them.
+    pub fn checks(&self, told: Told) -> Checklist {
+        let receipt = self.receipt;
+        let mut checks = Checklist::default();
+        criteria_check(&mut checks, receipt, told);
+        caution_checks(&mut checks, receipt);
+        let (found, words) = baseline(receipt.baseline.as_ref(), told);
+        checks.push(found, "baseline", words);
+        scope_check(&mut checks, receipt, told);
+        review_checks(&mut checks, receipt, told);
+        event_chain_check(&mut checks, receipt, told);
+        checks
+    }
+
+    /// What the run spent, what it changed and the pull request it opened, under its
+    /// checks, as `told` says them.
+    pub fn facts(&self, told: Told) -> Fields {
+        let receipt = self.receipt;
+        let (spent, detail) = cost(receipt);
+        Fields::new()
+            .push_if("cost", said(spent, detail, told))
+            .push_if("changed", changed(receipt, told))
+            .push_if(
+                "pull request",
+                receipt
+                    .pull_request
+                    .as_ref()
+                    .map_or(String::new(), |opened| {
+                        crate::outcome::pull_request(opened.number, &opened.url)
+                    }),
+            )
+    }
+}
+
+/// The findings and the criteria in one line, as a gate that ships the work says them above
+/// its card before the run closes, in `glyphs`: how many `findings` stand and how many were
+/// answered, then how many tasks a check judged and how many of their `criteria` are green.
+/// It opens on the done mark where every finding is answered and every criterion green, and
+/// on the caution mark otherwise, for the person to look before choosing. Not a receipt's
+/// rows, which say each on a row of its own.
+pub fn verdicts(findings: &FindingsSummary, criteria: &CriteriaSummary, glyphs: Glyphs) -> Line {
+    let green = match criteria.proved == criteria.proving {
+        true => format!("{} green", criteria_counted(criteria.proved)),
+        false => format!(
+            "{} of {} green",
+            criteria.proved,
+            criteria_counted(criteria.proving)
+        ),
+    };
+    let said = format!(
+        "{}, {} answered {} {}, {green}",
+        counted(findings.posted, "finding"),
+        findings.answered,
+        glyphs.sep(),
+        counted(criteria.tasks, "task"),
+    );
+    let holds = findings.answered == findings.posted && criteria.proved == criteria.proving;
+    let mark = match holds {
+        true => Found::Holds,
+        false => Found::Caution,
+    }
+    .mark();
+    Line::new()
+        .push(Tone::of(mark), glyphs.mark(mark).to_string())
+        .plain(" ")
+        .plain(said)
+}
+
+/// `count` criteria, in the noun's own plural.
+fn criteria_counted(count: usize) -> String {
+    match count {
+        1 => "1 criterion".to_string(),
+        _ => format!("{count} criteria"),
+    }
+}
+
 /// What the receipt says, as a document any surface draws: a file writes
 /// it as Markdown, a terminal lays it out.
 ///
-/// The run's word heads it, then what it is a receipt of, then one check
-/// per thing the run held its work to — a cross only for what failed, a
-/// `·` for what was never asked for — then each criterion and each path
-/// outside the scope, and the command that checks it all again. `glyphs`
-/// draws the separators between the facts a line states.
+/// The run's word heads it, then what it is a receipt of and the run, then
+/// one check per thing the run held its work to — a cross only for what
+/// failed, a `·` for what was never asked for — then what it spent, changed
+/// and opened, then each criterion and each path outside the scope, and the
+/// command that checks it all again. Each row says what a run's screen says,
+/// then what only a page keeps. `glyphs` draws the separators between the
+/// facts a line states.
 fn document(receipt: &receipt::Receipt, glyphs: Glyphs) -> Doc {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
@@ -63,14 +184,12 @@ fn document(receipt: &receipt::Receipt, glyphs: Glyphs) -> Doc {
     if receipt.terminal_state.is_none() {
         doc = doc.with(Gist::new("the run is still open: this is its last step"));
     }
+    let page = Receipt { receipt };
+    let told = Told::Printed(glyphs);
     let mut doc = doc
-        .with(
-            Fields::new()
-                .push_if("run", receipt.run_id.to_string())
-                .push_if("cost", cost(receipt, glyphs))
-                .push_if("changed", changed(receipt, glyphs)),
-        )
-        .with(checks(receipt));
+        .with(Fields::new().push_if("run", receipt.run_id.to_string()))
+        .with(page.checks(told))
+        .with(page.facts(told));
     for failed in &receipt.failed {
         doc = doc.with(failed_node(failed, &receipt.run_id));
     }
@@ -84,13 +203,11 @@ fn document(receipt: &receipt::Receipt, glyphs: Glyphs) -> Doc {
             .with(Block::Heading("outside the scope".to_string()))
             .with(outside);
     }
+    let verify = NextStep::Verify {
+        run: receipt.run_id.clone(),
+    };
     doc.with(Next {
-        steps: vec![(
-            crate::command::line(&NextStep::Verify {
-                run: receipt.run_id.clone(),
-            }),
-            "checks this run's evidence again",
-        )],
+        steps: vec![(crate::command::line(&verify), crate::command::does(&verify))],
     })
 }
 
@@ -160,204 +277,5 @@ fn standing(state: TerminalState, blocking_findings: usize) -> Standing {
     }
 }
 
-/// One check per thing the run held its work to, in the order a reader
-/// meets them.
-fn checks(receipt: &receipt::Receipt) -> Checklist {
-    let mut checks = Checklist::default();
-    criteria_check(&mut checks, receipt);
-    caution_checks(&mut checks, receipt);
-    let (found, said) = baseline(receipt.baseline.as_ref());
-    checks.push(found, "baseline", said);
-    scope_check(&mut checks, receipt);
-    review_checks(&mut checks, receipt);
-    event_chain_check(&mut checks, receipt);
-    checks
-}
-
-/// The run's criteria, each command green or not; none declared is not
-/// applicable.
-fn criteria_check(checks: &mut Checklist, receipt: &receipt::Receipt) {
-    let criteria = &receipt.criteria;
-    match (criteria.total, criteria.green == criteria.total) {
-        (0, _) => checks.push(
-            Found::NotApplicable,
-            "criteria",
-            "none declared, nothing to prove",
-        ),
-        (total, all) => checks.push(
-            if all { Found::Holds } else { Found::Problem },
-            "criteria",
-            format!("{} of {total} green, each command below", criteria.green),
-        ),
-    }
-}
-
-/// The event kinds this binary reads only in part, and the artifact problems
-/// reported during the run, when there are any.
-fn caution_checks(checks: &mut Checklist, receipt: &receipt::Receipt) {
-    if let Some(said) = crate::state::unknown_kinds(&receipt.unknown_kinds) {
-        checks.push(Found::Caution, "event kinds", said);
-    }
-    if !receipt.diagnostics.is_empty() {
-        let kinds: Vec<String> = receipt
-            .diagnostics
-            .iter()
-            .map(DiagnosticCount::to_string)
-            .collect();
-        checks.push(
-            Found::Caution,
-            "artifacts",
-            format!(
-                "{} reported during the run: {}",
-                counted(
-                    receipt.diagnostics.iter().map(|d| d.occurrences).sum(),
-                    "artifact problem"
-                ),
-                kinds.join(", ")
-            ),
-        );
-    }
-}
-
-/// The files the run touched, and the paths it wrote outside its scope.
-fn scope_check(checks: &mut Checklist, receipt: &receipt::Receipt) {
-    checks.push(
-        match receipt.scope.violations.is_empty() {
-            true => Found::Holds,
-            false => Found::Problem,
-        },
-        "scope",
-        format!(
-            "{} touched, {} outside it",
-            counted(receipt.scope.files_touched, "file"),
-            match receipt.scope.violations.len() {
-                0 => "none".to_string(),
-                n => n.to_string(),
-            }
-        ),
-    );
-}
-
-/// The review of the run's work: one check per group of fan-out siblings, or
-/// a note that no runner fanned out.
-fn review_checks(checks: &mut Checklist, receipt: &receipt::Receipt) {
-    let groups = receipt.fan_out_groups();
-    if groups.is_empty() {
-        checks.push(
-            Found::NotApplicable,
-            "review",
-            format!(
-                "{} used, no fan-out review",
-                counted(receipt.runners.len(), "runner")
-            ),
-        );
-    }
-    for (base, members) in &groups {
-        let adapters: Vec<&str> = members.iter().map(|m| m.adapter.as_str()).collect();
-        checks.push(
-            Found::Holds,
-            "review",
-            format!(
-                "by {} via `{base}` ({})",
-                counted(members.len(), "independent runner"),
-                adapters.join(", ")
-            ),
-        );
-    }
-}
-
-/// Whether the run's events form one hash-linked chain, or where it breaks.
-fn event_chain_check(checks: &mut Checklist, receipt: &receipt::Receipt) {
-    match &receipt.event_chain {
-        EventChainStatus::Intact { events } => checks.push(
-            Found::Holds,
-            "event chain",
-            format!("{}, hash-linked, replayable", counted(*events, "event")),
-        ),
-        EventChainStatus::Broken { seq, detail } => checks.push(
-            Found::Problem,
-            "event chain",
-            surco::text::detailed(format!("broken at seq {seq}"), detail),
-        ),
-    }
-}
-
-/// What the run spent: every token, in and out, per task once the run
-/// had tasks, and the reroutes it took.
-fn cost(receipt: &receipt::Receipt, glyphs: Glyphs) -> String {
-    let cost = &receipt.cost;
-    if cost.tokens.total() == 0 && cost.reroutes == 0 {
-        return "nothing spent".to_string();
-    }
-    let mut said = format!(
-        "{} ({})",
-        Tokens(cost.tokens.total()),
-        Breakdown(&cost.tokens)
-    );
-    if let Some(cptv) = cost.cptv {
-        said.push_str(&format!(
-            " {} cost per verified task: {}",
-            glyphs.sep(),
-            Tokens::rounded(cptv)
-        ));
-    }
-    said.push_str(&format!(
-        " {} {}",
-        glyphs.sep(),
-        counted(cost.reroutes, "reroute")
-    ));
-    said
-}
-
-/// What the run changed from its base to its newest tree, as git last
-/// counted it; nothing when nothing counted it, or it touched no file.
-fn changed(receipt: &receipt::Receipt, glyphs: Glyphs) -> String {
-    receipt
-        .changed
-        .as_ref()
-        .and_then(|change| crate::changes::of(change, glyphs))
-        .unwrap_or_default()
-}
-
-/// What the run's comparisons against its baseline found — or, when the
-/// suite was already failing when it was measured, that none of them
-/// could find anything.
-fn baseline(baseline: Option<&BaselineSummary>) -> (Found, String) {
-    let Some(b) = baseline else {
-        return (
-            Found::NotApplicable,
-            "not used by this workflow".to_string(),
-        );
-    };
-    let measured_by = match &b.origin {
-        BaselineOrigin::Measured => String::new(),
-        BaselineOrigin::Inherited { run } => format!(", measured by run {run}"),
-    };
-    let hash = b.hash.as_str().get(..12).unwrap_or_default();
-    match b.red {
-        Some(exit_code) => (
-            Found::Caution,
-            format!(
-                "already red when measured (exit {exit_code}): {} could find a regression \
-                 (suite `{}`, hash `{hash}`{measured_by})",
-                match b.compared {
-                    1 => "the one comparison never".to_string(),
-                    n => format!("none of {n} comparisons"),
-                },
-                b.suite,
-            ),
-        ),
-        None => (
-            match b.regressions {
-                0 => Found::Holds,
-                _ => Found::Problem,
-            },
-            format!(
-                "{} across {} (suite `{}`, hash `{hash}`{measured_by})",
-                counted(b.regressions, "regression"),
-                counted(b.compared, "comparison"),
-                b.suite,
-            ),
-        ),
-    }
-}
+#[cfg(test)]
+mod tests;

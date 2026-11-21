@@ -1,0 +1,36 @@
+ yunta › new run                                                                            ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+                                                                         │
+ What do you want to build?                                              │ what it usually takes
+ ╭─────────────────────────────────────────────────────────────────────╮ │ 0 past runs
+ │ add support for installing a pack globally                          │ │
+ ╰─────────────────────────────────────────────────────────────────────╯ │   ✓ claude-code  2.1.0
+ What the tasks build                                                    │   ✓ codex        0.157.0
+                                                                         │   ✓ git          commits as Marta Ruiz
+ workflow                                                                │   ✗ forge        github eulke/yunta:
+   yunta/fragua   the full cycle: questions, plan, tests, work, review,… │                  `YUNTA_DESIGNED_FORGE_TOKEN
+   lint-fix       lint and format, with one fix round                    │                  `, the variable its token
+ ▸ run-tasks      a tasks document you wrote by hand                     │                  is in, is not set, and
+                                                                         │                  `yunta/fragua` opens a pull
+ tasks (document, required)                                              │                  request through it
+ ╭─────────────────────────────────────────────────────────────────────╮ │     fix          export
+ │                                                                     │ │                  YUNTA_DESIGNED_FORGE_TOKEN
+ ╰─────────────────────────────────────────────────────────────────────╯ │                  to reach it
+ Tasks document YAML, relative to the repository root.                   │   ✓ checkouts    builds 0 B of a 98.9 GB
+                                                                         │                  budget
+ adapter                                                                 │
+  ▸ as the runners in config.yaml say   claude-code   codex              │
+                                                                         │
+ what runs                                                               │
+   ┄┄ ┄                                                                  │
+   implement verify                                                      │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+ ◆ C0NS0E needs you: node `approve` wants an external gate (assignee: reviewer) but no forge is reachable from this ma…
+ ↑↓ workflow · tab next row · enter start · esc back

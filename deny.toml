@@ -8,7 +8,13 @@ all-features = false
 no-default-features = false
 
 [advisories]
-ignore = []
+# An advisory is ignored only with the reason it does not stop a release.
+ignore = [
+    # `chrono` has no maintainer; the advisory names no vulnerability. The event
+    # log's timestamps, every clock and the tests that set one read it, so its
+    # replacement is work of its own, not a line to change here.
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained, not vulnerable; replacing it is work of its own" },
+]
 
 [licenses]
 # Permissive licenses only — no copyleft, no source-available terms. Every

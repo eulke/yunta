@@ -393,6 +393,11 @@ pub struct AgentMessagePayload {
     /// call, and for a log written before the engine recorded it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ToolTarget>,
+    /// The session the call was made in, as its `agent_session_opened`
+    /// names it. Absent on anything but a tool call, and on a log older than
+    /// the field, which reads as it did: a call that names no session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionId>,
     /// The usage a `usage` reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,

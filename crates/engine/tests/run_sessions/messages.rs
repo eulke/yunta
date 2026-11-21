@@ -32,6 +32,66 @@ sessions:
     assert_usage_and_tool_call_are_kept(&messages);
 }
 
+/// Two nodes, one session each, so a call shows which of two sessions it
+/// names.
+const TWO_SESSIONS_WORKFLOW: &str = r#"
+name: two-sessions
+nodes:
+  - id: first
+    kind: prompt
+    runner: executor
+    prompt: "Do the first thing."
+  - id: second
+    kind: prompt
+    runner: executor
+    depends_on: [first]
+    prompt: "Do the second thing."
+"#;
+
+/// Each tool call on the log names the session it was made in: the one the
+/// `agent_session_opened` of its node names.
+#[tokio::test]
+async fn a_tool_call_names_the_session_it_was_made_in() {
+    let bench = Bench::new();
+    let fixture = r#"
+dialect: claude-code
+sessions:
+  - steps:
+      - { type: tool_use, name: edit, target: first.rs }
+    outcome: { type: completed, summary: "done" }
+  - steps:
+      - { type: tool_use, name: edit, target: second.rs }
+    outcome: { type: completed, summary: "done" }
+"#;
+    let RunReport { terminal, state: _ } = bench.run(TWO_SESSIONS_WORKFLOW, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.events();
+    let opened: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::Opened(p))) => {
+                Some((e.node_id.clone(), Some(p.session_id.clone())))
+            }
+            _ => None,
+        })
+        .collect();
+    let called: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::Message(p)))
+                if p.message_type == yunta_core::events::AgentMessageType::ToolUse =>
+            {
+                Some((e.node_id.clone(), p.session.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opened.len(), 2, "one session in each node: {opened:?}");
+    assert_ne!(opened[0].1, opened[1].1, "two sessions: {opened:?}");
+    assert_eq!(called, opened);
+}
+
 /// Never the content: the note keeps its size and digest, and no text.
 fn assert_note_is_a_digest(messages: &[&yunta_core::events::AgentMessagePayload]) {
     let jsonl = serde_json::to_string(&messages).unwrap();

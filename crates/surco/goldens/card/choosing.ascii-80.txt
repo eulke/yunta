@@ -8,4 +8,4 @@
 |
 | then  review x2, conform -> ship
 |
-| up/down move ; enter chooses ; n adds a note ; esc leaves it for later
+| up/down choose ; enter answer ; n add a note ; esc leave it for later

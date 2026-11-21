@@ -101,6 +101,9 @@ pub enum ForgeAnswer {
     CannotPush,
     /// It did not answer: what reaching it said.
     Unanswered { said: String },
+    /// Its token is set, in `token_env`, and the forge could not be made ready to be asked
+    /// with it: what failing said.
+    Unready { token_env: String, said: String },
 }
 
 /// Why the remote a run's branch is pushed to does not hold.
@@ -287,6 +290,14 @@ fn forge_check(repo: &GitHubRepo, answer: &ForgeAnswer) -> Check {
         ForgeAnswer::Unanswered { said } => {
             Check::new(Found::Problem, "forge", format!("{named}: {said}"))
         }
+        ForgeAnswer::Unready { token_env, said } => Check::new(
+            Found::Problem,
+            "forge",
+            format!(
+                "{named}: `{token_env}`, the variable its token is in, is set, and reaching the \
+                 forge with it failed: {said}"
+            ),
+        ),
     }
 }
 

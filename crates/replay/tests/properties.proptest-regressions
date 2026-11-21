@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 61a2dfe201e3e6479cbd6ed7870b44496c9339aeff87c54eed9d4c84d8310087 # shrinks to log = [StoredEvent { run_id: RunId("run-prop"), seq: Seq(1), timestamp: 2026-01-01T00:00:00Z, node_id: None, body: Known(Run(Created(RunCreatedPayload { manifest_hash: ContentHash("67e9bc3cfd2163c2978358dfe00d2f912cd4ee0c99f077c3583b39b48aebb124"), checkout: None, inputs: {}, mode: ModeName("default"), promoted_from: None, yunta_schema: None, base_branch: "main", base_commit: CommitSha("deadbeef"), environment: None, left_out: [], opens_on_base: false }))) }]
+cc 74d58bb0ca2be447357c24b864353cd003302e8920aea381811da5bfd7fafe74 # shrinks to (log, cuts) = ([StoredEvent { run_id: RunId("run-prop"), seq: Seq(1), timestamp: 2026-01-01T00:00:00Z, node_id: None, body: Known(Node(Finished(NodeFinishedPayload { outcome: Summary("ok"), tokens_used: TokenUsage { input: 0, output: 0, cached: None }, tree: None, commit: None }))) }], [])
+cc 076fabfc4be2ec8794b03c92cf63861850ebe5188e9044ac1188fe98961e2bc7 # shrinks to (log, cuts) = ([StoredEvent { run_id: RunId("run-prop"), seq: Seq(1), timestamp: 2026-01-01T00:00:00Z, node_id: None, body: Known(Node(Finished(NodeFinishedPayload { outcome: Summary(""), tokens_used: TokenUsage { input: 7, output: 309, cached: Some(1) }, tree: None, commit: None }))) }], [1])

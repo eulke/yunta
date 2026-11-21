@@ -183,9 +183,15 @@ grill finished · brief finished · plan running · build never ran · review ne
 
 ◆ needs you: `yunta resolve-gate 7E5PH4 approve` (the plan waits for approval)
 
+◆ needs you: the plan waits for approval · `a` go there
+
 ◆ **Q78GRR** needs you: the suite passed at baseline and now exits 101 · `a` go there
 
 ◆ needs you: node `implement` asks at its terminal
+
+◆ **Q78GRR** needs you: node `grill` asks 3 questions: nothing is recorded until every one is answered
+
+✓ Recorded: approve. On to `pr`.
 
 ◆ **gate `ship` needs a decision** · approve KQERFD
 
@@ -196,31 +202,23 @@ the change is reviewed and its findings settled
 
 then pr, then the run finishes
 
-`↑↓` move · `enter` chooses · `esc` leaves the run waiting
+`↑↓` choose · `enter` answer · `esc` leave it waiting
 
-**plan** · A32BZY · reviewed-plan (default) · 2 tasks · needs you  approve-plan
+**plan** · A32BZY · reviewed-plan · 2 tasks · needs you  approve-plan
 
 Make it
 
 you asked: a file the run is about
 
 - the change
-
-**steps**
 - ▸ 1 T001
 - T002
 
-**impact**
-- made.txt · T001
-- said.txt · T002
+**what it says**
+- decided for you 2 `d`
 
-**weighs**
-- decided 2 `d`
+**what weighs on it**
 - the suite is red at baseline
-- flowchart LR
-  n0["T001"]
-  n1["T002"]
-  n0 --> n1
 
 **proof · T001** · step 1 of 1
 
@@ -231,7 +229,7 @@ tested by    the file exists
 
 `1` approve · `2` adjust · `3` abort
 
-`j k` task · `p` the card · `esc` leaves the run waiting
+`tab` next place · `p` proof · `esc` leave it waiting
 
 **project name** (enter keeps `yunta`)
 
@@ -242,7 +240,23 @@ filter **n**
 - **one-node** one command whose exit code is the check
 - ▸ **lint-fix** a check, and an agent that fixes what it finds
 
-`↑↓` move · `type` to filter · `enter` chooses · `esc` takes the first
+`↑↓` choose · `enter` answer · `esc` take the first
+
+_You never have to remember more than this._
+
+- `/` anything: only what can be done here, with its command
+- `n` start a new run, wherever no prompt stands
+- `j k` move; the footer always says what they move
+- `pgup pgdn` scroll the pane a page at a time
+- `enter` open, answer, confirm
+- `esc` one step back; what it leaves stays waiting
+- `a` go to what needs you
+- `f` follow what the run is doing
+- `s g` what it cost, its graph
+- `c` stop it and everything under it
+- `o` the whole page, in a browser
+- `q` go to the field; it keeps going
+- `ctrl-c` leave: every run keeps going without this window
 
 ## ▸ lint-fix: a check, and an agent that fixes what it finds
 
@@ -254,3 +268,23 @@ filter **n**
 
 - ✓ **acme/lint** v1.2.0 (3f9c2e1), as its lock records it
 - ▸ ▲ **acme/review** v0.4.0 (91ab7d0), modified: its files no longer match its lock
+
+- ✓ major: Global pack paths ignore the configured YUNTA_HOME
+  - fixed: Global pack paths now use the shared user_state_root resolver, which honors YUNTA_HOME.
+- ▸ ▲ major: **Global pack commands ignore the configured YUNTA_HOME state root**
+- ◌ minor: Pack audit cannot inspect globally installed packs
+- ✓ blocking: Pack target API shapes are defined outside the declared file
+  - fixed: PackTarget and its path functions are now defined in crates/cli/src/pack.rs.
+
+… 4 above  
+search  global pack  
+read    crates/cli/src/pack.rs  
+read    crates/cli/src/commands/pack.rs  
+read    crates/testkit/src/bin.rs  
+edit    crates/cli/src/pack.rs  
+edit    crates/cli/src/cli/pack.rs  
+edit    crates/cli/src/commands/pack.rs  
+edit    crates/cli/src/cli/dispatch.rs  
+… 4 under
+
+967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you

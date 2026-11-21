@@ -19,16 +19,19 @@ use surco::line::{Line, Tone};
 use surco::text;
 use surco::words::Standing;
 use yunta_core::events::{
-    Fact, FailureMenu, GateWaitingPayload, Leads, Menu, ProposedCheck, ScopeWait, WhyWithheld,
-    Withheld,
+    Claim, Fact, Failure, FailureMenu, GateWaitingPayload, Leads, Menu, ProposedCheck, ScopeWait,
+    WhyWithheld, Withheld,
 };
 use yunta_core::expansion::{Precheck, Waiting};
 use yunta_core::listed_globs;
 use yunta_core::protected::Protection;
 use yunta_core::shown::{withheld_because, ShownDocument};
-use yunta_core::{LeftOut, NodeId, OptionId, Workflow};
+use yunta_core::{LeftOut, NodeId, OptionId, TaskId, Workflow};
 
-use crate::blocks::{departure_facts, stuck_words};
+use crate::blocks::{
+    departure_facts, stuck_words, ITERATIONS_RUN, ITERATION_CAP, TASKS_READY, TOKENS_SPENT,
+    TOKEN_CAP,
+};
 
 mod decision;
 
@@ -83,19 +86,13 @@ fn menu_facts(escalation: &GateWaitingPayload) -> Vec<Fact> {
         Some(Menu::Gate(gate)) => vec![Fact::labelled("assignee", gate.assignee.clone())],
         Some(Menu::Published(gate)) => vec![Fact::labelled("published at", gate.url.clone())],
         Some(Menu::Budget(cap)) => vec![
-            Fact::labelled("limits.max_tokens_per_run", cap.cap.to_string()),
-            Fact::labelled(
-                "total input+output tokens derived from the event log",
-                cap.spent.to_string(),
-            ),
+            Fact::labelled(TOKEN_CAP, cap.cap.to_string()),
+            Fact::labelled(TOKENS_SPENT, cap.spent.to_string()),
         ],
         Some(Menu::LoopCap(cap)) => vec![
-            Fact::labelled(
-                "iterations already run this invocation",
-                cap.ran.to_string(),
-            ),
-            Fact::labelled("limits.max_loop_iterations", cap.cap.to_string()),
-            Fact::bare("the tasks document still has ready tasks"),
+            Fact::labelled(ITERATIONS_RUN, cap.ran.to_string()),
+            Fact::labelled(ITERATION_CAP, cap.cap.to_string()),
+            Fact::bare(TASKS_READY),
         ],
         Some(Menu::Scope(wait)) => scope_facts(wait),
         Some(Menu::Failure(menu)) => failure_facts(menu),
@@ -196,6 +193,59 @@ pub fn sentence(payload: &GateWaitingPayload) -> String {
 /// says happened, with the reroute a failed node has used up named in it.
 pub fn claim_words(escalation: &GateWaitingPayload) -> String {
     crate::claim::sentence(escalation.summary(), escalation.failure())
+}
+
+/// What a decision's card asks of a person: [`claim_words`]'s claim, put as the question
+/// its card answers.
+pub fn question(escalation: &GateWaitingPayload) -> String {
+    crate::claim::question(escalation.summary(), escalation.menu())
+}
+
+/// The one task of a loop `escalation` is about, where it is about one: a task's request for
+/// scope or its departure from the plan, asked at the engine's terminal, or the one request
+/// or departure a loop that ended on it owes a person. None where it is about a node, the
+/// run, or several tasks.
+pub fn task_it_is_about(escalation: &GateWaitingPayload) -> Option<&TaskId> {
+    match escalation.summary() {
+        Claim::ScopeAsked { task, .. } | Claim::Departs { task } => return Some(task),
+        _ => {}
+    }
+    let Some(Menu::Failure(menu)) = escalation.menu() else {
+        return None;
+    };
+    match &menu.failure {
+        Failure::ScopeOwed { owed } => match owed.as_slice() {
+            [one] => Some(&one.task_id),
+            _ => None,
+        },
+        Failure::TasksStopped { stopped } => {
+            match (stopped.as_slice(), menu.failure.departures_owed()) {
+                ([one], Some(_)) => Some(&one.task_id),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Why the one task `escalation` is about asks for the scope its card's question names, in
+/// its own words: its request asked at the engine's terminal, or the one request a loop that
+/// ended owing it carries. None where it asks for no path, or for several tasks.
+pub fn why_it_asks(escalation: &GateWaitingPayload) -> Option<String> {
+    let reason = match (escalation.summary(), escalation.menu()) {
+        (Claim::ScopeAsked { reason, .. }, Some(Menu::Scope(wait))) if !wait.paths.is_empty() => {
+            reason.as_deref()
+        }
+        (_, Some(Menu::Failure(menu))) => match &menu.failure {
+            Failure::ScopeOwed { owed } => match owed.as_slice() {
+                [one] => one.reason.as_deref(),
+                _ => return None,
+            },
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(crate::found::stated_reason(reason).to_string())
 }
 
 /// A decision as the section a page ends on: led by the mark of what

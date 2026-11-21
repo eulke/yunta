@@ -1,0 +1,36 @@
+ yunta :: RESETS :: pr                                                                      ? 1 needs you ; ^ 1 stalled
+........................................................................................................................
+ > opens (default) ; waiting ; for 0s                                                                            RESETS
+ make pr
+ ==== ====
+ node `pr` waits for its limit to reset at 2026-01-01 01:00 UTC, and the run resumes on its own then
+
+   + make                    0s  | pr ; pull_request
+ * > pr                          |
+                                 | it goes on alone at 01:00 UTC
+                                 |
+                                 | what it is doing ; 0 calls
+                                 | running: attempt 1
+                                 | failed: the forge rate-limited its requests until 2026-01-01 01:00 UTC: forge: ra...
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 0 tokens __ ; 0s at work
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refus...  ; a go there
+ j k node ; s stats ; g graph ; q field                                                             / anything ; ? keys

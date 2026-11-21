@@ -1,14 +1,24 @@
 //! A decision held in place at a terminal: its question, what a reader needs to
-//! answer, and either every option with one pointed at or the option chosen with
-//! the words it is said with. Every row opens on the decision's edge and is
+//! answer, and every option with one pointed at; where words are typed for the one
+//! pointed at, the box they are typed in stands under the options, what is asked of
+//! them faint in it while nothing is typed. Every row opens on the decision's edge and is
 //! tinted, and the row pointed at is set apart where a layer draws fills.
+//!
+//! A card whose keys stand in a screen's legend draws none of its own and ends on its
+//! last option; one printed with its keys says them as its foot, with what follows the
+//! option pointed at over them. A card with no option to choose and no keys of its own, as
+//! one standing for a decision that could not be read, ends on what stands under its
+//! question. Short of rows, what gives way never takes an option:
+//! the blank rows and the route go first, the question keeps one row beside its far
+//! edge and what stands under it is cut to the rows left, then each option keeps one
+//! row, and only then does the list count what it leaves out.
 
-use crate::components::{Card, CardBody, ChoiceRow, Choices, Laid, TypedRow};
+use super::at_ends;
+use crate::components::{Card, CardBody, Choices, Laid, TypedRow};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
-use crate::text::counted;
-use crate::width::{cell_width, id_column, middle_cut, INDENT};
+use crate::width::{cell_width, INDENT};
 
 /// A prompt's lines, where the cursor stands when a field is open (the row, counted
 /// from its first line, and the cell), and what was laid out of a pane it scrolls.
@@ -21,23 +31,12 @@ pub struct Placed {
 /// The cells the edge and the space after it take at the start of a row.
 const EDGE: usize = 2;
 
-/// The cells the pointer and the space after it take: a row not pointed at keeps
-/// them, so no row moves when the pointer does.
-const POINTER: usize = 2;
-
-/// The cells between an option's name and what it says: one would read as a word's
-/// space.
-const NAME_GAP: usize = 2;
-
-/// The fewest cells what an option says is wrapped in beside its name. Fewer are
-/// too few for a sentence, so it goes under the name instead.
-const LEAST_TEXT: usize = 12;
-
 /// The cells between the question and the card's far edge on one row.
 const HEAD_GAP: usize = 2;
 
-/// The cell the cursor needs past the last character of a field.
-pub(super) const CURSOR_CELL: usize = 1;
+/// The fewest cells a question cut to one row keeps beside its far edge: under them it
+/// no longer says what is asked, and the edge gives way instead.
+const LEAST_QUESTION: usize = 20;
 
 /// The cells the mark of a line that needs a person, or a refusal, and the space
 /// after it take: the rest of such a line wraps under them.
@@ -48,32 +47,57 @@ const MARKED: usize = 2;
 const THEN_MARGIN: usize = 6;
 
 /// How much of a card a terminal has room for, what gives way first to what stands
-/// to the last.
+/// to the last. A card's options stand at every one; a round gives way by levels of its
+/// own once its blank rows have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Keeping {
     /// All of it.
     Everything,
-    /// The question, the options and the keys: what stands under the question, the
-    /// route, and a far edge that takes a row of its own give way.
-    WhatAnswers,
-    /// The question and the options: the keys give way too.
+    /// The question on one row beside its far edge, what stands under it in the rows the
+    /// rest leaves, and the options and the keys: the blank rows and the route give way.
+    Spare,
+    /// Each option on one row too, cut at the line, and the list in the rows left,
+    /// counting what it leaves out.
+    OneRowEach,
+    /// The question and the options: the keys give way too, and the line words are typed
+    /// on stays.
     TheQuestion,
+    /// A round's own rows and the keys: the card's question and what stands under it give
+    /// way, since the round's questions say what is asked, and the round folds further.
+    TheRound,
+    /// A round's own rows: the keys give way too.
+    TheRoundAlone,
+}
+
+impl Keeping {
+    /// Whether the card's question and what stands under it give way here.
+    fn headless(self) -> bool {
+        matches!(self, Keeping::TheRound | Keeping::TheRoundAlone)
+    }
 }
 
 impl Card {
     /// The card as a prompt draws it in at most `rows` rows, with where the cursor
-    /// stands when a field is open. Short of rows, it keeps the question and the row
-    /// pointed at: the list gives way first, counting what it leaves out, then what
-    /// stands under the question and the route, and then the keys. Fewer rows than a
-    /// question and one row are too few to be asked in.
+    /// stands when a field is open. Short of rows, it keeps the question and every
+    /// option: the blank rows and the route give way first, with the question's rows
+    /// past its first and what stands under it past the rows left; then what each option
+    /// says past its row, then the list from the ends away from the row pointed at,
+    /// counting what it leaves out, and then the keys. Fewer rows than a question and
+    /// one row are too few to be asked in. A round keeps its own rows instead: after its
+    /// blank rows, the question over it and what stands under it give way, then its keys.
     pub fn drawn(&self, look: &Look, most: usize) -> Placed {
         let whole = self.laid_out(look, most, Keeping::Everything);
-        let placed = [Keeping::WhatAnswers, Keeping::TheQuestion]
-            .into_iter()
-            .fold(whole, |placed, keeping| match placed.lines.len() <= most {
-                true => placed,
-                false => self.laid_out(look, most, keeping),
-            });
+        let short = match self.body {
+            CardBody::Round(_) => [Keeping::Spare, Keeping::TheRound, Keeping::TheRoundAlone],
+            _ => [Keeping::Spare, Keeping::OneRowEach, Keeping::TheQuestion],
+        };
+        let placed =
+            short
+                .into_iter()
+                .fold(whole, |placed, keeping| match placed.lines.len() <= most {
+                    true => placed,
+                    false => self.laid_out(look, most, keeping),
+                });
         Placed {
             lines: placed
                 .lines
@@ -85,41 +109,95 @@ impl Card {
         }
     }
 
-    /// The cells a field on a card may fill with `prompt` before it: what the card's
-    /// edge, the prompt and the cell the cursor needs past the last character leave.
-    pub(crate) fn typed_room(look: &Look, prompt: &str) -> usize {
-        look.width
-            .cells()
-            .saturating_sub(EDGE + cell_width(prompt) + CURSOR_CELL)
+    /// The rows the card takes whole, every option's words and its blank rows standing: what
+    /// it keeps in a pane taller than the shortest look before anything of its own gives way.
+    pub(crate) fn whole(&self, look: &Look) -> usize {
+        self.laid_out(look, usize::MAX, Keeping::Everything)
+            .lines
+            .len()
     }
 
-    /// The card's rows, before their edge, in at most `most` rows where the list can
-    /// give way that far, holding what `keeping` says.
+    /// The rows the card keeps before what stands above it in a pane gives way: its
+    /// question on one row, what stands under it whole, each option on one row and its
+    /// keys, its blank rows and its route given way. What stands above it gives way from
+    /// its top down to the rows these leave, and only then does the card's own order of
+    /// giving way go on, so its options never give way to what stands above it.
+    pub(crate) fn least(&self, look: &Look) -> usize {
+        self.laid_out(look, usize::MAX, Keeping::OneRowEach)
+            .lines
+            .len()
+    }
+
+    /// The cells the box a card's words are typed in spans: what the card's edge leaves
+    /// of the line.
+    pub(crate) fn typed_room(look: &Look) -> usize {
+        look.width.cells().saturating_sub(EDGE)
+    }
+
+    /// The card's rows, before their edge, in at most `most` rows where what gives way
+    /// can give way that far, holding what `keeping` says.
     fn laid_out(&self, look: &Look, most: usize, keeping: Keeping) -> Placed {
         let room = look.width.cells().saturating_sub(EDGE);
-        let mut head = self.head(look, room, keeping);
-        if keeping == Keeping::Everything {
-            for about in self.about.iter().filter(|about| !about.is_empty()) {
-                head.extend(Line::new().plain(about.as_str()).wrap(room));
-            }
-        }
-        head.push(Line::new());
-        let keys = self.legend.spelled(look.glyphs);
-        let foot: Vec<Line> = match keys.is_empty() || keeping == Keeping::TheQuestion {
-            true => Vec::new(),
-            false => std::iter::once(Line::new())
-                .chain(Line::new().push(Tone::Muted, keys).wrap(room))
-                .collect(),
+        let spaced = keeping == Keeping::Everything;
+        let head = self.head(look, room, keeping);
+        let foot = self.foot(look, room, keeping);
+        // Everything stands: what stands under the question whole, and a blank row under it.
+        let whole = match spaced {
+            true => self.reason(room, usize::MAX, look.glyphs),
+            false => Vec::new(),
         };
-        let (middle, cursor) = match &self.body {
+        let left = most.saturating_sub(head.len() + whole.len() + usize::from(spaced) + foot.len());
+        let (middle, cursor) = self.middle(look, room, left, keeping);
+        let reason = match (spaced, keeping.headless()) {
+            (true, _) => whole,
+            (false, true) => Vec::new(),
+            (false, false) => {
+                let rows = most.saturating_sub(head.len() + middle.len() + foot.len());
+                self.reason(room, rows, look.glyphs)
+            }
+        };
+        // A card with nothing to choose and no keys of its own ends on its reason.
+        let parted = spaced && !(middle.is_empty() && foot.is_empty());
+        let over = head.len() + reason.len() + usize::from(parted);
+        Placed {
+            cursor: cursor.map(|(row, cell)| (over + row, EDGE + cell)),
+            lines: head
+                .into_iter()
+                .chain(reason)
+                .chain(parted.then(Line::new))
+                .chain(middle)
+                .chain(foot)
+                .collect(),
+            laid: None,
+        }
+    }
+
+    /// What the card holds under its question, in the `left` rows the rest leaves where it
+    /// gives way that far: every option, with what follows the one pointed at where the
+    /// card says its keys and everything stands, or with the words the one pointed at is
+    /// said with under them; or a round. With where the cursor stands among them.
+    fn middle(
+        &self,
+        look: &Look,
+        room: usize,
+        left: usize,
+        keeping: Keeping,
+    ) -> (Vec<Line>, Option<(usize, usize)>) {
+        match &self.body {
             CardBody::Choosing { choices, then } => {
+                // What follows an option is the printed card's, which says its keys as its
+                // foot: a screen's card leaves it to the printed page.
                 let route = then
                     .as_deref()
                     .filter(|then| keeping == Keeping::Everything && !then.is_empty())
+                    .filter(|_| !self.legend.is_empty())
                     .map(|then| then_lines(then, room));
                 let route_rows = route.as_ref().map_or(0, |route| route.len() + 1);
-                let left = most.saturating_sub(head.len() + foot.len() + route_rows);
-                let mut middle = choices.fitted(look, room, left);
+                let one_row_each = matches!(keeping, Keeping::OneRowEach | Keeping::TheQuestion);
+                let mut middle = match one_row_each {
+                    true => choices.fitted(look, room, left.saturating_sub(route_rows), Said::Cut),
+                    false => choices.lines(look, room, usize::MAX, Said::Wrapped),
+                };
                 if let Some(route) = route {
                     middle.push(Line::new());
                     middle.extend(route);
@@ -127,43 +205,101 @@ impl Card {
                 (middle, None)
             }
             CardBody::Saying {
-                chosen,
+                choices,
                 asks,
                 typed,
                 refused,
-            } => saying(chosen, asks, typed, refused.as_deref(), look, room),
-            CardBody::Round(rows) => {
-                let left = most.saturating_sub(head.len() + foot.len());
-                round::lines(rows, look, room, left)
+            } => {
+                let words = Words {
+                    asks,
+                    typed,
+                    refused: refused.as_deref(),
+                };
+                saying(choices, &words, (left, keeping), look, room)
             }
-        };
-        let cursor = cursor.map(|(row, cell)| (head.len() + row, EDGE + cell));
-        let lines = head.into_iter().chain(middle).chain(foot).collect();
-        Placed {
-            lines,
-            cursor,
-            laid: None,
+            CardBody::Round(rows) => round::lines(rows, look, room, left, !keeping.headless()),
         }
     }
 
-    /// The question under the mark of what needs a person, wrapped under itself,
-    /// with the card's far edge on its first row when both fit and, when `keeping`
-    /// holds everything, on a row of its own, cut to the line, when they do not.
+    /// The question under the mark of what needs a person. When everything stands, it
+    /// is wrapped under itself, with the card's far edge on its first row when both fit
+    /// and on a row of its own, cut to the line, when they do not; short of rows, it is
+    /// one row, cut beside its edge; and over a round shorter still, it gives way.
     fn head(&self, look: &Look, room: usize, keeping: Keeping) -> Vec<Line> {
         let question = Line::new().push(Tone::Strong, self.question.as_str());
+        if keeping.headless() {
+            return Vec::new();
+        }
+        if keeping != Keeping::Everything {
+            return vec![self.question_row(question, room, look.glyphs)];
+        }
         let mut head = marked(Mark::NeedsYou, question, room, look.glyphs);
         if let Some(edge) = &self.edge {
-            place_edge(&mut head, edge, room, keeping, look.glyphs);
+            place_edge(&mut head, edge, room, look.glyphs);
         }
         head
+    }
+
+    /// `question` on one row of `room` cells under the mark of what needs a person, cut
+    /// at the line, with the card's far edge whole at the row's end while the question
+    /// keeps the cells it needs, or `LEAST_QUESTION`, beside it; else the edge gives way.
+    fn question_row(&self, question: Line, room: usize, glyphs: Glyphs) -> Line {
+        let opened = |cells: usize| {
+            Line::new()
+                .push(
+                    Tone::of(Mark::NeedsYou),
+                    glyphs.mark(Mark::NeedsYou).to_string(),
+                )
+                .plain(" ")
+                .then(question.cut(cells, glyphs))
+        };
+        let needs = cell_width(&question.text());
+        let beside = self
+            .edge
+            .as_deref()
+            .map(|edge| {
+                (
+                    edge,
+                    room.saturating_sub(MARKED + HEAD_GAP + cell_width(edge)),
+                )
+            })
+            .filter(|(_, cells)| *cells >= LEAST_QUESTION.min(needs));
+        match beside {
+            Some((edge, cells)) => at_ends(
+                opened(cells),
+                Some(Line::new().push(Tone::Muted, edge)),
+                room,
+            ),
+            None => opened(room.saturating_sub(MARKED)),
+        }
+    }
+
+    /// What stands under the question, each part wrapped in `room` cells, in at most
+    /// `rows` rows: where more stands past them, the last row says what follows it too,
+    /// cut at the line.
+    fn reason(&self, room: usize, rows: usize, glyphs: Glyphs) -> Vec<Line> {
+        let mut wrapped: Vec<Line> = self
+            .about
+            .iter()
+            .filter(|about| !about.is_empty())
+            .flat_map(|about| Line::new().plain(about.as_str()).wrap(room))
+            .collect();
+        if wrapped.len() <= rows {
+            return wrapped;
+        }
+        let Some(last) = rows.checked_sub(1) else {
+            return Vec::new();
+        };
+        let rest: Vec<String> = wrapped.drain(last..).map(|line| line.text()).collect();
+        wrapped.push(Line::new().plain(rest.join(" ")).cut(room, glyphs));
+        wrapped
     }
 }
 
 /// Puts `edge` at the far end of the question's first row when both fit in `room`,
-/// padded so it ends at `room`. Otherwise, when `keeping` holds everything, it is a
-/// muted row of its own, last in `head`, cut in the middle when it is wider than the
-/// line.
-fn place_edge(head: &mut Vec<Line>, edge: &str, room: usize, keeping: Keeping, glyphs: Glyphs) {
+/// padded so it ends at `room`. Otherwise it is a muted row of its own, last in `head`,
+/// cut in the middle when it is wider than the line.
+fn place_edge(head: &mut Vec<Line>, edge: &str, room: usize, glyphs: Glyphs) {
     let first = cell_width(&head[0].text());
     let edge_cells = cell_width(edge);
     match first + HEAD_GAP + edge_cells <= room {
@@ -174,68 +310,51 @@ fn place_edge(head: &mut Vec<Line>, edge: &str, room: usize, keeping: Keeping, g
                 .push(Tone::Muted, edge);
             head[0] = row;
         }
-        false if keeping == Keeping::Everything => {
-            head.push(Line::new().push(Tone::Muted, cut_to(edge, room, glyphs)));
-        }
-        false => {}
+        false => head.push(Line::new().push(Tone::Muted, cut_to(edge, room, glyphs))),
     }
 }
 
-/// The option chosen, what is asked of the words, the row they are typed on, and why
-/// the words given were not taken; with where the cursor stands among those rows.
+/// What a card asks of the words an option is said with, the row they are typed on, and
+/// why the words given were not taken.
+struct Words<'c> {
+    asks: &'c str,
+    typed: &'c TypedRow,
+    refused: Option<&'c str>,
+}
+
+/// Every option, the pointer on the one the words are said with, then the box they are typed
+/// in, what is asked of them faint in it while nothing is typed, and why the words given were
+/// not taken, holding what `keeping` says in the `left` rows the rest leaves; with where the
+/// cursor stands among those rows. Short of rows the line being typed never gives way: what
+/// each option says gives way past its row first, then the list counts what it leaves out.
 fn saying(
-    chosen: &ChoiceRow,
-    asks: &str,
-    typed: &TypedRow,
-    refused: Option<&str>,
+    choices: &Choices,
+    words: &Words<'_>,
+    (left, keeping): (usize, Keeping),
     look: &Look,
     room: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
-    let mut lines = chosen.lines(true, cell_width(&chosen.name) + NAME_GAP, room, look.glyphs);
-    lines.push(Line::new());
-    lines.extend(Line::new().push(Tone::Strong, asks).wrap(room));
-    let (before, after) = typed.fitted(Card::typed_room(look, &typed.prompt));
-    let cursor = (lines.len(), cell_width(&typed.prompt) + cell_width(&before));
-    lines.push(
-        Line::new()
-            .push(Tone::Muted, typed.prompt.as_str())
-            .plain(before)
-            .plain(after),
-    );
-    if let Some(refused) = refused {
-        lines.extend(marked(
-            Mark::Failed,
-            Line::new().plain(refused),
-            room,
-            look.glyphs,
-        ));
-    }
-    (lines, Some(cursor))
-}
-
-/// A list with what narrows it over it, in at most `budget` lines of `room` cells: what
-/// was typed, when anything was, and the rows it leaves, or that it leaves none.
-pub fn narrowed(
-    choices: Option<&Choices>,
-    filter: Option<&str>,
-    look: &Look,
-    room: usize,
-    budget: usize,
-) -> Vec<Line> {
-    let mut lines: Vec<Line> = filter
-        .map(|typed| {
-            Line::new()
-                .push(Tone::Muted, "filter ")
-                .push(Tone::Strong, typed)
-        })
-        .into_iter()
-        .collect();
-    let left = budget.saturating_sub(lines.len());
-    match choices {
-        Some(choices) => lines.extend(choices.fitted(look, room, left)),
-        None => lines.push(Line::new().push(Tone::Muted, "nothing matches")),
-    }
-    lines
+    let boxed = words
+        .typed
+        .drawn(Card::typed_room(look), look.glyphs, Some(words.asks));
+    let refusal = words
+        .refused
+        .map(|refused| marked(Mark::Failed, Line::new().plain(refused), room, look.glyphs))
+        .unwrap_or_default();
+    let mut lines = match keeping {
+        Keeping::OneRowEach | Keeping::TheQuestion => {
+            let under = boxed.lines.len() + refusal.len();
+            choices.fitted(look, room, left.saturating_sub(under), Said::Cut)
+        }
+        Keeping::Everything | Keeping::Spare | Keeping::TheRound | Keeping::TheRoundAlone => {
+            choices.lines(look, room, usize::MAX, Said::Wrapped)
+        }
+    };
+    let field_at = lines.len();
+    let cursor = boxed.cursor.map(|(row, cell)| (field_at + row, cell));
+    lines.extend(boxed.lines);
+    lines.extend(refusal);
+    (lines, cursor)
 }
 
 /// `text` wrapped in `room` cells, its first row opened by `mark` in the mark's own
@@ -254,99 +373,6 @@ fn marked(mark: Mark, text: Line, room: usize, glyphs: Glyphs) -> Vec<Line> {
         .collect()
 }
 
-impl Choices {
-    /// The list in `room` cells: its rows, at most `most` of them around the one
-    /// pointed at, and how many are left out. A row's text stands where the longest
-    /// name leaves it.
-    pub fn lines(&self, look: &Look, room: usize, most: usize) -> Vec<Line> {
-        let glyphs = look.glyphs;
-        let name = id_column(self.rows.iter().map(|row| row.name.as_str())) + NAME_GAP;
-        let len = self.rows.len();
-        let most = most.max(1);
-        let (start, end) = match len <= most {
-            true => (0, len),
-            false => {
-                let start = (self.at + 1).saturating_sub(most).min(len - most);
-                (start, start + most)
-            }
-        };
-        let mut lines: Vec<Line> = self.rows[start..end]
-            .iter()
-            .enumerate()
-            .flat_map(|(offset, row)| row.lines(start + offset == self.at, name, room, glyphs))
-            .collect();
-        let left = len - (end - start);
-        if left > 0 {
-            let more = format!("{} {}", glyphs.ellipsis(), counted(left, "more option"));
-            lines.push(Line::new().push(Tone::Muted, more));
-        }
-        lines
-    }
-
-    /// The list in at most `budget` lines of `room` cells, as long as a row and what it
-    /// leaves out can stand: the window narrows until it fits, since a row may wrap.
-    pub fn fitted(&self, look: &Look, room: usize, budget: usize) -> Vec<Line> {
-        let mut most = self.rows.len();
-        let mut lines = self.lines(look, room, most);
-        while lines.len() > budget && most > 1 {
-            most -= 1;
-            lines = self.lines(look, room, most);
-        }
-        lines
-    }
-}
-
-impl ChoiceRow {
-    /// This option, pointed at or not, with its name in a column `name` cells wide:
-    /// what it does in the plain tone, and what it costs in the muted one, as one
-    /// sentence wrapped under itself. What it does not say it does not say, and a
-    /// name with nothing beside it ends where it does.
-    fn lines(&self, pointed: bool, name: usize, room: usize, glyphs: Glyphs) -> Vec<Line> {
-        let width = room.saturating_sub(POINTER);
-        let (mark, mark_tone, name_tone) = match pointed {
-            true => (glyphs.pointer().to_string(), Tone::NeedsYou, Tone::Strong),
-            false => (" ".to_string(), Tone::Plain, Tone::Plain),
-        };
-        let opening = Line::new().push(mark_tone, mark).plain(" ");
-        let text = self.text();
-        let beside = width.saturating_sub(name);
-        let mut lines: Vec<Line> = Vec::new();
-        if text.text().is_empty() || beside < LEAST_TEXT {
-            lines.push(opening.push(name_tone, cut_to(&self.name, width, glyphs)));
-            if !text.text().is_empty() {
-                let margin = " ".repeat(POINTER);
-                lines.extend(text.wrap(width).into_iter().map(|part| part.under(&margin)));
-            }
-        } else {
-            let column = middle_cut(&self.name, name, glyphs);
-            let margin = " ".repeat(POINTER + name);
-            for (at, part) in text.wrap(beside).into_iter().enumerate() {
-                lines.push(match at {
-                    0 => opening.clone().push(name_tone, column.clone()).then(part),
-                    _ => part.under(&margin),
-                });
-            }
-        }
-        match pointed {
-            true => lines
-                .into_iter()
-                .map(|line| line.filled(Fill::Selection))
-                .collect(),
-            false => lines,
-        }
-    }
-
-    /// What the option says: `said`, then `: ` and `cost` when both are given, the
-    /// cost in the muted tone, so a row says what it has and no more.
-    pub(super) fn text(&self) -> Line {
-        let mut text = Line::new().push(Tone::Plain, self.said.as_deref().unwrap_or_default());
-        if self.said.is_some() && self.cost.is_some() {
-            text = text.plain(": ");
-        }
-        text.push(Tone::Muted, self.cost.as_deref().unwrap_or_default())
-    }
-}
-
 /// The route of a card that has one, wrapped in `room` cells: `then` in the muted
 /// tone and two spaces, then the route, its later parts under the word's width.
 fn then_lines(then: &str, room: usize) -> Vec<Line> {
@@ -362,15 +388,6 @@ fn then_lines(then: &str, room: usize) -> Vec<Line> {
         .collect()
 }
 
-/// `text` in exactly `width` cells when it is wider, cut in the middle so that both
-/// of its ends stay, and as it is when it fits.
-fn cut_to(text: &str, width: usize, glyphs: Glyphs) -> String {
-    match cell_width(text) > width {
-        true => middle_cut(text, width, glyphs),
-        false => text.to_string(),
-    }
-}
-
 /// A row of a card with its edge in front of it, in the person's tone: the edge alone
 /// when the row is empty, and otherwise the edge, a space and the row. The row keeps
 /// its own fill, a pointed row's, and a row with none is a tint.
@@ -383,6 +400,10 @@ fn on_the_edge(row: Line, glyphs: Glyphs) -> Line {
     };
     drawn.filled(fill)
 }
+
+mod foot;
+pub(super) mod options;
+use options::{cut_to, Said};
 
 mod round;
 pub use round::said_whole;

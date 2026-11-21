@@ -1,0 +1,14 @@
+ yunta › Q78GRR › plan          ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 11m00s          Q78GRR
+ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ nothing needs you: it is moving
+ plan · prompt                   planner on mock/gpt-6-luna
+ what it is doing · 8 calls
+ … 8 above
+ read    docs/architecture.md
+ accepted tasks
+ submit  tasks
+ 2.87M tokens · 6m00s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · s stats · g graph · … · ? keys

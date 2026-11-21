@@ -1,29 +1,35 @@
-//! The end of what a command printed, and where the rest is.
+//! The end of what a command printed, and where the rest is. Cut from its top in a pane
+//! short of rows, it counts the lines above those it keeps at their place, in the gutter, as
+//! every list that hides rows counts them.
 
 use crate::components::{Evidence, Whole};
-use crate::line::{Line, Tone};
+use crate::line::{Hidden, Line, Tone};
 use crate::look::Look;
 use crate::width::{cell_width, truncate, INDENT};
 
 impl Evidence {
     /// The last `QUOTED` lines, each hanging from the gutter and cut to
     /// the line rather than wrapped — what a command printed keeps its
-    /// shape — then how much came before them and where it is.
+    /// shape — then how much came before them and where it is. Cut from
+    /// its top, the lines above those it keeps are counted over them in the
+    /// gutter instead.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let gutter = format!("{INDENT}{} ", look.glyphs.gutter());
         let room = look.width.cells().saturating_sub(cell_width(&gutter));
         let skipped = self.above();
-        let mut lines: Vec<Line> = self
-            .quoted()
-            .iter()
-            .map(|said| {
-                Line::new()
-                    .push(Tone::Muted, gutter.as_str())
-                    .plain(truncate(said, room, look.glyphs).trim_end())
-            })
-            .collect();
+        let counted = self
+            .cut()
+            .then(|| Line::hidden(skipped, Hidden::Above, look.glyphs))
+            .flatten()
+            .map(|count| Line::new().push(Tone::Muted, gutter.as_str()).then(count));
+        let quoted = self.quoted().iter().map(|said| {
+            Line::new()
+                .push(Tone::Muted, gutter.as_str())
+                .plain(truncate(said, room, look.glyphs).trim_end())
+        });
+        let mut lines: Vec<Line> = counted.into_iter().chain(quoted).collect();
         let mut rest: Vec<Line> = Vec::new();
-        if skipped > 0 {
+        if skipped > 0 && !self.cut() {
             rest.push(Line::new().push(
                 Tone::Muted,
                 format!("{} above", crate::text::counted(skipped, "line")),
@@ -57,3 +63,6 @@ impl Evidence {
         lines
     }
 }
+
+#[cfg(test)]
+mod tests;

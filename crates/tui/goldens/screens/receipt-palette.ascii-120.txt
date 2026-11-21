@@ -1,0 +1,36 @@
+ yunta :: Q78GRR :: receipt                                                                 ? 1 needs you ; ^ 1 stalled
+........................................................................................................................
+ + fragua (standard) ; finished ; in 1h52m                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ===== ===== ==== ==== ======= ========= ====== ==== ======= ==== ==== ======== ===== ==== ====
+ every criterion green, every finding answered, the log's chain intact
+                  . what do you want to do? ---------------------------------------------------------.
+   + grill        | * type to filter                                                                 |
+   + brief        |                                                                                  |
+   + plan         |* write the receipt                       e     yunta receipt Q78GRR              |
+   + spec         |  verify its evidence                     v     yunta verify Q78GRR               |
+   + approve-plan |  what it cost, and where its time went   s     yunta stats Q78GRR                |
+   + implement    |  draw its graph                          g     yunta graph --run Q78GRR          |
+    `- + global-pa|  the whole page, in a browser            o     yunta open Q78GRR                 |
+   + review@review|  the run's whole chronicle                     yunta status Q78GRR --follow      |
+   + review@review|  start a new run                         n     yunta run <workflow>              |
+   + conform      |  every run of this repository                  yunta list --runs                 |
+   + fix-findings |  the workflows you can run                     yunta list                        |
+   + lint         |  check adapters, git, forge, packs             yunta doctor                      |
+   + fix-lint     |  remove orphaned checkouts                     yunta gc                          |
+   + tests        |  the shape of every document yunta reads       yunta schema                      |
+   + ship         '----------------------------------------------------------------------------------'
+ * + pr                      0s  |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 27.1M tokens __.._#___._____ ; 1h12m at work ; 39m51s waiting on you
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused): Not logge...
+ up/down move ; enter do it ; esc back

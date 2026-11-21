@@ -41,6 +41,8 @@ pub struct DecisionAsked<'a> {
     pub node: Option<&'a crate::NodeId>,
     /// The mode the run follows.
     pub mode: &'a crate::ModeName,
+    /// What lies ahead at the nodes its options lead to, as the run froze them.
+    pub ahead: &'a crate::ahead::NodesAhead,
 }
 
 /// One surface's reply to a `kind: questions` artifact:

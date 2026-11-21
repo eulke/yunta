@@ -12,6 +12,7 @@ use surco::text::counted;
 use surco::words::Standing;
 use yunta_core::step::NextStep;
 use yunta_core::{Pid, RunId};
+use yunta_replay::frame::Effect;
 
 /// How a cancel ended, and what it did to the processes that were left.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -138,7 +139,7 @@ impl Cancelled<'_> {
         let close = NextStep::Close {
             run: self.run_id.clone(),
         };
-        (command::line(&close), "closes it for good")
+        (command::line(&close), command::does(&close))
     }
 
     /// The steps that go on from a stop: the run continued where it stopped,
@@ -147,10 +148,8 @@ impl Cancelled<'_> {
         let resume = NextStep::Resume {
             run: self.run_id.clone(),
         };
-        vec![
-            (command::line(&resume), "continues it where it stopped"),
-            self.closes(),
-        ]
+        let continues = command::effect(Effect::ContinuesWhereStopped);
+        vec![(command::line(&resume), continues), self.closes()]
     }
 }
 
@@ -222,7 +221,7 @@ mod tests {
                 parked: true,
                 standing: Standing::NeedsYou,
             }),
-            "? run AAAAAA ; needs you\n  nothing to cancel.\n\nnext\n  yunta close AAAAAA   closes it for good\n"
+            "? run AAAAAA ; needs you\n  nothing to cancel.\n\nnext\n  yunta close AAAAAA   close it for good\n"
         );
         assert_eq!(
             said(CancelState::AlreadyStopped {
@@ -252,7 +251,7 @@ mod tests {
             }),
             "# run AAAAAA ; stopped\n  its engine stopped every session and recorded the pause.\n\n\
              next\n  yunta resume AAAAAA   continues it where it stopped\n  \
-             yunta close AAAAAA    closes it for good\n"
+             yunta close AAAAAA    close it for good\n"
         );
         // A run that finished before the interrupt reached it is no pause
         // to resume or close.
@@ -271,7 +270,7 @@ mod tests {
             }),
             "# run AAAAAA ; stopped\n  its engine (pid 4321) had already died, so this cancel killed 1 orphaned\n  \
              process group and recorded the pause.\n\nnext\n  yunta resume AAAAAA   continues it where it \
-             stopped\n  yunta close AAAAAA    closes it for good\n"
+             stopped\n  yunta close AAAAAA    close it for good\n"
         );
         // A stop the engine answers to draws no line of its own.
         assert_eq!(said(CancelState::Escalated { engine_pid: engine }), "");

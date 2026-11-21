@@ -1,0 +1,24 @@
+ yunta › Q78GRR › plan                              ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fr╭ keys ──────────────────────────────────────────────────────────────╮8GRR
+ ━━━━│ You never have to remember more than this.                         │
+ noth│                                                                    │
+     │ /          anything: only what can be done here, with its command  │
+ plan│ n          start a new run, wherever no prompt stands              │luna
+     │ j k        move; the footer always says what they move             │
+ what│ pgup pgdn  scroll the pane a page at a time                        │
+ ◌ ta│ enter      open, answer, confirm                                   │
+     │ esc        one step back; what it leaves stays waiting             │
+ what│ a          go to what needs you                                    │
+ runn│ f          follow what the run is doing                            │
+ sess│ s g        what it cost, its graph                                 │
+ read│ c          stop it and everything under it                         │
+ read│ o          the whole page, in a browser                            │
+ read│ q          go to the field; it keeps going                         │
+     │ ctrl-c     leave: every run keeps going without this window        │
+     │                                                                    │
+     │                                                                    │
+     ╰────────────────────────────────────────────────────────────────────╯
+ 967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused…  · a go there
+ esc back

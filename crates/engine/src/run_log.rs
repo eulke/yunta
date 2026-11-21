@@ -9,8 +9,15 @@
 //! site that records something — the scheduler, a node's close, a
 //! session's tool listener, a run's birth — hands over a payload and
 //! nothing else.
+//!
+//! A question a person answered lands with its answer in one commit
+//! ([`RunLog::record_decided`]): appended one by one, a reader between the
+//! two, in this process or another, finds the run waiting on a person who
+//! already answered.
 
-use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
+use yunta_core::events::{
+    Escalation, EventDraft, EventPayload, GateEvent, GateResolvedPayload, HumanChoice, StoredEvent,
+};
 
 use yunta_core::port::{Observed, RunObserver};
 use yunta_core::{Clock, NodeId, RunId, Seq};
@@ -104,6 +111,27 @@ impl<'a> RunLog<'a> {
         self.append(node, payload, at).await
     }
 
+    /// Records `question` and the `choice` that answered it against `node`
+    /// — `None` for a run-level question — as one commit, the question
+    /// first, and answers with the answer's position. A reader of the log
+    /// never finds the question standing once it is answered, and a crash
+    /// never leaves it so.
+    pub(crate) async fn record_decided(
+        &self,
+        node: Option<&NodeId>,
+        question: Escalation,
+        choice: HumanChoice,
+    ) -> Result<Seq, StorageError> {
+        self.note_suspension().await?;
+        let at = self.clock.now();
+        let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(question.into_payload())));
+        let resolved =
+            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(choice)));
+        let drafts = [self.drafted(node, waiting)?, self.drafted(node, resolved)?];
+        let [_, answered] = self.appended(drafts, at).await?;
+        Ok(answered)
+    }
+
     /// `payload` as this log stores it, every secret the run declares taken
     /// out: what [`RunLog::events`] reads back of it. A site that asks
     /// whether the log already states a payload compares it in this form.
@@ -121,28 +149,55 @@ impl<'a> RunLog<'a> {
         payload: EventPayload,
         at: chrono::DateTime<chrono::Utc>,
     ) -> Result<Seq, StorageError> {
-        // A payload that cannot be redacted is refused before the draft exists.
-        let payload = self.redacted(payload)?;
-        let draft = EventDraft::new(self.run_id.clone(), node.cloned(), payload)?;
-        let Some(observer) = self.observer else {
-            return self.storage.append(draft, at).await;
-        };
-        // The mirror costs one clone, because `append` takes the draft
-        // by value — paid only while something is watching, which is
-        // what makes the `Option` load-bearing rather than nullability
-        // sugar. The frame goes out once storage has accepted the event
-        // and named its seq: a frame for an event that was never written
-        // would be a view of something that did not happen.
-        let mirrored = draft.clone();
-        let seq = self.storage.append(draft, at).await?;
-        observer.observe(Observed {
-            run_id: self.run_id,
-            seq,
-            at,
-            node_id: mirrored.node_id(),
-            payload: mirrored.payload(),
-        });
+        let [seq] = self.appended([self.drafted(node, payload)?], at).await?;
         Ok(seq)
+    }
+
+    /// The draft of `payload` against `node`, redacted. A payload that
+    /// cannot be redacted is refused before the draft exists.
+    fn drafted(
+        &self,
+        node: Option<&NodeId>,
+        payload: EventPayload,
+    ) -> Result<EventDraft, StorageError> {
+        Ok(EventDraft::new(
+            self.run_id.clone(),
+            node.cloned(),
+            self.redacted(payload)?,
+        )?)
+    }
+
+    /// Appends `drafts` stamped `at` as one commit, mirroring each to the
+    /// observer once it is written.
+    async fn appended<const N: usize>(
+        &self,
+        drafts: [EventDraft; N],
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<[Seq; N], StorageError> {
+        // Boxed: every append of a run awaits it, and a run nests a level
+        // of futures for each workflow it composes, so the drafts it holds
+        // stay off the stack that polls the run.
+        let Some(observer) = self.observer else {
+            return Box::pin(self.storage.append_together(drafts, at)).await;
+        };
+        // The mirror costs one clone, because `append_together` takes the
+        // drafts by value — paid only while something is watching, which
+        // is what makes the `Option` load-bearing rather than nullability
+        // sugar. The frames go out once storage has accepted the events
+        // and named their seqs: a frame for an event that was never written
+        // would be a view of something that did not happen.
+        let mirrored = drafts.clone();
+        let seqs = Box::pin(self.storage.append_together(drafts, at)).await?;
+        for (draft, seq) in mirrored.iter().zip(seqs) {
+            observer.observe(Observed {
+                run_id: self.run_id,
+                seq,
+                at,
+                node_id: draft.node_id(),
+                payload: draft.payload(),
+            });
+        }
+        Ok(seqs)
     }
 
     /// Every event this run's log holds, in order.

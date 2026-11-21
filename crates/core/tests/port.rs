@@ -72,3 +72,20 @@ fn a_sessions_redactor_takes_out_every_secret_it_holds() {
         "used [redacted], then [redacted] and [redacted]"
     );
 }
+
+/// A pull request's handle as a gate's publication keeps it in the log reads back as the pull
+/// request it names, and a handle that names none is refused rather than read as one: what
+/// a wake that polls the gate, and a screen that reads it, both rest on.
+#[test]
+fn a_pull_requests_handle_reads_back_and_one_that_names_none_is_refused() {
+    let handle = r#"{"url":"https://github.com/acme/web/pull/7","number":7}"#;
+    let read = yunta_core::port::PullRequestRef::of_handle(handle).expect("a handle the log keeps");
+    assert_eq!(read.url, "https://github.com/acme/web/pull/7");
+    assert_eq!(read.number, 7);
+    for broken in ["", "#7", r#"{"url":"https://github.com/acme/web/pull/7"}"#] {
+        assert!(
+            yunta_core::port::PullRequestRef::of_handle(broken).is_err(),
+            "`{broken}` names no pull request"
+        );
+    }
+}

@@ -1,0 +1,36 @@
+ yunta :: Q78GRR :: plan                                                                    ? 1 needs you ; ^ 1 stalled
+........................................................................................................................
+ > fragua (standard) ; running ; for 7m34s                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ===== ===== ==== .... ....... ......... ...... .... ....... .... .... ........ ..... .... ....
+ nothing needs you: it is moving
+
+   + grill        . what do you want to do? ---------------------------------------------------------.n mock/gpt-6-luna
+   + brief        | * type to filter                                                                 |
+ * - plan         |                                                                                  |
+   . spec         |* stop it and everything under it         c     yunta cancel Q78GRR               |
+   . approve-plan |  what it cost, and where its time went   s     yunta stats Q78GRR                |
+   . implement    |  draw its graph                          g     yunta graph --run Q78GRR          |
+   . review@review|  the whole page, in a browser            o     yunta open Q78GRR                 |
+   . review@review|  the run's whole chronicle                     yunta status Q78GRR --follow      |
+   . conform      |  start a new run                         n     yunta run <workflow>              |
+   . fix-findings |  every run of this repository                  yunta list --runs                 |
+   . lint         |  the workflows you can run                     yunta list                        |
+   . fix-lint     |  check adapters, git, forge, packs             yunta doctor                      |
+   . tests        |  remove orphaned checkouts                     yunta gc                          |
+   . ship         |  the shape of every document yunta reads       yunta schema                      |
+   . pr           '----------------------------------------------------------------------------------'
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+                                 |
+ 967k tokens :.#____________ ; 2m34s at work ; 5m00s waiting on you
+ ? EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused): Not logge...
+ up/down move ; enter do it ; esc back

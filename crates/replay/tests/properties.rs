@@ -1,9 +1,10 @@
 //! Property tests for the replay guarantees the whole engine rests on:
 //! `RunState::replay` is a pure, deterministic, prefix-monotonic fold of the
-//! event log, at every length and not just at the full log; a second copy of
-//! an event that states what the run holds derives what one copy derives;
-//! and the chronicle and the frame read one log the same way, at every
-//! prefix of it.
+//! event log, at every length and not just at the full log; a log folded in
+//! any chunks derives what its replay derives, past a break too, and an
+//! event already taken moves nothing; a second copy of an event that states
+//! what the run holds derives what one copy derives; and the chronicle reads
+//! one log as replay reads it (its own module).
 //!
 //! The logs come from `yunta_testkit_core::arbitrary`, which enforces no
 //! valid *lifecycle*: `RunState::replay` interprets any log (marking one it
@@ -16,14 +17,17 @@ use yunta_core::events::node::happening::Happening as NodeHappening;
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, EngineFact, EventPayload, FindingEvent,
     HostSuspendedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RecordedOrigin,
-    StoredEvent,
+    StoredEvent, TokenUsage,
 };
 use yunta_core::events::{ArtifactEvent, GateEvent, NodeEvent, RunEvent};
 use yunta_core::ArtifactKind;
-use yunta_replay::frame::{chronicle, Happening};
+use yunta_replay::frame::{chronicle, Happening, Moment};
 use yunta_replay::RunState;
 use yunta_testkit_core::arbitrary::{entry, log, tokens, RUN};
 use yunta_testkit_core::Log;
+
+#[path = "properties/chronicle.rs"]
+mod chronicle;
 
 /// What the node ledger counts — an attempt open, sessions without their
 /// service — is what its records hold.
@@ -99,6 +103,59 @@ fn a_questions_round() -> Vec<StoredEvent> {
             ))),
         )
         .build()
+}
+
+/// A log and the points it is cut at, each a position in it, as a reader
+/// that follows a run takes it: one read at a time, from where the last
+/// one stopped.
+fn cut(log: Vec<StoredEvent>) -> impl Strategy<Value = (Vec<StoredEvent>, Vec<usize>)> {
+    let len = log.len();
+    (Just(log), prop::collection::vec(0..=len, 0..6))
+}
+
+/// A log whose middle holds an event no log can take: a node's terminal
+/// that names no node. What comes before and after it is drawn, and every
+/// event keeps its own position, counted from 1.
+fn a_broken_log() -> impl Strategy<Value = Vec<StoredEvent>> {
+    (log(), log()).prop_map(|(before, after)| {
+        let refused = Log::for_run(RUN)
+            .event(EventPayload::Node(NodeEvent::Finished(
+                NodeFinishedPayload::new(NodeOutcome::Summary("ok".into()), TokenUsage::default()),
+            )))
+            .build();
+        let mut events: Vec<StoredEvent> = before.into_iter().chain(refused).chain(after).collect();
+        for (position, event) in events.iter_mut().enumerate() {
+            event.seq = (position as u64 + 1).into();
+        }
+        events
+    })
+}
+
+/// `log` cut at each of `cuts`, in order: the reads a reader that follows
+/// the run takes it in.
+fn chunks<'a>(log: &'a [StoredEvent], cuts: &[usize]) -> Vec<&'a [StoredEvent]> {
+    let mut ends = cuts.to_vec();
+    ends.sort_unstable();
+    ends.push(log.len());
+    let mut from = 0;
+    ends.into_iter()
+        .map(|to| {
+            let chunk = &log[from..to];
+            from = to;
+            chunk
+        })
+        .collect()
+}
+
+/// `log` folded into a fresh state chunk by chunk, cut at each of `cuts`.
+fn folded_in_chunks(log: &[StoredEvent], cuts: &[usize]) -> RunState {
+    let mut state = RunState::default();
+    for chunk in chunks(log, cuts) {
+        for event in chunk {
+            state.fold(event);
+        }
+    }
+    state
 }
 
 /// What every cut of a round derives, and therefore what a resume does
@@ -186,7 +243,8 @@ fn every_cut_of_a_questions_round_derives_what_a_resume_acts_on() {
 proptest! {
     /// `RunState::replay` is pure: the same log always derives the same state, with no
     /// dependence on `HashMap` iteration order or any hidden state.
-    /// Reached by: `crates/replay/src/lib.rs`, `crates/replay/src/activity.rs`,
+    /// Reached by: `crates/replay/src/lib.rs`, `crates/replay/src/fold.rs`,
+    /// `crates/replay/src/activity.rs`,
     /// `crates/replay/src/clock.rs`, `crates/replay/src/decisions.rs`,
     /// `crates/replay/src/refuse.rs`, `crates/replay/src/tree.rs`,
     /// `crates/core/src/events/**`
@@ -251,56 +309,6 @@ proptest! {
         }
     }
 
-    /// The chronicle of a prefix is a prefix of the chronicle: a reader
-    /// following a run live sees exactly what a reader of the finished
-    /// log sees, in the same order, and nothing a later event reveals
-    /// rewrites a moment already read.
-    #[test]
-    fn the_chronicle_of_a_prefix_is_a_prefix_of_the_chronicle(log in log()) {
-        let whole = chronicle(&log);
-        prop_assert_eq!(whole.len(), log.len(), "one moment per event");
-        for k in 0..=log.len() {
-            prop_assert_eq!(
-                chronicle(&log[..k]),
-                whole[..k].to_vec(),
-                "the chronicle of the first {} events is not its prefix",
-                k
-            );
-        }
-    }
-
-    /// The frame agrees with the chronicle: the state a moment says a
-    /// node reached is the state the log derives at that very event.
-    ///
-    /// Two derivations of one log that disagreed would let a region and
-    /// a scrollback describe the same node two ways, which is the
-    /// defect this pair exists to make impossible. Stated per moment
-    /// rather than per node, because that is what makes it true of a
-    /// node read halfway through the log as well as at its end.
-    #[test]
-    fn the_frame_agrees_with_the_chronicle(log in log()) {
-        for (index, moment) in chronicle(&log).into_iter().enumerate() {
-            let (Some(node), Happening::Node(NodeHappening::Reached { state, .. })) =
-                (moment.node, moment.happening)
-            else {
-                continue;
-            };
-            let at_that_event = RunState::replay(&log[..=index]);
-            if at_that_event.broken.is_some() {
-                // A log the replay could not fold that far derives
-                // nothing past its break, and the chronicle stops there
-                // with it: there is no state for the two to agree on.
-                continue;
-            }
-            prop_assert_eq!(
-                at_that_event.nodes.state(&node),
-                Some(&state),
-                "a node is where its own moment says it became, at that moment: {}",
-                node
-            );
-        }
-    }
-
     /// `RunState::replay` is deterministic at every length, not just at the full
     /// log: the same prefix derived twice is the same state. Nothing
     /// outside the events — an iteration order, a clock, a counter kept
@@ -316,15 +324,58 @@ proptest! {
         prop_assert_eq!(RunState::replay(prefix), RunState::replay(prefix));
     }
 
+    /// A reader that folds a run's log as it comes, a few events at a time,
+    /// holds the state a reader of the whole log derives, and stands at the
+    /// same head: where the reads were cut changes nothing.
+    #[test]
+    fn folding_a_log_in_any_chunks_equals_replaying_it(
+        (log, cuts) in log().prop_flat_map(cut)
+    ) {
+        let folded = folded_in_chunks(&log, &cuts);
+        let replayed = RunState::replay(&log);
+        prop_assert_eq!(&folded, &replayed);
+        prop_assert_eq!(folded.head(), replayed.head());
+        prop_assert_eq!(folded.head(), log.last().map(|event| event.seq));
+    }
+
+    /// A log that breaks in its middle folds, chunk by chunk, to the break
+    /// its replay names and to nothing past it, while its head goes on to
+    /// its last event: a reader never reads a broken log's tail again.
+    #[test]
+    fn a_broken_log_folds_as_it_replays(
+        (log, cuts) in a_broken_log().prop_flat_map(cut)
+    ) {
+        let folded = folded_in_chunks(&log, &cuts);
+        let replayed = RunState::replay(&log);
+        prop_assert!(replayed.broken.is_some(), "the event that names no node breaks the log");
+        prop_assert_eq!(&folded.broken, &replayed.broken);
+        prop_assert_eq!(&folded, &replayed);
+        prop_assert_eq!(folded.head(), log.last().map(|event| event.seq));
+    }
+
+    /// An event at or below the head was taken already: a log folded, then
+    /// folded again whole, derives what it derived once.
+    #[test]
+    fn an_event_already_taken_moves_nothing(log in log()) {
+        let once = RunState::replay(&log);
+        let mut again = once.clone();
+        for event in &log {
+            again.fold(event);
+        }
+        prop_assert_eq!(&again, &once);
+        prop_assert_eq!(again.head(), once.head());
+    }
+
     /// A second copy of an event that states what the run holds derives
-    /// what one copy derives: the artifact and the finding folds are
-    /// keyed by the identity their event names, so a channel that hands
-    /// the same acceptance or the same posting over twice leaves the run
-    /// holding exactly what it held.
+    /// what one copy derives: a channel that hands the same acceptance or
+    /// the same posting over twice leaves the run holding exactly what it
+    /// held.
     ///
     /// Each copy is the event it repeats, position included — the two
     /// arrivals are one event, which is what tells a redelivery apart
-    /// from a second acceptance of the same identity.
+    /// from a second acceptance of the same identity. So the copy stands
+    /// at the head the first arrival moved the fold to, and the fold takes
+    /// it as taken already before any ledger reads it.
     #[test]
     fn redelivering_any_subsequence_of_events_changes_no_state(
         (log, again) in log().prop_flat_map(|log| {

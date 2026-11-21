@@ -104,7 +104,6 @@ impl CasesRun {
                     self.ended.push(case);
                 }
             }
-            News::Following(_) | News::Run(_) => {}
         }
     }
 

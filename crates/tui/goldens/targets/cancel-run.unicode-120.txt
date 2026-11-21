@@ -1,0 +1,36 @@
+ yunta › Q78GRR › plan                                                                      ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 7m34s                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ━━━━━ ━━━━ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄┄┄ ┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄ ┄┄┄┄┄┄┄┄ ┄┄┄┄┄ ┄┄┄┄ ┄┄┄┄
+ nothing needs you: it is moving
+
+   ✓ grill                  36s  │ plan · prompt                                             planner on mock/gpt-6-luna
+   ✓ brief                  22s  │
+ ▸ ⠹ plan                   ╭ stop Q78GRR? ────────────────────────────────────────────────╮
+   ◌ spec                   │ It stops now, with every session under it, and waits where   │
+   ◌ approve-plan           │ it stopped until you continue it or close it.                │
+   ◌ implement              │                                                              │
+   ◌ review@reviewer        │ yunta cancel Q78GRR                                          │
+   ◌ review@reviewer-alt    │                                                              │
+   ◌ conform                ╰──────────────────────────────────────────────────────────────╯
+   ◌ fix-findings                │ read    crates/cli/src/cli/pack.rs
+   ◌ lint                        │ read    crates/engine/src/catalog.rs
+   ◌ fix-lint                    │
+   ◌ tests                       │
+   ◌ ship                        │
+   ◌ pr                          │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 967k tokens ▃▂█▁▁▁▁▁▁▁▁▁▁▁▁ · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ enter stop it · esc keep it

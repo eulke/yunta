@@ -27,8 +27,10 @@
 //!   it bore, under the nodes that bore them.
 //! - What happened to a run, in order: `chronicle`, what each moment of it
 //!   says, the same on every surface that follows the run; and `watched`,
-//!   the rows a person watches a moving run by: what needs them, each node
-//!   at work with what its session said, and the counters.
+//!   the rows a person watches a moving run by: on the CLI's region what
+//!   needs them and each node at work with what its session said, across a
+//!   run's screen its headline and its ribbon's named stretches, beside its
+//!   pane its nodes, and on both the run's gist and what it spent.
 //! - A decision a person meets: `escalation`, `claim`, `evidence`, `offers`
 //!   and `found`.
 //! - What Yunta refuses: `refusal`, the sentences of every refusal over its data.
@@ -39,14 +41,16 @@
 //! - What a prompt says: `prompt`, what Escape does where it opens, the keys a
 //!   list answers to, and what a command says with no terminal to ask on.
 //! - What the application's screens say around their pages: `screen`, the trail
-//!   every screen starts at and each stage's keys.
+//!   every screen starts at, each stage's keys and what help lists of them, and the
+//!   note an act leaves.
 //! - What a reader is told to type: `command`, every command written once,
 //!   and `declare`, what to declare in a project's config.
 //! - What a machine reads: `document`, every versioned JSON document of a
 //!   run, its stats, a decision and a refusal, the same from every command
 //!   and tool.
 //! - A workflow drawn: `graph`, its nodes and edges as Mermaid and as DOT,
-//!   labelled with what a run's log derives when the graph is a run's.
+//!   labelled with what a run's log derives when the graph is a run's, and as
+//!   the diagram a page draws, a box an id.
 //! - Every page a command shows, in the one form it takes: `page`, with a
 //!   run's and its nodes', a workflow's graph, what each command answers, a
 //!   pack's, the receipt, the findings, a gate's page, and what a decision
@@ -90,6 +94,11 @@ pub mod watched;
 /// log's clock keeps it — a limit's reset, when a page was drawn.
 pub(crate) const INSTANT_FORMAT: &str = "%Y-%m-%d %H:%M UTC";
 
+/// How an instant reads beside what it times, where its day goes without saying: its hour
+/// and minute, in UTC — when a limit's reset lets work go on, since when a question is
+/// asked. Not [`INSTANT_FORMAT`], which says the day.
+pub(crate) const TIME_OF_DAY_FORMAT: &str = "%H:%M UTC";
+
 #[cfg(test)]
 mod tests {
     mod cards;
@@ -105,6 +114,7 @@ mod tests {
     mod findings;
     mod found;
     mod grant;
+    mod help;
     mod initialized;
     mod inputs;
     mod offers;

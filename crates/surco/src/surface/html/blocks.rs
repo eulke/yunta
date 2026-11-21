@@ -5,9 +5,11 @@ use super::text::{class_of, command, esc, line, mark, steps, title_words, words}
 use super::{
     asked, card, code, decision, desk, diagram, markdown, notices, screen, tables, GLYPHS,
 };
-use crate::components::{Fields, Headline, Lead, Next, PathNote, Paths, Reads, Section, Title};
+use crate::components::{
+    Fields, FindingList, FindingRow, Headline, Lead, Next, PathNote, Paths, Reads, Section, Title,
+};
 use crate::doc::Block;
-use crate::glyphs::Mark;
+use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Line, Tone};
 use crate::surface::terminal::NEXT;
 use crate::words::Standing;
@@ -109,11 +111,14 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
         Block::TypedAnswer(drawn) => asked::typed_answer(drawn),
         Block::ChoiceList(drawn) => asked::choice_list(drawn),
         Block::Checklist(list) => tables::checklist(list),
+        Block::Findings(list) => findings(list),
         Block::Problem(problem) => notices::problem(problem),
         Block::Refusal(refusal) => notices::refusal(refusal),
         Block::Next(next) => next_steps(next, depth),
         Block::Legend(legend) => screen::legend(legend),
+        Block::KeyList(list) => screen::key_list(list),
         Block::Attention(attention) => screen::attention(attention),
+        Block::Noted(noted) => screen::noted(noted),
         Block::Title(doc_title) => title(reader, doc_title, depth),
         Block::Heading(text) => heading(reader, text, depth),
         Block::Section(part) => section(reader, part, depth),
@@ -126,6 +131,11 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
         Block::Diagram(drawn) => diagram::diagram(drawn),
         Block::Code(shown) => code::code(shown),
         Block::Lines(rows) | Block::Rows(rows) => lines(rows),
+        Block::Labelled(labelled) => lines(&labelled.laid(usize::MAX, Glyphs::Unicode)),
+        Block::Feed(feed) => lines(&feed.said(GLYPHS)),
+        Block::Meter(meter) => lines(&[meter.said(GLYPHS)]),
+        // A picture that says nothing: a page loses no fact without it.
+        Block::Horizon(_) => String::new(),
     }
 }
 
@@ -253,6 +263,43 @@ fn paths(listed: &Paths) -> String {
     format!(
         r#"<section class="paths-of"><p class="said">{}</p><ul class="paths">{items}</ul></section>"#,
         words(&listed.heading)
+    )
+}
+
+/// What a review found, a finding an item, laid out as a list of checks is: its mark, its
+/// severity's word muted, then its title, strong where the pointer stands on it, and the
+/// answer of an answered one under its title. Nothing for a list with no finding.
+fn findings(list: &FindingList) -> String {
+    let items: String = list
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(at, row)| finding_item(row, list.pointed == Some(at)))
+        .collect();
+    match items.is_empty() {
+        true => String::new(),
+        false => format!(r#"<ul class="checks">{items}</ul>"#),
+    }
+}
+
+/// One finding as a list item, the pointer before it where it is `pointed` at.
+fn finding_item(row: &FindingRow, pointed: bool) -> String {
+    let (pointer, title) = match pointed {
+        true => (
+            format!("{} ", esc(&GLYPHS.pointer().to_string())),
+            format!("<b>{}</b>", words(&row.title)),
+        ),
+        false => (String::new(), format!("<span>{}</span>", words(&row.title))),
+    };
+    let answer = row
+        .answer
+        .as_deref()
+        .map(|answer| format!(r#"<ul class="details"><li>{}</li></ul>"#, words(answer)))
+        .unwrap_or_default();
+    format!(
+        r#"<li>{pointer}{} <span class="muted">{}</span> {title}{answer}</li>"#,
+        mark(row.mark()),
+        esc(&row.severity),
     )
 }
 
@@ -387,7 +434,7 @@ fn fold(reader: &mut Reader, part: &Section, depth: usize) -> String {
 /// Lines a surface composed, each drawn in the tones of its spans, one to a
 /// line of a preformatted block. Nothing for lines that say nothing: a blank line
 /// is how a terminal sets two blocks apart, and a page has its own way.
-fn lines(rows: &[Line]) -> String {
+pub(super) fn lines(rows: &[Line]) -> String {
     if rows.iter().all(|row| row.text().trim().is_empty()) {
         return String::new();
     }

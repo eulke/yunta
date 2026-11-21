@@ -18,8 +18,8 @@ env:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    # Room for every step on a slow runner, where the walks of every state the
-    # application reaches take minutes; a hang still ends the job.
+    # Room for every step on a slow runner, where the walk of every state the
+    # application reaches takes minutes; a hang still ends the job.
     timeout-minutes: 45
     steps:
       # The whole history: the smell check reads the baseline of the merge
@@ -106,8 +106,8 @@ jobs:
   # that passes only on Linux is a test about Linux.
   test-macos:
     runs-on: macos-latest
-    # Room for the suite on a slow runner, where the walks of every state the
-    # application reaches take minutes; a hang still ends the job.
+    # Room for the suite on a slow runner, where the walk of every state the
+    # application reaches takes minutes; a hang still ends the job.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7

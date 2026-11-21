@@ -1,0 +1,24 @@
+ yunta › /cut/worktree                               ◆ 5 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  › wha╭ keys ──────────────────────────────────────────────────────────╮
+       │ You never have to remember more than this.                     │
+  askin│ /      anything: only what can be done here, with its command  │
+  ▸ ◆ Q│ n      start a new run, wherever no prompt stands              │   0s
+  needs│ j k    move; the footer always says what they move             │
+    ◆ E│ enter  open, answer, confirm                                   │  40d
+    ◆ C│ space  mark it                                                 │   1h
+    ◆ T│ x      close the marked, or the pointed, once confirmed        │   1h
+    ◆ B│ r      resume it                                               │   1h
+  stall│ c      stop it and everything under it                         │
+    ▲ E│ s      what it cost                                            │  11d
+  stopp│ a      go to what needs you                                    │
+    ■ S│ d      the closed too                                          │   1h
+    ■ A│ e      every run on this machine                               │   1h
+    … 2│ w      the workflows you can run                               │
+       │ m      check adapters, git, forge, packs                       │
+  what │ q      leave: every run keeps going without this window        │
+  c    │ ctrl-c leave: every run keeps going without this window        │
+  s    ╰────────────────────────────────────────────────────────────────╯
+
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused…  · a go there
+ esc back

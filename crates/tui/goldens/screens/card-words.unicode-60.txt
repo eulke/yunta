@@ -1,0 +1,14 @@
+ yunta › Q78GRR › implement      ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ fragua (standard) · needs you · for 10m00s        Q78GRR
+ ━━ ━━ ━━ ━━ ━━ ━━ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄ ┄┄
+ a task asks to touch a path outside its scope
+ ▎ ◆ It asks to touch crates/cli/src/commands/p…  implement
+ ▎ ▸ grant  the task may also touch this path, and goes on
+ ▎   deny   the task goes on within the scope it has
+ ▎ ╭──────────────────────────────────────────────────────╮
+ ▎ │ add a note                                           │
+ ▎ ╰──────────────────────────────────────────────────────╯
+ 14.1M tokens · 49m36s at work · 25m05s waiting on you
+
+ enter record it · esc go back

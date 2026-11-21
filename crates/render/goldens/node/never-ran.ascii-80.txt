@@ -1,0 +1,12 @@
+. node spec of run Q78GRR ; never ran
+
+  It has not run yet.
+
+  kind         prompt
+  runner       planner on mock/gpt-6-luna
+
+what it hands over
+. spec  not yet
+
+next
+  yunta status Q78GRR   shows the whole run

@@ -47,7 +47,7 @@ async fn a_sessions_check_keeps_all_a_red_criterion_printed() {
     let checks = "    effects:\n      - { path: a.rs, content: \"a\" }\n    steps:\n      - { type: run_tool, tool: yunta_check_task }\n";
 
     bench.run(WORKFLOW, &fixture(checks)).await;
-    answer_parked(&bench, "approve").await.unwrap();
+    bench.answer_parked("approve", None).await.unwrap();
     bench.wake().await;
 
     let kept = bench
@@ -74,7 +74,7 @@ async fn evidence_reads_a_location_beyond_the_last_lines_of_an_answer_from_the_l
     }));
 
     bench.run(WORKFLOW, &fixture(&request)).await;
-    answer_parked(&bench, "approve").await.unwrap();
+    bench.answer_parked("approve", None).await.unwrap();
     let RunReport { terminal, state } = bench.wake().await;
 
     assert_eq!(terminal, RunTerminal::Finished);

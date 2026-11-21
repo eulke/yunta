@@ -1,0 +1,36 @@
+ yunta › N0MENV › approve                                                                    ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ published (default) · needs you · for 0s                                                                      N0MENV
+ make approve
+ ━━━━ ┄┄┄┄┄┄┄
+ node `approve` wants an external gate (assignee: reviewer) but no forge is reachable from this machine (no credential…
+
+   ✓ make                    0s  │ approve · gate                                                     assignee reviewer
+ ▸ ◌ approve                     │
+                                 │ what it waits on
+                                 │ node `approve` wants an external gate (assignee: reviewer) but no forge is reachable
+                                 │ from this machine (no credentials, or none configured): resolve it here instead
+                                 │
+                                 │ no option answers it here: settle it where it was raised, then hand it back
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 0 tokens ▁▁ · 0s at work · 10m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused…  · a go there
+ j k node · r hand it back · x close · s stats · g graph · q field                                  / anything · ? keys

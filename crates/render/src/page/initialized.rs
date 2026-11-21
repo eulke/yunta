@@ -58,13 +58,11 @@ impl Page for Initialized<'_> {
                     .to_string(),
             ))
             .with(Said(suggestion));
-        let doctor = (
-            command::line(&NextStep::Doctor {
-                sessions: false,
-                full: false,
-            }),
-            "confirms everything above is usable",
-        );
+        let doctor = NextStep::Doctor {
+            sessions: false,
+            full: false,
+        };
+        let doctor = (command::line(&doctor), command::does(&doctor));
         if self.undeclared.is_empty() {
             let pack = NextStep::PackAdd { source: Arg::Blank };
             return doc.with(Next {

@@ -1,0 +1,36 @@
+ yunta › Q78GRR › pr                                                                        ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● fragua (standard) · running · for 1h52m                                                                       Q78GRR
+ grill brief plan spec approve implement review alt  conform fix  lint fix-lint tests ship pr
+ ━━━━━ ━━━━━ ━━━━ ━━━━ ━━━━━━━ ━━━━━━━━━ ━━━━━━ ━━━━ ━━━━━━━ ━━━━ ━━━━ ━━━━━━━━ ━━━━━ ━━━━ ━━━━
+ nothing needs you: it is moving
+
+   ✓ grill                  36s  │ pr · pull_request
+   ✓ brief                  22s  │
+   ✓ plan                 6m25s  │ what it is doing · 0 calls
+   ✓ spec                13m53s  │ running: attempt 1
+   ✓ approve-plan        10m05s  │
+   ✓ implement           41m05s  │
+    └─ ✓ global-pack-install     │
+   ✓ review@reviewer      2m00s  │
+   ✓ review@reviewer-alt    42s  │
+   ✓ conform                25s  │
+   ✓ fix-findings         5m31s  │
+   ✓ lint                   11s  │
+   ✓ fix-lint             1m31s  │
+   ✓ tests                1m04s  │
+   ✓ ship                    0s  │
+ ▸ ⠸ pr                          │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+ 27.1M tokens ▁▁▂▂▁█▁▁▁▂▁▁▁▁▁ · 1h12m at work · 39m51s waiting on you
+ ✓ Recorded: approve. On to `pr`.
+ j k node · s stats · g graph · q field, it keeps going                                             / anything · ? keys

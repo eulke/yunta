@@ -4,8 +4,8 @@
 //! said on one line.
 
 use surco::text;
-use yunta_core::events::{Claim, ExhaustedReroute, FailureMenu};
-use yunta_core::NodeId;
+use yunta_core::events::{Claim, ExhaustedReroute, Failure, FailureMenu, Menu};
+use yunta_core::{listed_globs, NodeId};
 
 use crate::found;
 
@@ -23,16 +23,95 @@ pub fn sentence(claim: &Claim, menu: Option<&FailureMenu>) -> String {
         Claim::AwaitsReview { node, assignee } => awaits_review(node, assignee.as_deref()),
         Claim::ForgeUnreachable { node, assignee } => forge_unreachable(node, assignee),
         Claim::RecheckUnreachable { node, external_ref } => recheck_unreachable(node, external_ref),
-        Claim::TokensSpent { run } => format!("run `{run}` exhausted its token budget"),
-        Claim::LoopCapSpent { node } => {
-            format!("loop `{node}` needs another iteration and its cap is spent")
+        Claim::TokensSpent { run } => {
+            format!("run `{}` exhausted its token budget", run.handle())
         }
+        Claim::LoopCapSpent { node } => cap_spent(node),
         Claim::ScopeAsked { task, reason } => format!(
             "task `{task}` requests scope expansion: {}",
             found::stated_reason(reason.as_deref())
         ),
         Claim::Departs { task } => format!("task `{task}`'s session departs from the plan"),
         Claim::Written(said) => text::one_line(said),
+    }
+}
+
+/// What a decision's card asks: what the person answers, said from the claim and from
+/// what its menu is about. A failed node's card asks what now, unless its failure is a
+/// task's request, a task's departure or a loop's spent cap, which it asks about in their
+/// place, or its reroutes are used up, which the claim says; a gate's card asks the
+/// question its own message ends on. Not [`sentence`], the claim a page and a listing say
+/// a run is parked with.
+pub fn question(claim: &Claim, menu: Option<&Menu>) -> String {
+    match (claim, menu) {
+        (Claim::NodeFailed { .. }, Some(Menu::Failure(menu))) if menu.reroute.is_some() => {
+            sentence(claim, Some(menu))
+        }
+        (Claim::NodeFailed { node }, Some(Menu::Failure(menu))) => failed(node, &menu.failure),
+        (Claim::NodeFailed { node }, _) => what_now(node),
+        (Claim::ScopeAsked { .. }, Some(Menu::Scope(wait))) if !wait.paths.is_empty() => {
+            format!("It asks to touch {}", listed_globs(&wait.paths))
+        }
+        (Claim::Departs { .. }, _) => departs(1),
+        (Claim::Written(said), _) => asked_last(&text::one_line(said)),
+        _ => sentence(claim, None),
+    }
+}
+
+/// The question a card asks about node `node`'s `failure`.
+fn failed(node: &NodeId, failure: &Failure) -> String {
+    match failure {
+        Failure::ScopeOwed { owed } => match owed.as_slice() {
+            [one] => format!("It asks to touch {}", listed_globs(&one.paths)),
+            _ => format!(
+                "{} ask to touch paths outside their scope",
+                text::counted(owed.len(), "task")
+            ),
+        },
+        Failure::LoopCapped { node, .. } => cap_spent(node),
+        _ => match failure.departures_owed() {
+            Some(tasks) => departs(tasks),
+            None => what_now(node),
+        },
+    }
+}
+
+/// What a card asks of node `node` that failed.
+fn what_now(node: &NodeId) -> String {
+    format!("`{node}` failed. What now?")
+}
+
+/// What a card asks of a task, or of each of `tasks`, whose session departs from the plan.
+fn departs(tasks: usize) -> String {
+    match tasks {
+        1 => "The task departs from its plan. Accept it?".to_string(),
+        _ => format!(
+            "{} depart from the plan. Accept them?",
+            text::counted(tasks, "task")
+        ),
+    }
+}
+
+/// What a loop's spent iteration cap says: loop `node` needs another iteration.
+fn cap_spent(node: &NodeId) -> String {
+    format!("loop `{node}` needs another iteration and its cap is spent")
+}
+
+/// The question `said` ends on: its last sentence when it says more than one and ends
+/// asking, and the whole of it otherwise.
+fn asked_last(said: &str) -> String {
+    let asks = said.trim_end();
+    if !asks.ends_with('?') {
+        return asks.to_string();
+    }
+    let body = &asks[..asks.len() - 1];
+    let start = [". ", "! ", "? "]
+        .iter()
+        .filter_map(|stop| body.rfind(stop).map(|at| at + stop.len()))
+        .max();
+    match start {
+        Some(start) => asks[start..].to_string(),
+        None => asks.to_string(),
     }
 }
 

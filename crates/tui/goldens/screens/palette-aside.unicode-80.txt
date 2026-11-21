@@ -1,0 +1,24 @@
+ yunta › Q78GRR › grill                              ◆ 2 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆╭ what do you want to do? ─────────────────────────────────────────────────╮R
+ ━│ ▸ type to filter                                                         │
+ n│                                                                          │d
+  │▸ answer what it asks                                                     │
+ g│  continue it from its log                                                │a
+  │  close it for good                                                       │
+ w│  what it cost, and where its time went                                   │
+ a│  draw its graph                                                          │
+ `│  the whole page, in a browser                                            │
+  │  the run's whole chronicle                                               │
+ w│  start a new run                                                         │
+ r│  every run of this repository                                            │
+ s│  the workflows you can run                                               │
+ r│  check adapters, git, forge, packs                                       │
+ r│  remove orphaned checkouts                                               │
+ r│  the shape of every document yunta reads                                 │
+ a╰──────────────────────────────────────────────────────────────────────────╯
+ submit  questions
+ needs you: asked 3 questions: `where-global-lives`, `how-requested`, `beside-…
+ 220k tokens █▁▁▁▁▁▁▁▁▁▁▁▁▁▁ · 36s at work · 5m00s waiting on you
+ ◆ Q78GRR needs you: node `grill` asks 3 questions: nothing is recorded until…
+ ↑↓ move · enter do it · esc back

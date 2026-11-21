@@ -1,0 +1,14 @@
+ yunta › ST0PPD › lint          ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ■╭ close ST0PPD? ───────────────────────────────────────╮D
+ ━│ It closes as cancelled, by you, and stops waiting on │
+ i│ a person. Its branch and worktree stay until gc      │
+ l│ removes them.                                        │
+ w│                                                      │
+ ■│ yunta close ST0PPD                                   │
+ w│                                                      │
+  ╰──────────────────────────────────────────────────────╯
+
+ 0 tokens · 45s at work
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ enter close it · esc keep it

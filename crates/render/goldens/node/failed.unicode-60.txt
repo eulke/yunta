@@ -1,0 +1,22 @@
+✗ node lint of run Q78GRR · failed
+
+  exit 101
+
+  │ error: function `packs_root` is never used
+  │   --> crates/cli/src/pack.rs:31:4
+  │ error: function `vendor_dir` is never used
+  │   --> crates/cli/src/pack.rs:35:4
+  │ error: could not compile `yunta` (lib) due to 2 previou…
+  whole output: ~/.yunta/runs/01M7DES1GNED00000000Q78GRR/objects/f14ef2d70af42292993be0c658999b79b5e4dde21379a510b936fb43bf33f018
+
+  stands       failed
+  took         6s
+  kind         bash
+  attempt      1
+
+what it is doing · 0 calls
+running: attempt 1
+failed: exit 101 · 6s
+
+next
+  yunta status Q78GRR   shows the whole run
