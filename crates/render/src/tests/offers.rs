@@ -2,6 +2,7 @@
 //! wrote it from its data and its menu, and the words an older log stored
 //! with an option read as it wrote them.
 
+use yunta_core::ahead::NodesAhead;
 use yunta_core::events::{
     Asks, AuthorGate, BudgetCap, Claim, ConsoleGate, DepartsFrom, DepartureMenu,
     DeviationDeclaredPayload, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption,
@@ -12,6 +13,8 @@ use yunta_core::reserved::ReservedOption;
 use yunta_core::{NodeId, NonEmpty, OptionId, RunId, TaskId};
 
 use crate::offers::{asks, option_words};
+
+mod card;
 
 /// An escalation about `claim` and `menu`, offering `options` in order.
 fn menu(claim: Claim, menu: Menu, options: Vec<GateOption>) -> Escalation {
@@ -29,7 +32,7 @@ fn words(escalation: &Escalation, id: &str) -> (String, Option<String>) {
         .find(|option| option.id.as_str() == id)
         .expect("on the menu")
         .clone();
-    option_words(&payload, &option)
+    option_words(&payload, &option, &NodesAhead::default())
 }
 
 fn said(label: &str, tradeoff: &str) -> (String, Option<String>) {
@@ -109,7 +112,7 @@ fn token_cap_reads_as_written() {
     assert_eq!(
         words(&tokens, "continue"),
         said(
-            "Continue past the cap",
+            "continue",
             "Lifts the cap for this invocation only; a later resume will ask again before \
              spending more"
         )
@@ -194,10 +197,7 @@ fn scope_reads_as_written() {
     );
     assert_eq!(
         words(&scope, "grant"),
-        said(
-            "Grant access to b.txt",
-            "The task's final diff is evaluated against its scope plus these paths"
-        )
+        said("grant", "the task may also touch this path, and goes on")
     );
     // Only the engine's own grants count toward `max_per_run`, so a grant a
     // person picks from this menu does not say it consumes the cap.
@@ -208,10 +208,7 @@ fn scope_reads_as_written() {
     );
     assert_eq!(
         words(&scope, "deny"),
-        said(
-            "Deny the request",
-            "The denial becomes a finding; the task retries within its original scope"
-        )
+        said("deny", "the task goes on within the scope it has")
     );
 }
 
@@ -301,7 +298,7 @@ fn an_option_an_older_log_wrote_reads_as_the_words_it_stored() {
     )
     .into_payload();
     assert_eq!(
-        option_words(&payload, &stored),
+        option_words(&payload, &stored, &NodesAhead::default()),
         (
             "Revise the plan".to_string(),
             Some("Sends the plan back to its author".to_string())
@@ -335,7 +332,7 @@ fn an_abort_a_log_wrote_in_older_words_reads_as_written() {
     )
     .into_payload();
     assert_eq!(
-        option_words(&payload, &stored),
+        option_words(&payload, &stored, &NodesAhead::default()),
         (
             "Abort the run".to_string(),
             Some("Pauses here; nothing further executes".to_string())
@@ -385,20 +382,17 @@ fn a_departure_offers_accepting_it_and_sending_it_back() {
             GateOption::reserved(ReservedOption::SendBack),
         ],
     );
-    let (label, tradeoff) = words(&departure, "accept");
-    assert_eq!(label, "Accept the departure");
-    assert!(
-        tradeoff.as_deref().is_some_and(|tradeoff| tradeoff
-            .starts_with("The task stops being held to `grep -q Hello greeting.txt` and closes")),
-        "{}",
-        tradeoff.as_deref().unwrap_or("none")
+    assert_eq!(
+        words(&departure, "accept"),
+        said(
+            "accept",
+            "the work stands as it is, and the plan records why it differs; the task stops \
+             being held to `grep -q Hello greeting.txt`"
+        )
     );
     assert_eq!(
         words(&departure, "send-back"),
-        said(
-            "Send it back",
-            "Its session picks the work back up with what you say"
-        )
+        said("send-back", "the session goes back to what the plan says")
     );
 }
 

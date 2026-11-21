@@ -1,0 +1,7 @@
+▎ ◆ It asks to touch crates/cli/src/commands/pack_audit.rs           implement
+▎ The target-aware vendor_dir and packs_root APIs are used by project-local
+▎ pack audit; this path must retain its existing project behavior and compile
+▎ after changing the shared helpers.
+▎
+▎ ▸ grant  the task may also touch this path, and goes on
+▎   deny   the task goes on within the scope it has

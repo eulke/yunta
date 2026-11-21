@@ -15,14 +15,15 @@
 //! each after it, made anew where a request hands its news to other inputs, which never
 //! ends by itself: dropping the performer ends it, `following`'s.
 //!
-//! Each family of work is carried out in a module of its own: `run`, a run's readings and
-//! its acts; `evidence`, what a run leaves; `workflow`, a workflow's check, past runs and
-//! graph, the cases and a new workflow; `pack`, the packs'; `machine`, what doctor checks
-//! of this machine and this project, and what upkeep collects of what runs left. What one
-//! piece of work finds that a later one takes stays with the performer, in `held`, under
-//! the ticket that found it: a repository's project detected for its setup, which is bound
-//! to the repository and written by the setup's own work. The state hands back only the
-//! ticket, and lets it go when the person leaves the stage that holds it.
+//! Each family of work is carried out in a module of its own: `run`, the pull request a
+//! run's gate waits on and the acts on a run; `evidence`, what a run leaves; `workflow`, a
+//! workflow's check, past runs and graph, the cases and a new workflow; `pack`, the packs';
+//! `machine`, what doctor checks of this machine and this project, and what upkeep collects
+//! of what runs left. What one piece of work finds that a later one takes stays with the
+//! performer, in `held`, under the ticket that found it: a repository's project detected for
+//! its setup, which is bound to the repository and written by the setup's own work. The
+//! state hands back only the ticket, and lets it go when the person leaves the stage that
+//! holds it.
 
 mod evidence;
 mod following;
@@ -199,12 +200,7 @@ impl Performer {
             Operation::Collect { dry_run } => {
                 machine::collected(&project, dry_run, remarks, stop).await
             }
-            Operation::ReadPage { run } => run::page_read(&project, &run, remarks).await,
-            Operation::ReadNodePage { run, node } => {
-                run::node_page_read(&project, &run, &node, remarks).await
-            }
-            Operation::ReadQuestions { run } => run::questions_read(&project, &run).await,
-            Operation::ReadDecision { run } => run::decision_read(&project, &run).await,
+            Operation::ReadPullRequest { run } => run::pull_request_read(&project, &run).await,
             Operation::ReadHistory { workflow } => {
                 workflow::history_read(&project, &workflow).await
             }

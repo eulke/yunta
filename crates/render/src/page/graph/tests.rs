@@ -1,19 +1,16 @@
 //! A workflow's graph as a page, in every environment: as its file declares it,
-//! and as a run that failed on it leaves it. A group is drawn as a box holding
-//! its nodes, the links to what it holds crossing its edge; a graph with none is
-//! drawn as its chain.
+//! and as a run of it draws it, headed by its mode, each node a box holding its id
+//! alone. A group is drawn as a box holding its nodes, the links to what it holds
+//! crossing its edge; a graph with none is drawn as its chain.
 
 use std::path::{Path, PathBuf};
 
 use surco::golden::{assert_golden, ENVIRONMENTS};
 use surco::look::Look;
 use surco::surface::{Surface, Terminal};
-use surco::words::Standing;
-use yunta_core::Workflow;
-use yunta_replay::frame::{RunFrame, RunPhase};
+use yunta_core::{ModeName, Workflow};
 
 use super::Graph;
-use crate::page::run::fixtures::{ahead, failed_lint, finished, RUN};
 use crate::page::Page;
 
 /// A build, a group that checks two ways at once, a fix the lint reroutes to, and a
@@ -77,20 +74,81 @@ fn chain() -> Workflow {
     Workflow::parse(CHAIN).expect("the chained workflow parses")
 }
 
-/// The run that failed on `lint`: built, the checks failed, the rest ahead.
-fn failed_run() -> RunFrame {
-    RunFrame {
-        standing: Standing::Failed,
-        phase: RunPhase::Failed { failure: None },
-        nodes: vec![
-            finished("build"),
-            ahead("checks"),
-            failed_lint(),
-            ahead("test"),
-            ahead("fix"),
-            ahead("ship"),
-        ],
-        ..RunFrame::sample(&RUN)
+/// The mode a run of the sample workflows was created in.
+fn standard() -> ModeName {
+    ModeName::from("standard")
+}
+
+/// A run's graph is headed by the nodes its workflow runs, in order, with the run's mode
+/// at the far end, and its workflow as written by the same words with `as written` there;
+/// each node's box holds its id alone.
+#[test]
+fn a_runs_graph_is_headed_by_the_nodes_it_runs_and_labels_each_node_by_its_id() {
+    let look = Look::plain();
+    let run = Graph {
+        workflow: workflow(),
+        mode: Some(standard()),
+    };
+    let drawn = Terminal::on(look).draw(&run.document(&look));
+    let headline = drawn.lines().next().expect("a headline");
+    assert!(
+        headline.starts_with("> checked ; the nodes it runs, in order "),
+        "{drawn}"
+    );
+    assert!(headline.ends_with(" standard"), "{drawn}");
+    assert_eq!(headline.len(), look.width.cells(), "{drawn}");
+    for id in ["build", "lint", "test", "fix", "ship"] {
+        assert!(drawn.contains(&format!("| {id} |")), "{drawn}");
+    }
+    let as_written = Graph {
+        workflow: workflow(),
+        mode: None,
+    };
+    let drawn = Terminal::on(look).draw(&as_written.document(&look));
+    let headline = drawn.lines().next().expect("a headline");
+    assert!(
+        headline.starts_with(". checked ; the nodes it runs, in order "),
+        "{drawn}"
+    );
+    assert!(headline.ends_with(" as written"), "{drawn}");
+}
+
+/// The workflow the design's run froze in its manifest.
+fn designed() -> Workflow {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../testkit-ui/fixtures/designed/run/manifest.yaml");
+    let frozen = std::fs::read(path).expect("the design's run is kept");
+    yunta_core::Manifest::read_frozen(&frozen)
+        .expect("the design's manifest reads")
+        .doc
+        .workflow
+}
+
+/// The graph of the design's run, in `standard`, the mode its run was created in, reads as
+/// its targets draw it at the width each target's region takes, the whole diagram under
+/// its headline.
+#[test]
+fn the_design_s_graph_reads_as_its_targets_draw_it() {
+    let page = Graph {
+        workflow: designed(),
+        mode: Some(standard()),
+    };
+    for (size, glyphs, cells) in [
+        ("unicode-120", surco::glyphs::Glyphs::Unicode, 118),
+        ("ascii-120", surco::glyphs::Glyphs::Ascii, 118),
+        ("unicode-80", surco::glyphs::Glyphs::Unicode, 78),
+        ("unicode-60", surco::glyphs::Glyphs::Unicode, 58),
+    ] {
+        let look = Look {
+            glyphs,
+            paint: surco::paint::Paint::Plain,
+            width: surco::look::Width::exact(cells),
+            motion: surco::motion::Motion::Moves,
+        };
+        assert_golden(
+            &goldens().join(format!("designed.{size}.txt")),
+            &Terminal::on(look).draw(&page.document(&look)),
+        );
     }
 }
 
@@ -101,21 +159,21 @@ fn a_workflows_graph_matches_its_goldens_in_every_environment() {
             "as-written",
             Graph {
                 workflow: workflow(),
-                run: None,
+                mode: None,
             },
         ),
         (
             "chained",
             Graph {
                 workflow: chain(),
-                run: None,
+                mode: None,
             },
         ),
         (
             "of-a-run",
             Graph {
                 workflow: workflow(),
-                run: Some((RUN, failed_run())),
+                mode: Some(standard()),
             },
         ),
     ];

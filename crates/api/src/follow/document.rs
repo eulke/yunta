@@ -64,6 +64,13 @@ impl Document {
             },
         }
     }
+
+    /// Each document the nodes of the run in `state` handed over that a person reads whole,
+    /// with the node that handed it over, in the order the run first accepted each: what a
+    /// following of the run hands of it, read or not, by the head `state` stands at.
+    pub fn handed_over_in(state: &RunState) -> Vec<(NodeId, Shown)> {
+        yunta_engine::documents_handed_over(state, None)
+    }
 }
 
 /// What the run held handed over, as far as the following worked it out and handed it.

@@ -2,6 +2,7 @@
 //! on the screen after it: each question with its answer, whole.
 
 use surco::surface::said_whole;
+use yunta_core::diagnostic::Report;
 use yunta_core::events::Channel;
 use yunta_core::port::QuestionsReply;
 use yunta_core::{Env, NodeId, QuestionsFile};
@@ -11,17 +12,21 @@ use yunta_ui::prompt::{Round, SettledAnswers};
 use super::held::hold;
 use super::{attributed, Answered, Console};
 
-/// Puts every question `node` asks in `questions` to the person as one round, and
-/// records the answers once the last of them is given.
+/// Puts every question `node` asks in `questions` to the person as one round, what the
+/// engine `refused` of the answers it was last given standing under each question it is
+/// about, and records the answers once the last of them is given.
 pub(crate) fn answer(
     console: &Console,
     env: &Env,
-    node: &NodeId,
-    questions: &QuestionsFile,
+    (node, questions): (&NodeId, &QuestionsFile),
+    refused: Option<&Report>,
 ) -> Answered<QuestionsReply> {
     let settled = match questions.questions.is_empty() {
         true => SettledAnswers::default(),
-        false => hold(console, &mut Round::new(node, questions, console.escape()))?,
+        false => {
+            let mut round = Round::new(node, questions, console.escape()).refused_as(refused);
+            hold(console, &mut round)?
+        }
     };
     let look = console.look();
     for (asked, said) in &settled.said {

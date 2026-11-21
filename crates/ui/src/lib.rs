@@ -28,7 +28,8 @@
 //!   [`Answerable`](prompt::Answerable) a surface holds, the [`Stroke`](prompt::Stroke)
 //!   it is handed and the [`Press`](prompt::Press) it answers with.
 //! - `scroll`, how a region taller than what a surface shows of it scrolls by the
-//!   keys, held by a desk's pane and every stage that shows a page.
+//!   keys, held by a desk's pane, every stage that shows a page and a run's feed: the
+//!   [`Scroll`] that says where it stands ([`ScrolledTo`]).
 //! - `room`, what a surface shows where it has less room than it lays a screen out
 //!   in ([`room_needed`]).
 
@@ -60,11 +61,13 @@ pub use outcome::{
     PackScaffolded, RepositoryReading, WorkflowOutcome,
 };
 pub use performer::Performer;
-pub use request::Request;
+pub use request::{Address, Request};
 pub use room::room_needed;
+pub use scroll::{Scroll, ScrolledTo};
 pub use stage::{
-    CatalogStage, DecisionStage, DoctorStage, Evidence, EvidenceStage, FieldStage, FirstRunStage,
-    GraphStage, RunStage, SchemaStage, SetupStage, Stage, StartStage, StatsStage, UpkeepStage,
+    CatalogStage, ChronicleStage, DoctorStage, Evidence, EvidenceStage, FieldStage, FirstRunStage,
+    GraphStage, Grounds, ItsRun, RunStage, Scene, SchemaStage, SetupStage, Stage, Standstill,
+    StartStage, StatsStage, UpkeepStage,
 };
 pub use state::State;
 pub use ticket::Ticket;

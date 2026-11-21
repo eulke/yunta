@@ -31,6 +31,7 @@ pub(crate) fn scrolled_back() -> Feed {
     ];
     Feed {
         rows: rows.into_iter().map(|row| Line::new().plain(row)).collect(),
+        subjects: Vec::new(),
         before: 4,
         after: 4,
     }
@@ -53,6 +54,7 @@ fn at_its_end(glyphs: Glyphs) -> Feed {
             .map(|row| Line::new().plain(row))
             .chain([Line::new().push(Tone::Strong, "edit    crates/cli/src/pack.rs")])
             .collect(),
+        subjects: Vec::new(),
         before: 3,
         after: 0,
     }
@@ -103,6 +105,7 @@ fn a_row_past_the_edge_ends_in_the_ellipsis_and_cuts_no_number() {
         };
         let feed = Feed {
             rows: vec![Line::new().plain(row)],
+            subjects: Vec::new(),
             before: 0,
             after: 0,
         };
@@ -110,4 +113,53 @@ fn a_row_past_the_edge_ends_in_the_ellipsis_and_cuts_no_number() {
         let texts: Vec<String> = lines.iter().map(Line::text).collect();
         assert_eq!(texts, [drawn], "at {edge} cells");
     }
+}
+
+/// A feed of more than one thing's moments opens each row with what it is about, in a column
+/// as wide as the widest subject among the rows a drawing shows and two cells: a window at the
+/// feed's end measures the rows in its sight, so a subject scrolled out of sight widens it no
+/// more, and a drawing of every row measures them all.
+#[test]
+fn each_row_opens_with_its_subject_in_a_column_as_wide_as_the_widest_in_sight() {
+    let said = [
+        ("approve-plan", "finished: approve · 0s"),
+        ("implement", "running: attempt 1"),
+        ("implement", "read    crates/cli/src/pack.rs"),
+        ("implement", "run     cargo check"),
+    ];
+    let feed = Feed {
+        rows: said
+            .iter()
+            .map(|(_, words)| Line::new().plain(*words))
+            .collect(),
+        subjects: said
+            .iter()
+            .map(|(subject, _)| subject.to_string())
+            .collect(),
+        before: 0,
+        after: 0,
+    };
+    let look = Look {
+        glyphs: Glyphs::Unicode,
+        paint: Paint::Plain,
+        width: Width::exact(60),
+        motion: Motion::Still,
+    };
+    let region = crate::components::Region::new(Doc::new().with(feed))
+        .in_sight(crate::components::Sight::at_the_end());
+    let window = Terminal::on(look).pane(&region, 3);
+    let texts: Vec<String> = window.lines.iter().map(Line::text).collect();
+    assert_eq!(
+        texts,
+        [
+            "… 2 above",
+            "implement  read    crates/cli/src/pack.rs",
+            "implement  run     cargo check",
+        ]
+    );
+    let whole = Terminal::on(look).draw(&region.doc);
+    assert!(
+        whole.contains("approve-plan  finished: approve · 0s\nimplement     running: attempt 1"),
+        "{whole}"
+    );
 }

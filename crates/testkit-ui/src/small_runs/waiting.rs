@@ -32,7 +32,7 @@ pub async fn wakes_alone() -> SmallRun {
 /// the run parks on the forge.
 pub async fn pull_request() -> SmallRun {
     let place = Place::of(&id("PR0PEN"), &[], |bench| {
-        bench.with_forge(forge(Reviewing))
+        bench.with_forge(forge(Reviewing::default()))
     });
     let config = format!("{MOCK_CONFIG}{FORGE}");
     woken(&place, PUBLISHES, NO_SESSIONS, &config).await;

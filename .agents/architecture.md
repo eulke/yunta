@@ -28,7 +28,7 @@ fact is an event in the log.
 | `yunta` | the commands | core, replay, render, api, mcp, ui, tui, surco |
 | `yunta-testkit-core` | test scaffolding below the engine | core |
 | `yunta-testkit` | whole-run test harness | core, testkit-core, storage, adapters, engine, surco |
-| `yunta-testkit-ui` | the application's test world and walk | core, api, ui, surco, testkit-core, testkit |
+| `yunta-testkit-ui` | application test world and walk | core, api, ui, render, surco, testkit-core, testkit |
 | `xtask` | smells, the docs checker, schemas | core, surco |
 
 ## Product rules

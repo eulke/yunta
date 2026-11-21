@@ -1,7 +1,7 @@
 > paced (default) ; running ; 7m30s so far                                9G5FAV
 ======================================== =======================================
 
-  task cost    19.8k tokens per verified task ; 1 task done
+  task cost    19.8k tokens per verified task, 1 task done
   rework       12% of tokens went to retries and reroutes
   cache        1.4x cached tokens per input token
   tokens       18k in / 1.8k out (25.2k cached)
@@ -9,9 +9,9 @@
   findings     5 posted, 1 updated, 1 withdrawn; 4 standing
   answers      2 given, 1 proved; 1 settled
 
+who spent it
+implementer   ############################  19.8k tokens
+
 nodes:
   + finished  plan                            40s ##                 4.4k tokens
   + finished  implement-the-whole-feature   5m00s ##############    15.4k tokens
-
-runners:
-  implementer ####################  19.8k tokens

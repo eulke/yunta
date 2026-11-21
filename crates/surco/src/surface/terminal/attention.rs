@@ -1,7 +1,7 @@
 //! The attention on a terminal: what needs a person, and how they answer it,
 //! on one row that keeps its answer when it is cut; on a screen, that row tinted.
 
-use super::Terminal;
+use super::{Terminal, APART};
 use crate::components::{Answer, Attention};
 use crate::glyphs::Mark;
 use crate::line::{Fill, Line, Tone};
@@ -13,10 +13,11 @@ impl Attention {
     /// One row: the mark and `needs you`, what needs the person when there is
     /// a subject, then the answer where a cut keeps it. A command stands
     /// before what is asked, which is said between parentheses, and the row is
-    /// cut at its end; a key stands at the row's end, and what is asked is cut
-    /// to leave it room; an attention answered elsewhere says only what is
-    /// asked, cut at its end. The row carries no fill: a screen tints it where it
-    /// stands. An attention that asks nothing draws nothing.
+    /// cut at its end; a key stands whole at the row's end, set apart from what
+    /// is asked, which is cut to leave it room; an attention answered elsewhere,
+    /// or said where a line is typed, says only what is asked, cut at its end.
+    /// A cut never falls inside a number. The row carries no fill: a screen tints
+    /// it where it stands. An attention that asks nothing draws nothing.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         if self.asks.trim().is_empty() {
             return Vec::new();
@@ -31,7 +32,10 @@ impl Attention {
             Answer::Key(binding) => {
                 let head = self.head(look);
                 let tail = Line::new()
-                    .push(Tone::Faint, format!(" {} ", glyphs.sep()))
+                    .push(
+                        Tone::Faint,
+                        format!("{}{} ", " ".repeat(APART), glyphs.sep()),
+                    )
                     .push(Tone::Strong, binding.keys.spelled(glyphs))
                     .push(Tone::Muted, format!(" {}", binding.does));
                 let room =
@@ -42,7 +46,7 @@ impl Attention {
                 };
                 head.plain(asks).then(tail)
             }
-            Answer::Elsewhere => self.head(look).plain(self.asks.as_str()),
+            Answer::Elsewhere | Answer::Unkeyed => self.head(look).plain(self.asks.as_str()),
         };
         vec![row.cut(width, glyphs)]
     }

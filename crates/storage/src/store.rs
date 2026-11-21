@@ -2,7 +2,8 @@
 //! rows.
 //!
 //! An append gives the event the next `seq` of its run and its link of the
-//! chain in one transaction: `event_hash` is SHA-256 over the previous
+//! chain in one transaction, and events appended together share it, so a
+//! reader finds all of them or none: `event_hash` is SHA-256 over the previous
 //! event's hash and the row's own fields in a fixed order — `run_id`, `seq`,
 //! `ts`, `node_id`, `kind`, `payload_json`, `schema_version` — over the bytes
 //! as stored, so no reading of a later binary bears on it. A run's first
@@ -144,6 +145,77 @@ fn previous_hash(tx: &Transaction<'_>, draft: &EventDraft, seq: i64) -> Result<S
     Ok(stored.unwrap_or_default())
 }
 
+/// Writes `draft` as the next row of its run inside `tx`, stamped `ts`: its
+/// `seq`, its link of the chain, and its run's head moved onto it. Returns
+/// the `seq` it was given.
+fn append_row(tx: &Transaction<'_>, draft: &EventDraft, ts: &str) -> Result<Seq> {
+    let append_err = |error| StorageError::Append {
+        run_id: draft.run_id().clone(),
+        source: cause(error),
+    };
+
+    let seq: i64 = tx
+        .query_row(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?1",
+            params![draft.run_id().as_str()],
+            |row| row.get(0),
+        )
+        .map_err(append_err)?;
+
+    let payload_json =
+        serde_json::to_string(draft.payload()).map_err(|source| StorageError::Serialize {
+            run_id: draft.run_id().clone(),
+            source,
+        })?;
+
+    // The chain hash, computed inside the same transaction that
+    // assigns `seq`, anchored on the previous event's hash.
+    let prev_hash = previous_hash(tx, draft, seq)?;
+
+    let event_hash = chain_hash(ChainHashFields {
+        prev_hash: &prev_hash,
+        run_id: draft.run_id().as_str(),
+        seq,
+        ts,
+        node_id: draft.node_id().map(NodeId::as_str),
+        kind: draft.payload().kind_name(),
+        payload_json: &payload_json,
+        schema_version: KIND_VERSION,
+    });
+
+    tx.execute(
+        "INSERT INTO events (run_id, seq, ts, node_id, kind, payload_json, schema_version, \
+         event_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            draft.run_id().as_str(),
+            seq,
+            ts,
+            draft.node_id().map(NodeId::as_str),
+            draft.payload().kind_name(),
+            payload_json,
+            KIND_VERSION,
+            event_hash.as_str(),
+        ],
+    )
+    .map_err(append_err)?;
+
+    // The head moves with the row it names, in the same transaction, so a
+    // tail deleted afterwards reads as broken at this head.
+    tx.execute(
+        "INSERT INTO run_heads (run_id, seq, event_hash) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(run_id) DO UPDATE SET seq = excluded.seq, \
+         event_hash = excluded.event_hash",
+        params![draft.run_id().as_str(), seq, event_hash.as_str()],
+    )
+    .map_err(append_err)?;
+
+    Seq::try_from(seq).map_err(|source| StorageError::CorruptSeq {
+        run_id: draft.run_id().clone(),
+        source,
+    })
+}
+
 fn cause(error: rusqlite::Error) -> Cause {
     Box::new(error)
 }
@@ -201,8 +273,26 @@ impl Storage {
     /// clock — what an async caller does before hopping to a blocking
     /// thread, so the instant recorded is the one its clock reported.
     pub fn append_at(&self, draft: &EventDraft, at: chrono::DateTime<chrono::Utc>) -> Result<Seq> {
+        let [seq] = self.append_together_at(std::array::from_ref(draft), at)?;
+        Ok(seq)
+    }
+
+    /// Appends `drafts` in their order as one commit, each the next `seq`
+    /// of its run, all stamped `at`: a reader of the log finds every one
+    /// of them or none, and a crash leaves none. What a writer appends
+    /// whose events say one thing together that one of them alone says
+    /// falsely. Returns the `seq` each was given, in their order.
+    pub fn append_together_at<const N: usize>(
+        &self,
+        drafts: &[EventDraft; N],
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<[Seq; N]> {
+        let mut seqs = [Seq::FIRST; N];
+        let Some(first) = drafts.first() else {
+            return Ok(seqs);
+        };
         let append_err = |error| StorageError::Append {
-            run_id: draft.run_id().clone(),
+            run_id: first.run_id().clone(),
             source: cause(error),
         };
 
@@ -220,70 +310,12 @@ impl Storage {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(append_err)?;
-
-        let seq: i64 = tx
-            .query_row(
-                "SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?1",
-                params![draft.run_id().as_str()],
-                |row| row.get(0),
-            )
-            .map_err(append_err)?;
-
-        let payload_json =
-            serde_json::to_string(draft.payload()).map_err(|source| StorageError::Serialize {
-                run_id: draft.run_id().clone(),
-                source,
-            })?;
-
-        // The chain hash, computed inside the same transaction that
-        // assigns `seq`, anchored on the previous event's hash.
-        let prev_hash = previous_hash(&tx, draft, seq)?;
-
         let ts = at.to_rfc3339();
-        let event_hash = chain_hash(ChainHashFields {
-            prev_hash: &prev_hash,
-            run_id: draft.run_id().as_str(),
-            seq,
-            ts: &ts,
-            node_id: draft.node_id().map(NodeId::as_str),
-            kind: draft.payload().kind_name(),
-            payload_json: &payload_json,
-            schema_version: KIND_VERSION,
-        });
-
-        tx.execute(
-            "INSERT INTO events (run_id, seq, ts, node_id, kind, payload_json, schema_version, \
-             event_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                draft.run_id().as_str(),
-                seq,
-                ts,
-                draft.node_id().map(NodeId::as_str),
-                draft.payload().kind_name(),
-                payload_json,
-                KIND_VERSION,
-                event_hash.as_str(),
-            ],
-        )
-        .map_err(append_err)?;
-
-        // The head moves with the row it names, in the same transaction, so a
-        // tail deleted afterwards reads as broken at this head.
-        tx.execute(
-            "INSERT INTO run_heads (run_id, seq, event_hash) VALUES (?1, ?2, ?3) \
-             ON CONFLICT(run_id) DO UPDATE SET seq = excluded.seq, \
-             event_hash = excluded.event_hash",
-            params![draft.run_id().as_str(), seq, event_hash.as_str()],
-        )
-        .map_err(append_err)?;
-
+        for (seq, draft) in seqs.iter_mut().zip(drafts) {
+            *seq = append_row(&tx, draft, &ts)?;
+        }
         tx.commit().map_err(append_err)?;
-
-        Seq::try_from(seq).map_err(|source| StorageError::CorruptSeq {
-            run_id: draft.run_id().clone(),
-            source,
-        })
+        Ok(seqs)
     }
 
     /// Test-support fault injection: alters the `seq`-th event's persisted

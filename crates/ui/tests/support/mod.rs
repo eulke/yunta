@@ -2,7 +2,8 @@
 //! (`yunta_testkit_ui::sandbox`): the application open on a field the follower reads from
 //! runs a bench made, each stopped under an id the test names, with the world it reads;
 //! a performer working in a bench's world; a piece of work performed there; and a bench's
-//! run read whole, as what the application follows hands it first.
+//! run read whole, with what it asks where a key is to answer it, as what the application
+//! follows hands it first.
 //!
 //! Every test binary that declares `mod support` compiles the whole module and uses a
 //! part of it, so what another binary needs reads as dead here.
@@ -12,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
-use yunta_api::{FollowNews, Followed, Stop};
+use yunta_api::{FollowNews, Followed, RunNews, Stop};
 use yunta_core::events::{Channel, EventPayload, PauseReason, RunEvent};
 use yunta_core::RunId;
 use yunta_testkit::workflows::FINISHES;
@@ -125,4 +126,40 @@ pub async fn read_whole(bench: &Bench) -> FollowNews {
             Ok(None) | Err(_) => panic!("the following never reads {} whole", bench.run_id),
         }
     }
+}
+
+/// `bench`'s run read whole, then what it waits on a person for as the following read it
+/// for the pause it stands at, as a performer following it alone hands them first: what a
+/// state is handed before a key answers the run.
+pub async fn read_whole_and_asked(bench: &Bench) -> Vec<FollowNews> {
+    let run = Followed {
+        field: None,
+        run: Some(bench.run_id.clone()),
+    };
+    let (performer, (inputs, mut received)) = (performer_in(bench), mpsc::unbounded_channel());
+    performer.take(Request::Follow(run), &inputs);
+    let mut read = Vec::new();
+    loop {
+        match tokio::time::timeout(READING_WHOLE, received.recv()).await {
+            Ok(Some(Input::FollowNews(whole @ FollowNews::Whole { .. }))) => read.push(whole),
+            Ok(Some(Input::FollowNews(asked @ FollowNews::Run { .. }))) if asks(&asked) => {
+                read.push(asked);
+                return read;
+            }
+            Ok(Some(Input::LookFailed(why))) => panic!("a look at the run failed: {why}"),
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => panic!("the following never reads what {} asks", bench.run_id),
+        }
+    }
+}
+
+/// Whether `news` says what a run waits on a person for, read or not.
+fn asks(news: &FollowNews) -> bool {
+    matches!(
+        news,
+        FollowNews::Run {
+            news: RunNews::Awaited(_) | RunNews::AwaitedUnread { .. },
+            ..
+        }
+    )
 }

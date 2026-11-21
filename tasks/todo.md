@@ -2429,7 +2429,7 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 - **The receipt's scene writes nothing**: it reads the receipt Phase 1 derives from the ledgers of the run in view, and verifies the event chain once with `Operation::Evidence(Verify)`; `WriteReceipt`, which writes `receipt.md`, is not asked.
 - **Criterion 12 holds at Checkpoint A; after it, the receipt differs from the base only by the design's phrases, each a row of the inventory.** The rows the inventory rewords to the design's (`1 of 1 green, red before the work`, `intact`) are the same facts `yunta receipt`, `receipt.md` and the pull request's body print (`crates/engine/goldens/receipt/finished.md` holds `each command below` and `hash-linked`), so they change here, each keeping after the design's words, past the separator, what the inventory leaves to the printed page (`intact · 342 events, hash-linked, replayable`), blessed in Task 88 and approved at Checkpoint C.
 - **`NextStep::Follow` opens the run's whole chronicle** (Task 110), which is what `yunta status <run> --follow` prints; `State::opened_on` opens a run under a step by `NextStep::Status`.
-- **The side regions' widths**: a side at the left stands 31 cells, one at the right 40 (the field's glance, `design/field.wide.txt`), each with a gutter of 3, from 102 columns. Phase 4 gives a new run's facts their own width where its target asks.
+- **The side regions' widths**: a side at the left stands 31 cells, one at the right 39 (the field's glance, as its target draws it: its edge in column 79, measured in Task 76), each with a gutter of 3, from 102 columns. Phase 4 gives a new run's facts their own width where its target asks.
 - **A run's numbers and the graph's headline are reworded with their drawing** (Task 85), in the files that redraw touches, rather than with render's other phrases.
 - **A tally counted with nothing in it says `nothing needs you`** (Task 75): `Screen.tally` becomes `Tally` (new in Surco), `Uncounted` or `Counted(Vec<Count>)`, so a screen that counts nothing is told apart from one whose runs need nothing.
 - **Names added**, each grepped free in `crates/`: Surco's `Noted`, `Tally`, `SideAt`, `Line::pointed`, `Horizon`, `FindingList`, `FindingRow`, `Answer::Unkeyed`, `Screen.{noted,anywhere,meter}`, `Region.edge`; render's `blocks::{NodeTitle,FindingsAt,WhereItStopped,FenceRefused}` and `watched::{stretch_names,needing}`; `yunta-ui`'s `InPlace`, `ChronicleStage`, `Address`, `Standpoint`, `FollowedRuns::framing`, `Operation::ReadPullRequest`, `Outcome::PullRequest`; `yunta-api`'s `OpenedRun::pull_request` and `PullRequestPolled`.
@@ -2450,14 +2450,16 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 - Surco's catalog (`components/catalog/on_screen.rs`) shows the note beside the attention row. No interface draws it yet: the run's frame does (Task 92).
 - Knowledge: `Screen`'s `///` on `noted` says it stands in the attention row's place until the next key, and news leave it.
 
+**Found in its turn:** `Noted { mark, said }`, `Screen.noted` and `Terminal::noted`: the mark in its tone and the sentence plain, cut with the ellipsis, in the attention row's place. The catalog is a document, so the note is also a block, `Block::Noted`, which every surface says; Markdown's and HTML's screens say `Screen.noted` where they say the attention row (HTML as a status paragraph). Goldens written by hand first: `screen/noted.*` at three environments from the targets' rows, `markdown/screen-noted.md`, `html/screen-noted.html`; the catalog's seven gain the note's row and nothing else.
+
 **Fails first:** `crates/surco/src/surface/terminal/screen/tests.rs`: a note at 60 cells is one row, its done mark first and its sentence cut with the ellipsis; it does not compile before `Noted` exists.
 
 **Acceptance criteria:**
-- [ ] Goldens of the note at 60 and 80 cells, ASCII and Unicode, plain and 16-color, in `crates/surco/goldens/screen/`, reviewed in the diff.
-- [ ] Every base golden is unchanged but the catalog's, which gains the note.
+- [x] Goldens of the note at 60 and 80 cells, ASCII and Unicode, plain and 16-color, in `crates/surco/goldens/screen/`, reviewed in the diff.
+- [x] Every base golden is unchanged but the catalog's, which gains the note.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco screen`, `cargo test -p yunta-surco catalog`
+- [x] Tests pass: `cargo test -p yunta-surco screen`, `cargo test -p yunta-surco catalog`
 
 **Dependencies:** None. Runs beside Task 77 and Task 78, which touch other files.
 
@@ -2474,15 +2476,17 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 - **A `tui` frame among the goldens whose cut split a number is deleted here**, with its builder in `crates/testkit-ui/src/screens.rs`, never blessed. None does at the base: no digit stands before an ellipsis in `crates/tui/goldens/screens/`.
 - Knowledge: `truncate`'s `///` says why a number is kept whole; `Answer::Unkeyed`'s `///` says why no key stands there; the catalog's attention rows show the three cases.
 
+**Found in its turn:** `Answer::Unkeyed` and `Attention::unkeyed`, which Markdown and HTML say as they say `Elsewhere`; the catalog's attention rows show three cases. The rule on cuts is owned once, in `width::truncate`, which the feed and the attention row call: a cut never falls inside a word that holds a digit (a count, a date, a time, a handle) and never right after a digit; it falls before that word, which goes whole with what is left out, as the conventions say. A run of digits was not enough: a date read `until 2026-01-...`. The targets and the conventions set two spaces before the separator of `a go there`, where the task wrote one: the targets govern. Goldens that moved: `screen/rows.*` and the catalog's seven by the separator and the new rows; `catalog.unicode-60` from `4 tasks in 3…` to `4 tasks in…`; `every-block.unicode-color-100` from `reported at src/lib.rs…` to `reported at…` (the word is `src/lib.rs:3:5`); and render's `status/waiting.{dig,full}.ascii-80`, a waiting row of `yunta status` that read `hit a limit until 2026-01-01...` and reads `hit a limit until...`, for the person to see at Checkpoint C. `crates/tui/goldens/screens/` did not move; the feed's goldens stand. The targets name a run's own decision in the attention row by its handle, which Task 92 composes. `middle_cut`, `render/src/published.rs` and `adapters/src/forge/mod.rs` keep cuts of their own. The catalog's `KINDS` still leaves out `rows`.
+
 **Fails first:** `crates/surco/src/width/tests.rs`: `truncate("exits 101 now", 9, …)` keeps no digit of `101`, red at the base, which cuts to `exits 1…`; `crates/surco/src/surface/terminal/attention/tests.rs`: the design's attention row at 80 cells keeps `· a go there` and cuts what it asks before `101`; an unkeyed attention with a handle names no key and keeps its handle at 60 cells, which does not compile at the base.
 
 **Acceptance criteria:**
-- [ ] Goldens of the three cases at 60 and 80 cells, ASCII and Unicode, plain and 16-color, and on Markdown and HTML, reviewed in the diff.
-- [ ] Every base golden whose cut split a number changes there and nowhere else, each named in the diff's review; every other golden is unchanged, and `crates/tui/goldens/screens/` with it.
+- [x] Goldens of the three cases at 60 and 80 cells, ASCII and Unicode, plain and 16-color, and on Markdown and HTML, reviewed in the diff.
+- [x] Every base golden whose cut split a number changes there and nowhere else, each named in the diff's review; every other golden is unchanged, and `crates/tui/goldens/screens/` with it.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- width attention catalog`, `cargo test -p yunta-tui --test screens`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-surco -- width attention catalog`, `cargo test -p yunta-tui --test screens`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** None. Runs beside Task 77 and Task 78; after Task 72 where both touch the catalog (`components/catalog/on_screen.rs`).
 
@@ -2498,14 +2502,16 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 - `yunta-tui`'s `drawn.rs`, the caller of `Terminal::legend` and `Terminal::title`, follows the new forms, drawing what it drew (every caller, the compiler names them).
 - Knowledge: `Screen`'s `//!` gains the far keys; the catalog shows a legend with its far keys and a titled region with its edge.
 
+**Found in its turn:** `Screen.anywhere`, `Terminal::legend(&Legend, &Legend)` with `FAR_KEYS_FROM = 98`, `Region.title` as parts with `Region.edge`, and `Terminal::title`; Markdown says the edge in the heading and the far keys after the screen's, HTML in spans of their own. The targets govern over the task's text: under 98 cells only `? keys` follows the screen's keys, `/ anything` left out (`work.unicode-80`); from 98, screen keys that do not fit beside the far pair end in ` · …` and drop their last key (`desk.ascii-120`); the edge is drawn muted, as the desk's, a card's and a pane's are. The desk's `title_parts` moved into `terminal/screen.rs`, one owner for the desk's title and a region's. Over a box no far keys stand. Goldens written by hand: `screen/legend.*`, `screen/title.*`, `markdown/screen-far.md`, `html/screen-far.html`; no existing golden moved. The lead's ruling on the task's catalog line: the legend and a region's title are parts of a screen, held by the screen's goldens, and take no block of their own in the catalog, whose goldens the task keeps unchanged.
+
 **Fails first:** `crates/surco/src/surface/terminal/legend/tests.rs`: at 120 cells `/ anything · ? keys` ends the row; at 80 the far pair follows the keys and the overflow keeps `? keys` last. `crates/surco/src/surface/terminal/screen/tests.rs`: a title with an edge at 60 cells cuts the title and keeps the edge. Neither compiles at the base.
 
 **Acceptance criteria:**
-- [ ] Goldens of a legend with its far keys at 60, 80 and 120 cells, and of a titled region with its edge, ASCII and Unicode, plain and 16-color, reviewed in the diff.
-- [ ] `crates/tui/goldens/screens/` and every other base golden are unchanged: no stage composes `anywhere` or an edge yet.
+- [x] Goldens of a legend with its far keys at 60, 80 and 120 cells, and of a titled region with its edge, ASCII and Unicode, plain and 16-color, reviewed in the diff.
+- [x] `crates/tui/goldens/screens/` and every other base golden are unchanged: no stage composes `anywhere` or an edge yet.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- legend screen`, `cargo test -p yunta-tui --test screens --test walk`
+- [x] Tests pass: `cargo test -p yunta-surco -- legend screen`, `cargo test -p yunta-tui --test screens --test walk`
 
 **Dependencies:** Task 72 (both touch `components/screen.rs`)
 
@@ -2520,14 +2526,16 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 - `Terminal::trail` (`surface/terminal/screen.rs:17`) takes `&Tally`; `yunta-tui`'s `drawn.rs` and the field's stage, the one stage that sets a tally (`crates/ui/src/stage/field.rs:119`), follow (every caller, the compiler names them). The field sets `Counted`: a field whose runs need nothing says `nothing needs you`, as the design's field does; every base frame counts a run on its gate, so none changes.
 - Knowledge: `Screen`'s `//!` gains the tally's two states; the catalog shows a counted empty tally.
 
+**Found in its turn:** `Tally::{Uncounted, Counted}` in place of the list, `Terminal::trail(&[String], &Tally)`: a tally counted with nothing in it says `nothing needs you`, muted, and Markdown and HTML say it in their place line; the field sets `Counted` and stays `Uncounted` before its first reading. The field still counts the stopped and the running, Phase 4's to change, so a field of running runs alone reads `● n running`. Goldens written by hand: `screen/tally.*`, `markdown/screen-nothing-needs-you.md`, `html/screen-nothing-needs-you.html`; no existing golden moved. As for Task 74, an empty tally is a part of a screen and takes no block in the catalog. The walk's counts stand.
+
 **Fails first:** `crates/surco/src/surface/terminal/screen/tests.rs`: a counted empty tally says `nothing needs you` at the trail's far end, and an uncounted one says nothing; it does not compile at the base, where a tally is a list.
 
 **Acceptance criteria:**
-- [ ] Goldens of the trail with each tally at 60 and 80 cells, ASCII and Unicode, plain and 16-color, reviewed in the diff.
-- [ ] `crates/tui/goldens/screens/` and every other base golden are unchanged.
+- [x] Goldens of the trail with each tally at 60 and 80 cells, ASCII and Unicode, plain and 16-color, reviewed in the diff.
+- [x] `crates/tui/goldens/screens/` and every other base golden are unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco screen`, `cargo test -p yunta-ui --test field`, `cargo test -p yunta-tui --test screens --test walk`
+- [x] Tests pass: `cargo test -p yunta-surco screen`, `cargo test -p yunta-ui --test field`, `cargo test -p yunta-tui --test screens --test walk`
 
 **Dependencies:** Task 74 (both touch `components/screen.rs`, `surface/terminal/screen.rs` and `drawn.rs`)
 
@@ -2544,14 +2552,16 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 - The base's frames `run`, `palette` and `help` go from `crates/tui/goldens/screens/` with their entries in `crates/tui/tests/screens.rs` and their builders (`run`, `palette`, `help`) in `crates/testkit-ui/src/screens.rs`, whose `//!` follows: their run loses its nodes at 80 columns, and their targets land with Task 98 and Task 112.
 - Knowledge: `layout.rs`'s `//!` says the side's two edges, its widths and where it gives way.
 
+**Found in its turn:** `SideAt::{Left, Right}` on `Side` and `Screen::side(region, at)`; the layout's `SIDE_FROM = 102`, `SIDE_AT_LEFT = 31` and `SIDE_AT_RIGHT = 39`, the side standing at a fixed width from 102 columns and the main region taking every cell below. The right side is 39 cells, not the 40 the list gave: on `field.unicode-120` the edge stands in column 79 and the glance in columns 81 to 119, and the targets govern. Gone, with their builders and their assertions: `run`, `palette` and `help` at `ascii-80` and `unicode-60` (six files), held by the walk's layout checks until their targets land (Task 98, Task 112); `field`, `card`, `desk`, `confirmation` and `room-needed` pass unchanged. The walk draws at 80 and 60 columns, both under 102, so it never lays out a side: only the layout's tests prove one at either edge until the walk draws the design's own size (written into Task 122). Markdown and HTML say the side region first at either edge. `crates/ui/tests/run_stage.rs` keeps a copy of the old side's width, 22, in a helper its test no longer depends on. The walk's counts stand.
+
 **Fails first:** `crates/tui/src/layout/tests.rs`: a side at the right stands at the right edge; a side stands at 102 columns and gives way at 101; at 140 the side keeps 31 cells. Each is red at the base, where the side is 22 cells at the left and stands from 65.
 
 **Acceptance criteria:**
-- [ ] The walk lays every state out with the side's edge whole on every row it spans, at both its sizes.
-- [ ] `field`, `card`, `desk`, `confirmation` and `room-needed` frames are unchanged; `run`, `palette` and `help` are gone with their builders, each named for the task that lands its target.
+- [x] The walk lays every state out with the side's edge whole on every row it spans, at both its sizes.
+- [x] `field`, `card`, `desk`, `confirmation` and `room-needed` frames are unchanged; `run`, `palette` and `help` are gone with their builders, each named for the task that lands its target.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --lib layout`, `cargo test -p yunta-tui --test screens --test walk`, `cargo test -p yunta-surco screen`, `cargo test -p yunta-testkit-ui`
+- [x] Tests pass: `cargo test -p yunta-tui --lib layout`, `cargo test -p yunta-tui --test screens --test walk`, `cargo test -p yunta-surco screen`, `cargo test -p yunta-testkit-ui`
 
 **Dependencies:** Task 75 (both touch `components/screen.rs` and `drawn.rs`)
 
@@ -2566,14 +2576,16 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 - A card's choices (`surface/terminal/card.rs:304-337`) and the rail's stops (`surface/terminal/desk/rail.rs:173-190`), which each draw it their own way today, draw through it. The nodes list (Task 95), the findings (Task 83) and the field's runs (Phase 4) draw through it too.
 - Knowledge: `Line::pointed`'s `///`; the catalog's choice list shows a pointed row filled.
 
+**Found in its turn:** `Line::pointed(on, glyphs)`, the opening of a row a pointer moves along, drawn once for a card's choices and the rail's stops; a wrapped line of a pointed option takes its opening's fill, and the rail's own `POINTER` is gone. Every golden of a card, a choice list and a desk holds byte for byte on every layer. One golden added, `components/pointed.unicode-color-100.txt`: the 16-color layer paints no fill, so it shows the pointer and the strong name, the fill being held by the unit test and the truecolor goldens already there.
+
 **Fails first:** `crates/surco/src/line/tests.rs`: a pointed row leads with the pointer and is filled with the selection; one not pointed at keeps the pointer's cells and no fill.
 
 **Acceptance criteria:**
-- [ ] Every base golden of a card, a choice list and a desk is unchanged on every layer: the two drawings it replaces drew the same.
-- [ ] A golden of a pointed row and its neighbours on the 16-color layer is reviewed in the diff.
+- [x] Every base golden of a card, a choice list and a desk is unchanged on every layer: the two drawings it replaces drew the same.
+- [x] A golden of a pointed row and its neighbours on the 16-color layer is reviewed in the diff.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- line card desk`
+- [x] Tests pass: `cargo test -p yunta-surco -- line card desk`
 
 **Dependencies:** None. Runs beside Task 72, Task 73 and Task 78.
 
@@ -2589,14 +2601,16 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 - The catalog shows it.
 - Knowledge: the component's `//!` says it is drawing alone and why ASCII leaves it out.
 
+**Found in its turn:** `Horizon { tone }`, `Block::Horizon` and `Terminal::horizon(&Horizon, rows)`, a port of the spike's canvas (nineteen furrows, the same clipping and the same dots), drawing nothing in ASCII or under three rows, left out of Markdown and HTML; `Glyphs::dots` owns the braille cells. It equals the targets cell for cell at each region they give it: `receipt` at 84×16 and 78×5, `reported` at 84×12, `first-request` at 118×20 and 78×10, `setup` at 118×8, `setup-unreachable` at 118×11, `setup-changing` at 118×4, and every braille cell outside the box of `receipt-palette`. The task asks goldens at 60 and 80 cells and no target draws the field at 60 columns, so the goldens stand at the targets' regions, written by hand from their rows; the catalog draws it at 60 and 100. The least it needs is three rows, as the conventions say; a document, which gives no rows to fill, draws it at those three. Four catalog goldens gain its three rows and a blank one; the ASCII, Markdown and HTML catalogs hold no trace of it.
+
 **Fails first:** `crates/surco/src/surface/terminal/horizon.rs`'s tests: at 40 by 8 cells in Unicode every row holds braille and its rows widen toward the bottom; in ASCII it draws no row.
 
 **Acceptance criteria:**
-- [ ] Goldens at 60 and 80 cells in Unicode, plain and 16-color, and its absence in ASCII, reviewed in the diff; the Markdown and HTML catalogs hold no trace of it.
-- [ ] Every other base golden is unchanged.
+- [x] Goldens at 60 and 80 cells in Unicode, plain and 16-color, and its absence in ASCII, reviewed in the diff; the Markdown and HTML catalogs hold no trace of it.
+- [x] Every other base golden is unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- horizon catalog`
+- [x] Tests pass: `cargo test -p yunta-surco -- horizon catalog`
 
 **Dependencies:** None. Runs beside Task 72, Task 73 and Task 77.
 
@@ -2605,7 +2619,9 @@ Its groups, each green before the next: Surco's pieces of a run's screen; the co
 **Estimated scope:** M
 
 ### Group check: Surco's pieces of a run's screen
-- [ ] `python3 .plans/yunta-tui/tools/suite.py` for Surco's, the terminal application's and `yunta-ui`'s groups green; every golden not named by Task 72 to Task 78 equals the base's digest; the walk's counts equal the base's.
+- [x] `python3 .plans/yunta-tui/tools/suite.py` for Surco's, the terminal application's and `yunta-ui`'s groups green; every golden not named by Task 72 to Task 78 equals the base's digest; the walk's counts equal the base's.
+
+**Found in its check:** run on the whole suite, the rule on cuts reaching everything Surco prints: 322 binaries and 5,078 tests, none failing; the gate's short steps pass, the strict doc build among them. The walk's counts equal Phase 2's: 63,842 states, 41 palettes, 72 helps, 6,683 screens at each size. 728 goldens against the base's digests: twenty changed, each named by a task (the catalog and every-block, eleven, by Tasks 63, 64, 72, 73 and 78; `screen/rows`, three, by Task 73's separator; render's `status/waiting.{dig,full}.ascii-80` by Task 73's cut; `tui`'s `field` and `confirmation`, four, by Task 51); six gone, `run`, `palette` and `help` by Task 76; 487 new.
 
 Task 79 to Task 85 each redraw one of Surco's components and bless what draws it; they run one at a time, since each blesses the same golden directories.
 
@@ -2618,15 +2634,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - Blessed and reviewed: `crates/surco/goldens/{typed_answer,card,components}/`; the CLI's captures of `yunta init -i`'s lines asked and of a card's note at `yunta resolve-gate`, by `prompts.py`; `crates/cli/tests/console_interaction/{init.rs,card.rs}` where they read the typed row (`> repo` at `init.rs:157`).
 - Knowledge: `typed.rs`'s `//!` says the box is the one drawing of a line asked, and that a list narrowed by typing is not one.
 
+**Found in its turn:** `TypedRow::drawn` draws the design's box, three rows with round corners and muted edges, the words strong one cell in and the cursor on the middle row; a typed answer, a card's words and a round's answer draw through it, and `fitted` is private to it. The CLI's prompts take it with it: `init -i`, `resolve-gate` and a round differ from the base in the boxed rows and the cursor one row higher (captures in `proof/live-screens/task-79/prompts/`). Goldens that moved, all by the box: Surco's `typed_answer/named`, `card/saying`, `card/round` and the catalog's typed rows, on the five terminal layers; no Markdown, HTML, render, engine or `tui` golden moved. Three tests beyond the list read the typed rows and follow: `console_interaction/round.rs`, `application/starting.rs`, `ui/src/prompt/round/tests.rs`. The walk's counts stand.
+
 **Fails first:** `crates/surco/src/surface/terminal/typed/tests.rs`: a typed row at 40 cells draws three rows, round corners above and below and the words between the uprights; words longer than the box keep the cursor's side in sight; in ASCII the corners are `.` and `'`. `crates/surco/src/surface/terminal/pane/tests.rs`: a typed answer under a paragraph is held with its cursor inside the box. Red at the base, which draws `> ` and the words on one row.
 
 **Acceptance criteria:**
-- [ ] Goldens of a typed answer, a card that asks for words and a round's typed answer at 60 and 80 cells, ASCII and Unicode, plain and 16-color, reviewed in the diff; the box's rows equal `design/empty.wide.txt` rows 7-9 for the same words at the same width.
-- [ ] `prompts.py`'s captures differ from the base's only in the typed rows, each a row of the inventory; the inventory's rows for the line a person types on are closed.
+- [x] Goldens of a typed answer, a card that asks for words and a round's typed answer at 60 and 80 cells, ASCII and Unicode, plain and 16-color, reviewed in the diff; the box's rows equal `design/empty.wide.txt` rows 7-9 for the same words at the same width.
+- [x] `prompts.py`'s captures differ from the base's only in the typed rows, each a row of the inventory; the inventory's rows for the line a person types on are closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- typed asked card pane catalog`, `cargo test -p yunta --test console_interaction`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-surco -- typed asked card pane catalog`, `cargo test -p yunta --test console_interaction`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Group check: Surco's pieces of a run's screen
 
@@ -2642,16 +2660,18 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - The base's frames `card.*` go from `crates/tui/goldens/screens/`, with their entry in `crates/tui/tests/screens.rs` and their builder `card` in `crates/testkit-ui/src/screens.rs`: they draw the base's card; its targets land with Task 113.
 - Blessed and reviewed: `crates/surco/goldens/{card,pane,components}/`; the CLI's card at `yunta resolve-gate` and a gate of an attached run, captured by Phase 1's `prompts.py`; `crates/cli/tests/console_interaction/card.rs` where it reads the card's rows.
 
+**Found in its turn:** a card with no keys draws no foot and no route; short of rows, nothing takes an option: the blank rows and the route go first, the question is cut to one row with its edge whole, the reason on its last row, then each option to one row, then the list counts what it hides, the keys last. `FootRow::Saying` draws the option's row, then the box with what is asked faint inside it, then a refusal, on every surface; `TypedRow::drawn` takes a placeholder for it. The base's `card.*` frames are gone with their builder. Goldens: `card/scope.*` at the four sizes written from the targets' card rows (at 120 columns the old drawing already matched: the design's card is the base's without keys or route), `desk/saying.{md,html}`, and `pane/held-card`, three, by the new order of giving way; three tests that held "the list gives way first" follow the design's order. The card's own typed line still draws the chosen option, what is asked, then the box, where the target `card-words` keeps every option with the ask faint inside the box: Task 118's. The options' drawing moved to `card/options.rs` for the line counters. The walk's counts stand.
+
 **Fails first:** `crates/surco/src/surface/terminal/card/tests.rs`: a card with no keys draws no foot and ends on its last option; a desk whose foot types words draws the asked words and the boxed typed row in place of its options, its cursor on that row. Both red at the base.
 
 **Acceptance criteria:**
-- [ ] The card's goldens equal the design's card rows of `design/scope.wide.txt` for the same data, at 120 cells, every difference one the inventory names.
-- [ ] `prompts.py`'s captures differ from the base's only in the card's rows the inventory names.
-- [ ] The inventory's rows for the card's component are closed.
+- [x] The card's goldens equal the design's card rows of `design/scope.wide.txt` for the same data, at 120 cells, every difference one the inventory names.
+- [x] `prompts.py`'s captures differ from the base's only in the card's rows the inventory names.
+- [x] The inventory's rows for the card's component are closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- card desk pane`, `cargo test -p yunta --test console_interaction`, `cargo test -p yunta-tui --test screens`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-surco -- card desk pane`, `cargo test -p yunta --test console_interaction`, `cargo test -p yunta-tui --test screens`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Task 79 (Task 77's fill and Task 79's boxed row both stand on the card)
 
@@ -2666,15 +2686,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **A list of choices** (`surface/terminal/asked.rs`, `ChoiceList`) as the palette and the round draw it (`design/work+palette.wide.txt` rows 9-19): what is typed on its first row after the pointer, `type to filter` faint where nothing is, a blank row, then the rows; a list that hides rows says how many above and how many below it; its keys out of it when a screen holds them. A list narrowed by typing is not a line asked, so it draws no box.
 - Blessed and reviewed: `crates/surco/goldens/{card,choice_list,components}/`; the CLI's round (`yunta resolve-gate` on questions) and its lists (`yunta init -i`'s adapters), captured by `prompts.py`; `crates/cli/tests/console_interaction/{round.rs,init.rs}` where they read the rows.
 
+**Found in its turn:** the list of choices is drawn as the palette's and the round's targets draw it: a first row with a muted pointer, then what was typed strong or `type to filter` faint, a blank row, the names with the descriptions three cells past the widest name and cut at the row's end, and the rows it hides counted `… n above` and `… n under` at the names' column through `Line::hidden`, which the feed's counts use too; a list with no keys draws no row of them. `narrowed` and the words `ANSWERED` and `TO_ANSWER` are gone. A round's list has no blank row; short of rows, the blank rows go first, then the questions above and under fold into the counts, then the card's question, the question being answered takes one row, `type to filter` goes, and the list's window narrows last. A scrolled list follows the row on the selection before any row that starts with the pointer, or the palette followed its filter row. Goldens: `card/ask*` at the four sizes (twelve) and `choice_list/palette.unicode-{80,60}` written from the targets; `choice_list/shapes` and the catalog on the five terminal layers blessed; no render, engine, `tui` or CLI golden moved, and the CLI's `init -i`, `new -i` and round differ from Task 80's captures in these rows alone. Two target rows are cut one or two cells short of what `width::truncate` gives at their width (`round-answered.unicode-80` row 11, `round-answered.ascii-120` row 12): the goldens keep the code's cut, and Task 115 settles the targets. The target `document-shape` sets the filter's pointer in the rows' column where the round's and the palette's set it one cell right: followed the two. `new-run`'s and `workflows`' lists are not narrowed by typing and need a list with no filter row, Phase 4's.
+
 **Fails first:** `crates/surco/src/components/choice_list/tests.rs`: a list scrolled past its first row says how many stand above it, red at the base, which says only `N more options` below; `card/round` tests: the question being answered draws its choices indented under it as the design does.
 
 **Acceptance criteria:**
-- [ ] The round's golden equals `design/ask.wide.txt`'s card rows for the same data at 120 cells, every difference one the inventory names.
-- [ ] `prompts.py`'s captures differ from the base's only where the inventory names.
+- [x] The round's golden equals `design/ask.wide.txt`'s card rows for the same data at 120 cells, every difference one the inventory names.
+- [x] `prompts.py`'s captures differ from the base's only where the inventory names.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- card choice_list`, `cargo test -p yunta --test console_interaction`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-surco -- card choice_list`, `cargo test -p yunta --test console_interaction`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Task 80
 
@@ -2690,15 +2712,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - The base's frames `desk.*` go from `crates/tui/goldens/screens/`, with their entry in `crates/tui/tests/screens.rs` and their builder `desk` in `crates/testkit-ui/src/screens.rs`; their targets land with Task 116.
 - Blessed and reviewed: `crates/surco/goldens/desk/`, `crates/render/goldens/document/desk-*`, the CLI's desk at `yunta resolve-gate` (`r`) captured by `prompts.py`, `crates/cli/tests/plan_desk.rs` where it reads the rail.
 
+**Found in its turn:** render draws every stop of the desk's rail in one untitled group, then `what it says` (`decided for you` with `d`, `out of scope`, `risks`), then `what weighs on it`; order, implies and impact left the rail, and with them Surco's `RailRow::{Pair, Order}` on every surface and render's `short_names` and `impact_paths`. A pane's title says `N tasks` on the change and `<task>, its proof` with its count of criteria. The base's `desk.*` frames are gone with their builder. Goldens: `document/desk-designed-rail.txt`, the target's rows 7 to 16, met exactly; render's `desk-{choices,proof,task,the-change}`, Surco's `desk/plan.*`, `desk/saying.{md,html}`, `pane/held-desk` and the catalog's desk rows blessed. The count beside `decided for you` still leaves out the decisions that restate a round's answers, where the desk's targets count all three: Task 116's. The walk's counts stand.
+
 **Fails first:** `crates/render/src/tests/desk.rs`: the rail of the design's plan holds, in order, the untitled group of the change and its task, `what it says` with three tallies, and `what weighs on it`; red at the base, whose groups are `steps`, untitled tallies and `left out`.
 
 **Acceptance criteria:**
-- [ ] The desk's golden at 120 cells draws the rail rows of `design/plan.wide.txt` for the design's plan.
-- [ ] The CLI's desk differs from the base's only in the rail and pane rows the inventory names.
+- [x] The desk's golden at 120 cells draws the rail rows of `design/plan.wide.txt` for the design's plan.
+- [x] The CLI's desk differs from the base's only in the rail and pane rows the inventory names.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render desk`, `cargo test -p yunta-surco desk`, `cargo test -p yunta --test plan_desk`, `cargo test -p yunta-tui --test screens`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-render desk`, `cargo test -p yunta-surco desk`, `cargo test -p yunta --test plan_desk`, `cargo test -p yunta-tui --test screens`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Task 81
 
@@ -2712,14 +2736,16 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **`FindingList`** and **`FindingRow`** (new, `crates/surco/src/components/finding_list.rs`), with `Block::Findings`: one finding a row, its mark (its severity's, or done once answered), its severity's word in a column as wide as the widest, its title cut at the row's end; the pointed row through `Line::pointed`. A terminal draws it (`surface/terminal/finding_list.rs`, new) as `design/review.wide.txt` row 10 does; Markdown and HTML as a list, with every fact. Render lists its findings through it in Task 88.
 - **A checklist's row** stands as the base draws it: the design's row (`design/receipt.wide.txt` rows 8-12) is Surco's (`surface/terminal/checklist.rs`) for the same data, a mark, the subject in the widest subject's column and what it found after it (`sweeps/gap-review-receipt.md`: "same mapping"); the rows that differ are render's, in Task 88. A golden of the design's five checks at 120 cells holds it; where the inventory finds a difference in the drawing, it is made here.
 
+**Found in its turn:** `FindingList` and `FindingRow`, with `Block::Findings`: a row is the pointer (`Line::pointed`), the mark, done once answered, the severity's word muted in the widest word's column, and the title cut at the row's end; an answer stands muted under its title, so an answered finding keeps its row. Markdown and HTML say it as a list. Goldens written by hand, `finding_list/{posted,answered}` at 84, 78 and 58 cells, the first two equal to the targets' rows; the checklist's golden `checklist/receipt.{unicode,ascii}-120` equals the design's rows and passed at once, the base drawing that row already. The catalog's seven gain the list's rows alone. The findings' page takes `FindingList` in Task 88. A checklist's pointer is drawn by its own margin, not `Line::pointed`, and the pages' targets at 60×14 cut a checklist's rows where it wraps: Phase 4's.
+
 **Fails first:** `crates/surco/src/components/finding_list.rs`'s tests: an answered finding draws the done mark and keeps its severity's word; the words line up in one column; the pointed row is filled. They do not compile at the base.
 
 **Acceptance criteria:**
-- [ ] Goldens of a finding list at 60 and 80 cells, ASCII and Unicode, plain and 16-color, and on Markdown and HTML, reviewed.
-- [ ] The golden of the design's five checks equals `design/receipt.wide.txt` rows 8-12 for the same data.
+- [x] Goldens of a finding list at 60 and 80 cells, ASCII and Unicode, plain and 16-color, and on Markdown and HTML, reviewed.
+- [x] The golden of the design's five checks equals `design/receipt.wide.txt` rows 8-12 for the same data.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- finding checklist`
+- [x] Tests pass: `cargo test -p yunta-surco -- finding checklist`
 
 **Dependencies:** Task 82
 
@@ -2736,15 +2762,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - The base's frames `confirmation.*` go from `crates/tui/goldens/screens/`, with their entry in `crates/tui/tests/screens.rs` and their builder `confirmation` in `crates/testkit-ui/src/screens.rs`: the box is one component, and the confirmations' targets (`close-run`, `field-close`) land in Phase 4.
 - Blessed and reviewed: `crates/surco/goldens/{boxed,components}/`.
 
+**Found in its turn:** a box has round corners, its words a cell in from its left upright, and keeps no cell inside its right one (the targets cut `help.unicode-60` row 5 and `setup-confirm.unicode-60` row 8 at the upright); a palette's list fills every cell between the uprights, its pointer in that cell and the selection reaching both. `ChoiceRow.key` gives the palette its three columns (what it does in 40 cells, the key in 6, the command muted) from 82 inner cells. `KeyList` is help's rows, built by `render::screen::help`, giving way as the targets do and still scrolling; its key column is 7 cells, or the widest key and two where a key leaves no cell (`pgup pgdn` makes it 11), a rule that gives both help targets at the four sizes. The base's `confirmation.*` frames are gone with their builder, a check of the walk holding every box between the rule and the legend. Only Surco's goldens moved: `boxed/{help,scrolled}`, the new `boxed/palette`, and the catalog's seven by help's rows. Left for the tasks that land each: the three columns show from 82 inner cells, so a box of 84 under 100 columns shows them against the spec's "from 100" (Task 96); the palette's keys still draw inside its box, its list carrying render's legend (Task 112); help has no tagline yet (Task 86). The walk's counts stand, in 154 s and 121 s beside other builds.
+
 **Fails first:** `crates/surco/src/surface/terminal/boxed/tests.rs`: a box's corners are the round ones and its last row the bottom edge; a palette's row in the box a terminal of 100 columns stands holds what it does, its key and its command in that order, and in the box of a terminal of 80, what it does alone. Red at the base.
 
 **Acceptance criteria:**
-- [ ] The boxed goldens at 60, 80 and 120 cells, ASCII and Unicode, plain and 16-color, reviewed.
-- [ ] The walk lays out every palette, help and confirmation it opens with the box between the rule and the legend.
+- [x] The boxed goldens at 60, 80 and 120 cells, ASCII and Unicode, plain and 16-color, reviewed.
+- [x] The walk lays out every palette, help and confirmation it opens with the box between the rule and the legend.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco -- boxed choice_list`, `cargo test -p yunta-tui --test screens --test walk`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-surco -- boxed choice_list`, `cargo test -p yunta-tui --test screens --test walk`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Task 83
 
@@ -2762,15 +2790,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - The words are reworded here with the drawing, in the files it touches, rather than in Task 88.
 - Blessed and reviewed: `crates/render/goldens/{stats,graph}/`, `yunta stats` and `yunta graph` captured by Phase 1's `prints.sh`; `crates/cli/tests/{stats_cmd.rs,graph_cmd.rs}` where they read those rows.
 
+**Found in its turn:** a run's numbers put the facts first (`task cost` reading `…, 1 task done`), then `where its time went`, a bar across the whole width with a legend whose parts open with `●`, then `who spent it`, a role a row, the most first, its name in 14 cells, a bar of 28 on a track of 30 (`SPENT_BAR`) and its tokens muted; what the printed page adds, the rails and the nodes, comes after. The graph's page is headed `<workflow> · the nodes it runs, in order`, the mode at the far end or `as written`, every box holding its id alone; `Graph.run` became `mode`, and `graph::drawn` names nodes by their place and leaves out an edge a longer chain already makes. Every figure of the design's run equals its target's: 65% at work, 37% of rework, 96% cached, the tokens and every role. `yunta graph` prints Mermaid or DOT, never the page, and keeps its `--run` labels; `yunta stats` changes as said (`stats/run.*` blessed: the comma, `who spent it` above the nodes; `graph/{as-written,chained,of-a-run}.*`: the headline, the labels gone); `stats/designed.*` and `graph/designed.*` are new, the first written by hand from the targets' rows. The design's graph never drew its diagram: `@` in an id defeats Surco's parser, and the frozen workflow carries the edges a node reads along, which the page's diagram leaves out. The targets `graph` and `workflow-graph` hold the recording's diagram, a chain, where the workflow fans `implement` out to three nodes: the code's rows equal the target's once trimmed, seventeen columns to the right, centred over the real fan-out; Task 111 settles the targets against the workflow's own diagram. The graph no longer moves with a node's news. At 58 cells the nodes' row `waiting on you` wraps, as at the base; `nodes:` and `rails:` keep the printed page's style. The walk's counts stand.
+
 **Fails first:** `crates/render/src/page/stats/run/tests.rs`: the headings read `where its time went` and `who spent it`; the time bar takes the line's whole width and each part of its legend opens with a mark; the runners' bars stand in one column. `crates/render/src/page/graph/tests.rs`: a run's graph is headed by the design's headline and labels each node by its id. Red at the base.
 
 **Acceptance criteria:**
-- [ ] The stats and graph goldens differ from the base's only in rows the inventory names; `prints.sh`'s captures of `yunta stats` and `yunta graph` likewise.
-- [ ] The inventory's rows for the two bars, a run's numbers, the graph's drawing and its headline are closed.
+- [x] The stats and graph goldens differ from the base's only in rows the inventory names; `prints.sh`'s captures of `yunta stats` and `yunta graph` likewise.
+- [x] The inventory's rows for the two bars, a run's numbers, the graph's drawing and its headline are closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render -- stats graph`, `cargo test -p yunta --test stats_cmd --test graph_cmd`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-render -- stats graph`, `cargo test -p yunta --test stats_cmd --test graph_cmd`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Task 84
 
@@ -2779,7 +2809,9 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 **Estimated scope:** M
 
 ### Group check: the components the design redraws
-- [ ] The suite's groups green; every golden changed is one Task 79 to Task 85 names, its diff reviewed; Phase 1's captures differ from the base's only where those tasks name; the walk's counts equal the base's.
+- [x] The suite's groups green; every golden changed is one Task 79 to Task 85 names, its diff reviewed; Phase 1's captures differ from the base's only where those tasks name; the walk's counts equal the base's.
+
+**Found in its turn:** run twice: the first run met a disk under the pool's floor (19 GB free where 24.7 GB stays free), where every group from `engine-4` on failed on `NoRoom` and `crates/cli/tests/session_ends.rs` waited three hours on a session that never started; the trap on a full disk says so now. With room: the gate's short steps pass; the suite's groups hold 5,150 tests, none failing, none aborted; the walk reaches 63,842 states, 41 palettes and 72 helps, and draws 6,683 screens at each size, in 88 s and 87 s. Against the base's digests 69 goldens changed, each one a task of this phase or the last names, 12 are gone (the base's `card`, `confirmation`, `desk`, `help`, `palette` and `run` frames at their two sizes) and 529 are new. Of 159 captured views 11 differ from the base's, each where a task names: the node's printed page (its feed), the cut that no longer ends inside a number (`needs` at 120 columns: `until…`), the typed line in its box (`init -i` twice, `resolve-gate`, the round), the list of choices with its filter row (`new -i`), and a run's screen under 102 columns with no side, as the design draws it at 80 (`review` at a terminal, twice).
 
 ### Task 86: the keys' words, and what a screen notes: the legends, the far pair, help's rows, the palette's rows and the sentence for an answer recorded
 
@@ -2790,19 +2822,47 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **The sentence for an answer recorded** (new in `screen/run.rs`), one per kind of option: `Recorded: grant. The session goes on with the wider scope.`, `Recorded: retry. A fresh attempt starts from the run's tree.`, `Recorded: approve. On to \`pr\`.`; `Nothing recorded. The run stays waiting on these questions.`; what leaving a run says (`The run keeps going: no engine lives in this window.`, that it waits, that it ended); a decision answered elsewhere, and by whom, in the log's words.
 - `over_every_stage` stays for the stages Phase 4 moves; the run's stage and those over it take `anywhere()` from Task 92.
 
+**Found in its turn:** render owns the keys' words and what a screen notes: `screen::anywhere()` (`/ anything · ? keys`); `run_legend` from what the scene offers (`RunKeys`, `Along`, `Quit`, `Leaving`) and whether the run leads; the legends of a card, a round, the desk and a confirming desk; help's tagline and `help_over_a_run`; `palette_legend`; `recorded`, `NOTHING_RECORDED`, `answered_elsewhere` in the log's words; the titles `what do you want to do?` and `keys`. `command::does` and `effect` say the palette's words, one const each, and the pages of the receipt, `init`, `new`, cancel, the gate's pull request and a refusal call them: `write the receipt`, `verify its evidence`, `close it for good`, `check adapters, git, forge, packs`, `follow it as it moves`. The targets `palette` and `field-palette` word two acts that show one command, not one act twice: over the field `follow it as it moves` is what `enter` and the command do; over a run `the run's whole chronicle` is the row of the act Task 110 lands. No target holds the task's example legend with both `f` and `g`: with `f follow it` the legend leaves `g` out, as `node-working` draws it. The sentences no target gives (a recorded answer for each option the design does not show, a gate that finishes or goes back, leaving a run that waits or that ended) were each held to the engine's code, eight of them corrected by it (a rejected gate fails and claims no reroute; a promotion closes the run and a new one goes on; a cap is passed until the run next stops), and are the lead's to show the person. Goldens, the next steps' words alone: render's `closing/` (9), `open/` (5), `status/` (36), `initialized/` (9), `gate/pull-request.md`; the engine's `receipt/{finished,failed,no-baseline}.md`, `forge/{pull-request,gate}.md`; no line of `docs/` quotes them. The run's stage, forced by the new signature, says `j k node`, its acts, `s stats`, `g graph` and `q quit` until Task 94 gives `q` the field; the pages over a run drop `q leaves yunta`; stats keeps `f every row` until Task 111. The CLI's prompts keep their own legends, so a card's keys are worded twice until Tasks 113 to 118. The walk opens 51 helps where it opened 72, one for each distinct legend now that a run's legend names no node; its 63,842 states and 41 palettes stand. `a_promoted_runs_graph_moves_onto_its_successor` (`crates/ui/tests/stats_graph.rs`) failed once beside the batch on `surfaced.is_none()` and passed alone: stressed apart, before the group's check.
+
 **Fails first:** `crates/render/src/tests/screen.rs`: the legend of a run at work while it leads reads the design's row; help's first row is the tagline; `anywhere()` holds `/` and `?` with the design's words; the sentence recorded for a grant is the design's. Red at the base.
 
 **Acceptance criteria:**
-- [ ] Every word of these rows is in render and nowhere else (`cargo xtask smells --check`).
-- [ ] The goldens and captures that change are the ones the inventory names; `crates/ui/tests/walk.rs`'s `MUST_REACH` and `crates/cli/tests/application.rs`'s awaited words follow the words they quote.
+- [x] Every word of these rows is in render and nowhere else (`cargo xtask smells --check`).
+- [x] The goldens and captures that change are the ones the inventory names; `crates/ui/tests/walk.rs`'s `MUST_REACH` and `crates/cli/tests/application.rs`'s awaited words follow the words they quote.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render -- screen command`, `cargo test -p yunta-ui --test walk --test palette`, `cargo test -p yunta --test docs_sync --test application`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-render -- screen command`, `cargo test -p yunta-ui --test walk --test palette`, `cargo test -p yunta --test docs_sync --test application`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Group check: the components the design redraws
 
 **Files likely touched:** `crates/render/src/{screen.rs,screen/run.rs,command.rs}`, `crates/render/src/tests/screen.rs`, `crates/render/goldens/status/`, `docs/guide.md`
+
+**Estimated scope:** M
+
+### Task 86a: a question answered at the engine's terminal lands with its answer
+
+**Description:** an engine that asks at its own terminal writes the question and its answer once the answer is in hand, and wrote them as two commits (`gate_waiting`, then `gate_resolved`). A reader that looks between the two finds a gate standing with no answer: the frame says the run needs the person, and the application calls them for a question already answered. Found by a test of Phase 2 that fails under contention (`a_promoted_runs_graph_moves_onto_its_successor`, 19 runs of 400, each on `Some(CallThePerson)`); the run that turned was the test's own promoted run, at the batch that ended on `gate_waiting`.
+- **The pair is one commit.** `Store::append_together_at` (and `AsyncStorage::append_together`) writes several drafts in one transaction, each row and its run's head through the one `append_row` every append takes; `RunLog::record_decided` drafts the question and the answer and appends them together; `RunCtx::emit_decided` is what the engine's sites call.
+- **Every site that asks at the terminal** takes it: an escalation, an internal gate, a budget's cap, a console gate, a loop's escalation.
+- A reader of the log, in this process or another, finds the question and its answer or neither; a crash between the two no longer leaves a question standing that was answered.
+- Knowledge: the `//!` of `crates/storage/src/store.rs` (events appended together are seen all or none) and of `crates/engine/src/run_log.rs`; the test's `Reached by:` names the five sites.
+
+**Found in its turn:** the cause was not in the fold, the follower or the frame, which read the log truly: the log held the question alone for an instant. Nothing outside the test's bench was read. A first form made every `emit`'s future larger (2,208 to 2,840 bytes) and overflowed the stack of `follow_build`'s `a_promoted_run_hands_over_the_checkout_it_moved_to`; the storage's future is boxed, and `emit` takes 2,144 bytes, `emit_decided` 2,288. Stressed with the same command, 16 processes of 25 runs: 19 of 400 before, none of 400 after, and none of 400 for the test's sibling on stats. The branch `feature/agentic-flows` changes four of the five sites (`internal_gate.rs` most of all): the person chose to keep the correction here, and its patch stands apart in the plan's `fixes/` for whoever joins the branches. Left: while the scripted answer is given the engine's registry shows the run asking at its terminal for under a millisecond; a look that lands there calls the person by the rule, and the test's helper would refuse it (none in 960 runs); the helper says so once it accepts that call. The words' socket of a run (`/tmp/yunta-<uid>/<run id>.sock`) is shared by processes that give two runs one fixed id, as a stress of one test does; it carries what sessions said and moves no standing.
+
+**Fails first:** `crates/engine/tests/asking.rs`, `a_question_answered_at_the_terminal_lands_with_its_answer`: the log read after every commit, through the engine's observer, never ends on a question with no answer. Red: one reading ends `["asking_opened", "gate_waiting"]`.
+
+**Acceptance criteria:**
+- [x] No reading of the log between two commits holds a question answered at the terminal without its answer.
+- [x] The promoted run's tests pass under contention: none of 400.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-engine`, `cargo test -p yunta-storage`, `cargo test -p yunta-ui` (every target but `walk`), `cargo test -p yunta --test parked_runs`
+- [x] `python3 .plans/yunta-tui/tools/stress_binary.py <stats_graph's binary> 16 25 <folder> a_promoted_runs_graph_moves_onto_its_successor`
+
+**Dependencies:** Task 86
+
+**Files likely touched:** `crates/storage/src/{store.rs,async_storage.rs}`, `crates/engine/src/run_log.rs`, `crates/engine/src/run/{ctx.rs,escalation.rs,internal_gate.rs,budget.rs,console_gate.rs,loop_exec/escalate.rs}`, `crates/engine/tests/asking.rs`
 
 **Estimated scope:** M
 
@@ -2814,19 +2874,45 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **A decision's gist** (`crates/render/src/state.rs:148`): `a task asks to touch a path outside its scope`, `a task departs from what the plan decided`, `regression: …`, the ship's sentence, a round's `node \`grill\` asks three questions: nothing is recorded until every one is answered`.
 - Blessed: the CLI's card and the run's page that print the same (`crates/render/goldens/{status,gate,document}/`, `prompts.py`'s captures), and `crates/cli/tests/parked_runs/cap.rs`, `crates/engine/tests/failed_node_retry.rs` where they read the words.
 
+**Found in its turn:** render owns a card's question (`claim::question`, `escalation::question`) and its edge, the node's or the run's handle where there is none; each option's words on both menus (grant, deny, retry, the loop's retry, the budget's continue, continue-work, accept, send-back), the departure's facts `the plan decided` and `the session says instead`, and the gists of a scope claim, a round, a red check and a departure; `TokensSpent` names the run by its handle. The gist of a scope claim is one, the design's `a task asks to touch a path outside its scope`: the targets `node-needs-you` and `still-unread` stand at the cut of `scope` and `card-words` and kept the base's gist from the dump on their gist rows, which the task that lands them corrects. `abort` reads `Pause here: nothing runs; this decision stays open` on every menu, the departure's too; the `departure` target's row dropped `Pause here:` and is corrected the same way. The ship's approve, which needs the forge and the repository, is Task 87a. No golden moved: the fixtures' logs store their options' words, and stored words still win; `older_words.rs` changed in the two checks that quote words derived for lines that stored none, its stored-word checks holding. The round's question `{node} asks` and its handle are Task 115's; the desk keeps the claim as its question. The sentences no target gives, each true of the engine's code, are the lead's to show the person: the plural forms of grant, deny, accept and send-back for several tasks, continue-work's, the retry that waits on something outside the tree, the questions and gists that count tasks, a round's `asks 1 question`.
+
 **Fails first:** `crates/render/src/tests/offers.rs` and `cards.rs`: the scope's grant reads the design's name and words; a failure's question reads `` `tests` failed. What now? ``; the scope's gist is the design's. Red at the base.
 
 **Acceptance criteria:**
-- [ ] Every one of these phrases has one owner in render, and the CLI prints it where it prints the same thing.
-- [ ] The inventory's rows for a card's words and a decision's gist are closed; the captures differ only where they name.
+- [x] Every one of these phrases has one owner in render, and the CLI prints it where it prints the same thing.
+- [x] The inventory's rows for a card's words and a decision's gist are closed; the captures differ only where they name.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render -- offers cards claims retry`, `cargo test -p yunta-render --test older_words`, `cargo test -p yunta --test parked_runs`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-render -- offers cards claims retry`, `cargo test -p yunta-render --test older_words`, `cargo test -p yunta --test parked_runs`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Task 86
 
 **Files likely touched:** `crates/render/src/{offers.rs,claim.rs,state.rs}`, `crates/render/src/blocks/{failure.rs,decision.rs}`, `crates/render/src/tests/offers.rs`
+
+**Estimated scope:** M
+
+### Task 87a: an option says what lies ahead of it: the pull request a node opens, and on which repository
+
+**Description:** the ship's approve reads ``approve  On to `pr`: opens the pull request on github eulke/yunta`` in the design, and render knew of an option only the node it leads to. Found by Task 87.
+- **`yunta_core::ahead`** (new): `Ahead` says what a node an option may lead to does that its name does not say (`OpensPullRequest { repo }`, `LeftOut(Because)`), and `NodesAhead::of` reads it for every node from the run's frozen workflow, its config's forge and the nodes the run leaves out. The log holds none of it, and no event gains a field.
+- **It travels in what a decision asks**: `DecisionAsked`, filled where the engine frames an asking, then `WaitingDecision`, `DecisionPut`, render's `escalation::Decision`, the run's page and the CLI's closing block, so the application's card and the CLI's say the same.
+- **Render's words read it**: `option_words`, `decision_options` and the sentence recorded for an approve (``On to `pr`.``). An option that leads to a node of another kind says ``On to `<node>` `` and nothing it does not know; one that leads past a node the run leaves out says so.
+
+**Found in its turn:** a `pull_request` node with no forge declared is left out of the run or refuses it before it starts, so it never stands ahead of a decision as one that opens anything: the option then says ``Resolve the gate: `pr` is not in this run: the project declares no `forge` ``, and its recorded sentence ``The gate finishes; `pr` is not in this run.`` No golden moved. A program's JSON of a decision reads no workflow and says nothing of what lies ahead: whether it should is the person's to say, since every interface is meant to hold the same facts. `ask_human` in the engine and the recorded sentence's helper in render were split to stay under fifty lines; core's crate map names `ahead`.
+
+**Fails first:** `crates/core/tests/ahead.rs`: a workflow whose gate leads to a `pull_request` node, under a config that declares a GitHub repository, reads `OpensPullRequest` with it; one left out for lack of a forge reads `LeftOut`. Render's `tests/offers.rs`: the ship's approve reads the target's row. Red: ``On to `pr`: resolves this gate, and settles every finding it shows``.
+
+**Acceptance criteria:**
+- [x] The ship's approve reads the design's row in the application's card and the CLI's.
+- [x] No event of the log gains a field.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-core --test ahead`, `cargo test -p yunta-render -- offers`, `cargo test -p yunta-engine`, `cargo test -p yunta-api`, `cargo test -p yunta-ui` (every target but `walk`), the CLI's groups
+
+**Dependencies:** Task 87
+
+**Files likely touched:** `crates/core/src/{ahead.rs,lib.rs,port/person.rs}`, `crates/core/tests/ahead.rs`, `crates/engine/src/run/asking.rs`, `crates/api/src/{answers.rs,run/page.rs}`, `crates/ui/src/prompt/{decision_put.rs,decision_card.rs}`, `crates/render/src/{offers.rs,escalation/decision.rs,document/decision.rs,screen/run.rs}`, `crates/cli/src/{commands/drive.rs,surface/closing/mod.rs}`
 
 **Estimated scope:** M
 
@@ -2837,15 +2923,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **The checklist and the receipt** (`page/receipt.rs`): the design's five rows (`1 of 1 green, red before the work`, `cargo test --workspace still passes`, `6 files, 2 of them granted by you`, `4 findings, 4 answered`, `intact`), then `cost`, `changed` and `pull request` under them as the receipt's pane lays them out, and the gist `every criterion green, every finding answered, the log's chain intact`, which the receipt's scene draws under its ribbon, from the ledgers Phase 1 made. A printed receipt (`yunta receipt`, `receipt.md`, the pull request's body) takes the same rows in the same order, its `run` row staying first and its headline keeping `receipt of`; it prints no gist; and it keeps on each row, after the design's words and the separator, each fact the inventory leaves to the printed page (`intact · 342 events, hash-linked, replayable`; the cost's split in and out; the baseline's regressions, comparisons, suite and hash; the review's runners); the criteria row counts the task's criteria and says `red before the work` where the task's check before the work (`TaskRecord::checked_before`, Task 41c) has each of them red, the guards counted apart (`2 guards green`, after the separator on a printed receipt); the ship's line `4 findings, 4 answered · 1 task, 1 criterion green`. The checklists of doctor and verify (`page/checklist.rs`) draw through the same row.
 - Blessed and reviewed: `crates/render/goldens/{document,closing}/`, `crates/engine/goldens/{receipt,forge}/` (the receipt and the pull request's body), `crates/cli/tests/receipt_cmd.rs` where it reads them; `docs/guide.md` where `docs_sync` holds its quotes.
 
+**Found in its turn:** the findings' page of a run carries the design's heading (answered of posted, then the nodes that posted) and its findings through Surco's `FindingList`, `fixed: <why>` under an answered row, then each one's place, detail and answer. The receipt's rows say the design's words in the pane's order on the screen and in print (`Told::{OnScreen, Printed}`, `gist`, `verdicts`), a printed receipt keeping after the separator each fact the inventory leaves to it. Core's `Receipt` gains what the rows count (the criteria red before the work, the guards, the grants, the findings, the pull request), derived in replay; it publishes no schema, and `cargo xtask schema` moves nothing. The printed baseline row follows its print target, the suite's command in a code span, where the screen sets it plain: one phrase on two surfaces (`` `make test` still passes · 0 regressions across 2 comparisons … ``, where it read `0 regressions across 2 comparisons …`). The tests stand in `page/{findings,receipt}/tests.rs`: aligned rows under `src/tests/` read as production to the smell counters. Goldens, the rows' order and words alone: the engine's `receipt/{finished,failed,no-baseline}.md` and `forge/pull-request.md`, each equal to its print target. Phrases no target gives, for the lead to show: the guards' counts, the cost with no cost per task, `{p} of {n} criteria green`, the findings' heading's tail by severity and `settled`, and ``fixed: {why} · by `{node}` ``. The walk's counts stand: 63,842 states, 41 palettes, 51 helps, 6,683 screens at each size.
+
 **Fails first:** `crates/render/src/tests/findings.rs`: the heading of one finding posted by three reviewers, none answered, reads the design's, and its rows are a `FindingList`; the receipt's criteria row reads `1 of 1 green, red before the work`. Red at the base.
 
 **Acceptance criteria:**
-- [ ] The inventory's rows for findings, the checklist and the receipt are closed.
-- [ ] `yunta receipt`, `receipt.md` and the pull request's body differ from the base only in the rows the inventory rewords (each keeping after the design's words what the inventory leaves to the printed page), in the pane's order of rows, and in their next steps' words, listed for Checkpoint C.
+- [x] The inventory's rows for findings, the checklist and the receipt are closed.
+- [x] `yunta receipt`, `receipt.md` and the pull request's body differ from the base only in the rows the inventory rewords (each keeping after the design's words what the inventory leaves to the printed page), in the pane's order of rows, and in their next steps' words, listed for Checkpoint C.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render -- findings receipt`, `cargo test -p yunta --test receipt_cmd --test docs_sync`, `cargo test -p yunta-engine --test receipt`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-render -- findings receipt`, `cargo test -p yunta --test receipt_cmd --test docs_sync`, `cargo test -p yunta-engine --test receipt`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Task 87
 
@@ -2854,7 +2942,9 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 **Estimated scope:** M
 
 ### Group check: render's phrases of a run's screen
-- [ ] The suite's groups green; every golden and capture that changed against the base is one Task 86 to Task 88 names, each reviewed; `cargo xtask smells --check` and `cargo xtask docs --check` pass.
+- [x] The suite's groups green; every golden and capture that changed against the base is one Task 86 to Task 88 names, each reviewed; `cargo xtask smells --check` and `cargo xtask docs --check` pass.
+
+**Found in its turn:** the gate's short steps pass, the schema's among them; the suite's groups hold 5,147 tests, none failing, none aborted; the walk reaches 63,842 states, 41 palettes and 51 helps, and draws 6,683 screens at each size (110 s and 119 s under a load of 19 and 10). Against the base's digests 141 goldens changed, each one a task of this phase or the last names, 12 are gone and 529 are new. Of 159 captured views 67 differ from the base's and 61 from the last check's, every line one of this group's: the next steps in the palette's words (`close it for good`, `write the receipt`, `verify its evidence`, `check adapters, git, forge, packs`, `start a new run`, `follow it as it moves`), in the pages and in a program's JSON (`why`); retry's words and the retry that waits on the outside (`label`, `tradeoff` in JSON too); a card's edge, the node alone; a round's gist (`asks 1 question`, JSON's `said`); the receipt's rows in the pane's order (`scope  no file touched`, `event chain  intact · 8 events, hash-linked, replayable`); a run's legend (`j k node`). `yunta receipt --json` gains fields, none lost: the criteria's `tasks`, `proving`, `proved`, `red_before`, `guards`, `guards_green`, the scope's `granted`, and `findings` with `posted` and `answered`.
 
 ### Task 89: `ScrolledTo` in `Scroll`
 
@@ -2864,13 +2954,15 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - The desk's pane (`prompt/plan_desk.rs:270`), the one caller of `top()`, reads its row.
 - Knowledge: `scroll.rs`'s `//!` says the two places a region stands at.
 
+**Found in its turn:** `ScrolledTo { End, Row(usize) }` is what `Scroll` keeps in place of `top`: `sight()` maps `End` onto `Sight::at_the_end()` and a row onto `Sight::from_line`; `End`, and any key that reaches the last first line laid out, go to `End`, every other key to a row; a key does nothing on a region the last surface showed whole. `top()` is gone, the desk reading `sight().top`. Two held asserts of `crates/ui/tests/scroll.rs` compared `sight.top` with the `most` the base kept, and now say the first row shown: the same behavior, read from what the region keeps. `Scroll::at_the_end()` is not made: nothing opens a region at its end until a pane holds a feed, and it would be dead code; Task 97 makes it. The run's stage takes the arrows for its nodes, so the new test steps back with `PageUp`. The walk reaches 53,686 states by this task alone, where it reached 63,842: a page at its end is one state however long it grew, where each line `End` had reached was a state of its own.
+
 **Fails first:** `crates/ui/tests/scroll.rs`: a region at its end that grows between two surfaces' `Laid` is still at its end; `PageDown` onto the last row goes to its end, and `Up` from there to a row. Red at the base, where `End` goes to a `most` the growth left behind (`scroll.rs:70-82`).
 
 **Acceptance criteria:**
-- [ ] Every stage that scrolls a page scrolls it as before: the tests `crates/ui/tests/scroll.rs` held before this task pass unchanged.
+- [x] Every stage that scrolls a page scrolls it as before: the tests `crates/ui/tests/scroll.rs` held before this task pass unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test scroll`, `cargo test -p yunta-ui --lib prompt`
+- [x] Tests pass: `cargo test -p yunta-ui --test scroll`, `cargo test -p yunta-ui --lib prompt`
 
 **Dependencies:** Group check: render's phrases of a run's screen
 
@@ -2888,14 +2980,16 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **`yunta_testkit_ui::screens::run`** (new module, where Task 76 deleted the base's `run` builder): the application opened on a target's cut, taken by the target's name from `yunta_testkit_ui::cut::TARGET_CUTS` (its runs and seqs, registry, node pointed at and keys pressed), loaded through `Cut::of_target` and driven as Phase 2's helpers drive. Every later test of a scene builds its state from a target's name.
 - Knowledge: `lead.rs`'s `//!` says who leads and how it is given back; `run.rs`'s `//!` drops the base's following.
 
+**Found in its turn:** `crates/ui/src/stage/run/lead.rs` holds `PointedBy<T>` (`TheRun`, `ThePerson`), the node pointer's rule, the finding pointer's (the first with no answer, else the last) and `RunStage::leads()`. `j`, `k` and `enter` take the node pointer, so a picked page and the trail agree; `f` gives both pointers back and drops a picked page; the pointers are placed again as the run's news fold and on coming back from the field. The trail names the pointed node always, and `run_legend` takes `leads()`. One case the rule did not say: a run that waits on a person where no node says so itself points at the node its pause names (the menuless escalation of `standstill` names `approve` in its claim alone). The pane is not in `leads()` yet: the pane is still Phase 2's page, which opens at its head, and the CLI's tests at a terminal wait for that head at 80×24; opened at its end it would hide it. The pane joins `leads()` when it holds a feed (Task 97): it opens at its end, scrolled back it is the person's, and `f` gives the three back. The test kit's `screens::run::{opened, RunScreen}` opens the application on a target's cut by the target's name and presses its pointed node and keys (`pressed`, `went_on`, `Cut::goes_on`); it does not yet apply a cut's `asked` or `goes_on_to`, which the first task that needs them adds. A probe held the trails of the 41 targets of a run's screen to the rule: all match but `receipt` and `reported`, whose trail names the receipt's scene (Task 108). Tests that held the trail ending at the handle, or the pointer on the first node, follow the rule: `scroll.rs`, `decision_stage.rs`, `followed.rs`, the walk's run-page key, the CLI's `interface/{start,run}.rs`; `page.rs`'s `followed_on` is `page_turned`. No golden moved. The walk: 55,574 states (63,842 before the group; Task 89 alone 53,686, this task adds 1,888), 41 palettes, 59 helps (51: the eight with `f follow it`), 5,460 screens at each size (6,683), in 75 s and 71 s.
+
 **Fails first:** `crates/ui/tests/lead.rs` (new), on the cut of `findings` (the design's run, three reviewers at work): the node pointer stands on `review@reviewer` and stays there as `conform` moves; `j` takes it to the next node and the next event leaves it there; `f` brings it back to the node at work; the trail names the pointed node. Red at the base, where the pointer falls to the first node.
 
 **Acceptance criteria:**
-- [ ] A test for each case of the rule: a node waiting on the person, the first at work kept while it works, the last that ran, and a finding pointer on the first unanswered.
-- [ ] `crates/ui/tests/run_stage.rs` passes with the pointer's moves it holds rewritten to the rule.
+- [x] A test for each case of the rule: a node waiting on the person, the first at work kept while it works, the last that ran, and a finding pointer on the first unanswered.
+- [x] `crates/ui/tests/run_stage.rs` passes with the pointer's moves it holds rewritten to the rule.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test lead --test run_stage`
+- [x] Tests pass: `cargo test -p yunta-ui --test lead --test run_stage`
 
 **Dependencies:** Task 89
 
@@ -2911,15 +3005,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **The run's stage draws by scene** from this task on: each arm draws what Phase 2 drew (the run's page, or the pointed node's) until its family's task replaces it.
 - Knowledge: `scene.rs`'s `//!` holds the rule that every closed set has a screen, the lint and the test that hold it, and that no `if let` or `matches!` decides a scene.
 
+**Found in its turn:** `scene(run, frame, pointed, leads)` in `crates/ui/src/stage/run/scene.rs` says which scene stands, every closed set it reads matched by name (`RunPhase`, the run's and the node's `Standing`, `WaitingOn`, `PauseReason`, `Menu`, `NodeKind`, `Failure`, `TaskCause`) under `#![deny(clippy::wildcard_enum_match_arm)]`: a wildcard added there fails clippy (`wildcard match will also match any future added variants`), seen once. It takes the pointed node's frame, so no case stands for a node the run does not hold; the menu is the awaited decision's, and only one read for the run's present pause. The run's page draws through a `match` on the scene in `page.rs`, each arm drawing what the stage drew; `State::scene()` lets a test read it. The table of scenes and four targets disagreed, and the targets govern, the spec's four rows brought to them: a pause not yet read, an ask that could not be read and an answer awaiting its resume draw as their node at work draws, the board where it is a loop (`still-unread`, `still-answered`); a gate that shows a plan is the desk where the change it counted holds no file and a card with the change where it holds files, the plan one `r` away (`RunInView::change_counted_at`: `approve-plan` counted none, `ship` seven); what a pointed node shows does not depend on who points, so the node a failed, promoted or broken run's end names shows the end and any other node its own scene (`lead::node_led`); `ChildPaused` is a standstill of the parent, the child's screen being the application following the child. `promoted` with the person leading is not asserted yet: the stage still moves onto the successor, which Task 109 changes; `broken` and `failed` hold the rule. A scope owed, a capped loop and a departure owed behind a failure's menu give the card their grounds. Two rules written twice have one owner each: `Failure::departures_owed()` in core, read by render's gist and claim; `RunInView::awaited_decision()` and `awaited_round()`, read by the stage's offers and the scene. The test kit applies a cut's `asked: NotYet` (`RunScreen::handed`) and presses a pointed node with `j` so the person holds the pointer. No golden moved; the walk's counts stand.
+
 **Fails first:** `crates/ui/src/stage/run/scene/tests.rs` (new): a scene for every `Standing` of the pointed node (`Standing::ALL`), each the arm the spec's table names; `crates/ui/tests/scenes.rs` (new): the cut of each target of a run's screens (the design's run at `round`, `work`, `board`, `desk`, `scope`, `findings`, `failure`, `ship` and `receipt`, and each small run's) makes its row's scene. They do not compile at the base.
 
 **Acceptance criteria:**
-- [ ] A wildcard arm added in `scene.rs` fails `cargo clippy` (seen once, then taken out).
-- [ ] Every screen draws as after Phase 2: `crates/ui/tests/run_stage.rs` and the walk pass unchanged.
+- [x] A wildcard arm added in `scene.rs` fails `cargo clippy` (seen once, then taken out).
+- [x] Every screen draws as after Phase 2: `crates/ui/tests/run_stage.rs` and the walk pass unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --lib scene`, `cargo test -p yunta-ui --test scenes --test run_stage --test walk`
-- [ ] `cargo clippy -p yunta-ui --all-targets -- -D warnings`
+- [x] Tests pass: `cargo test -p yunta-ui --lib scene`, `cargo test -p yunta-ui --test scenes --test run_stage --test walk`
+- [x] `cargo clippy -p yunta-ui --all-targets -- -D warnings`
 
 **Dependencies:** Task 90
 
@@ -2928,7 +3024,9 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 **Estimated scope:** M
 
 ### Group check: the scene and the lead
-- [ ] The suite's groups green; the walk's states counted against the base's, its time recorded; every golden equal to the base's or named by an earlier task.
+- [x] The suite's groups green; the walk's states counted against the base's, its time recorded; every golden equal to the base's or named by an earlier task.
+
+**Found in its turn:** the gate's short steps pass; the suite's groups hold 5,170 tests, none failing, none aborted; the walk reaches 55,574 states, 41 palettes and 59 helps, and draws 5,460 screens at each size, in 77 s and 72 s (63,842 states and 6,683 screens at the last group: a page at its end is one state however long it grew, Task 89). The same goldens differ from the base's as at the last check: 141 changed, 12 gone, 529 new, none by this group. Of 159 captured views two differ from the last check's, `review` at a terminal twice, in the trail alone, which names the pointed node (`yunta › <handle> › approve-plan`, Task 90).
 
 ### Task 92: a run's screen in its frame: the tally, the attention row, the legend and the note
 
@@ -2942,14 +3040,16 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - `crates/render/src/watched/mod.rs`'s attention row stays the CLI region's; the application's comes from render's words for it (`watched::needing`, new), which `framing` calls.
 - Knowledge: `followed_runs.rs`'s `//!` says that every stage frames itself through `framing`, and why a typed line takes the key away.
 
+**Found in its turn:** `FollowedRuns::framing(Standpoint, now)` (`crates/ui/src/followed_runs/framing.rs`) hands the tally and the attention row: the tally counts the field's open runs that need the person and that stalled; the attention row comes from render's `watched::needing` (the handle, the gist, `a go there`, no key where a line is typed). The run's stage frames itself in `stage/run/frame.rs`: tally, attention, the scene's legend with `anywhere()`, and the note (`Notice`: a refused act under `✓`, a failed one under `✗`, a remark under its weight's mark, `Weight::mark`); `drawn.rs` draws the note in the attention row's place. The targets ask a third case of where the run's own decision stands, which the list's text gave as yes or no: `ItsDecision::{InSight, InItsPane, OutOfSight}`, since on `still-unread` and `standstill` the run leads, its decision is the pane's and not shown yet, and the row names another run. `node-needs-you` is held to the design's gist and not to its stale row; `still-unread`'s attention row names another run and needs no correction, its gist row alone does. Remarks are said one a key and never take the place of a note that stands. The test kit's cuts had no project configuration, so a run's screen stood over the set-up and followed no field: `cut.rs` writes one where none came. The walk opened help only where `?` stood in the legend, which now stands among the far keys: it reads them too. Left for the tasks that follow: `/` and `?` never reach the stage, so a note stays under the palette or help (Task 93); the layout keeps the row above the legend only while something stands in it, where the conventions keep it at every size (Task 96); a box can cover the attention row at 24 rows, and the walk skips screens with a box (Task 112); `card-unread` draws no attention row, its scene being work until Task 103 counts its decision as in sight. No golden moved; the CLI's region stands. The walk: 72,623 states (55,574 before: the tally and the attention row say the field under the run, so states it merged are told apart; with those rows left off it reaches 55,562), 41 palettes, 60 helps, 8,051 screens at each size (5,460), in 113 s and 109 s; its bound is raised to 95,000 by the person's standing rule.
+
 **Fails first:** `crates/ui/tests/frame.rs` (new): with the cut of `failure` and the home's other runs followed, the tally counts them; pointing another node (the run not leading) puts the decision in the attention row with `a go there`; a run asked at its terminal is counted and never named; the palette open over the run leaves the attention row with no key; a refused act's note stands through a piece of news and goes at the next key; a remark kept for the run is the note once, and gone after the next key. Red at the base.
 
 **Acceptance criteria:**
-- [ ] The walk's layout checks hold the attention row above the legend on every state, with the note in its place where one stands.
-- [ ] No stage but the run's composes the frame yet; stats, graph and the field draw as after Phase 2.
+- [x] The walk's layout checks hold the attention row above the legend on every state, with the note in its place where one stands.
+- [x] No stage but the run's composes the frame yet; stats, graph and the field draw as after Phase 2.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test frame --test run_stage --test stats_graph`, `cargo test -p yunta-tui --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test frame --test run_stage --test stats_graph`, `cargo test -p yunta-tui --test walk`
 
 **Dependencies:** Group check: the scene and the lead
 
@@ -2965,14 +3065,16 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - `docs/guide.md`'s "The application at a terminal" says a run's keys as they are.
 - Knowledge: `acts.rs`'s `//!` names the keys a run binds and the ones it leaves to help and the palette.
 
+**Found in its turn:** `j k` move along the nodes and show the pointed node's page, which `enter` did; the arrows, `PgUp`, `PgDn`, `Home`, `End` and `space` scroll the pane and leave the pointer where it is; `f` gives the lead back; `a` goes where the attention row points (`FollowedRuns::named_in_attention`, by framing's rule): another run's screen in place of this one, or, on the run's own decision, the lead given back and the decision's stage, until its prompt stands in place; `n` opens a new run's start over the run where no prompt stands; `r` and `x` act where `RunFrame::actions` offers them; `enter`, `p` and `w` do nothing. The legend names `r` and `x` in render's words, `n` on the receipt alone (`Scene::names_a_new_run`), and leaves `c`, `e`, `v`, `o` to the palette. Any key takes a note away. One row stands against the targets for now: the run's legend is led by the shared `↑↓ scroll · pgup pgdn by the page` where its pane scrolls, which the targets do not draw; without it the interface's walk, which lays nothing out, takes a scrolled state for the one it left and its check that pages scroll fails. The task that lays a feed out drops that row and makes the walk lay out each state it reaches. Help is built from the legend, so `c e v o` and the scroll keys are not in help until the palette and help land over a run; `w` opened a parked parent's child, which nothing reaches until the child's task; `x` shows on `no-room`, `orphans` and `still-answered`, where the targets draw none, until the standstill's task; where the attention row names nothing and the run waits on a decision not yet read, `a` opens the decision's stage. `docs/guide.md` says a run's keys as they are. The CLI's tests that pressed `q` on a run (`watching`, `deciding`, `review`, `starting`) go through one helper that asserts the note where the run's standing is settled.
+
 **Fails first:** `crates/ui/tests/run_stage.rs`: on a run at work the arrows scroll the pane and leave the pointer on its node; `p` does nothing; `a` with another run named goes to its screen in place of this one. Red at the base, where the arrows move the pointer.
 
 **Acceptance criteria:**
-- [ ] Each key of the spec's row for a run, and each of its list of keys whose meaning changes that a run takes, has a test, `esc` and `q` in Task 94.
-- [ ] `crates/cli/tests/application/watching.rs` passes with the keys it presses rewritten to these.
+- [x] Each key of the spec's row for a run, and each of its list of keys whose meaning changes that a run takes, has a test, `esc` and `q` in Task 94.
+- [x] `crates/cli/tests/application/watching.rs` passes with the keys it presses rewritten to these.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test run_stage --test palette --test walk`, `cargo test -p yunta --test application -- watching`, `cargo test -p yunta --test docs_sync`
+- [x] Tests pass: `cargo test -p yunta-ui --test run_stage --test palette --test walk`, `cargo test -p yunta --test application -- watching`, `cargo test -p yunta --test docs_sync`
 
 **Dependencies:** Task 92
 
@@ -2988,14 +3090,16 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **The note goes to the field's `said`** (`crates/ui/src/stage/field.rs:50`), which the field draws today where it says what an act said; Phase 4 moves it into the attention row's place.
 - Knowledge: `state.rs`'s `//!` says that leaving a run ends on the field, which takes the first request's place at the bottom.
 
+**Found in its turn:** `q` and `esc` leave a run for the field: `Want::ToTheField(said)`, and `State::down_to_the_field` drops to the stage at the bottom, keeps a field that stands there, and lets any other, the first request among them, give way to the kept field; the note goes to the field's `said`. `Framed::leaving()` picks the sentence: a run that ended, one an engine drives (`The run keeps going: no engine lives in this window.`), else one that waits. The legend says `q field`, with `it keeps going` where it does; render's `Quit` is gone, one variant being left, and `unread_run_legend` says `q field` before the run is read; Ctrl-C still leaves the application. `esc` goes to the field even where a prompt stands, until prompts stand in place. `runs_left.rs` passes unchanged: its `q`s are pressed on the evidence's stage, which still leaves the application until Phase 4. The walk: 85,806 states (72,623 before: the arrows scroll a line at a time, `j k` read each node's page, `n` opens the start over every run, `q` and `esc` land on a field under one of three notes), 38 palettes (41) and 55 helps (60), the row of `enter` for each node and `c e v o` having left the legends; 7,118 screens at each size (8,051). The interface's walk took 170 s, its test 189 s, begun on an idle machine: past the three minutes at which the lead stops for the person; the layout's took 104 s.
+
 **Fails first:** `crates/ui/tests/run_stage.rs`: `q` on a run at work goes to the field, whose note reads `The run keeps going: no engine lives in this window.`; on a run waiting on the person the note says it waits. `crates/ui/tests/state.rs`: on the first request, a run started from it and its screen opened over it, `q` stands the field alone at the bottom. Red at the base, where `q` leaves the application.
 
 **Acceptance criteria:**
-- [ ] `crates/cli/tests/application/runs_left.rs` passes with the keys it presses rewritten to these.
-- [ ] The note stands on the field for each of the three ends (keeps going, waits, ended), each a test.
+- [x] `crates/cli/tests/application/runs_left.rs` passes with the keys it presses rewritten to these.
+- [x] The note stands on the field for each of the three ends (keeps going, waits, ended), each a test.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test run_stage --test state --test field --test walk`, `cargo test -p yunta --test application -- runs_left`
+- [x] Tests pass: `cargo test -p yunta-ui --test run_stage --test state --test field --test walk`, `cargo test -p yunta --test application -- runs_left`
 
 **Dependencies:** Task 93
 
@@ -3003,8 +3107,33 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 
 **Estimated scope:** M
 
+### Task 94a: the note a run leaves is true of a run started a moment ago
+
+**Description:** `q` pressed on a run this window started, before its engine's registry was read, left the note that the run waits beside a field that said it runs. Found by a stress of one test of the application at a terminal (`starting::a_workflow_started…`: 5 runs of 60, 9 of 120). The legend and the note follow the conventions: `it keeps going` where an engine drives the run, `q field` where none does or it ended.
+- `Framed::leaving()` matches by name, with no wildcard arm: a closed run has ended, a cancelled one that closed among them; a run whose registry reads an engine alive keeps going; a run whose registry reads unrecorded keeps going only where this window handed it to a detached engine itself; every other run waits. The legend's `q` and the note read that one decision.
+- `FollowedRuns.handed_on` keeps the runs this window started, from the start's outcome until the first reading of the run's engine that is not `Unrecorded`, of the run in view or of the field.
+
+**Found in its turn:** the lead first ruled that the note says what the run's standing says, without reading the conventions; `created` and `still-answered` draw `q field` on a run that stands created or running with no engine, and the ruling was withdrawn. An absent registry reads unrecorded at any age and a run stalls only on a registry that names a dead process, so a detached child that dies before it writes one leaves a run that reads as going for good: open work, in `.agents/open.md`. Stressed with the same commands: none of 60 and none of 120. The walk's counts stand; it starts no run.
+
+**Fails first:** `crates/ui/tests/run_stage/leaving.rs`: on the cuts of `created` and `still-answered` the legend reads `q field` and `q` leaves the waiting note; a run that closed cancelled has ended. `crates/ui/tests/state.rs`: a run started from the first request keeps going while its registry reads unrecorded, and waits once its engine is read dead.
+
+**Acceptance criteria:**
+- [x] The legend's `q` and the note agree on every run, and say what the conventions say.
+- [x] `starting::a_workflow_started…` passes under contention: none of 120.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-ui --test run_stage --test state`, `cargo test -p yunta --test application`
+
+**Dependencies:** Task 94
+
+**Files likely touched:** `crates/ui/src/stage/run/acts.rs`, `crates/ui/src/stage/run.rs`, `crates/ui/src/followed_runs.rs`, `crates/ui/src/state.rs`, `crates/ui/tests/run_stage/leaving.rs`, `crates/ui/tests/state.rs`
+
+**Estimated scope:** S
+
 ### Group check: a run's frame and its keys
-- [ ] The suite's groups green, the application's pty tests among them; the walk's counts against the last group check's.
+- [x] The suite's groups green, the application's pty tests among them; the walk's counts against the last group check's.
+
+**Found in its turn:** run on the profile that optimises five packages in a debug build. The suite's groups hold 5,193 tests: one failed in its batch and passed three times alone (`context_command_timeout_leaves_no_process_alive` of `crates/engine/tests/process.rs`, the open work on a command's group still seen running), none aborted; the application's tests at a terminal pass. The walk reaches 85,806 states, 38 palettes and 55 helps, and draws 7,118 screens at each size, its tests in 90 s and 87 s (175 s and 141 s before the profile). The same goldens differ from the base's as at the last check. The release binary weighs 31,343,968 bytes. Of the gate's short steps one fails, and not by this tree: `cargo deny` reads a new advisory, RUSTSEC-2026-0543, `chrono` unmaintained, every version; it is the person's to rule before the phase's commit. The captures' scripts pressed `q` once to leave a run, which now goes to the field: `prompts.py` and `screens.py` press it again there. Captured again, 68 of 159 views differ from the base and three from the last check: `review` at a terminal twice, which ends on the field under the note `The run has ended: leaving it changes nothing.` or with the run among those that need the person, and the bare field's ages, an effect of capturing it apart.
 
 ### Task 95: what stands across a run's screen, its nodes beside it, and its meter
 
@@ -3015,14 +3144,16 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **The meter** (C6): `Screen.meter: Option<Meter>` (new field), which the run's stage sets from `watched::spent(frame) -> Meter` (Phase 2's): tokens, one bar a node, time at work, and time waiting on a person where it is not zero. Task 96 lays it out.
 - **Deleted**: `watched::footer` with its words (`footer_words`), the row of `watched::rows` that carried it and their tests in `watched/tests.rs`: the meter replaces its last caller, the application's run screen (`crates/ui/src/stage/run.rs:167`).
 
+**Found in its turn:** render's `watched::headline` says a run's headline across its screen (`for` while it is open, `in` once it closed, through `page::stood_open`, which `Run::headline` shares), the ribbon is named through `watched::stretch_names` (fragua's fifteen), and the gist stands on a row of its own. `watched::nodes` lives in `watched/nodes.rs`: the pointed row through `Line::pointed`, one spinner frame for every node at work, names in 19 cells, how long a node took in 7, a loop's tasks on `└─`, `↻` for a node a gate sent back, `f follow what it is doing` while the person leads. `Screen.meter` is set from `watched::spent`, and Markdown and HTML say it too; `watched::footer` is gone. The targets governed three points of the task's text: how long a node took shows for a node that finished or was rerouted, none for one that failed; a task's mark is `●`, not the spinner; the ribbon's strokes alone are an even `floor(w ÷ n) − 1` cells, which turned a Surco test that held them to the page's furrow. The node a run waits on a person at draws `◆`, as `scope`, `still-unread`, `node-needs-you`, `card-words` and `failure` draw it: the rule that names it has one owner, replay's `RunFrame::waits_on_a_person_at()` with `WaitingOn::names()`, read by the list and by the pointer's rule in `lead.rs`, whose own copy is gone. `Place::Task.nth` went, nothing reading it. The CLI's live region and every printed page draw as they did; no golden moved, `screen-meter` for Markdown and HTML being new and written by hand.
+
 **Fails first:** `crates/render/src/watched/tests.rs`: `stretch_names` over fragua's node ids, with no run, reads the rule's fifteen names, and the ribbon of a run of it the same; the nodes of the design's run at `board` draw `implement`'s task under it with `└─` and the spinner on `implement`; `review@reviewer` and `review@reviewer-alt` keep their names whole in the column. Red at the base.
 
 **Acceptance criteria:**
-- [ ] The CLI's live region draws as after Phase 2 (`crates/cli/tests/run_surface.rs`, `live_motion.rs` unchanged); `git grep -n "fn footer" crates/render/src/watched` finds nothing.
-- [ ] The inventory's rows H1 to H3, N1 to N3, E2, E3 and E16 are closed in render's tests; the run's screen holds its meter at every scene.
+- [x] The CLI's live region draws as after Phase 2 (`crates/cli/tests/run_surface.rs`, `live_motion.rs` unchanged); `git grep -n "fn footer" crates/render/src/watched` finds nothing.
+- [x] The inventory's rows H1 to H3, N1 to N3, E2, E3 and E16 are closed in render's tests; the run's screen holds its meter at every scene.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-render watched`, `cargo test -p yunta-ui --test run_stage`, `cargo test -p yunta --test run_surface --test live_motion`, `cargo test -p yunta-surco screen`
+- [x] Tests pass: `cargo test -p yunta-render watched`, `cargo test -p yunta-ui --test run_stage`, `cargo test -p yunta --test run_surface --test live_motion`, `cargo test -p yunta-surco screen`
 
 **Dependencies:** Group check: a run's frame and its keys
 
@@ -3039,14 +3170,16 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **The four environments** of the targets join `crates/tui/tests/screens.rs`, each drawing a state that `screens::run` builds from a target's name.
 - Knowledge: `layout.rs`'s `//!` gains the meter's row and the title row of the main column.
 
+**Found in its turn:** the layout puts the meter on the row above the attention row, and keeps the row above the legend on every screen; a title is the first row of its own column; short of rows the blank row under what stands across goes first, then those rows (`LEAST_REGIONS`); a box is as wide as what it draws needs, 84 at most (`BOX_MOST`). Surco's `Terminal::across` drops the ribbon's names before anything else, `Terminal::trail` the tally's words before it cuts the trail (`◆ 1 · ▲ 1`, as `findings` draws it at 60 columns), and a headline whose edge is said elsewhere lets its handle go before it is cut (`board-tasks`, `orphans`); the conventions give no order past the handle, and the code takes the facts from the last, then the subject. The pane's place below 102 columns: the desk's pane says where it stands among the places (`2 of 2 · step 1 of 1`). `crates/tui/tests/screens.rs` draws the four environments and holds eleven targets of the design's run everywhere but the pane and the legend; the walk's copies of the layout's rules follow. Left to the tasks that land each: the boxes' widths against their targets (help 68 for 70, a confirmation 84 for 64) and the palette's three columns from 88 columns; the desk pane's title, the task's title where the targets show its id; the receipt's trail and gist; `f follow…` after the feed is scrolled back. A stress of one test of the application at a terminal (`starting::a_workflow_started…`, failed once in a batch) found a defect of Task 94: 5 runs of 60 and 9 of 120 end on a note that says the run waits beside a field that says it runs, `q` having landed before the run's engine read alive; corrected apart. The walk's counts stand: 85,806 states, 38 palettes, 55 helps, 7,118 screens at each size, its tests in 97 s and 87 s.
+
 **Fails first:** `crates/tui/src/layout/tests.rs`: a screen holding a meter lays it out on the row over the attention row; a main title stands on the main column's first row while the side's first row is a node; a box is never wider than 84 cells. Red at the base, where the title row spans both regions and a box stops at 60.
 
 **Acceptance criteria:**
-- [ ] The walk's layout checks pass at both its sizes, the meter's row among them.
-- [ ] `crates/tui/tests/screens.rs` draws a state at 120×36, 80×24 and 60×14.
+- [x] The walk's layout checks pass at both its sizes, the meter's row among them.
+- [x] `crates/tui/tests/screens.rs` draws a state at 120×36, 80×24 and 60×14.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --lib layout`, `cargo test -p yunta-tui --test walk --test screens`
+- [x] Tests pass: `cargo test -p yunta-tui --lib layout`, `cargo test -p yunta-tui --test walk --test screens`
 
 **Dependencies:** Task 95
 
@@ -3062,15 +3195,19 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **Same words**: each row says what `status --follow` prints for the same moment after its time and its subject; held where Phase 2's tests do not hold it already.
 - The screen a feed scrolled back draws, its counts and `f follow what it is doing` under the nodes, is the target `feed-back`, which lands with the pane it stands in (Task 98).
 - Knowledge: `pane.rs`'s `//!` gains the feed's rule; `ScreenLaid`'s `///` says a feed's region is laid out as its feed.
+- **The pane that holds a feed is the run's while it leads** (from Tasks 89 and 90): `Scroll::at_the_end()` opens it at its end, so its newest moment is in sight and stays there as the feed grows; scrolled back it is the person's, and the run's news move it no more; `RunStage::leads()` is both pointers the run's and the pane at its end, and `f` gives the three back.
+
+**Found in its turn:** a region whose document ends with a `Feed` is laid out as its feed: the blocks above stand still and give way from their top only where the window would keep fewer than three rows (`FEED_LEAST`); `Laid` is counted from the whole feed's first row, and a page is the window's rows less one, so a page key moves by the rows between the two counts. The run's stage hands render a page and a margin of 64 rows on each side (`MARGIN`) from `RunInView`'s moments of the node (`stage/run/feed.rs`), and keeps two places, the page's and the feed's, the feed's opening at its end; keys and layouts go to the one the pane shows. `RunStage::leads()` is both pointers the run's and the feed at its end; `f`, `j k` and a successor put the feed back at its end; scrolled back it is the person's and news leave it where it stands, the counts above and under growing. A pane ends with its feed in the work, board and findings scenes and a node's own (`Scene::ends_with_its_feed`), unless a node's page is picked; there the feed stands under the run's page where the run's chronicle stood, with no heading yet. The legend's `↑↓ scroll · pgup pgdn by the page` is gone, as the targets draw it: the interface's walk reads the place a pane stands at (`State::pane()`) and needs no layout for it. Surco's goldens `pane/feed-at-its-end` and `pane/feed-scrolled-back`, six files written by hand, equalled the code at once, the first at 60 columns equal to `work`'s pane at 60×14; nothing was blessed. The CLI's tests at a terminal pass unchanged, `FINISHED` standing in the headline across the screen. Clippy's bound on a large variant boxed the stage's `turned`. The cut of `feed-back` presses `up` three times with no layout between, which does nothing: the test kit gains `RunScreen::laid`, and the task that lands that target lays out after each key at each size; the order in which blanks and the scope give way at 60×14 is the scenes' too. The walk: 66,694 states (85,806 before: only the feed scrolls where the whole page scrolled a line at a time, 21,422 fewer; a run read before its following came adds 2,310), 38 palettes, 49 helps (55, six legends having differed by the scroll row alone), 5,289 screens at each size (7,118), its tests in 89 s and 80 s.
 
 **Fails first:** `crates/surco/src/surface/terminal/pane/tests.rs`: a page with a feed under three blocks, in rows too few for all, keeps the feed's newest row last and cuts the blocks from their top; `crates/ui/src/stage/run/feed/tests.rs` (new): a node of ten thousand moments hands render no more rows than the last `Laid`'s page and its margin; scrolled back by the arrows, ten moments more leave the rows in sight where they stand and raise the count under them by ten.
 
 **Acceptance criteria:**
-- [ ] Goldens of a held feed in a pane at 60 and 80 cells, ASCII and Unicode, plain and 16-color, reviewed in `crates/surco/goldens/pane/`.
-- [ ] A feed's place, rows above and rows under are asserted at its start, its middle and its end.
+- [x] Goldens of a held feed in a pane at 60 and 80 cells, ASCII and Unicode, plain and 16-color, reviewed in `crates/surco/goldens/pane/`.
+- [x] A feed's place, rows above and rows under are asserted at its start, its middle and its end.
+- [x] A pane on a feed opens at its end and follows it; scrolled back it stays where the person left it as the feed grows; `f` brings it back to its end with both pointers, and `leads()` says so.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco pane`, `cargo test -p yunta-ui --lib feed`, `cargo test -p yunta-ui --test scroll`
+- [x] Tests pass: `cargo test -p yunta-surco pane`, `cargo test -p yunta-ui --lib feed`, `cargo test -p yunta-ui --test scroll`
 
 **Dependencies:** Task 96
 
@@ -3088,14 +3225,16 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/` at the four sizes: `work`, `work-moved` (one event on), `work-command` (a check at work), `created`, and `feed-back` (the work scene's feed scrolled back by the arrows, its counts above and under, `f follow what it is doing` under the nodes). Cuts: the design's run at `work`, one event on, while `tests` runs, at its creation, and at `work` scrolled back.
 - `crates/cli/tests/interface/run.rs` reads the node's feed rows where it read the chronicle under the page, against the same piped follower's lines.
 
+**Found in its turn:** the work scene composes its own pane (`crates/ui/src/stage/run/pane.rs`) from render's parts, where it showed the run's page: the title, the node and its kind with who works it at the far end (`blocks::NodeTitle`), what the node runs (`blocks::NodeCommand`) or what it hands over, and the feed last under a heading that counts the open attempt's calls (`chronicle::open_attempt_calls`, shared with the node's printed page). A pane with a title leaves a blank row under it, and in five rows or fewer drops every blank row. Landed, moved beside the goldens and held whole at the four sizes: `work`, `work-moved`, `work-command` and `created`. `created` at 60 columns needed the conventions' rule on the meter: at the shortest look the sparkline gives way with the look and not with the width, as the ribbon's names do; the layout owns that decision (`Areas.short_of_rows`, true where the gap under what stands across gave way) and the screen draws the meter's figures alone there (`Terminal::meter_figures`), the meter as a component keeping its bars where they fit. `feed-back` draws the board's pane, a loop with its task, so it lands with the board's scene and stays among the targets, held around its pane and by its legend with a layout before each `up`. `what it says` is drawn nowhere, as the notes ask; a command's result and the tail of its output are not drawn, no state of the work scene holding them. A node with no moment draws an empty feed with no heading: falling back to the page's scroll there made the walk reach 86,674 states. The lead's tools read a landed target beside the goldens. The walk: 64,940 states (66,694 before, the run's page having left the work pane), 38 palettes, 49 helps, 5,189 screens at each size, its tests in 92 s and 82 s.
+
 **Fails first:** `crates/tui/tests/screens.rs`: `work` at `unicode-120` differs from its target (the run's page stands there); `crates/ui/tests/scenes.rs`: the work pane's last row is the feed's newest call.
 
 **Acceptance criteria:**
-- [ ] The five targets equal at the four sizes.
-- [ ] The inventory's rows of elements P0 and P1 are closed.
+- [x] The five targets equal at the four sizes.
+- [x] The inventory's rows of elements P0 and P1 are closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes`, `cargo test -p yunta-render blocks`, `cargo test -p yunta --test interface run`
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes`, `cargo test -p yunta-render blocks`, `cargo test -p yunta --test interface run`
 
 **Dependencies:** Task 97
 
@@ -3110,14 +3249,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - With several tasks at work, each feed row names its task after its verb, and each scope marks the paths its own sessions wrote; on a log without a call's session a row names no task, and a path is marked only where its task is the node's one open task or its scope check ran.
 - A scope's paths give way before the feed.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `board`, `board-moved` (one event on), `board-tasks` (two tasks at work). Cuts: the design's run at `board` and one event on; `yunta_testkit_ui::small_runs`' loop with two tasks at work at once, their calls naming their sessions, held by `awaits_word`.
+- **`feed-back`** (from Task 98, whose text set it in the work scene): its target draws the board's pane, the loop `implement` with its task, its feed scrolled back by the arrows with its counts above and under and `f follow what it is doing` under the nodes. It lands here, moved with the board's targets, a layout laid before each key at each size (`screens::run::opened_laid_out`).
+
+**Found in its turn:** the board's scene composes its pane (`pane/board.rs`): each task at work, running or blocked, in the order they were registered, with its title from the tasks' document, its proof and its scope, over the loop's one feed, which stands one step in with its heading. A region carries abridged forms of what stands above its feed (Surco's `pane/fed.rs`), and the pane draws the first that leaves the feed's window its three rows: no scopes, then no blank row under a task's row, then the tasks' rows alone; a pane that stands close keeps the last whole. `TaskProof::turning` sets the spinner on a task's row. Landed and held whole at the four sizes: `board`, `board-moved`, `board-tasks` and `feed-back`. A task's title comes from a document the follower hands over, which came after `State::caught_up` said so: it waits for those documents too (`yunta_api::Document::handed_over_in`). A blocked task counts as at work, and `still-unread` draws one. At 80×24 the tasks' rows alone are tried before blocks give way from their top, a state no target reaches. `Scene::composes()` says which pane a scene composes, in place of a yes or no. The walk's counts stand, its recordings holding no loop.
 
 **Fails first:** `crates/tui/tests/screens.rs`: `board` differs from its target; `crates/ui/tests/scenes.rs`: with two tasks at work each row of the feed names its task, and a scope cut by too few rows keeps the feed's newest row.
 
 **Acceptance criteria:**
-- [ ] The three targets equal at the four sizes; the inventory's rows of elements N2 and P2 are closed.
+- [x] The three targets equal at the four sizes; the inventory's rows of elements N2 and P2 are closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes`
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes`
 
 **Dependencies:** Task 98
 
@@ -3133,13 +3275,15 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - **Its keys**: `j k` along the findings (the finding pointer becomes the person's); `tab` hands `j k` to the nodes and back, and the legend says which they move; the arrows through the pane.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `findings` (three reviewers at once) and `findings-answered` (the pointed finding with its answer), and no other. Cuts: the design's run at `findings` and where the pointed finding is answered. The states between them, one, three and four findings posted, are asserted in `crates/ui/tests/scenes.rs`.
 
+**Found in its turn:** render's `blocks::FindingsAt` is the findings' pane: its heading, the list with its pointer, and the pointed finding, its node in 21 cells, its place, its words wrapped, its answer under a done mark. The pane is titled by that heading, one part cut at the row's edge, as the targets set it on the pane's first row; short of rows the pointed finding gives way first, then the list. `j k` move the finding pointer, `tab` hands them to the nodes and back, and the legend says which they move (`lead.rs`). Landed and held whole at the four sizes: `findings` and `findings-answered`. The design's run posts no finding after one is answered, so the pointer staying as findings change is held as more are answered (seq 229), and posts at seq 191, 196 and 199. The walk's counts stand, its recordings holding no finding: the walk's own task brings the design's run into its home. The lead's tools hold: 19 screens and 76 frames of the family, and the inventory's cover.
+
 **Fails first:** `crates/tui/tests/screens.rs`: `findings` differs from its target; `crates/ui/tests/scenes.rs`: as the design's run posts its first, third and fourth finding, the heading counts them answered of posted, each a row, and the finding pointer stays on the first with no answer; `tab` then `j` moves the node pointer and the legend says `j k node`; the finding pointer stays on an answered finding the person pointed at as more are posted.
 
 **Acceptance criteria:**
-- [ ] The two targets equal at the four sizes; the inventory's row of element P7 is closed.
+- [x] The two targets equal at the four sizes; the inventory's row of element P7 is closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes --test lead`, `cargo test -p yunta-render blocks`
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes --test lead`, `cargo test -p yunta-render blocks`
 
 **Dependencies:** Task 99
 
@@ -3155,15 +3299,17 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 - The `Node` arm no longer reads the node's page (`ReadNodePage`), which Task 119 deletes.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `node-working`, `node-needs-you`, `node-ended`, `node-never-ran`, `node-skipped`, `node-sent-back`. `node-needs-you` lands here alone; Task 117 holds that `esc` reaches the same frame. Cuts: the design's run at `work` with a node at work pointed by the person, with `brief` pointed (ended) and with `spec` pointed (never ran); the design's run at `scope` with `implement` pointed by `j` then `k` (needing the person); `yunta_testkit_ui::small_runs`' run in a mode that leaves a node out, and its run whose plan gate is answered `adjust`, which sends `plan` back.
 
+**Found in its turn:** a node's own scene composes its pane (`pane/node.rs`) from render's `blocks::HowItStands`: `It has not run yet.`, the mode that leaves it out, `what it waits on` in the log's words, or `stands`, `took` and `tokens` with its summary, over a feed that lists every call of every attempt. The `Node` arm reads the node's page no more; `j k` still ask for it, the `Ended` arm drawing it. Landed and held whole at the four sizes: `node-working`, `node-ended`, `node-never-ran`, `node-skipped`, `node-sent-back` and `node-needs-you`, the last with its gist rows corrected to the design's gist by the lead's ruling, each row listed before and after for the person. Two rules the targets follow and the code did not: a word that ends on a pane's last cell is not broken (Surco's `row_end`, now as `wrap_unbroken`), and a node's own scene asks nothing, so its legend names no `r` or `x` (`Scene::names_the_runs_acts`). A node that never ran names the runner its run resolved for its role (`blocks::runner_of`, read by the title and the printed page). A node that ended having posted or answered findings stands as the findings' scene: no target holds it, a test does. The printed page says the same three fields and keeps what it printed: its tokens row says the design's words, then the split in and out it said before (`HowItStands::printed_fields`); its headline reads the standing the nodes' list reads (`watched::listed_as`), where a node a gate sent back read `failed` above a row that said `rerouted`. Goldens, render's `node/` alone: `stands` added, `took` and `tokens` before `kind`, the tokens' row as said, `never-ran` new with its runner. One test of `crates/engine/tests/process.rs` failed in a batch and passed alone and 120 times of 120 under stress: the open work on a command's group. The walk: 56,029 states (64,940 before, the node's scene no longer changing as its page arrives), 36 palettes, 47 helps, 4,718 screens at each size, its tests in 75 s and 80 s.
+
 **Fails first:** `crates/tui/tests/screens.rs`: `node-never-ran` and `node-ended` differ from their targets; `crates/ui/tests/scenes.rs`: a finished node's feed lists every call of every attempt, each attempt named where it opens; the node sent back is pointed with its mark.
 
 **Acceptance criteria:**
-- [ ] The six targets equal at the four sizes; the inventory's rows of elements E4 and E16 are closed.
-- [ ] `yunta status <run> --node` differs from the base only in the fields the inventory names.
+- [x] The six targets equal at the four sizes; the inventory's rows of elements E4 and E16 are closed.
+- [x] `yunta status <run> --node` differs from the base only in the fields the inventory names.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes`, `cargo test -p yunta --test status_node_cmd`
-- [ ] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes`, `cargo test -p yunta --test status_node_cmd`
+- [x] `YUNTA_BLESS=1 cargo test -p yunta-surco -p yunta-render -p yunta -p yunta-engine`, then the goldens' diff reviewed.
 
 **Dependencies:** Task 100
 
@@ -3172,7 +3318,9 @@ Task 79 to Task 85 each redraw one of Surco's components and bless what draws it
 **Estimated scope:** M
 
 ### Group check: what a node does
-- [ ] The suite's groups green; every target of Task 98 to Task 101 equal at the four sizes; the CLI's captures differ from the base only where earlier tasks name.
+- [x] The suite's groups green; every target of Task 98 to Task 101 equal at the four sizes; the CLI's captures differ from the base only where earlier tasks name.
+
+**Found in its turn:** the gate's short steps pass; the suite's groups hold 5,248 tests, none failing, none aborted; the sixteen targets of Tasks 98 to 101 stand beside the goldens and equal their screens at the four sizes, and the lead's tools hold (19 screens and 76 frames of the family; the inventory's cover). The walk reaches 56,029 states, 36 palettes and 47 helps, and draws 4,718 screens at each size, its tests in 61 s and 59 s. Against the base's digests the goldens that differ are those of the last check and this group's own: the landed targets under `screens/`, Surco's `pane/feed-*`, `screen-meter` for Markdown and HTML, render's `node/never-ran`. The release binary weighs 31,410,192 bytes. Of 159 captured views 67 differ from the base and four from the last check: the printed page of a node at its three sizes, by the fields Task 101 names (`stands`, the order of `took` and `tokens`, the tokens' words before their split), and the bare field, whose ages the last check had captured apart.
 
 Task 102 to Task 110 each add one family to the pane's composer and to `screens/run.rs`, but Task 104, which changes a type under the pull request's family; they run one at a time.
 
@@ -3184,13 +3332,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - The run's `r` resumes and `x` closes once confirmed where the scene offers them, and `u` opens upkeep over the run on no room.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `standstill` (the pause no option answers here), `no-room`, `orphans` (and blocked), `stopped` (cancelled, after a crash, a gate aborted, a sentence recorded), `stalled`. Cuts: `yunta_testkit_ui::small_runs`' runs for each, the pause with no menu among them.
 
+**Found in its turn:** a standstill says its kind (`Standstill::{Unanswered, NoRoom, HalfDone, Stopped, NoProcess}`) and composes its pane (`pane/standstill.rs`) from render's `blocks::WhereItStopped`: what it waits on, then what the disk has free and needs, what was left half done with its branch, or where it stopped and why, its labels in a column two cells past the widest. `Scene::named_acts` decides the acts a legend names: `x` stays out on `no-room` and `orphans`; `u` opens upkeep over a run with no room; `r` reads `continue it where it stopped`. A region with no feed draws the first abridged form that fits (Surco's `pane/fitted.rs`), so `what it waits on` gives way whole at 60×14. Landed and held whole at the four sizes: `standstill`, `no-room`, `orphans`, `stopped`, `stalled`. The target `standstill` draws `◌ approve` where the code drew `◆`: the list marks by standing, and a node the run waits at is marked `◆` only once its log started it. `docs/guide.md` says what `u` does on a run with no room; under no isolation the `branch` row shows the base branch alone.
+
 **Fails first:** `crates/tui/tests/screens.rs`: each standstill's target differs; `crates/ui/tests/scenes.rs`: on no room `u` opens upkeep over the run and `esc` comes back to it.
 
 **Acceptance criteria:**
-- [ ] The five targets equal at the four sizes; the legend of each offers exactly the keys its row names.
+- [x] The five targets equal at the four sizes; the legend of each offers exactly the keys its row names.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes --test upkeep_schema`, `cargo test -p yunta-render blocks`
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes --test upkeep_schema`, `cargo test -p yunta-render blocks`
 
 **Dependencies:** Group check: what a node does
 
@@ -3205,13 +3355,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **A pause whose ask could not be read** (Phase 1's `RunNews::AwaitedUnread { why }`, its why kept in `RunInView`): as work, with that why shown in place of the card, the spec's "unreadable in place", and no option; the next reading of the pause stands its card there.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `wakes-alone`, `still-answered`, `still-unread`, `card-unread`. Cuts: `yunta_testkit_ui::small_runs`' run that wakes alone; the design's run between the scope's answer and its wake; the design's run with a pause on the log and its ask not yet read; `small_runs`' gate whose shown document fails today's shape.
 
+**Found in its turn:** render's `watched::still` says the line of work that stands still: `it goes on alone at 01:00 UTC`, and `✓ <answer> · the run goes on when an engine takes it up`, the answer from replay's `answer_awaiting_its_resume()`. Where no engine drives the run, the work, board and findings scenes name no act but the resume an answer awaits. An ask that could not be read stands as a card with no options at the pane's foot, ending on its reason, in the feed's place; its decision counts as in sight, so no attention row stands, and `a` answers nothing there; before a decision is read `a` goes nowhere, as the spec says. A page that could not be read is said in the page's place and not as a note. Landed and held whole at the four sizes: `wakes-alone`, `still-answered`, `still-unread` (its gist row corrected to the design's gist by the lead's ruling, listed before and after for the person) and `card-unread`, three slips of whose writer the lead ruled corrected in the target: the ribbon names `approve-plan` as `approve`, by the one rule on a stretch's name; its card asks the message's question, `◆ Approve?`, as `ship` and `card` do; at 60×14 its reason stands whole, wrapped, the conventions cutting a reason only to give way. The walk: 55,879 states (56,029 before, by `a`'s rule), 36 palettes, 47 helps, 4,718 screens at each size, its tests in 78 s and 67 s.
+
 **Fails first:** `crates/ui/tests/scenes.rs`, a behaviour a golden cannot hold: a run that wakes alone draws no spinner frame on any node, on a moving look, through three events; a pause whose `awaited` is not read yet shows work and no card; a pause whose ask could not be read shows its why where the card stands, and no key answers it; an answer awaiting its resume offers `r` only where no engine drives the run.
 
 **Acceptance criteria:**
-- [ ] The four targets equal at the four sizes.
+- [x] The four targets equal at the four sizes.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes`
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test scenes`
 
 **Dependencies:** Task 102
 
@@ -3227,14 +3379,16 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - The evidence stage's pages are `Address::Page` (`crates/ui/src/stage/evidence.rs:155,217`), and the walk hands them back unshown as before (`crates/testkit-ui/src/walk.rs:358`).
 - Knowledge: `request.rs`'s `///` on `Address`; `browser.rs`'s `//!` says it opens a link as it opens a page.
 
+**Found in its turn:** `Address { Page(PathBuf), Link(String) }` in `crates/ui/src/request.rs` is what a surface is asked to show; `Want::Show`, `Request::ShowPage`, `Input::Unshown` and `Stage::unshown` carry it, `yunta-tui`'s `show_page` takes it, and the CLI's `browser::open` hands a page's path or a link to the system's opener alike. The evidence's stage and `yunta open` hand a page; the walk hands pages back unshown as before. Its guard passed before and after (`evidence`, the application's own tests, `open_cmd`), the acceptance's search finds nothing, and no golden was touched. `crates/cli/src/commands/open.rs` changed too, the compiler naming it.
+
 **Fails first:** none: a type in place of another, with no new behaviour until the pull request shows a link (Task 105). Its guard: `crates/ui/tests/evidence.rs` and `crates/tui/src/application/tests.rs` pass with `Address::Page` where they named a path, and `crates/cli/tests/open_cmd.rs` passes unchanged.
 
 **Acceptance criteria:**
-- [ ] `git grep -n "ShowPage(PathBuf)\|Unshown(PathBuf)\|Show(std::path::PathBuf)" crates` finds nothing.
-- [ ] Every golden and capture equals the last group check's.
+- [x] `git grep -n "ShowPage(PathBuf)\|Unshown(PathBuf)\|Show(std::path::PathBuf)" crates` finds nothing.
+- [x] Every golden and capture equals the last group check's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test evidence --test walk`, `cargo test -p yunta-tui --lib application`, `cargo test -p yunta --test open_cmd`
+- [x] Tests pass: `cargo test -p yunta-ui --test evidence --test walk`, `cargo test -p yunta-tui --lib application`, `cargo test -p yunta --test open_cmd`
 
 **Dependencies:** Task 103
 
@@ -3249,13 +3403,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **`OpenedRun::pull_request`** (new, `crates/api/src/run/reading.rs`) polls the gate's pull request with the run's forge and hands back `PullRequestPolled` (new): its link and `ReviewOutcome`. **`Operation::ReadPullRequest { run }`** and `Outcome::PullRequest` (new) carry it.
 - Target, moved (`git mv`) from `crates/tui/goldens/targets/`: `pull-request`. Cut: `yunta_testkit_ui::small_runs`' run with a pull request, its forge a fake answering `Pending`.
 
+**Found in its turn:** the pull request's scene reads the forge once for each pause, as the run's news, a key or a return to the run opens it, never on a draw (`stage/run/pull_request.rs`): `OpenedRun::pull_request` hands `PullRequestPolled`, the pull request with what the forge answered or why it gave none, the whole poll, a review deciding only the commit it reviewed; `Operation::ReadPullRequest` and `Outcome::PullRequest` carry it. The pane is render's `blocks::PullRequestReview`; the legend names `o` alone, which asks the surface for `Address::Link` with the log's link; the run's page stays in the palette, an act's key being optional now. A link that could not be opened is noted as a failed act with the link (`page::unopened`, which a page's own note uses too). The forge needed a seam for tests: `Workspace.forges`, every interface handing the declared forge. Landed and held whole at the four sizes: `pull-request`. Its row at 60×14 cut a link outside its number, which the one rule on a cut refused, having been made wider than the conventions at Task 73 (no cut inside a word that holds a digit): the rule is narrowed to their words, never right after a digit and never inside a number, a number being digits with the marks that join them, so a link, a path or a handle is cut anywhere outside its numbers and a date, a time, a decimal and a duration still go whole. One golden moved by it, Surco's `every-block.unicode-color-100` row 14, back to what the branch's base held; no landed target and no golden of render, the engine or the CLI moved. `yunta doctor` said of a forge whose client could not be built that its token was not set, which was false: it says the token is set and what reaching the forge failed on (`ForgeAnswer::Unready`). The engine reads a pull request's reference through core's one reader. The sentences on how a pull request stands, each true of the forge's answer, are the lead's to show the person. `crates/ui/src/stage.rs` stands at 496 lines. The walk's counts stand; it reaches no pull request.
+
 **Fails first:** `crates/ui/tests/scenes.rs`, a behaviour a golden cannot hold: the forge is read once when the scene opens, and not again on a piece of news of the same pause; `o` asks the surface to show `Address::Link` with the pull request's link.
 
 **Acceptance criteria:**
-- [ ] The target equals at the four sizes; the walk records the reading and its outcome.
+- [x] The target equals at the four sizes; the walk records the reading and its outcome.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-api pull_request`, `cargo test -p yunta-ui --test scenes --test evidence`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-api pull_request`, `cargo test -p yunta-ui --test scenes --test evidence`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 104
 
@@ -3269,13 +3425,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - The row `ChildPaused`: while the run leads, the child becomes the run read whole, shown in its place (`State::followed()` names it); the trail leads up to its parent; with no prompt standing, `esc` goes up to the parent, whose node pointer becomes the person's on the node that bore the child; a prompt of the child's is put aside first, as any prompt is.
 - Target, moved (`git mv`) from `crates/tui/goldens/targets/`: `child`. Cut: `yunta_testkit_ui::small_runs`' run whose child paused.
 
+**Found in its turn:** while a run leads and is parked on a child, its stage moves onto the child (`crates/ui/src/stage/run/child.rs`: `Parent`, `onto_its_child`, `up_to_its_parent`, `up_where_a_parent_moved`), so `State::followed()` names the child under every stage opened over it; the trail reads the parent, the node that bore the child, the child, then its node; `esc` goes up to the parent, its node pointer the person's on that node, and `f` shows the child again; where the field shows the parent no longer parked on that child, the parent takes the screen back. Which child a run is parked on has one owner, replay's `WaitingOn::child_run`. `docs/guide.md` says how a child is shown. The target `child` does not land here: its pane and its legend draw the child's card in place (`j k choose · enter answer · esc leave it waiting`), which the task that lands a card in place draws, and its attention row names another run where every card's target leaves that row blank, a slip of its writer the lead ruled corrected when it lands; it is held everywhere but those rows, and the list's Task 113 carries it. The walk's home holds no child: the walk's own task brings the small runs into it and holds that `followed()` names the child. The walk's check follows the run the trail names last.
+
 **Fails first:** `crates/ui/tests/scenes.rs`, a behaviour a golden cannot hold: `esc` on the child goes up to its parent, and `followed()` names the parent then; the trail reads parent, node, child.
 
 **Acceptance criteria:**
-- [ ] The target equals at the four sizes; the walk holds that `followed()` names the child under a stage opened over it.
+- [x] The target equals at the four sizes; the walk holds that `followed()` names the child under a stage opened over it.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test scenes --test walk`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-ui --test scenes --test walk`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 105
 
@@ -3289,13 +3447,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - `Scene::AskedElsewhere` for a question open at another terminal: the node it asks about, since when, and the process that asks; nothing here answers it. It is read only.
 - Target, moved (`git mv`) from `crates/tui/goldens/targets/`: `asked-elsewhere`. Cut: `yunta_testkit_ui::small_runs`' run with a registry whose engine asks at its terminal.
 
+**Found in its turn:** a run asked at its own terminal composes its pane (`pane/asked_elsewhere.rs`) from render's `blocks::AskedAtItsTerminal`: the node it asks about, the process that asks, since when, and that nothing here answers it; `NOTHING_HERE_ANSWERS` and `answer it there` are written once in render. No key on the scene answers it, `a`, `enter`, a number and the palette's rows among them, and the run's log is the same after each: that held before this task too. Landed and held whole at the four sizes: `asked-elsewhere`, its title row corrected by the lead's ruling, a slip of its writer: it drew `ship · gate` with nothing at the far end, where the conventions give a gate's title `assignee {…}`, the run's gate declares `assignee: lead`, and seven other gate targets draw it; the row is listed before and after for the person. The target holds `{pid}` for the test's own process; at 60×14 the gist row's cut depends on how many digits the pid has, so the test holds that row to the conventions' cut for the pid in hand.
+
 **Fails first:** `crates/ui/tests/scenes.rs`, a behaviour a golden cannot hold: no key on the scene answers it, `a`, `enter`, a number and the palette's rows among them, and the run's log is unchanged after each.
 
 **Acceptance criteria:**
-- [ ] The target equals at the four sizes.
+- [x] The target equals at the four sizes.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test scenes`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-ui --test scenes`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 106
 
@@ -3312,14 +3472,16 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `receipt`, `reported`. Cuts: the design's run at its end; `yunta_testkit_ui::small_runs`' finished run that reports blocking findings.
 - Knowledge: `pane.rs`'s `//!` says how a region that ends with a horizon is laid out.
 
+**Found in its turn:** a pane whose document ends with a horizon draws its blocks, a blank row, then the field in every row left; with too few rows the field goes, and where the blocks still do not fit their blank rows go before they scroll. The receipt's scene composes its pane: the checks, `cost`, `changed` and `pull request`, under a report the findings that block (`blocks::FindingsThatBlock`), then the field; its trail names `receipt` and its gist is the receipt's. The event chain is verified once for a run and nothing is written: no `receipt.md` stands after it. A reading asked once as a scene opens, and asked again where a stage opened over the run let it go before an answer, has one owner, `crates/ui/src/stage/run/read_once.rs` (`ReadOnce<K, T>`), which the receipt's verification and the pull request's poll both use: the poll had the same defect and never asked again. One rule in replay, `RunState::findings_that_block`, feeds the frame's count, the receipt's count and the pane's list. Landed and held whole at the four sizes: `receipt` and `reported`, row 11 of each at 60×14 corrected by the lead's ruling, a slip of their writer: the row that counts hidden lines stood two cells in, where it is the region's own row at its first cell, as `evidence-receipt`, `graph`, `setup-audit` and `setup-confirm` set it. Surco's goldens `pane/receipt.{unicode,ascii}-{80,60}` are new, written by hand, the 80-column one from the target's rows. `docs/guide.md` says nothing yet of the receipt's screen.
+
 **Fails first:** `crates/surco/src/surface/terminal/pane/tests.rs`: three blocks and a horizon given more rows than the blocks take draw the blocks, then the horizon in every row left; given fewer than the horizon's least, the blocks alone. `crates/ui/tests/scenes.rs`: showing the receipt asks one verification and no receipt's writing, and no `receipt.md` stands in the run's directory after it; `crates/tui/tests/screens.rs`: `receipt` differs from its target.
 
 **Acceptance criteria:**
-- [ ] The two targets equal at the four sizes; the inventory's row of element P9 is closed.
-- [ ] Goldens of a pane ending with a horizon at 60 and 80 cells, Unicode and ASCII, reviewed in `crates/surco/goldens/pane/`.
+- [x] The two targets equal at the four sizes; the inventory's row of element P9 is closed.
+- [x] Goldens of a pane ending with a horizon at 60 and 80 cells, Unicode and ASCII, reviewed in `crates/surco/goldens/pane/`.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-surco pane`, `cargo test -p yunta-ui --test scenes --test evidence`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-surco pane`, `cargo test -p yunta-ui --test scenes --test evidence`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 107
 
@@ -3334,14 +3496,16 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **The successor takes the screen while the run leads**: `State::followed()` names the successor then, and the run's own ended scene otherwise, where `f` gives the lead back and the successor follows; Phase 2's unconditional move to the successor narrows to this.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `failed`, `promoted`, `broken`. Cuts: `yunta_testkit_ui::small_runs`' runs that failed, were promoted and broke.
 
+**Found in its turn:** the ended scene composes its pane from render's `HowItFailed`, `ItsSuccessor` and `WhereItsLogBreaks`. A successor takes the screen only while the run leads: with a pointer the person's, the promotion leaves the screen on the run, which keeps its successor beside itself, `State::followed()` naming the run, and `f` hands the screen over; `promoted` with the person leading is asserted now. The tally counts by the field's groups, which set a broken run among those that need the person. Landed and held whole at the four sizes: `failed`, `broken` and `promoted`, rows 4 and 5 of the last corrected by the lead's ruling, a slip of its writer: the ribbon named `fix-lint` whole, where the one rule on a stretch's name gives `fix` when no stretch before it is named so. The cut of `promoted` stands at seq 8 and goes on to 9 after `j k`, so the person holds the screen as the successor comes. Two sentences no target gives are the lead's to show the person: a successor that never came (`none came in the time one takes to be created`) and a broken log that names no node (`it reads up to seq {n}`). The walk: 56,144 states (55,879 before, a finished run's screen standing once with its verification under way and once answered), 36 palettes, 47 helps, 4,702 screens at each size, its tests in 61 s and 59 s.
+
 **Fails first:** `crates/ui/tests/scenes.rs`, a behaviour a golden cannot hold: with the node pointer the person's, the promotion leaves the screen on the run and `followed()` on it; `f` then names the successor.
 
 **Acceptance criteria:**
-- [ ] The three targets equal at the four sizes.
-- [ ] `crates/cli/tests/application/watching.rs`' promotion followed onto its successor passes unchanged.
+- [x] The three targets equal at the four sizes.
+- [x] `crates/cli/tests/application/watching.rs`' promotion followed onto its successor passes unchanged.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test scenes --test walk`, `cargo test -p yunta-tui --test screens`, `cargo test -p yunta --test application watching`
+- [x] Tests pass: `cargo test -p yunta-ui --test scenes --test walk`, `cargo test -p yunta-tui --test screens`, `cargo test -p yunta --test application watching`
 
 **Dependencies:** Task 108
 
@@ -3357,13 +3521,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - `crates/cli/tests/interface/run.rs` holds the chronicle's rows to the piped follower's lines, as it held the base's chronicle under the page.
 - Target, moved (`git mv`) from `crates/tui/goldens/targets/`: `chronicle`. Cut: the design's run at `findings`, the chronicle opened from the palette.
 
+**Found in its turn:** `ChronicleStage` (`crates/ui/src/stage/chronicle.rs`, `Stage::Chronicle`) is the run's whole chronicle as a feed of its own over the run: every moment of every node, opened at its end and kept there as it grows, scrolled by the arrows, `End` going with the end again, `esc` going back, `n` a new run, in the run's frame. `NextStep::Follow` opens it; the field's `enter`, `a`, a run just started and `State::opened_on` open a run's screen by `NextStep::status`. The run's palette offers `the run's whole chronicle`, an act carrying its own words (`Act::saying`). Render gains `chronicle::{whole, whole_heading}` and the stage's words; Surco's `Feed.subjects` lays out the subjects' column where the rows in sight are known; `Scroll::window` and its margin serve both feeds. `stage.rs` is split into `act.rs` and `want.rs`. Landed and held whole at the four sizes: `chronicle`. Its cut stands at seq 104 with `implement` at work, as the kit's table has it, where the task's text said at the findings; it types `chronicle` into the palette, so the palette narrows by what a row does as well as by its command (`Picker::found_by_labels_too`). `a` acts on the chronicle, the numbers and the graph as their attention row names it, by the one rule the run's stage follows (`FollowedRuns::attended`, `Want::BackToItsDecision`, `Want::in_place`): the list had left it to the task that gives `a` to every stage, and a row may not name a key that does nothing. `q` still leaves the application from these three pages, and no legend of theirs names it. The walk walks on from no palette row, so the chronicle adds no state.
+
 **Fails first:** `crates/ui/tests/chronicle.rs` (new): the palette's chronicle row opens it with the newest moment on its last row; ten more moments keep it at its end; `End` after scrolling back returns there. It does not compile at the base.
 
 **Acceptance criteria:**
-- [ ] The target equals at the four sizes; the parity test passes against the piped follower.
+- [x] The target equals at the four sizes; the parity test passes against the piped follower.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test chronicle --test state`, `cargo test -p yunta --test interface run`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-ui --test chronicle --test state`, `cargo test -p yunta --test interface run`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 109
 
@@ -3372,7 +3538,9 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 **Estimated scope:** M
 
 ### Group check: where a run stands
-- [ ] The suite's groups green; every target of Task 102 to Task 110 equal; the walk's counts and time against the last group check's.
+- [x] The suite's groups green; every target of Task 102 to Task 110 equal; the walk's counts and time against the last group check's.
+
+**Found in its turn:** run for Tasks 102 to 109, the chronicle's target being the next group's. The gate's short steps pass; the suite's groups hold 5,290 tests, none failing, none aborted; thirty-two targets stand beside the goldens and equal their screens at the four sizes, and the lead's tools hold (`run` 19 screens, `stands` 13, `decisions` 22; the inventory's cover). The walk reaches 56,144 states, 36 palettes and 47 helps, and draws 4,702 screens at each size, its tests in 78 s and 90 s beside another session's builds. Against the base's digests the goldens that differ are those of the last check, the targets that landed and Surco's `pane/receipt`. The release binary weighs 31,476,368 bytes. Of 159 captured views 67 differ from the base and none from the last check. The capture of `review` at a terminal sent its keys on a clock and, beside other builds, pressed `q` before the screen it was meant for stood: it waits for each screen now, and three captures in a row are equal.
 
 ### Task 111: a run's numbers and its graph
 
@@ -3381,14 +3549,16 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - Their frame through `FollowedRuns::framing` (Task 92), the run's decision out of sight under them, and their legends (`esc back · n new run`, the graph's scroll keys) as their targets say; `n` starts a new run there.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `stats`, `graph`. Cut: the design's run at `work`, with `s` and with `g` pressed.
 
+**Found in its turn:** render's `StatsTold { OnScreen, Printed(Depth) }` says what a run's numbers tell on the screen, leaving the cost, the answers, what is unread, the checks a red criterion decided, the rails and the nodes to the printed page. The numbers and the graph stand in the run's frame (`over_the_run.rs`), one legend for the pages in that frame, `n` starting a new run, `f` gone; their trails read `Q78GRR stats` and `fragua graph`. The conventions give every blank row of a page way at 60×14: `Terminal::pane_short_of_rows`, and the layout marks a screen with nothing across it as short of rows on the least terminal. Landed and held whole at the four sizes: `stats` and `graph`, the diagram rows of the last redrawn by the lead's ruling from the workflow's own diagram (rows 5 to 34 at 120 columns and in ASCII, 5 to 22 at 80, 4 to 12 at 60), every other row as approved: the chain stands eighteen columns to the right, centred over the fan-out from `implement`; the count row follows (`… 34 more lines`, `… 46` at 80); at 60 columns the diagram, 64 cells wide, is written as its chains and no count row stands. The rows before and after are kept for the person. The interface's walk could no longer scroll a run's numbers, no run of its home spending enough for them to pass its screen: the entry is out of `MUST_SCROLL`, `crates/ui/tests/scroll.rs` holding the numbers to scroll on a run that spends enough, and the walk's own task holds it again with the design's run in the home. The walk: 55,478 states (56,144 before: the frame over the two pages adds 340, `f` gone takes 1,006), 36 palettes, 45 helps, 4,560 screens at each size, its tests in 59 s each.
+
 **Fails first:** `crates/tui/tests/screens.rs`: `stats` and `graph` differ from their targets; `crates/ui/tests/stats_graph.rs`: stats over a run waiting on the person names its decision in the attention row with `a go there`.
 
 **Acceptance criteria:**
-- [ ] Both targets equal at the four sizes; the inventory's rows for a run's numbers and graph screens are closed.
-- [ ] `crates/ui/tests/stats_graph.rs` passes with its words rewritten to render's.
+- [x] Both targets equal at the four sizes; the inventory's rows for a run's numbers and graph screens are closed.
+- [x] `crates/ui/tests/stats_graph.rs` passes with its words rewritten to render's.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test stats_graph`
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test stats_graph`
 
 **Dependencies:** Group check: where a run stands
 
@@ -3404,14 +3574,16 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - Their legends stand in the screen's legend row while they are open.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `palette`, `palette-narrowed` (typing narrows it), `help`, `receipt-palette` (the palette over the receipt). The palette over a prompt put aside (`palette-aside`) lands with the putting aside, in Task 117. Cuts: the design's run at `work` with `/`, with `/` and words typed, and with `?` pressed; the design's run at its end with `/` pressed.
 
+**Found in its turn:** the palette over a run names each row by what it does, with its key (`Alternative.key`) and the command that does the same muted; words typed narrow by what a row does, the narrowing by command gone as the targets ask; no key stands inside the box, its legend standing in the screen's legend row. A run's rows stand in the targets' order (`s`, `g`, `o`, the chronicle, `n`), then what every stage offers (`Stage::always`): the runs of this repository, the workflows, doctor, `yunta gc` and the schema; a new run is no row of every stage, `n` opening one only where a stage takes it. Help over a run is `help_over_a_run`: the tagline, the keys every screen answers to, then every keyed act of the screen under it, `c`, `e`, `v` and `o` among them. A box stays above the meter's row (`BOX_LEAVES`) and keeps two cells past its widest row, help measuring 70 as its targets draw it; Surco's `Terminal::boxed` reads `Terminal::wide()` (`WIDE_FROM`, the legend's far keys folded into it), so the three columns show from 100 columns. Landed and held whole at the four sizes: `palette`, `palette-narrowed`, `help` and `receipt-palette`, one cell of the last at 60×14 corrected by the lead's ruling: left of the box the screen under it shows the `…` of the receipt's count row, which the lead had ruled to the region's first cell. Verification on a finished or reported run is decided where a run's acts are, in replay's `RunFrame::actions` (`Receipt`, then `Verify`; `Effect::Verifies`), where the stage had added it for itself: `yunta status`, the closing page and the run's page for a browser gain the next step `yunta verify <run>   verify its evidence`, one line in 26 of render's goldens. On the findings help says of `tab`: `hand j k to the nodes and back`. The walk checks the attention row and the meter under a box; it reaches 55,578 states (55,478 before, `v` opening the verification on the home's finished runs), 36 palettes, 45 helps, 4,588 screens at each size, its tests in about 75 to 90 s beside other builds.
+
 **Fails first:** `crates/tui/tests/screens.rs`: the four targets differ; `crates/ui/tests/palette.rs`: a run's palette row for stats names `s` and `yunta stats <run>`; words typed narrow the rows and stand where `type to filter` stood; help over a run lists `c` with what it does.
 
 **Acceptance criteria:**
-- [ ] The four targets equal at the four sizes; the inventory's row of element C7 is closed.
-- [ ] Every row of a palette the walk meets does what its key does (`crates/ui/tests/walk/dialogs.rs`).
+- [x] The four targets equal at the four sizes; the inventory's row of element C7 is closed.
+- [x] Every row of a palette the walk meets does what its key does (`crates/ui/tests/walk/dialogs.rs`).
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test palette --test dialogs --test walk`
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-ui --test palette --test dialogs --test walk`
 
 **Dependencies:** Task 111
 
@@ -3420,7 +3592,9 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 **Estimated scope:** M
 
 ### Group check: over a run
-- [ ] The suite's groups green; every target of Task 111 and Task 112 equal; the palettes and helps the walk opens counted against the base's.
+- [x] The suite's groups green; every target of Task 111 and Task 112 equal; the palettes and helps the walk opens counted against the base's.
+
+**Found in its turn:** the gate's short steps pass; the suite's groups hold 5,305 tests, none failing, none aborted; thirty-nine targets stand beside the goldens and equal their screens at the four sizes, the chronicle's among them, and the lead's tools hold the four families and the inventory's cover. The walk reaches 55,578 states, takes 36 palettes row by row and opens 45 helps (41 and 72 at the base, whose legends named each node), and draws 4,588 screens at each size, its tests in 129 s and 101 s beside another session's builds at a load of 27 and 37. Against the base's digests the goldens that differ are those of the last check and the targets that landed, two of which stand at keys the base's deleted frames held. The release binary weighs 31,509,424 bytes. Of 159 captured views 67 differ from the base and ten from the last check, each by one line: the next step `yunta verify <run>   verify its evidence` on a finished run's pages and in a program's JSON of them.
 
 ### Task 113: the card in place, on a gate that shows no plan
 
@@ -3430,15 +3604,18 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **A card's keys**: `j k` and `tab` choose; a number picks (`DecisionCard` gains it, in the CLI's card too); `enter` answers, the choice on the run's log through `Operation::Decide`; `n` adds a note; `r` reads the plan it offers; the arrows and the wheel move what stands above it and never its choice. Evidence above it gives way from its top and never overlaps it; its options never give way.
 - An answer recorded is said in a note, in Task 86's sentence for that option.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `ship`, `card-recorded` (the note the ship's answer leaves), `card` (a gate with no plan, answered at the console). Cuts: the design's run at `ship` and after its answer; `yunta_testkit_ui::small_runs`' console gate.
+- **`child`** (from Task 106): its target draws the child's card in place, with the card's legend, and could not land before a card stands in place. It lands here, moved with this task's targets, its attention row corrected first by the lead's ruling: the row is blank where the run's own decision stands in sight, as `ship`, `card`, `scope`, `failure` and `budget` draw it, and the target names another run there; the row is reported before and after for the person.
+
+**Found in its turn:** `InPlace` (`crates/ui/src/stage/run/in_place.rs`) is the prompt a run's screen holds for one pause: the pause, a `Deciding` with its card in front, the place of what stands above the card, which opens at its end, and how its answer stands. `Scene::Card` with `Grounds::Shown` composes its pane (`pane/card.rs`): the title; for a child, the run that bore it; render's `Gate::OverTheCardInPlace`, the documents the gate shows but a plan and the run's findings, the change by file, then the line of findings and criteria; the card at the pane's foot, with no about and no keys of its own. On the card `j k`, `tab` and a number choose; `enter` records the choice on the run's log through `Operation::Decide`, once, and the note says the sentence recorded for that option (`Notice::Recorded`); `n` adds a note; `r` opens the plan the card offers; the arrows and the page keys scroll what stands above and leave the choice and `leads()` as they were. Surco sets a card at its pane's foot (`pane/card_at_the_foot.rs`, `Card::least`): what stands above takes every row the options leave, gives way from its top and scrolls; a line typed on a card keeps its box where rows are short; `pane/held-card` blessed, the sentence giving way before the options. The shared card takes a number (`DecisionCard`, `ListKey`): on the CLI's card `2` sets the pointer on the second option, where a number did nothing; no capture of the CLI moves, and the CLI keeps its own legend at a terminal. Landed and held whole at the four sizes: `ship`, `card-recorded`, `card` and `child`. Three rows were slips the lead ruled corrected in the targets, each listed before and after for the person: `child`'s attention row, blank where its card stands in sight; `child`'s legend, which left out `n add a note` where the seven other card targets name it; `card`'s row of the change, set as `yunta status` and its own dump draw the one component. On `card`'s rows of the document the gate shows the target governed and the code follows: above a card a text document stands at the pane's body column, its words right under its title (`page::shown::text_over_a_card`), the gate's printed page keeping its own layout. `a` still opens the decision's stage over a card in place, and the prompt in place has no round yet; a decision recorded here does not mark the run as handed on. The walk: 55,585 states (55,578 before), 34 palettes, 46 helps, 4,452 screens at each size, its tests in about 75 s beside other builds.
 
 **Fails first:** `crates/ui/tests/in_place.rs` (new): on the design's run at `ship` the card stands with no key pressed; the arrows over the card scroll its evidence, leave its choice where it was, and `leads()` stays true; `2` points `abort`; `enter` records it on the log and the note says the design's sentence. `crates/ui/src/prompt/decision_card/tests.rs`: a number picks its option.
 
 **Acceptance criteria:**
-- [ ] The three targets equal at the four sizes; the inventory's row of element P8 is closed.
-- [ ] `crates/cli/tests/console_interaction/card.rs` passes, a number picking there too.
+- [x] The three targets equal at the four sizes; the inventory's row of element P8 is closed.
+- [x] `crates/cli/tests/console_interaction/card.rs` passes, a number picking there too.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test in_place`, `cargo test -p yunta-ui --lib decision_card`, `cargo test -p yunta-tui --test screens`, `cargo test -p yunta --test console_interaction`
+- [x] Tests pass: `cargo test -p yunta-ui --test in_place`, `cargo test -p yunta-ui --lib decision_card`, `cargo test -p yunta-tui --test screens`, `cargo test -p yunta --test console_interaction`
 
 **Dependencies:** Group check: over a run
 
@@ -3456,13 +3633,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
   - **a cap** (`Menu::Budget`, `BudgetExhausted`, `Menu::LoopCap`, `LoopOverrun`): what is spent against its cap.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `failure`, `failure-recorded`, `scope`, `scope-recorded`, `departure`, `budget`, `loop-cap`. Cuts: the design's run at `failure` and `scope` and after each answer; `yunta_testkit_ui::small_runs`' departure, token cap and loop cap.
 
+**Found in its turn:** every card composes its pane with its grounds (`ComposedPane::Card(Grounds)`, `pane/card.rs`) and holds its prompt in place. A failure: render's `HowItFailed` quotes a regression's tail as evidence, its abridged forms letting `attempt` go first, then the tail from its top, counted in the gutter (Surco's `Evidence.kept`), `kind` and `took` staying. A scope: `blocks::FenceRefused`, the task's reason in the card (`escalation::why_it_asks`), `abort` left to `esc` as the table and the targets ask. A departure and a cap: `blocks::Departures`, whose `because` gives way first, and `blocks::SpentAgainstItsCap`. A scope's or a departure's card names its one task at the title's far end (`NodeTitle::about_the_task`); where a card's least cannot stand under the title, the card takes the title's row (`Terminal::keeps_its_title`). A card stands whole but at the shortest look, which the layout hands down (`Room.shortest`): above that, room is made over it by the blank row between the grounds and the card, then the grounds' abridged forms, then the blank row under the pane's title, as `failure` and `departure` draw at 80×24; the code had set the card at its least wherever the grounds wanted rows. A labelled row is one Surco block (`Block::Labelled`), which the cap's block and `WhereItStopped` draw through: its labels stand in a column two cells past the widest of the rows that stand, and a row gives way only where none of its value can stand, as `budget` shows at 60×14. Landed and held whole at the four sizes: `scope`, `failure`, `failure-recorded`, `scope-recorded`, `departure`, `budget`, `loop-cap`. The recorded two hold the recording's facts, `chosen by mcp`: the test kit plays the recording's own events from the answer on where a cut's log goes on, in place of the performer's write. Target rows the lead ruled slips and corrected, each listed before and after for the person: `departure`'s `abort`, with `Pause here:`; `budget`'s two rows at 120 and 80 columns and in ASCII, one cell past the column's rule; at 60×14 the blank row both `budget` and `loop-cap` set under the title, and the row `loop-cap` let go where it fits. An answer given on a real screen reads `chosen by unverified:<user>`, the log's name for an answer nobody claimed: for the person to see. On a loop failed at its cap, `iterations already run this invocation` reads the cap, the one figure that failure carries. The cut of `node-needs-you` presses its keys before the ask is read, until the task that puts a prompt aside cuts it with `esc`. The walk's counts stand, no state it reaches holding a card on these grounds.
+
 **Fails first:** `crates/tui/tests/screens.rs`: each target differs; `crates/ui/tests/in_place.rs`: the scope's grant recorded on the log with the note `Recorded: grant. The session goes on with the wider scope.`; the failure's card keeps its two options at 60×14 with its tail cut from the top.
 
 **Acceptance criteria:**
-- [ ] The seven targets equal at the four sizes; the inventory's rows of elements P5 and P6 are closed.
+- [x] The seven targets equal at the four sizes; the inventory's rows of elements P5 and P6 are closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test in_place --test scenes`, `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-render blocks`
+- [x] Tests pass: `cargo test -p yunta-ui --test in_place --test scenes`, `cargo test -p yunta-tui --test screens`, `cargo test -p yunta-render blocks`
 
 **Dependencies:** Task 113
 
@@ -3477,13 +3656,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **Its keys**: a line typed on Task 79's boxed row, or a choice picked with the arrows and narrowed by typing; `enter` answers; `shift-tab` the question before; `esc` puts it aside with nothing recorded and the note `Nothing recorded. The run stays waiting on these questions.` No attention row stands while the round does, a line typed or not (Task 92's `Standpoint`).
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `round`, `round-answered`, `round-refused`, `round-aside` (the note `esc` leaves). Cuts: the design's run at `round`, after its first answer and after `esc`; `yunta_testkit_ui::small_runs`' round whose first answers are refused (`AnswersRefused`) and then answered.
 
+**Found in its turn:** `InPlace` holds a decision or a round. The round stands under a `you asked` row (`render::prompt::round::you_asked`) and takes the nodes' list and the pane (`ComposedPane::Round`, `pane/round.rs`, `Scene::lists_its_nodes`), drawn from its top and 110 cells wide at most (`ROUND_MOST`). Every key but `esc` types into it; nothing is recorded until the last answer, then one `Operation::Answer` records them all and the note says so (render's `answers_recorded`, true of the engine's code: ``Recorded: 3 answers. `grill` finishes with them, and the run goes on.``, with its forms for one answer and for none); `esc` puts the round aside, the person pointing at the node, nothing recorded, the note saying it (`Notice::NothingRecorded`). A refusal stands under its question wherever the round is asked: `WaitingQuestions` carries the report, read from the run's own pause, so `yunta resolve-gate` shows it as the application does; the engine's own terminal is handed none. A typed screen's legend that overflows keeps its first keys and ` · …` (`Screen.typed`), as `new-run-refused` and `setup-changing` draw too. A node's feed lists its questions asked and their answer, as the follower prints each. Landed and held whole at the four sizes: `round`, `round-refused`, `round-aside` and `round-answered`, two rows of the last corrected by the lead's ruling, slips of a hand count one and two cells short of the region's last cell, where every other cut row of these targets ends (`unicode-80` row 11, `ascii-120` row 12), listed before and after for the person. What the CLI prints now: the round's question `◆ ask asks`, a refusal without its question's name, and on `yunta status --node` for a node waiting on questions its feed's row `needs you: asked 3 questions…` (render's `node/waiting` blessed, that row alone). `docs/guide.md` says what `esc` does on a round. A round whose answer is recorded no longer counts as waiting on the person in what the state keeps of the run in view. The round at a terminal keeps its own legend. The walk's counts stand, its home following no run parked on a round.
+
 **Fails first:** `crates/ui/tests/in_place.rs`: on the design's run at `round` the round stands with no key pressed; two answers leave the log without an answer; the third records all three; `shift-tab` from the second returns to the first with its answer kept; on the refused round, the refusal stands under its question and the next answers are recorded.
 
 **Acceptance criteria:**
-- [ ] The four targets equal at the four sizes; the inventory's row of element P3 is closed.
+- [x] The four targets equal at the four sizes; the inventory's row of element P3 is closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test in_place`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-ui --test in_place`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 114
 
@@ -3498,13 +3679,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **Its keys**: a number, then `enter`; `j k` and `tab` from task to task; the arrows and the wheel through what is read; `p` its proof; `d` what is decided; `esc` puts it aside.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `desk`, `desk-confirm` (`1` pressed), `desk-proof` (`p`), `desk-decided` (`d`), `desk-change` (the change's pane). Cut: the design's run at `desk`, with each key pressed.
 
+**Found in its turn:** The plan's desk stands in place on the run's screen: it takes everything between the rule and the attention row and shows nothing of the run across, beside or under it (`ComposedPane::Desk`, `pane/desk.rs`, `Scene::heads_itself`); it opens on the plan's first task; a number then `enter` records the option once through `Operation::Decide` and the note says so (``Recorded: approve. On to `implement`.``); `esc` puts it aside with nothing recorded; at the shortest look Surco draws it without its own blank rows. `composes()` returns the pane for every scene, so `acts`, `lead`, `receipt`, `pull_request` and `page` follow. By the targets, and for the CLI's desk at a terminal too: the desk's places are the plan's own (a shown document such as the brief is no place); the head names the workflow without its mode (`WaitingDecision.workflow`) and counts the files the plan names, each once, from scope paths, changes and the spec's test files (`1 task, 6 files`); a task's pane is titled by its id; a task read at its desk says neither `changes` nor `tested by`, and its proof reads `proves` and `runs` (the printed plan keeps every row it had); `d` shows every decision of the plan whole, question, choice and why, and counts them all; `j k` walk the places; the head's far words give way before its title loses a part. Landed and held whole at the four sizes: `desk`, `desk-confirm`, `desk-proof`, `desk-decided`, `desk-change`. Two rows of the targets corrected by the lead's ruling, listed before and after for the person: `new · 7 lines` reads `7 lines` (`desk`, `desk-confirm`, `desk-words`, at 120 columns and in ASCII), the cut's plan holding no shape and its log no reading of the tree, so inventory row `decisions.plan.P10` is carried by no target (`none: D20`); and a continued line of code hangs under its own indent as Surco continues every line (`desk-proof` row 30 at 120 columns and in ASCII, and its count at 60 columns, `… 35 more lines`). Render's and Surco's desk fixtures hand the head the workflow alone, as its one caller does (`fragua`, `reviewed-plan`), their goldens' head row blessed. Left as it is for the person to rule at the checkpoint: the printed plan counts as `decided for you` the decisions that restate no answer of the person and lists the others under `you answered`, where the desk counts and shows every one. Left to the tasks after it: `esc` on a card still leaves for the field; `2` then `enter` on the desk turns to the card's typed line; `review` takes three `esc` to reach the field. The walk's counts stand: no state its home reaches stands as the desk until the design's run is brought there.
+
 **Fails first:** `crates/ui/tests/in_place.rs`: on the design's run at `desk` the desk stands with no key pressed; `1` then `enter` records `approve` on the log; `Down` moves what is read and leaves the task pointed at.
 
 **Acceptance criteria:**
-- [ ] The five targets equal at the four sizes; the inventory's row of element P4 is closed.
+- [x] The five targets equal at the four sizes; the inventory's row of element P4 is closed.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test in_place`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-ui --test in_place`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 115
 
@@ -3522,13 +3705,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **The palette over a prompt put aside**: `/` on a round put aside opens the palette over its node's own scene, its row that answers what the run asks among the rest.
 - Target, moved (`git mv`) from `crates/tui/goldens/targets/`: `palette-aside`. Cut: the design's run at `round` with `esc` then `/` pressed. `node-needs-you`, landed in Task 101, is held here as `esc` reaches it: the design's run at `scope` with `esc` pressed draws that golden.
 
+**Found in its turn:** `esc` on a prompt in place (a card, a round, the desk) puts it aside wherever the prompt itself does not take `esc` (a typed line or a pending confirmation still does): the person takes the node pointer on the node the run waits at, which shows its own scene; the prompt stays held for its pause; only a round leaves a note; `esc` again, or `q`, goes to the field with the note that the run waits; on a child the first `esc` puts the card aside and the second goes up to the parent. `a` or `f` brings the prompt back as it was left, from the run and from the pages over it (`attending_its_decision`); `a` no longer opens the decision's stage. When the pause goes, the held prompt goes with what was typed on it and `in_place/gone.rs` writes the note from the log: ``Answered elsewhere: `deny` chosen by lead.`` for a decision, `Answered elsewhere: by lead via mcp.` or `Answered elsewhere: via tty.` for a round (render's `chronicle::who_answered`, shared with the chronicle's row so the two cannot drift; a round the workflow lets go is never parked on, so it has no form here); our own answer whose news lands before its outcome reads as recorded; a pause of another run going writes nothing (`AnswerablePause::run()`). A defect found and fixed at its root: a run answered in place was not marked as handed on, so until its engine wrote its registry the legend read `r continue it from its log … q field`, `q` said the run stays waiting and `r` could hand it to a second detached engine; `Outcome::handed_on()` marks it for a start, a resume, a decision and a round's answers, and the legend reads `q field, it keeps going`. The lead's ruling on keys: going on and closing are bound exactly where a scene's legend names them (`keyed(step, named)` in `acts.rs`, from `Scene::named_acts`; a test walks one cut a scene), so `r` and `x` no longer act on a node's own scene, a pull request, a card, a round or the desk, and `x` no longer acts on a run short of room or with orphans; each stays a row of the palette, which takes it with no key (`Want::taking`). `/` and `?` take the run's note away as any key does. The lead's ruling on the task's first test: half a note holds through news of its pause and the pick through the trip, since `esc` on a typed line returns to the options, the card's rule. Landed and held whole at the four sizes: `palette-aside`; `node-needs-you` is drawn by `esc` on the scope's card, its cut in the notes following. The walk reaches a round in place on the asking run's screen; it counts 47,920 states, 37 palettes, 46 helps and 4,023 screens at each size, its tests 29 s and 42 s. `docs/guide.md` says how a prompt is put aside and brought back, and what an answer from elsewhere does. Nothing a command prints off a terminal moves. Left to the task that deletes the decision's stage: `decision_stage.rs` and that stage's round, which the application no longer reaches.
+
 **Fails first:** `crates/ui/tests/in_place.rs`: half a note typed on the scope's card survives a piece of news of the same pause and a trip to `brief` and back with `a`; a `resolve-gate` from the API takes the card away with the note naming who answered. `crates/tui/tests/screens.rs`: `esc` on the scope's card draws `node-needs-you`, red while `esc` leaves the run.
 
 **Acceptance criteria:**
-- [ ] `palette-aside` equals its target, and `esc` on the scope's card equals `node-needs-you`, at the four sizes; each of the spec's bullets "`esc` puts it aside" and "A prompt belongs to its pause" has a test.
+- [x] `palette-aside` equals its target, and `esc` on the scope's card equals `node-needs-you`, at the four sizes; each of the spec's bullets "`esc` puts it aside" and "A prompt belongs to its pause" has a test.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test in_place --test lead`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-ui --test in_place --test lead`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 116
 
@@ -3543,19 +3728,46 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - `Deciding` and `PlanDesk` keep the desk in front while the words are typed for an option picked there, in the CLI's desk too; `docs/guide.md`'s sentence on it follows.
 - Targets, moved (`git mv`) from `crates/tui/goldens/targets/`: `card-words`, `desk-words`. Cuts: the design's run at `scope` with its option that asks for words picked; at `desk` with `2` then `enter` pressed.
 
+**Found in its turn:** An option that asks for words opens its typed line in place: at the desk's foot in place of its options, the option's row staying over the box and what is asked faint in it until a key is typed (`2` then `enter`; legend `enter send it · esc go back`; no attention row); on a card every option stays in sight with the box under them (legend `enter record it · esc go back` for a note). `esc` returns to the options and drops the words; an empty `enter` where the option needs words is refused under the line (`✗ this option needs an answer`, the sentence the base's card says, owned once by `Offered::said_with`); words then `enter` record the option with them, once. `PlanDesk` holds how it is being answered (`Answering::{Open, Confirming, Saying}`) and the card's options with what each asks (`decision_card::Offered`); `Left::Chose(PickedOption)` replaces `Left::Picked`, and `DecisionCard::pick` is gone. Surco's `CardBody::Saying` carries every option; render gains `prompt::desk::saying` and one `typed_row`; `Block::Desk` is boxed. Landed and held whole at the four sizes: `card-words` (its cut the note, `n`, since neither option of the scope's card asks for words) and `desk-words` (its cut `2` then `enter`, the notes following); no row contested. With no target left beside the run's screen, the test that held a pane everywhere but its surroundings is gone from `screens.rs`. The CLI's desk at a terminal changes on purpose, for the person to approve: `2`, `enter` keeps the desk and types at its foot, where it closed the desk and typed on the card; the CLI's card keeps every option in sight over its typed line, where it showed the chosen one alone. Surco's `card/saying.*` goldens blessed, the option rows alone. Nothing a command prints off a terminal moves. The walk's counts stand: 47,920 states, 37 palettes, 46 helps, 4,023 screens at each size. `docs/guide.md` says the desk keeps the words at its foot. Found and given a task of their own (118a): the note of an option sent back with words is not yet the design's sentence, and the CLI's prompts word their keys in the third person where the screens say the act.
+
 **Fails first:** `crates/ui/tests/in_place.rs`: at the desk `2` then `enter` opens the line at the desk's foot; words typed and `enter` record `adjust` with them on the log; `esc` brings the options back. `crates/ui/src/prompt/deciding/tests.rs`: the desk stays in front.
 
 **Acceptance criteria:**
-- [ ] The two targets equal at the four sizes; `crates/cli/tests/plan_desk.rs` passes with the line at the desk's foot.
+- [x] The two targets equal at the four sizes; `crates/cli/tests/plan_desk.rs` passes with the line at the desk's foot.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test in_place`, `cargo test -p yunta-ui --lib -- deciding plan_desk`, `cargo test -p yunta --test plan_desk --test docs_sync`, `cargo test -p yunta-tui --test screens`
+- [x] Tests pass: `cargo test -p yunta-ui --test in_place`, `cargo test -p yunta-ui --lib -- deciding plan_desk`, `cargo test -p yunta --test plan_desk --test docs_sync`, `cargo test -p yunta-tui --test screens`
 
 **Dependencies:** Task 117
 
 **Files likely touched:** `crates/ui/src/prompt/{deciding.rs,plan_desk.rs}`, `crates/ui/src/stage/run/in_place.rs` (new) in Task 113, `crates/cli/tests/plan_desk.rs`, `docs/guide.md`, `crates/tui/goldens/{targets,screens}/`
 
 **Estimated scope:** M
+
+### Task 118a: a prompt at a terminal words its keys as the screens do
+
+**Description:**
+- The CLI's prompts at a terminal (the card, its typed line, the round, the desk and its confirmation, and every other prompt `render::prompt` words) name each key's act in the words the screens' legends use: `enter answer`, `enter confirm`, `enter send it`, `enter record it`, `esc go back`, `shift-tab go back`, `esc leave it waiting`, `esc leave it for later`, `n add a note`, `r read the plan`, the arrows `choose`. Today they say `answers`, `chooses`, `confirms`, `sends it`, `records it`, `goes back`, `leaves the run waiting`, `leaves it for later`, `adds a note`, `reads the plan`, `move`: one act worded twice.
+- One owner for each act's words: a screen's legend and a prompt's legend that name the same act read them from the same item of render. A prompt keeps a key of its own only where a terminal needs one (the arrows where a screen takes `j k`), and that entry still says the act in the screen's words.
+- An act no landed screen names takes the words its approved target gives it (the targets still in `crates/tui/goldens/targets/`), or, where no target names it, the same form: the act named as an order, never in the third person.
+- The note an option sent back with words leaves is the design's: ``Sent back to `plan` with your words: "split the second task".``, on the screen; an option that leads back with no words keeps ``Recorded: adjust. Back to `plan`; the gate asks again once it has run.``
+
+**Found in its turn:** Render's `prompt::PromptAct` says each act of a prompt once, as an order (`choose`, `answer`, `confirm`, `send it`, `record it`, `add a note`, `read the plan`, `go back`, `leave it waiting`, `leave it for later`), and one builder makes each legend for the run's screen and for the terminal alike (`card::choosing_legend(ChosenWith::{Letters, Arrows}, …)`, `card::saying_legend`, `round::legend`, `desk::legend`, `prompt::confirming_legend`); the screen's own copies are gone (`card_legend`, `saying_legend`, `round_legend`, `desk_legend`, `confirming_legend`, `confirmation_legend`, `GO_BACK`, `LEAVE_IT_WAITING`, `READ_THE_PLAN`). `screen::recorded` takes the words said with an option: one that leads back with words leaves the design's note, ``Sent back to `plan` with your words: "split the second task".``; with none it reads as before. The lead's rulings: the acceptance search still finds `answers` three times outside any legend (a label `yunta stats` prints, its test, a test's hash input), left as they are; `esc keeps the detected default` was today's phrase carried to the screen in the third person, so the code says `esc keep the detected default`, the target `setup-changing` is corrected in that one word at 120 columns, in ASCII and at 80, and inventory row `starting.setup.T04` follows (listed before and after for the person); `new -i` says `esc take the first`; `type to filter` is said by the list's filter row and leaves the lists' legends. Keys under a prompt fold as a legend folds, between two keys and never inside one, each key strong and what it does muted: the desk's foot (`desk/foot.rs`), the card's and the round's (`card/foot.rs`) and a list's (`asked.rs`) lay them out through one function, `Legend::folded`; before, a joined string was wrapped as words, and at 80 columns `yunta resolve-gate`'s card ended a row `esc leave it` with `waiting` under it (it did at the base too, in the old words). Surco's fixtures and catalog hand every prompt the words the product says, 52 goldens blessed in their legend rows alone (the catalog at 60 columns one row shorter, a list's legend fitting one row). What a prompt shows at a terminal, before and after, is kept for the person under `checkpoint-c/task-118a/`. The confirmation over the field and the application's pickers read the general words until the tasks that land their targets word each act. Nothing a command prints off a terminal moves; no landed screen moves. The walk's counts stand: 47,920 states, 37 palettes, 46 helps, 4,023 screens at each size.
+
+**Fails first:** `crates/render/src/tests/`: each prompt's legend equals the legend of the screen that asks the same thing, entry for entry but the keys a terminal owns; the note of `adjust` recorded with words reads the design's sentence. `crates/cli/tests/console_interaction/`: the card's, the round's and the desk's legend rows read the screens' words.
+
+**Acceptance criteria:**
+- [x] `git grep -n '"sends it"\|"goes back"\|"confirms"\|"chooses"\|"answers"\|"records it"\|"adds a note"\|"reads the plan"' crates/render/src crates/ui/src crates/cli/src` finds nothing.
+- [x] Every legend row a prompt shows at a terminal is listed before and after for the person.
+
+**Verification:**
+- [x] Tests pass: `cargo test -p yunta-render`, `cargo test -p yunta-ui`, `cargo test -p yunta --test console_interaction --test plan_desk --test gate_review_cmd --test interface --test docs_sync`
+
+**Dependencies:** Task 118
+
+**Files likely touched:** `crates/render/src/prompt.rs`, `crates/render/src/prompt/{card,round,desk}.rs`, `crates/render/src/screen.rs`, `crates/render/src/screen/run.rs`, `crates/cli/tests/console_interaction/`, `docs/guide.md`
+
+**Estimated scope:** S
 
 ### Task 119: `Stage::Decision` and the run's page go; `review` opens the run's screen on the plan
 
@@ -3565,14 +3777,16 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **`yunta review <run>`** at a terminal opens the run's screen on the plan; `esc` puts it aside on the run, `esc` again goes to the field and `q` leaves the run for the field. `crates/cli/tests/application/review.rs` says so. `README.md`'s row and the guide's review paragraph follow.
 - `crates/ui/tests/decision_stage.rs` goes: its three tests move to `in_place.rs` under what they hold. `crates/testkit-ui/src/{recorded.rs,screens.rs}` and `crates/ui/tests/walk.rs`' `MUST_REACH` follow.
 
+**Found in its turn:** Gone, with every caller: `Stage::Decision` and `stage/decision.rs`; `Operation::{ReadPage, ReadNodePage, ReadQuestions, ReadDecision}` and `Outcome::{Page, NodePage, Questions, Decision}` with their performers and arms; the run stage's page (`run/page.rs`, its fields and `RunStage::{opening, shown, went_on, node_page_read, reads_a_page}`); render's `screen::DECISION`; the test kit's recordings of the four readings. The API's `waiting_decision`, `waiting_questions`, `page` and `node_page` stay, the CLI's. `Stage::opened_by` maps `status` and `resolve-gate` to the run's screen on its card and `review` to its plan (`RunStage::opened_on(run, Opens)`); the opening is spent on the pause it opened on (`Option<Opens>`, taken by the first prompt built), so a later gate of the run stands as its own scene says. `yunta review <run>` at a terminal opens the run's screen on the plan's first task, under the run's trail and frame: `esc` puts the plan aside, `esc` again goes to the field, `q` goes to the field at once (three `esc` before, under a trail `› decision`); off a terminal it prints what it printed (one run captured with both binaries: 51 lines alike but the run's id). Beyond the task's text, each needed by it: the scene follows where the plan stands, in front of its card or behind it, as the held prompt says; `r` on a card turns the card's own prompt to the plan's desk in place, `esc go back` returning to the card as left; the desk stays in front while its answer is in flight and after it lands, where the card showed for a moment. Help over a prompt in place says the prompt's keys, by one rule in render's `help_over_a_run`: the prompt's keys first, in its own words (its legend, and the keys its legend leaves to help: on the desk `j k next place`, `shift-tab place before`, `pgup pgdn by the page`; on a card `tab shift-tab` and its numbers `choose`), a run's row giving way where the prompt names any of its keys, and only `ctrl-c` staying while a line is typed; before, help over a card said `n` starts a new run. `crates/ui/tests/decision_stage.rs` is gone, its four tests moved under what they hold in `in_place/{aside,desk,round}.rs`; two tests of the deleted stage and of the page's reading are deleted with it. `README.md`'s row, the guide's review paragraph and `yunta review --help` follow. The walk no longer reaches the decision stage's screens and reaches in their place the run's screen opened on the plan, the plan put aside, the plan read from a card, help over the desk and the desk with its answer in flight: 44,541 states, 37 palettes, 51 helps, 3,897 screens at each size, its tests 46 s to 59 s. No landed screen moves. Left as they are, named nowhere: `home`, `end` and `space` on the desk, and `N` and `R` on a card.
+
 **Fails first:** none for the deletion; its guard is `in_place.rs`, the walk and the application's pty tests passing. `crates/cli/tests/application/review.rs`: `review` opens on the plan with the run's trail and no `decision` place, red at the base.
 
 **Acceptance criteria:**
-- [ ] `git grep -n "Stage::Decision\|ReadPage\|ReadNodePage\|ReadDecision\|ReadQuestions" crates` finds nothing.
-- [ ] Off a terminal `review` prints what the base prints.
+- [x] `git grep -n "Stage::Decision\|ReadPage\|ReadNodePage\|ReadDecision\|ReadQuestions" crates` finds nothing.
+- [x] Off a terminal `review` prints what the base prints.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui`, `cargo test -p yunta --test application -- review deciding`, `cargo test -p yunta --test docs_sync`, `cargo test -p yunta-tui --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui`, `cargo test -p yunta --test application -- review deciding`, `cargo test -p yunta --test docs_sync`, `cargo test -p yunta-tui --test walk`
 
 **Dependencies:** Task 118
 
@@ -3581,7 +3795,9 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 **Estimated scope:** M
 
 ### Group check: decisions in place
-- [ ] The suite's groups green; every target of Task 113 to Task 118 equal; `prompts.py`'s captures differ from the base's only where the inventory names; the walk's counts and time recorded.
+- [x] The suite's groups green; every target of Task 113 to Task 118 equal; `prompts.py`'s captures differ from the base's only where the inventory names; the walk's counts and time recorded.
+
+**Found in its turn:** the gate's short steps pass (fmt, clippy on the workspace, the smell counters, the agent docs); the suite's twelve groups hold 5,376 tests, none failing, none aborted (3,227 outside the engine and the CLI, 1,495 the engine's, 654 the CLI's). Sixty targets stand beside the goldens and equal their screens at the four sizes; none of this phase's is left in `targets/`, and the lead's tools hold every family (102 screens, 408 frames), the inventory's cover and the page's notes (no difference unexplained). The walk reaches 44,541 states, takes 37 palettes row by row and opens 51 helps, and draws 3,897 screens at each size; its tests take 55 s and 52 s at a load of 11 to 12 from the other session's builds. The release binary weighs 31,526,048 bytes. Of the 159 captured views, 5 differ from the last check's, each by a task of this group: the prompts of `init -i` (two views) and `new -i` by their legends' words; `resolve-gate`'s card by its legend and by the options that stay in sight over its typed line; the round by its question (`ask asks`) and its legend. `review` at a terminal draws alike once its bytes end. Logs: `.plans/yunta-tui/proof/live-screens/check-decisions/`, captures `check-decisions-prints/`.
 
 ### Task 120: what holds, and only evidence moves
 
@@ -3593,13 +3809,15 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
   - an open palette keeps its pointed row through news;
   - with no event, two drawings a second apart differ only in their times, and every time and age on screen is true to the second.
 
+**Found in its turn:** `crates/ui/tests/holding.rs` holds the five rules through `State` alone on the design's run, fed one event at a time as a following that holds the run hands news (`RunScreen::followed_on_to`, new in the test kit; `Cut::goes_on` returns the events it loads): a feed scrolled back keeps its rows in sight and raises the count under them a call at a time; a decision that comes while the person points another node changes no key's meaning, the attention row naming it and `a` bringing its card; half a note typed on a card stays as news of its pause land; an open palette keeps its pointed row; with no event two drawings a second apart differ only in their times, each equal to one worked out from the log (`holding/times.rs`). Each was seen red with its rule broken in the code (the feed's place kept by its distance from the end; a prompt standing whoever leads; the held prompt dropped on news; the palette built again; the spinner turned by the clock), the source put back as it began. A sixth, `holding/one_following.rs`, holds why a prompt is never rebuilt by a run read whole again: the application makes one following for its life and reads a run's screen whole once, every page over the run keeping the same run followed; the paths that could read it whole are listed in the test's doc with its `Reached by:`. The lead's note: a cut that stops between the two events of an answer (the gate's and its resolution's, one commit) is a state the application never sees, so tests of a pause's news use the gate's own event. The five pass 50 runs at once beside eight busy loops. A trap recorded in `.agents/traps.md`: a source put back with its old time is not built again.
+
 **Fails first:** each test seen red with its rule broken for the run (the feed's place kept by position; the prompt rebuilt from news; the palette rebuilt), then the rule put back.
 
 **Acceptance criteria:**
-- [ ] Five tests, one for each bullet; the second drawing's differences are times alone.
+- [x] Five tests, one for each bullet; the second drawing's differences are times alone.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test holding`
+- [x] Tests pass: `cargo test -p yunta-ui --test holding`
 
 **Dependencies:** Group check: decisions in place
 
@@ -3614,15 +3832,17 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - **`crates/cli/tests/application/deciding.rs`**: a card appears by itself as the run parks, with no key pressed, and is answered there, the choice on the log; a run parked on a person and answered from a shell goes on with no key pressed: the card goes, a note says who answered, the scene becomes work.
 - Each asserts an order, never a duration, and runs under `stress_binary.py` (in `.plans/yunta-tui/tools/`) before the phase's commit.
 
+**Found in its turn:** Three tests at a pseudo-terminal, each waiting for words on the screen and sending a key only after the screen it acts on is seen. `application/feed.rs`: on a run whose session is held between its calls, each call let go stands as the pane's last row before the next word is given; scrolled back with the arrows, three more calls leave the rows in sight as they are and raise the count under them by one each; the pane stays on that node as the run moves on; `End` returns to the newest. `application/deciding.rs`: a card stands by itself as the run parks, with no key pressed, and its answer is on the log; a gate answered from a shell (`yunta resolve-gate <id> go --by lead`, another process) takes its card away with no key pressed, the note reading ``Answered elsewhere: `go` chosen by lead.`` as the log says, and the run works on. Each was seen red with its rule broken (news putting a scrolled feed back at its end; the card not standing by itself; the note not written), the source put back. Each passes 50 runs, five workers beside eight busy loops on eight cores, none failing: `.plans/yunta-tui/proof/live-screens/phase-3-stress.txt`. The engine of the feed's test is `yunta run` in a process of its own, a run on the mock adapter never being handed to a detached engine. The stress tool keeps its own busy loops now (`--busy <n>`).
+
 **Fails first:** each seen red with the run stage's lead broken for the run (the pane following the end while scrolled back; the card not standing by itself), then the rule put back.
 
 **Acceptance criteria:**
-- [ ] The spec's criteria 2 and 3 hold at a pty.
-- [ ] Each test passes 50 runs under `stress_binary.py` beside busy loops, the counts written in `.plans/yunta-tui/proof/live-screens/`.
+- [x] The spec's criteria 2 and 3 hold at a pty.
+- [x] Each test passes 50 runs under `stress_binary.py` beside busy loops, the counts written in `.plans/yunta-tui/proof/live-screens/`.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta --test application -- feed deciding`
-- [ ] `python3 .plans/yunta-tui/tools/stress_binary.py` over the two files' tests.
+- [x] Tests pass: `cargo test -p yunta --test application -- feed deciding`
+- [x] `python3 .plans/yunta-tui/tools/stress_binary.py` over the two files' tests.
 
 **Dependencies:** Task 120
 
@@ -3637,13 +3857,19 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - `crates/ui/tests/walk.rs`' `MUST_REACH` gains a screen for every scene of the spec's table, and holds that `State::followed()` names the run under every stage opened over it; `crates/tui/tests/walk.rs` lays every state out at its two sizes.
 - The walk's states and time are measured against the last group check's, and the suite's against CI's 45 minutes.
 
+- **The walk draws the design's own size.** Its two sizes, 80 and 60 columns, both stand under the 102 a side region needs, so since Task 76 it lays out no side. It draws every state at `ascii-120` (120×36) in place of `ascii-80`, and at `unicode-60` as before: the side's edge whole on every row it spans, every region inside its rectangle. 80×24 is held by each scene's goldens. Its states and time are written beside `walk-fed.txt`'s.
+- **A child in the walk's home** (from Task 106): with the small runs in the home, the walk holds that `State::followed()` names the child under every stage opened over a parent parked on it, and reaches the child's screen.
+- **`MUST_SCROLL` holds a run's numbers again** (from Task 111): the screen leaves most of a run's numbers to the printed page, so no run of the walk's home spent enough for them to pass its screen and the entry `("stats", "a run's stats")` was taken out; with the design's run in the home the walk scrolls them, and the entry stands again.
+
+**Found in its turn:** The walk's home holds, each loaded through `Cut` from `TARGET_CUTS`: the design's run at five moments (the board at 99, the scope's pause at 118, the findings at 200, the failure at 254, the receipt at 276), twenty small runs in one cut, the child in a cut of its own, a command at work and an answer recorded with no resume on the smallest run that stands as each (`FAVLTY` at 2 and at 4), a round picked from a list on a run of its own (`CH00SE`), and the promoted run. A piece of a run's news is recorded under the head the run stood at, so one run stands at several moments. `MUST_REACH` names every scene of the spec's table (80 entries, the new ones seen red before the home held their runs); `MUST_SCROLL` holds a run's numbers again. The terminal's walk draws every state at `ascii-120` (120×36) and `unicode-60`. The lead's rulings: ten moments of the design's run alone took each walk's test to four and a half minutes, so a scene is carried by the smallest run that stands as it; `MOST_STATES` is 130,000, a third over the 97,626 the walk reaches. What a stage is to its run is a type, `ItsRun::{Shows, WroteFor}` (`crates/ui/src/stage/its_run.rs`): the walk holds that a stage that shows a run as it moves names the run the state follows, and that a stage holding what was written for a run (the receipt, a verification, the page for a browser) names that run still, a successor taking the run's place under it (its own test in `scenes/successor.rs`). The child: the trail names the child under every stage opened over a parent parked on it. Defects the walk found, fixed at their root: a run's numbers were never scrolled by the walk because their page stood outside `State::pane()` (`state/followed.rs`, `stage/stats.rs`); a list picked by typing showed no cursor: it stands on the list's filter row, at its first cell while nothing is typed and after the words otherwise (`filter_cursor` in Surco's `asked.rs`), for the application's lists, the palette, a round's question picked from a list and the CLI's lists alike, the text of each unchanged; where a filter row gave way for room with nothing typed no cursor shows, and a filter in force brings its row back (held by a test; `round-answered` at 60×14 stands as approved). The walk's cursor rule reads the frame (`crates/tui/tests/walk/cursor.rs`): a typed line places a cursor, a list places one exactly where its filter row stands, nothing else shows one. Measured where the walk's time goes (a sample of 20 s): six tenths in each state's fingerprint (the screen 27%, of which a run's frame derived again 17%; its Markdown 21%), a seventh in taking the input, a state's clone 0.2%. Cut without changing what the walk tells apart: an input's label built only for a state kept, what a state follows hashed directly (`Hash` on `yunta_api::Followed` and `FieldReach`), the design's places made once and only when opened; the counts did not move. Not made: Markdown kept by its screen (Surco's `Screen` holds no equality, a meter's bars being floats), and a run's frame derived once a head, which changes the product. On a quiet machine the two walk tests take 192 s and 188 s (walk 153 s and 148 s, user CPU 719 s each): some ten seconds past the three minutes the person set, theirs to rule at the checkpoint. Left as found: the small runs are built one after another (27 s), both walk binaries build the same home, `Menu::Console` stands in no home (the API reads no decision of a console gate; its screen is a standstill). Two tests failed once under load beside this work and pass alone, given to another agent: ui's `in_place::round::nothing_is_recorded_until_the_last_answer_which_records_every_one` and the CLI's `application` `deciding::a_round_answered_…`.
+
 **Fails first:** `MUST_REACH`'s new entries seen red before the home holds the fixtures.
 
 **Acceptance criteria:**
-- [ ] Every scene of the spec's table is reached; the walk stays under its bound (`MOST_STATES`), its count and time written in `.plans/yunta-tui/proof/live-screens/`.
+- [x] Every scene of the spec's table is reached; the walk stays under its bound (`MOST_STATES`), its count and time written in `.plans/yunta-tui/proof/live-screens/`.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-ui --test walk`, `cargo test -p yunta-tui --test walk`
+- [x] Tests pass: `cargo test -p yunta-ui --test walk`, `cargo test -p yunta-tui --test walk`
 
 **Dependencies:** Task 121
 
@@ -3659,16 +3885,19 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 - `pages.sh`'s and `prompts.py`'s captures against the base's: each difference one the inventory names, listed in `.plans/yunta-tui/proof/live-screens/phase-3-prints.txt`.
 - **The probe's `feed`** (new, in `.plans/yunta-tui/proof/live-screens/probe/`): a run whose one node made ten thousand calls, its screen drawn at 200×60 with that node pointed and its feed at its end, the median of 2,000 drawings, as the probe's `frame` measures; its number written in `.plans/yunta-tui/proof/live-screens/phase-3-feed.txt`, which Phase 4 measures again.
 - **Surco's reference**, at the path Task 160 names (its sources outside git at `~/.claude/plans/surco-v3/tools/reference/`, republished to its artifact), edited in place, not appended, for the pieces this phase changed or added, each with its owner in the code: `Noted`, `Tally`, `SideAt`, `Line::pointed`, `Horizon`, `FindingList`, `Answer::Unkeyed`, the legend's far keys, a region's edge, the typed row's box, and the redrawn card, round, list of choices, rail, boxes and bars.
+- **The guide says a run's screen whole** (from Tasks 108 and 109): `docs/guide.md`'s "The application at a terminal" says what a finished run's screen shows and that showing it writes nothing, and that a promoted run's successor takes the screen while the run leads, `f` handing it over otherwise; `docs_sync` holds what it quotes.
+
+**Found in its turn:** `LANDED` holds 60 screens whole at the four sizes, `feed-back` and `asked-elsewhere` by tests of their own; the 251 files under `crates/tui/goldens/screens/` are each read by a test, none of the base's `run`, `card`, `desk`, `palette`, `help` or `confirmation` frames or builders remains, and `targets/` holds the 40 screens of the next phase. The lead's tools hold a run's screens (62 screens, 248 frames; no row differing), the inventory's cover (66 components, 298 phrases, 332 rows only today's screen says) and the page's notes. Against the base, 67 of 159 captured views differ, every differing line named by a task or a ruling of this phase and none unnamed (`.plans/yunta-tui/proof/live-screens/phase-3-prints.txt`); against the base's digests 162 goldens changed, 540 are new and 8 are gone. The release binary weighs 31,542,560 bytes. The probe gains `feed`: a node of 10,000 calls pointed, its feed at its end, at 200×60 draws in 0.35 ms (median of 2,000; 0.28 ms with 100 calls: some 7 ns a call grow with the node's calls though only the rows in sight are drawn); `parts`, `frame` and `dump` no longer build against this tree and stand out of the probe's build with the reason. `docs/guide.md`'s "The application at a terminal" is one text of five paragraphs: keys and the palette, what a run's screen shows, a run's keys, ended runs and a successor, prompts in place. Surco's reference is rebuilt from this tree and republished (its sources point at this worktree; every capture retaken from this phase's binary): it had been built before the application existed, so it gains the application whole (a screen's parts, how a pane is laid out, the boxes, how a screen gives way, how screens are held), a family for what is answered in place, the one rule on a cut and the legends' words, each piece with its owner; 43 blocks where it said 28. Three real runs with this phase's binary reach `ship` in 126 to 136 s, the engine's time between nodes 0.553 to 0.672 s, the last figure one stall of a tenth of a second at one node's start on a busy machine, the seven other gaps equal to the earlier runs' to the millisecond. Found while the reference was captured, and given a fix of its own: text in a box over a screen keeps the background of the cells under it.
 
 **Fails first:** none: a count, a measurement and the reference. Their guard is the screens test and the checker.
 
 **Acceptance criteria:**
-- [ ] The checker counts zero differing rows for a run's screens; the screens test passes at the four sizes.
-- [ ] The feed's median is written beside the probe's `frame` on the base, and Surco's reference names each piece above with its owner.
+- [x] The checker counts zero differing rows for a run's screens; the screens test passes at the four sizes.
+- [x] The feed's median is written beside the probe's `frame` on the base, and Surco's reference names each piece above with its owner.
 
 **Verification:**
-- [ ] Tests pass: `cargo test -p yunta-tui --test screens`
-- [ ] Manual check: `python3 .plans/yunta-tui/tools/targets_check.py crates/tui/goldens/screens`, and the captures' list read against the inventory.
+- [x] Tests pass: `cargo test -p yunta-tui --test screens`
+- [x] Manual check: `python3 .plans/yunta-tui/tools/targets_check.py crates/tui/goldens/screens`, and the captures' list read against the inventory.
 
 **Dependencies:** Task 122
 
@@ -3677,12 +3906,16 @@ Task 102 to Task 110 each add one family to the pane's composer and to `screens/
 **Estimated scope:** M
 
 ### Group check: the proof
-- [ ] The gate (`sh .plans/yunta-tui/tools/gate.sh`) green, one build at a time with `CARGO_INCREMENTAL=0`; every golden and capture against the base differs only where this phase's tasks name; the walk's counts and time recorded.
+- [x] The gate (`sh .plans/yunta-tui/tools/gate.sh`) green, one build at a time with `CARGO_INCREMENTAL=0`; every golden and capture against the base differs only where this phase's tasks name; the walk's counts and time recorded.
+
+**Found in its turn:** the gate's twelve steps pass on the final tree (`.plans/yunta-tui/proof/live-screens/gate-c-final/`): 329 test binaries, 5,399 tests, none failing, none aborted; its test step took 2,123 s on a machine loaded by another session, the tests' own times summing to 1,424 s (832 s at Checkpoint B's gate). A first run of the gate on the phase's tree (`gate-c/`) had failed the strict documentation build alone: two redundant link targets and six links from the test kit's public docs to private items, fixed. Found while Surco's reference was captured and fixed with its tests: a box over a screen kept the ground, color and weight of the cells under it. Against the base, 67 of 159 captured views differ, every differing line named by a task or a ruling (`phase-3-prints.txt`). The walk is one test that holds the interface's rules and the terminal's over 97,626 states, 114 palettes, 63 helps and 10,950 screens at each of `ascii-120` and `unicode-60`, in about 205 s on a quiet machine (280 s in this gate); the screens test draws on every core.
 
 ### Checkpoint C: a run's screen
 - [ ] The user tries a real fragua run in the application in the sandbox: followed on its screen, every decision answered in place, one answered from a shell; and reviews what the CLI's prompts and pages now print (the goldens' diff and `phase-3-prints.txt`), the receipt's rewordings among them, and Surco's reference.
-- [ ] The spec's criteria 2, 3, 5, 6 for a run's scenes, 7, 8 and 11, each with its evidence; no row of the inventory differs on a run's screens; what the CLI prints differs from the base only where the inventory names; the walk's states and time and the suite's time are measured against CI's limit; the feed's probe recorded.
-- [ ] The phase commits after every step of the `ci` job passes (the gate, `CARGO_INCREMENTAL=0`, one build at a time), with `crates/{surco,render,ui,tui,testkit-ui,api,cli}/` (the targets moved out of `crates/tui/goldens/targets/` among them) and the goldens of `crates/{surco,render,engine,tui}/goldens/` that changed, `docs/guide.md` and `README.md`, staged by name; then `cargo clean`.
+- [x] The spec's criteria 2, 3, 5, 6 for a run's scenes, 7, 8 and 11, each with its evidence; no row of the inventory differs on a run's screens; what the CLI prints differs from the base only where the inventory names; the walk's states and time and the suite's time are measured against CI's limit; the feed's probe recorded.
+- [x] The phase commits after every step of the `ci` job passes (the gate, `CARGO_INCREMENTAL=0`, one build at a time), with `crates/{surco,render,ui,tui,testkit-ui,api,cli}/` (the targets moved out of `crates/tui/goldens/targets/` among them) and the goldens of `crates/{surco,render,engine,tui}/goldens/` that changed, `docs/guide.md` and `README.md`, staged by name; then `cargo clean`.
+
+**Decided at the checkpoint (2026-11-21):** the person read the checkpoint's page, wrote their decisions on it and said to go on; whether they made the trial run is theirs to say, so its box stays open. Their decisions: one exploration for both walks, now (done, with the screens test drawn on every core; a run's frame derived once for a head of its log is Phase 4's first task); the printed plan follows the desk on `decided for you` (done: every decision of the plan under it in the plan's order, one that restates an answer keeping the question asked and the answer beside it; one owner for the count, `page::plan::change::how_many_decided`); the `chrono` advisory ignored in `deny.toml` with its reason and its replacement recorded as open work (done; the edit made by a script the person asked for); the three changes to the CLI's prompts approved; the lead's rulings and the corrected rows confirmed. Told to the person on the page: CI's `test-release` job failed once on the Phase 2 commit in a test of the base (`crates/core/tests/process_mark.rs`), which this module does not touch.
 
 ## Phase 4: the field, a new run, a setup, and the proof
 
@@ -3723,6 +3956,29 @@ Its groups, each green before the next: Surco's pieces of these screens; render'
 - Phase 3, render: `watched::stretch_names` over a workflow's node ids, the ribbon's names by question 3's rule, callable for a mode with no run (Task 95); a stage's keys beyond its legend listed by help, for a run's screen (Task 112).
 - Phase 3, `yunta-ui`: one composer of the tally and the attention row, `FollowedRuns::framing` in `crates/ui/src/followed_runs.rs`, which each stage calls (Task 92); `a` going where the attention row names; `q` going to the field, taking the place of a first request that stands at the bottom (Task 93); the field's `said` taking the note a run's `q` and `esc` leave (Task 94); the four sizes in `crates/tui/tests/screens.rs` (Task 96); a run's screens built from `yunta_testkit_ui::cut` by a target's name (Task 90); the probe's `feed`, a drawing at 200×60 of a node of ten thousand calls (Task 123); `tui`'s `run`, `card`, `desk`, `palette`, `help` and `confirmation` frames deleted with their builders (Task 76, Task 80, Task 82, Task 84); Surco's reference brought up to Phase 3's pieces at the path Task 160 names (Task 123).
 - Phase 3: where it delivers any of these another way, the task that uses it says the difference in its turn and builds what it lacks.
+
+### Task 123b: a run's frame is derived once for a head of its log
+
+**Description:**
+- The person's decision at Checkpoint C. A run's frame (`RunFrame::of`) is derived again at every draw and every key: about 27% of the walk's work (a sample of 20 s) and the part of a drawing that grows with a node's calls (the probe's `feed`: 0.35 ms a drawing at 10,000 calls against 0.28 ms at 100, some 7 ns a call, though only the rows in sight are drawn).
+- What a frame says of a log's head is derived once for that head and kept with the run followed; what moves with the clock (an age, how long a node has worked, how long a run has waited) is worked out apart at each draw from what was kept, so a draw with no news folds no event.
+- One owner for the kept frame, replaced when the run's head moves; no reader of a frame derives its own. Not a cache keyed by a clock: nothing that moves with time is kept.
+
+**Fails first:** `crates/ui/tests/holding.rs` or `crates/replay/tests/`: two draws of a run with no news between them fold the run's events once (count the folds through a probe the test owns, never a timer); a draw a second later says every time a second on, as `holding/times.rs` holds today.
+
+**Acceptance criteria:**
+- [ ] The probe's `feed` draws a node of 10,000 calls within a few hundredths of a millisecond of a node of 100; its figures written beside `phase-3-feed.txt`'s.
+- [ ] The walk's counts do not move (97,626 states, 114 palettes, 63 helps, 10,950 screens at each size) and its time is written beside `walk-fed.txt`'s last entry; every screen golden unmoved.
+- [ ] Real runs before and after if the change reaches replay on the run path; said if it does not.
+
+**Verification:**
+- [ ] Tests pass: `cargo test -p yunta-replay -p yunta-ui -p yunta-tui`, the strict documentation build of the packages touched
+
+**Dependencies:** Checkpoint C
+
+**Files likely touched:** `crates/replay/src/frame/mod.rs`, `crates/ui/src/followed_runs.rs`, `crates/ui/src/followed_runs/framing.rs`, `.plans/yunta-tui/proof/live-screens/probe/src/feed.rs` (outside git)
+
+**Estimated scope:** M
 
 ### Task 124: the typed answer, in the design's box
 

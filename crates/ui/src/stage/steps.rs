@@ -2,36 +2,44 @@
 //! that takes it: what every stage's palette offers after the stage's own acts, the stage
 //! each step opens, and the step whose command shows what a stage shows.
 
-use yunta_core::step::{Arg, NextStep};
+use yunta_core::step::{Arg, NextStep, Reach};
 
 use super::{
-    CatalogStage, DecisionStage, DoctorStage, Evidence, EvidenceStage, GraphStage, RunStage,
+    CatalogStage, ChronicleStage, DoctorStage, Evidence, EvidenceStage, GraphStage, RunStage,
     SchemaStage, Stage, StatsStage, UpkeepStage,
 };
 use crate::prompt::Opens;
 
 impl Stage {
     /// What every stage's palette offers after the stage's own acts, in their order:
-    /// the workflows, doctor, upkeep and the shapes of the documents Yunta reads, each
-    /// opening the stage that takes it ([`Stage::opened_by`]).
-    pub(crate) fn always() -> [NextStep; 4] {
+    /// every run of this repository, the workflows, doctor, upkeep and the shapes of the
+    /// documents Yunta reads, each taken as [`Want::taking`](super::Want::taking) takes it:
+    /// the field for the runs, which every stage goes down to, and the stage that takes any
+    /// other ([`Stage::opened_by`]).
+    pub(crate) fn always() -> [NextStep; 5] {
         [
+            NextStep::ListRuns {
+                reach: Reach::Repository,
+            },
             NextStep::List,
             NextStep::Doctor {
                 sessions: false,
                 full: false,
             },
-            NextStep::Gc { dry_run: true },
+            NextStep::Gc { dry_run: false },
             NextStep::Schemas,
         ]
     }
 
-    /// The stage `step` opens: one of [`Stage::always`]; a run's step that shows or
-    /// follows the run, its decision on its card or on its plan, its evidence, its
-    /// numbers or its graph; or a workflow's past runs or its graph. None for a step that
-    /// is work or asks a confirmation first, which the stage it is taken on carries out.
-    /// The one mapping from a step to the stage that takes it: every stage and every
-    /// opening reads it.
+    /// The stage `step` opens: one of [`Stage::always`] but the runs, which are the field
+    /// every stage goes down to; upkeep for `gc`, whether it removes or says what it would,
+    /// since the page says what it would remove and removes it only once confirmed; a run's
+    /// step that shows the run, its decision on its card as `status` and `resolve-gate` show
+    /// it or on its plan as `review` shows it, its whole chronicle as `--follow` prints it,
+    /// its evidence, its numbers or its graph; or a workflow's past runs or its graph. None
+    /// for a step that is work or asks a confirmation first, which the stage it is taken on
+    /// carries out. The one mapping from a step to the stage that takes it: every stage and
+    /// every opening reads it.
     pub(crate) fn opened_by(step: &NextStep) -> Option<Stage> {
         Some(match step {
             NextStep::List => Stage::Catalog(CatalogStage::new()),
@@ -39,17 +47,15 @@ impl Stage {
                 sessions: false,
                 full: false,
             } => Stage::Doctor(DoctorStage::new()),
-            NextStep::Gc { dry_run: true } => Stage::Upkeep(UpkeepStage::new()),
+            NextStep::Gc { .. } => Stage::Upkeep(UpkeepStage::new()),
             NextStep::Schemas => Stage::Schema(SchemaStage::new()),
-            NextStep::Status { run, .. } | NextStep::Follow { run } => {
-                Stage::Run(RunStage::of(run.clone()))
-            }
-            NextStep::ResolveGate { run, .. } => {
-                Stage::Decision(DecisionStage::of(run.clone(), Opens::TheCard))
+            NextStep::Status { run, .. } | NextStep::ResolveGate { run, .. } => {
+                Stage::Run(RunStage::opened_on(run.clone(), Opens::TheCard))
             }
             NextStep::Review { run } => {
-                Stage::Decision(DecisionStage::of(run.clone(), Opens::ThePlan))
+                Stage::Run(RunStage::opened_on(run.clone(), Opens::ThePlan))
             }
+            NextStep::Follow { run } => Stage::Chronicle(ChronicleStage::of(run.clone())),
             NextStep::Receipt { run } => {
                 Stage::Evidence(EvidenceStage::of(run.clone(), Evidence::Receipt))
             }
@@ -80,12 +86,12 @@ impl Stage {
                 sessions: false,
                 full: false,
             }),
-            Stage::Upkeep(_) => Some(NextStep::Gc { dry_run: true }),
+            Stage::Upkeep(_) => Some(NextStep::Gc { dry_run: false }),
             Stage::Schema(_) => Some(NextStep::Schemas),
             Stage::Signpost
             | Stage::Field(_)
             | Stage::Run(_)
-            | Stage::Decision(_)
+            | Stage::Chronicle(_)
             | Stage::FirstRun(_)
             | Stage::Start(_)
             | Stage::Setup(_)

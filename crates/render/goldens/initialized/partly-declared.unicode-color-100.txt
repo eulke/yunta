@@ -22,4 +22,4 @@
       - { adapter: claude-code, model: <model> }
 
 ␛[2mnext␛[0m
-  ␛[1myunta doctor␛[0m   ␛[2mconfirms everything above is usable␛[0m
+  ␛[1myunta doctor␛[0m   ␛[2mcheck adapters, git, forge, packs␛[0m

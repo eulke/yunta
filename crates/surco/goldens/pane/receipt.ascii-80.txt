@@ -1,0 +1,9 @@
+  + criteria     1 of 1 green, red before the work
+  + baseline     cargo test --workspace still passes
+  + scope        7 files, 2 of them granted by you
+  + review       4 findings, 4 answered
+  + event chain  intact
+
+  cost         27.1M tokens per verified task, 1 reroute
+  changed      7 files, +65 -24
+  pull request #31: https://github.com/eulke/yunta/pull/31

@@ -12,11 +12,11 @@ use surco::text::{detailed, one_line};
 use surco::words::Standing;
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
-    artifacts, children, findings, gates, node, run, session, AgentMessageType,
+    artifacts, children, findings, gates, node, run, session, AgentMessageType, Channel,
     GateResolvedPayload, LoggedWords, NodeState, NodeWait, NoteDigest, TokenUsage,
 };
 use yunta_core::fence::Coverage;
-use yunta_core::NonEmpty;
+use yunta_core::{NonEmpty, Responder};
 use yunta_replay::frame::Happening;
 
 use crate::children::{child_standing, closed_as};
@@ -405,15 +405,27 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String)
         ),
         H::Answered { channel, responder } => (
             Some(Mark::Done),
-            match (channel, responder) {
-                (yunta_core::events::Channel::Assumed, _) => {
+            match channel {
+                Channel::Assumed => {
                     "nothing required: going on with what each question assumes".to_string()
                 }
-                (_, Some(by)) => format!("answered by {by} via {}", channel.as_str()),
-                (_, None) => format!("answered via {}", channel.as_str()),
+                Channel::Tty | Channel::Mcp => {
+                    format!("answered {}", who_answered(*channel, responder.as_ref()))
+                }
             },
         ),
         H::AskingOpened => (Some(Mark::NeedsYou), "asking a person".to_string()),
+    }
+}
+
+/// Who answered a round of questions and through what, in the log's words: by `responder`,
+/// where the channel says one, via `channel`, as the log spells it. Not a round closed on what
+/// each question assumes, which nobody answered: the engine closes one so only where the
+/// workflow lets it go unasked, in the step that asks it.
+pub(crate) fn who_answered(channel: Channel, responder: Option<&Responder>) -> String {
+    match responder {
+        Some(by) => format!("by {by} via {}", channel.as_str()),
+        None => format!("via {}", channel.as_str()),
     }
 }
 
@@ -450,7 +462,7 @@ fn fence_covered(coverage: &Coverage) -> String {
 
 /// How a gate was settled: who settled it and what they said, in each
 /// of the shapes the persisted object spells.
-fn resolution(payload: &GateResolvedPayload) -> String {
+pub(crate) fn resolution(payload: &GateResolvedPayload) -> String {
     match payload {
         GateResolvedPayload::Chosen(choice) => {
             format!("`{}` chosen by {}", choice.option, choice.by)

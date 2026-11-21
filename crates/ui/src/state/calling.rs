@@ -30,6 +30,7 @@ use yunta_core::RunId;
 use yunta_render::page::FieldRow;
 use yunta_render::watched;
 
+use crate::followed_runs::waiting_longest;
 use crate::{FollowedRuns, Request};
 
 /// The runs the state keeps that stand needing the person, as the news folded last left
@@ -146,8 +147,7 @@ impl Calling {
         let field = kept.field.as_ref()?;
         let needing = self.needing.iter().flatten();
         let held = needing.filter(|(run, _)| field.runs.contains_key(*run));
-        let answered_here = held.map(|(_, row)| row).filter(|row| !row.asking());
-        let longest = answered_here.min_by(|a, b| FieldRow::by_wait(a, b))?;
+        let longest = waiting_longest(held.map(|(_, row)| row.as_ref()))?;
         Some(longest.frame.run_id.clone())
     }
 }

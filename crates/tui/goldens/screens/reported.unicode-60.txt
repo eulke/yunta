@@ -1,0 +1,14 @@
+ yunta › REP0RT › receipt       ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ▲ reviewed (default) · reported · in 2m12s          REP0RT
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ finished holding 1 blocking finding
+   ◌ criteria     none declared, nothing to prove
+   ◌ baseline     not used by this workflow
+   ✓ scope        no file touched
+   ✗ review       1 finding, 0 answered
+   ✓ event chain  intact
+ … 5 more lines
+ 0 tokens · 2m10s at work
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ j k node · s stats · g graph · n new run · … · ? keys

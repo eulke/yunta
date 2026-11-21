@@ -1,7 +1,7 @@
-//! See [`super`]. The work a run's stages ask for: its readings and the acts that change
-//! it, each through the API's open run.
+//! See [`super`]. The work a run's stages ask for: the pull request its gate waits on, read
+//! from its forge, and the acts that change it, each through the API's open run. What the
+//! run's log says is followed, never read here.
 
-use surco::doc::Depth;
 use yunta_api::{Error, Project, Remarks, RunRequest, Stop};
 use yunta_core::events::Channel;
 use yunta_core::port::QuestionsReply;
@@ -9,37 +9,10 @@ use yunta_core::{Answer, NodeId, OptionId, RunId};
 
 use crate::Outcome;
 
-/// `run`'s page, what reading it says said through `remarks`.
-pub(super) async fn page_read(
-    project: &Project,
-    run: &RunId,
-    remarks: &dyn Remarks,
-) -> Result<Outcome, Error> {
-    let page = project.run(run).await?.page(Depth::Glance, remarks).await?;
-    Ok(Outcome::Page(Box::new(page)))
-}
-
-/// The page of `run`'s node `node`, what reading it says said through `remarks`.
-pub(super) async fn node_page_read(
-    project: &Project,
-    run: &RunId,
-    node: &NodeId,
-    remarks: &dyn Remarks,
-) -> Result<Outcome, Error> {
-    let page = project.run(run).await?.node_page(node, remarks).await?;
-    Ok(Outcome::NodePage(Box::new(page)))
-}
-
-/// The round of questions `run` is parked on.
-pub(super) async fn questions_read(project: &Project, run: &RunId) -> Result<Outcome, Error> {
-    let waiting = project.run(run).await?.waiting_questions().await?;
-    Ok(Outcome::Questions(Box::new(waiting)))
-}
-
-/// The decision `run` waits on, with the documents it shows.
-pub(super) async fn decision_read(project: &Project, run: &RunId) -> Result<Outcome, Error> {
-    let waiting = project.run(run).await?.waiting_decision().await?;
-    Ok(Outcome::Decision(Box::new(waiting)))
+/// The pull request of the gate `run` waits at, polled on the run's forge.
+pub(super) async fn pull_request_read(project: &Project, run: &RunId) -> Result<Outcome, Error> {
+    let polled = project.run(run).await?.pull_request().await?;
+    Ok(Outcome::PullRequest(polled.map(Box::new)))
 }
 
 /// `option` recorded on the decision `run` waits on, with the `words` it was chosen

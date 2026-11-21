@@ -3,7 +3,7 @@
 //! being said for the one chosen, or a round's questions; and its keys. What a
 //! terminal fits to its rows, a file says whole.
 
-use super::{plain_text, screen, GLYPHS};
+use super::{code_span, plain_text, screen, GLYPHS};
 use crate::components::{Card, CardBody, ChoiceRow, Choices, RoundRow, RoundStanding, TypedRow};
 use crate::glyphs::Mark;
 
@@ -49,13 +49,13 @@ fn body(body: &CardBody) -> Vec<String> {
             parts
         }
         CardBody::Saying {
-            chosen,
+            choices,
             asks,
             typed,
             refused,
         } => {
             let mut parts = vec![
-                option(chosen, true),
+                listed(choices),
                 format!("**{}**", plain_text(asks)),
                 typed_line(typed),
             ];
@@ -83,13 +83,17 @@ pub(super) fn listed(choices: &Choices) -> String {
         .join("\n")
 }
 
-/// One option: the pointer when it is pointed at, its name in bold, what it says
-/// and what it costs.
+/// One option: the pointer when it is pointed at, its name in bold, its key as code where
+/// it has one, what it says and what it costs.
 fn option(row: &ChoiceRow, pointed: bool) -> String {
     let mut said = match pointed {
         true => format!("{} **{}**", GLYPHS.pointer(), plain_text(&row.name)),
         false => format!("**{}**", plain_text(&row.name)),
     };
+    if let Some(key) = &row.key {
+        said.push(' ');
+        said.push_str(&code_span(key));
+    }
     for part in [&row.said, &row.cost].into_iter().flatten() {
         said.push(' ');
         said.push_str(&plain_text(part));

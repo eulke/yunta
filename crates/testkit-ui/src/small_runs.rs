@@ -51,6 +51,8 @@
 //! no wake of this binary writes (a pause with no menu, a pause blocked, a
 //! crash's start, a document accepted again, a close that names no node) is
 //! appended as the engine writes it, as the engine's own tests append a crash.
+//! A workspace that reads them reaches the forge their gates were published on
+//! through [`StandInForge`], whose reviewers never answer.
 
 pub mod asking;
 pub mod beside;
@@ -60,6 +62,8 @@ mod stand_ins;
 pub mod standstills;
 pub mod waiting;
 pub mod work;
+
+pub use stand_ins::StandInForge;
 
 use std::path::{Path, PathBuf};
 

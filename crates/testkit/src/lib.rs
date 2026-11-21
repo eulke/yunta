@@ -25,7 +25,8 @@
 //! its own, and sets a store's log aside and puts it back; `registry` writes what a run's
 //! registry says of the engine driving it; `interaction` and
 //! `observer` are doubles for a gate and the display boundary; `tools` hosts
-//! the per-run MCP listener; `said` reads what a run's sessions said off its
+//! the per-run MCP listener and makes what every run's directory is born with;
+//! `said` reads what a run's sessions said off its
 //! socket; `tasks` writes a tasks document; `corpus` reads
 //! the repository's own documents; `owner` is what a test's subprocesses
 //! answer to; `stack` gives a deep run its thread; and `wait` bounds a wait on
@@ -79,7 +80,7 @@ pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
 pub use terminal::screen::Screen;
 pub use terminal::{runs_root, Terminal};
-pub use tools::{tools_environment, ToolsHost};
+pub use tools::{born_dirs, tools_environment, ToolsHost};
 pub use wait::{after, wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 
 /// Runs the `yunta` binary in a [`Checkout`], with whatever that

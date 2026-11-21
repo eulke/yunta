@@ -68,11 +68,19 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     assert_eq!(escalation.summary(), &node_failed("broken"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
-    let (label, _) = yunta_render::offers::option_words(&escalation, &escalation.options()[0]);
-    assert_eq!(
-        label,
-        "Run it again (attempt 2) once something outside the tree changes"
+    let (_, tradeoff) = yunta_render::offers::option_words(
+        &escalation,
+        &escalation.options()[0],
+        &yunta_core::ahead::NodesAhead::default(),
     );
+    let waits = "until something outside the tree changes, it fails the same way and asks again";
+    assert!(
+        tradeoff
+            .as_deref()
+            .is_some_and(|said| said.ends_with(waits)),
+        "{tradeoff:?}"
+    );
+    assert_eq!(escalation.failure().map(|menu| menu.attempt), Some(2));
 }
 
 /// A failure on a key the run's frozen config leaves unset fails every
@@ -205,11 +213,19 @@ async fn a_retry_that_fails_again_asks_again_for_the_next_attempt() {
     .await
     .unwrap()
     .expect("the second failure is a decision too");
-    let (label, _) = yunta_render::offers::option_words(&escalation, &escalation.options()[0]);
-    assert_eq!(
-        label,
-        "Run it again (attempt 3) once something outside the tree changes"
+    let (_, tradeoff) = yunta_render::offers::option_words(
+        &escalation,
+        &escalation.options()[0],
+        &yunta_core::ahead::NodesAhead::default(),
     );
+    let waits = "until something outside the tree changes, it fails the same way and asks again";
+    assert!(
+        tradeoff
+            .as_deref()
+            .is_some_and(|said| said.ends_with(waits)),
+        "{tradeoff:?}"
+    );
+    assert_eq!(escalation.failure().map(|menu| menu.attempt), Some(3));
 }
 
 #[tokio::test]

@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use super::Said;
 use crate::components::{Card, CardBody, ChoiceRow, Choices, Legend, TypedRow};
 use crate::figures::files_moving;
 use crate::glyphs::Glyphs;
@@ -18,6 +19,7 @@ fn row(name: &str, said: Option<&str>, cost: Option<&str>) -> ChoiceRow {
         name: name.to_string(),
         said: said.map(str::to_string),
         cost: cost.map(str::to_string),
+        key: None,
     }
 }
 
@@ -48,10 +50,10 @@ pub(in crate::surface::terminal) fn card(body: CardBody, glyphs: Glyphs) -> Card
         about: vec![files_moving("8 files".to_string(), 295, 73, glyphs)],
         body,
         legend: Legend::new()
-            .arrows("move")
-            .key("enter", "chooses")
-            .key("n", "adds a note")
-            .key("esc", "leaves it for later"),
+            .arrows("choose")
+            .key("enter", "answer")
+            .key("n", "add a note")
+            .key("esc", "leave it for later"),
     }
 }
 
@@ -59,6 +61,24 @@ fn choosing(at: usize, then: Option<&str>) -> CardBody {
     CardBody::Choosing {
         choices: Choices { rows: rows(), at },
         then: then.map(str::to_string),
+    }
+}
+
+/// Words being typed for `adjust` under every option, `before` and `after` the cursor, and
+/// why the words given were not taken where they were not.
+fn saying((before, after): (&str, &str), refused: Option<&str>) -> CardBody {
+    CardBody::Saying {
+        choices: Choices {
+            rows: rows(),
+            at: 1,
+        },
+        asks: "what should change?".to_string(),
+        typed: TypedRow {
+            prompt: "> ".to_string(),
+            before: before.to_string(),
+            after: after.to_string(),
+        },
+        refused: refused.map(str::to_string),
     }
 }
 
@@ -98,7 +118,7 @@ fn a_card_asks_and_points_at_one_option_with_what_follows_it() {
             "▎",
             "▎ then  review ×2, conform → ship",
             "▎",
-            "▎ ↑↓ move · enter chooses · n adds a note · esc leaves it for later",
+            "▎ ↑↓ choose · enter answer · n add a note · esc leave it for later",
         ]
     );
 }
@@ -122,7 +142,7 @@ fn the_pointer_moves_and_no_row_changes_place() {
     assert_eq!(rows[7], "▎");
     assert_eq!(
         rows[8],
-        "▎ ↑↓ move · enter chooses · n adds a note · esc leaves it for later"
+        "▎ ↑↓ choose · enter answer · n add a note · esc leave it for later"
     );
 }
 
@@ -146,62 +166,50 @@ fn ascii_draws_its_own_edge_and_pointer() {
     );
 }
 
-/// Where a field is open, the card holds the option chosen and the words it is
-/// said with, and says where the cursor stands: past the edge, the answer's mark
+/// Where a field is open, the card keeps every option, the pointer on the one chosen, and
+/// under them the words it is said with, in a box across the card, and says where the cursor
+/// stands: on the box's middle row, past the edge, the box's upright and the cell inside it,
 /// and the part of the row before it.
 #[test]
-fn a_field_opens_under_the_option_it_answers_with_the_cursor_on_it() {
-    let body = CardBody::Saying {
-        chosen: rows().swap_remove(1),
-        asks: "what should change?".to_string(),
-        typed: TypedRow {
-            prompt: "> ".to_string(),
-            before: "keep the ".to_string(),
-            after: "lock".to_string(),
-        },
-        refused: None,
-    };
-    let mut card = card(body, Glyphs::Unicode);
-    card.legend = Legend::new()
-        .key("enter", "sends it")
-        .key("esc", "goes back");
+fn a_field_opens_under_every_option_with_the_cursor_on_it() {
+    let mut card = card(saying(("keep the ", "lock"), None), Glyphs::Unicode);
+    card.legend = Legend::new().key("enter", "send it").key("esc", "go back");
     let placed = card.drawn(&look(Glyphs::Unicode, 80), usize::MAX);
     let rows: Vec<String> = placed.lines.iter().map(|line| line.text()).collect();
+    let level = "─".repeat(76);
     assert_eq!(
         rows,
         [
-            "▎ ◆ Plan and its tests registered. Approve?                approve-plan · 3GQF5Q",
-            "▎ 8 files, +295 −73",
-            "▎",
-            "▎ ▸ adjust  Back to `plan`: sends what you say, and asks again once it completes",
-            "▎",
-            "▎ what should change?",
-            "▎ > keep the lock",
-            "▎",
-            "▎ enter sends it · esc goes back",
+            "▎ ◆ Plan and its tests registered. Approve?                approve-plan · 3GQF5Q"
+                .to_string(),
+            "▎ 8 files, +295 −73".to_string(),
+            "▎".to_string(),
+            "▎   approve  On to `implement`: resolves this gate".to_string(),
+            "▎ ▸ adjust   Back to `plan`: sends what you say, and asks again once it".to_string(),
+            "▎            completes".to_string(),
+            "▎   abort    Pause here: nothing runs; this decision stays open".to_string(),
+            format!("▎ ╭{level}╮"),
+            format!("▎ │ keep the lock{} │", " ".repeat(61)),
+            format!("▎ ╰{level}╯"),
+            "▎".to_string(),
+            "▎ enter send it · esc go back".to_string(),
         ]
     );
-    assert_eq!(placed.cursor, Some((6, 13)));
+    assert_eq!(placed.cursor, Some((8, 13)));
 }
 
-/// What a field refuses is said under it, and the cursor stays on the field.
+/// While nothing is typed, what is asked of the words stands in the box where they go; what
+/// a field refuses is said under its box, and the cursor stays in the box, on the first cell.
 #[test]
 fn a_refused_answer_is_said_under_its_field() {
-    let body = CardBody::Saying {
-        chosen: rows().swap_remove(1),
-        asks: "what should change?".to_string(),
-        typed: TypedRow {
-            prompt: "> ".to_string(),
-            before: String::new(),
-            after: String::new(),
-        },
-        refused: Some("this option needs an answer".to_string()),
-    };
+    let body = saying(("", ""), Some("this option needs an answer"));
     let placed = card(body, Glyphs::Unicode).drawn(&look(Glyphs::Unicode, 80), usize::MAX);
     let rows: Vec<String> = placed.lines.iter().map(|line| line.text()).collect();
-    assert_eq!(rows[6], "▎ > ");
-    assert_eq!(rows[7], "▎ ✗ this option needs an answer");
-    assert_eq!(placed.cursor, Some((6, 4)));
+    let asked = format!("▎ │ what should change?{} │", " ".repeat(55));
+    assert_eq!(rows[8], asked);
+    assert_eq!(rows[9], format!("▎ ╰{}╯", "─".repeat(76)));
+    assert_eq!(rows[10], "▎ ✗ this option needs an answer");
+    assert_eq!(placed.cursor, Some((8, 4)));
 }
 
 /// The name of an option with no words of its own stands alone, and a row with
@@ -212,7 +220,7 @@ fn a_row_says_only_what_it_has() {
         rows: vec![row("yes", None, None), row("no", None, Some("stops here"))],
         at: 0,
     };
-    let lines = choices.lines(&look(Glyphs::Unicode, 80), 80, usize::MAX);
+    let lines = choices.lines(&look(Glyphs::Unicode, 80), 80, usize::MAX, Said::Wrapped);
     let texts: Vec<String> = lines.iter().map(|line| line.text()).collect();
     assert_eq!(texts, ["▸ yes", "  no   stops here"]);
     assert_eq!(
@@ -231,7 +239,7 @@ fn a_long_list_shows_the_rows_around_the_pointer_and_counts_the_rest() {
             .into(),
         at: 4,
     };
-    let lines = choices.lines(&look(Glyphs::Unicode, 80), 80, 3);
+    let lines = choices.lines(&look(Glyphs::Unicode, 80), 80, 3, Said::Wrapped);
     let texts: Vec<String> = lines.iter().map(|line| line.text()).collect();
     assert_eq!(texts, ["  c", "  d", "▸ e", "… 2 more options"]);
 }
@@ -263,7 +271,10 @@ fn what_is_too_wide_for_the_line_is_held_to_it() {
     let mut wide = card(body, Glyphs::Unicode);
     wide.edge = Some(long.to_string());
     let body = CardBody::Saying {
-        chosen: row(long, None, None),
+        choices: Choices {
+            rows: vec![row(long, None, None)],
+            at: 0,
+        },
         asks: "what should change?".to_string(),
         typed: TypedRow {
             prompt: "> ".to_string(),
@@ -288,10 +299,8 @@ pub(in crate::surface::terminal) fn eight_rows() -> Vec<ChoiceRow> {
         .into()
 }
 
-/// A short terminal keeps the question and the row pointed at: the list gives way
-/// first, and counts what it leaves out.
-#[test]
-fn on_a_short_terminal_the_list_gives_way_first() {
+/// Eight options pointed at their seventh, with a route: a card short of rows.
+fn eight_with_a_route() -> Card {
     let body = CardBody::Choosing {
         choices: Choices {
             rows: eight_rows(),
@@ -299,85 +308,70 @@ fn on_a_short_terminal_the_list_gives_way_first() {
         },
         then: Some("x → y".to_string()),
     };
-    let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 9)
-        .lines
-        .iter()
-        .map(|line| line.text())
-        .collect();
+    card(body, Glyphs::Unicode)
+}
+
+/// A short terminal keeps the question and every option: the blank rows and the route
+/// give way first, and what stands under the question keeps the rows left.
+#[test]
+fn on_a_short_terminal_the_blank_rows_and_the_route_give_way_first() {
     assert_eq!(
-        rows,
+        in_rows(&eight_with_a_route(), 11),
         [
             "▎ ◆ Plan and its tests registered. Approve?                approve-plan · 3GQF5Q",
             "▎ 8 files, +295 −73",
-            "▎",
-            "▎ ▸ g  does it",
-            "▎ … 7 more options",
-            "▎",
-            "▎ then  x → y",
-            "▎",
-            "▎ ↑↓ move · enter chooses · n adds a note · esc leaves it for later",
-        ]
-    );
-}
-
-/// Shorter still, what stands under the question and the route give way too: the
-/// question, the row pointed at and the keys are what a person answers with.
-#[test]
-fn shorter_still_only_the_question_the_row_and_the_keys_stay() {
-    let body = CardBody::Choosing {
-        choices: Choices {
-            rows: eight_rows(),
-            at: 6,
-        },
-        then: Some("x → y".to_string()),
-    };
-    let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 6)
-        .lines
-        .iter()
-        .map(|line| line.text())
-        .collect();
-    assert_eq!(
-        rows,
-        [
-            "▎ ◆ Plan and its tests registered. Approve?                approve-plan · 3GQF5Q",
-            "▎",
-            "▎ ▸ g  does it",
-            "▎ … 7 more options",
-            "▎",
-            "▎ ↑↓ move · enter chooses · n adds a note · esc leaves it for later",
-        ]
-    );
-}
-
-/// With no room for the keys either, a person who has answered a card before still
-/// has the question and the row pointed at.
-#[test]
-fn shortest_of_all_the_keys_give_way_before_the_question() {
-    let body = CardBody::Choosing {
-        choices: Choices {
-            rows: eight_rows(),
-            at: 6,
-        },
-        then: Some("x → y".to_string()),
-    };
-    let rows: Vec<String> = card(body, Glyphs::Unicode)
-        .drawn(&look(Glyphs::Unicode, 80), 5)
-        .lines
-        .iter()
-        .map(|line| line.text())
-        .collect();
-    assert_eq!(
-        rows,
-        [
-            "▎ ◆ Plan and its tests registered. Approve?                approve-plan · 3GQF5Q",
-            "▎",
+            "▎   a  does it",
+            "▎   b  does it",
+            "▎   c  does it",
+            "▎   d  does it",
+            "▎   e  does it",
             "▎   f  does it",
             "▎ ▸ g  does it",
-            "▎ … 6 more options",
+            "▎   h  does it",
+            "▎ ↑↓ choose · enter answer · n add a note · esc leave it for later",
         ]
     );
+}
+
+/// Shorter still, what stands under the question gives way, then the list counts what it
+/// leaves out around the row pointed at: the question, the options and the keys are what
+/// a person answers with.
+#[test]
+fn shorter_still_the_list_counts_what_it_leaves_out_and_the_keys_stay() {
+    assert_eq!(
+        in_rows(&eight_with_a_route(), 6),
+        [
+            "▎ ◆ Plan and its tests registered. Approve?                approve-plan · 3GQF5Q",
+            "▎   e  does it",
+            "▎   f  does it",
+            "▎ ▸ g  does it",
+            "▎ … 5 more options",
+            "▎ ↑↓ choose · enter answer · n add a note · esc leave it for later",
+        ]
+    );
+}
+
+/// With no room for the keys beside the row pointed at, a person who has answered a card
+/// before still has the question and the row pointed at: the keys give way last.
+#[test]
+fn shortest_of_all_the_keys_give_way_before_the_question() {
+    assert_eq!(
+        in_rows(&eight_with_a_route(), 3),
+        [
+            "▎ ◆ Plan and its tests registered. Approve?                approve-plan · 3GQF5Q",
+            "▎ ▸ g  does it",
+            "▎ … 7 more options",
+        ]
+    );
+}
+
+/// `card` in `rows` rows of a line 80 cells wide: each row's text.
+fn in_rows(card: &Card, rows: usize) -> Vec<String> {
+    card.drawn(&look(Glyphs::Unicode, 80), rows)
+        .lines
+        .iter()
+        .map(|line| line.text())
+        .collect()
 }
 
 /// A question that wraps keeps its first row on a short, narrow terminal: the far
@@ -402,11 +396,10 @@ fn a_long_question_keeps_its_first_row_on_a_short_narrow_terminal() {
     assert!(rows.iter().any(|row| row.starts_with("▎ ▸ a")), "{rows:#?}");
 }
 
-/// What a field may fill is what the card's edge, its prompt and the cell its
-/// cursor needs past the last character leave of the line.
+/// The box a field is typed in spans what the card's edge leaves of the line.
 #[test]
-fn a_field_fills_what_the_edge_and_the_prompt_leave() {
-    assert_eq!(Card::typed_room(&look(Glyphs::Unicode, 80), "> "), 75);
+fn a_fields_box_spans_what_the_edge_leaves() {
+    assert_eq!(Card::typed_room(&look(Glyphs::Unicode, 80)), 78);
 }
 
 /// Every row is the decision's: tinted where a layer draws fills, its edge in the
@@ -456,6 +449,29 @@ fn a_card_matches_its_goldens_in_every_environment() {
     }
 }
 
+/// A card whose keys stand in a screen's legend draws none of its own, and leaves what
+/// follows an option to the card printed with its keys: it ends on its last option.
+#[test]
+fn a_card_with_no_keys_draws_no_foot_and_ends_on_its_last_option() {
+    let mut on_a_screen = card(
+        choosing(1, Some("plan, then this gate asks again")),
+        Glyphs::Unicode,
+    );
+    on_a_screen.legend = Legend::new();
+    assert_eq!(
+        drawn(&on_a_screen, &look(Glyphs::Unicode, 80)),
+        [
+            "▎ ◆ Plan and its tests registered. Approve?                approve-plan · 3GQF5Q",
+            "▎ 8 files, +295 −73",
+            "▎",
+            "▎   approve  On to `implement`: resolves this gate",
+            "▎ ▸ adjust   Back to `plan`: sends what you say, and asks again once it",
+            "▎            completes",
+            "▎   abort    Pause here: nothing runs; this decision stays open",
+        ]
+    );
+}
+
 /// A card's keys read in one muted run, each key beside what it does and the
 /// glyph set's separator between two, in each glyph set.
 #[test]
@@ -463,11 +479,11 @@ fn a_cards_legend_reads_as_its_keys_read() {
     for (glyphs, foot) in [
         (
             Glyphs::Unicode,
-            "▎ ↑↓ move · enter chooses · n adds a note · esc leaves it for later",
+            "▎ ↑↓ choose · enter answer · n add a note · esc leave it for later",
         ),
         (
             Glyphs::Ascii,
-            "| up/down move ; enter chooses ; n adds a note ; esc leaves it for later",
+            "| up/down choose ; enter answer ; n add a note ; esc leave it for later",
         ),
     ] {
         let rows = drawn(&card(choosing(0, None), glyphs), &look(glyphs, 100));

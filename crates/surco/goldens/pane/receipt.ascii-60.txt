@@ -1,0 +1,6 @@
+  + criteria     1 of 1 green, red before the work
+  + baseline     cargo test --workspace still passes
+  + scope        7 files, 2 of them granted by you
+  + review       4 findings, 4 answered
+  + event chain  intact
+... 3 more lines

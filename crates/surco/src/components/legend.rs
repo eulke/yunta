@@ -6,10 +6,11 @@ use crate::glyphs::Glyphs;
 /// The keys a person can press where they are, each with what it does, in the
 /// order they are read. Not a [`Next`](super::Next), which says what to type at
 /// a shell: a legend's keys act on the screen it stands under.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Legend(pub Vec<Binding>);
 
 /// What is pressed and what it does: `enter` and `open`.
+#[derive(Clone)]
 pub struct Binding {
     pub keys: Keys,
     pub does: String,
@@ -18,6 +19,7 @@ pub struct Binding {
 /// What is pressed, as the person reads it: the arrows, which each glyph set
 /// draws its own way, keys spelled as they are typed (`enter`, `esc`, `n`), or
 /// whatever the person types.
+#[derive(Clone)]
 pub enum Keys {
     UpDown,
     Typed(String),
@@ -61,7 +63,7 @@ impl Legend {
     }
 
     /// The legend as one run of words, each key beside what it does and the
-    /// separator `glyphs` draws between two: `↑↓ move · enter chooses`. What
+    /// separator `glyphs` draws between two: `↑↓ choose · enter answer`. What
     /// a card's or a desk's foot says, in one tone.
     pub fn spelled(&self, glyphs: Glyphs) -> String {
         let sep = format!(" {} ", glyphs.sep());

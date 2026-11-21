@@ -1,14 +1,14 @@
- yunta › Q78GRR
+ yunta › Q78GRR › plan          ◆ 1 needs you · ▲ 1 stalled
 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
- p┌ the keys here ───────────────────────────────────────┐
- ━│   j k     move along its nodes                       │
-  │   enter   the page of plan                           │
- ◆│   a       puts what the run waits on to you          │…
- ━│   p       reads its plan, and answers it there       │
-  │   x       closes it for good                         │
- ◆│   o       opens the run's page in a browser          │R
- ━│   s       shows what the run cost                    │━
-  │   g       draws the run's graph, each node as its    │
-  │ … 6 more lines                                       │
- …└──────────────────────────────────────────────────────┘
- ↑↓ scroll · esc closes it
+ ●╭ keys ────────────────────────────────────────────────╮R
+ ━│ You never have to remember more than this.           │
+ n│ /          anything: only what can be done here, wit…│
+ p│ n          start a new run, wherever no prompt stands│a
+ w│ j k        move; the footer always says what they mo…│
+ …│ pgup pgdn  scroll the pane a page at a time          │
+ r│ enter      open, answer, confirm                     │
+ r│ … 8 under                                            │
+ r╰──────────────────────────────────────────────────────╯
+ 967k tokens · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: se…  · a go there
+ esc back

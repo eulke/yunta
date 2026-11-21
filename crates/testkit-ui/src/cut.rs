@@ -7,12 +7,21 @@
 //! small run built in this process. Its log up to the cut is loaded at each event's own
 //! seq and instant through `yunta-testkit`, which reaches the store; every other run the
 //! same build made (a child, a successor, the other past runs) is loaded whole. Beside
-//! each run its directory is copied as the design's run is kept, without the engine's
-//! scratch, its manifest naming the cut's repository, so the field places it here; or
+//! each run its directory is copied as the design's run is kept, its working space empty
+//! where the engine's scratch stood, its manifest naming the cut's repository, so the field places it here; or
 //! another repository, or a manifest today's binary cannot read ([`Placed`]). The
 //! registry its scene needs is written ([`Registered`]). The cut's repository holds what
 //! the repositories its runs were made in hold under `.yunta/`: the workflows, the packs
-//! and the config a new run reads.
+//! and the config a new run reads. It is a repository set up for Yunta, as each one a run
+//! was made in is, so the application opens on its field, which every run's screen stands
+//! in: where none of them gave it a config, it holds one of its own.
+//!
+//! A cut's run goes on past its seq the same way: its next events loaded into the store
+//! ([`Cut::goes_on`]), where the following reads them as it reads a run that moves. An
+//! answer a key records is the application's own, written by its performer, and a run the
+//! application hands on to a detached engine is handed to one that takes it up and leaves
+//! its going on to the cut (`ENGINE`): the cut loads what that engine would write, after
+//! what the key wrote, and registers the engine alive ([`Cut::driven`]).
 //!
 //! What a build leaves of the place it was made in names the cut's place once loaded: a
 //! kept log names the place every recording is kept under, a small run's manifest the
@@ -20,7 +29,8 @@
 //! stands at ([`Cut::now`]). A run at work, its engine alive, stands at its last event's
 //! instant: it is seen as that event lands. Any other stands at the instant the event
 //! after the cut came, or its last event's where its log ends at the cut, so a parked run
-//! has waited as long as the person took to answer it.
+//! has waited as long as the person took to answer it. Its workspace reaches the forge its
+//! runs' gates were published on, one whose reviewers never answer ([`StandInForge`]).
 
 mod built;
 mod targets;
@@ -40,6 +50,7 @@ use yunta_testkit::WrittenRegistry;
 use yunta_testkit_core::HostClock;
 
 use crate::designed::kept::{KEPT, MANIFEST};
+use crate::small_runs::StandInForge;
 
 /// Where a cut's repository stands under its place: where a run's bench keeps the one it
 /// works in, which its manifest names.
@@ -51,6 +62,15 @@ const STORE: &str = "yunta.db";
 /// Where such a workspace finds each run's directory, by the run's id.
 const RUNS: &str = "runs";
 
+/// The engine a workspace of the cut hands a run on to, under the cut's place: a program that
+/// takes the run up and writes nothing, its going on loaded by the cut, as a detached
+/// `yunta resume` would write it.
+const ENGINE: &str = "engine";
+
+/// What the engine a run is handed on to runs: it starts and ends at once, the run's going
+/// on left to the cut.
+const ENGINE_TAKES_IT_UP: &str = "#!/bin/sh\nexit 0\n";
+
 /// Where a run of another repository names its repository, under the cut's place: a
 /// directory no repository stands in.
 const ELSEWHERE: &str = "elsewhere";
@@ -58,6 +78,13 @@ const ELSEWHERE: &str = "elsewhere";
 /// The schema a manifest today's binary cannot read is written at: a version far past
 /// any this binary reads, as a newer binary that wrote it would.
 const UNREAD_SCHEMA: u32 = 999;
+
+/// Where a repository set up for Yunta keeps its config, under the repository.
+const CONFIG: &str = ".yunta/config.yaml";
+
+/// The config the cut's repository holds where none of its runs' repositories gave it
+/// one: the least a repository set up for Yunta holds.
+const SET_UP: &str = "defaults:\n  isolation: none\n";
 
 /// What a cut registers of the engine driving the run it shows. Not replay's `Engine`,
 /// what a reader makes of a registry.
@@ -164,6 +191,8 @@ pub struct Cut {
     now: DateTime<Utc>,
     /// The registries written, kept while the cut is.
     _registries: Vec<WrittenRegistry>,
+    /// The forge its runs' gates were published on, which its workspace reaches.
+    forge: StandInForge,
 }
 
 impl Cut {
@@ -182,6 +211,7 @@ impl Cut {
             shown: Vec::new(),
             now: yunta_testkit_core::fixed_now(),
             _registries: Vec::new(),
+            forge: StandInForge::default(),
         };
         for each in shown {
             let built = each.built.build().await;
@@ -189,7 +219,32 @@ impl Cut {
             cut.now = cut.now.max(stands);
             cut.shown.push(built.run().clone());
         }
+        cut.set_up();
+        cut.engine();
         cut
+    }
+
+    /// The engine a run is handed on to, written under the cut's place, ready to run.
+    fn engine(&self) {
+        let engine = self.root.join(ENGINE);
+        std::fs::write(&engine, ENGINE_TAKES_IT_UP).expect("the engine a run is handed on to");
+        let mut permissions = std::fs::metadata(&engine)
+            .expect("the engine, written")
+            .permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+        std::fs::set_permissions(&engine, permissions).expect("the engine, made to run");
+    }
+
+    /// The cut's repository set up for Yunta, with a config of its own where none of its
+    /// runs' repositories gave it one.
+    fn set_up(&self) {
+        let config = self.repository().join(CONFIG);
+        if config.exists() {
+            return;
+        }
+        let yunta = config.parent().expect("the config stands in `.yunta`");
+        std::fs::create_dir_all(yunta).expect("the repository's `.yunta`");
+        std::fs::write(&config, SET_UP).expect("the repository's config");
     }
 
     /// The cut of the target `name`, by its row of [`TARGET_CUTS`]. A target that opens in a
@@ -227,7 +282,7 @@ impl Cut {
     }
 
     /// A workspace in the cut's repository, reading the state kept beside it, its clock
-    /// standing at [`Cut::now`].
+    /// standing at [`Cut::now`], reaching the forge its runs' gates were published on.
     pub fn workspace(&self) -> Workspace {
         let clock = HostClock::default();
         let ahead = (self.now - clock.now())
@@ -236,8 +291,40 @@ impl Cut {
         clock.advance(ahead);
         Workspace {
             clock: Arc::new(clock),
+            forges: Arc::new(self.forge.clone()),
+            binary: self.root.join(ENGINE),
             ..crate::sandbox::workspace(&self.repository(), &self.root)
         }
+    }
+
+    /// How many times a workspace of the cut polled the forge its runs' gates were
+    /// published on.
+    pub fn forge_polls(&self) -> usize {
+        self.forge.polls()
+    }
+
+    /// The scene's run of `shown` driven by an engine of this process from here on, as the
+    /// engine it was handed on to drives it: its registry written alive.
+    pub fn driven(&mut self, shown: Shown) {
+        let run = &self.shown[0];
+        let dir = self.root.join(RUNS).join(run.as_str());
+        let alive = shown.alive();
+        self.registered(&dir, &alive, self.now);
+    }
+
+    /// The scene's run of `shown` gone on: its events after `past` up to `to` loaded into
+    /// the cut's store as `shown`'s cut loaded the ones before them, for a following to
+    /// read as it reads a run that moves; and those events, as a following finds them.
+    pub async fn goes_on(&self, shown: Shown, past: u64, to: u64) -> Vec<StoredEvent> {
+        let built = shown.built.build().await;
+        let log = built.placed(&built.log, &self.root);
+        let after: Vec<StoredEvent> = built
+            .events(built.run(), &log)
+            .into_iter()
+            .filter(|event| (past + 1..=to).contains(&event.seq.get()))
+            .collect();
+        yunta_testkit::loaded(&self.root.join(STORE), &after);
+        after
     }
 
     /// `built`'s runs loaded as `shown` says: the scene's run cut at its seq, every other
@@ -267,6 +354,7 @@ impl Cut {
             yunta_testkit::loaded(&self.root.join(STORE), &kept);
             let dir = self.root.join(RUNS).join(run.as_str());
             self.copied(built, &built.dirs[at], &dir, &into);
+            yunta_testkit::born_dirs(&dir);
             if at == 0 {
                 self.registered(&dir, shown, last.timestamp);
                 if shown.placed == Placed::Unread {

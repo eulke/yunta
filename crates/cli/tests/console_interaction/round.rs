@@ -14,7 +14,7 @@ fn an_interrupt_takes_a_round_off_the_screen() {
     );
     terminal.wait_on_screen("◆ What changed?", "the question was never asked");
     terminal.keys("half an ans");
-    terminal.wait_on_screen("> half an ans", "the words never reached the line");
+    terminal.wait_on_screen("│ half an ans", "the words never reached the line");
     terminal.keys("\x03");
     let drawn = terminal.ended();
     let screen = terminal.screen();
@@ -44,7 +44,7 @@ fn shift_tab_goes_back_and_the_answer_can_change() {
     );
     terminal.keys("\x1b[Z");
     terminal.wait_on_screen("◆ What changed?", "shift-tab never went back");
-    assert!(terminal.screen().holds("> one"), "{:#?}", terminal.screen());
+    assert!(terminal.screen().holds("│ one"), "{:#?}", terminal.screen());
     terminal.keys("\x7f\x7f\x7ftwo\r");
     terminal.wait_on_screen("◆ Any risk?", "the changed answer never landed");
     terminal.keys("none\r");
@@ -55,6 +55,27 @@ fn shift_tab_goes_back_and_the_answer_can_change() {
     assert!(
         recorded.contains("value: two") && !recorded.contains("value: one"),
         "what was said last is what is recorded:\n{recorded}"
+    );
+}
+
+/// The round's keys name each act in the words a run's screen says them in: answering,
+/// going back once a question stands before, and leaving it for later.
+#[test]
+fn the_rounds_keys_say_each_act_as_a_runs_screen_says_it() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = asking(root.path(), TWO_TYPED);
+    terminal.wait_on_screen("◆ What changed?", "the first question was never asked");
+    let screen = terminal.screen();
+    assert!(
+        screen.holds("enter answer · esc leave it for later"),
+        "{screen:#?}"
+    );
+    terminal.keys("one\r");
+    terminal.wait_on_screen("◆ Any risk?", "the first answer never landed");
+    let screen = terminal.screen();
+    assert!(
+        screen.holds("enter answer · shift-tab go back · esc leave it for later"),
+        "{screen:#?}"
     );
 }
 
@@ -153,8 +174,9 @@ fn an_answer_wider_than_the_terminal_is_typed_on_one_row() {
     terminal.keys(&long);
     terminal.wait_for("11abcdefgh", "the answer was never typed to its end");
 
-    // Read while the line is still being edited: the row holds the end of it, and what
-    // stands under the row is what stood there before it grew.
+    // Read while the line is still being edited: the box's row holds the end of it, and
+    // what stands under the row is what stood there before it grew: the box's bottom edge,
+    // then the card's blank row.
     let screen = terminal.screen();
     let row = screen
         .rows
@@ -162,7 +184,11 @@ fn an_answer_wider_than_the_terminal_is_typed_on_one_row() {
         .position(|row| row.contains("11abcdefgh"))
         .unwrap_or_else(|| panic!("the end of the answer is off the screen: {screen:#?}"));
     assert_eq!(screen.count("11abcdefgh"), 1, "{screen:#?}");
-    assert_eq!(screen.rows[row + 1], "▎", "the row wrapped: {screen:#?}");
+    assert!(
+        screen.rows[row + 1].starts_with("▎     ╰"),
+        "the row wrapped: {screen:#?}"
+    );
+    assert_eq!(screen.rows[row + 2], "▎", "the row wrapped: {screen:#?}");
 
     terminal.keys("\r");
     terminal.ended();
@@ -249,15 +275,12 @@ fn an_answer_its_own_rules_refuse_is_asked_again() {
 }
 
 #[test]
-fn the_questions_say_which_node_asks_and_how_many_answers_it_needs() {
+fn the_questions_say_which_node_asks() {
     let root = tempfile::tempdir().unwrap();
     let terminal = asking(
         root.path(),
         "questions:\n  - id: summary\n    text: \"What changed?\"\n    answer_type: text\n    \
          required: true\n",
     );
-    terminal.wait_on_screen(
-        "1 answer before `ask` goes on",
-        "the round never said who asks and how many answers it needs",
-    );
+    terminal.wait_on_screen("◆ ask asks", "the round never said which node asks");
 }

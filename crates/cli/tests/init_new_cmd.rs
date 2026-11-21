@@ -53,7 +53,7 @@ fn init_writes_config_gitignore_and_the_mechanism_skill() {
     assert!(
         out.lines()
             .any(|l| l.trim_start().starts_with("yunta doctor")
-                && l.ends_with("confirms everything above is usable")),
+                && l.ends_with("check adapters, git, forge, packs")),
         "init directs the user to `yunta doctor` next: {out}"
     );
 }

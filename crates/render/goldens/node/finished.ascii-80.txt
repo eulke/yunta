@@ -3,11 +3,12 @@
   Wrote and verified brief.md. It captures the idea and lists unsettled details
   as open points with planning assumptions.
 
+  stands       finished
+  took         22s
+  tokens       112k tokens ; 106k in / 6k out (102k cached)
   kind         prompt
   attempt      1
   runner       planner on mock/gpt-6-luna
-  tokens       106k in / 6k out (102k cached)
-  took         22s
   produced     ~/.yunta/runs/01M7DES1GNED00000000Q78GRR/artifacts/brief/brief.md
 
 what it hands over

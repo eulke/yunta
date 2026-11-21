@@ -1,9 +1,16 @@
 //! A run, through `State` alone: opened from the field, what is followed of it folded
-//! into its rows and its chronicle, a node picked or not, the acts it offers, going back
-//! to the runs, and its marks turning as the reader's look asks.
+//! into what stands across it, the feed of its node at work (`feed`) and its chronicle, a
+//! node pointed at or not, the acts it offers, what each key does (`keys`), leaving it for
+//! the field (`leaving`), and its marks turning as the reader's look asks.
 
 mod support;
 
+#[path = "run_stage/feed.rs"]
+mod feed;
+#[path = "run_stage/keys.rs"]
+mod keys;
+#[path = "run_stage/leaving.rs"]
+mod leaving;
 #[path = "run_stage/said.rs"]
 mod said;
 
@@ -13,13 +20,12 @@ use surco::components::{Binding, Keys};
 use surco::doc::Block;
 use surco::look::{Look, Width};
 use surco::motion::Motion;
-use surco::paint::Paint;
 use surco::surface::{Markdown, Surface, Terminal};
 use tokio::sync::mpsc;
 use yunta_api::{FollowNews, FollowedRun, RunNews};
 use yunta_core::events::StoredEvent;
+use yunta_core::step::NextStep;
 use yunta_core::{NodeId, Pid, RunId};
-use yunta_replay::frame::Effect;
 use yunta_replay::registry::{Engine, Prompt};
 use yunta_replay::RunState;
 use yunta_testkit::workflows::{PLANNER_HANDS_TWO_TASKS, PLAN_THEN_GATE};
@@ -27,16 +33,17 @@ use yunta_testkit::Bench;
 use yunta_testkit_core::fixed_now;
 use yunta_testkit_ui::sandbox::now;
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, Operation, Outcome, Request, State};
+use yunta_ui::{Input, Request, Scene, State};
 
-use support::{on_the_field, performed, performer_in};
+use support::{on_the_field, performer_in};
 
 /// Two nodes that finish, one after the other.
 const FINISHES: &str = "name: done\nnodes:\n  - { id: first, kind: bash, run: \"true\" }\n  \
                         - { id: second, kind: bash, run: \"true\", depends_on: [first] }\n";
 
-/// The cells the region beside a run's page takes on a terminal.
-const SIDE: usize = 22;
+/// The cells the region beside a run's pane takes on a terminal from 102 columns: a run's
+/// nodes, at its left.
+const SIDE: usize = 31;
 
 /// A mock fixture with no sessions: the workflow opens none.
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
@@ -60,80 +67,34 @@ fn read_whole(run: &FollowedRun, events: &[StoredEvent]) -> FollowNews {
     }
 }
 
-/// What stands across `state`'s screen, the run's ribbon and the rows a person watches
-/// it by, as Markdown draws it.
+/// What stands across `state`'s screen, the run's headline, ribbon and gist, as Markdown
+/// draws it.
 fn across(state: &State) -> String {
     let about = state.screen(&Look::plain()).about;
     Markdown.draw(&about.expect("the run across the screen"))
 }
 
-/// The lines of the run's chronicle on the screen, as a pipe writes them.
-fn chronicle(state: &State) -> Vec<String> {
-    let look = Look::plain();
-    let screen = state.screen(&look);
-    screen
-        .main
-        .doc
-        .blocks()
-        .iter()
-        .flat_map(|block| match block {
-            Block::Lines(lines) => lines.iter().map(|line| Paint::Plain.line(line)).collect(),
-            _ => Vec::new(),
-        })
-        .filter(|line| line.starts_with('['))
-        .collect()
-}
-
-/// What a following finds grows the run's chronicle by what came alone: the events that
-/// come are said under the ones the run was read whole with, as the whole log says them,
-/// and a batch handed twice says nothing again.
-#[tokio::test]
-async fn news_of_events_grows_the_chronicle() {
-    let bench = Bench::with_run_id("01M7RVNSTAGE00000000000000");
-    bench.run(FINISHES, NO_SESSIONS).await;
-    let (whole, events) = followed(&bench).await;
-    let at_once = followed_from_the_field(&whole, &events).await;
-    let mut state = followed_from_the_field(&whole, &events[..1]).await;
-
-    let before = chronicle(&state);
-    let came = FollowNews::Run {
-        run: whole.run.clone(),
-        news: RunNews::Events(events[1..].to_vec()),
-    };
-    state.update(Input::FollowNews(came.clone()));
-    let after = chronicle(&state);
-    state.update(Input::FollowNews(came));
-    let again = chronicle(&state);
-
-    assert_eq!(before.len(), 1, "{before:?}");
-    assert!(after.starts_with(&before), "{before:?} then {after:?}");
-    assert_eq!(after, chronicle(&at_once), "what came, said once");
-    assert_eq!(again, after, "a batch handed twice says nothing again");
-}
-
-/// The ticket the run's page was asked under, among `asked`.
-fn page_read(asked: &[Request]) -> yunta_ui::Ticket {
-    asked
-        .iter()
-        .find_map(|request| match request {
-            Request::Perform(ticket, Operation::ReadPage { .. }) => Some(*ticket),
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("the run's page is read: {asked:?}"))
+/// The run's pane as Markdown draws it: its title, then what it says.
+fn pane(state: &State) -> String {
+    let main = state.screen(&Look::plain()).main;
+    format!("{:?}\n{}", main.title, Markdown.draw(&main.doc))
 }
 
 const RUN: RunId = RunId::from_static("01CCCCCCCCCCCCCCCCCCCCCCCC");
 
-/// Going back to the runs lets the run's readings go and asks no work: the field stands
-/// as the state keeps it.
+/// A run's screen asks no work as it opens, the state following the run, and going back to
+/// the runs asks none either: the field stands as the state keeps it.
 #[tokio::test]
-async fn going_back_to_the_runs_lets_the_run_go_and_asks_no_work() {
+async fn opening_a_run_and_going_back_to_the_runs_asks_no_work() {
     let (mut state, _) = on_the_field(&[&RUN]).await;
-    let page = page_read(&state.update(Input::Stroke(Stroke::Enter)));
+    let performs = |request: &Request| matches!(request, Request::Perform(..));
+    let asked = state.update(Input::Stroke(Stroke::Enter));
+    assert!(
+        !asked.iter().any(performs),
+        "opening the run asks no work: {asked:?}"
+    );
 
     let asked = state.update(Input::Stroke(Stroke::Decline));
-    assert!(asked.contains(&Request::LetGo(page)), "{asked:?}");
-    let performs = |request: &Request| matches!(request, Request::Perform(..));
     assert!(
         !asked.iter().any(performs),
         "coming back asks no work: {asked:?}"
@@ -152,11 +113,12 @@ async fn followed_from_the_field(read: &FollowedRun, events: &[StoredEvent]) -> 
     state
 }
 
-/// With a node picked, the run's next events, handed as what the state follows hands
-/// them, move the rows across the screen while the node's page stands, and the chronicle
-/// under the run's page once it is back: picking lets nothing go.
+/// With a node pointed at by the person, the run's next events, handed as what the state
+/// follows hands them, move what stands across the screen while the node's pane stands, and
+/// once `f` gives the lead back the pane stands as it does on the run read whole: pointing
+/// lets nothing go.
 #[tokio::test]
-async fn with_a_node_picked_the_runs_news_move_its_rows_and_its_chronicle() {
+async fn with_a_node_pointed_at_the_runs_news_move_its_rows_and_its_chronicle() {
     let bench = Bench::with_run_id("01M7P1CKEDM0VES00000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
     let (whole, events) = followed(&bench).await;
@@ -164,7 +126,7 @@ async fn with_a_node_picked_the_runs_news_move_its_rows_and_its_chronicle() {
     let mut state = followed_from_the_field(&whole, &events[..2]).await;
     let before = across(&state);
 
-    state.update(Input::Stroke(Stroke::Enter));
+    state.update(Input::Stroke(Stroke::Insert('j')));
     let came = FollowNews::Run {
         run: whole.run.clone(),
         news: RunNews::Events(events[2..].to_vec()),
@@ -172,116 +134,101 @@ async fn with_a_node_picked_the_runs_news_move_its_rows_and_its_chronicle() {
     state.update(Input::FollowNews(came));
 
     let trail = state.screen(&Look::plain()).trail;
-    assert_eq!(trail.last().map(String::as_str), Some("first"), "{trail:?}");
+    assert_eq!(
+        trail.last().map(String::as_str),
+        Some("second"),
+        "{trail:?}"
+    );
     let after = across(&state);
     assert_ne!(after, before, "the rows move with the run's news");
     assert_eq!(after, across(&at_once), "the rows of the run read whole");
-    state.update(Input::Stroke(Stroke::Decline));
-    assert_eq!(chronicle(&state), chronicle(&at_once), "what came, said");
+    state.update(Input::Stroke(Stroke::Insert('f')));
+    assert_eq!(pane(&state), pane(&at_once), "what came, said");
 }
 
-/// The word the run's page stands at in its headline, the page's first block.
+/// The word the run stands at in the headline across its screen, the first block of what
+/// stands across.
 fn headline_said(state: &State) -> String {
-    let screen = state.screen(&Look::plain());
-    match screen.main.doc.blocks().first() {
+    let about = state.screen(&Look::plain()).about;
+    let about = about.expect("the run across the screen");
+    match about.blocks().first() {
         Some(Block::Headline(headline)) => headline.said.clone(),
-        _ => panic!(
-            "the page's headline first: {}",
-            Markdown.draw(&screen.main.doc)
-        ),
+        _ => panic!("the run's headline first: {}", Markdown.draw(&about)),
     }
 }
 
-/// How many times `asked` asks for the run's page.
-fn pages_asked(asked: &[Request]) -> usize {
-    let page =
-        |request: &&Request| matches!(request, Request::Perform(_, Operation::ReadPage { .. }));
-    asked.iter().filter(page).count()
-}
-
-/// A run that finishes while its screen is open says finished in its headline with no
-/// stroke, the page standing at the run as it is kept, and its page is asked once more,
-/// once: when the run turns, not again for the same news.
+/// A run that finishes while its screen is open says finished in the headline across its
+/// screen with no stroke, and stands as its receipt.
 #[tokio::test]
-async fn a_run_finishing_on_its_screen_says_so_and_its_page_is_read_once_more() {
+async fn a_run_finishing_on_its_screen_says_so_with_no_stroke() {
     let bench = Bench::with_run_id("01M7F1N1SHES0NSCREEN000000");
     bench.run(FINISHES, NO_SESSIONS).await;
     let (whole, events) = followed(&bench).await;
     let mut state = followed_from_the_field(&whole, &events[..2]).await;
-    let Some((reading, read)) = state
-        .waiting_on()
-        .into_iter()
-        .find(|(_, operation)| matches!(operation, Operation::ReadPage { .. }))
-    else {
-        panic!("the run's page is asked: {:?}", state.waiting_on());
-    };
-    let Outcome::Page(mut page) = performed(&bench, read).await.1 else {
-        panic!("the run's page is read");
-    };
-    let mut cut = whole.clone();
-    cut.state = RunState::replay(&events[..2]);
-    (page.frame, page.state) = (cut.frame(now()), cut.state);
-    state.update(Input::Outcome(reading, Outcome::Page(page)));
-    assert_ne!(headline_said(&state), "finished", "read before it finished");
+    assert!(
+        matches!(state.scene(), Some(Scene::Work)),
+        "followed before it finished, while its node's work stands"
+    );
 
     let came = FollowNews::Run {
         run: whole.run.clone(),
         news: RunNews::Events(events[2..].to_vec()),
     };
-    let asked = state.update(Input::FollowNews(came.clone()));
+    state.update(Input::FollowNews(came));
     assert_eq!(headline_said(&state), "finished", "with no stroke");
-    assert_eq!(pages_asked(&asked), 1, "read once more: {asked:?}");
-    let again = state.update(Input::FollowNews(came));
-    assert_eq!(pages_asked(&again), 0, "{again:?}");
+    assert!(matches!(state.scene(), Some(Scene::Receipt)));
 }
 
-/// Picking a node asks for its page, which stands in place of the run's once it is read,
-/// and lets nothing go.
+/// That `state`'s run stands as its receipt, which the trail names, its pointer beside it on
+/// `node`.
+fn stands_as_its_receipt_pointing_at(state: &State, node: &str) {
+    let screen = state.screen(&Look::plain());
+    assert_eq!(
+        screen.trail.last().map(String::as_str),
+        Some(yunta_render::screen::RECEIPT),
+        "a run that finished stands as its receipt"
+    );
+    let side = screen.side.expect("the run's nodes beside its receipt");
+    let nodes = Markdown.draw(&side.region.doc);
+    let pointed = |row: &str| row.starts_with("* + ") && row.contains(node);
+    assert!(nodes.lines().any(pointed), "pointed at {node}: {nodes}");
+}
+
+/// Pointing at a node asks nothing and lets nothing go: a node that ended shows its own
+/// scene, titled by it and saying how it stands, from what the state follows. On a run that
+/// finished, which stands as its receipt, the pointer stands on the last node that ran, and
+/// `k` takes it to the node before.
 #[tokio::test]
-async fn a_node_picked_shows_its_page_and_lets_nothing_go() {
+async fn a_node_pointed_at_shows_its_own_scene_and_asks_nothing() {
     let bench = Bench::with_run_id("01M7N0DEP1CKED000000000000");
     bench.run(FINISHES, NO_SESSIONS).await;
     let (read, events) = followed(&bench).await;
     let mut state = followed_from_the_field(&read, &events).await;
+    stands_as_its_receipt_pointing_at(&state, "second");
 
-    let asked = state.update(Input::Stroke(Stroke::Enter));
-    let let_go = |request: &Request| matches!(request, Request::LetGo(_));
-    assert!(!asked.iter().any(let_go), "{asked:?}");
-    let Some((reading, node)) = asked.iter().find_map(|request| match request {
-        Request::Perform(ticket, Operation::ReadNodePage { node, .. }) => {
-            Some((*ticket, node.clone()))
-        }
-        _ => None,
-    }) else {
-        panic!("the node's page is asked for: {asked:?}");
-    };
-    assert_eq!(
-        node,
-        NodeId::from("first"),
-        "the pointer starts on the first node"
-    );
-    let read = Operation::ReadNodePage {
-        run: bench.run_id.clone(),
-        node,
-    };
-    let (_, page) = performed(&bench, read).await;
-    state.update(Input::Outcome(reading, page));
+    let asked = state.update(Input::Stroke(Stroke::Insert('k')));
+    assert!(asked.is_empty(), "{asked:?}");
 
     let screen = state.screen(&Look::plain());
     assert_eq!(screen.trail.last().map(String::as_str), Some("first"));
-    let page = Markdown.draw(&screen.main.doc);
-    assert!(page.contains("node first of run"), "{page}");
+    assert_eq!(screen.main.title, ["first", "bash"]);
+    let pane = Markdown.draw(&screen.main.doc);
+    assert!(
+        pane.contains("stands") && pane.contains("finished"),
+        "{pane}"
+    );
+    assert!(!pane.contains("node first of run"), "{pane}");
     let nodes = Markdown.draw(
         &screen
             .side
-            .expect("the run's nodes beside its page")
+            .expect("the run's nodes beside its pane")
             .region
             .doc,
     );
     assert!(nodes.contains("first"), "{nodes}");
 }
 
-/// A node whose name passes the region beside the run's page keeps its one row there, cut
+/// A node whose name passes the region beside the run's pane keeps its one row there, cut
 /// where it passes, so a pointer moves along the nodes a row at a time.
 #[tokio::test]
 async fn a_node_named_past_the_side_keeps_its_one_row() {
@@ -295,7 +242,7 @@ async fn a_node_named_past_the_side_keeps_its_one_row() {
     let side = state
         .screen(&Look::plain())
         .side
-        .expect("the run's nodes beside its page");
+        .expect("the run's nodes beside its pane");
     let beside = Look {
         width: Width::exact(SIDE),
         ..Look::plain()
@@ -315,7 +262,8 @@ async fn a_node_named_past_the_side_keeps_its_one_row() {
 }
 
 /// A run whose engine asks at its own terminal is said to ask there, and offers only
-/// stopping it: no other act is bound to a key, and stopping asks a confirmation first.
+/// stopping it, in the palette: no other act is bound to a key, and stopping asks a
+/// confirmation first.
 #[tokio::test]
 async fn a_run_asking_at_its_terminal_offers_only_stopping() {
     let bench = Bench::with_run_id("01M7ASK1NGATTERM1NA1000000");
@@ -334,30 +282,20 @@ async fn a_run_asking_at_its_terminal_offers_only_stopping() {
     let about = state
         .screen(&Look::plain())
         .about
-        .expect("the rows the run is watched by, across the screen");
+        .expect("what stands across the screen");
     let across = Markdown.draw(&about);
-    assert!(across.contains("asks at its terminal"), "{across}");
-    let does: Vec<String> = state
-        .screen(&Look::plain())
-        .legend
-        .0
-        .into_iter()
-        .map(|binding| binding.does)
-        .collect();
-    assert!(
-        does.iter()
-            .any(|said| said == "stops it and everything under it"),
-        "{does:?}"
-    );
-    for offered in [
-        "continues it",
-        "closes it for good",
-        "certifies what it did",
-    ] {
-        assert!(
-            !does.iter().any(|said| said.starts_with(offered)),
-            "{does:?}"
-        );
+    assert!(across.contains("asking at its terminal"), "{across}");
+    let offered = keys::palette_offers(&state);
+    let run = asking.run.clone();
+    let stopping = yunta_render::command::line(&NextStep::Cancel { run: run.clone() });
+    assert!(offered.contains(&stopping), "{offered:?}");
+    let others = [
+        NextStep::Resume { run: run.clone() },
+        NextStep::Close { run: run.clone() },
+        NextStep::Receipt { run },
+    ];
+    for other in others.iter().map(yunta_render::command::line) {
+        assert!(!offered.contains(&other), "{offered:?}");
     }
     assert!(state.update(Input::Stroke(Stroke::Insert('r'))).is_empty());
     assert!(state.update(Input::Stroke(Stroke::Insert('x'))).is_empty());
@@ -373,18 +311,20 @@ async fn a_run_asking_at_its_terminal_offers_only_stopping() {
 /// this long.
 const CATCHING_UP: Duration = Duration::from_secs(30);
 
-/// What `p` does on `state`'s run, as the keys under its screen say: none where no act is
-/// bound to it.
-fn p_does(state: &State) -> Option<String> {
+/// What `key` does on `state`'s run, as the keys under its screen say: none where the
+/// legend names no act bound to it.
+fn key_does(state: &State, key: &str) -> Option<String> {
     let legend = state.screen(&Look::plain()).legend.0;
-    let p = |binding: &Binding| matches!(&binding.keys, Keys::Typed(key) if key == "p");
-    legend.into_iter().find(p).map(|binding| binding.does)
+    let named = |binding: &Binding| matches!(&binding.keys, Keys::Typed(typed) if typed == key);
+    legend.into_iter().find(named).map(|binding| binding.does)
 }
 
-/// A run parked on its plan offers reading it once what it waits on is folded from what
-/// the state follows, its page never read.
+/// A run parked on its plan offers what the decision it waits on offers once that is
+/// folded from what the state follows, nothing read beside it: before, its work standing
+/// still names none of its acts, the decision standing by itself once read; then the plan's
+/// desk, whose keys the legend says in place of the run's acts, which the palette lists.
 #[tokio::test]
-async fn a_run_parked_on_its_plan_offers_reading_it_once_what_it_waits_on_is_folded() {
+async fn a_run_parked_on_its_plan_offers_what_its_decision_offers_once_it_is_folded() {
     let bench = Bench::with_run_id("01M7PARKED0NP1AN0000000000");
     bench.run(PLAN_THEN_GATE, PLANNER_HANDS_TWO_TASKS).await;
     let (mut state, _) = on_the_field(&[&bench.run_id]).await;
@@ -401,15 +341,22 @@ async fn a_run_parked_on_its_plan_offers_reading_it_once_what_it_waits_on_is_fol
             panic!("the state catches up with the run");
         };
         if matches!(&input, Input::FollowNews(FollowNews::Run { news, .. }) if awaited(news)) {
-            assert_eq!(p_does(&state), None, "before it is read");
+            assert_eq!(
+                (key_does(&state, "r"), key_does(&state, "x")),
+                (None, None),
+                "before it is read"
+            );
         }
         state.update(input);
     }
-    let reads_its_plan = yunta_render::command::effect(Effect::ReadsPlan);
-    assert_eq!(p_does(&state).as_deref(), Some(reads_its_plan));
-    let page = |(_, work): &(_, Operation)| matches!(work, Operation::ReadPage { .. });
-    let unread = state.waiting_on().iter().any(page);
-    assert!(unread, "its page is never read");
+    assert_eq!(key_does(&state, "r"), None);
+    assert_eq!(key_does(&state, "x"), None);
+    assert_eq!(key_does(&state, "p").as_deref(), Some("proof"));
+    let waiting_on = state.waiting_on();
+    assert!(
+        waiting_on.is_empty(),
+        "nothing is read beside: {waiting_on:?}"
+    );
 }
 
 /// A running run's ribbon plows its running node's stretch on a look that moves, and
@@ -428,8 +375,12 @@ async fn the_ribbon_turns_only_on_a_look_that_moves() {
             ..Look::plain()
         };
         let about = state.screen(&look).about.expect("the run's ribbon");
-        let Some(Block::Ribbon(ribbon)) = about.blocks().first() else {
-            panic!("the ribbon first across the screen");
+        let ribbon = about.blocks().iter().find_map(|block| match block {
+            Block::Ribbon(ribbon) => Some(ribbon),
+            _ => None,
+        });
+        let Some(ribbon) = ribbon else {
+            panic!("the ribbon across the screen");
         };
         assert_eq!(ribbon.events.is_some(), plowed, "{motion:?}");
     }

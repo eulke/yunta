@@ -40,11 +40,11 @@ fn a_typed_answer_matches_its_goldens_on_every_surface() {
     }
 }
 
-/// Held, the cursor stands after what was typed before it, on the row under the
-/// question.
+/// Held, the cursor stands after what was typed before it, inside the box under the
+/// question: on its middle row, past its upright and the cell inside it.
 #[test]
 fn a_held_answer_puts_the_cursor_where_the_typing_is() {
     let look = Look::of(&ENVIRONMENTS[0]);
     let held = named().drawn(&look);
-    assert_eq!(held.cursor, Some((1, "> yunta-".len())));
+    assert_eq!(held.cursor, Some((2, "│ yunta-".chars().count())));
 }

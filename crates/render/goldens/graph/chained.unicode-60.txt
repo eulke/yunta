@@ -1,4 +1,4 @@
-◌ workflow chained · as written
+◌ chained · the nodes it runs, in order           as written
 
        ┌───────┐
        │ build │

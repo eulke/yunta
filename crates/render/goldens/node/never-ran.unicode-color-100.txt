@@ -1,0 +1,12 @@
+␛[2m◌␛[0m ␛[1mnode spec of run Q78GRR␛[0m␛[2m ·␛[0m␛[2m never ran␛[0m
+
+  It has not run yet.
+
+  ␛[2mkind        ␛[0m prompt
+  ␛[2mrunner      ␛[0m planner on mock/gpt-6-luna
+
+␛[2mwhat it hands over␛[0m
+␛[2m◌␛[0m spec  not yet
+
+␛[2mnext␛[0m
+  ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m

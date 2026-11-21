@@ -1,0 +1,8 @@
+␛[32m✓␛[0m Recorded: approve. On to `pr`.
+␛[32m✓␛[0m Nothing to resume: this one waits on a decision. Enter reads it.
+␛[32m✓␛[0m Nothing recorded. The run stays waiting on these questions.
+␛[32m✓␛[0m C0NS0E resumed, driving forward independently.
+␛[32m✓␛[0m Recorded: approve. On to `pr`.
+␛[32m✓␛[0m Nothing to resume: this one waits on a decision. Enter…
+␛[32m✓␛[0m Nothing recorded. The run stays waiting on these questi…
+␛[32m✓␛[0m C0NS0E resumed, driving forward independently.

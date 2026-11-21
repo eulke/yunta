@@ -17,12 +17,13 @@
 //! its runs move as their news come. Opening the run pointed at, or the one that has
 //! waited longest on a person, opens its stage over the field; so do the workflows, with
 //! `w`, and doctor, with `m`. A person who comes back to the field finds it as the state
-//! keeps it, and nothing is asked.
+//! keeps it, and nothing is asked; one who leaves a run for it finds noted there, until the
+//! next key, whether the run keeps going, waits or ended.
 
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use surco::components::{Attention, Count, Note, Region, Screen, Sight};
+use surco::components::{Attention, Count, Note, Region, Screen, Sight, Tally};
 use surco::doc::{Depth, Doc};
 use surco::look::Look;
 use surco::words::Standing;
@@ -55,7 +56,8 @@ pub struct FieldStage {
     marked: Vec<RunId>,
     pub(super) reach: FieldReach,
     depth: Depth,
-    /// What the last act came to where it did not do what it was asked.
+    /// What the last act came to where it did not do what it was asked, or what leaving a
+    /// run said of it: noted until the next key.
     said: Option<String>,
 }
 
@@ -76,6 +78,12 @@ impl FieldStage {
             depth: Depth::Glance,
             said: None,
         }
+    }
+
+    /// `said` noted on the field until the next key, where anything was said: what leaving a
+    /// run for it said of the run.
+    pub(crate) fn noting(&mut self, said: Option<String>) {
+        self.said = said;
     }
 
     /// The field `followed` keeps, framed at `now`: none until it is read. A field read
@@ -153,7 +161,7 @@ impl FieldStage {
         let mut screen = Screen::new(Region::new(doc).in_sight(Sight::following_pointer()));
         screen.trail = vec![yunta_render::screen::YUNTA.to_string()];
         if let Some(framed) = &framed {
-            screen.tally = tally(&framed.reading);
+            screen.tally = Tally::Counted(tally(&framed.reading));
             screen.attention = waiting_longest(&framed.reading, look);
         }
         screen.legend = yunta_render::screen::field_legend(
@@ -290,10 +298,7 @@ impl FieldStage {
             | Outcome::Pack(_)
             | Outcome::Evidence(_)
             | Outcome::Started { .. }
-            | Outcome::Page(_)
-            | Outcome::NodePage(_)
-            | Outcome::Questions(_)
-            | Outcome::Decision(_)
+            | Outcome::PullRequest(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)
@@ -415,6 +420,6 @@ fn run_waiting_longest(reading: &FieldReading) -> Option<RunId> {
 
 /// `run` followed in its stage, opened over the field, where there is a run.
 fn opened(run: Option<RunId>) -> Vec<Want> {
-    run.map(|run| Want::taking(&NextStep::Follow { run }))
+    run.map(|run| Want::taking(&NextStep::status(&run)))
         .unwrap_or_default()
 }

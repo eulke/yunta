@@ -23,6 +23,6 @@
   |   nothing runs; this decision stays open
   |   yunta resolve-gate 7E5PH4 abort
   | or
-  |   yunta close 7E5PH4   closes it for good
+  |   yunta close 7E5PH4   close it for good
     the run holds its own state on disk, so close this terminal whenever you
     like and answer from anywhere.

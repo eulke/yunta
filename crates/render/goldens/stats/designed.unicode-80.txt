@@ -1,0 +1,37 @@
+◆ fragua (standard) · needs you · 1h52m so far                          Q78GRR
+━━━━ ━━━━━ ━━━━ ━━━━ ━━━━ ━━━━━ ━━━━ ━━━━ ━━━━ ━━━━━ ━━━━ ━━━━ ━━━━ ━━━━━ ┄┄┄┄
+  65% of it was agents and the engine at work.
+
+  task cost    27.1M tokens per verified task, 1 task done
+  rework       37% of tokens went to retries and reroutes
+  cache        96% cached tokens per input token
+  tokens       26.1M in / 1.06M out (25M cached)
+  documents    3 accepted
+  findings     4 posted; 4 standing
+  answers      4 given
+
+where its time went
+██████████████████████████████████████████████████████████████████████████████
+● working 1h12m · ● waiting on you 39m51s
+
+who spent it
+executor      ████████████████████████████  21.2M tokens
+planner       ██████▎                       4.71M tokens
+reviewer      ▊                             558k tokens
+reviewer-alt  ▌                             421k tokens
+mechanical    ▎                             217k tokens
+
+nodes:
+  ✓ finished  grill                   36s ▏                      220k tokens
+  ✓ finished  brief                   22s ▏                      112k tokens
+  ✓ finished  plan                  6m25s █▎                    2.54M tokens
+  ✓ finished  spec                 13m53s ██▊                   1.84M tokens
+  ✓ finished  approve-plan         10m05s ██                    waiting on you
+  ✓ finished  implement            41m05s ████████  3 attempts  19.5M tokens
+  ✓ finished  review@reviewer       2m00s ▍                      394k tokens
+  ✓ finished  review@reviewer-alt     42s ▏                      421k tokens
+  ✓ finished  conform                 25s ▏                      164k tokens
+  ✓ finished  fix-findings          5m31s █▏                    1.71M tokens
+  ✓ finished  lint                    11s           3 attempts
+  ✓ finished  fix-lint              1m31s ▎                      217k tokens
+  ✓ finished  tests                 1m04s ▎         2 attempts

@@ -16,6 +16,7 @@
 
 use chrono::{DateTime, Utc};
 use surco::doc::Depth;
+use yunta_core::ahead::NodesAhead;
 use yunta_core::events::DecisionOn;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::shown::ShownDocument;
@@ -42,6 +43,8 @@ pub(crate) struct ClosingEnv<'a> {
     pub(crate) decision: Option<(DecisionOn, GateWaitingPayload)>,
     /// The documents that decision shows, as the run holds them.
     pub(crate) shown: Vec<ShownDocument>,
+    /// What lies ahead at the nodes the decision's options lead to, as the run froze them.
+    pub(crate) ahead: NodesAhead,
     pub(crate) places: Places,
 }
 
@@ -70,6 +73,7 @@ impl Closing {
             on,
             escalation,
             shown: env.shown,
+            ahead: env.ahead,
         });
         Self {
             page: Run {

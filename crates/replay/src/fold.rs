@@ -37,8 +37,9 @@ impl RunState {
         if self.broken.is_some() {
             return;
         }
-        if let Err(error) = self.apply(event) {
-            self.broken = Some(error.to_string());
+        match self.apply(event) {
+            Ok(()) => self.applied = Some(event.seq),
+            Err(error) => self.broken = Some(error.to_string()),
         }
     }
 
@@ -46,6 +47,13 @@ impl RunState {
     /// reader that follows the run reads on from. `None` before its first.
     pub fn head(&self) -> Option<Seq> {
         self.head
+    }
+
+    /// The seq of the last event the state applied: the head of a log that
+    /// makes sense, and where one that broke last made sense. `None` before
+    /// it applied any. Not [`RunState::head`], which moves past a break.
+    pub fn reads_up_to(&self) -> Option<Seq> {
+        self.applied
     }
 
     /// Whether the event at `seq` was taken already: it stands at or below

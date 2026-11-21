@@ -11,20 +11,22 @@ pub struct Card {
     /// What a reader needs to answer, each a line under the question.
     pub about: Vec<String>,
     pub body: CardBody,
-    /// The keys it answers to, each with what it does: `enter chooses`.
+    /// The keys it answers to, each with what it does: `enter answer`.
     pub legend: Legend,
 }
 
-/// What a card holds: its options, or the words one of them is said with.
+/// What a card holds: its options, or its options with the words the one pointed at is said
+/// with.
 pub enum CardBody {
     Choosing {
         choices: Choices,
         /// What follows the option pointed at, when something does.
         then: Option<String>,
     },
+    /// Words being typed for the option pointed at, every option still in sight over them.
     Saying {
-        /// The option the words are said with.
-        chosen: ChoiceRow,
+        /// Every option, the pointer on the one the words are said with.
+        choices: Choices,
         /// What is asked of them.
         asks: String,
         typed: TypedRow,
@@ -43,20 +45,34 @@ pub struct Choices {
 }
 
 /// One option of a list: what it is picked by, what it does and what choosing it
-/// costs, where those are said.
+/// costs, where those are said, and the key the screen under the list takes it by, where
+/// one does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChoiceRow {
     pub name: String,
     pub said: Option<String>,
     pub cost: Option<String>,
+    /// The key the screen under the list does the same by: a palette's act, beside what it
+    /// does and before the command that does it at a shell. A list whose rows carry keys
+    /// lays its rows out in those three columns where its width holds them.
+    pub key: Option<String>,
 }
 
-/// The row words are being typed on.
+impl Choices {
+    /// Whether any of its rows carries a key, and so the list stands in three columns.
+    pub fn keyed(&self) -> bool {
+        self.rows.iter().any(|row| row.key.is_some())
+    }
+}
+
+/// The row words are being typed on: the one line asked of a person, wherever it is
+/// asked. Not a list narrowed by typing, whose filter stands on a row of the list's own.
 pub struct TypedRow {
-    /// What opens the row: `> `.
+    /// What opens the row where it is written on one line, as Markdown and a page write
+    /// it: `> `. A terminal draws the row in a box instead.
     pub prompt: String,
     /// The words before the cursor, whole: a surface shows what fits, as a
-    /// terminal's row does with [`TypedRow::fitted`].
+    /// terminal's box shows the part of them around the cursor.
     pub before: String,
     /// The words after the cursor, whole.
     pub after: String,

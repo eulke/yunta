@@ -6,7 +6,11 @@
 //! one column whichever verbs stand in sight; where calls of more than one task stand in
 //! sight, each names its task after its verb. Which moments a feed lists is [`in_feed`]'s
 //! alone; which of them stand in sight, and how many above and under, is its caller's.
+//!
+//! The run's whole chronicle is a feed of its own ([`whole`]): every moment that says anything,
+//! each row about its subject, which the surface sets in a column of its own.
 
+use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use surco::components::Feed;
@@ -29,10 +33,10 @@ const APART: usize = 2;
 /// Whether a node's feed lists this moment: each call of its sessions, where each attempt
 /// opens and where it ends, and what the engine does there between the calls (a session
 /// opened, a write refused, a file formatted, a task's check and its result, an artifact
-/// handed over or refused, a finding, a scope asked and answered). What a session reports
-/// spending, its notes, the runner and the context it was given, the rail's summary, a scope
-/// check's count and a task's moves stay out: a pane says them in its own parts, or no reader
-/// of a node's work acts on them.
+/// handed over or refused, a finding, a scope asked and answered, a decision answered, the
+/// questions it asks a person and their answers). What a session reports spending, its notes, the runner and
+/// the context it was given, the rail's summary, a scope check's count and a task's moves
+/// stay out: a pane says them in its own parts, or no reader of a node's work acts on them.
 pub fn in_feed(happening: &Happening) -> bool {
     use node::happening::Happening as Node;
     use session::happening::Happening as Session;
@@ -60,7 +64,12 @@ pub fn in_feed(happening: &Happening) -> bool {
             artifacts::happening::Happening::Accepted(_)
                 | artifacts::happening::Happening::Submitted { taken: false, .. }
         ),
-        Happening::Gates(it) => matches!(it, gates::happening::Happening::Resolved(_)),
+        Happening::Gates(it) => matches!(
+            it,
+            gates::happening::Happening::Resolved(_)
+                | gates::happening::Happening::Asked { .. }
+                | gates::happening::Happening::Answered { .. }
+        ),
         _ => false,
     };
     listed && super::says_anything(happening)
@@ -111,9 +120,42 @@ pub fn feed(
         .collect();
     Feed {
         rows,
+        subjects: Vec::new(),
         before,
         after,
     }
+}
+
+/// The run's whole chronicle as a feed of its own, with `moments` in sight, each a moment that
+/// says anything ([`says_anything`](super::says_anything)), the oldest first, and `before`
+/// rows above them and `after` under: each row is about its moment's subject, the node or the
+/// run, which a surface says before it, and says what its line says after that subject as a
+/// node's feed says it ([`feed`]), every moment listed. The newest row is strong where it
+/// stands in sight. Not [`feed`], one node's, whose pane names the node.
+pub fn whole(
+    moments: &[Moment],
+    tasks: &BTreeMap<SessionId, TaskId>,
+    before: usize,
+    after: usize,
+    look: &Look,
+) -> Feed {
+    let subjects = moments
+        .iter()
+        .map(|moment| super::phrased(moment, look.glyphs).subject)
+        .collect();
+    Feed {
+        subjects,
+        ..feed(moments, tasks, before, after, look)
+    }
+}
+
+/// What the run's whole chronicle stands under: how many moments it holds.
+pub fn whole_heading(moments: usize, glyphs: Glyphs) -> String {
+    format!(
+        "its whole chronicle {} {}",
+        glyphs.sep(),
+        counted(moments, "moment")
+    )
 }
 
 /// What a feed stands under: what the node is doing, and how many calls its open attempt
@@ -124,6 +166,31 @@ pub fn feed_heading(calls: usize, glyphs: Glyphs) -> String {
         glyphs.sep(),
         counted(calls, "call")
     )
+}
+
+/// How many calls the open attempt of a node whose moments are `moments`, in the log's order,
+/// made: those after the moment its latest attempt started, open or closed since. What a
+/// feed's heading counts, wherever a node's feed is said.
+pub fn open_attempt_calls<M: Borrow<Moment>>(moments: &[M]) -> usize {
+    let moments: Vec<&Moment> = moments.iter().map(Borrow::borrow).collect();
+    let started = moments.iter().rposition(|moment| {
+        matches!(
+            moment.happening,
+            Happening::Node(node::happening::Happening::Reached {
+                state: NodeState::Running { .. },
+                ..
+            })
+        )
+    });
+    moments[started.map_or(0, |at| at + 1)..]
+        .iter()
+        .filter(|moment| {
+            matches!(
+                moment.happening,
+                Happening::Session(session::happening::Happening::Called { .. })
+            )
+        })
+        .count()
 }
 
 /// One moment's row: a call's verb in its column, then its task in a `column` as wide as the

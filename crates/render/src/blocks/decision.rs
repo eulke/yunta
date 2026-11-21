@@ -10,6 +10,15 @@ use yunta_core::reserved::ReservedOption;
 use yunta_core::step::{Choice, NextStep};
 use yunta_core::RunId;
 
+/// The words over what the plan decided, where a session departs from it.
+pub(crate) const THE_PLAN_DECIDED: &str = "the plan decided";
+
+/// The words over what a session that departs from the plan says it does instead.
+pub(crate) const SAYS_INSTEAD: &str = "the session says instead";
+
+/// The words over why a session departs from the plan.
+pub(crate) const BECAUSE: &str = "because";
+
 /// A decision a terminal chooses for `run`: each option names the command
 /// that chooses it.
 pub fn here(run: &RunId, options: Vec<DecisionOption>) -> Decision {
@@ -39,30 +48,48 @@ pub fn here(run: &RunId, options: Vec<DecisionOption>) -> Decision {
     }
 }
 
+/// What accepting the departures of a loop's task, or of each of `tasks`, does: its work
+/// stands, and the plan the run judges keeps why it differs.
+pub(crate) fn accepted(tasks: usize) -> String {
+    let whose = match tasks {
+        1 => "the work",
+        _ => "each task's work",
+    };
+    format!("{whose} stands as it is, and the plan records why it differs")
+}
+
+/// What sending a departing task, or each of `tasks`, back does: its session picks the
+/// work back up, held to the plan.
+pub(crate) fn sent_back(tasks: usize) -> String {
+    let whose = match tasks {
+        1 => "the session",
+        _ => "each session",
+    };
+    format!("{whose} goes back to what the plan says")
+}
+
 /// The label and the tradeoff of a departure's answer, written from the
-/// departure's own facts: accepting it, and sending it back. `None` for an
-/// answer a departure does not offer.
+/// departure's own facts: accepting it, and sending it back, each said by
+/// what it does alone. `None` for an answer a departure does not offer.
 pub(crate) fn departure_words(
     menu: &DepartureMenu,
     id: ReservedOption,
-) -> Option<(String, Option<String>)> {
+) -> Option<(Option<String>, Option<String>)> {
     match id {
-        ReservedOption::Accept => Some(("Accept the departure".to_string(), Some(accepting(menu)))),
-        ReservedOption::SendBack => Some((
-            "Send it back".to_string(),
-            Some("Its session picks the work back up with what you say".to_string()),
-        )),
+        ReservedOption::Accept => Some((None, Some(accepting(menu)))),
+        ReservedOption::SendBack => Some((None, Some(sent_back(1)))),
         _ => None,
     }
 }
 
-/// What accepting a departure does, in the words its option offers: the task
-/// stops being held to the criteria it waives, and the test a run's spec
-/// gave it is written again by the node that writes it.
+/// What accepting a departure does, in the words its option offers: the
+/// work stands, and beside it the task stops being held to the criteria it
+/// waives, and the test a run's spec gave it is written again by the node
+/// that writes it.
 fn accepting(menu: &DepartureMenu) -> String {
     let waived = (!menu.waived.is_empty()).then(|| {
         format!(
-            "stops being held to {}",
+            "the task stops being held to {}",
             text::listed(menu.waived.iter().map(String::as_str))
         )
     });
@@ -74,14 +101,8 @@ fn accepting(menu: &DepartureMenu) -> String {
     });
     let changes: Vec<String> = waived.into_iter().chain(rewritten).collect();
     match changes.is_empty() {
-        true => "The task closes on the work as it stands, if its criteria pass; the rest of \
-                 the plan builds on what it did instead"
-            .to_string(),
-        false => format!(
-            "The task {} and closes on the work as it stands, if its other criteria pass; the \
-             rest of the plan builds on what it did instead",
-            changes.join(", and ")
-        ),
+        true => accepted(1),
+        false => format!("{}; {}", accepted(1), changes.join(", and ")),
     }
 }
 
@@ -95,9 +116,9 @@ pub(crate) fn departure_facts(menu: &DepartureMenu) -> Vec<Fact> {
         .flat_map(|deviation| {
             [
                 Fact::labelled("departs from", deviation.from.to_string()),
-                Fact::labelled("the plan says", deviation.planned.clone()),
-                Fact::labelled("its work instead", deviation.instead.clone()),
-                Fact::labelled("because", deviation.why.clone()),
+                Fact::labelled(THE_PLAN_DECIDED, deviation.planned.clone()),
+                Fact::labelled(SAYS_INSTEAD, deviation.instead.clone()),
+                Fact::labelled(BECAUSE, deviation.why.clone()),
             ]
         })
         .collect();

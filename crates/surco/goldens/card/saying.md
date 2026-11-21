@@ -2,7 +2,9 @@
 
 the tasks document the planner handed over
 
-▸ **adjust** Back to `plan`: sends what you say
+- **approve** On to `implement`
+- ▸ **adjust** Back to `plan`: sends what you say
+- **abort** Pause here: nothing runs
 
 **what should the plan change**
 
@@ -10,4 +12,4 @@ the tasks document the planner handed over
 
 ✗ this option needs an answer
 
-`enter` sends it · `esc` goes back
+`enter` send it · `esc` go back

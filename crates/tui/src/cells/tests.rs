@@ -1,10 +1,13 @@
 //! A cell's style is what Surco's one table says of its span, on every layer, for every
 //! tone and fill; plain paint styles nothing; a filled row is tinted to its edge; a line
-//! stops at its area's edge.
+//! stops at its area's edge; a line replaces each cell of its row whole, and cuts a wide
+//! glyph that reaches into it.
 
+use ratatui::backend::TestBackend;
 use ratatui::buffer::{Buffer, Cell};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::Terminal;
 use surco::line::{Fill, Line, Syntax, Tone};
 use surco::paint::{self, Ansi, Ground, Layer, Paint};
 
@@ -170,4 +173,64 @@ fn a_line_stops_at_its_areas_edge() {
         .map(|x| buffer[(x, 0)].symbol().to_string())
         .collect();
     assert_eq!(text, "  abcd    ");
+}
+
+/// Over a row in bold, a color and a ground of its own, a line in the terminal's own tone
+/// with no fill leaves nothing of it in the cells of its area: its words in their own style,
+/// every cell past them blank and unstyled; the cells outside its area keep what stood
+/// there. On every layer.
+#[test]
+fn a_line_replaces_each_cell_of_its_row_whole() {
+    for layer in LAYERS {
+        let paint = Paint::Color {
+            layer,
+            links: false,
+        };
+        let under = Line::new()
+            .push_filled(Tone::NeedsYou, Fill::Selection, "xxxxxxxxxx")
+            .filled(Fill::Selection);
+        let mut buffer = row(10);
+        write(&under, Rect::new(0, 0, 10, 1), &mut buffer, paint);
+        let stood = buffer[(0, 0)].clone();
+        let over = Line::new().push(Tone::Plain, "ab");
+        write(&over, Rect::new(2, 0, 6, 1), &mut buffer, paint);
+        let own = kept(expected(layer, Tone::Plain, None, None));
+        assert_eq!(buffer[(2, 0)].symbol(), "a");
+        assert_eq!(buffer[(2, 0)].style(), own, "{layer:?}: the line's word");
+        for x in 4..8 {
+            assert_eq!(buffer[(x, 0)], Cell::EMPTY, "{layer:?}: cell {x}");
+        }
+        for x in [0, 1, 8, 9] {
+            assert_eq!(
+                buffer[(x, 0)],
+                stood,
+                "{layer:?}: cell {x}, outside the area"
+            );
+        }
+    }
+}
+
+/// A line written where a wide glyph's second half stood cuts that glyph to a blank on its
+/// own ground, so the terminal draws the line's first cell rather than the glyph across it.
+#[test]
+fn a_wide_glyph_a_line_reaches_into_is_cut_to_a_blank() {
+    let layer = Layer::Truecolor(Ground::Dark);
+    let paint = Paint::Color {
+        layer,
+        links: false,
+    };
+    let mut terminal = Terminal::new(TestBackend::new(6, 1)).expect("a test backend");
+    terminal
+        .draw(|frame| {
+            let under = Line::new().push(Tone::Plain, "a界b").filled(Fill::Code);
+            write(&under, Rect::new(0, 0, 6, 1), frame.buffer_mut(), paint);
+            let over = Line::new().push(Tone::Muted, "│c");
+            write(&over, Rect::new(2, 0, 4, 1), frame.buffer_mut(), paint);
+        })
+        .expect("a drawing");
+    let shown = terminal.backend().buffer();
+    let text: String = (0..6).map(|x| shown[(x, 0)].symbol().to_string()).collect();
+    assert_eq!(text, "a │c  ");
+    let ground = paint::erase(layer, Some(Fill::Code)).map(said);
+    assert_eq!(Some(shown[(1, 0)].bg), ground, "the cut glyph's own ground");
 }

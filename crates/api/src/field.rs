@@ -28,7 +28,7 @@ use crate::{Error, Failure, FollowedRun, Project, RunRegistry, Stop};
 ///
 /// Not core's `step::Reach`, the reach a command line names, which says how
 /// deep a listing reads as well.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FieldReach {
     /// The runs of the repository the project is rooted in; every run on
     /// this machine outside one, where there is no repository to narrow to.

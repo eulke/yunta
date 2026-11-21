@@ -22,6 +22,7 @@ fn performer(dir: PathBuf) -> Arc<Performer> {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SystemIdSource),
         secrets: Arc::new(ProcessSecrets),
+        forges: Arc::new(yunta_api::DeclaredForge),
         binary: PathBuf::from("yunta"),
     };
     Arc::new(Performer::new(workspace, Channel::Mcp))

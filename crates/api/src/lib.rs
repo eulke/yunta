@@ -4,10 +4,9 @@
 //! of its own process: an interface reads its process once and hands the
 //! workspace in.
 //!
-//! Every interface plugs into it and gets the same behavior: the CLI, the
-//! MCP server an agent asks Yunta through, and later the terminal
-//! application and the desktop. A decision two of them would make is made
-//! here, once.
+//! Every interface plugs into it and gets the same behavior: the CLI, the MCP
+//! server an agent asks Yunta through, and later the terminal application and
+//! the desktop. A decision two of them would make is made here, once.
 //!
 //! Its map:
 //!
@@ -29,8 +28,9 @@
 //!   of them found by the [`RunRef`] a person typed, opened as an
 //!   [`OpenedRun`], read as a [`RunReading`] or a [`StatsReading`], its page
 //!   and a node's read whole, its document for a program, its page written for
-//!   a browser, receipted and verified; `follow`, what is [`Followed`], followed
-//!   as a [`Following`] that hands back [`FollowNews`], the field read whole as a
+//!   a browser, receipted and verified, its gate's pull request polled
+//!   ([`PullRequestPolled`]); `follow`, what is [`Followed`], followed as a
+//!   [`Following`] that hands back [`FollowNews`], the field read whole as a
 //!   [`FollowedField`], the run read whole and the [`RunNews`] a [`FollowedRun`]
 //!   folds, beside the [`RunRegistry`] its engine keeps; `event_log`, the
 //!   [`EventLog`] a moving run's log is read through; and `history`, a
@@ -52,9 +52,9 @@
 //!   what it asks (`committer`).
 //! - What this machine answers for: `machine`, the adapters this binary
 //!   builds, what it refuses to serve a run with, and every check `doctor`
-//!   makes of it; `forge`, the forge a run reaches with the workspace's
-//!   secrets; and `sandbox`, a checkout of its own a probe run is made in,
-//!   apart from the project's.
+//!   makes of it; `forge`, the forge a run reaches through the workspace's
+//!   [`ForgeSource`]; and `sandbox`, a checkout of its own a probe run is made
+//!   in, apart from the project's.
 //! - What it hands back when it does not do what it was asked: `error`, an
 //!   [`Error`] that is a refusal render says, a [`Failure`] below it, or the
 //!   caller's stop.
@@ -103,12 +103,13 @@ pub use follow::{
     AnswerablePause, Document, FollowNews, Followed, FollowedField, FollowedRun, Following,
     RunNews, RunRegistry,
 };
+pub use forge::{DeclaredForge, ForgeSource};
 pub use history::{HistoryReading, WorkflowHistory};
 pub use hold::HeldRun;
 pub use packs::{AuditedPack, FetchedPack, InstalledPack, Packs, ScaffoldedPack};
 pub use project::{config_layers, Project};
 pub use remark::{Remark, Remarks};
-pub use run::{OpenedRun, RunReading, RunRef, StatsReading};
+pub use run::{OpenedRun, PullRequestPolled, RunReading, RunRef, StatsReading};
 pub use setup::{
     DetectedProject, InitializedProject, ProjectDraft, ProjectSetup, ProposedRunners, RunnerAnswer,
     RunnerDeclaration, WorkflowStem, WrittenWorkflow,

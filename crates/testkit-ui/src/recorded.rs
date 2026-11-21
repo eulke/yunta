@@ -5,12 +5,17 @@
 //!
 //! What the application follows is recorded by place, `followed`'s, as a state opened there
 //! follows it: the field at each reach in the places the walk's field comes from, and each
-//! run whose page is read, its performer's following taken piece by piece until the state
+//! run whose screen it opens, its performer's following taken piece by piece until the state
 //! stands caught up with the place's log, before any act moves a log. Each piece is kept by
-//! what it is about, the field at the reach followed or the run it names, and the walk
-//! hands it to every state that follows that. The fold takes an event once and a piece
-//! handed again changes nothing, so what is followed adds no endless states: it bounds the
-//! walk as the recorded answers do.
+//! what it is about, the field at the reach followed or the run it names at the head its log
+//! stands at there, and the walk hands it to every state that follows that and holds the run
+//! at that head, or none of it yet. The fold takes an event once and a piece handed again
+//! changes nothing, so what is followed adds no endless states: it bounds the walk as the
+//! recorded answers do.
+//!
+//! The runs of the home's cuts, each standing at a scene of a run's screen, are followed on
+//! their screens, and the application is opened on each of their screens: what those screens
+//! ask to read as a scene opens, a pull request or a verification, is recorded there.
 
 mod followed;
 
@@ -18,7 +23,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use tokio::sync::mpsc;
-use yunta_api::{FollowNews, Followed, Repository, RunRequest, Workspace};
+use yunta_api::{FollowNews, Repository, RunRequest, Workspace};
 use yunta_core::events::Channel;
 use yunta_core::step::NextStep;
 use yunta_core::{
@@ -29,6 +34,7 @@ use yunta_ui::{
     PackOperation, PackOutcome, Performer, Request, State, WorkflowOperation,
 };
 
+use crate::cut::Cut;
 use crate::home::{root_of, Home};
 use crate::sandbox::{now, workspace, workspace_on};
 use crate::walk::Reached;
@@ -57,10 +63,19 @@ impl Recordings {
         let reviewed = NextStep::Review {
             run: home.reviewing.run_id.clone(),
         };
+        let asked = NextStep::status(&home.asking.run_id);
+        let choosing = NextStep::status(&home.scenes.choosing.run_id);
+        let mut opened_on = vec![reviewed, asked, choosing];
+        for run in home.scenes.cuts().flat_map(Cut::runs) {
+            let status = NextStep::status(run);
+            if !opened_on.contains(&status) {
+                opened_on.push(status);
+            }
+        }
         let mut made = Recordings {
             kinds: Vec::new(),
             followed: FollowedNews::default(),
-            opened_on: vec![reviewed],
+            opened_on,
         };
         made.readings(home).await;
         made.acts(home).await;
@@ -68,7 +83,10 @@ impl Recordings {
     }
 
     /// The steps the application is also opened on, beside its opening: `review` of the
-    /// home's run parked on its plan.
+    /// home's run parked on its plan, the screen of each of its runs parked on a round, typed
+    /// or of choices, which no field the walk shows lists and whose round stands in place
+    /// there, and the screen of each run of the home's cuts, once for each run however many
+    /// moments it stands at.
     pub fn opened_on(&self) -> &[NextStep] {
         &self.opened_on
     }
@@ -170,40 +188,15 @@ impl Recordings {
         }
     }
 
-    /// A run's decision and rounds, and its pages.
+    /// The pull request of the gate a run waits at. The home holds no run waiting at a gate a
+    /// forge holds: the pull request of the run parked on its own gate is read as none. What
+    /// a run's log says, the decision and the round it waits on among it, is followed.
     async fn run_readings(&mut self, home: &Home) {
         let worked = (home.worked.worktree.as_path(), home.worked_root());
-        let parked = home.parked.clone();
-        let deciding = Operation::ReadDecision {
-            run: parked.clone(),
+        let no_pull_request = Operation::ReadPullRequest {
+            run: home.parked.clone(),
         };
-        self.kept(performed(worked.0, worked.1, deciding).await);
-        let no_round = Operation::ReadQuestions { run: parked };
-        self.kept(performed(worked.0, worked.1, no_round).await);
-        let asking = (home.asking.worktree.as_path(), root_of(&home.asking));
-        let round = Operation::ReadQuestions {
-            run: home.asking.run_id.clone(),
-        };
-        self.kept(performed(asking.0, asking.1, round).await);
-        let reviewing = (home.reviewing.worktree.as_path(), root_of(&home.reviewing));
-        let on_its_plan = Operation::ReadDecision {
-            run: home.reviewing.run_id.clone(),
-        };
-        self.kept(performed(reviewing.0, reviewing.1, on_its_plan).await);
-        for (run, node) in [
-            (home.worked.run_id.clone(), "only"),
-            (home.parked.clone(), "approve"),
-        ] {
-            for reading in [
-                Operation::ReadPage { run: run.clone() },
-                Operation::ReadNodePage {
-                    run,
-                    node: NodeId::from(node),
-                },
-            ] {
-                self.kept(performed(worked.0, worked.1, reading).await);
-            }
-        }
+        self.kept(performed(worked.0, worked.1, no_pull_request).await);
     }
 
     /// Every act the application asks for, performed on a run it changes or a
@@ -292,10 +285,17 @@ impl Recordings {
             .map_or(&[], |recorded| recorded.news.as_slice())
     }
 
-    /// What the application's following handed of what `followed` names, where it was
-    /// recorded: each piece of the field at its reach, then each piece of its run.
-    pub fn followed(&self, followed: &Followed) -> Vec<&FollowNews> {
-        self.followed.about(followed)
+    /// What the application's following handed of what `state` follows, where it was
+    /// recorded: each piece of the field at its reach, then each piece of its run recorded
+    /// where the run's log stood at the head `state` holds it read whole at, or every
+    /// place's where it holds none of it.
+    pub fn followed(&self, state: &State) -> Vec<&FollowNews> {
+        let followed = state.followed();
+        let in_view = state.followed_runs().in_view.as_ref();
+        let held = in_view
+            .filter(|in_view| followed.run.as_ref() == Some(&in_view.run.run))
+            .and_then(|in_view| in_view.run.state.head());
+        self.followed.about(&followed, held)
     }
 
     /// Every page a piece of work wrote for a surface to show: what the walk tells each

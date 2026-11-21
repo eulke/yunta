@@ -1,14 +1,95 @@
-//! Deciding in the application: a run parked on a gate answered on its card, a round of
-//! questions answered, and a plan read at its desk and decided there. Each answer is on
-//! the run's log, and the run goes on to its end, as `resolve-gate` leaves it.
+//! Deciding in the application: a run parked on a gate answered on its card, which stands in
+//! place on the run's screen, by itself as the run parks while it is followed, a round of
+//! questions answered where it stands in place too, and a plan read at its desk, which stands
+//! in place as well, and decided there. Each answer is on the run's log, and the run goes on
+//! to its end, as `resolve-gate` leaves it. A run parked on a gate and answered from a shell
+//! goes on on its screen with no key pressed: its card goes, a note says who answered, in the
+//! log's words, and the node after the gate stands at work. Each step waits for the words the
+//! screen shows, and a key is sent once the screen it acts on stands.
 
+use serde_json::Value;
+use yunta_render::screen::Leaving;
 use yunta_testkit::workflows::{
     ASKS, EXECUTOR_ON_THE_MOCK, GATED, HANDS_ONE_QUESTION_OVER, PLANNER_HANDS_TWO_TASKS,
     PLANNER_ON_THE_MOCK, PLAN_THEN_GATE,
 };
-use yunta_testkit::{runs_root, wait_until, Checkout};
+use yunta_testkit::{run_ids, runs_root, stderr, wait_until, yunta_at, Checkout, Hold, Terminal};
 
-use super::{following, given_back, log, outcome, parked};
+use super::{
+    following, given_back, left_through_the_field, log, outcome, parked, FINISHED, ITS_DESK_STANDS,
+};
+
+/// The word the node before the gate waits for before the run parks on it.
+const PARK: &str = "park";
+
+/// The marker the node before the gate writes once it started.
+const HELD_STARTED: &str = "held-started";
+
+/// The word the node after the gate waits for before the run finishes.
+const FINISH: &str = "finish";
+
+/// What the screen says once a node starts its first attempt: the moment its feed opens on.
+const AT_WORK: &str = "running: attempt 1";
+
+/// What the gate's card shows first while it stands in place: its first option pointed at.
+const ITS_CARD_STANDS: &str = "▸ go";
+
+/// Who answers the gate from a shell.
+const ANSWERER: &str = "lead";
+
+/// What the note says first of a decision answered elsewhere, before what was chosen and by
+/// whom.
+const ANSWERED_ELSEWHERE: &str = "Answered elsewhere: ";
+
+/// The workflow `parks`: a node that says it started, then holds until `hold` gives the word
+/// [`PARK`]; then a gate that asks whether to go on, `Go on?`; then a node that finishes.
+fn held_then_gated(hold: &Hold) -> String {
+    format!(
+        "name: parks\nnodes:\n  - id: held\n    kind: bash\n    run: \"echo in > {started}; until [ -f {park} ] || [ ! -e {marks} ]; do sleep 0.05; done\"\n  - {{ id: approve, kind: gate, assignee: lead, message: \"Go on?\", options: [go, stop], depends_on: [held] }}\n  - {{ id: after, kind: bash, run: \"true\", depends_on: [approve] }}\n",
+        started = hold.word(HELD_STARTED).display(),
+        park = hold.word(PARK).display(),
+        marks = hold.marks().display(),
+    )
+}
+
+/// The workflow `gated`: a gate asks the person whether to go on; the node after it holds
+/// until `hold` gives the word [`FINISH`], or until its marks are gone.
+fn gated_then_held(hold: &Hold) -> String {
+    format!(
+        "name: gated\nnodes:\n  - {{ id: approve, kind: gate, assignee: lead, message: \"Go on?\", options: [go] }}\n  - id: after\n    kind: bash\n    run: \"until [ -f {finish} ] || [ ! -e {marks} ]; do sleep 0.05; done\"\n    depends_on: [approve]\n",
+        finish = hold.word(FINISH).display(),
+        marks = hold.marks().display(),
+    )
+}
+
+/// Waits until every one of `shown` stands on `terminal`'s screen and none of `gone` does,
+/// failing with `what` and the screen.
+fn wait_until_shown(terminal: &Terminal, shown: &[&str], gone: &[&str], what: &str) {
+    wait_until(
+        || {
+            let screen = terminal.screen();
+            shown.iter().all(|row| screen.holds(row)) && !gone.iter().any(|row| screen.holds(row))
+        },
+        || {
+            format!(
+                "{what}\non the screen:\n{}",
+                terminal.screen().rows.join("\n")
+            )
+        },
+    );
+}
+
+/// The option chosen and who chose it, as `decision`, the log's line that records a
+/// decision, says them.
+fn chosen_by(decision: &str) -> (String, String) {
+    let resolved: Value = serde_json::from_str(decision).expect("the decision's line");
+    let said = |field: &str| {
+        let said = resolved[field].as_str();
+        let said = said.unwrap_or_else(|| panic!("the decision says its `{field}`: {resolved}"));
+        said.to_string()
+    };
+    (said("chosen_option"), said("resolved_by"))
+}
 
 /// The log's line that records the decision on the run `id`, once the run finished and
 /// its log says so, and how `yunta status` says it ended. The log is read once it holds
@@ -35,13 +116,12 @@ fn a_gate_answered_on_its_card_is_on_the_log_and_the_run_goes_on_to_its_end() {
         .committed();
     let id = parked(&checkout, &["run", "wf.yaml"]);
     let mut terminal = following(&checkout);
-    terminal.keys("a");
-    terminal.wait_on_screen("▸ go", "the gate's card never stood");
+    terminal.wait_on_screen("▸ go", "the gate's card never stood in place");
     terminal.keys("\r");
     let (decision, ended) = decided(&checkout, &id);
     assert!(decision.contains("\"go\""), "{decision}");
     assert_eq!(ended, "finished");
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, None);
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 
@@ -62,8 +142,7 @@ fn a_round_answered_is_on_the_run_and_the_run_goes_on_to_its_end() {
     ];
     let id = parked(&checkout, &arguments);
     let mut terminal = following(&checkout);
-    terminal.keys("a");
-    terminal.wait_on_screen("What changed?", "the round never stood");
+    terminal.wait_on_screen("◆ What changed?", "the round never stood in place");
     terminal.keys("the greeting names the person");
     terminal.keys("\r");
     wait_until(
@@ -79,11 +158,11 @@ fn a_round_answered_is_on_the_run_and_the_run_goes_on_to_its_end() {
         recorded.contains("the greeting names the person"),
         "{recorded}"
     );
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, None);
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 
-/// The card's `r` opens the plan's desk, where a number chosen and confirmed decides.
+/// The plan's desk stands in place by itself, where a number chosen and confirmed decides.
 #[test]
 fn a_plan_decided_at_its_desk_is_on_the_log_and_the_run_goes_on_to_its_end() {
     let checkout = Checkout::new()
@@ -101,17 +180,90 @@ fn a_plan_decided_at_its_desk_is_on_the_log_and_the_run_goes_on_to_its_end() {
     ];
     let id = parked(&checkout, &arguments);
     let mut terminal = following(&checkout);
-    terminal.keys("a");
-    terminal.wait_on_screen("▸ approve", "the plan's card never stood");
-    terminal.keys("r");
     // At 80 columns the desk has no rail of its tasks: its keys say it stands.
-    terminal.wait_on_screen("j k task", "the desk never opened");
+    terminal.wait_on_screen(ITS_DESK_STANDS, "the plan's desk never stood in place");
     terminal.keys("1");
-    terminal.wait_on_screen("enter confirms", "a number never asked to be confirmed");
+    terminal.wait_on_screen("enter confirm", "a number never asked to be confirmed");
     terminal.keys("\r");
     let (decision, ended) = decided(&checkout, &id);
     assert!(decision.contains("\"approve\""), "{decision}");
     assert_eq!(ended, "finished");
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, None);
+    assert_eq!(given_back(&mut terminal), Some(0));
+}
+
+/// A run followed at work that comes to park on its gate: the card stands by itself, with no
+/// key pressed, and answered there, its choice is on the log.
+#[test]
+fn a_card_stands_by_itself_as_the_run_parks_and_its_answer_is_on_the_log() {
+    let hold = Hold::new();
+    let checkout = Checkout::new()
+        .working_in_place()
+        .workflow("wf", &held_then_gated(&hold))
+        .committed();
+    let detached = yunta_at!(&checkout, &["run", "wf.yaml", "--detach"]);
+    assert!(detached.status.success(), "{}", stderr(&detached));
+    wait_until(
+        || hold.word(HELD_STARTED).exists(),
+        || "the run never started".to_string(),
+    );
+    let id = run_ids(&checkout.home).remove(0);
+    let mut terminal = following(&checkout);
+    wait_until_shown(
+        &terminal,
+        &[AT_WORK],
+        &[ITS_CARD_STANDS],
+        "the node before the gate never stood at work",
+    );
+
+    hold.give(PARK);
+    terminal.wait_on_screen(
+        ITS_CARD_STANDS,
+        "the gate's card never stood by itself as the run parked",
+    );
+    terminal.keys("\r");
+    let (decision, ended) = decided(&checkout, &id);
+    assert!(decision.contains("\"go\""), "{decision}");
+    assert_eq!(ended, "finished");
+    left_through_the_field(&mut terminal, None);
+    assert_eq!(given_back(&mut terminal), Some(0));
+}
+
+/// A run parked on its gate, its card in place, answered from a shell: with no key pressed
+/// the card goes, the note says who answered in the log's words, and the node after the gate
+/// stands at work; then the run is read to its end.
+#[test]
+fn a_gate_answered_from_a_shell_takes_its_card_away_saying_who_and_the_run_works_on() {
+    let hold = Hold::new();
+    let checkout = Checkout::new()
+        .working_in_place()
+        .workflow("wf", &gated_then_held(&hold))
+        .committed();
+    let id = parked(&checkout, &["run", "wf.yaml"]);
+    let mut terminal = following(&checkout);
+    terminal.wait_on_screen(ITS_CARD_STANDS, "the gate's card never stood in place");
+
+    let answered = yunta_at!(&checkout, &["resolve-gate", &id, "go", "--by", ANSWERER]);
+    assert!(answered.status.success(), "{}", stderr(&answered));
+    wait_until_shown(
+        &terminal,
+        &[ANSWERED_ELSEWHERE, "after · bash", AT_WORK],
+        &[ITS_CARD_STANDS],
+        "the gate answered from a shell never took its card away saying who",
+    );
+    let rows = terminal.screen().rows;
+    let noted = rows.iter().find(|row| row.contains(ANSWERED_ELSEWHERE));
+    let noted = noted.expect("the note stands").clone();
+
+    hold.give(FINISH);
+    terminal.wait_on_screen(FINISHED, "the run was never read to its end");
+    let (decision, ended) = decided(&checkout, &id);
+    assert_eq!(ended, "finished");
+    let (option, by) = chosen_by(&decision);
+    assert!(
+        noted.ends_with(&format!("{ANSWERED_ELSEWHERE}`{option}` chosen by {by}.")),
+        "the note says who answered in the log's words, {decision}: {noted}"
+    );
+    left_through_the_field(&mut terminal, Some(Leaving::Ended));
     assert_eq!(given_back(&mut terminal), Some(0));
 }

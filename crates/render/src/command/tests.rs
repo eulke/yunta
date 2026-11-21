@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use surco::doc::Depth;
 use yunta_core::step::samples::every_step;
-use yunta_core::step::{Arg, Choice, NextStep};
+use yunta_core::step::{Arg, Choice, NextStep, Reach};
 use yunta_core::{NodeId, OptionId, PackRef, RunId, WorkflowName, WorkflowShape};
 use yunta_replay::frame::{Action, Effect};
 
@@ -112,10 +112,73 @@ fn a_program_is_handed_the_whole_id_and_a_person_the_handle() {
     );
 }
 
+/// Each act a run's palette offers on the run, in the palette's words: what it does, as
+/// the person would ask for it.
+#[test]
+fn the_palette_words_each_act_on_a_run() {
+    let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
+    let answer = NextStep::ResolveGate {
+        run: run.clone(),
+        choice: Choice::Asked,
+    };
+    let palette = [
+        (answer, "answer what it asks"),
+        (NextStep::Cancel { run: run.clone() }, STOP),
+        (NextStep::Resume { run: run.clone() }, CONTINUE),
+        (NextStep::Close { run: run.clone() }, CLOSE),
+        (NextStep::Receipt { run: run.clone() }, WRITE_THE_RECEIPT),
+        (NextStep::Verify { run: run.clone() }, VERIFY),
+        (NextStep::RunGraph { run: run.clone() }, "draw its graph"),
+        (NextStep::Open { run }, "the whole page, in a browser"),
+    ];
+    for (step, words) in palette {
+        assert_eq!(does(&step), words, "{}", line(&step));
+    }
+    assert_eq!(STOP, "stop it and everything under it");
+    assert_eq!(CONTINUE, "continue it from its log");
+    assert_eq!(CLOSE, "close it for good");
+    assert_eq!(WRITE_THE_RECEIPT, "write the receipt");
+    assert_eq!(VERIFY, "verify its evidence");
+}
+
+/// Each act the palette offers from anywhere, in the palette's words.
+#[test]
+fn the_palette_words_each_act_it_offers_from_anywhere() {
+    let stats = NextStep::Stats {
+        run: RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA"),
+    };
+    let doctor = NextStep::Doctor {
+        sessions: false,
+        full: false,
+    };
+    let runs = NextStep::ListRuns {
+        reach: Reach::Repository,
+    };
+    let palette = [
+        (stats, "what it cost, and where its time went"),
+        (
+            NextStep::Run {
+                workflow: Arg::Blank,
+            },
+            "start a new run",
+        ),
+        (runs, "every run of this repository"),
+        (NextStep::List, "the workflows you can run"),
+        (doctor, "check adapters, git, forge, packs"),
+        (NextStep::Gc { dry_run: false }, "remove orphaned checkouts"),
+        (NextStep::Schemas, "the shape of every document yunta reads"),
+    ];
+    for (step, words) in palette {
+        assert_eq!(does(&step), words, "{}", line(&step));
+    }
+}
+
+/// An effect the palette words as an act says the palette's words; one it does not
+/// keeps its own.
 #[test]
 fn each_effect_says_what_its_action_does_to_the_run() {
     let said = [
-        (Effect::ContinuesFromLog, "continues it from its log"),
+        (Effect::ContinuesFromLog, "continue it from its log"),
         (
             Effect::ContinuesWhereStopped,
             "continues it where it stopped",
@@ -131,13 +194,10 @@ fn each_effect_says_what_its_action_does_to_the_run() {
         ),
         (Effect::ReadsPlan, "reads its plan, and answers it there"),
         (Effect::ShowsWhatItWaitsOn, "shows what it is waiting on"),
-        (Effect::Stops, "stops it and everything under it"),
-        (Effect::Closes, "closes it for good"),
-        (Effect::Certifies, "certifies what it did"),
-        (
-            Effect::FindsWhereLogStops,
-            "says where its log stops reading",
-        ),
+        (Effect::Stops, "stop it and everything under it"),
+        (Effect::Closes, "close it for good"),
+        (Effect::Certifies, "write the receipt"),
+        (Effect::Verifies, "verify its evidence"),
     ];
     for (effect, words) in said {
         assert_eq!(super::effect(effect), words);
@@ -154,7 +214,7 @@ fn an_action_is_said_as_its_line_and_what_it_does() {
     };
     assert_eq!(
         said(&action, Reader::Person),
-        ("yunta close AAAAAA".to_string(), "closes it for good")
+        ("yunta close AAAAAA".to_string(), "close it for good")
     );
 }
 
@@ -231,5 +291,5 @@ fn every_step_says_what_it_does() {
     let follow = NextStep::Follow {
         run: RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA"),
     };
-    assert_eq!(does(&follow), "follows the run as it moves");
+    assert_eq!(does(&follow), "follow it as it moves");
 }

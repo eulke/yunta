@@ -414,6 +414,7 @@ fn a_fence_around_quoted_or_pasted_text_outlasts_every_fence_in_it() {
             .map(str::to_string)
             .to_vec(),
         whole: None,
+        kept: None,
     };
     let pasted = Concern {
         fact: "the hook is missing".to_string(),

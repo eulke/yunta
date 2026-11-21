@@ -5,7 +5,9 @@
 //! so on. Arrows move through it, typing narrows it to what matches, Enter takes
 //! what is pointed at and Escape leaves without an answer. A row has no number: a
 //! digit narrows the list as any letter does, so a value with digits in it is typed
-//! as written. A decision is not this list: its letters are keys.
+//! as written. A decision is not this list: its letters are keys. Typing matches a
+//! row's name: a list whose rows are asked for by what they do, as the palette's, names each
+//! by what it does and labels it with its command, so its command answers nothing typed.
 
 use surco::components::{ChoiceRow, Choices};
 use surco::doc::Block;
@@ -15,21 +17,26 @@ use yunta_render::prompt::Escape;
 use super::{Answerable, Press, Stroke};
 
 /// One of the alternatives a list offers: what it is called, what it does when its
-/// name does not say it, and what the caller gets back for it. Not core's
-/// `step::Choice`, how a command line chooses on a decision.
+/// name does not say it, the key the screen under the list takes it by where one does,
+/// and what the caller gets back for it. Not core's `step::Choice`, how a command line
+/// chooses on a decision.
 #[derive(Debug, Clone)]
 pub struct Alternative<T> {
     pub name: String,
     pub label: Option<String>,
+    /// The key the screen under the list takes it by, as a legend spells it: a palette's
+    /// act, which pressing that key does as well. None on a list no screen keys.
+    pub key: Option<String>,
     pub value: T,
 }
 
 impl<T> Alternative<T> {
-    /// An alternative its name says all of.
+    /// An alternative its name says all of, which no key takes.
     pub fn named(name: impl Into<String>, value: T) -> Self {
         Alternative {
             name: name.into(),
             label: None,
+            key: None,
             value,
         }
     }
@@ -58,7 +65,8 @@ impl<T> Picker<T> {
     }
 
     /// The indices of the options the filter leaves: the best answers to what was
-    /// typed first, and in the order they were given among equals.
+    /// typed first, and in the order they were given among equals. A row answers by its
+    /// name.
     fn matching(&self) -> Vec<usize> {
         let typed = self.filter.to_lowercase();
         let mut found: Vec<(u8, usize)> = self
@@ -66,7 +74,8 @@ impl<T> Picker<T> {
             .iter()
             .enumerate()
             .filter_map(|(index, choice)| {
-                Some((answers(&choice.name.to_lowercase(), &typed)?, index))
+                let best = answers(&choice.name.to_lowercase(), &typed)?;
+                Some((best, index))
             })
             .collect();
         found.sort_unstable();
@@ -93,6 +102,7 @@ impl<T> Picker<T> {
                     name: choice.name.clone(),
                     said: choice.label.clone(),
                     cost: None,
+                    key: choice.key.clone(),
                 })
                 .collect(),
             at: self.at.min(matching.len() - 1),

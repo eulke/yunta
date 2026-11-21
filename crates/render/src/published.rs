@@ -255,6 +255,9 @@ fn decision(
         }
     };
     blocks.extend(weighing.map(Block::Section));
+    let close = NextStep::Close {
+        run: request.run_id.clone(),
+    };
     blocks.push(Block::Decision(Decision {
         chosen: Chosen::OnTheForge {
             forge: publication.forge.to_string(),
@@ -268,12 +271,7 @@ fn decision(
                 }),
                 "reads the answer and acts on it",
             ),
-            (
-                crate::command::line(&NextStep::Close {
-                    run: request.run_id.clone(),
-                }),
-                "closes the run for good",
-            ),
+            (crate::command::line(&close), crate::command::does(&close)),
         ],
     }));
     crate::escalation::section(question, blocks)

@@ -8,4 +8,4 @@ the tasks document the planner handed over
   ✗ say what it risks
 - ◌ How deep?
 
-`enter` answers · `esc` leaves it for later
+`enter` answer · `esc` leave it for later

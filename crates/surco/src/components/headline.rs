@@ -18,6 +18,11 @@ pub struct Headline {
     /// What names it at the line's far edge: a run's handle, which a
     /// reader copies into the next command.
     pub edge: Option<String>,
+    /// Whether something else in sight says the edge too, as a run's screen's
+    /// trail says its handle: the edge then gives way first where the line is
+    /// too narrow for the whole headline. A page keeps its edge, which a
+    /// reader types next.
+    pub edge_said_elsewhere: bool,
 }
 
 impl Headline {
@@ -28,6 +33,7 @@ impl Headline {
             said: said.into(),
             facts: Vec::new(),
             edge: None,
+            edge_said_elsewhere: false,
         }
     }
 
@@ -61,6 +67,15 @@ impl Headline {
     /// This headline with `edge` at the line's far edge.
     pub fn edge(mut self, edge: impl Into<String>) -> Self {
         self.edge = Some(edge.into());
+        self
+    }
+
+    /// This headline with `edge` at the line's far edge, which something else in
+    /// sight says too, so it gives way first on a line too narrow for the whole
+    /// headline.
+    pub fn edge_said_elsewhere(mut self, edge: impl Into<String>) -> Self {
+        self.edge = Some(edge.into());
+        self.edge_said_elsewhere = true;
         self
     }
 }

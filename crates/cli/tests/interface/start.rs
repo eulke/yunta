@@ -57,9 +57,10 @@ async fn a_run_started_at_the_first_run_is_followed_to_its_end() {
     let [id] = runs_under(&checkout.home)
         .try_into()
         .expect("one run started");
+    // The run's trail names its handle, then the node pointed at.
     let screen = state.screen(&Markdown.look());
     assert_eq!(
-        screen.trail.last().map(String::as_str),
+        screen.trail.get(1).map(String::as_str),
         Some(yunta_testkit::handle(&id)),
         "the run is followed in its stage"
     );

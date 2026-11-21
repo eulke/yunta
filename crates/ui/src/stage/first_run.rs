@@ -108,10 +108,7 @@ impl FirstRunStage {
             }
             Outcome::Repository(_)
             | Outcome::Started { .. }
-            | Outcome::Page(_)
-            | Outcome::NodePage(_)
-            | Outcome::Questions(_)
-            | Outcome::Decision(_)
+            | Outcome::PullRequest(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)

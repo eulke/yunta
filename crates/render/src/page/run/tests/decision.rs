@@ -39,6 +39,7 @@ fn status_with(lint: NodeFrame) -> String {
             on,
             escalation,
             shown: Vec::new(),
+            ahead: yunta_core::ahead::NodesAhead::default(),
         }),
         plans: Vec::new(),
     };

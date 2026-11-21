@@ -1,27 +1,34 @@
 //! A feed on a terminal: a row a line, each cut at the edge it is drawn at rather than folded
-//! onto the line under it, between the rows that count what stands above and under it.
+//! onto the line under it, between the rows that count what stands above and under it. A row
+//! is cut as every line is, so a cut never falls inside a number or right after one.
 //!
-//! A cut never falls inside a number or right after one: a number cut short reads as a
-//! smaller one, so the cut falls before it and the number goes with what the cut leaves out.
+//! In a pane a feed shows a window of its rows: at its end, the row that counts those above
+//! it and the newest rows under that; scrolled back, the rows from the place asked for between
+//! the rows that count those above and under. A window too short to hold a count beside a row
+//! lets its counts go before its rows, the newest last.
+//!
+//! Where a feed says what each row is about, each row it shows opens with its subject in a
+//! column as wide as the widest subject among the rows shown and [`APART`] more: a window
+//! measures the rows in its sight, any other drawing every row it holds.
 
-use crate::components::Feed;
+use std::ops::Range;
+
+use crate::components::{Feed, Laid, Sight};
 use crate::glyphs::Glyphs;
-use crate::line::{Line, Tone};
+use crate::line::{Hidden, Line, Tone};
 use crate::look::Look;
 use crate::width::cell_width;
 
-/// The word after the count of the rows that stand above a feed's rows in sight.
-const ABOVE: &str = "above";
-
-/// The word after the count of the rows that stand under a feed's rows in sight.
-const UNDER: &str = "under";
+/// The cells that part a row's subject from its words: two, as a feed's call parts its verb
+/// from its object.
+const APART: usize = 2;
 
 impl Feed {
     /// Each row on a line of its own, cut at the stream's width and never folded.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         self.said(look.glyphs)
             .iter()
-            .map(|row| cut(row, look.width.cells(), look.glyphs))
+            .map(|row| row.cut(look.width.cells(), look.glyphs))
             .collect()
     }
 
@@ -29,79 +36,102 @@ impl Feed {
     /// those under them, each where its count is not zero and muted, as a reader skims past
     /// it: what every surface says of a feed, its ellipsis drawn in `glyphs`.
     pub(in crate::surface) fn said(&self, glyphs: Glyphs) -> Vec<Line> {
-        let hidden = |count: usize, side: &str| {
-            (count > 0).then(|| {
-                Line::new().push(Tone::Muted, format!("{} {count} {side}", glyphs.ellipsis()))
-            })
-        };
-        hidden(self.before, ABOVE)
+        Line::hidden(self.before, Hidden::Above, glyphs)
             .into_iter()
-            .chain(self.rows.iter().cloned())
-            .chain(hidden(self.after, UNDER))
+            .chain(self.subjected(0..self.rows.len()))
+            .chain(Line::hidden(self.after, Hidden::Under, glyphs))
             .collect()
     }
-}
 
-/// `row` inside `cells`, cut as [`Line::cut`] cuts it, but before a number the cut would split
-/// or end on. The ellipsis takes the tone and fill of the span it ends.
-fn cut(row: &Line, cells: usize, glyphs: Glyphs) -> Line {
-    let text = row.text();
-    if cell_width(&text) <= cells {
-        return row.clone();
-    }
-    let cut = row.cut(cells, glyphs);
-    let kept = cut
-        .text()
-        .strip_suffix(glyphs.ellipsis())
-        .map_or(0, str::len);
-    let end = clear_of_numbers(&text, kept);
-    if end == kept {
-        return cut;
-    }
-    let kept = row.slice(0..end);
-    let ends = kept.spans().last().or(row.spans().first());
-    let ellipsis = glyphs.ellipsis();
-    match ends.map(|span| (span.tone, span.fill)) {
-        Some((tone, Some(fill))) => kept.push_filled(tone, fill, ellipsis),
-        Some((tone, None)) => kept.push(tone, ellipsis),
-        None => kept.plain(ellipsis),
-    }
-}
-
-/// Where a cut that keeps `text[..end]` falls so that it splits no number and ends on none:
-/// before the number it would split or end on, again before the one that leaves it ending
-/// on, with the spaces before the cut left out. Each turn moves the cut back, so it ends.
-fn clear_of_numbers(text: &str, end: usize) -> usize {
-    let mut end = end;
-    loop {
-        let kept = text[..end].trim_end();
-        let splits = kept.len() == end
-            && kept.ends_with(in_a_number)
-            && text[end..].starts_with(|c: char| c.is_ascii_digit());
-        if !(kept.ends_with(|c: char| c.is_ascii_digit()) || splits) {
-            return kept.len();
+    /// The rows it holds at `held`, each opened by what it is about where the feed says it,
+    /// in a column as wide as the widest subject among them and [`APART`] more, in the tone
+    /// its row opens in; the rows as they are where it says none.
+    fn subjected(&self, held: Range<usize>) -> Vec<Line> {
+        let rows = &self.rows[held.clone()];
+        if self.subjects.is_empty() {
+            return rows.to_vec();
         }
-        end = number_start(kept);
+        let subject = |at: usize| self.subjects.get(at).map_or("", String::as_str);
+        let widest = held.clone().map(|at| cell_width(subject(at))).max();
+        let column = widest.unwrap_or(0) + APART;
+        held.zip(rows)
+            .map(|(at, row)| {
+                let tone = row.spans().first().map_or(Tone::Plain, |span| span.tone);
+                let pad = column.saturating_sub(cell_width(subject(at)));
+                let opening = format!("{}{}", subject(at), " ".repeat(pad));
+                Line::new().push(tone, opening).then(row.clone())
+            })
+            .collect()
+    }
+
+    /// How many rows the whole feed holds: those it holds, and those above and under them.
+    pub(in crate::surface) fn whole(&self) -> usize {
+        self.before + self.rows.len() + self.after
+    }
+
+    /// What a window `rows` high shows of the feed from the row `sight` asks for, counted
+    /// from the whole feed's first row, each row cut at the stream's width; and what was laid
+    /// out of it, counted the same way, a page of it the rows in sight at its end. Of the rows
+    /// it would show, only those the feed holds show, the rest counted with those above or
+    /// under them.
+    pub(in crate::surface) fn windowed(
+        &self,
+        look: &Look,
+        sight: Sight,
+        rows: usize,
+    ) -> (Vec<Line>, Laid) {
+        if rows == 0 {
+            return (Vec::new(), Laid::default());
+        }
+        let whole = self.whole();
+        let (first, last, most) = in_sight(whole, sight.top, rows);
+        let held_end = self.before + self.rows.len();
+        let first = first.clamp(self.before, held_end);
+        let last = last.clamp(first, held_end);
+        let (cells, glyphs) = (look.width.cells(), look.glyphs);
+        let shown = self
+            .subjected(first - self.before..last - self.before)
+            .into_iter()
+            .map(|row| row.cut(cells, glyphs));
+        let mut above = Line::hidden(first, Hidden::Above, glyphs);
+        let mut under = Line::hidden(whole - last, Hidden::Under, glyphs);
+        let counted = usize::from(above.is_some()) + usize::from(under.is_some());
+        // The counts give way before a row does: the one under first, the newest rows' side.
+        if (last - first) + counted > rows {
+            under = None;
+        }
+        if (last - first) + usize::from(above.is_some()) > rows {
+            above = None;
+        }
+        let lines = above
+            .into_iter()
+            .map(|above| above.cut(cells, glyphs))
+            .chain(shown)
+            .chain(under.map(|under| under.cut(cells, glyphs)))
+            .collect();
+        let laid = Laid {
+            top: first,
+            page: rows.saturating_sub(1),
+            most,
+        };
+        (lines, laid)
     }
 }
 
-/// Where the number `kept` ends in starts: the letters, digits and stops (`13.7M`, `1m31s`,
-/// `10:05`) that run back from its end, from the first letter or digit among them, since a
-/// stop opens no number. Always before the end of `kept`, which ends in one of them.
-fn number_start(kept: &str) -> usize {
-    let run = kept
-        .char_indices()
-        .rev()
-        .take_while(|(_, c)| in_a_number(*c))
-        .last()
-        .map_or(kept.len(), |(at, _)| at);
-    kept[run..]
-        .find(char::is_alphanumeric)
-        .map_or(run, |at| run + at)
-}
-
-/// Whether `c` can stand inside a number as Yunta writes one: a letter or a digit, or a stop
-/// that parts two of them.
-fn in_a_number(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '.' | ',' | ':')
+/// Which of a feed's `whole` rows a window `rows` high shows from the row `top`: the first
+/// and the one after the last, and the last first row it can show. Past that row the window
+/// is at its end: the row that counts those above, then the newest rows. Short of it, the
+/// rows from `top` on between the rows that count those above and under, at least one.
+fn in_sight(whole: usize, top: usize, rows: usize) -> (usize, usize, usize) {
+    if whole <= rows {
+        return (0, whole, 0);
+    }
+    let most = whole - rows.saturating_sub(1).max(1);
+    let top = top.min(most);
+    if top == most {
+        return (top, whole, most);
+    }
+    let counts = usize::from(top > 0) + 1;
+    let in_sight = rows.saturating_sub(counts).max(1);
+    (top, top + in_sight, most)
 }

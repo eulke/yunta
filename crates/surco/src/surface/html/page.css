@@ -66,6 +66,7 @@ td .furrow{margin:0;min-width:48px}
 .region{min-width:0;padding:10px 14px;border:1px solid var(--rule);border-radius:6px}
 .region h3{font-size:13px;font-weight:500;color:var(--muted);margin:0 0 8px}
 .region[aria-current] h3{color:var(--strong)}
+.region h3 .edge{float:right;font-weight:400;color:var(--muted)}
 .act{display:flex;flex-direction:column;gap:8px}
 dialog[open]{max-width:min(60ch,90vw);border:1px solid var(--rule);border-radius:8px;background:var(--panel);color:var(--ink)}
 dialog h2{font-size:14px;margin:0 0 8px}
@@ -74,6 +75,7 @@ dialog h2{font-size:14px;margin:0 0 8px}
 .attention .asks{color:var(--muted)}
 .legend{display:flex;flex-wrap:wrap;gap:.3rem .7rem;align-items:center;color:var(--muted)}
 .legend .key{color:var(--strong);background:var(--panel);border:1px solid var(--rule);border-bottom-width:2px;border-radius:4px;padding:.05em .45em;margin-right:.25em}
+.legend .far{margin-left:auto}
 .ribbon i.done{background:var(--done)}.ribbon i.failed{background:var(--failed)}.ribbon i.running{background:var(--running)}.ribbon i.needs{background:var(--needs)}.ribbon i.caution{background:var(--caution)}
 
 /* Words. */

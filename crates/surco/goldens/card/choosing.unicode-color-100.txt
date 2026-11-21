@@ -7,4 +7,4 @@
 ␛[1;35m▎␛[0m
 ␛[1;35m▎␛[0m ␛[2mthen␛[0m  review ×2, conform → ship
 ␛[1;35m▎␛[0m
-␛[1;35m▎␛[0m ␛[2m↑↓ move · enter chooses · n adds a note · esc leaves it for later␛[0m
+␛[1;35m▎␛[0m ␛[1m↑↓␛[0m␛[2m choose␛[0m␛[2m · ␛[0m␛[1menter␛[0m␛[2m answer␛[0m␛[2m · ␛[0m␛[1mn␛[0m␛[2m add a note␛[0m␛[2m · ␛[0m␛[1mesc␛[0m␛[2m leave it for later␛[0m

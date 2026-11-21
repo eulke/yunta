@@ -1,19 +1,22 @@
 //! See [`super`]. What a person can do from where they stand: the acts the stage offers,
-//! then what every stage offers, each row the command that does the same, spelled by
-//! render's `command`, with what it does, so a person learns the CLI from it. Typed
-//! words narrow it. A row the stage offers is taken by the key it is bound to there, so
-//! choosing it does what pressing the key does; a row every stage offers opens the stage
-//! that takes it. Not the stage's legend, which says its keys: the palette says its acts.
+//! then what every stage offers, each row what it does, the key the stage takes it by where
+//! one does, and the command that does the same, spelled by render's `command`, so a person
+//! learns the keys and the CLI from it: what an act the stage offers does in the act's own
+//! words, since two acts may share one command. Typed words narrow it by what a row does,
+//! never by its command. A row the stage offers is taken by the key it is bound to there, so
+//! choosing it does what pressing the key does; a row every stage offers, and one the stage
+//! offers with no key bound to it there, is taken as its step is ([`Want::taking`]). Its own
+//! keys stand in the screen's legend row while it is open, none inside its box. Not the
+//! stage's legend, which says its keys: the palette says its acts.
 
-use surco::components::{Overlay, Sight};
+use surco::components::{ChoiceList, Legend, Overlay, Sight};
 use surco::doc::Doc;
-use surco::look::Look;
 use yunta_core::step::NextStep;
 use yunta_render::command;
-use yunta_render::prompt::Escape;
+use yunta_render::prompt::{Escape, ENTER};
 
 use crate::prompt::{Alternative, Answerable, Picker, Press, Stroke};
-use crate::stage::{Act, Stage};
+use crate::stage::{Act, Stage, Want};
 
 /// The key that opens the palette over a stage where nothing is being typed.
 pub(crate) const OPENS: Stroke = Stroke::Insert('/');
@@ -29,16 +32,17 @@ pub struct Palette {
 enum Taken {
     /// By the key it is bound to on the stage.
     ByKey(Stroke),
-    /// By opening the stage that takes the step, one every stage offers.
-    Opening(NextStep),
+    /// As its step is taken from any stage: one every stage offers, or one no key here takes.
+    Stepping(NextStep),
 }
 
 /// What a stroke at the palette came to.
 pub(crate) enum Chosen {
     /// A row the stage offers: what pressing `0` there does.
     Pressed(Stroke),
-    /// A row every stage offers: the stage that takes it, opened.
-    Opened(Box<Stage>),
+    /// A row taken as its step is: what taking it wants of the state, nothing where no
+    /// stage takes it.
+    Took(Vec<Want>),
     /// Closed, with nothing done.
     Closed,
     /// The person leaves the application.
@@ -57,26 +61,36 @@ impl Palette {
                 Some(step) != showing.as_ref() && !acts.iter().any(|act| act.step == *step)
             })
             .collect();
-        let offered = acts
-            .into_iter()
-            .map(|act| row(act.step, Taken::ByKey(act.key)));
+        let offered = acts.into_iter().map(|act| {
+            let taken = match act.key {
+                Some(key) => Taken::ByKey(key),
+                None => Taken::Stepping(act.step.clone()),
+            };
+            row(&act.step, act.does, act.key, taken)
+        });
         let rows = offered
-            .chain(
-                always
-                    .into_iter()
-                    .map(|step| row(step.clone(), Taken::Opening(step))),
-            )
+            .chain(always.into_iter().map(|step| {
+                let does = command::does(&step);
+                row(&step, does, None, Taken::Stepping(step.clone()))
+            }))
             .collect();
         Palette {
             rows: Picker::new(rows, Escape::GoesBack),
         }
     }
 
-    /// The palette as the overlay a surface draws over the screen: the list, with its
-    /// keys, the row pointed at in sight.
-    pub(crate) fn overlay(&self, look: &Look) -> Overlay {
-        let doc = Doc::new().with(self.rows.block(look));
-        Overlay::new(yunta_render::screen::PALETTE, doc).in_sight(Sight::following_pointer())
+    /// The palette as the overlay a surface draws over the screen: the list, the row
+    /// pointed at in sight, with no keys of its own inside it, and its keys, which stand in
+    /// the screen's legend row while it is open.
+    pub(crate) fn overlay(&self) -> Overlay {
+        let list = ChoiceList {
+            choices: self.rows.list(),
+            filter: self.rows.filter().map(str::to_string),
+            legend: Legend::new(),
+        };
+        Overlay::new(yunta_render::screen::PALETTE, Doc::new().with(list))
+            .legend(yunta_render::screen::palette_legend())
+            .in_sight(Sight::following_pointer())
     }
 
     /// What `stroke` does here: typing narrows the rows, the arrows move along them,
@@ -84,10 +98,7 @@ impl Palette {
     pub(crate) fn pressed(&mut self, stroke: Stroke) -> Chosen {
         match self.rows.press(stroke) {
             Press::Answer(Taken::ByKey(key)) => Chosen::Pressed(key),
-            Press::Answer(Taken::Opening(step)) => match Stage::opened_by(&step) {
-                Some(stage) => Chosen::Opened(Box::new(stage)),
-                None => Chosen::Closed,
-            },
+            Press::Answer(Taken::Stepping(step)) => Chosen::Took(Want::taking(&step)),
             Press::Decline => Chosen::Closed,
             Press::Interrupt => Chosen::Leave,
             Press::Stay | Press::Moved => Chosen::Stay,
@@ -95,11 +106,23 @@ impl Palette {
     }
 }
 
-/// The row of `step`, taken as `taken`: its command, and what it does.
-fn row(step: NextStep, taken: Taken) -> Alternative<Taken> {
+/// The row of an act that takes `step`, does `does` and is bound to `key` here, where a key
+/// is, taken as `taken`: named by what it does, which typing narrows it by; its key, as a
+/// legend spells it; and its command.
+fn row(step: &NextStep, does: &str, key: Option<Stroke>, taken: Taken) -> Alternative<Taken> {
     Alternative {
-        name: command::line(&step),
-        label: Some(command::does(&step).to_string()),
-        value: taken,
+        label: Some(command::line(step)),
+        key: key.and_then(spelled),
+        ..Alternative::named(does, taken)
+    }
+}
+
+/// `key` as a legend spells it in a row's key column: a character as it is typed, Enter by
+/// its name. None for a stroke no act is bound to.
+fn spelled(key: Stroke) -> Option<String> {
+    match key {
+        Stroke::Insert(character) => Some(character.to_string()),
+        Stroke::Enter => Some(ENTER.to_string()),
+        _ => None,
     }
 }

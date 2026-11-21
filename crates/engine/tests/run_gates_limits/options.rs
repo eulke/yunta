@@ -3,6 +3,7 @@
 //! approval resolves it and the dag continues.
 
 use super::*;
+use yunta_core::ahead::NodesAhead;
 
 /// A gate that declares `abort` beside its other options, with a node after it.
 const DECLARED_ABORT_WORKFLOW: &str = r#"
@@ -80,7 +81,12 @@ async fn a_gate_that_declares_abort_pauses_the_run_when_abort_is_chosen() {
     let offered: Vec<(&str, Option<String>)> = waiting
         .options()
         .iter()
-        .map(|o| (o.id.as_str(), option_words(&waiting, o).1))
+        .map(|o| {
+            (
+                o.id.as_str(),
+                option_words(&waiting, o, &NodesAhead::default()).1,
+            )
+        })
         .collect();
     assert_eq!(
         offered,
@@ -111,7 +117,7 @@ async fn a_declared_abort_reads_as_the_pause_it_makes() {
         .find(|o| o.id.as_str() == "abort")
         .expect("abort is on the menu");
     assert_eq!(
-        option_words(&waiting, abort),
+        option_words(&waiting, abort, &NodesAhead::default()),
         (
             "Pause here".to_string(),
             Some("nothing runs; this decision stays open".to_string())
@@ -183,7 +189,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
         .expect("the resolved interaction must be on the log");
     let ids: Vec<&str> = waiting.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["proceed", "revise", "abort"]);
-    let words = |o| option_words(waiting, o).1;
+    let words = |o| option_words(waiting, o, &NodesAhead::default()).1;
     assert!(waiting.options().iter().all(|o| words(o).is_some()));
     assert_eq!(
         waiting.summary(),

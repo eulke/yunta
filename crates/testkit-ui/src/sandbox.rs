@@ -36,6 +36,7 @@ pub fn workspace_on(dir: &Path, root: &Path, first: Vec<PathBuf>) -> Workspace {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SystemIdSource),
         secrets: Arc::new(ProcessSecrets),
+        forges: Arc::new(yunta_api::DeclaredForge),
         binary: PathBuf::from("yunta"),
     }
 }

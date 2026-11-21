@@ -34,9 +34,8 @@ impl SchemaStage {
     pub(crate) fn new() -> Self {
         let documents = DocumentKind::all()
             .map(|kind| Alternative {
-                name: kind.as_str().to_string(),
                 label: Some(kind.purpose().to_string()),
-                value: kind,
+                ..Alternative::named(kind.as_str(), kind)
             })
             .collect();
         SchemaStage {

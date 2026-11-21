@@ -23,6 +23,7 @@ mod description;
 mod desk;
 mod diffstat;
 mod fence;
+mod findings;
 pub(in crate::surface) mod fold;
 mod headline;
 mod problem;
@@ -115,12 +116,7 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         Block::Nodes(nodes) => self::table(&nodes.table(GLYPHS)),
         Block::Runs(runs) => self::runs(runs),
         Block::Evidence(evidence) => self::evidence(evidence),
-        Block::Said(said) => said
-            .0
-            .iter()
-            .map(|line| plain_text(line))
-            .collect::<Vec<_>>()
-            .join("  \n"),
+        Block::Said(said) => self::said(&said.0),
         Block::Paths(paths) => self::paths(paths),
         Block::Diffstat(stat) => diffstat::diffstat(stat),
         Block::Decision(decision) => decision::decision(decision),
@@ -129,11 +125,14 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         Block::TypedAnswer(drawn) => asked::typed_answer(drawn),
         Block::ChoiceList(drawn) => asked::choice_list(drawn),
         Block::Checklist(list) => self::checklist(list),
+        Block::Findings(list) => findings::findings(list),
         Block::Problem(said) => problem::problem(said),
         Block::Refusal(refusal) => problem::refusal(refusal),
         Block::Next(next) => self::next(next),
         Block::Legend(legend) => screen::legend(legend),
+        Block::KeyList(list) => screen::key_list(list),
         Block::Attention(attention) => screen::attention(attention),
+        Block::Noted(noted) => screen::noted(noted),
         Block::Heading(title) => format!("{} {}", "#".repeat(2 + depth), plain_text(title)),
         Block::Title(title) => headline::title(title, page),
         Block::Section(section) => self::section(section, depth, page),
@@ -149,9 +148,21 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         }
         Block::Code(shown) => code::drawn(shown, page),
         Block::Lines(lines) | Block::Rows(lines) => rows(lines),
+        Block::Labelled(labelled) => rows(&labelled.laid(usize::MAX, GLYPHS)),
         Block::Feed(feed) => rows(&feed.said(GLYPHS)),
         Block::Meter(meter) => rows(&[meter.said(GLYPHS)]),
+        // A picture that says nothing: a file has no cell to draw it in, and loses no fact.
+        Block::Horizon(_) => String::new(),
     }
+}
+
+/// Lines a message says whole, each kept on its own line by a hard break.
+fn said(lines: &[String]) -> String {
+    lines
+        .iter()
+        .map(|line| plain_text(line))
+        .collect::<Vec<_>>()
+        .join("  \n")
 }
 
 fn fields(fields: &Fields) -> String {

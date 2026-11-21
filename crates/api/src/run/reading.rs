@@ -1,14 +1,18 @@
 //! See [`super`]. A run read at one instant: the state and frame its log
 //! derives, the decision it stopped on, and the tree and branch it works in —
-//! what every page and document about a run is drawn from, read once.
+//! what every page and document about a run is drawn from, read once. And the
+//! pull request a gate the run waits at published, polled on the run's forge.
 
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::{DecisionOn, Escalation, NodeState};
+use yunta_core::events::{
+    DecisionOn, Escalation, EventPayload, GateEvent, Menu, NodeState, PauseReason,
+};
+use yunta_core::port::{ForgeUnanswered, PolledGate, PullRequestRef};
 use yunta_core::shown::ShownDocument;
 use yunta_core::NodeId;
-use yunta_replay::frame::{NodeStanding, RunFrame};
+use yunta_replay::frame::{NodeStanding, RunFrame, WaitingOn};
 use yunta_replay::RunState;
 
 use super::OpenedRun;
@@ -64,6 +68,67 @@ impl<'p> OpenedRun<'p> {
         })
     }
 
+    /// The pull request of the gate the run waits at, polled once on the forge
+    /// the run's config declares: it reads, and changes nothing of the pull
+    /// request or of the run, whose gate the engine resolves on its next wake.
+    /// None where the run waits at no gate whose pull request a forge holds.
+    pub async fn pull_request(&self) -> Result<Option<PullRequestPolled>, Error> {
+        let Some(pull_request) = self.waited_pull_request() else {
+            return Ok(None);
+        };
+        let config = &self.manifest.doc.config;
+        let answered = match self.project.workspace.forge(config) {
+            Ok(forge) => forge
+                .poll(&pull_request)
+                .await
+                .map_err(|error| ForgeUnanswered::Failed {
+                    said: yunta_core::describe(&error),
+                }),
+            Err(unanswered) => Err(unanswered),
+        };
+        Ok(Some(PullRequestPolled {
+            pull_request,
+            answered,
+        }))
+    }
+
+    /// The pull request the gate the run waits at published, as its log keeps
+    /// its handle: where the run waits on a forge's review, on a pull request a
+    /// person closed, or on a gate whose escalation is the pull request. The
+    /// handle is the gate's last publication's, which a close leaves in the log.
+    fn waited_pull_request(&self) -> Option<PullRequestRef> {
+        let frame = self.frame();
+        let Some(WaitingOn::Node {
+            node,
+            reason: Some(pause),
+            ..
+        }) = frame.phase.waiting_on()
+        else {
+            return None;
+        };
+        let held_by_a_forge = match pause {
+            PauseReason::ExternalGate { .. } | PauseReason::PullRequestClosed { .. } => true,
+            PauseReason::Escalation(escalation) => {
+                matches!(escalation.menu(), Some(Menu::Published(_)))
+            }
+            _ => false,
+        };
+        if !held_by_a_forge {
+            return None;
+        }
+        let handle = self.events.iter().rev().find_map(|event| {
+            match (event.node_id.as_ref(), event.payload()) {
+                (Some(at), Some(EventPayload::Gates(GateEvent::Waiting(waiting))))
+                    if at == node =>
+                {
+                    waiting.external_ref()
+                }
+                _ => None,
+            }
+        })?;
+        PullRequestRef::of_handle(handle).ok()
+    }
+
     /// The frame `state` derives at `now`, beside the engine the run's lock
     /// names.
     pub(crate) fn frame_of(&self, state: &RunState, now: DateTime<Utc>) -> RunFrame {
@@ -71,6 +136,17 @@ impl<'p> OpenedRun<'p> {
         let workflow = &self.manifest.doc.workflow;
         RunFrame::of(&self.id, workflow, state, None, &engine, now)
     }
+}
+
+/// The pull request a gate the run waits at published, polled on the run's
+/// forge: the pull request, by its number and its link as the log keeps them,
+/// and what the forge answered of where its head stands and how its review
+/// stands, or why no forge answered. Not the gate's resolution, which the
+/// engine records on its next wake: polling records nothing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PullRequestPolled {
+    pub pull_request: PullRequestRef,
+    pub answered: Result<PolledGate, ForgeUnanswered>,
 }
 
 impl RunReading<'_> {

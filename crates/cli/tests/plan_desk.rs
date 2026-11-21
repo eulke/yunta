@@ -55,7 +55,7 @@ fn the_card_says_what_the_plan_is_and_offers_it_with_a_key() {
     let screen = terminal.screen();
     assert!(screen.holds("Make the two files"), "{screen:#?}");
     assert!(screen.holds("2 tasks in 2 steps"), "{screen:#?}");
-    assert!(screen.holds("r reads the plan"), "{screen:#?}");
+    assert!(screen.holds("r read the plan"), "{screen:#?}");
     assert!(!screen.alternate, "it never opens by itself: {screen:#?}");
     let drawn = terminal.drawn();
     assert!(!drawn.contains("T001: Make it"), "{drawn}");
@@ -75,14 +75,17 @@ fn r_opens_the_desk_on_the_other_screen_and_esc_comes_back_to_the_card() {
     let desk = terminal.screen();
     assert!(desk.alternate, "{desk:#?}");
     assert!(desk.cursor_hidden, "{desk:#?}");
-    assert!(desk.holds("reviewed (default)"), "{desk:#?}");
+    assert!(desk.holds("· reviewed ·"), "the workflow: {desk:#?}");
     assert!(desk.holds("▸ the change"), "{desk:#?}");
     assert!(
         desk.holds("Writes the files the run is about."),
         "{desk:#?}"
     );
     assert!(desk.holds("decided for you"), "{desk:#?}");
-    assert!(desk.holds("T001 → T002"), "the order: {desk:#?}");
+    assert!(
+        desk.holds("what it says"),
+        "what the plan says, counted: {desk:#?}"
+    );
     assert!(desk.holds("│"), "{desk:#?}");
     assert!(desk.holds("1 approve   2 adjust   3 abort"), "{desk:#?}");
 
@@ -112,26 +115,26 @@ fn j_walks_the_tasks_p_turns_a_card_over_and_d_shows_what_was_decided() {
     terminal.wait_on_screen("▸ the change", "the desk never opened");
     terminal.keys("j");
     terminal.wait_on_screen("▸ T001", "j never moved the pointer");
-    assert!(terminal.screen().holds("Make it"));
+    assert!(
+        terminal.screen().holds("│ T001"),
+        "the pane is titled by the task"
+    );
     assert!(terminal.screen().holds("step 1 of 2"));
     assert!(terminal.screen().holds("the file's first line"));
     terminal.keys("j");
     terminal.wait_on_screen("▸ T002", "j never moved the pointer again");
     assert!(terminal.screen().holds("the words themselves"));
     terminal.keys("p");
-    terminal.wait_on_screen("proof · T002", "p never turned the card over");
+    terminal.wait_on_screen("T002, its proof", "p never turned the card over");
     assert!(terminal.screen().holds("test -f said.txt"));
     terminal.keys("d");
     // The rail says `decided for you` already: what only the view holds is what to wait on.
-    terminal.wait_on_screen(
-        "▸ 1 What are they called?",
-        "d never showed what was decided",
-    );
+    terminal.wait_on_screen("What are they called?", "d never showed what was decided");
     let screen = terminal.screen();
     assert!(screen.holds("made and said"), "{screen:#?}");
-    assert!(screen.holds("Two files can drift apart."), "{screen:#?}");
+    assert!(screen.holds("They say what they are."), "{screen:#?}");
     terminal.keys("d");
-    terminal.wait_on_screen("Say it", "d never came back to the task");
+    terminal.wait_on_screen("the words themselves", "d never came back to the task");
 }
 
 /// Reading a plan is no time for one key to approve it: a number says what it would do,
@@ -144,7 +147,7 @@ fn a_number_confirmed_answers_the_decision_from_the_desk() {
     terminal.keys("r");
     terminal.wait_on_screen("▸ the change", "the desk never opened");
     terminal.keys("1");
-    terminal.wait_on_screen("enter confirms", "a number never asked to be confirmed");
+    terminal.wait_on_screen("enter confirm", "a number never asked to be confirmed");
     assert!(terminal.screen().alternate, "nothing is answered yet");
     terminal.keys("\r");
     let drawn = terminal.ended();
@@ -153,22 +156,51 @@ fn a_number_confirmed_answers_the_decision_from_the_desk() {
     assert!(!terminal.screen().alternate, "{drawn}");
 }
 
-/// An option that asks for words asks where words are asked for.
+/// The desk's keys name each act in the words a run's screen says them in: a number
+/// answering, the next place, what is read, what is decided, and back to the card; a number
+/// waiting to be confirmed, confirming it or going back.
 #[test]
-fn an_option_that_asks_comes_back_to_the_card_with_its_field_open() {
+fn the_desks_keys_say_each_act_as_a_runs_screen_says_it() {
+    let root = tempfile::tempdir().unwrap();
+    let checkout = checkout(root.path(), PLAN_THEN_GATE);
+    let mut terminal = at_the_card(&checkout);
+    terminal.keys("r");
+    terminal.wait_on_screen("▸ the change", "the desk never opened");
+    let screen = terminal.screen();
+    let reading = "1 2 3 answer · tab next place · ↑↓ scroll · d decided for you · esc back";
+    assert!(screen.holds(reading), "{screen:#?}");
+    terminal.keys("1");
+    terminal.wait_on_screen("enter confirm · esc go back", "a number never asked");
+}
+
+/// An option that asks for words asks for them at the desk's foot, in place of the options,
+/// the plan still read above them, and the words typed there answer with it.
+#[test]
+fn an_option_that_asks_opens_its_line_at_the_desks_foot() {
     let root = tempfile::tempdir().unwrap();
     let checkout = checkout(root.path(), PLAN_THEN_GATE);
     let mut terminal = at_the_card(&checkout);
     terminal.keys("r");
     terminal.wait_on_screen("▸ the change", "the desk never opened");
     terminal.keys("2");
-    terminal.wait_on_screen("enter confirms", "a number never asked to be confirmed");
+    terminal.wait_on_screen("enter confirm", "a number never asked to be confirmed");
     terminal.keys("\r");
-    terminal.wait_on_screen("what should change?", "the field never opened");
+    terminal.wait_on_screen("what should change?", "the line never opened");
     let screen = terminal.screen();
-    assert!(!screen.alternate, "{screen:#?}");
+    assert!(screen.alternate, "the desk stands: {screen:#?}");
     assert!(!screen.cursor_hidden, "{screen:#?}");
-    assert!(screen.holds("▸ adjust"), "{screen:#?}");
+    assert!(screen.holds("▸ the change"), "{screen:#?}");
+    assert!(screen.holds("adjust  Back to `plan`"), "{screen:#?}");
+    assert!(screen.holds("enter send it · esc go back"), "{screen:#?}");
+    assert!(!screen.holds("1 approve"), "{screen:#?}");
+    terminal.keys("split the second task");
+    terminal.wait_on_screen("split the second task", "the words never stood in the line");
+    terminal.keys("\r");
+    terminal.wait_for(
+        "chose `adjust`: split the second task",
+        "the words were never sent with the option",
+    );
+    assert!(!terminal.screen().alternate, "{:#?}", terminal.screen());
 }
 
 /// What the run says of being stopped lands where the card stood, on the screen that
@@ -199,7 +231,8 @@ fn ctrl_c_leaves_the_other_screen_before_the_run_stops() {
     );
 }
 
-/// Under ninety columns the pane has the screen, and says which task it is.
+/// Under ninety columns the pane has the screen, and says where it stands among the places
+/// a person stands on, the change first, then each task.
 #[test]
 fn a_narrow_terminal_has_no_rail() {
     let root = tempfile::tempdir().unwrap();
@@ -209,7 +242,7 @@ fn a_narrow_terminal_has_no_rail() {
     terminal.keys("r");
     terminal.wait_on_screen("the change", "the desk never opened");
     terminal.keys("j");
-    terminal.wait_on_screen("task 1 of 2", "the pane never said where it is");
+    terminal.wait_on_screen("2 of 3 · step 1 of 2", "the pane never said where it is");
     let screen = terminal.screen();
     assert!(screen.alternate, "{screen:#?}");
     assert!(!screen.holds("▸ T001"), "{screen:#?}");
@@ -243,7 +276,7 @@ fn a_decision_with_no_plan_offers_no_key_for_one() {
     let workflow = PLAN_THEN_GATE.replace("    shows: [{ node: plan, kind: tasks }]\n", "");
     let checkout = checkout(root.path(), &workflow);
     let mut terminal = at_the_card(&checkout);
-    assert!(!terminal.screen().holds("r reads the plan"));
+    assert!(!terminal.screen().holds("r read the plan"));
     terminal.keys("r");
     terminal.keys("\x1b[B");
     terminal.wait_on_screen("▸ adjust", "the card stopped answering");

@@ -45,6 +45,7 @@ fn workspace(dir: &Path, home: &Path) -> Workspace {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SystemIdSource),
         secrets: Arc::new(ProcessSecrets),
+        forges: Arc::new(yunta_api::DeclaredForge),
         binary: PathBuf::from(env!("CARGO_BIN_EXE_yunta")),
     }
 }

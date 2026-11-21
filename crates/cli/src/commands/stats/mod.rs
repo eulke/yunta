@@ -9,7 +9,7 @@
 //! width and the glyphs are settled once in `crate::output`, where both
 //! rules live.
 
-use yunta_render::page::{History, Page, Stats};
+use yunta_render::page::{History, Page, Stats, StatsTold};
 
 use yunta_core::{RunId, WorkflowName};
 
@@ -60,7 +60,7 @@ pub(crate) async fn of_run(
             frame: &spent.frame,
             stats: &spent.stats,
             pricing,
-            depth,
+            told: StatsTold::Printed(depth),
         },
     };
     emit(output, &answer, look)

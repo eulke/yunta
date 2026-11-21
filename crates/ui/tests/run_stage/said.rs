@@ -1,9 +1,9 @@
-//! What a node's sessions said, on its row across a run's screen: let go once the node
-//! stops working, so a node working again shows none of its last session's words, and not
-//! heard again when the same news is handed again.
+//! What a node's sessions said, as the state keeps it of the run in view: let go once the
+//! node stops working, so a node working again keeps none of its last session's words, and
+//! not heard again when the same news is handed again.
 
 use yunta_api::{FollowNews, RunNews};
-use yunta_core::events::{EventPayload, NodeEvent, StoredEvent};
+use yunta_core::events::{EventPayload, NodeEvent, NodeState, StoredEvent};
 use yunta_core::port::Said;
 use yunta_core::{NodeId, SessionId};
 use yunta_testkit::Bench;
@@ -11,7 +11,7 @@ use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, State};
 
 use super::support::on_the_field;
-use super::{across, followed, read_whole, NO_SESSIONS};
+use super::{followed, read_whole, NO_SESSIONS};
 
 /// A check that fails once and sends the run to its fix, then runs again: a node that
 /// works, ends, and works again.
@@ -84,10 +84,23 @@ async fn worked_again() -> WorkedAgain {
     }
 }
 
-/// A node whose session said words, which ended and works again, shows none of its last
-/// session's words on its row: what a node said is let go once it stops working.
+/// What `state` keeps of what the check of the run in view said last, and whether the check
+/// is at work, as the run in view's log has it.
+fn check_heard(state: &State) -> (Option<String>, bool) {
+    let in_view = state.followed_runs().in_view.as_deref();
+    let in_view = in_view.expect("the run is in view");
+    let check = NodeId::from("check");
+    let said = in_view.heard.of(&in_view.run.run, &check);
+    let record = in_view.run.state.nodes.get(&check);
+    let works = record.and_then(|record| record.state.as_ref());
+    let works = matches!(works, Some(NodeState::Running { .. }));
+    (said.map(|said| said.text.clone()), works)
+}
+
+/// A node whose session said words, which ended and works again, keeps none of its last
+/// session's words: what a node said is let go once it stops working.
 #[tokio::test]
-async fn a_node_working_again_shows_none_of_its_last_sessions_words() {
+async fn a_node_working_again_keeps_none_of_its_last_sessions_words() {
     let WorkedAgain {
         mut state,
         saying,
@@ -97,13 +110,11 @@ async fn a_node_working_again_shows_none_of_its_last_sessions_words() {
     for news in saying {
         state.update(Input::FollowNews(news));
     }
-    assert!(across(&state).contains(WORDS), "{}", across(&state));
+    assert_eq!(check_heard(&state), (Some(WORDS.to_string()), true));
     for news in working_again {
         state.update(Input::FollowNews(news));
     }
-    let shown = across(&state);
-    assert!(shown.contains("**check** running"), "{shown}");
-    assert!(!shown.contains(WORDS), "{shown}");
+    assert_eq!(check_heard(&state), (None, true));
 }
 
 /// The news of a node that said words, ended and works again, handed twice, leaves the

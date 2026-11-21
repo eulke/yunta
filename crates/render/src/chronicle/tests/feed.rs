@@ -13,13 +13,13 @@ use surco::paint::Paint;
 use surco::surface::Terminal;
 use yunta_core::events::scope::happening::Step;
 use yunta_core::events::{
-    artifacts, node, scope, session, tasks, AgentMessageType, ArtifactId, NodeState, Phase,
-    TaskStatus, ToolAction, ToolTarget,
+    artifacts, gates, node, scope, session, tasks, AgentMessageType, ArtifactId, Channel,
+    NodeState, Phase, TaskStatus, ToolAction, ToolTarget,
 };
-use yunta_core::{ArtifactKind, SessionId, TaskId};
+use yunta_core::{ArtifactKind, QuestionId, SessionId, TaskId};
 use yunta_replay::frame::{Happening, Moment};
 
-use super::super::{feed, feed_heading, in_feed};
+use super::super::{feed, feed_heading, in_feed, whole, whole_heading};
 
 fn look(glyphs: Glyphs) -> Look {
     Look {
@@ -228,6 +228,21 @@ fn a_feed_lists_the_work_at_a_node_and_leaves_its_accounts_out() {
     }
 }
 
+/// The feed lists the questions a node asks a person, and their answers once recorded, as
+/// `status --follow` says each.
+#[test]
+fn a_feed_lists_the_questions_a_node_asks_and_their_answers() {
+    let asked = Happening::Gates(gates::happening::Happening::Asked {
+        questions: vec![QuestionId::from("where-global-lives")],
+    });
+    let answered = Happening::Gates(gates::happening::Happening::Answered {
+        channel: Channel::Tty,
+        responder: None,
+    });
+    assert!(in_feed(&asked), "{asked:?}");
+    assert!(in_feed(&answered), "{answered:?}");
+}
+
 /// The heading counts the calls of the open attempt, with the stream's separator.
 #[test]
 fn a_feed_s_heading_counts_the_open_attempt_s_calls() {
@@ -236,6 +251,45 @@ fn a_feed_s_heading_counts_the_open_attempt_s_calls() {
         "what it is doing · 3 calls"
     );
     assert_eq!(feed_heading(1, Glyphs::Ascii), "what it is doing ; 1 call");
+}
+
+/// The run's whole chronicle lists every moment it is handed, the runner and what a session
+/// spent among them, which a node's feed leaves out, each row about its node or the run and
+/// saying its words as a node's feed does; its heading counts the moments, with the stream's
+/// separator.
+#[test]
+fn the_whole_chronicle_says_every_moment_about_its_subject_and_counts_them() {
+    let ran = Moment::sample(
+        None,
+        Happening::Run(yunta_core::events::run::happening::Happening::Resumed {
+            policies: Vec::new(),
+        }),
+    );
+    let moments = [
+        ran,
+        reached(NodeState::Running { attempt: 1 }),
+        call(ToolAction::Read, "crates/cli/src/pack.rs", None),
+    ];
+    let whole = whole(&moments, &BTreeMap::new(), 2, 0, &look(Glyphs::Unicode));
+    assert_eq!(whole.subjects, ["run", "implement", "implement"]);
+    let rows: Vec<String> = whole.rows.iter().map(|row| row.text()).collect();
+    assert_eq!(
+        rows,
+        [
+            "resumed",
+            "running: attempt 1",
+            "read    crates/cli/src/pack.rs"
+        ]
+    );
+    assert_eq!((whole.before, whole.after), (2, 0));
+    assert_eq!(
+        whole_heading(104, Glyphs::Unicode),
+        "its whole chronicle · 104 moments"
+    );
+    assert_eq!(
+        whole_heading(1, Glyphs::Ascii),
+        "its whole chronicle ; 1 moment"
+    );
 }
 
 /// A row stays one row however narrow the pane that draws it, and the newest is strong on the

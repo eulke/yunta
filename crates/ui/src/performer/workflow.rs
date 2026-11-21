@@ -48,7 +48,7 @@ pub(super) fn graph_read(project: &Project, workflow: &str) -> Result<Outcome, E
     let read = project.workspace.read_workflow(Path::new(workflow))?;
     let graph = Graph {
         workflow: read.workflow,
-        run: None,
+        mode: None,
     };
     Ok(Outcome::Graph(Box::new(graph)))
 }

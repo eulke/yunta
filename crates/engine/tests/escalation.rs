@@ -78,7 +78,14 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
     assert_eq!(reroute_goto(&escalation).as_deref(), Some("fix-lint"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
-    let words = |o| yunta_render::offers::option_words(&escalation, o).1;
+    let words = |o| {
+        yunta_render::offers::option_words(
+            &escalation,
+            o,
+            &yunta_core::ahead::NodesAhead::default(),
+        )
+        .1
+    };
     assert!(escalation.options().iter().all(|o| words(o).is_some()));
 }
 
@@ -116,7 +123,14 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
     assert_eq!(escalation.summary(), &written("Approve the plan?"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["proceed", "revise", "abort"]);
-    let words = |o| yunta_render::offers::option_words(&escalation, o).1;
+    let words = |o| {
+        yunta_render::offers::option_words(
+            &escalation,
+            o,
+            &yunta_core::ahead::NodesAhead::default(),
+        )
+        .1
+    };
     assert!(escalation.options().iter().all(|o| words(o).is_some()));
 }
 

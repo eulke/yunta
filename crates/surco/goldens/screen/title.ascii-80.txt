@@ -1,0 +1,15 @@
+plan ; prompt                                             planner on mock/gpt-6-luna
+implement ; loop                                         executor on mock/gpt-6-luna
+tests ; check                                                       baseline_compare
+ship ; gate                                                            assignee lead
+build ; bash
+plan ; prompt                                       planner on mock/gpt-6-luna
+implement ; loop                                   executor on mock/gpt-6-luna
+tests ; check                                                 baseline_compare
+ship ; gate                                                      assignee lead
+build ; bash
+plan ; prompt                   planner on mock/gpt-6-luna
+implement ; loop               executor on mock/gpt-6-luna
+tests ; check                             baseline_compare
+ship ; gate                                  assignee lead
+build ; bash

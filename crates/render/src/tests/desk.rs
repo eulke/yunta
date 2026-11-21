@@ -8,7 +8,8 @@ use surco::line::Line;
 use surco::look::{Look, Width};
 use surco::paint::Paint;
 use surco::surface::Terminal;
-use yunta_core::shown::PlanReview;
+use yunta_core::shown::{HeldTo, JudgedCriterion, PlanReview, TaskReview};
+use yunta_core::{SpecFile, TasksFile};
 
 use super::documents::{global_packs, goldens, review as greeting};
 use crate::page::desk::{about, Reading, Spot, View};
@@ -33,7 +34,7 @@ fn read(reading: &Reading, spot: &Spot) -> Vec<String> {
         ..terminal
     };
     Terminal::on(measure)
-        .lines(&reading.pane_doc(spot, &terminal))
+        .lines(&reading.pane_doc(spot))
         .iter()
         .map(Line::text)
         .collect()
@@ -48,7 +49,6 @@ fn rail(reading: &Reading, at: usize) -> Vec<RailGroup> {
     reading.rail(&Spot {
         at,
         view: View::Stop,
-        choice: 0,
     })
 }
 
@@ -68,21 +68,51 @@ fn stops(groups: &[RailGroup]) -> Vec<(String, String, bool)> {
         .collect()
 }
 
-fn group<'a>(groups: &'a [RailGroup], title: &str) -> Option<&'a RailGroup> {
-    groups
-        .iter()
-        .find(|group| group.title.as_deref() == Some(title))
+/// The plan the design's run hands its gate, from the documents its kept run holds: one
+/// task held to the spec's one test, three decisions made for the person, two risks and
+/// three things it leaves out, and nothing that keeps it from being proven.
+fn designed() -> PlanReview {
+    let plan: TasksFile = yunta_core::yaml::parse(include_str!(
+        "../../../testkit-ui/fixtures/designed/run/artifacts/plan/tasks.yaml"
+    ))
+    .unwrap();
+    let spec: SpecFile = yunta_core::yaml::parse(include_str!(
+        "../../../testkit-ui/fixtures/designed/run/artifacts/spec/spec.yaml"
+    ))
+    .unwrap();
+    let test = &spec.of(&plan.tasks[0].id).expect("its spec").tests[0];
+    let task = TaskReview {
+        task: plan.tasks[0].id.clone(),
+        criteria: vec![JudgedCriterion {
+            cmd: test.cmd.clone(),
+            proves: Some(test.proves.clone()),
+            from: HeldTo::Spec,
+        }],
+        denied: Vec::new(),
+        guards: Vec::new(),
+    };
+    PlanReview {
+        plan,
+        departed: Vec::new(),
+        spec: Some(spec),
+        spec_node: Some("spec".into()),
+        held: Vec::new(),
+        tasks: vec![task],
+        handed_over: None,
+        answered: Vec::new(),
+        asked: Some("add support for installing a pack globally".into()),
+        shapes_read: None,
+    }
 }
 
 /// What the plan says of itself is its description and its design, with its drawings.
 #[test]
 fn the_change_is_what_the_author_wrote() {
     let review = greeting();
-    let reading = Reading::of(review.clone(), Vec::new());
+    let reading = Reading::of(review.clone());
     let spot = Spot {
         at: 0,
         view: View::Stop,
-        choice: 0,
     };
     let rows = read(&reading, &spot);
     assert!(
@@ -98,15 +128,19 @@ fn the_change_is_what_the_author_wrote() {
     );
 }
 
-/// A card has the change; its tests are a key away.
+/// Whether one of `rows` opens with `label`, as a field's label stands at its row's start.
+fn labelled(rows: &[String], label: &str) -> bool {
+    rows.iter().any(|row| row.trim_start().starts_with(label))
+}
+
+/// A card has the change, the files it changes heading their code and no row of their own;
+/// its tests are a key away.
 #[test]
-fn a_card_has_no_tests_and_its_proof_has_them_whole() {
-    let review = global_packs();
-    let reading = Reading::of(review.clone(), Vec::new());
-    let mut spot = Spot {
+fn a_card_has_the_change_and_no_row_of_its_files_or_its_tests() {
+    let reading = Reading::of(global_packs());
+    let spot = Spot {
         at: 1,
         view: View::Stop,
-        choice: 0,
     };
     let card = read(&reading, &spot);
     assert!(holds(&card, "you will see"), "{}", card.join("\n"));
@@ -116,74 +150,99 @@ fn a_card_has_no_tests_and_its_proof_has_them_whole() {
         "{}",
         card.join("\n")
     );
-
-    spot.view = View::Proof;
-    let proof = read(&reading, &spot);
-    assert!(holds(&proof, "tested by"), "{}", proof.join("\n"));
-    assert!(holds(&proof, "the suite"), "{}", proof.join("\n"));
-    assert!(holds(&proof, "cargo clippy"), "{}", proof.join("\n"));
-    assert!(
-        holds(&proof, "global_pack_storage.rs"),
-        "the file the spec wrote: {}",
-        proof.join("\n")
-    );
-    assert!(
-        holds(
-            &proof,
-            "pack::installed_packs(pack::PackInstallScope::Project"
-        ),
-        "whole: {}",
-        proof.join("\n")
-    );
-    assert!(
-        !holds(&proof, "PackInstallScope {"),
-        "and not the change: {}",
-        proof.join("\n")
-    );
+    for said_elsewhere in ["changes", "tested by"] {
+        assert!(!labelled(&card, said_elsewhere), "{}", card.join("\n"));
+    }
 }
 
-/// One decision is open at a time, under a pointer. What a person answered, the risks and
-/// what is left out stand under them whole.
+/// A task's proof says each of its tests, what it proves and the command that runs it, with
+/// the file the spec wrote whole under its path; the suite every task keeps is the whole
+/// plan's proof's to say.
 #[test]
-fn what_was_decided_shows_one_decision_open() {
+fn a_tasks_proof_has_its_tests_whole_and_the_plans_has_the_suite() {
+    let reading = Reading::of(global_packs());
+    let proof = read(
+        &reading,
+        &Spot {
+            at: 1,
+            view: View::Proof,
+        },
+    );
+    assert!(labelled(&proof, "proves"), "{}", proof.join("\n"));
+    assert!(labelled(&proof, "runs"), "{}", proof.join("\n"));
+    assert!(!labelled(&proof, "the suite"), "{}", proof.join("\n"));
+    for said in [
+        "global_pack_storage.rs",
+        "pack::installed_packs(pack::PackInstallScope::Project",
+    ] {
+        assert!(holds(&proof, said), "{said}: {}", proof.join("\n"));
+    }
+    for unsaid in ["written by the spec", "PackInstallScope {"] {
+        assert!(!holds(&proof, unsaid), "{unsaid}: {}", proof.join("\n"));
+    }
+    let whole = read(
+        &reading,
+        &Spot {
+            at: 0,
+            view: View::Proof,
+        },
+    );
+    assert!(holds(&whole, "the suite"), "{}", whole.join("\n"));
+    assert!(holds(&whole, "cargo clippy"), "{}", whole.join("\n"));
+}
+
+/// What was decided is every decision the plan made, each whole: its question, then what the
+/// plan chose and why under it, a decision that restates what the person answered among
+/// them; no pointer, no number, and nothing the rail counts beside them.
+#[test]
+fn what_was_decided_shows_every_decision_whole() {
     let review = greeting();
-    let reading = Reading::of(review.clone(), Vec::new());
-    assert_eq!(reading.choices(), 1, "one was made for the person");
+    let reading = Reading::of(review.clone());
     let spot = Spot {
         at: 0,
         view: View::Choices,
-        choice: 0,
     };
     let rows = read(&reading, &spot);
-    assert!(
-        holds(&rows, "▸ 1 What does it say when no name is given?"),
+    let first = rows.iter().position(|row| !row.trim().is_empty());
+    let opening = first.map(|at| rows[at].as_str());
+    assert_eq!(
+        opening,
+        Some("What does it say when no name is given?"),
         "{}",
         rows.join("\n")
     );
-    assert!(holds(&rows, "It greets"), "{}", rows.join("\n"));
-    assert!(holds(&rows, "Refuse to run"), "{}", rows.join("\n"));
-    assert!(holds(&rows, "you answered"), "{}", rows.join("\n"));
-    assert!(holds(&rows, "risks"), "{}", rows.join("\n"));
-    assert!(holds(&rows, "breaks the line"), "{}", rows.join("\n"));
-    assert!(holds(&rows, "left out"), "{}", rows.join("\n"));
+    assert!(holds(&rows, "  It greets `world`."), "{}", rows.join("\n"));
+    assert!(
+        holds(&rows, "should still say something"),
+        "{}",
+        rows.join("\n")
+    );
+    assert!(
+        rows.iter().any(|row| row == "Which word greets?"),
+        "the decision that restates an answer: {}",
+        rows.join("\n")
+    );
+    for counted_on_the_rail in ["you answered", "risks", "left out", "▸", "Refuse to run"] {
+        assert!(
+            !holds(&rows, counted_on_the_rail),
+            "{counted_on_the_rail}: {}",
+            rows.join("\n")
+        );
+    }
 
     let packs = global_packs();
-    let reading = Reading::of(packs.clone(), Vec::new());
-    assert_eq!(reading.choices(), 4);
-    let spot = Spot { choice: 2, ..spot };
+    let reading = Reading::of(packs.clone());
     let rows = read(&reading, &spot);
-    assert!(holds(&rows, "▸ 3 What happens when"), "{}", rows.join("\n"));
-    assert!(
-        holds(&rows, "  1 What scope and persistence"),
-        "{}",
-        rows.join("\n")
-    );
-    assert_eq!(
-        rows.iter().filter(|row| row.contains("chose")).count(),
-        1,
-        "{}",
-        rows.join("\n")
-    );
+    let questions = packs
+        .plan
+        .decisions
+        .iter()
+        .map(|decision| &decision.question);
+    for question in questions {
+        // A question wider than the pane goes on in the rows under it.
+        let opens = |row: &String| !row.trim().is_empty() && question.starts_with(row.as_str());
+        assert!(rows.iter().any(opens), "{question}: {}", rows.join("\n"));
+    }
 }
 
 /// What a decision's card says of the plan: what it is about, unless the question says
@@ -217,12 +276,48 @@ fn a_card_says_what_the_plan_is_about_and_how_big_it_is() {
     );
 }
 
+/// The design's plan at its desk on a terminal 120 columns wide, between the rule and the
+/// attention row, its keys in the screen's legend: the rail's first ten rows, its places
+/// and what it says, each row to the rule beside the pane.
+#[test]
+fn the_designs_plan_draws_its_rail_at_120_columns() {
+    let reading = Reading::of(designed());
+    let foot = DeskFoot {
+        question: "Approve the plan: Add explicit per-user global pack installation alongside \
+                   project-level installs?"
+            .to_string(),
+        row: FootRow::Options {
+            named: ["approve", "adjust", "abort"].map(str::to_string).to_vec(),
+            more: 0,
+        },
+        legend: Legend::new(),
+    };
+    let look = look(118);
+    let spot = Spot {
+        at: 1,
+        view: View::Stop,
+    };
+    let title = ["plan", "Q78GRR", "fragua"].map(str::to_string);
+    let edge = Some("needs you  approve-plan".to_string());
+    let rule = look.glyphs.gutter();
+    let rail: String = reading
+        .desk(&spot, 0, &title, edge, foot, &look)
+        .drawn(&look, 32)
+        .lines
+        .iter()
+        .map(Line::text)
+        .filter_map(|row| Some(format!("{}\n", &row[..row.find(rule)? + rule.len_utf8()])))
+        .take(10)
+        .collect();
+    assert_golden(&goldens().join("desk-designed-rail.txt"), &rail);
+}
+
 /// The whole desk over the plan these tests read, at the size a person reads it at, for
 /// each thing a person can have in front of them.
 #[test]
 fn the_desk_matches_its_goldens() {
     let review: PlanReview = global_packs();
-    let reading = Reading::of(review.clone(), Vec::new());
+    let reading = Reading::of(review.clone());
     let foot = |[moves, p, d]: [&str; 3]| DeskFoot {
         question: "Plan and its tests registered. Approve?".to_string(),
         row: FootRow::Options {
@@ -240,31 +335,29 @@ fn the_desk_matches_its_goldens() {
             .key("esc", "back"),
     };
     let reading_keys = ["task", "proof", "decided for you"];
-    for (name, at, view, choice, keys) in [
-        ("desk-the-change", 0, View::Stop, 0, reading_keys),
-        ("desk-task", 2, View::Stop, 0, reading_keys),
+    for (name, at, view, keys) in [
+        ("desk-the-change", 0, View::Stop, reading_keys),
+        ("desk-task", 2, View::Stop, reading_keys),
         (
             "desk-proof",
             1,
             View::Proof,
-            0,
             ["task", "the card", "decided for you"],
         ),
         (
             "desk-choices",
             1,
             View::Choices,
-            1,
-            ["choice", "proof", "the tasks"],
+            ["task", "proof", "the tasks"],
         ),
     ] {
         let look = look(118);
-        let spot = Spot { at, view, choice };
+        let spot = Spot { at, view };
         let laid = reading
             .desk(
                 &spot,
                 0,
-                &["plan", "EKPBGE", "fragua (standard)"].map(str::to_string),
+                &["plan", "EKPBGE", "fragua"].map(str::to_string),
                 Some("needs you  approve-plan".to_string()),
                 foot(keys),
                 &look,
@@ -278,4 +371,43 @@ fn the_desk_matches_its_goldens() {
             .collect();
         assert_golden(&goldens().join(format!("{name}.txt")), &text);
     }
+}
+
+/// The design's plan at its desk on a terminal of 80 columns, where no rail stands: the
+/// pane's title row, under the desk's head and a blank row, says at its far end where the
+/// pane stands among the places a person stands on, then what its edge says, as row 7 of
+/// the targets `desk` and `desk-change` does.
+#[test]
+fn with_no_rail_the_pane_says_its_place_among_the_places() {
+    let reading = Reading::of(designed());
+    let foot = || DeskFoot {
+        question: "Approve the plan?".to_string(),
+        row: FootRow::Options {
+            named: ["approve", "adjust", "abort"].map(str::to_string).to_vec(),
+            more: 0,
+        },
+        legend: Legend::new(),
+    };
+    let look = look(78);
+    let title = ["plan", "Q78GRR", "fragua"].map(str::to_string);
+    let title_row = |at: usize| {
+        let spot = Spot {
+            at,
+            view: View::Stop,
+        };
+        let laid = reading
+            .desk(&spot, 0, &title, None, foot(), &look)
+            .drawn(&look, 20);
+        let rows: Vec<String> = laid.lines.iter().map(Line::text).collect();
+        let under = rows.iter().position(|row| row.trim().is_empty());
+        under
+            .and_then(|blank| rows.get(blank + 1))
+            .map(|row| row.trim_end().to_string())
+            .unwrap_or_default()
+    };
+    let task = title_row(1);
+    assert!(task.ends_with("  2 of 2 · step 1 of 1"), "{task}");
+    let change = title_row(0);
+    assert!(change.trim_start().starts_with("the change "), "{change}");
+    assert!(change.ends_with("  1 of 2 · 1 task"), "{change}");
 }

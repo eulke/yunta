@@ -33,4 +33,4 @@
 
 
 
- left/right adapter ; enter take it ; esc keeps the detected default
+ left/right adapter ; enter take it ; esc keep the detected default

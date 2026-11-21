@@ -32,6 +32,9 @@ yunta-testkit-core.workspace = true
 # The screen a state draws, as Markdown keeps it apart from another, and as a terminal of
 # a few rows lays it out.
 yunta-surco.workspace = true
+# The titles of what stands over a stage, by which the interface's rules over the walk tell
+# the palette, help and a confirmation apart.
+yunta-render.workspace = true
 # The instant every test of the application stands at.
 chrono.workspace = true
 # The channel a performer hands its answers back on, the files the walk's places are

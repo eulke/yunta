@@ -1,0 +1,6 @@
+␛[1mj k␛[0m␛[2m node␛[0m␛[2m · ␛[0m␛[1ms␛[0m␛[2m stats␛[0m␛[2m · ␛[0m␛[1mg␛[0m␛[2m graph␛[0m␛[2m · ␛[0m␛[1mq␛[0m␛[2m field, it keeps going␛[0m                                             ␛[1m/␛[0m␛[2m anything␛[0m␛[2m · ␛[0m␛[1m?␛[0m␛[2m keys␛[0m
+␛[1m1 2 3␛[0m␛[2m answer␛[0m␛[2m · ␛[0m␛[1mtab␛[0m␛[2m next place␛[0m␛[2m · ␛[0m␛[1m↑↓␛[0m␛[2m scroll␛[0m␛[2m · ␛[0m␛[1mp␛[0m␛[2m proof␛[0m␛[2m · ␛[0m␛[1md␛[0m␛[2m decided for you␛[0m␛[2m · ␛[0m␛[1mesc␛[0m␛[2m leave it waiting␛[0m     ␛[1m/␛[0m␛[2m anything␛[0m␛[2m · ␛[0m␛[1m?␛[0m␛[2m keys␛[0m
+␛[1mj k␛[0m␛[2m node␛[0m␛[2m · ␛[0m␛[1ms␛[0m␛[2m stats␛[0m␛[2m · ␛[0m␛[1mg␛[0m␛[2m graph␛[0m␛[2m · ␛[0m␛[1mq␛[0m␛[2m field, it keeps going␛[0m␛[2m · ␛[0m␛[1m?␛[0m␛[2m keys␛[0m
+␛[1m1 2 3␛[0m␛[2m answer␛[0m␛[2m · ␛[0m␛[1mtab␛[0m␛[2m next place␛[0m␛[2m · ␛[0m␛[1m↑↓␛[0m␛[2m scroll␛[0m␛[2m · ␛[0m␛[1mp␛[0m␛[2m proof␛[0m␛[2m · ␛[0m␛[2m…␛[0m␛[2m · ␛[0m␛[1m?␛[0m␛[2m keys␛[0m
+␛[1mj k␛[0m␛[2m node␛[0m␛[2m · ␛[0m␛[1ms␛[0m␛[2m stats␛[0m␛[2m · ␛[0m␛[1mg␛[0m␛[2m graph␛[0m␛[2m · ␛[0m␛[2m…␛[0m␛[2m · ␛[0m␛[1m?␛[0m␛[2m keys␛[0m
+␛[1m1 2 3␛[0m␛[2m answer␛[0m␛[2m · ␛[0m␛[1mtab␛[0m␛[2m next place␛[0m␛[2m · ␛[0m␛[1m↑↓␛[0m␛[2m scroll␛[0m␛[2m · ␛[0m␛[2m…␛[0m␛[2m · ␛[0m␛[1m?␛[0m␛[2m keys␛[0m

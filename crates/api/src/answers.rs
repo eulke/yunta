@@ -11,6 +11,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use yunta_core::ahead::NodesAhead;
+use yunta_core::diagnostic::Report;
 use yunta_core::events::{
     ChangesCountedPayload, DecisionOn, GateWaitingPayload, HumanChoice, PauseReason, StoredEvent,
 };
@@ -20,14 +22,14 @@ use yunta_core::shown::ShownDocument;
 use yunta_core::{Manifest, NodeId, OptionId, QuestionsFile, Responder, RunId};
 use yunta_render::escalation::Route;
 use yunta_render::refusal::Refused;
-use yunta_replay::frame::RunFrame;
+use yunta_replay::frame::{RunFrame, WaitingOn};
 use yunta_replay::RunState;
 
 use crate::{Error, Failure, OpenedRun};
 
 /// What a run waits on a person for: the decision its gate waits on, with what it shows,
 /// or the round of questions one of its nodes asked. Not
-/// [`WaitingOn`](yunta_replay::frame::WaitingOn), where a run is parked.
+/// [`WaitingOn`], where a run is parked.
 #[derive(Debug, Clone)]
 pub enum Awaited {
     Decision(Box<WaitingDecision>),
@@ -45,16 +47,23 @@ pub struct WaitingDecision {
     pub routes: BTreeMap<OptionId, Route>,
     /// What the run changed, when the change was counted on its newest tree.
     pub changed: Option<ChangesCountedPayload>,
-    /// The workflow and the mode the run follows, as a person reads them.
-    pub called: String,
+    /// The workflow the run follows, by its name.
+    pub workflow: String,
+    /// What lies ahead at the nodes its options lead to, as the run froze them.
+    pub ahead: NodesAhead,
 }
 
-/// The questions a node parked on and nobody has answered: the node, and the
-/// round it asked, as the document it handed over holds it.
+/// The questions a node parked on and nobody has answered: the node, the round it asked,
+/// as the document it handed over holds it, and what the engine refused of the answers the
+/// round was last given.
 #[derive(Debug, Clone)]
 pub struct WaitingQuestions {
     pub node: NodeId,
     pub questions: QuestionsFile,
+    /// Every way the answers the round was last given failed it, as the run's own pause
+    /// records them, where the run stands parked on that refusal: none for a round asked and
+    /// not answered yet.
+    pub refused: Option<Report>,
 }
 
 /// The node whose round of questions the run framed as `frame` is parked on, asked and
@@ -65,6 +74,18 @@ pub fn waiting_round(frame: &RunFrame) -> Option<&NodeId> {
         Some(PauseReason::Questions { node, .. } | PauseReason::AnswersRefused { node, .. }) => {
             Some(node)
         }
+        _ => None,
+    }
+}
+
+/// What the engine refused of the answers `node` last gave its round, as the run's own pause
+/// `paused` records it: none where the run is not parked on that refusal.
+fn refused_of(paused: Option<&PauseReason>, node: &NodeId) -> Option<Report> {
+    match paused? {
+        PauseReason::AnswersRefused {
+            node: refused,
+            report,
+        } if refused == node => Some(report.clone()),
         _ => None,
     }
 }
@@ -92,10 +113,12 @@ impl WaitingDecision {
             state.run.left_out(),
             on.node(),
         );
+        let ahead = NodesAhead::of(workflow, &manifest.config, state.run.left_out());
         Ok(Some(WaitingDecision {
             routes,
+            ahead,
             changed: state.current_change().cloned(),
-            called: yunta_render::state::called(&workflow.name, state.run.mode()),
+            workflow: workflow.name.to_string(),
             on,
             escalation,
             shown,
@@ -106,15 +129,22 @@ impl WaitingDecision {
 impl WaitingQuestions {
     /// The round of questions `node` asked and nobody has answered, read from the
     /// document it handed over in the run whose directory is `dir`, by the hash its
-    /// `questions_asked` in `events` recorded: none when it waits on no round, as a round
-    /// answered elsewhere reads.
+    /// `questions_asked` in `events` recorded, with what the run's own pause, `paused`,
+    /// records the engine refused of the answers it was last given: none when it waits on
+    /// no round, as a round answered elsewhere reads.
     pub(crate) async fn read(
         dir: &Path,
         events: &[StoredEvent],
         node: NodeId,
+        paused: Option<&PauseReason>,
     ) -> Result<Option<WaitingQuestions>, Error> {
+        let refused = refused_of(paused, &node);
         match yunta_engine::asked_questions(dir, events, &node).await {
-            Ok(questions) => Ok(Some(WaitingQuestions { node, questions })),
+            Ok(questions) => Ok(Some(WaitingQuestions {
+                node,
+                questions,
+                refused,
+            })),
             Err(yunta_engine::AnswerQuestionsError::Refused(AnswersRefusal::NothingAsked {
                 ..
             })) => Ok(None),
@@ -139,7 +169,8 @@ impl OpenedRun<'_> {
             .into());
         };
         let nothing_asked = Refused::Answers(AnswersRefusal::NothingAsked { node: node.clone() });
-        WaitingQuestions::read(&self.dir, &self.events, node)
+        let paused = frame.phase.waiting_on().and_then(WaitingOn::reason);
+        WaitingQuestions::read(&self.dir, &self.events, node, paused)
             .await?
             .ok_or_else(|| nothing_asked.into())
     }

@@ -115,6 +115,21 @@ fn arrows_and_letters_move_the_pointer_and_it_goes_around() {
     assert!(pointed(&card).contains("adjust"), "{:?}", rows(&card));
 }
 
+/// A number picks the option it counts to, from the first, wherever the pointer stood, and
+/// `enter` then takes it; a number past the last option picks nothing.
+#[test]
+fn a_number_picks_its_option() {
+    let mut card = card();
+    assert_eq!(card.press(Stroke::Insert('3')), Press::Stay);
+    assert!(pointed(&card).contains("abort"), "{:?}", rows(&card));
+    assert_eq!(card.press(Stroke::Insert('2')), Press::Stay);
+    assert!(pointed(&card).contains("adjust"), "{:?}", rows(&card));
+    assert_eq!(card.press(Stroke::Insert('4')), Press::Stay);
+    assert!(pointed(&card).contains("adjust"), "{:?}", rows(&card));
+    assert_eq!(card.press(Stroke::Insert('1')), Press::Stay);
+    assert_eq!(card.press(Stroke::Enter), answer("approve", None));
+}
+
 /// Every option says what it does and what choosing it costs, in one sentence,
 /// wherever the pointer stands.
 #[test]

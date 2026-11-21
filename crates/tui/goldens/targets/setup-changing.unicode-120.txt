@@ -33,4 +33,4 @@
  ⠛⠛⢛⣉⣉⣉⡩⠭⠤⠤⠔⠒⣒⣒⣊⡩⠭⠭⠥⠒⠒⠒⠉⢉⣉⣁⠤⠤⠔⠒⠒⠉⠉⠉ ⢀⣀⡠⠤⠒⠊⠉⠁    ⣀⠤⠊⠁        ⡇       ⠈⠑⠤⣀     ⠉⠑⠒⠤⠤⣀⡀ ⠈⠉⠉⠒⠒⠢⠤⠤⣈⣉⡉⠉⠒⠒⠒⠬⠭⠭⢍⣑⣒⣒⠒⠢⠤⠤⠭⢍⣉⣉⣉⡛⠛⠛
  ⣉⣉⠥⠤⠤⠔⠒⠒⠊⠉⠉⠉  ⢀⣀⠤⠤⠔⠒⠒⠉⠉⠁     ⢀⡠⠤⠔⠒⠉⠁        ⡠⠔⠊            ⡇           ⠑⠢⢄        ⠈⠉⠒⠒⠤⢄⡀     ⠈⠉⠉⠒⠒⠢⠤⠤⣀⡀  ⠉⠉⠉⠑⠒⠒⠢⠤⠤⠬⣉⣉
 
- ←→ adapter · enter take it · esc keeps the detected default
+ ←→ adapter · enter take it · esc keep the detected default

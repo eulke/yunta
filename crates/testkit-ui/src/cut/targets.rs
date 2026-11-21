@@ -20,7 +20,9 @@
 //! on to ([`TargetCut::goes_on_to`]): the answer on the log, then the run on to its next
 //! node's start, `implement` again (123), `tests` again (258) and `pr` (273), driven by the
 //! engine it is handed on to. A screen of a run the person leads is reached by the keys
-//! that take the lead, moving along its nodes.
+//! that take the lead, moving along its nodes; where the run then closes promoted, the
+//! cut stands before the close (8), and its log goes on to it (9) once the person took the
+//! lead, so its successor comes while the person holds the screen.
 //!
 //! Every run's screen stands in a field: beside the run in view, the two older runs of
 //! [`BESIDE`], one that needs the person and one stalled, which its tally counts and its
@@ -57,8 +59,9 @@ pub struct TargetCut {
     /// Whether what the run in view asks has been handed to the screen.
     pub asked: Asked,
     /// The seq the log of the run in view goes on to once the keys are pressed: they
-    /// record an answer, and the engine the run is handed on to takes it to its next
-    /// node's start. `None` where the keys leave the log as it stands.
+    /// answer, the recording's own answer recorded, and the engine the run is handed on to
+    /// takes it to its next node's start; or they take the lead, and the run then closes.
+    /// `None` where the keys leave the log as it stands.
     pub goes_on_to: Option<u64>,
 }
 
@@ -93,19 +96,20 @@ pub enum HomePlace {
     /// A directory in no repository: `Home::outside`.
     Outside,
     /// The design's repository before its setup, a Rust workspace whose origin is on GitHub,
-    /// never set up (`Home::setting_up`); a `claude` and a `codex` answering on its `PATH`
-    /// (`Home::clis`, `Home::codex`), and its git pointing the Yunta repository's URL at
-    /// the pack a setup installs (`Home::reference_pack`).
+    /// never set up (`DesignsPlaces::setting_up`); a `claude` and a `codex` answering on its
+    /// `PATH` (`Home::clis`, `DesignsPlaces::codex`), and its git pointing the Yunta
+    /// repository's URL at the pack a setup installs (`DesignsPlaces::reference_pack`).
     SettingUp,
     /// The same repository, its git pointing the Yunta repository's URL at a directory no
     /// repository stands in: the pack a setup installs, out of reach.
     PackOutOfReach,
     /// A repository set up with one workflow, a case of it and no run: `Home::set_up`.
     SetUp,
-    /// A repository set up as the design's, `Home::with_fragua`: `yunta/fragua` installed
-    /// as a pack beside its own `lint-fix` and `run-tasks`, which reads a tasks document
-    /// beside its request; three finished runs of fragua, the design's among them; a run
-    /// that needs the person and one stalled. A `claude` and a `codex` answer on its `PATH`.
+    /// A repository set up as the design's, `DesignsPlaces::with_fragua`: `yunta/fragua`
+    /// installed as a pack beside its own `lint-fix` and `run-tasks`, which reads a tasks
+    /// document beside its request; three finished runs of fragua, the design's among them; a
+    /// run that needs the person and one stalled. A `claude` and a `codex` answer on its
+    /// `PATH`.
     WithFragua,
     /// A repository with a pack installed: `Home::packed`.
     Packed,
@@ -321,7 +325,7 @@ pub const TARGET_CUTS: &[TargetCut] = &[
     TargetCut::run("findings-answered", ANSWERING),
     TargetCut::run("feed-back", BUILDING_ON).pressing(&["up", "up", "up"]),
     TargetCut::run("node-working", AT_WORK).at_node("plan"),
-    TargetCut::run("node-needs-you", SCOPE).pressing(&["j", "k"]),
+    TargetCut::run("node-needs-you", SCOPE).pressing(&["esc"]),
     TargetCut::run("node-ended", AT_WORK).at_node("brief"),
     TargetCut::run("node-never-ran", AT_WORK).at_node("spec"),
     TargetCut::run("node-sent-back", Shown::at(Built::SentBack, 25).alive()).at_node("plan"),
@@ -333,7 +337,7 @@ pub const TARGET_CUTS: &[TargetCut] = &[
     TargetCut::run("round-aside", ROUND).pressing(&["esc"]),
     TargetCut::run("desk", PLANS_GATE),
     TargetCut::run("desk-confirm", PLANS_GATE).pressing(&["1"]),
-    TargetCut::run("desk-words", PLANS_GATE).pressing(&["2"]),
+    TargetCut::run("desk-words", PLANS_GATE).pressing(&["2", "enter"]),
     TargetCut::run("desk-proof", PLANS_GATE).pressing(&["p"]),
     TargetCut::run("desk-decided", PLANS_GATE).pressing(&["d"]),
     TargetCut::run("desk-change", PLANS_GATE).pressing(&["k"]),
@@ -370,7 +374,9 @@ pub const TARGET_CUTS: &[TargetCut] = &[
     TargetCut::run("receipt", FINISHED),
     TargetCut::run("reported", Shown::at(Built::Reported, 14)),
     TargetCut::run("failed", Shown::at(Built::Failed, 5)),
-    TargetCut::run("promoted", Shown::at(Built::Promoted, 9)).pressing(&["j", "k"]),
+    TargetCut::run("promoted", Shown::at(Built::Promoted, 8))
+        .pressing(&["j", "k"])
+        .going_on_to(9),
     TargetCut::run("broken", Shown::at(Built::Broken, 3)),
     // What stands over a run.
     TargetCut::run("palette", AT_WORK).pressing(&["/"]),

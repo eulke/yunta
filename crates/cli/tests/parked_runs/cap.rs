@@ -82,7 +82,7 @@ fn a_run_stopped_on_the_cap_shows_its_decision() {
         "its token budget is spent (100 tokens with `limits.max_tokens_per_run: 100`).".to_string(),
         "decision on the run".to_string(),
         "limits.max_tokens_per_run".to_string(),
-        "continue: Continue past the cap".to_string(),
+        "Lifts the cap for this invocation only".to_string(),
         format!("yunta resolve-gate {run} continue"),
         "abort: Pause here".to_string(),
         format!("yunta resolve-gate {run} abort"),

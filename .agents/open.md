@@ -20,6 +20,12 @@ counts a member not yet reaped: reproduce it under load, many runs beside busy l
 `yunta-testkit-core`'s `a_pid_never_recorded_ends_the_wait_instead_of_hanging_it` timed out once in the same suite. So did
 `crates/engine/tests/memo_across_wakes.rs`'s `a_wake_whose_commands_run_elsewhere…`, once, beside the same builds.
 
+### A detached engine that dies before it writes its registry leaves a run that reads as going
+Paths: `crates/api/src/detach.rs`, `crates/engine/src/process_registry.rs`, `crates/replay/src/frame/mod.rs`, `crates/ui/src/followed_runs.rs`
+An absent registry reads `Engine::Unrecorded` at any age, so a detached child that dies before it writes one
+leaves a run that stands running for good, on every interface. The hand-off owns the child: it can return once
+the child holds the run, or say the child is gone.
+
 ### A skill a run revises is not the one its later sessions load
 Paths: `crates/engine/src/frozen/**`, `crates/adapters/src/mount.rs`, `crates/engine/src/run/session_plan.rs`
 A run freezes each skill when it is born and mounts that copy in every session, so a node that rewrites a skill's
@@ -89,3 +95,8 @@ of which the application's own crates are about 90 KB. The growth is the perform
 the API's async paths and the readers of tasks, questions and specs through `serde_path_to_error`. Not known: how
 much of it is a second copy of what the CLI's commands already instantiate. A symbol by symbol diff of the two
 builds answers that before any change.
+
+### `chrono` has no maintainer
+Paths: `deny.toml`, `Cargo.toml`
+RUSTSEC-2026-0543 says so and names no vulnerability. Choose a successor: the event log's
+timestamps, every clock and the tests that set one read it.

@@ -42,6 +42,7 @@ fn evidence(lines: usize) -> Evidence {
             shown: "~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c".to_string(),
             path: PathBuf::from("/home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c"),
         }),
+        kept: None,
     }
 }
 
@@ -116,6 +117,7 @@ fn evidence_shows_at_most_six_lines_and_says_where_the_rest_is() {
     let short = plain(Evidence {
         tail: vec!["exit 1".to_string()],
         whole: None,
+        kept: None,
     });
     assert_eq!(
         short,

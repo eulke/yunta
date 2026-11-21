@@ -388,8 +388,10 @@ pub(super) fn encode_ref(published: &PullRequestRef) -> Result<String, RunError>
     })
 }
 
+/// The pull request the handle `external_ref` names, read by core's one reader of a handle;
+/// one that names none is a broken run.
 fn decode_ref(external_ref: &str) -> Result<PullRequestRef, RunError> {
-    serde_json::from_str(external_ref).map_err(|e| RunError::Broken {
+    PullRequestRef::of_handle(external_ref).map_err(|e| RunError::Broken {
         diagnostic: format!("gate_waiting.external_ref `{external_ref}` isn't valid: {e}"),
     })
 }

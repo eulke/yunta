@@ -398,6 +398,24 @@ impl Glyphs {
         }
     }
 
+    /// The cell that draws `lit`, dots two across and four down, each lit where `lit` has the
+    /// bit `across + 2 * down`: a picture finer than a character, in Unicode's braille cells.
+    /// ASCII has no cell finer than a character, so a picture of dots stands nowhere there.
+    pub fn dots(self, lit: u8) -> Option<char> {
+        /// Each dot's bit in a braille cell, in the order `lit` counts them: a braille cell
+        /// counts down its left column's first three, then its right's, then the two at its foot.
+        const BRAILLE_BITS: [u32; 8] = [0x01, 0x08, 0x02, 0x10, 0x04, 0x20, 0x40, 0x80];
+        /// The braille cell with no dot lit, the first of the 256: each dot lit adds its bit.
+        const NO_DOT: u32 = 0x2800;
+        let lit_at = (0..8).filter(|at| lit & (1 << at) != 0);
+        match self {
+            Self::Unicode => {
+                char::from_u32(lit_at.fold(NO_DOT, |cell, at| cell | BRAILLE_BITS[at]))
+            }
+            Self::Ascii => None,
+        }
+    }
+
     /// The frames of a spin, in the order it turns.
     pub fn spin(self) -> &'static [&'static str] {
         match self {

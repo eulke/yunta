@@ -15,8 +15,8 @@ impl Ribbon {
     /// The names over their strokes, each stretch as wide as its name and at
     /// least [`LEAST`] cells, a gap between two. The plow is the running
     /// node's cell where its events put it, drawn strong, and only when the
-    /// ribbon has events. Where the names do not fit the line, it is a page's
-    /// furrow: the strokes alone, sharing the line.
+    /// ribbon has events. Where the names do not fit the line, the strokes
+    /// alone ([`Ribbon::strokes`]).
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         if self.stretches.is_empty() {
             return Vec::new();
@@ -29,9 +29,7 @@ impl Ribbon {
             .collect();
         let needed = cells.iter().sum::<usize>() + cells.len() - 1;
         if needed > width {
-            let standings: Vec<Standing> = self.stretches.iter().map(|it| it.standing).collect();
-            let apart = page::spaced(standings.len(), width);
-            return vec![page::strokes(&standings, width, apart, look)];
+            return vec![self.strokes(look)];
         }
         let mut names = Line::new();
         let mut strokes = Line::new();
@@ -49,6 +47,32 @@ impl Ribbon {
             strokes = self.stroke(strokes, stretch, cells, look);
         }
         vec![names, strokes]
+    }
+
+    /// The strokes alone, what the ribbon draws where its names do not fit, and where they
+    /// give way to the rows a screen leaves it: every stretch as long as the others, the
+    /// cells the line shares out evenly less the gap after it, and the plow on the running
+    /// one; what is left of the line stays blank at its end. A line too narrow for a cell
+    /// and a gap a node is a page's furrow, a cell standing for the nodes it covers.
+    pub(in crate::surface) fn strokes(&self, look: &Look) -> Line {
+        let width = look.width.cells();
+        let count = self.stretches.len();
+        let cells = (width / count.max(1)).saturating_sub(1);
+        if cells == 0 {
+            let standings: Vec<Standing> = self.stretches.iter().map(|it| it.standing).collect();
+            let apart = page::spaced(count, width);
+            return page::strokes(&standings, width, apart, look);
+        }
+        self.stretches
+            .iter()
+            .enumerate()
+            .fold(Line::new(), |line, (at, stretch)| {
+                let line = match at {
+                    0 => line,
+                    _ => line.plain(" "),
+                };
+                self.stroke(line, stretch, cells, look)
+            })
     }
 
     /// `line` with `stretch`'s stroke, `cells` long: the page's stroke, with

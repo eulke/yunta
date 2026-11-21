@@ -23,6 +23,7 @@ pub fn project_of(bench: &Bench) -> Project {
             clock: Arc::new(FixedClock),
             ids: Arc::new(SystemIdSource),
             secrets: Arc::new(ProcessSecrets),
+            forges: Arc::new(yunta_api::DeclaredForge),
             binary: PathBuf::from("yunta"),
         },
     }

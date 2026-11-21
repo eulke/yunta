@@ -5,9 +5,9 @@
 use indexmap::IndexMap;
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
-    ArtifactId, AuthorGate, Claim, EngineFact, Escalation, EventPayload, Failure, GateEvent,
-    GateOption, GateResolvedPayload, HumanChoice, Leads, Menu, NodeEvent, NodeOutcome, PauseReason,
-    Shown, TokenUsage, WhyWithheld, Withheld,
+    ArtifactId, AuthorGate, Claim, EngineFact, Escalation, EventPayload, Failure, GateOption,
+    HumanChoice, Leads, Menu, NodeEvent, NodeOutcome, PauseReason, Shown, TokenUsage, WhyWithheld,
+    Withheld,
 };
 use yunta_core::reserved::ReservedOption;
 use yunta_core::shown::{Flaw, ShownDocument};
@@ -349,18 +349,8 @@ async fn record(
     escalation: Escalation,
     choice: &HumanChoice,
 ) -> Result<(), RunError> {
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload()))),
-    )
-    .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
-            choice.clone(),
-        ))),
-    )
-    .await?;
+    ctx.emit_decided(Some(&node.id), escalation, choice.clone())
+        .await?;
     Ok(())
 }
 

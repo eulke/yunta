@@ -9,7 +9,8 @@ use super::{Binding, Keys};
 /// A surface says the answer where a row cut short keeps it: a command
 /// before what is asked, since a person who lost what it is about still has
 /// the command to run, and a key after it, which what is asked gives way to.
-/// An attention answered at another terminal says only what is asked.
+/// An attention answered at another terminal, or said where a line is typed,
+/// says only what is asked.
 pub struct Attention {
     /// What needs the person, when a screen shows more than one: a run's
     /// handle.
@@ -28,6 +29,10 @@ pub enum Answer {
     /// Given where it was asked, at another terminal: nothing here answers
     /// it.
     Elsewhere,
+    /// Said where a line is typed: every key a person presses there types,
+    /// `a` among them, so no key answers it there and none stands beside what
+    /// is asked. Not [`Answer::Elsewhere`], answered at another terminal.
+    Unkeyed,
 }
 
 impl Attention {
@@ -59,6 +64,15 @@ impl Attention {
             subject: None,
             asks: asks.into(),
             answer: Answer::Elsewhere,
+        }
+    }
+
+    /// What `asks`, said where a line is typed, so no key answers it there.
+    pub fn unkeyed(asks: impl Into<String>) -> Self {
+        Attention {
+            subject: None,
+            asks: asks.into(),
+            answer: Answer::Unkeyed,
         }
     }
 

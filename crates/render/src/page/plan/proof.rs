@@ -45,12 +45,19 @@ pub(in crate::page) fn of_plan(review: &PlanReview) -> Doc {
     Doc::new().with_all(blocks)
 }
 
-/// What proves `task`, a key away from its card: what tests it, the suite
-/// every task keeps passing, its guards, what it promises that no guard of
-/// its own checks, and each file the spec wrote for it, whole.
+/// What proves `task` at its desk, a key away from its card: each test, what
+/// it proves and the command that runs it; its guards; what it promises that no
+/// guard of its own checks; and each file the spec wrote for it, whole, under its
+/// path. The suite every task keeps passing is the whole plan's proof's to say.
 pub(in crate::page) fn of_task(task: &Task, review: &PlanReview) -> Doc {
     let judged = card::judged(review, task);
-    let fields = suite(card::tested(Fields::new(), task, review, judged), review);
+    let fields = card::tests_of(task, review, judged).into_iter().fold(
+        Fields::new(),
+        |fields, (proves, cmd)| match proves.trim() {
+            "" => fields.push_command("runs", cmd),
+            proves => fields.push_if("proves", proves).push_command("runs", cmd),
+        },
+    );
     let guards = judged.map_or(&[][..], |judged| judged.guards.as_slice());
     let fields = guards
         .iter()
@@ -76,14 +83,11 @@ pub(in crate::page) fn of_task(task: &Task, review: &PlanReview) -> Doc {
         );
     }
     if let Some(spec) = review.spec.as_ref().and_then(|spec| spec.of(&task.id)) {
-        blocks.extend(spec.files.iter().map(|file| {
-            Code::whole(
-                file.path.as_str(),
-                Some("written by the spec".to_string()),
-                &file.content,
-            )
-            .into()
-        }));
+        blocks.extend(
+            spec.files
+                .iter()
+                .map(|file| Code::whole(file.path.as_str(), None, &file.content).into()),
+        );
     }
     if blocks.is_empty() {
         blocks.push(nothing("nothing here proves this task"));
@@ -156,7 +160,7 @@ fn measured(review: &PlanReview, showing: Option<String>) -> Fields {
 
 /// `fields` with the suite every task keeps passing, and the command that
 /// runs it, once for all of them. Nothing when the run measured no suite.
-pub(super) fn suite(fields: Fields, review: &PlanReview) -> Fields {
+fn suite(fields: Fields, review: &PlanReview) -> Fields {
     match review.held.is_empty() {
         true => fields,
         false => review.held.iter().fold(

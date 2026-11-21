@@ -10,8 +10,8 @@ use crate::words::Standing;
 /// A surface draws each node's name over its stretch, in the tone of its word
 /// where there is color, and the plow a cell further along the running node's
 /// stretch for each event that node has had: only an event moves it. Where
-/// the names do not fit, it is a page's furrow, the strokes alone, which the
-/// words beside them say.
+/// the names do not fit, the strokes alone, each as long as the others, which
+/// the words beside them say.
 pub struct Ribbon {
     /// Each node's stretch, in the order the workflow declares them.
     pub stretches: Vec<Stretch>,

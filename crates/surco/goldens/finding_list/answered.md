@@ -1,0 +1,6 @@
+- ✓ major: Global pack paths ignore the configured YUNTA_HOME
+  - fixed: Global pack paths now use the shared user_state_root resolver, which honors YUNTA_HOME.
+- ▸ ▲ major: **Global pack commands ignore the configured YUNTA_HOME state root**
+- ◌ minor: Pack audit cannot inspect globally installed packs
+- ✓ blocking: Pack target API shapes are defined outside the declared file
+  - fixed: PackTarget and its path functions are now defined in crates/cli/src/pack.rs.

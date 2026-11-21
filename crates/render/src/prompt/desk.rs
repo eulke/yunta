@@ -1,35 +1,33 @@
 //! What a plan's desk says around what is read: its title, what stands at its far
-//! edge, and the keys that do something from where it stands.
+//! edge, the keys that do something while it is read, on a run's screen and at a terminal
+//! alike, and the words being typed at its foot for an option that asks for them.
 
-use surco::components::Legend;
+use surco::components::{ChoiceRow, FootRow, Legend};
 use surco::words::Standing;
 
-use super::{Escape, ESC};
-use crate::page::desk::View;
+use super::card::NEEDS_WORDS;
+use super::{numbered, typed_row, PromptAct, ESC};
+use crate::screen::BY_THE_PAGE;
 
-/// Where a desk stands, as the keys that do something there depend on it.
-pub struct DeskKeys {
-    /// Whether an option a number named waits to be confirmed.
-    pub confirming: bool,
-    /// What the pane shows of the place stood on.
-    pub view: View,
-    /// Whether the plan offers choices to read, where the pane shows them.
-    pub has_choices: bool,
-    /// Whether the place stood on has a proof to turn to.
-    pub has_proof: bool,
-    /// Whether the plan says what it decided for the person.
-    pub says_decided: bool,
-    /// Where Escape leaves to: back to the card it opened from, or out of the command
-    /// with what that Escape does.
-    pub leaving: Option<Escape>,
-}
+/// What `tab` does at the plan's desk, and `j k` alike: goes from place to place.
+pub const NEXT_PLACE: &str = "next place";
+
+/// What `shift-tab` does at the plan's desk: goes back to the place before.
+pub const PLACE_BEFORE: &str = "place before";
+
+/// What `p` does at the plan's desk: turns the place stood on over to its proof, or back.
+pub const PROOF: &str = "proof";
+
+/// What `d` does at the plan's desk: shows what the plan decided for the person, or the
+/// place again.
+pub const DECIDED_FOR_YOU: &str = "decided for you";
 
 /// The title a desk is headed with: the plan, then the run's handle and the workflow it
-/// follows, each when there is one.
-pub fn title(run: Option<String>, called: Option<String>) -> Vec<String> {
+/// follows, by its name, each when there is one.
+pub fn title(run: Option<String>, workflow: Option<String>) -> Vec<String> {
     std::iter::once("plan".to_string())
         .chain(run)
-        .chain(called)
+        .chain(workflow)
         .collect()
 }
 
@@ -42,30 +40,48 @@ pub fn edge(node: Option<&str>) -> String {
     }
 }
 
-/// The keys that do something from where the desk stands, each with what it does.
-pub fn legend(keys: &DeskKeys) -> Legend {
-    if keys.confirming {
-        return Legend::new().key("enter", "confirms").key(ESC, "goes back");
+/// The words being said for `chosen` at the desk's foot, in place of its options: what it
+/// `asks` of them; the row they are typed on, before the cursor and after it; and, where an
+/// answer was `refused` for having none, that the option needs one, as a card says it.
+pub fn saying(
+    chosen: ChoiceRow,
+    asks: String,
+    (before, after): (String, String),
+    refused: bool,
+) -> FootRow {
+    FootRow::Saying {
+        chosen,
+        asks,
+        typed: typed_row(before, after),
+        refused: refused.then(|| NEEDS_WORDS.to_string()),
     }
-    let legend = match keys.view {
-        View::Choices if !keys.has_choices => Legend::new(),
-        View::Choices => Legend::new().key("j k", "choice"),
-        _ => Legend::new().key("j k", "task"),
-    }
-    .arrows("scroll");
-    let legend = match (keys.has_proof, keys.view) {
-        (false, _) => legend,
-        (true, View::Proof) => legend.key("p", "the card"),
-        (true, _) => legend.key("p", "proof"),
+}
+
+/// The keys of a plan's desk while it is read: a number for each of its `options` (up to
+/// `9`), the next place, what is read, the proof where the place has one, what is decided
+/// where the plan says it, and `escape`, what Escape does where the desk stands.
+pub fn legend(options: usize, has_proof: bool, says_decided: bool, escape: &str) -> Legend {
+    let legend = Legend::new()
+        .key(numbered(options), PromptAct::Answer.said())
+        .key("tab", NEXT_PLACE)
+        .arrows("scroll");
+    let legend = match has_proof {
+        true => legend.key("p", PROOF),
+        false => legend,
     };
-    let legend = match (keys.says_decided, keys.view) {
-        (false, _) => legend,
-        (true, View::Choices) => legend.key("d", "the tasks"),
-        (true, _) => legend.key("d", "decided for you"),
+    let legend = match says_decided {
+        true => legend.key("d", DECIDED_FOR_YOU),
+        false => legend,
     };
-    let leaving = match keys.leaving {
-        None => "back",
-        Some(escape) => escape.does(),
-    };
-    legend.key(ESC, leaving)
+    legend.key(ESC, escape)
+}
+
+/// The keys the desk takes that its legend leaves to help, where help over a screen holding
+/// it says them: `j k` to the next place as `tab` goes, `shift-tab` to the place before, and
+/// a page at a time.
+pub fn left_to_help() -> Legend {
+    Legend::new()
+        .key("j k", NEXT_PLACE)
+        .key("shift-tab", PLACE_BEFORE)
+        .key("pgup pgdn", BY_THE_PAGE)
 }

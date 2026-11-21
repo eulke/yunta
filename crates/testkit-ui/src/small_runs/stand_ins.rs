@@ -1,17 +1,22 @@
 //! What stands in for the world beside a small run: a forge that publishes and
 //! never answers, one whose rate limit is spent, and a person who answers a
-//! round at the terminal of the engine that drives the run.
+//! round at the terminal of the engine that drives the run. And what a
+//! workspace reading a small run reaches its forge through: the forge that
+//! never answers, standing in for every forge a run's config declares
+//! ([`StandInForge`]).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use yunta_api::ForgeSource;
 use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
 use yunta_core::port::{
-    Forge, ForgeError, ForgeProbe, HumanInteraction, PolledGate, PublishRequest, PullRequestRef,
-    PullRequestRequest, QuestionsReply, ReviewOutcome,
+    Forge, ForgeError, ForgeProbe, ForgeUnanswered, HumanInteraction, PolledGate, PublishRequest,
+    PullRequestRef, PullRequestRequest, QuestionsReply, ReviewOutcome,
 };
-use yunta_core::{Answer, NodeId, QuestionsFile};
+use yunta_core::{Answer, ConfigLayer, NodeId, QuestionsFile, SecretSource};
 
 /// The pull request a small run's forge opens, by its number.
 const NUMBER: u64 = 7;
@@ -25,8 +30,42 @@ const RETRY_AFTER: Duration = Duration::from_secs(3_600);
 const HEAD: &str = "0000000000000000000000000000000000000000";
 
 /// A forge that publishes a gate's pull request and opens a run's, and whose
-/// reviewers have not answered yet.
-pub(super) struct Reviewing;
+/// reviewers have not answered yet: how many times it was polled.
+#[derive(Default)]
+pub(super) struct Reviewing {
+    polls: AtomicUsize,
+}
+
+/// Where a workspace reading the small runs reaches a forge: one forge whose reviewers
+/// have not answered, standing in for every forge a run's config declares, and none for a
+/// config that declares none, as a workspace's own source reaches none. A clone shares the
+/// forge, and how many times it was polled. Not the forge itself, which it hands out.
+#[derive(Clone, Default)]
+pub struct StandInForge(Arc<Reviewing>);
+
+impl StandInForge {
+    /// How many times its forge was polled.
+    pub fn polls(&self) -> usize {
+        self.0.polls.load(Ordering::SeqCst)
+    }
+}
+
+impl ForgeSource for StandInForge {
+    fn forge(
+        &self,
+        config: &ConfigLayer,
+        _secrets: &dyn SecretSource,
+    ) -> Result<Arc<dyn Forge>, ForgeUnanswered> {
+        let declared = config
+            .forge
+            .as_ref()
+            .and_then(|forge| forge.github.as_ref());
+        match declared {
+            Some(_) => Ok(Arc::clone(&self.0) as Arc<dyn Forge>),
+            None => Err(ForgeUnanswered::Undeclared),
+        }
+    }
+}
 
 /// A forge whose rate limit is spent: it refuses to open a pull request until
 /// its reset, an hour on.
@@ -47,6 +86,7 @@ impl Forge for Reviewing {
     }
 
     async fn poll(&self, _gate: &PullRequestRef) -> Result<PolledGate, ForgeError> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
         Ok(PolledGate {
             head_sha: HEAD.parse().expect("a commit's sha"),
             review: ReviewOutcome::Pending,

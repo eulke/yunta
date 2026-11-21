@@ -22,4 +22,4 @@ next
   yunta pack add <source>
     installs a pack of workflows to run
   yunta doctor
-    confirms everything above is usable
+    check adapters, git, forge, packs

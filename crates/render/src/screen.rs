@@ -8,6 +8,12 @@
 //! shapes of the documents Yunta reads). What every
 //! screen shares stays here: the trail's start, a confirmation's, the palette's,
 //! help's, leaving, and the keys that scroll a page.
+//!
+//! A key is said in a legend by a word or two (`s stats`) and in help by a sentence
+//! (`s g  what it cost, its graph`). The keys a person presses anywhere they are not
+//! typing, the palette and help, are [`anywhere`], drawn at the legend's far end apart
+//! from the screen's own keys; [`over_every_stage`] adds them after the keys of a stage
+//! that draws no far end.
 
 mod catalog;
 mod field;
@@ -30,9 +36,12 @@ pub use machine::{
     OPENING_SESSIONS_ASKS, SCHEMA, SESSIONS_STOPPED, UPKEEP, WHICH_DOCUMENT,
 };
 pub use run::{
-    opened_legend, over_the_run_legend, run_legend, stats_legend, DECISION, GRAPH, HISTORY, PAGE,
-    READING_THE_GRAPH, READING_THE_HISTORY, READING_THE_STATS, RECEIPT, STATS, VERIFICATION,
-    VERIFYING, WRITING_THE_PAGE, WRITING_THE_RECEIPT,
+    answered_elsewhere, answers_recorded, help_over_a_run, in_the_legend, in_the_runs_frame_legend,
+    opened_legend, over_the_run_legend, place_of, recorded, round_answered_elsewhere, run_legend,
+    unread_run_legend, Along, Leaving, PromptKeys, RunKeys, CHRONICLE, GRAPH, HISTORY, MAKE_ROOM,
+    NOTHING_RECORDED, OPEN_THE_PULL_REQUEST, PAGE, READING_THE_CHRONICLE, READING_THE_GRAPH,
+    READING_THE_HISTORY, READING_THE_STATS, RECEIPT, STATS, VERIFICATION, VERIFYING,
+    WRITING_THE_PAGE, WRITING_THE_RECEIPT,
 };
 pub use setup::{
     setup_legend, written_legend, FINDING_WHAT_IT_RUNS, SETUP, SETUP_LET_GO, WRITING_THE_SETUP,
@@ -42,9 +51,9 @@ pub use start::{
     WHICH_ADAPTER, WHICH_MODE, WHICH_WORKFLOW,
 };
 
-use surco::components::{Cell, Column, Holds, Legend, Row, Table};
+use surco::components::{KeyList, Legend};
 use surco::doc::Doc;
-use surco::glyphs::Glyphs;
+use surco::words::Standing;
 
 use crate::prompt::ESC;
 
@@ -81,16 +90,18 @@ pub fn leaving_legend() -> Legend {
     Legend::new().key("q", "leaves yunta")
 }
 
-/// The keys of a confirmation.
-pub fn confirmation_legend() -> Legend {
-    Legend::new().key("enter", "confirms").key(ESC, "goes back")
-}
-
 /// What the palette is titled, over the screen it stands on: every act from where the
 /// person stands, and every act always there.
-pub const PALETTE: &str = "what you can do here";
+pub const PALETTE: &str = "what do you want to do?";
+
+/// The keys a person presses anywhere they are not typing, at the legend's far end: the
+/// palette, and help. Not a screen's legend, the keys of what is on it.
+pub fn anywhere() -> Legend {
+    Legend::new().key("/", "anything").key("?", "keys")
+}
 
 /// `legend` with the keys every stage answers to after its own: the palette, and help.
+/// For a stage that draws no far end to its legend, where [`anywhere`] stands.
 pub fn over_every_stage(legend: Legend) -> Legend {
     legend
         .key("/", "what you can do here")
@@ -98,57 +109,88 @@ pub fn over_every_stage(legend: Legend) -> Legend {
 }
 
 /// What help is titled, over the screen it stands on.
-pub const HELP: &str = "the keys here";
+pub const HELP: &str = "keys";
+
+/// What help says above the keys it lists: they are every key there is.
+pub const NOTHING_MORE_TO_REMEMBER: &str = "You never have to remember more than this.";
+
+/// What going back does, where a key says it in a word: closing what stands over a
+/// screen, or leaving a page, a plan's desk among them, for what it was opened from.
+pub const BACK: &str = "back";
+
+/// What `n` does where a legend names it: a new run.
+pub(crate) const NEW_RUN: &str = "new run";
+
+/// What leaving the application leaves: every run, going on without it. Help says it
+/// beside Ctrl-C, and beside `q` where `q` leaves.
+pub(crate) const LEAVE: &str = "leave: every run keeps going without this window";
+
+/// What help says `/` does, on every screen.
+pub(crate) const ANYTHING: &str = "anything: only what can be done here, with its command";
+
+/// What help says `n` does, on every screen.
+pub(crate) const STARTS_A_RUN: &str = "start a new run, wherever no prompt stands";
+
+/// What help says `j k` do, on every screen: the legend says what they move there.
+pub(crate) const MOVES: &str = "move; the footer always says what they move";
+
+/// What help says `enter` does, on every screen.
+pub(crate) const OPENS: &str = "open, answer, confirm";
+
+/// What help says `esc` does, where it does something.
+pub(crate) const ONE_STEP_BACK: &str = "one step back; what it leaves stays waiting";
+
+/// What help says `a` does, on every screen: going to what needs the person, in the
+/// word Surco says that state with.
+pub(crate) fn to_what_needs_you() -> String {
+    format!("go to what {}", Standing::NeedsYou.word())
+}
+
+/// Help's list of `keys`, a key a row, under the sentence that says they are all there
+/// is.
+pub(crate) fn listed(keys: Legend) -> Doc {
+    Doc::new().with(KeyList {
+        said: Some(NOTHING_MORE_TO_REMEMBER.to_string()),
+        keys,
+    })
+}
 
 /// Every key `legend` names, each with what it does, then the keys every stage answers
-/// to, Ctrl-C leaving from anywhere: a row each, the keys spelled in `glyphs`.
-pub fn help(legend: &Legend, glyphs: Glyphs) -> Doc {
-    let every = over_every_stage(Legend::new()).key("ctrl-c", "leaves yunta");
-    let rows = legend
-        .0
-        .iter()
-        .chain(&every.0)
-        .map(|binding| Row {
-            mark: None,
-            cells: vec![
-                Cell::plain(binding.keys.spelled(glyphs)),
-                Cell::plain(binding.does.clone()),
-            ],
-        })
-        .collect();
-    let columns = vec![
-        Column {
-            title: "key",
-            holds: Holds::Id,
-        },
-        Column {
-            title: "what it does",
-            holds: Holds::Prose,
-        },
-    ];
-    Doc::new().with(Table { columns, rows })
+/// to, Ctrl-C leaving from anywhere: a key a row, as help lists them, under the
+/// sentence that says they are all there is.
+pub fn help(legend: &Legend) -> Doc {
+    listed(over_every_stage(legend.clone()).key("ctrl-c", LEAVE))
 }
 
-/// The keys of help: scrolling it, and closing it.
+/// The keys of help while it stands: closing it.
 pub fn help_legend() -> Legend {
-    Legend::new().arrows("scroll").key(ESC, "closes it")
+    Legend::new().key(ESC, BACK)
 }
+
+/// The keys of the palette while it stands: moving along its rows, doing the one
+/// pointed at, and closing it.
+pub fn palette_legend() -> Legend {
+    Legend::new()
+        .arrows("move")
+        .key("enter", "do it")
+        .key(ESC, BACK)
+}
+
+/// `legend` with `n` starting a new run, where a screen takes it.
+pub fn with_a_new_run(legend: Legend) -> Legend {
+    legend.key("n", NEW_RUN)
+}
+
+/// What PageUp and PageDown do where a page taller than what shows of it scrolls.
+pub const BY_THE_PAGE: &str = "by the page";
 
 /// `legend` led by the keys that scroll a page taller than what shows of it: a line
 /// with the arrows, a page with PageUp and PageDown.
 pub fn scrolling(legend: Legend) -> Legend {
     led_by(
-        Legend::new()
-            .arrows("scroll")
-            .key("pgup pgdn", "by the page"),
+        Legend::new().arrows("scroll").key("pgup pgdn", BY_THE_PAGE),
         legend,
     )
-}
-
-/// `legend` led by the keys that scroll a run's page, where the arrows move along its
-/// nodes: the page by PageUp and PageDown.
-pub fn scrolling_by_the_page(legend: Legend) -> Legend {
-    led_by(Legend::new().key("pgup pgdn", "scroll its page"), legend)
 }
 
 /// `rest` after the keys of `first`.

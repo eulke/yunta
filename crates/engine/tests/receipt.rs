@@ -20,7 +20,7 @@ use yunta_core::events::{
 };
 use yunta_core::receipt::{
     BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry, DiagnosticCount,
-    EventChainStatus, Receipt, RunnerUsage, ScopeSummary,
+    EventChainStatus, FindingsSummary, Receipt, RunnerUsage, ScopeSummary,
 };
 use yunta_core::{ArtifactKind, NodeId, RunId};
 use yunta_engine::RunReport;
@@ -62,6 +62,12 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         criteria: CriteriaSummary {
             total: 3,
             green: 3,
+            tasks: 2,
+            proving: 3,
+            proved: 3,
+            red_before: 3,
+            guards: 0,
+            guards_green: 0,
             entries: vec![
                 CriterionEntry {
                     task_id: "T001".to_string(),
@@ -91,6 +97,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         scope: ScopeSummary {
             files_touched: 4,
             violations: Vec::new(),
+            granted: 0,
         },
         changed: Some(ChangesCountedPayload {
             tree: "deadbeef".into(),
@@ -127,6 +134,11 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         diagnostics: Vec::new(),
         failed: Vec::new(),
         blocking_findings: 0,
+        findings: FindingsSummary {
+            posted: 0,
+            answered: 0,
+        },
+        pull_request: None,
     }
 }
 

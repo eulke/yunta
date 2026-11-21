@@ -45,7 +45,7 @@ At a terminal, a person types `yunta` and gets the whole application on one scre
 - `paint::style(layer, tone, own, line) -> Style { bold, dim, fg, bg }` and `paint::erase(layer, line)` are the one color table. Their `//!` names "any other engine that draws Surco's lines in cells of its own" as a reader.
 - The legend, the attention and the ribbon are blocks `Terminal::block` draws.
 - The trail, the tally, the rule under them and a region's title have no terminal lines in Surco.
-- Which of `held` and `scrolled` draws a region is decided by each caller. The walk's test terminal (`crates/ui/tests/walk/terminal.rs`) scrolls every region, while the CLI's hold draws prompts.
+- Which of `held` and `scrolled` draws a region is decided by each caller. The walk's test terminal (`crates/testkit-ui/src/terminal.rs`) scrolls every region, while the CLI's hold draws prompts.
 
 **The reference is drawn and its rules are written.** `.plans/yunta-tui/proof/surco-screen/targets/tui-reference/` lays out the run's screen at 80×24 in ASCII and at 60×14 in Unicode, the second also with help open. Its `NOTES.md` states the rules the frames follow:
 - **Margins:** a cell at each side.

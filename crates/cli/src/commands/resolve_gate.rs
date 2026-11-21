@@ -16,6 +16,7 @@
 use surco::look::Look;
 use yunta_api::{OpenedRun, Project, WaitingDecision, WaitingQuestions};
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
+use yunta_core::port::QuestionsReply;
 use yunta_core::step::{Choice, NextStep};
 use yunta_core::{OptionId, Responder, RunId};
 use yunta_render::command;
@@ -26,7 +27,7 @@ use yunta_render::prompt::Escape;
 use yunta_render::refusal::Refused;
 use yunta_ui::prompt::DecisionPut;
 
-use crate::ask::{Console, NoAnswer};
+use crate::ask::{Answered, Console, NoAnswer};
 use crate::error::CliError;
 use crate::output::Outcome;
 use crate::output::{emit, show, Answer, Mode};
@@ -135,15 +136,8 @@ async fn answered_round(
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let WaitingQuestions { node, questions } = waiting;
-    let replied = {
-        let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
-            return Err(CliError::msg(QuestionsAnswered::off_terminal(
-                &open.id, &node,
-            )));
-        };
-        crate::ask::answer(&console, &project.workspace.env, &node, &questions)
-    };
+    let replied = asked_here(project, open, &waiting).await?;
+    let node = waiting.node;
     let answer = match replied {
         Ok(mut reply) => {
             if let Some(by) = by {
@@ -176,6 +170,28 @@ async fn answered_round(
         RoundAnswer::Interrupted => Outcome::interrupted(),
         RoundAnswer::Answered { .. } | RoundAnswer::Declined { .. } => Outcome::Success,
     })
+}
+
+/// The round `waiting` put to the person at this terminal as the run asks it, what the
+/// engine refused of the answers it was last given standing under each question it is about:
+/// refused off a terminal, where nobody is there to ask, saying where they are asked.
+async fn asked_here(
+    project: &Project,
+    open: &OpenedRun<'_>,
+    waiting: &WaitingQuestions,
+) -> Result<Answered<QuestionsReply>, CliError> {
+    let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
+        let off = QuestionsAnswered::off_terminal(&open.id, &waiting.node);
+        return Err(CliError::msg(off));
+    };
+    let round = (&waiting.node, &waiting.questions);
+    let refused = waiting.refused.as_ref();
+    Ok(crate::ask::answer(
+        &console,
+        &project.workspace.env,
+        round,
+        refused,
+    ))
 }
 
 /// What a person at the menu did, carried through: recorded and handed back, or the page

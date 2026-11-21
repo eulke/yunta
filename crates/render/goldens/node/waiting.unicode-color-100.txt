@@ -1,10 +1,11 @@
 ␛[1;35m◆␛[0m ␛[1mnode grill of run Q78GRR␛[0m␛[2m ·␛[0m␛[1;35m needs you␛[0m
 
+  ␛[2mstands      ␛[0m needs you
+  ␛[2mtook        ␛[0m 36s
+  ␛[2mtokens      ␛[0m 220k tokens · 210k in / 10k out (202k cached)
   ␛[2mkind        ␛[0m prompt
   ␛[2mattempt     ␛[0m 1
   ␛[2mrunner      ␛[0m planner on mock/gpt-6-luna
-  ␛[2mtokens      ␛[0m 210k in / 10k out (202k cached)
-  ␛[2mtook        ␛[0m 36s
   ␛[2mproduced    ␛[0m ~/.yunta/runs/01M7DES1GNED00000000Q78GRR/artifacts/grill/questions.yaml
 
 ␛[2mwhat it hands over␛[0m
@@ -17,7 +18,8 @@ read    docs/pack.md
 read    crates/cli/src/cli/pack.rs
 read    crates/cli/src/project.rs
 accepted questions
-␛[1msubmit  questions␛[0m
+submit  questions
+␛[1mneeds you: asked 3 questions: `where-global-lives`, `how-requested`, `beside-project-packs`␛[0m
 
 ␛[2mnext␛[0m
   ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m

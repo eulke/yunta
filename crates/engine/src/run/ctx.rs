@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    ConfinementRecord, EventPayload, Finding, FindingCause, FindingEvent, FindingPostedPayload,
-    FindingSays, FindingSeverity, StoredEvent,
+    ConfinementRecord, Escalation, EventPayload, Finding, FindingCause, FindingEvent,
+    FindingPostedPayload, FindingSays, FindingSeverity, HumanChoice, StoredEvent,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::port::{Adapter, Forge, HumanInteraction, RunObserver};
@@ -299,6 +299,17 @@ impl<'a> RunCtx<'a> {
         payload: EventPayload,
     ) -> Result<Seq, RunError> {
         Ok(self.log().record(node_id, payload).await?)
+    }
+
+    /// Records `question` and the `choice` that answered it as one commit,
+    /// and returns the answer's seq ([`RunLog::record_decided`]).
+    pub(crate) async fn emit_decided(
+        &self,
+        node_id: Option<&NodeId>,
+        question: Escalation,
+        choice: HumanChoice,
+    ) -> Result<Seq, RunError> {
+        Ok(self.log().record_decided(node_id, question, choice).await?)
     }
 
     /// This run's whole log, read through [`RunLog`] like every other

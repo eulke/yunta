@@ -34,13 +34,48 @@ fn pressing_n_adds_a_note() {
     let mut terminal = approving(root.path());
     terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
     terminal.keys("n");
-    terminal.wait_on_screen("enter records it", "`n` never opened a line for the note");
+    terminal.wait_on_screen("enter record it", "`n` never opened a line for the note");
     terminal.keys("ship it after lunch\r");
 
     let drawn = terminal.ended();
     assert!(terminal.ran_to_the_end(), "{drawn}");
     let choice = recorded(root.path()).expect("the run recorded no choice");
     assert_eq!(choice.free_text.as_deref(), Some("ship it after lunch"));
+}
+
+/// The card's keys name each act in the words a run's screen says them in: choosing,
+/// answering, a note, leaving it for later; and on a note's line, recording it and going
+/// back.
+#[test]
+fn the_cards_keys_say_each_act_as_a_runs_screen_says_it() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = approving(root.path());
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
+    let screen = terminal.screen();
+    assert!(
+        screen.holds("↑↓ choose · enter answer · n add a note · esc leave it for later"),
+        "{screen:#?}"
+    );
+    terminal.keys("n");
+    terminal.wait_on_screen("│ add a note", "`n` never opened a line for the note");
+    let screen = terminal.screen();
+    assert!(screen.holds("enter record it · esc go back"), "{screen:#?}");
+}
+
+/// A number picks the option it counts to, as it does on a run's screen in the
+/// application: the pointer stands on it, and enter records it.
+#[test]
+fn a_number_picks_its_option() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = approving(root.path());
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
+    terminal.keys("2");
+    terminal.wait_on_screen("▸ abort", "`2` never picked the second option");
+    terminal.keys("\r");
+
+    let drawn = terminal.ended();
+    let choice = recorded(root.path()).expect("the run recorded no choice");
+    assert_eq!(choice.option.as_str(), "abort", "{drawn}");
 }
 
 /// A key redraws the card over itself: what stands above it stays, and the card
@@ -119,7 +154,7 @@ fn a_paste_answers_no_decision() {
     terminal.keys("\x1b[B");
     terminal.wait_on_screen("▸ abort", "the card stopped reading keys after the paste");
     assert!(
-        !terminal.screen().holds("enter records it"),
+        !terminal.screen().holds("enter record it"),
         "{:#?}",
         terminal.screen()
     );
@@ -166,8 +201,8 @@ fn adjusting_with(root: &Path, flags: &[&str]) -> Terminal {
     yunta_on_terminal!(&repo, &home, &args)
 }
 
-/// An option that asks opens its field where the card stands, with the cursor on
-/// it; esc goes back to the list, and an empty answer is said back, not sent.
+/// An option that asks opens its field where the card stands, under every option, with the
+/// cursor on it; esc goes back to the list, and an empty answer is said back, not sent.
 #[test]
 fn an_option_that_asks_opens_its_field_in_place() {
     let root = tempfile::tempdir().unwrap();
@@ -184,19 +219,19 @@ fn an_option_that_asks_opens_its_field_in_place() {
     );
     let (row, column) = screen.cursor;
     assert!(
-        screen.rows[usize::from(row)].starts_with("▎ >") && column == 4,
-        "the cursor stands on the field, past its prompt: {screen:#?}"
+        screen.rows[usize::from(row)].starts_with("▎ │") && column == 4,
+        "the cursor stands in the field's box, past its upright: {screen:#?}"
     );
     assert!(
-        !screen.holds("approve"),
-        "the field stands in for the list: {screen:#?}"
+        screen.holds("approve") && screen.holds("▸ adjust"),
+        "every option stands over the field, the pointer on the one it answers: {screen:#?}"
     );
 
     terminal.keys("\r");
     terminal.wait_on_screen("this option needs an answer", "an empty answer was sent");
     terminal.keys("half");
     terminal.keys("\x1b");
-    terminal.wait_on_screen("enter chooses", "esc never went back to the list");
+    terminal.wait_on_screen("enter answer", "esc never went back to the list");
     let screen = terminal.screen();
     assert!(
         screen.holds("▸ adjust"),

@@ -1,42 +1,43 @@
 //! A workflow's graph as a person reads it on a page: a headline naming the
-//! workflow, and the run when the graph is a run's, over the diagram of its nodes.
-//! A run's graph labels each node with what the run's log derives for it, so the
-//! diagram and the run's page say the same word about the same node.
+//! workflow and what the graph shows, the nodes it runs in order, with the
+//! run's mode at its far end when the graph is a run's, or `as written`; over
+//! the diagram of its nodes, each a box that holds its id alone. What a run's
+//! log derives for each node is its page's and its stats' to say, and the
+//! Mermaid and DOT `yunta graph --run` prints write it inside each node.
 
 use surco::components::Headline;
 use surco::diagram::Diagram;
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::look::Look;
-use yunta_core::{RunId, Workflow};
-use yunta_replay::frame::RunFrame;
+use yunta_core::{ModeName, Workflow};
 
 use super::Page;
-use crate::graph::{self, Labels};
+use crate::graph;
 
-/// What a workflow's graph is drawn from: the workflow, and the run it was drawn
-/// from, with the frame its log derives, when it is a run's.
+/// What a workflow's graph is drawn from: the workflow, and the mode of the run
+/// it is drawn for when it is a run's.
 #[derive(Debug, Clone)]
 pub struct Graph {
     pub workflow: Workflow,
-    pub run: Option<(RunId, RunFrame)>,
+    /// The mode the run it is drawn for was created in, which its headline names
+    /// at its far end; `None` for the workflow as written.
+    pub mode: Option<ModeName>,
 }
 
 impl Page for Graph {
     fn document(&self, _look: &Look) -> Doc {
-        let named = format!("workflow {}", self.workflow.name);
-        let (headline, labels) = match &self.run {
-            Some((run, frame)) => (
-                Headline::new(
-                    frame.standing.mark(),
-                    format!("{named} of run {}", run.handle()),
-                    frame.standing.word(),
-                ),
-                Some(Labels::of(frame)),
-            ),
-            None => (Headline::new(Mark::Absent, named, "as written"), None),
+        let (mark, edge) = match &self.mode {
+            Some(mode) => (Mark::Running, mode.to_string()),
+            None => (Mark::Absent, "as written".to_string()),
         };
-        let source = graph::mermaid(&self.workflow, labels.as_ref());
+        let headline = Headline::new(
+            mark,
+            self.workflow.name.to_string(),
+            "the nodes it runs, in order",
+        )
+        .edge(edge);
+        let source = graph::drawn(&self.workflow);
         Doc::new()
             .with(headline)
             .with(Block::Diagram(Diagram::of(&source)))

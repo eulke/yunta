@@ -7,7 +7,7 @@ use yunta_replay::frame::RunPhase;
 use super::*;
 
 /// The look of a terminal `cells` wide.
-fn look(cells: usize) -> Look {
+pub(super) fn look(cells: usize) -> Look {
     Look {
         glyphs: Glyphs::Unicode,
         paint: Paint::Plain,
@@ -17,18 +17,20 @@ fn look(cells: usize) -> Look {
 }
 
 /// The look of an ASCII terminal wide enough for a whole command.
-fn ascii() -> Look {
+pub(super) fn ascii() -> Look {
     Look {
         glyphs: Glyphs::Ascii,
         ..look(120)
     }
 }
 
-fn drawn(rows: Vec<Line>) -> Vec<String> {
+/// `rows` as a reader sees them, unpainted.
+pub(super) fn drawn(rows: Vec<Line>) -> Vec<String> {
     rows.iter().map(|row| Paint::Plain.line(row)).collect()
 }
 
-const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
+/// A run's id, for a frame made by hand.
+pub(super) const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
 
 /// A `parallel` group's children sit one step under the group,
 /// exactly where a child run sits under the node that bore it.
@@ -235,9 +237,8 @@ fn the_ribbon_plows_the_running_node_only_where_the_view_moves() {
     assert_eq!(ribbon(&frame, Motion::Still).events, None);
 }
 
-/// A run in `phase`, with `prior` as what its workflow's history
-/// says.
-fn standing(phase: RunPhase, prior: Option<yunta_replay::history::PriorEstimation>) -> RunFrame {
+/// A run in `phase`.
+fn standing(phase: RunPhase) -> RunFrame {
     RunFrame {
         standing: yunta_replay::frame::run_standing(
             &phase,
@@ -246,7 +247,6 @@ fn standing(phase: RunPhase, prior: Option<yunta_replay::history::PriorEstimatio
             &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         ),
         phase,
-        prior,
         elapsed: Some(Duration::from_secs(3)),
         ..RunFrame::sample(&RUN)
     }
@@ -263,45 +263,9 @@ fn parked() -> RunPhase {
 }
 
 #[test]
-fn the_footer_says_nothing_needs_you_while_the_run_moves() {
-    let paint = |frame: &RunFrame| Paint::Plain.line(&footer(frame, &Look::plain()));
-    let moving = paint(&standing(RunPhase::Running, None));
-    assert!(moving.ends_with(" nothing needs you"), "{moving}");
-    assert!(moving.contains("3s"), "how long it has taken: {moving}");
-    let waiting = paint(&standing(parked(), None));
-    assert!(
-        waiting.ends_with(" needs you") && !waiting.contains("nothing"),
-        "{waiting}"
-    );
-}
-
-#[test]
-fn the_footer_names_what_the_run_spent_in_and_out() {
-    let paint = |frame: &RunFrame| Paint::Plain.line(&footer(frame, &Look::plain()));
-    let spent = RunFrame {
-        tokens: yunta_core::events::TokenUsage {
-            input: 18_000,
-            output: 2_200,
-            cached: None,
-        },
-        ..standing(RunPhase::Running, None)
-    };
-    let line = paint(&spent);
-    assert!(line.contains("18k in / 2.2k out"), "{line}");
-    let quiet = RunFrame {
-        tokens: yunta_core::events::TokenUsage::default(),
-        ..standing(RunPhase::Running, None)
-    };
-    assert!(
-        !paint(&quiet).contains(" in / "),
-        "a run that spent nothing names no tokens"
-    );
-}
-
-#[test]
 fn the_attention_row_is_drawn_only_while_something_needs_you() {
-    assert!(attention(&standing(RunPhase::Running, None), &RUN, false, &ascii()).is_none());
-    let row = attention(&standing(parked(), None), &RUN, true, &ascii())
+    assert!(attention(&standing(RunPhase::Running), &RUN, false, &ascii()).is_none());
+    let row = attention(&standing(parked()), &RUN, true, &ascii())
         .map(|row| Paint::Plain.line(&row))
         .unwrap_or_default();
     assert!(
@@ -332,16 +296,13 @@ fn the_row_of_a_run_asked_at_its_terminal_says_whom_it_asks() {
     );
 }
 
-/// A pause a person chose draws no row, and the footer says nothing needs them.
+/// A pause a person chose draws no row.
 #[test]
 fn a_run_a_person_paused_draws_no_attention_row() {
     let paused = |reason: yunta_core::events::PauseReason| {
-        standing(
-            RunPhase::Waiting {
-                on: yunta_replay::frame::WaitingOn::Run { reason },
-            },
-            None,
-        )
+        standing(RunPhase::Waiting {
+            on: yunta_replay::frame::WaitingOn::Run { reason },
+        })
     };
     let closed = paused(yunta_core::events::PauseReason::PullRequestClosed {
         node: NodeId::from_static("approve"),
@@ -353,13 +314,11 @@ fn a_run_a_person_paused_draws_no_attention_row() {
     });
     for frame in [&closed, &aborted] {
         assert!(attention(frame, &RUN, true, &ascii()).is_none());
-        let line = Paint::Plain.line(&footer(frame, &Look::plain()));
-        assert!(line.ends_with(" nothing needs you"), "{line}");
     }
 }
 
 #[test]
-fn a_run_waiting_on_a_reset_draws_no_attention_row_and_says_it_waits() {
+fn a_run_waiting_on_a_reset_draws_no_attention_row() {
     let reset = RunPhase::Waiting {
         on: yunta_replay::frame::WaitingOn::Run {
             reason: yunta_core::events::PauseReason::AwaitingReset {
@@ -368,119 +327,130 @@ fn a_run_waiting_on_a_reset_draws_no_attention_row_and_says_it_waits() {
             },
         },
     };
-    let frame = standing(reset, None);
+    let frame = standing(reset);
     assert!(attention(&frame, &RUN, true, &ascii()).is_none());
-    let line = Paint::Plain.line(&footer(&frame, &Look::plain()));
-    assert!(line.ends_with(" waiting for a reset"), "{line}");
-    assert!(!line.contains("needs you"), "{line}");
 }
 
+/// The design's run, as it is kept beside the application's tests.
+fn designed() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testkit-ui/fixtures/designed")
+}
+
+/// The design run's workflow, fragua's, as its manifest froze it: its reviewer's node fanned
+/// out to a node a runner.
+pub(super) fn fragua() -> yunta_core::Workflow {
+    let frozen = std::fs::read(designed().join("run/manifest.yaml")).expect("its manifest");
+    yunta_core::Manifest::read_frozen(&frozen)
+        .expect("the design's manifest reads")
+        .doc
+        .workflow
+}
+
+/// The design's run cut at `seq`, as a person watches it while an engine drives it: its
+/// frame read at its last event, its workflow and its state.
+pub(super) fn designed_at(seq: u64) -> (RunFrame, yunta_core::Workflow, yunta_replay::RunState) {
+    let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
+    designed_under(seq, &engine)
+}
+
+/// The design's run cut at `seq` with no engine driving it, as a run parked on its person
+/// stands: its frame read at its last event, its workflow and its state.
+pub(super) fn designed_parked(
+    seq: u64,
+) -> (RunFrame, yunta_core::Workflow, yunta_replay::RunState) {
+    designed_under(seq, &yunta_replay::registry::Engine::Unrecorded)
+}
+
+/// The design's run cut at `seq` under `engine`, read at its last event.
+fn designed_under(
+    seq: u64,
+    engine: &yunta_replay::registry::Engine,
+) -> (RunFrame, yunta_core::Workflow, yunta_replay::RunState) {
+    let events: Vec<yunta_core::events::StoredEvent> =
+        std::fs::read_to_string(designed().join("log.jsonl"))
+            .expect("the design's run is kept")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("a logged event"))
+            .filter(|event: &yunta_core::events::StoredEvent| event.seq.get() <= seq)
+            .collect();
+    let state = yunta_replay::RunState::replay(&events);
+    let now = state.clock().last_at().expect("a run with events");
+    let workflow = fragua();
+    let frame = RunFrame::of(&events[0].run_id, &workflow, &state, None, engine, now);
+    (frame, workflow, state)
+}
+
+/// Fragua's stretches by the ribbon's rule, in the order its workflow declares its nodes.
+const FRAGUA_NAMES: [&str; 15] = [
+    "grill",
+    "brief",
+    "plan",
+    "spec",
+    "approve",
+    "implement",
+    "review",
+    "alt",
+    "conform",
+    "fix",
+    "lint",
+    "fix-lint",
+    "tests",
+    "ship",
+    "pr",
+];
+
+/// Each of fragua's stretches is named by the part of its id before `@`, else its first
+/// word, where no stretch before it took that name; else its last word; else its whole id.
+/// A workflow read with no run names them so, and so does a run of it.
 #[test]
-fn the_estimate_appears_beside_the_time_once_the_workflow_has_a_history() {
-    let paint = |frame: &RunFrame| Paint::Plain.line(&footer(frame, &Look::plain()));
-    let known = yunta_replay::history::PriorEstimation {
-        sample_count: 3,
-        tokens: yunta_replay::history::Percentiles {
-            median: 1_000.0,
-            p90: 2_000.0,
-        },
-        wall_clock_secs: Some(yunta_replay::history::Percentiles {
-            median: 6_840.0,
-            p90: 9_000.0,
-        }),
-        tasks: yunta_replay::history::Percentiles {
-            median: 0.0,
-            p90: 0.0,
-        },
-    };
-    let first = paint(&standing(RunPhase::Running, None));
-    assert!(!first.contains("usually"), "{first}");
-    let later = paint(&standing(RunPhase::Running, Some(known)));
-    let sep = Glyphs::Ascii.sep();
+fn fraguas_stretches_are_named_by_the_rule_with_or_without_a_run() {
+    let workflow = fragua();
+    let ids: Vec<&str> = workflow.iter_nodes().map(|node| node.id.as_str()).collect();
+    assert_eq!(stretch_names(&ids), FRAGUA_NAMES);
+    let (frame, _, _) = designed_at(42);
+    let ribbon = ribbon(&frame, Motion::Still);
+    let named: Vec<&str> = ribbon
+        .stretches
+        .iter()
+        .map(|stretch| stretch.name.as_str())
+        .collect();
+    assert_eq!(named, FRAGUA_NAMES);
+}
+
+/// `headline` as a terminal `cells` wide draws it, unpainted.
+fn headline_drawn(headline: Headline, cells: usize) -> String {
+    let drawn = Terminal::on(look(cells)).block(&Block::Headline(headline));
+    drawn.iter().map(|row| Paint::Plain.line(row)).collect()
+}
+
+/// The headline across a run's screen says how long an open run has stood at its word, and
+/// how long a closed one took, the handle at the far end; a run that stalled has stood there
+/// as long, said as any open run's.
+#[test]
+fn the_headline_says_how_long_an_open_run_stood_and_how_long_a_closed_one_took() {
+    let (at_work, _, _) = designed_at(42);
+    let open = headline_drawn(headline(&at_work), 118);
     assert!(
-        later.contains(&format!("3s {sep} usually ~1h54m")),
-        "{later}"
+        open.starts_with("● fragua (standard) · running · for 7m34s "),
+        "{open}"
     );
-}
-
-/// A footer opens with the furrow when the row has room for it, and a row
-/// too narrow keeps the counter and its last word, and drops the furrow.
-#[test]
-fn the_footer_opens_with_the_furrow_when_the_row_has_room() {
-    let ahead = |id: &'static str| {
-        yunta_replay::frame::NodeFrame::sample(&NodeId::from_static(id), NodeStanding::ToGo)
-    };
-    let frame = RunFrame {
-        nodes: vec![ahead("plan"), ahead("build"), ahead("ship"), ahead("tests")],
-        flow: yunta_replay::frame::Counter {
-            total: 4,
-            ..yunta_replay::frame::Counter::default()
-        },
-        ..standing(RunPhase::Running, None)
-    };
-    let wide = Paint::Plain.line(&footer(&frame, &Look::plain()));
-    assert!(wide.starts_with(". .. . . "), "{wide}");
-    assert!(wide.ends_with(" nothing needs you"), "{wide}");
-    assert!(wide.contains("0 of 4"), "{wide}");
-    let narrow = Look {
-        width: surco::look::Width::of(None, None).within(40),
-        ..Look::plain()
-    };
-    let line = Paint::Plain.line(&footer(&frame, &narrow));
-    assert_eq!(line, "0 of 4 nodes done ; nothing needs you");
-}
-
-/// A run of three nodes shows its whole furrow, six cells, on a row that
-/// has room for it: the floor is for a furrow squeezed, not a small one.
-#[test]
-fn a_small_run_shows_its_whole_furrow() {
-    let ahead = |id: &'static str| {
-        yunta_replay::frame::NodeFrame::sample(&NodeId::from_static(id), NodeStanding::ToGo)
-    };
-    let frame = RunFrame {
-        nodes: vec![ahead("plan"), ahead("build"), ahead("ship")],
-        ..standing(RunPhase::Running, None)
-    };
-    let row = Paint::Plain.line(&footer(&frame, &Look::plain()));
-    assert!(!row.starts_with('0'), "{row}");
-    assert!(row.ends_with(" nothing needs you"), "{row}");
-}
-
-/// Narrower than the counter and the answer, a row drops the counter and
-/// keeps the answer whole.
-#[test]
-fn the_answer_outlasts_the_counter() {
-    let frame = standing(RunPhase::Running, None);
-    let narrow = Look {
-        width: surco::look::Width::of(None, None).within(20),
-        ..Look::plain()
-    };
-    let row = Paint::Plain.line(&footer(&frame, &narrow));
-    assert_eq!(row, "nothing needs you");
-}
-
-/// The run's nodes beside its page: each a row with its standing's mark, the pointer on
-/// the one pointed at, and how long a node worked where it did.
-#[test]
-fn the_runs_nodes_are_a_list_the_pointer_moves_along() {
-    let mut frame = RunFrame::sample(&RUN);
-    let mut plan = NodeFrame::sample(&NodeId::from("plan"), NodeStanding::ToGo);
-    plan.standing = Standing::Finished;
-    plan.elapsed = Some(Duration::from_secs(36));
-    let mut approve = NodeFrame::sample(&NodeId::from("approve-plan"), NodeStanding::ToGo);
-    approve.standing = Standing::NeedsYou;
-    approve.elapsed = None;
-    let mut ship = NodeFrame::sample(&NodeId::from("ship"), NodeStanding::ToGo);
-    ship.standing = Standing::NeverRan;
-    ship.elapsed = None;
-    frame.nodes = vec![plan, approve, ship];
-    let pointed = NodeId::from("approve-plan");
-    assert_eq!(
-        drawn(nodes(&frame, Some(&pointed), &look(22))),
-        ["  ✓ plan  36s", "▸ ◆ approve-plan", "  ◌ ship"]
+    assert!(
+        open.ends_with(" Q78GRR") && open.chars().count() == 118,
+        "{open}"
     );
-    assert_eq!(
-        drawn(nodes(&frame, None, &ascii())),
-        ["  + plan  36s", "  ? approve-plan", "  . ship"]
+    let (finished, _, _) = designed_at(276);
+    let closed = headline_drawn(headline(&finished), 118);
+    assert!(
+        closed.starts_with("✓ fragua (standard) · finished · in 1h52m "),
+        "{closed}"
     );
+    let stalled = RunFrame {
+        standing: Standing::Stalled,
+        phase: RunPhase::Running,
+        elapsed: Some(Duration::from_secs(60)),
+        since_last_event: Some(Duration::from_secs(9)),
+        ..RunFrame::sample(&RUN)
+    };
+    let stalled = headline_drawn(headline(&stalled), 118);
+    assert!(stalled.contains(" · stalled · for 9s "), "{stalled}");
 }

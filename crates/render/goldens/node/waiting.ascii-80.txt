@@ -1,10 +1,11 @@
 ? node grill of run Q78GRR ; needs you
 
+  stands       needs you
+  took         36s
+  tokens       220k tokens ; 210k in / 10k out (202k cached)
   kind         prompt
   attempt      1
   runner       planner on mock/gpt-6-luna
-  tokens       210k in / 10k out (202k cached)
-  took         36s
   produced     ~/.yunta/runs/01M7DES1GNED00000000Q78GRR/artifacts/grill/questions.yaml
 
 what it hands over
@@ -18,6 +19,7 @@ read    crates/cli/src/cli/pack.rs
 read    crates/cli/src/project.rs
 accepted questions
 submit  questions
+needs you: asked 3 questions: `where-global-lives`, `how-requested`, `beside-...
 
 next
   yunta status Q78GRR   shows the whole run

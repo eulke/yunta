@@ -1,0 +1,9 @@
+● fragua · the nodes it runs, in order            standard
+
+  grill → brief → plan → spec → approve-plan → implement
+  implement → review@reviewer → fix-findings
+  implement → review@reviewer-alt → fix-findings
+  implement → conform → fix-findings
+  fix-findings → lint
+  lint → tests → ship → pr
+  lint → fix-lint

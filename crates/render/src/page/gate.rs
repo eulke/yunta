@@ -7,14 +7,19 @@
 //! Where it is drawn says how much it carries, so the page is one value whose
 //! variant is that place. What answers the decision is not the page's: a
 //! prompt draws its card under it, and `published` ends a pull request's
-//! description on the decision a review gives.
+//! description on the decision a review gives. Over a card standing in place at
+//! the foot of a run's pane, the page is what the decision rests on: what the
+//! gate shows, but a plan, read at its desk a key away, and the run's findings,
+//! which its last line counts; the change by file; and the findings and the
+//! criteria in a line, where the run has either.
 
 use surco::components::{Fields, Gist, Headline, Note};
 use surco::doc::{Block, Doc};
 use surco::look::Look;
 use surco::words::Standing;
-use yunta_core::events::GateWaitingPayload;
-use yunta_core::shown::ShownDocument;
+use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload};
+use yunta_core::receipt::{CriteriaSummary, FindingsSummary};
+use yunta_core::shown::{ShownContent, ShownDocument};
 use yunta_core::RunId;
 
 use super::{desk, shown, Form, Page, Shown};
@@ -53,6 +58,24 @@ pub enum Gate<'a> {
         shown: Option<(&'a RunId, &'a [ShownDocument])>,
         /// The decision, which says what it keeps from the person.
         escalation: &'a GateWaitingPayload,
+    },
+    /// What a card standing in place at the foot of a run's pane rests on,
+    /// above it: each document the gate shows as a review reads it, but a
+    /// plan, read at its desk a key away, and the run's findings; the change
+    /// by file; then the findings and the criteria in a line, where the run
+    /// posted a finding or a check judged a task. No headline: the pane's title
+    /// names the gate, and the card asks what is decided.
+    OverTheCardInPlace {
+        /// The run the decision is in, with each document it is about as the
+        /// run holds it.
+        shown: (&'a RunId, &'a [ShownDocument]),
+        /// What the run changed, when the change was counted on its newest
+        /// tree.
+        changed: Option<&'a ChangesCountedPayload>,
+        /// The findings the run holds, and how many were answered.
+        findings: &'a FindingsSummary,
+        /// What the checks after each task's work found of its criteria.
+        criteria: &'a CriteriaSummary,
     },
     /// What a terminal with no room for a plan's desk prints over the card:
     /// each document as a terminal shows it, under the headline, and what
@@ -97,8 +120,57 @@ impl Page for Gate<'_> {
                     ),
                 }
             }
+            Gate::OverTheCardInPlace {
+                shown,
+                changed,
+                findings,
+                criteria,
+            } => over_the_card_in_place(shown, changed, (findings, criteria), look),
             Gate::InPlaceOfTheDesk { shown, escalation } => whole(shown, escalation, look),
         }
+    }
+}
+
+/// What a card standing in place at the foot of a run's pane rests on, as
+/// [`Gate::OverTheCardInPlace`] says: each document `shown` but a plan and the run's
+/// findings, as a review reads it, a text one at the pane's body column with its words right
+/// under its title; the change `changed` by file; then the findings and the
+/// criteria in a line, where the run posted a finding or a check judged a task.
+fn over_the_card_in_place(
+    (run, documents): (&RunId, &[ShownDocument]),
+    changed: Option<&ChangesCountedPayload>,
+    (findings, criteria): (&FindingsSummary, &CriteriaSummary),
+    look: &Look,
+) -> Doc {
+    let read = documents.iter().filter(|document| match &document.content {
+        ShownContent::Tasks(_) | ShownContent::RunFindings(_) => false,
+        ShownContent::Spec(_) | ShownContent::Findings(_) | ShownContent::Text(_) => true,
+    });
+    let doc = read.fold(Doc::new(), |doc, document| {
+        doc.with_all(over_a_card(document, run, look))
+    });
+    let by_file = changed.and_then(crate::changes::by_file);
+    let judged = findings.posted > 0 || criteria.tasks > 0;
+    let verdicts = judged.then(|| super::verdicts(findings, criteria, look.glyphs));
+    doc.with_all(by_file.map(Block::Diffstat))
+        .with_all(verdicts.map(|line| Block::Rows(vec![line])))
+}
+
+/// `document`, of the run `run`, as it stands over a card in place: a text one at the
+/// pane's body column with its words right under its title, any other as a review reads it.
+fn over_a_card(document: &ShownDocument, run: &RunId, look: &Look) -> Vec<Block> {
+    match &document.content {
+        ShownContent::Text(text) => vec![shown::text_over_a_card(document, text)],
+        ShownContent::Tasks(_)
+        | ShownContent::Spec(_)
+        | ShownContent::Findings(_)
+        | ShownContent::RunFindings(_) => Shown {
+            document,
+            run,
+            form: Form::Review,
+        }
+        .document(look)
+        .into_blocks(),
     }
 }
 

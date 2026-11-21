@@ -110,14 +110,14 @@ The scene is a pure function of the run kept, of what it waits on a person for, 
 | the node runs a loop | board | each task at work: its title and attempt, how it is proved (red or green, by which command), what the run holds every task to, its scope with the paths written and those granted; then the feed | nothing |
 | findings posted, and the node reviews or fixes | findings | how many are answered and which nodes posted; one finding a row, a pointer; the pointed finding (where, what, its answer once it has one); the node's feed | nothing |
 | `Questions`, `AnswersRefused` | round | the request above; each question in turn, a refused answer under its question; nothing recorded until the last | answer |
-| a gate that shows a plan | desk | the plan's desk as the design draws it (`plan`), the gate's options at its foot | a number |
-| a gate with no plan, `Menu::Console` | card | what the gate shows, as the gate's page draws it above a card today; the change by file | choose |
+| a gate that shows a plan, the change it counted holding no file | desk | the plan's desk as the design draws it (`plan`), the gate's options at its foot | a number |
+| a gate with no plan, or whose counted change holds a file; `Menu::Console` | card | what the gate shows, as the gate's page draws it above a card today; the change by file; a plan it shows one `r` away | choose |
 | `Menu::Failure`, `NodeFailed`, an escalation of a failed node | failure | the failing output's tail; kind, attempt, how long it took; the card | choose |
 | `Menu::Scope` | card | the write the fence refused, when one was; the path and why | grant, deny |
 | `Menu::Departure`, or a failure whose cause is a departure owed | card | what the plan decided, then what the session says instead; the options the engine offers | choose |
 | `Menu::Budget`, `BudgetExhausted`, `Menu::LoopCap`, `LoopOverrun`, or a failure whose cause is a loop capped | card | what is spent against its cap | choose |
 | an answer recorded, its resume not yet on the log | work, still | the answer as recorded; that it goes on when an engine takes it | `r` when no engine does |
-| a pause on the log, what it asks not yet read | work, still | as work, with no card yet | nothing |
+| a pause on the log, what it asks not yet read | work, still: the board where its node is a loop | as its node at work draws, with no card yet | nothing |
 | a pause whose escalation carries no menu | standstill | the pause in the log's words; that no option answers it here | `r`, `x` |
 | `AwaitingReset` | work, still | as work, with when it goes on alone; no tint, no spinner | nothing |
 | `ExternalGate`, `Menu::Published`, `PullRequestClosed` | pull request | the link and how it stands, read from the forge when the scene opens | `o` opens the pull request; the run's page is in the palette here |
@@ -130,7 +130,7 @@ The scene is a pure function of the run kept, of what it waits on a person for, 
 | created, no node started | work | what runs first | nothing |
 | finished, reported | receipt | criteria, baseline, scope, review, event chain (verified once, when the scene first shows; nothing is written); cost, change, pull request; under a report, the findings that block | nothing |
 | failed, promoted, broken | ended | the failure's evidence; the successor, which takes the screen while the run leads; where the log stops making sense | nothing |
-| a node pointed at while the run does not lead | its own | by its standing: at work, as its work, board or findings scene; needing the person, what it waits on and its feed, the prompt one `a` or `f` away; ended, what it did (its findings, as the findings scene, for a node that posted or answered them), its outcome's summary and its feed whole; never ran, what it runs; skipped, why the mode leaves it out | nothing |
+| a node pointed at while the run does not lead | its own; ended, for the node a failed, promoted or broken run's end names | by its standing: at work, as its work, board or findings scene; needing the person, what it waits on and its feed, the prompt one `a` or `f` away; ended, what it did (its findings, as the findings scene, for a node that posted or answered them), its outcome's summary and its feed whole; never ran, what it runs; skipped, why the mode leaves it out; the node a failed, promoted or broken run's end names shows the end, whoever points at it | nothing |
 
 Every pane but the findings', the receipt's and the round's opens with its title: the node and its kind, and at the far end who works it, its task, its check or its assignee.
 

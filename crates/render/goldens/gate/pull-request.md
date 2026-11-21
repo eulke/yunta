@@ -300,4 +300,4 @@ _8 lines_
 on the machine that holds the run
 
 - `yunta resume 7E5PH4`: reads the answer and acts on it
-- `yunta close 7E5PH4`: closes the run for good
+- `yunta close 7E5PH4`: close it for good

@@ -5,6 +5,7 @@
 //! lays out in columns and scrolls, a page draws whole and in order.
 
 use super::blocks::{draw_all, Reader};
+use super::card::typed_line;
 use super::screen;
 use super::text::{esc, mark, words};
 use super::GLYPHS;
@@ -91,13 +92,6 @@ fn rail_row(row: &RailRow) -> String {
             format!("{} <b>{count}</b>{key}", words(what))
         }
         RailRow::Weighs(said) => words(said),
-        RailRow::Pair { left, right } => format!(
-            r#"{} <span class="muted">{}</span> {}"#,
-            words(left),
-            GLYPHS.sep(),
-            words(right)
-        ),
-        RailRow::Order(diagram) => format!("<code>{}</code>", esc(&diagram.source)),
     }
 }
 
@@ -117,7 +111,8 @@ fn pane(reader: &mut Reader, pane: &Pane) -> String {
     )
 }
 
-/// What is being asked, as the page's status, what answers it, and its keys.
+/// What is being asked, as the page's status, what answers it, the words being typed
+/// for an option with what is asked of them and why they were not taken, and its keys.
 fn foot(foot: &DeskFoot) -> String {
     let question = format!(
         r#"<p class="attention">{} <b>{}</b></p>"#,
@@ -138,7 +133,7 @@ fn foot(foot: &DeskFoot) -> String {
             }
             format!("<p>{}</p>", options.join("&nbsp;&nbsp; "))
         }
-        FootRow::Confirming(option) => {
+        FootRow::Confirming(option) | FootRow::Saying { chosen: option, .. } => {
             let mut said = format!("<b>{}</b>", esc(&option.name));
             for part in [&option.said, &option.cost].into_iter().flatten() {
                 said.push_str(&format!(" {}", words(part)));
@@ -146,5 +141,26 @@ fn foot(foot: &DeskFoot) -> String {
             format!("<p>{said}</p>")
         }
     };
-    format!("{question}{answers}{}", screen::legend(&foot.legend))
+    let typing = match &foot.row {
+        FootRow::Saying {
+            asks,
+            typed,
+            refused,
+            ..
+        } => {
+            let refused = refused.as_deref().map_or(String::new(), |refused| {
+                format!("<p>{} {}</p>", mark(Mark::Failed), words(refused))
+            });
+            format!(
+                "<p><b>{}</b></p><p>{}</p>{refused}",
+                words(asks),
+                typed_line(typed)
+            )
+        }
+        _ => String::new(),
+    };
+    format!(
+        "{question}{answers}{typing}{}",
+        screen::legend(&foot.legend)
+    )
 }

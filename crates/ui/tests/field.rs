@@ -6,6 +6,7 @@
 mod support;
 
 use chrono::TimeDelta;
+use surco::components::Tally;
 use surco::surface::{Markdown, Surface};
 use surco::words::Standing;
 use tokio::sync::mpsc;
@@ -206,10 +207,11 @@ async fn a_run_parked_while_the_field_stands_moves_under_needs_you() {
         .and_then(|below| below.split(Standing::Stopped.word()).next())
         .unwrap_or_default();
     assert!(needs_you.contains(GATE.handle()), "{drawn}");
-    let counted = screen
-        .tally
-        .iter()
-        .map(|count| (count.standing, count.runs));
+    let counted: &[_] = match &screen.tally {
+        Tally::Counted(counts) => counts,
+        Tally::Uncounted => &[],
+    };
+    let counted = counted.iter().map(|count| (count.standing, count.runs));
     let says = [(Standing::NeedsYou, 1), (Standing::Stopped, 2)];
     assert!(counted.eq(says), "{drawn}");
     let subject = screen.attention.and_then(|attention| attention.subject);

@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use surco::doc::Depth;
 use surco::surface::{Html, Surface};
+use yunta_core::ahead::NodesAhead;
 use yunta_core::events::{ArtifactId, GateWaitingPayload, Shown};
 use yunta_core::shown::{ShownContent, ShownDocument};
 use yunta_core::{ArtifactKind, NodeId, NodeKind, TaskId};
@@ -81,10 +82,13 @@ impl OpenedRun<'_> {
             _ => Vec::new(),
         };
         let (documents, unread) = self.produced(node, &state).await;
+        let config = &self.manifest.doc.config;
+        let runner = yunta_render::blocks::runner_of(framed, declares, &state, config).cloned();
         let workspace = &self.project.workspace;
         Ok(Node {
             run_id: self.id.clone(),
             node: framed.clone(),
+            runner,
             run_dir: self.dir.clone(),
             cwd: workspace.dir.clone(),
             home: workspace.env.home.clone(),
@@ -203,10 +207,13 @@ impl RunReading<'_> {
     /// The run's page as deep as `depth` asks, from this reading.
     async fn into_page(self, depth: Depth) -> Result<Run, Error> {
         let shown = self.shown().await?;
+        let frozen = &self.run.manifest.doc;
+        let ahead = NodesAhead::of(&frozen.workflow, &frozen.config, self.state.run.left_out());
         let decision = self.waits_on().map(|(on, escalation)| Decision {
             on: on.clone(),
             escalation: GateWaitingPayload::clone(escalation),
             shown,
+            ahead,
         });
         let plans = match depth.reaches(Depth::Full) {
             true => self.plans().await,

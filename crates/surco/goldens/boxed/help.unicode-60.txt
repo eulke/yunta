@@ -1,6 +1,49 @@
-┌ keys ────────────────────────────────────────────────┐
-│ /      anything: only what can be done here          │
-│ n      start a new run, from anywhere                │
-│ esc    one step back; what it leaves stays waiting   │
-│ q      leave: every run keeps going                  │
-└──────────────────────────────────────────────────────┘
+╭ keys ──────────────────────────────────────────────────────────────╮
+│ You never have to remember more than this.                         │
+│                                                                    │
+│ /          anything: only what can be done here, with its command  │
+│ n          start a new run, wherever no prompt stands              │
+│ j k        move; the footer always says what they move             │
+│ pgup pgdn  scroll the pane a page at a time                        │
+│ enter      open, answer, confirm                                   │
+│ esc        one step back; what it leaves stays waiting             │
+│ a          go to what needs you                                    │
+│ f          follow what the run is doing                            │
+│ s g        what it cost, its graph                                 │
+│ c          stop it and everything under it                         │
+│ o          the whole page, in a browser                            │
+│ q          go to the field; it keeps going                         │
+│ ctrl-c     leave: every run keeps going without this window        │
+│                                                                    │
+│                                                                    │
+╰────────────────────────────────────────────────────────────────────╯
+
+╭ keys ──────────────────────────────────────────────────────────────╮
+│ You never have to remember more than this.                         │
+│                                                                    │
+│ /          anything: only what can be done here, with its command  │
+│ n          start a new run, wherever no prompt stands              │
+│ j k        move; the footer always says what they move             │
+│ pgup pgdn  scroll the pane a page at a time                        │
+│ enter      open, answer, confirm                                   │
+│ esc        one step back; what it leaves stays waiting             │
+│ a          go to what needs you                                    │
+│ f          follow what the run is doing                            │
+│ s g        what it cost, its graph                                 │
+│ c          stop it and everything under it                         │
+│ o          the whole page, in a browser                            │
+│ q          go to the field; it keeps going                         │
+│ ctrl-c     leave: every run keeps going without this window        │
+│                                                                    │
+│                                                                    │
+╰────────────────────────────────────────────────────────────────────╯
+
+╭ keys ────────────────────────────────────────────────╮
+│ You never have to remember more than this.           │
+│ /          anything: only what can be done here, wit…│
+│ n          start a new run, wherever no prompt stands│
+│ j k        move; the footer always says what they mo…│
+│ pgup pgdn  scroll the pane a page at a time          │
+│ enter      open, answer, confirm                     │
+│ … 8 under                                            │
+╰──────────────────────────────────────────────────────╯

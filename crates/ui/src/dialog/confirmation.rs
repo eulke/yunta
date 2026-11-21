@@ -50,7 +50,7 @@ impl Confirmation {
             .with(Gist::new(self.asks.clone()))
             .with(Next { steps });
         Overlay::new(yunta_render::screen::CONFIRM, asks)
-            .legend(yunta_render::screen::confirmation_legend())
+            .legend(yunta_render::prompt::confirming_legend())
     }
 
     /// What `stroke` does here: Enter confirms, Escape goes back, Ctrl-C leaves.

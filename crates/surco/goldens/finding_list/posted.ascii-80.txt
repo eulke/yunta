@@ -1,0 +1,14 @@
+* ^ major    Global pack paths ignore the configured YUNTA_HOME
+  ^ major    Global pack commands ignore the configured YUNTA_HOME state root
+  . minor    Pack audit cannot inspect globally installed packs
+  ! blocking Pack target API shapes are defined outside the declared file
+
+* ^ major    Global pack paths ignore the configured YUNTA_HOME
+  ^ major    Global pack commands ignore the configured YUNTA_HOME state root
+  . minor    Pack audit cannot inspect globally installed packs
+  ! blocking Pack target API shapes are defined outside the declared file
+
+* ^ major    Global pack paths ignore the configured YU...
+  ^ major    Global pack commands ignore the configured...
+  . minor    Pack audit cannot inspect globally install...
+  ! blocking Pack target API shapes are defined outside...

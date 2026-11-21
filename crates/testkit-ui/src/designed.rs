@@ -13,7 +13,9 @@
 //! command the run measures by a `cargo` that holds when armed, and every node
 //! started beside another at its first `git` call, before it writes anything
 //! (`place`); `script` gives each word once the event the last one let go is
-//! on the log, so nothing two sessions do races. The run's clock stands still
+//! on the log, so nothing two sessions do races, and moves the clock past a
+//! node at work beside others only once it gave its checkout back, so the pool
+//! dates each give-back the same way. The run's clock stands still
 //! until the recording moves it, by the seconds the design shows each node
 //! working and each person taking: events between two moves share an instant.
 //! Each pause is a park, answered as another process answers it, then a wake.

@@ -77,10 +77,10 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::artifacts::ArtifactLedger;
-use yunta_core::events::findings::FindingLedger;
+use yunta_core::events::findings::{FindingLedger, PostedFinding};
 use yunta_core::events::{
-    ChildLedger, DegradationLedger, Failure, Finding, GateLedger, GrantLedger, NodeLedger,
-    NodeState, RunLedger, RunMetrics, Spend, TaskLedger, TokenUsage, UnknownKindCount,
+    ChildLedger, DegradationLedger, Failure, Finding, FindingSeverity, GateLedger, GrantLedger,
+    NodeLedger, NodeState, RunLedger, RunMetrics, Spend, TaskLedger, TokenUsage, UnknownKindCount,
 };
 use yunta_core::{NodeId, RunId, Seq};
 
@@ -152,6 +152,10 @@ pub struct RunState {
     /// The seq of the last event folded. It moves past a break while the
     /// ledgers stay at it, and is left out of the comparison.
     head: Option<Seq>,
+    /// The seq of the last event applied: the head, until the log breaks,
+    /// and where it last made sense once it has. Left out of the comparison,
+    /// as the head is.
+    applied: Option<Seq>,
 }
 
 /// Two states are the same when they derive the same facts. The clock, the
@@ -334,6 +338,24 @@ impl RunState {
     pub fn unsettled_findings(&self) -> Vec<Finding> {
         let unsettled = self.findings.unsettled().into_iter();
         unsettled.map(|posted| posted.finding).collect()
+    }
+
+    /// The findings that keep the run from being done, each by the node that posted it:
+    /// those of blocking severity among the unsettled ones, two that make the same complaint
+    /// at the same place counted once, as [`dedup_findings`] counts them, in the order each
+    /// was first posted. What a run's frame and its receipt count, and its receipt's pane
+    /// lists. Not [`RunState::unsettled_findings`], whatever their severity.
+    pub fn findings_that_block(&self) -> Vec<PostedFinding> {
+        let mut seen = std::collections::HashSet::new();
+        self.findings
+            .unsettled()
+            .into_iter()
+            .filter(|posted| {
+                let finding = &posted.finding;
+                seen.insert((finding.location.clone(), finding.complaint()))
+            })
+            .filter(|posted| posted.finding.severity == FindingSeverity::Blocking)
+            .collect()
     }
 
     /// Whether `node`'s questions were answered and its close still owes

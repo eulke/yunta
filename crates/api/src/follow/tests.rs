@@ -1,19 +1,22 @@
 //! What a look at a followed run and field costs, counted on the reader the following
 //! keeps, and what waits on the following's own clocks, which no caller outside the
 //! module can move: a wait for a successor run out, and final once handed; a run's
-//! directory checked. Over a log a bench writes.
+//! directory checked; and the order a reading of what a run asks takes among the events,
+//! its read and the following's next look made to wait on each other. Over a log a bench
+//! writes.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::time::Instant;
 use yunta_core::events::{
-    EventDraft, EventPayload, HostSuspendedPayload, RunCreatedPayload, RunEvent,
+    EventDraft, EventPayload, GateEvent, HostSuspendedPayload, RunCreatedPayload, RunEvent,
     RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
 };
 use yunta_core::persisted::PersistedDoc;
 use yunta_core::{ConfigLayer, Env, ProcessSecrets, RunId, SystemIdSource};
 use yunta_render::page::RunUnread;
+use yunta_testkit::workflows::{ASKS, HANDS_ONE_QUESTION_OVER};
 use yunta_testkit::{Bench, SourceLog};
 use yunta_testkit_core::FixedClock;
 
@@ -43,6 +46,7 @@ fn project_of(bench: &Bench) -> Project {
             clock: Arc::new(FixedClock),
             ids: Arc::new(SystemIdSource),
             secrets: Arc::new(ProcessSecrets),
+            forges: Arc::new(crate::DeclaredForge),
             binary: PathBuf::from("yunta"),
         },
     }
@@ -189,6 +193,72 @@ async fn followed(project: &Project, run: &RunId) -> Following {
         "the run read whole comes first: {first:?}"
     );
     following
+}
+
+/// What `following` handed once the reading of what its run asks, under way, came back:
+/// the reading waited on, and handed as the following hands it.
+async fn read_of_what_it_asks(following: &mut Following) -> Vec<FollowNews> {
+    let read = following.asking.read.recv().await;
+    let (turn, news) = read.expect("a reading of what the run asks is under way");
+    following.asked_read(turn, news);
+    following.news.drain(..).collect()
+}
+
+/// What a run asks is read as of the head the following holds, never past it: a round read
+/// again once its answer reached the log, before the following read that answer, is handed
+/// as the pause the run stands at by that head; then come the events that answer it, then
+/// that nothing waits. Not that nothing waits first, ahead of the events that say why,
+/// which a screen holding the round takes for a pause gone with nothing answered.
+#[tokio::test]
+async fn a_round_read_again_as_its_answer_lands_is_read_at_the_head_held() {
+    let bench = Bench::with_run_id("01M7R0VNDREADAGA1N00000000");
+    bench.run(ASKS, HANDS_ONE_QUESTION_OVER).await;
+    let project = project_of(&bench);
+    let mut following = followed(&project, &bench.run_id).await;
+    let first = read_of_what_it_asks(&mut following).await;
+    let [FollowNews::Run {
+        news: RunNews::Awaited(Some((parked_at, _))),
+        ..
+    }] = first.as_slice()
+    else {
+        panic!("the round the run is parked on is read: {first:?}");
+    };
+
+    // The answer reaches the log; then the round is read again, as a following made anew
+    // or one that holds the run again reads it, the run still held before the answer.
+    let recorded = bench.answer_round("ask", &[("summary", "the greeting")]);
+    recorded.await.expect("the answer is recorded");
+    following.asking.forget();
+    following.ask(project.workspace.clock.now());
+    let again = read_of_what_it_asks(&mut following).await;
+    let [FollowNews::Run {
+        news: RunNews::Awaited(Some((read_at, _))),
+        ..
+    }] = again.as_slice()
+    else {
+        panic!("the round is read as the head held stands: {again:?}");
+    };
+    assert_eq!(read_at, parked_at);
+
+    following.look(&Stop::new()).await.unwrap();
+    let handed: Vec<FollowNews> = following.news.drain(..).collect();
+    let [FollowNews::Run {
+        news: RunNews::Events(events),
+        ..
+    }, FollowNews::Run {
+        news: RunNews::Awaited(None),
+        ..
+    }] = handed.as_slice()
+    else {
+        panic!("the events that answer it, then that nothing waits: {handed:?}");
+    };
+    let answered = events.iter().any(|event| {
+        matches!(
+            event.payload(),
+            Some(EventPayload::Gates(GateEvent::QuestionsAnswered(_)))
+        )
+    });
+    assert!(answered, "{events:?}");
 }
 
 /// A run closed promoted whose successor never comes is handed once as having none,

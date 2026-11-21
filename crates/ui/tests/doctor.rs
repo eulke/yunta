@@ -139,9 +139,9 @@ async fn sessions_under_way_go_on_while_the_person_looks_elsewhere_and_comes_bac
         panic!("confirmed, a session is opened per binding: {asked:?}");
     };
     let sessions = *sessions;
-    // Upkeep, opened from the palette over doctor, then back to doctor.
+    // Upkeep, opened from the palette over doctor by what its row does, then back to doctor.
     let mut asked = Vec::new();
-    for stroke in "/gc"
+    for stroke in "/orphan"
         .chars()
         .map(Stroke::Insert)
         .chain([Stroke::Enter, Stroke::Decline])

@@ -348,7 +348,7 @@ async fn caught_up_once_what_is_followed_is_read_whole() {
 
 /// A promoted run's successor, folded from what is followed, takes the run's place: the
 /// run's stage shows the successor, which the state follows and keeps in view, and the
-/// screen's trail ends with its handle.
+/// screen's trail names its handle, then the node pointed at.
 #[tokio::test]
 async fn a_successor_folded_takes_the_place_of_its_run() {
     let promoted = Bench::with_run_id("01M7F0110WEDPR0M0TED000000");
@@ -375,7 +375,7 @@ async fn a_successor_folded_takes_the_place_of_its_run() {
     assert_eq!(in_view(&state).run.run, successor.run_id);
     let trail = state.screen(&Look::plain()).trail;
     assert_eq!(
-        trail.last().map(String::as_str),
+        trail.get(1).map(String::as_str),
         Some(successor.run_id.handle()),
         "{trail:?}"
     );

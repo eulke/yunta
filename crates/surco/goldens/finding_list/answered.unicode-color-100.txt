@@ -1,0 +1,20 @@
+  ␛[32m✓␛[0m ␛[2mmajor   ␛[0m Global pack paths ignore the configured YUNTA_HOME
+             ␛[2mfixed: Global pack paths now use the shared user_state_root resolver,␛[0m␛[2m…␛[0m
+␛[1;35m▸␛[0m ␛[33m▲␛[0m ␛[2mmajor   ␛[0m ␛[1mGlobal pack commands ignore the configured YUNTA_HOME state root␛[0m
+  ␛[2m◌␛[0m ␛[2mminor   ␛[0m Pack audit cannot inspect globally installed packs
+  ␛[32m✓␛[0m ␛[2mblocking␛[0m Pack target API shapes are defined outside the declared file
+             ␛[2mfixed: PackTarget and its path functions are now defined in crates/cli␛[0m␛[2m…␛[0m
+
+  ␛[32m✓␛[0m ␛[2mmajor   ␛[0m Global pack paths ignore the configured YUNTA_HOME
+             ␛[2mfixed: Global pack paths now use the shared user_state_root reso␛[0m␛[2m…␛[0m
+␛[1;35m▸␛[0m ␛[33m▲␛[0m ␛[2mmajor   ␛[0m ␛[1mGlobal pack commands ignore the configured YUNTA_HOME state root␛[0m
+  ␛[2m◌␛[0m ␛[2mminor   ␛[0m Pack audit cannot inspect globally installed packs
+  ␛[32m✓␛[0m ␛[2mblocking␛[0m Pack target API shapes are defined outside the declared file
+             ␛[2mfixed: PackTarget and its path functions are now defined in crat␛[0m␛[2m…␛[0m
+
+  ␛[32m✓␛[0m ␛[2mmajor   ␛[0m Global pack paths ignore the configured YUNT…
+             ␛[2mfixed: Global pack paths now use the shared␛[0m␛[2m…␛[0m
+␛[1;35m▸␛[0m ␛[33m▲␛[0m ␛[2mmajor   ␛[0m ␛[1mGlobal pack commands ignore the configured Y␛[0m␛[1m…␛[0m
+  ␛[2m◌␛[0m ␛[2mminor   ␛[0m Pack audit cannot inspect globally installed…
+  ␛[32m✓␛[0m ␛[2mblocking␛[0m Pack target API shapes are defined outside t…
+             ␛[2mfixed: PackTarget and its path functions are␛[0m␛[2m…␛[0m

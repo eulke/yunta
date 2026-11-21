@@ -4,6 +4,7 @@
 //! git and, where a page is shown, a stand-in for the opener that records what it was
 //! handed: no test opens a browser.
 
+use yunta_render::screen::{place_of, GRAPH, STATS};
 use yunta_testkit::stubs::path_opening_no_browser;
 use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::{stderr, yunta_at, Checkout, Terminal};
@@ -35,14 +36,16 @@ fn its_closed_run_followed(checkout: &Checkout, environment: &[(&str, &str)]) ->
 
 #[test]
 fn a_runs_numbers_graph_and_receipt_open_from_its_stage() {
-    let (checkout, _) = with_a_finished_run();
+    let (checkout, id) = with_a_finished_run();
     let mut terminal = its_closed_run_followed(&checkout, &[]);
     terminal.keys("s");
-    terminal.wait_on_screen("› stats", "its numbers never opened");
+    let stats = place_of(yunta_testkit::handle(&id), STATS);
+    terminal.wait_on_screen(&format!("› {stats}"), "its numbers never opened");
     terminal.keys("\u{1b}");
     terminal.wait_on_screen(FOLLOWED, "esc never came back to the run");
     terminal.keys("g");
-    terminal.wait_on_screen("› graph", "its graph never opened");
+    let graph = place_of("done", GRAPH);
+    terminal.wait_on_screen(&format!("› {graph}"), "its graph never opened");
     terminal.keys("\u{1b}");
     terminal.wait_on_screen(FOLLOWED, "esc never came back to the run");
     terminal.keys("e");

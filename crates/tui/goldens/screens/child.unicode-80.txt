@@ -1,0 +1,24 @@
+ yunta › PARENT › feat › nted-1 › approve            ◆ 3 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◆ gated (default) · needs you · for 0s                                  nted-1
+ approve work
+ ━━━━━━━ ┄┄┄┄
+ gate `approve` needs a decision
+
+ approve · gate                                                   assignee lead
+
+ a child of PARENT, opened by its node `feat`
+
+
+
+
+
+
+
+ ▎ ◆ gate `approve` needs a decision                                    approve
+ ▎
+ ▎ ▸ approve  On to `work`: resolves this gate
+ ▎   abort    Pause here: nothing runs; this decision stays open
+ 0 tokens ▁▁ · 0s at work
+
+ j k choose · enter answer · n add a note · esc leave it waiting · ? keys

@@ -3,21 +3,26 @@
 //! What a run asks is keyed by the [`AnswerablePause`] it waits at: a decision, by the
 //! node or run `awaits_decision` names and the seq of the run's pause; a round of
 //! questions, by its node and the seq of its `questions_asked`, which stays the same
-//! while the run parks again on the same round. Each key says that event's seq, so an
+//! while the run parks again on the same round. A round whose answer the log holds asks no
+//! one: it waits on its resume, as a decision answered does, so its key goes with the
+//! events that answer it. Each key says that event's seq, so an
 //! interface tells whether what it keeps was read for the pause a run stands at. The key
 //! is worked out here alone, from the state the following holds, again only once the
 //! run's head moved, so a parked run looked at many times costs no more; what was worked
-//! out of a run a refollow lets go is forgotten, so a run held again is asked again. A key the following has not read is read on a task
-//! of its own, off the look's path: a decision from the run's manifest, directory and
-//! that state; a round from its events too, read through the following's reader. What
-//! it read is handed with its key while the key is still the run's, and dropped once the
-//! key changed, so an interface keeps by the key what a person typed and works none out.
+//! out of a run a refollow lets go is forgotten, so a run held again is asked again. A key
+//! the following has not read is read on a task of its own, off the look's path: a
+//! decision from the run's manifest, directory and that state; a round from its events
+//! too, read through the following's reader up to the head that state stands at. What it
+//! read is handed with its key while the key is still the run's, and dropped once the key
+//! changed, so an interface keeps by the key what a person typed and works none out.
 //!
-//! A run that waits on none is handed `Awaited(None)` once, and so is a read that finds
-//! nothing waiting where the log said something does: it was answered elsewhere, and the
-//! next batch says so. A read that fails, as a document a decision shows that fails
-//! today's shape, is handed as `AwaitedUnread` with its key and why, and the following
-//! goes on.
+//! A read is of the run as the following holds it, never of the log past it: an answer
+//! that reached the log while the read ran comes in the next batch, and the `Awaited(None)`
+//! once it waits on none after it. Read from the log as it stands, the read would hand that
+//! nothing waits ahead of the events that say why, and an interface would let a prompt go
+//! with what was answered on it unsaid. A run that waits on none is handed `Awaited(None)`
+//! once. A read that fails, as a document a decision shows that fails today's shape, is
+//! handed as `AwaitedUnread` with its key and why, and the following goes on.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -89,6 +94,11 @@ impl AnswerablePause {
             AskedOn::Decision { paused_at, .. } => *paused_at,
             AskedOn::Round { asked_at, .. } => *asked_at,
         }
+    }
+
+    /// The run it is a pause of, whose log [`AnswerablePause::seq`] counts in.
+    pub fn run(&self) -> &RunId {
+        &self.run
     }
 }
 
@@ -222,7 +232,8 @@ struct Read {
 }
 
 impl Read {
-    /// What `key` asks a person, read whole: none when nothing waits on one.
+    /// What `key` asks a person, read whole as of the head the run is held at, the log's
+    /// events past it left to the next batch: none when nothing waits on one.
     async fn of(self, key: &AnswerablePause) -> Result<Option<Awaited>, Error> {
         match &key.on {
             AskedOn::Decision { .. } => {
@@ -231,8 +242,12 @@ impl Read {
                 Ok(decision.map(|decision| Awaited::Decision(Box::new(decision))))
             }
             AskedOn::Round { node, .. } => {
-                let events = self.reader.events(&key.run).await.map_err(Failure::new)?;
-                let round = WaitingQuestions::read(&self.dir, &events, node.clone()).await?;
+                let mut events = self.reader.events(&key.run).await.map_err(Failure::new)?;
+                let held = self.state.head();
+                events.retain(|event| Some(event.seq) <= held);
+                let paused = self.state.run.paused().map(|(pause, _)| pause);
+                let round = WaitingQuestions::read(&self.dir, &events, node.clone(), paused);
+                let round = round.await?;
                 Ok(round.map(|round| Awaited::Round(Box::new(round))))
             }
         }
@@ -240,13 +255,17 @@ impl Read {
 }
 
 /// What `run` waits on a person for, by the pause it waits at, its frame taken at `now`:
-/// none while it is not parked on a person.
+/// none while it is not parked on a person, as a round once its answer is on the log, which
+/// waits on its resume from then.
 fn asked_of(run: &FollowedRun, now: DateTime<Utc>) -> Option<AskedOn> {
     let (_, paused_at) = run.state.run.paused()?;
     let frame = run.frame(now);
     frame.phase.waiting_on()?;
     if let Some(node) = waiting_round(&frame) {
         let round = run.state.gates.get(node)?.rounds.last()?;
+        if round.answered.is_some() {
+            return None;
+        }
         let (node, asked_at) = (node.clone(), round.asked_at);
         return Some(AskedOn::Round { node, asked_at });
     }

@@ -2,7 +2,9 @@
 //! changes, the shapes of another task it builds on, what it keeps, what
 //! its shapes imply beyond the plan and what tests it; then the code it
 //! writes — each shape it builds, as the tree held it, and each change it
-//! makes, once.
+//! makes, once. At the plan's desk it says neither the files it changes,
+//! which head the code under it, nor what tests it, which its proof says a
+//! key away.
 
 use surco::components::{Code, Fields, Section};
 use surco::doc::Block;
@@ -13,27 +15,50 @@ use yunta_core::{Change, Shape, Task, TasksFile};
 
 use super::{blank, said, tree};
 
+/// Where a task's card is read, which decides what it says in words. Not a page's
+/// [`Form`](super::Form), how much of a whole page a reader is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadOn {
+    /// A page that draws the plan whole: every fact of the card.
+    APage,
+    /// The plan's desk, where the code's headings name the files it changes and its
+    /// proof, a key away, what tests it.
+    ItsDesk,
+}
+
 /// One task's card: what it says in words, then the code it writes, each
 /// shape told against what the tree held of it.
 pub(in crate::page) fn card(task: &Task, review: &PlanReview) -> Section {
+    Section {
+        lead: None,
+        title: Line::new()
+            .push(Tone::Strong, task.id.as_str())
+            .plain(format!(": {}", task.title)),
+        blocks: said_on(task, review, ReadOn::APage),
+    }
+}
+
+/// One task's card as the plan's desk reads it, under a pane titled by the task: what it
+/// says in words but the files it changes and what tests it, then the code it writes.
+pub(in crate::page) fn at_its_desk(task: &Task, review: &PlanReview) -> Vec<Block> {
+    said_on(task, review, ReadOn::ItsDesk)
+}
+
+/// What `task`'s card says read `on` a page or its desk: its facts, then the code it writes,
+/// each shape told against what the tree held of it.
+fn said_on(task: &Task, review: &PlanReview, on: ReadOn) -> Vec<Block> {
     let judged = judged(review, task);
     let read = review.shapes_read.as_ref();
     let pieces: Vec<Piece> = pieces(task, &review.plan, judged)
         .into_iter()
         .map(|piece| piece.told(read))
         .collect();
-    let mut blocks: Vec<Block> = vec![facts(task, review, judged, &pieces).into()];
+    let mut blocks: Vec<Block> = vec![facts(task, review, judged, (&pieces, on)).into()];
     for piece in pieces {
         blocks.push(blank());
         blocks.push(piece.code.into());
     }
-    Section {
-        lead: None,
-        title: Line::new()
-            .push(Tone::Strong, task.id.as_str())
-            .plain(format!(": {}", task.title)),
-        blocks,
-    }
+    blocks
 }
 
 /// How many of the changes `review`'s cards draw show no code, and how
@@ -59,23 +84,25 @@ pub(in crate::page) fn judged<'a>(review: &'a PlanReview, task: &Task) -> Option
     review.tasks.iter().find(|judged| judged.task == task.id)
 }
 
-/// What a task's card says in words: what a person sees once it is done,
-/// the files it changes, the shapes of another task it builds on, what it
-/// keeps, what the shapes among `pieces` imply beyond the plan, and what
-/// tests it. The files and the shapes are read as written.
+/// What a task's card says in words, read `on` a page or its desk: what a
+/// person sees once it is done, the files it changes but at its desk, the
+/// shapes of another task it builds on, what it keeps, what the shapes among
+/// `pieces` imply beyond the plan, and what tests it but at its desk. The
+/// files and the shapes are read as written.
 fn facts(
     task: &Task,
     review: &PlanReview,
     judged: Option<&TaskReview>,
-    pieces: &[Piece],
+    (pieces, on): (&[Piece], ReadOn),
 ) -> Fields {
     let mut fields = Fields::new();
     if let Some(outcome) = said(&task.outcome) {
         fields = fields.push_if("you will see", outcome);
     }
-    fields = fields
-        .push_literal("changes", changed_files(task, judged).join(", "))
-        .push_literal("builds on", built_on(task, &review.plan).join(", "));
+    if on == ReadOn::APage {
+        fields = fields.push_literal("changes", changed_files(task, judged).join(", "));
+    }
+    fields = fields.push_literal("builds on", built_on(task, &review.plan).join(", "));
     for (n, invariant) in task.invariants.iter().enumerate() {
         fields = fields.push_if(if n == 0 { "keeps" } else { "" }, invariant.as_str());
     }
@@ -84,7 +111,10 @@ fn facts(
         .filter_map(|piece| Some((piece.shape?, &piece.code)))
         .collect();
     let fields = tree::implies(fields, &shapes, review.shapes_read.as_ref());
-    tested(fields, task, review, judged)
+    match on {
+        ReadOn::APage => tested(fields, task, review, judged),
+        ReadOn::ItsDesk => fields,
+    }
 }
 
 /// The files `task` changes, each once, in the order it names them: a card
@@ -102,36 +132,6 @@ pub(in crate::page) fn changed_files<'a>(
         }
     }
     files
-}
-
-/// The paths a task's rail row names: each file it changes, except that a directory it
-/// changes more than one file of stands for those files, once, where the first of them
-/// stood. A file at the root stands for itself.
-pub(in crate::page) fn impact_paths(files: &[&str]) -> Vec<String> {
-    let mut paths: Vec<String> = Vec::new();
-    for file in files {
-        let shared = |dir: &str| {
-            files
-                .iter()
-                .copied()
-                .filter(|other| parent(other) == Some(dir))
-                .count()
-                > 1
-        };
-        let path = match parent(file) {
-            Some(dir) if shared(dir) => format!("{dir}/"),
-            _ => file.to_string(),
-        };
-        if !paths.contains(&path) {
-            paths.push(path);
-        }
-    }
-    paths
-}
-
-/// The directory `file` is in, when it is in one.
-fn parent(file: &str) -> Option<&str> {
-    file.rsplit_once('/').map(|(dir, _)| dir)
 }
 
 /// Whether `change` is on a test the spec wrote, which no session writes.
@@ -154,16 +154,15 @@ fn built_on(task: &Task, plan: &TasksFile) -> Vec<String> {
         .collect()
 }
 
-/// `fields` with what tests `task`: each test the spec gives it, what it
-/// proves in the spec's words and the command that runs it; with no spec
-/// beside the plan, each criterion the plan gives it.
-pub(super) fn tested(
-    mut fields: Fields,
+/// What tests `task`, each what it proves and the command that runs it: each
+/// test the spec gives it, in the spec's words; with no spec beside the plan,
+/// each criterion the plan gives it.
+pub(super) fn tests_of<'a>(
     task: &Task,
-    review: &PlanReview,
-    judged: Option<&TaskReview>,
-) -> Fields {
-    let tests: Vec<(&str, &str)> = match review.spec.as_ref().and_then(|spec| spec.of(&task.id)) {
+    review: &'a PlanReview,
+    judged: Option<&'a TaskReview>,
+) -> Vec<(&'a str, &'a str)> {
+    match review.spec.as_ref().and_then(|spec| spec.of(&task.id)) {
         Some(spec) => spec
             .tests
             .iter()
@@ -180,8 +179,18 @@ pub(super) fn tested(
                 )
             })
             .collect(),
-    };
-    for (n, (proves, cmd)) in tests.into_iter().enumerate() {
+    }
+}
+
+/// `fields` with what tests `task`, as [`tests_of`] reads it: what each
+/// proves and the command that runs it, under `tested by`.
+fn tested(
+    mut fields: Fields,
+    task: &Task,
+    review: &PlanReview,
+    judged: Option<&TaskReview>,
+) -> Fields {
+    for (n, (proves, cmd)) in tests_of(task, review, judged).into_iter().enumerate() {
         let label = if n == 0 { "tested by" } else { "" };
         fields = match proves.trim() {
             "" => fields.push_command(label, cmd),

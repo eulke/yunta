@@ -7,6 +7,11 @@
 //! one surface is the phrase met on the next, and renaming a subcommand is a
 //! change to this file. The CLI's clap declaration is what accepts each line.
 //!
+//! An act the palette offers is said in the palette's words, as a person would ask
+//! for it (`stop it and everything under it`), and every page that offers the same
+//! act says those words beside its line: one act, one phrase. An act no palette
+//! offers keeps the words that say what it does.
+//!
 //! A line carries what the run is called by — its handle on a line a person
 //! reads, its whole id on one an agent copies — and nothing else a reader
 //! would have to invent: an option a reader picks stays `<option>`, because an
@@ -87,31 +92,59 @@ pub fn line_for(step: &NextStep, reader: Reader) -> String {
     }
 }
 
-/// What `step` does, beside its line where a reader picks one by it: a palette, and
-/// help. Not what an action does to the run it names ([`effect`]), which a run's
-/// page says.
+/// What stopping a run does, as the palette and every page that offers it say it.
+const STOP: &str = "stop it and everything under it";
+
+/// What closing a run does, as the palette and every page that offers it say it.
+const CLOSE: &str = "close it for good";
+
+/// What resuming a stalled run does, as the palette and every page that offers it say
+/// it.
+const CONTINUE: &str = "continue it from its log";
+
+/// What the receipt of a run that ended does, as the palette and every page that
+/// offers it say it.
+const WRITE_THE_RECEIPT: &str = "write the receipt";
+
+/// What verifying a run does, as the palette and every page that offers it say it.
+const VERIFY: &str = "verify its evidence";
+
+/// What following a run does, as the field's palette and every page that offers it say
+/// it.
+const FOLLOW: &str = "follow it as it moves";
+
+/// What opening a run's whole chronicle does, as a run's palette says it: an act of its own
+/// whose command, `yunta status <run> --follow`, following the run shares, so its row says
+/// these words where [`does`] says following's. Not following, which the field's `enter`
+/// takes.
+pub const WHOLE_CHRONICLE: &str = "the run's whole chronicle";
+
+/// What `step` does, in the palette's words where a palette offers it, which every
+/// page that offers the step says beside its line too, as help does. Not what an
+/// action does to the run it names ([`effect`]), which a run's page says, in these
+/// words where the palette words the act.
 pub fn does(step: &NextStep) -> &'static str {
     match step {
         NextStep::Status { node, depth, .. } => status_does(node.is_some(), *depth),
         NextStep::Needs => "shows the run waiting on you, and how to answer it",
-        NextStep::Follow { .. } => "follows the run as it moves",
-        NextStep::Resume { .. } => "continues the run from its log",
-        NextStep::Cancel { .. } => "stops the run and everything under it",
-        NextStep::Close { .. } => "closes the run for good",
+        NextStep::Follow { .. } => FOLLOW,
+        NextStep::Resume { .. } => CONTINUE,
+        NextStep::Cancel { .. } => STOP,
+        NextStep::Close { .. } => CLOSE,
         NextStep::Review { .. } => "reads the plan the run waits on, and answers it there",
-        NextStep::Open { .. } => "opens the run's page in a browser",
-        NextStep::Receipt { .. } => "writes the run's verified work receipt",
-        NextStep::Verify { .. } => "checks the run's event chain and its artifacts",
-        NextStep::Stats { .. } => "shows what the run cost",
+        NextStep::Open { .. } => "the whole page, in a browser",
+        NextStep::Receipt { .. } => WRITE_THE_RECEIPT,
+        NextStep::Verify { .. } => VERIFY,
+        NextStep::Stats { .. } => "what it cost, and where its time went",
         NextStep::History { .. } => "shows what the workflow's past runs cost",
         NextStep::Graph { .. } => "draws the workflow's graph",
-        NextStep::RunGraph { .. } => "draws the run's graph, each node as its log stands",
+        NextStep::RunGraph { .. } => "draw its graph",
         NextStep::ResolveGate { choice, .. } => resolve_gate_does(choice),
-        NextStep::Run { .. } => "runs the workflow",
+        NextStep::Run { .. } => "start a new run",
         NextStep::Check { .. } => "checks the workflow, naming each rule it breaks",
-        NextStep::List => "lists the workflows this repository can run",
+        NextStep::List => "the workflows you can run",
         NextStep::ListRuns { reach } => list_runs_does(*reach),
-        NextStep::Schemas => "lists every document yunta shows",
+        NextStep::Schemas => "the shape of every document yunta reads",
         NextStep::Schema { json, .. } => schema_does(*json),
         NextStep::Doctor { sessions, full } => doctor_does(*sessions, *full),
         NextStep::Test { .. } => "runs the project's workflow test cases",
@@ -142,7 +175,7 @@ fn status_does(one_node: bool, depth: Depth) -> &'static str {
 /// What a `resolve-gate` step does, as it chooses.
 fn resolve_gate_does(choice: &Choice) -> &'static str {
     match choice {
-        Choice::Asked => "puts what the run waits on to you",
+        Choice::Asked => "answer what it asks",
         Choice::Blank | Choice::Picked { .. } => "answers the decision the run waits on",
     }
 }
@@ -150,7 +183,7 @@ fn resolve_gate_does(choice: &Choice) -> &'static str {
 /// What listing the runs as far as `reach` does.
 fn list_runs_does(reach: Reach) -> &'static str {
     match reach {
-        Reach::Repository => "lists this repository's runs, the ones waiting on you first",
+        Reach::Repository => "every run of this repository",
         Reach::WithClosed => "lists this repository's runs, the closed ones too",
         Reach::Machine => "lists every run on this machine",
     }
@@ -169,7 +202,7 @@ fn doctor_does(sessions: bool, full: bool) -> &'static str {
     match (sessions, full) {
         (true, _) => "opens a session on each agent binding",
         (false, true) => "checks this machine, every check unfolded",
-        (false, false) => "checks this machine and its agent CLIs",
+        (false, false) => "check adapters, git, forge, packs",
     }
 }
 
@@ -177,7 +210,7 @@ fn doctor_does(sessions: bool, full: bool) -> &'static str {
 fn gc_does(dry_run: bool) -> &'static str {
     match dry_run {
         true => "says what reclaiming would remove, and removes nothing",
-        false => "reclaims the disk of runs past their retention",
+        false => "remove orphaned checkouts",
     }
 }
 
@@ -251,20 +284,21 @@ fn flag(on: bool, words: &str) -> &str {
     }
 }
 
-/// What `effect` does to the run its action names, in the words beside its line.
+/// What `effect` does to the run its action names, in the words beside its line: the
+/// palette's where the palette offers the act, its own where it does not.
 pub fn effect(effect: Effect) -> &'static str {
     match effect {
-        Effect::ContinuesFromLog => "continues it from its log",
+        Effect::ContinuesFromLog => CONTINUE,
         Effect::ContinuesWhereStopped => "continues it where it stopped",
         Effect::WaitsForReset => "waits for the reset, then drives on",
         Effect::HandsBackOnceSettled => "hands it back once that is settled",
         Effect::RetriesOnceTreeChanged => "offers a retry once the run's tree changed",
         Effect::ReadsPlan => "reads its plan, and answers it there",
         Effect::ShowsWhatItWaitsOn => "shows what it is waiting on",
-        Effect::Stops => "stops it and everything under it",
-        Effect::Closes => "closes it for good",
-        Effect::Certifies => "certifies what it did",
-        Effect::FindsWhereLogStops => "says where its log stops reading",
+        Effect::Stops => STOP,
+        Effect::Closes => CLOSE,
+        Effect::Certifies => WRITE_THE_RECEIPT,
+        Effect::Verifies => VERIFY,
     }
 }
 

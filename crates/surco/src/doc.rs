@@ -11,8 +11,9 @@
 
 use crate::components::{
     Attention, Card, Checklist, ChoiceList, Code, Concern, Decision, Desk, Diffstat, Evidence,
-    Feed, Fields, Furrow, Gist, Headline, Legend, Marked, Meter, Next, NodeTable, Note, Paths,
-    Problem, Prose, Refusal, Ribbon, Runs, Said, Section, Table, TypedAnswer,
+    Feed, Fields, FindingList, Furrow, Gist, Headline, Horizon, KeyList, Labelled, Legend, Marked,
+    Meter, Next, NodeTable, Note, Noted, Paths, Problem, Prose, Refusal, Ribbon, Runs, Said,
+    Section, Table, TypedAnswer,
 };
 use crate::line::Line;
 
@@ -60,6 +61,9 @@ pub enum Block {
     /// The page's gist, under the headline.
     Gist(Gist),
     Fields(Fields),
+    /// Facts on labelled rows, the labels in one column two cells past the widest of the rows
+    /// that stand: a row whose value cannot stand in its row at a surface's width gives way.
+    Labelled(Labelled),
     /// Rows under named columns.
     Table(Table),
     /// A run's nodes, one to a row: a table each surface builds in its own
@@ -76,17 +80,20 @@ pub enum Block {
     Diffstat(Diffstat),
     Decision(Decision),
     /// A decision put to a person while they answer it: its question, then its
-    /// options with one pointed at, the words being said for the one chosen, or
+    /// options with one pointed at and the words being said for that one, or
     /// a round of questions; and its keys.
     Card(Card),
     /// A plan read at its desk while a person decides on it: what it is, the places
-    /// they can stand on, what is being read, and what is being asked.
-    Desk(Desk),
+    /// they can stand on, what is being read, and what is being asked. Held on the heap,
+    /// since it is far the largest block and every other block would take its size.
+    Desk(Box<Desk>),
     /// A line asked of a person and the answer typed under it.
     TypedAnswer(TypedAnswer),
     /// A list a person picks one value from, narrowed by what they type.
     ChoiceList(ChoiceList),
     Checklist(Checklist),
+    /// What a review found, a finding a row, with the row a pointer stands on.
+    Findings(FindingList),
     /// A problem found in a text, pointed at in its line.
     Problem(Problem),
     /// What a command would not do.
@@ -94,8 +101,13 @@ pub enum Block {
     Next(Next),
     /// The keys of what is on screen, each with what it does.
     Legend(Legend),
+    /// The keys a person can press, a key a row with what each does, under the sentence that
+    /// says what they are: what help holds.
+    KeyList(KeyList),
     /// What needs a person, and how they answer it.
     Attention(Attention),
+    /// What a person's last act came to: a mark and a sentence.
+    Noted(Noted),
     /// What a whole document is, before anything it says: its name and
     /// the facts beside it.
     Title(crate::components::Title),
@@ -128,6 +140,9 @@ pub enum Block {
     Feed(Feed),
     /// What a run has spent, on one row: its count, one bar a node, and its times.
     Meter(Meter),
+    /// Furrows running to a horizon, under what a screen says: a picture that says nothing,
+    /// which only a terminal that draws braille draws.
+    Horizon(Horizon),
 }
 
 macro_rules! block_from {
@@ -146,6 +161,7 @@ block_from!(
     Ribbon(Ribbon),
     Gist(Gist),
     Fields(Fields),
+    Labelled(Labelled),
     Table(Table),
     Nodes(NodeTable),
     Runs(Runs),
@@ -155,15 +171,17 @@ block_from!(
     Diffstat(Diffstat),
     Decision(Decision),
     Card(Card),
-    Desk(Desk),
     TypedAnswer(TypedAnswer),
     ChoiceList(ChoiceList),
     Checklist(Checklist),
+    Findings(FindingList),
     Problem(Problem),
     Refusal(Refusal),
     Next(Next),
     Legend(Legend),
+    KeyList(KeyList),
     Attention(Attention),
+    Noted(Noted),
     Title(crate::components::Title),
     Section(Section),
     Fold(crate::components::Fold),
@@ -176,7 +194,14 @@ block_from!(
     Lines(Vec<Line>),
     Feed(Feed),
     Meter(Meter),
+    Horizon(Horizon),
 );
+
+impl From<Desk> for Block {
+    fn from(desk: Desk) -> Self {
+        Block::Desk(Box::new(desk))
+    }
+}
 
 /// A block a person answers while it is held: what a terminal fits to the rows it has,
 /// with the cursor where it is typed into. Not [`Block`], which is whatever a document

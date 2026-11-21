@@ -4,7 +4,7 @@ use surco::golden::{assert_golden, ENVIRONMENTS};
 use surco::look::Look;
 use surco::surface::{Surface, Terminal};
 use yunta_core::events::StoredEvent;
-use yunta_core::{NodeId, NodeKind, Pid, RunId, TaskId, Workflow};
+use yunta_core::{ConfigLayer, NodeId, NodeKind, Pid, RunId, TaskId, Workflow};
 use yunta_replay::frame::{Moment, RunFrame};
 use yunta_replay::registry::Engine;
 use yunta_replay::RunState;
@@ -76,13 +76,17 @@ fn page(node: &str, seq: u64, driven: Driven) -> Node {
         .map(|(task, _)| (task.clone(), Some(TITLE.to_string())))
         .collect();
     let artifacts = declares.artifacts.as_ref();
+    let node = frame
+        .nodes
+        .into_iter()
+        .find(|frame| frame.id == id)
+        .expect("its frame");
+    let config = ConfigLayer::default();
+    let runner = crate::blocks::runner_of(&node, Some(declares), &state, &config).cloned();
     Node {
         run_id: RunId::from(run.as_str()),
-        node: frame
-            .nodes
-            .into_iter()
-            .find(|frame| frame.id == id)
-            .expect("its frame"),
+        node,
+        runner,
         run_dir: PathBuf::from("/home/me/.yunta/runs").join(run.as_str()),
         cwd: PathBuf::from("/home/me/project"),
         home: Some(PathBuf::from("/home/me")),
@@ -98,8 +102,8 @@ fn page(node: &str, seq: u64, driven: Driven) -> Node {
 }
 
 /// A node's page says in print what its pane shows, in each way a node stands: a session
-/// at work, a loop with a task red and its scope, a node finished, one failed, and one
-/// waiting on a person.
+/// at work, a loop with a task red and its scope, a node finished, one failed, one waiting
+/// on a person, and one the run has not come to.
 #[test]
 fn a_nodes_page_matches_its_goldens_in_each_way_a_node_stands() {
     let cases = [
@@ -108,6 +112,7 @@ fn a_nodes_page_matches_its_goldens_in_each_way_a_node_stands() {
         ("finished", page("brief", 42, Driven::Alive)),
         ("failed", page("lint", 234, Driven::Alive)),
         ("waiting", page("grill", 19, Driven::Parked)),
+        ("never-ran", page("spec", 42, Driven::Alive)),
     ];
     for (name, page) in &cases {
         for environment in &ENVIRONMENTS {
@@ -142,4 +147,19 @@ fn a_feed_longer_than_the_page_prints_says_how_many_rows_stand_above() {
         .take_while(|line| !line.is_empty())
         .count();
     assert_eq!(rows, super::FEED_ROWS, "{drawn}");
+}
+
+/// The page says what a node spent in the design's words, then, after the separator, the
+/// tokens in and out it printed before: nothing a printed page said goes missing.
+#[test]
+fn the_tokens_row_says_the_designs_words_then_its_tokens_in_and_out() {
+    let page = page("brief", 42, Driven::Alive);
+    let look = Look::of(&ENVIRONMENTS[1]);
+    let drawn = Terminal::on(look).draw(&page.document(&look));
+    assert!(
+        drawn
+            .lines()
+            .any(|line| line == "  tokens       112k tokens ; 106k in / 6k out (102k cached)"),
+        "{drawn}"
+    );
 }

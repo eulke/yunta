@@ -142,7 +142,10 @@ async fn help_lists_the_keys_where_the_person_is_and_escape_closes_it() {
             binding.does
         );
     }
-    assert!(listed.contains("leaves yunta"), "{listed}");
+    assert!(
+        listed.contains("every run keeps going without this window"),
+        "{listed}"
+    );
     let asked = state.update(Input::Stroke(Stroke::Decline));
     assert!(asked.is_empty(), "{asked:?}");
     assert!(state.screen(&Markdown.look()).overlay.is_none());

@@ -1,21 +1,22 @@
 //! Watching a run in the application: a run started detached, opened from the field and
 //! followed to its end, and onto the run a promotion hands the work to; leaving while a
-//! run moves leaves it moving. With no key pressed, the run's screen goes on as shells
-//! move the run: a gate answered, a stop and a resume. A node picked, and the run's stats
-//! opened and closed, never stop it from moving. Each move is read once the one before it
+//! run moves leaves it moving, the field it is left for saying so. With no key pressed, the run's screen goes on as shells
+//! move the run: a gate answered, a stop and a resume. A node pointed at, and the run's
+//! stats opened and closed, never stop it from moving. Each move is read once the one before it
 //! stands, the run held by a word between the two. The application only follows: the
 //! run's engine is another process, never the application.
 
 use std::path::Path;
 use std::process::Stdio;
 
+use yunta_render::screen::{place_of, Leaving, STATS};
 use yunta_testkit::workflows::PROMOTABLE;
 use yunta_testkit::{
     handle, run_ids, stderr, wait_until, yunta_at, yunta_on_terminal, Checkout, HeldRun, Hold,
     Terminal,
 };
 
-use super::{engine_of, following, given_back, outcome, parked, FINISHED};
+use super::{engine_of, following, given_back, left_through_the_field, outcome, parked, FINISHED};
 
 /// The word the node after the gate waits for before the run finishes.
 const FINISH: &str = "finish";
@@ -31,6 +32,21 @@ const SECOND_STARTED: &str = "second-started";
 
 /// The word the second of two held nodes waits for before the run finishes.
 const SECOND: &str = "second";
+
+/// What the gate of [`gated_then_held`] asks, which the run's gist says while it waits.
+const GATE_ASKS: &str = "Go on?";
+
+/// What the screen says once a node starts its first attempt: the moment the run's chronicle
+/// tells, and the node's feed after it.
+const STARTED: &str = "running: attempt 1";
+
+/// The ribbon's strokes of [`held_twice`]'s run once it reached `second`: each stretch under
+/// its name, `first` and `second`, plowed.
+const SECOND_REACHED: &str = "━━━━━ ━━━━━━";
+
+/// The title of [`held_twice`]'s `second` while it works: its pane, titled by the node and
+/// its kind.
+const SECOND_AT_WORK: &str = "second · bash";
 
 /// The binary these tests run.
 fn yunta() -> &'static Path {
@@ -97,7 +113,7 @@ fn a_run_started_detached_is_followed_from_the_field_to_its_end() {
             )
         },
     );
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, Some(Leaving::Ended));
     assert_eq!(given_back(&mut terminal), Some(0));
     assert_eq!(outcome(&held.checkout, &held.id), "finished");
 }
@@ -137,17 +153,18 @@ fn a_promotion_is_followed_onto_its_successor() {
     attached.choose(&[], "abort");
     attached.ended();
     assert_eq!(attached.exit_code(), Some(1), "abort fails the successor");
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, None);
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 
 /// Leaving the application while the run it follows moves leaves the run moving, as
-/// `yunta status` reads it, until it is let go and finishes.
+/// `yunta status` reads it, until it is let go and finishes; the field the run is left for
+/// says it keeps going.
 #[test]
 fn leaving_while_a_run_moves_leaves_it_moving() {
     let held = HeldRun::started_detached(yunta());
     let mut terminal = following(&held.checkout);
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, Some(Leaving::KeepsGoing));
     assert_eq!(given_back(&mut terminal), Some(0));
     assert_eq!(outcome(&held.checkout, &held.id), "running");
     held.hold.let_go();
@@ -163,8 +180,8 @@ fn leaving_while_a_run_moves_leaves_it_moving() {
 }
 
 /// A run parked on its gate, answered from a shell, goes on on its screen with no key
-/// pressed: its headline leaves needs you and the node after the gate works, then it is
-/// read to its end.
+/// pressed: its headline leaves needs you and the trail names the node after the gate, at
+/// work, then it is read to its end.
 #[test]
 fn a_gate_answered_from_a_shell_goes_on_on_the_runs_screen() {
     let hold = Hold::new();
@@ -174,26 +191,26 @@ fn a_gate_answered_from_a_shell_goes_on_on_the_runs_screen() {
         .committed();
     let id = parked(&checkout, &["run", "wf.yaml"]);
     let mut terminal = following(&checkout);
-    let asked = format!("needs you: yunta resolve-gate {}", handle(&id));
     wait_until_shown(
         &terminal,
-        &["(default) · needs you", &asked],
+        &["(default) · needs you", GATE_ASKS],
         &[],
         "the run parked never stood as needing you",
     );
 
     let answered = yunta_at!(&checkout, &["resolve-gate", &id, "go"]);
     assert!(answered.status.success(), "{}", stderr(&answered));
+    let at_after = format!("{} › after", handle(&id));
     wait_until_shown(
         &terminal,
-        &["(default) · running", "after running for"],
-        &["(default) · needs you", &asked],
+        &["(default) · running", &at_after],
+        &["(default) · needs you"],
         "the run answered never went on to its next node",
     );
 
     hold.give(FINISH);
     terminal.wait_on_screen(FINISHED, "the run was never read to its end");
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, Some(Leaving::Ended));
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 
@@ -203,7 +220,7 @@ fn a_gate_answered_from_a_shell_goes_on_on_the_runs_screen() {
 fn a_run_stopped_then_resumed_from_a_shell_is_read_on_to_its_end() {
     let held = HeldRun::started_detached(yunta());
     let mut terminal = following(&held.checkout);
-    terminal.wait_on_screen("hold running for", "the held node never worked");
+    terminal.wait_on_screen(STARTED, "the held node never worked");
 
     let cancelled = yunta_at!(&held.checkout, &["cancel", &held.id]);
     assert!(cancelled.status.success(), "{}", stderr(&cancelled));
@@ -220,7 +237,7 @@ fn a_run_stopped_then_resumed_from_a_shell_is_read_on_to_its_end() {
         .expect("the run resumes");
     wait_until_shown(
         &terminal,
-        &["(default) · running", "hold running for"],
+        &["(default) · running"],
         &["(default) · stopped"],
         "the run resumed was never read going on",
     );
@@ -228,14 +245,15 @@ fn a_run_stopped_then_resumed_from_a_shell_is_read_on_to_its_end() {
     held.hold.let_go();
     terminal.wait_on_screen(FINISHED, "the run resumed was never read to its end");
     assert!(resumed.wait().expect("the resume ends").success());
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, Some(Leaving::Ended));
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 
-/// A node picked, and the run's stats opened and closed while the run moves, the rows
-/// stand where the run went meanwhile, and go on moving.
+/// A node pointed at before it runs, its own scene shown, and the run's stats opened and
+/// closed while the run moves, what stands across the screen stands where the run went
+/// meanwhile, the node still pointed at shown at its work, and goes on moving.
 #[test]
-fn a_node_picked_and_the_stats_closed_stand_where_the_run_went_meanwhile() {
+fn a_node_pointed_at_and_the_stats_closed_stand_where_the_run_went_meanwhile() {
     let hold = Hold::new();
     let checkout = Checkout::new()
         .working_in_place()
@@ -248,11 +266,13 @@ fn a_node_picked_and_the_stats_closed_stand_where_the_run_went_meanwhile() {
         || "the run never started".to_string(),
     );
     let mut terminal = following(&checkout);
-    terminal.wait_on_screen("first running for", "the first node never worked");
-    terminal.keys("\r");
-    terminal.wait_on_screen("node first of run", "the node's page never stood");
+    terminal.wait_on_screen(STARTED, "the first node never worked");
+    terminal.keys("j");
+    terminal.wait_on_screen("It has not run yet.", "the node's own scene never stood");
     terminal.keys("s");
-    terminal.wait_on_screen("› stats", "its stats never opened");
+    let run = run_ids(&checkout.home).remove(0);
+    let stats = format!("› {}", place_of(handle(&run), STATS));
+    terminal.wait_on_screen(&stats, "its stats never opened");
 
     hold.give(FIRST);
     wait_until(
@@ -262,17 +282,13 @@ fn a_node_picked_and_the_stats_closed_stand_where_the_run_went_meanwhile() {
     terminal.keys("\u{1b}");
     wait_until_shown(
         &terminal,
-        &[
-            "node first of run",
-            "second running for",
-            "1 of 2 nodes done",
-        ],
-        &["› stats"],
-        "back on the run, the rows never stood where it went",
+        &[SECOND_AT_WORK, SECOND_REACHED],
+        &[stats.as_str()],
+        "back on the run, what stands across never stood where it went",
     );
 
     hold.give(SECOND);
-    terminal.wait_on_screen("2 of 2 nodes done", "the rows never went on moving");
-    terminal.keys("q");
+    terminal.wait_on_screen(FINISHED, "what stands across never went on moving");
+    left_through_the_field(&mut terminal, None);
     assert_eq!(given_back(&mut terminal), Some(0));
 }

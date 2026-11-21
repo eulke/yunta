@@ -1,11 +1,13 @@
-//! What a prompt says, apart from where it stands: what Escape does where it opens,
-//! the key that leaves it and the mark an answer stands after, the keys every list
-//! answers to, what an answer pasted over several lines is said as, and what a
-//! command asked to ask says when no terminal is there to ask on.
+//! What a prompt says, apart from where it stands: what each key does there and what
+//! Escape does where it opens, the key that leaves it and the mark an answer stands
+//! after, the keys every list answers to, what an answer pasted over several lines is
+//! said as, and what a command asked to ask says when no terminal is there to ask on.
 //!
 //! The prompts' models in `yunta-ui` keep where each stands and what a stroke does
 //! there; every sentence they show a person is said here, so a terminal, a page and a
-//! window say a prompt alike.
+//! window say a prompt alike. A key's act is said once, as an order ([`PromptAct`]): a
+//! prompt at a terminal and a run's screen may take other keys for one act, never other
+//! words, and each legend a screen shares with a prompt is built once, here.
 
 use surco::components::{ChoiceList, Choices, Legend, TypedAnswer, TypedRow};
 use surco::line::{Line, Tone};
@@ -41,20 +43,70 @@ impl Escape {
         format!("{ESC} {}", self.does())
     }
 
-    /// What Escape does, as a legend says it beside the key.
+    /// What Escape does, as a legend says it beside the key: an order, in the words a
+    /// screen says the same act in.
     pub fn does(self) -> &'static str {
         match self {
-            Escape::Parks => "leaves it for later",
-            Escape::LeavesWaiting => "leaves the run waiting",
-            Escape::KeepsDefault => "keeps the detected default",
-            Escape::TakesTheFirst => "takes the first",
-            Escape::GoesBack => "goes back",
+            Escape::Parks => PromptAct::LeaveItForLater.said(),
+            Escape::LeavesWaiting => PromptAct::LeaveItWaiting.said(),
+            Escape::KeepsDefault => "keep the detected default",
+            Escape::TakesTheFirst => "take the first",
+            Escape::GoesBack => PromptAct::GoBack.said(),
+        }
+    }
+}
+
+/// What a key does on a prompt, said once as an order, so a prompt at a terminal and a
+/// run's screen say one act in the same words whatever key does it there. Not what Escape
+/// comes to where a prompt opens ([`Escape`]), which says some of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptAct {
+    /// The pointer moved to another of what is offered.
+    Choose,
+    /// What is pointed at taken, or what is typed given, as the answer.
+    Answer,
+    /// What a number named taken.
+    Confirm,
+    /// The words an option asks for sent with it.
+    SendIt,
+    /// The note typed recorded with the option.
+    RecordIt,
+    /// A line opened for a note on the option.
+    AddANote,
+    /// The plan a decision is on opened to be read.
+    ReadThePlan,
+    /// Back to the choice before.
+    GoBack,
+    /// Away from a decision, which stays open.
+    LeaveItWaiting,
+    /// Away from a round of questions, nothing of it recorded.
+    LeaveItForLater,
+}
+
+impl PromptAct {
+    /// The act, as a legend says it beside its key.
+    pub fn said(self) -> &'static str {
+        match self {
+            PromptAct::Choose => "choose",
+            PromptAct::Answer => "answer",
+            PromptAct::Confirm => "confirm",
+            PromptAct::SendIt => "send it",
+            PromptAct::RecordIt => "record it",
+            PromptAct::AddANote => "add a note",
+            PromptAct::ReadThePlan => "read the plan",
+            PromptAct::GoBack => "go back",
+            PromptAct::LeaveItWaiting => "leave it waiting",
+            PromptAct::LeaveItForLater => "leave it for later",
         }
     }
 }
 
 /// The key a person leaves a prompt with, as a legend spells it.
 pub const ESC: &str = "esc";
+
+/// The key a person takes what is pointed at with, as a palette's key column spells it
+/// where an act is bound to it.
+pub const ENTER: &str = "enter";
 
 /// What marks a line an answer is given on, typed or echoed back, so a person reads a
 /// round as answers under the things that asked for them.
@@ -66,9 +118,28 @@ pub const ANSWER: &str = "> ";
 pub const FOLDED: &str = "the text pasted here spanned more than one line, \
                           and this answer is those lines joined into one";
 
-/// The keys any list answers to, whatever holds it.
+/// The digits that pick an option where a prompt numbers its options: `1` to `9`, since a
+/// second digit would have nothing to say the first has ended.
+const DIGITS: usize = 9;
+
+/// The digits that pick each of `options`, as a legend names them in one entry: `1 2 3`.
+pub(crate) fn numbered(options: usize) -> String {
+    let digits: Vec<String> = (1..=options.min(DIGITS)).map(|n| n.to_string()).collect();
+    digits.join(" ")
+}
+
+/// The keys any list answers to, whatever holds it: the arrows choose, and what is typed
+/// narrows it on a row of its own, which says so.
 pub fn list_legend() -> Legend {
-    Legend::new().arrows("move").typing("to filter")
+    Legend::new().arrows(PromptAct::Choose.said())
+}
+
+/// The keys of what waits to be confirmed, a number at a plan's desk or an act over a
+/// screen: `enter` confirms it, and `esc` goes back.
+pub fn confirming_legend() -> Legend {
+    Legend::new()
+        .key(ENTER, PromptAct::Confirm.said())
+        .key(ESC, PromptAct::GoBack.said())
 }
 
 /// What `--interactive` says when there is no terminal to ask on, before the
@@ -90,11 +161,17 @@ pub fn defaulting_to(shape: &str) -> String {
 pub fn typed_answer(asked: &Line, before: String, after: String) -> TypedAnswer {
     TypedAnswer {
         asked: asked.clone(),
-        typed: TypedRow {
-            prompt: ANSWER.to_string(),
-            before,
-            after,
-        },
+        typed: typed_row(before, after),
+    }
+}
+
+/// The row words are typed on, before the cursor and after it, opened as an answer is
+/// where it is written on one line.
+fn typed_row(before: String, after: String) -> TypedRow {
+    TypedRow {
+        prompt: ANSWER.to_string(),
+        before,
+        after,
     }
 }
 
@@ -105,7 +182,7 @@ pub fn choice_list(choices: Option<Choices>, filter: Option<&str>, escape: Escap
         choices,
         filter: filter.map(str::to_string),
         legend: list_legend()
-            .key("enter", "chooses")
+            .key(ENTER, PromptAct::Answer.said())
             .key(ESC, escape.does()),
     }
 }

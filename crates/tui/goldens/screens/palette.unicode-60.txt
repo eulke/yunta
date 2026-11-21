@@ -1,14 +1,14 @@
- yunta › Q78GRR
+ yunta › Q78GRR › plan          ◆ 1 needs you · ▲ 1 stalled
 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
- p┌ what you can do here ────────────────────────────────┐
- ━│ ▸ yunta resolve-gate Q78GRR        puts what the run │
-  │                                    waits on to you   │
- ◆│   yunta review Q78GRR              reads the plan    │…
- ━│                                    the run waits on, │
-  │                                    and answers it    │
- ◆│                                    there             │R
- ━│ … 9 more options                                     │━
-  │ ↑↓ move · type to filter · enter chooses · esc goes  │
-  │ back                                                 │
- …└──────────────────────────────────────────────────────┘
-
+ ●╭ what do you want to do? ─────────────────────────────╮R
+ ━│ ▸ type to filter                                     │
+ n│▸ stop it and everything under it                     │
+ p│  what it cost, and where its time went               │a
+ w│  draw its graph                                      │
+ …│  the whole page, in a browser                        │
+ r│  the run's whole chronicle                           │
+ r│  … 6 under                                           │
+ r╰──────────────────────────────────────────────────────╯
+ 967k tokens · 2m34s at work · 5m00s waiting on you
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` r…
+ ↑↓ move · enter do it · esc back

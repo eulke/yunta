@@ -99,3 +99,31 @@ fn a_narrow_row_lets_the_bars_go_then_the_last_time_and_keeps_its_count_whole() 
         assert_eq!(row.text(), drawn, "at {edge} cells");
     }
 }
+
+/// A screen short of rows draws the meter in figures alone: its bars go where they would fit,
+/// and its times go from the last as anywhere else, every part whole.
+#[test]
+fn in_figures_alone_the_bars_go_where_they_would_fit() {
+    for (edge, meter, drawn) in [
+        (58, spent_nothing(), "0 tokens · 45s at work"),
+        (
+            78,
+            waited_on_you(),
+            "967k tokens · 2m34s at work · 5m00s waiting on you",
+        ),
+        (49, waited_on_you(), "967k tokens · 2m34s at work"),
+    ] {
+        let look = Look {
+            glyphs: Glyphs::Unicode,
+            paint: Paint::Plain,
+            width: Width::exact(edge),
+            motion: Motion::Moves,
+        };
+        let terminal = Terminal::on(look);
+        assert_eq!(
+            terminal.meter_figures(&meter).text(),
+            drawn,
+            "at {edge} cells"
+        );
+    }
+}

@@ -146,6 +146,7 @@ fn quoting() -> Vec<Block> {
         whole: Some(Whole::Command(
             "yunta status 7E5PH4 --node lint".to_string(),
         )),
+        kept: None,
     };
     vec![Section {
         lead: Some(crate::components::Lead::Mark(Mark::Failed)),

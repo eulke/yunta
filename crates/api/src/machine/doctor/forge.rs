@@ -3,18 +3,16 @@
 //! remote is the repository it names.
 
 use yunta_core::describe;
+use yunta_core::port::ForgeUnanswered;
+use yunta_core::GitHubForgeConfig;
 use yunta_render::page::doctor::{Finding, ForgeAnswer, RemoteAnswer};
 
-use crate::{Error, Project, Remarks, Stop};
+use crate::{Error, Project, Stop};
 
 /// What `doctor` finds of the forge the config declares. Nothing for a
 /// config that declares none. A remote lookup the caller's stop ended is the
 /// stop, not a finding about the remote.
-pub(super) async fn findings(
-    project: &Project,
-    remarks: &dyn Remarks,
-    stop: &Stop,
-) -> Result<Vec<Finding>, Error> {
+pub(super) async fn findings(project: &Project, stop: &Stop) -> Result<Vec<Finding>, Error> {
     let config = &project.config;
     let Some(github) = config
         .forge
@@ -24,27 +22,44 @@ pub(super) async fn findings(
         return Ok(Vec::new());
     };
     let repo = github.repo.clone();
-    let secrets = project.workspace.secrets.as_ref();
-    let Some(forge) = crate::forge::forge_for(config, secrets, remarks) else {
-        return Ok(vec![Finding::ForgeTokenUnset {
-            repo,
-            token_env: github.token_env.clone(),
-            opening: opening_a_pull_request(project),
-        }]);
-    };
-    let answer = match forge.probe().await {
-        Ok(yunta_core::port::ForgeProbe {
-            can_push: Some(false),
-        }) => ForgeAnswer::CannotPush,
-        Ok(_) => ForgeAnswer::Reachable,
-        Err(error) => ForgeAnswer::Unanswered {
-            said: describe(&error),
+    let answer = match project.workspace.forge(config) {
+        Ok(forge) => match forge.probe().await {
+            Ok(yunta_core::port::ForgeProbe {
+                can_push: Some(false),
+            }) => ForgeAnswer::CannotPush,
+            Ok(_) => ForgeAnswer::Reachable,
+            Err(error) => ForgeAnswer::Unanswered {
+                said: describe(&error),
+            },
         },
+        Err(ForgeUnanswered::Failed { said }) => ForgeAnswer::Unready {
+            token_env: github.token_env.clone(),
+            said,
+        },
+        Err(ForgeUnanswered::Undeclared | ForgeUnanswered::TokenUnset { .. }) => {
+            return Ok(vec![Finding::ForgeTokenUnset {
+                repo,
+                token_env: github.token_env.clone(),
+                opening: opening_a_pull_request(project),
+            }]);
+        }
     };
-    let mut findings = vec![Finding::Forge {
+    let forge = Finding::Forge {
         repo: repo.clone(),
         answer,
-    }];
+    };
+    let remote = remote_finding(project, github, stop).await?;
+    Ok(std::iter::once(forge).chain(remote).collect())
+}
+
+/// Whether the remote this checkout pushes a run's branch to is the repository `github`
+/// names: nothing where it is, what it is or why it could not be read where it is not. A
+/// lookup the caller's stop ended is the stop.
+async fn remote_finding(
+    project: &Project,
+    github: &GitHubForgeConfig,
+    stop: &Stop,
+) -> Result<Option<Finding>, Error> {
     let remote = github.remote();
     let dir = &project.workspace.dir;
     let supervision = project.workspace.supervision(stop);
@@ -57,12 +72,11 @@ pub(super) async fn findings(
             detail: unread.detail(),
         }),
     };
-    findings.extend(answer.map(|answer| Finding::Remote {
+    Ok(answer.map(|answer| Finding::Remote {
         remote: remote.to_string(),
-        repo,
+        repo: github.repo.clone(),
         answer,
-    }));
-    Ok(findings)
+    }))
 }
 
 /// The catalog workflows that open a pull request through the forge: what

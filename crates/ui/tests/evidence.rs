@@ -19,7 +19,7 @@ use yunta_testkit::Bench;
 use yunta_testkit_ui::driving::drive;
 use yunta_testkit_ui::sandbox::{now, workspace};
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, Performer, Request, State};
+use yunta_ui::{Address, Input, Performer, Request, State};
 
 use support::on_the_field;
 
@@ -91,7 +91,7 @@ async fn a_runs_page_is_shown_where_open_writes_it() {
     let strokes = [Stroke::Insert('d'), Stroke::Enter, Stroke::Insert('o')];
     let (state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;
     let page = bench.run_dir().join("page.html");
-    assert_eq!(surfaced, [Request::ShowPage(page.clone())]);
+    assert_eq!(surfaced, [Request::ShowPage(Address::Page(page.clone()))]);
     assert!(page.is_file(), "the page is written before it is shown");
     let trail = state.screen(&Markdown.look()).trail;
     assert_eq!(trail.last().map(String::as_str), Some("page"));
@@ -111,10 +111,12 @@ async fn a_page_not_shown_is_said_with_where_it_is() {
     // The field lists a finished run with its closed runs, which `d` shows.
     let strokes = [Stroke::Insert('d'), Stroke::Enter, Stroke::Insert('o')];
     let (mut state, surfaced) = drive(field, Vec::new(), &performer, &strokes).await;
-    let [Request::ShowPage(page)] = surfaced.as_slice() else {
+    let [Request::ShowPage(Address::Page(page))] = surfaced.as_slice() else {
         panic!("the page is shown: {surfaced:?}");
     };
-    assert!(state.update(Input::Unshown(page.clone())).is_empty());
+    assert!(state
+        .update(Input::Unshown(Address::Page(page.clone())))
+        .is_empty());
     let said = Markdown.screen(&state.screen(&Markdown.look()));
     let opened = page.display().to_string();
     let printed = Markdown.draw(

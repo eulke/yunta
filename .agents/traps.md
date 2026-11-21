@@ -29,7 +29,11 @@ document a second crate reads one of its own.
 Paths: `crates/*/tests/**`, `crates/testkit/src/**`, `crates/testkit-ui/src/**`, `crates/engine/src/worktree/pool/room.rs`
 Wrong: reading a `NoRoom` refusal in a test, a recording or a real run as the change's fault: the pool keeps the
 larger of a twentieth of the disk and 10 GB free on the disk the test runs on, and a build beside it can take that.
-Right: read the disk's free space first; make room (a `cargo clean` of your own checkout) and run again.
+A test that waits for what the refused run never starts hangs with no bound (`crates/cli/tests/session_ends.rs`
+waits for a session's process), so a suite under that floor may never end.
+Right: read the disk's free space first, against that floor and not a rounder number; make room (a `cargo clean`
+of your own checkout, and the builds a pool keeps under `~/.yunta/worktrees/pool/` with its owner's leave) and run
+again.
 
 ### A test file under `src` that the smell counters read as production
 Paths: `crates/*/src/**/tests/*.rs`, `xtask/src/smells/corpus.rs`
@@ -39,3 +43,10 @@ that quotes a run tool's name or a long test function there raises a production 
 Right: read `cargo xtask smells --check` after adding one; say what the assertion holds through the crate's own
 values rather than a quoted literal the counter reads, and keep its functions under the production counts.
 
+### A source put back with its old time is not built again
+Paths: `crates/*/src/**`, `crates/*/tests/**`
+Wrong: breaking a rule to see a test fail, then restoring the file from a copy that keeps its modification
+time (`cp -p`, a backup moved back): cargo compares times, takes the file as unchanged since the broken build,
+and the next run still holds the break.
+Right: undo the edit in place, or `touch` the file after restoring it, and see the test pass again before
+trusting any other result.

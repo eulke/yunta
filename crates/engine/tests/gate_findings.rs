@@ -228,9 +228,14 @@ async fn going_on_settles_each_finding_shown_and_the_run_succeeds() {
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::Gates(GateEvent::Waiting(p))) => {
-                Some(yunta_render::offers::option_words(p, &p.options()[0]).1)
-            }
+            Some(EventPayload::Gates(GateEvent::Waiting(p))) => Some(
+                yunta_render::offers::option_words(
+                    p,
+                    &p.options()[0],
+                    &yunta_core::ahead::NodesAhead::default(),
+                )
+                .1,
+            ),
             _ => None,
         })
         .unwrap()

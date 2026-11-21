@@ -1,6 +1,5 @@
-//! The words of a retry: the label and the tradeoff a menu's retry carries
-//! say what the retry waits for, once, whether the menu offers one retry or
-//! several.
+//! The words of a retry: what a menu's retry does and what it costs say what
+//! the retry waits for, once, whether the menu offers one retry or several.
 
 use yunta_core::events::{
     Failure, FailureMenu, Precondition, Remedy, Surprise, TaskCause, TaskStop,
@@ -29,9 +28,15 @@ fn retry_menu(waits: Vec<Precondition>) -> FailureMenu {
     }
 }
 
-/// The label and the tradeoff the retry option of `retry_menu(waits)` carries.
-fn retry_words_of(waits: Vec<Precondition>) -> Option<(String, Option<String>)> {
+/// What the retry option of `retry_menu(waits)` does and what it costs.
+fn retry_words_of(waits: Vec<Precondition>) -> Option<(Option<String>, Option<String>)> {
     remedy_words(&retry_menu(waits), ReservedOption::Retry)
+}
+
+/// The words of a retry that costs `costs`: every retry starts the same way.
+fn retried(costs: &str) -> Option<(Option<String>, Option<String>)> {
+    let starts = "Starts a fresh attempt from the run's tree as it stands".to_string();
+    Some((Some(starts), Some(costs.to_string())))
 }
 
 /// A command that has to run before a retry can end differently.
@@ -45,29 +50,16 @@ fn runnable(cmd: &str) -> Precondition {
 fn a_single_retry_names_its_one_input() {
     assert_eq!(
         retry_words_of(vec![runnable("x")]),
-        Some((
-            "Run it again (attempt 2) once `x` can run".to_string(),
-            Some(
-                "Starts a fresh attempt from the run's tree as it stands, under the same \
-                 scope: what failed is asked again and what passed stays passed. Until `x` \
-                 can run, it fails the same way and asks again"
-                    .to_string()
-            ),
-        ))
+        retried(
+            "what failed is asked again and what passed stays passed; until `x` can run, it \
+             fails the same way and asks again"
+        )
     );
 }
 
 #[test]
-fn a_retry_on_a_tree_that_already_moved_says_the_tree_changed_however_many_say_so() {
-    let said = Some((
-        "Run it again (attempt 2): the tree changed since it failed".to_string(),
-        Some(
-            "Starts a fresh attempt from the run's tree as it stands, under the same \
-             scope: what failed is asked again and what passed stays passed; if the change \
-             does not fix what it failed on, it fails the same way and asks again"
-                .to_string(),
-        ),
-    ));
+fn a_retry_on_a_tree_that_already_moved_waits_for_nothing_however_many_say_so() {
+    let said = retried("what failed is asked again and what passed stays passed");
     assert_eq!(retry_words_of(vec![Precondition::TreeChanged]), said);
     assert_eq!(
         retry_words_of(vec![Precondition::TreeChanged, Precondition::TreeChanged]),
@@ -79,17 +71,10 @@ fn a_retry_on_a_tree_that_already_moved_says_the_tree_changed_however_many_say_s
 fn retries_that_wait_for_several_inputs_say_them_in_one_clause() {
     assert_eq!(
         retry_words_of(vec![runnable("x"), Precondition::OutsideTreeChanged]),
-        Some((
-            "Run it again (attempt 2) once `x` can run and something outside the tree changes"
-                .to_string(),
-            Some(
-                "Starts a fresh attempt from the run's tree as it stands, under the same \
-                 scope: what failed is asked again and what passed stays passed. Until `x` \
-                 can run and something outside the tree changes, it fails the same way and \
-                 asks again"
-                    .to_string()
-            ),
-        ))
+        retried(
+            "what failed is asked again and what passed stays passed; until `x` can run and \
+             something outside the tree changes, it fails the same way and asks again"
+        )
     );
 }
 
@@ -101,18 +86,11 @@ fn three_inputs_are_joined_with_a_comma_before_the_last_and() {
             Precondition::CredentialFixed,
             Precondition::OutsideTreeChanged,
         ]),
-        Some((
-            "Run it again (attempt 2) once `x` can run, the credential is fixed, and \
-             something outside the tree changes"
-                .to_string(),
-            Some(
-                "Starts a fresh attempt from the run's tree as it stands, under the same \
-                 scope: what failed is asked again and what passed stays passed. Until `x` \
-                 can run, the credential is fixed, and something outside the tree changes, \
-                 it fails the same way and asks again"
-                    .to_string()
-            ),
-        ))
+        retried(
+            "what failed is asked again and what passed stays passed; until `x` can run, the \
+             credential is fixed, and something outside the tree changes, it fails the same \
+             way and asks again"
+        )
     );
 }
 
@@ -123,15 +101,10 @@ fn a_tree_that_already_moved_needs_no_waiting_beside_another_input() {
             Precondition::TreeChanged,
             Precondition::OutsideTreeChanged,
         ]),
-        Some((
-            "Run it again (attempt 2) once something outside the tree changes".to_string(),
-            Some(
-                "Starts a fresh attempt from the run's tree as it stands, under the same \
-                 scope: what failed is asked again and what passed stays passed. Until \
-                 something outside the tree changes, it fails the same way and asks again"
-                    .to_string()
-            ),
-        ))
+        retried(
+            "what failed is asked again and what passed stays passed; until something outside \
+             the tree changes, it fails the same way and asks again"
+        )
     );
 }
 
@@ -178,16 +151,12 @@ fn a_red_guard_is_named_by_its_stop_and_its_retry_waits_on_the_outside() {
         stuck: None,
         reroute: None,
     };
-    let (label, tradeoff) = remedy_words(&menu, ReservedOption::Retry).expect("a retry is worded");
-    assert_eq!(
-        label,
-        "Run it again (attempt 2) once something outside the tree changes"
-    );
+    let (_, tradeoff) = remedy_words(&menu, ReservedOption::Retry).expect("a retry is worded");
     assert!(
         tradeoff
             .as_deref()
             .is_some_and(|tradeoff| tradeoff.ends_with(
-                "Until something outside the tree changes, it fails the same way and asks again"
+                "until something outside the tree changes, it fails the same way and asks again"
             )),
         "{}",
         tradeoff.as_deref().unwrap_or("none")
@@ -212,16 +181,9 @@ fn a_capped_loop_s_retry_says_its_count_starts_over() {
             stuck: None,
             reroute: None,
         };
-        let (label, tradeoff) =
+        let words =
             remedy_words(&menu, ReservedOption::Retry).expect("a capped loop's retry has words");
-        assert_eq!(
-            label,
-            "Run it again (attempt 2): its iteration count starts over"
-        );
-        let tradeoff = tradeoff.expect("what it costs");
-        assert!(
-            tradeoff.ends_with("It stops at the cap again if tasks remain"),
-            "{tradeoff}"
-        );
+        let again = "its iteration count starts over; it stops at the cap again if tasks remain";
+        assert_eq!(words, (None, Some(again.to_string())));
     }
 }

@@ -7,14 +7,15 @@
 //!   instant every test stands at.
 //! - [`driving`]: a state driven with its performer until it waits on nothing and stands
 //!   caught up with the log.
-//! - [`home`]: the places the walk's recordings are made in, and the places the design's
-//!   starting screens stand in.
+//! - [`home`]: the places the walk's recordings are made in, the places the design's
+//!   starting screens stand in, and the cuts of the runs whose scenes the walk opens.
 //! - `planned`: a run parked on its plan's gate, which the screens' world and the home
 //!   each make.
 //! - [`recorded`]: each kind of work the application asks for, performed once where it
 //!   reads something different, and what it found and came to.
 //! - [`walk`]: every state the application reaches, answered from the recordings, each
-//!   held by the [`walk::Checks`] of a surface; `terminal` is the terminal of a few rows
+//!   held by [`walk::Checks`]: the interface's rules, which stand here
+//!   ([`walk::interface`]), and a surface's own; `terminal` is the terminal of a few rows
 //!   it lays each screen out on, so every page scrolls.
 //! - [`screens`]: the states the terminal application's target frames show, the same on
 //!   every machine.

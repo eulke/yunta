@@ -3,18 +3,26 @@
 //! task's latest check, the one after its work, or the one before it while none ran after;
 //! `by`, each command its criteria run, its guards left out; `keeps`, what the run holds
 //! every task to: each command the baseline held, where it was green.
+//!
+//! A pane shows a task at work turning while its run moves: its row opens on the spinner's
+//! frame of the run's last event in place of its mark, as the node it works under does in
+//! the nodes beside the pane; a printed page, which does not move, keeps the mark. A pane
+//! short of rows takes the row and its proof apart ([`TaskProof::row`],
+//! [`TaskProof::proof`]): which of them stands is its own to say.
 
 use surco::doc::Block;
-use surco::glyphs::{Glyphs, Mark};
+use surco::glyphs::Mark;
 use surco::line::{Fill, Line, Tone};
+use surco::look::Look;
+use surco::motion::Motion;
 use surco::width::INDENT;
 use yunta_core::events::{CriterionType, TaskStatus};
 use yunta_core::TaskId;
 use yunta_replay::RunState;
 
 /// The cells a proof's labels stand in: the widest, `proved`, and two that part it from its
-/// value.
-const LABEL: usize = 8;
+/// value. A pane's other blocks whose labels are a word each stand them in the same column.
+pub(super) const LABEL: usize = 8;
 
 /// How a task is proved, by its latest check. Not a criterion's own answer, which a check
 /// holds one of for each command it ran.
@@ -36,6 +44,9 @@ pub struct TaskProof {
     proved: Option<ProvedAs>,
     by: Vec<String>,
     keeps: Vec<String>,
+    /// The events the spinner's frame is turned by while the task works and its run moves:
+    /// the seq of the run's last event. None where the row keeps the task's mark.
+    turned: Option<u64>,
 }
 
 impl TaskProof {
@@ -71,12 +82,32 @@ impl TaskProof {
             proved,
             by,
             keeps,
+            turned: None,
         })
+    }
+
+    /// This task as a pane shows it while its run moves: where it works and the look moves,
+    /// its row opens on the spinner's frame `turned` events bring it to, the seq of the
+    /// run's last event, in place of its mark.
+    pub fn turning(mut self, turned: u64) -> TaskProof {
+        self.turned = Some(turned);
+        self
     }
 
     /// The task's own row, then, one step under it, its proof's rows, a label a column; a
     /// row with nothing to say is left out.
-    pub fn blocks(&self, glyphs: Glyphs) -> Vec<Block> {
+    pub fn blocks(&self, look: &Look) -> Vec<Block> {
+        let task = Block::Rows(vec![self.row(look)]);
+        let rows = self.proof();
+        match rows.is_empty() {
+            true => vec![task],
+            false => vec![task, Block::Rows(rows)],
+        }
+    }
+
+    /// How the task is proved, one step under its row, a label a column: red or green, by
+    /// which commands, and what the run holds it to; a row with nothing to say left out.
+    pub fn proof(&self) -> Vec<Line> {
         let mut rows = Vec::new();
         if let Some(proved) = self.proved {
             let (tone, word) = match proved {
@@ -98,18 +129,22 @@ impl TaskProof {
                     .plain(format!("{}, green at the baseline", self.keeps.join(", "))),
             );
         }
-        let task = Block::Rows(vec![self.row(glyphs)]);
-        match rows.is_empty() {
-            true => vec![task],
-            false => vec![task, Block::Rows(rows)],
-        }
+        rows
     }
 
-    /// The task's own row: its mark, its id, its title, and its attempt once it has one.
-    fn row(&self, glyphs: Glyphs) -> Line {
+    /// The task's own row: its mark, or the spinner's frame where it turns, its id, its
+    /// title, and its attempt once it has one.
+    pub fn row(&self, look: &Look) -> Line {
+        let glyphs = look.glyphs;
         let mark = task_mark(self.status);
+        let sign = match (self.status, self.turned, look.motion) {
+            (TaskStatus::Running, Some(turned), Motion::Moves) => {
+                surco::motion::frame(glyphs, turned).to_string()
+            }
+            _ => glyphs.mark(mark).to_string(),
+        };
         let row = Line::new()
-            .push(Tone::of(mark), glyphs.mark(mark).to_string())
+            .push(Tone::of(mark), sign)
             .plain(" ")
             .push(Tone::Strong, self.task.as_str());
         let row = match &self.title {

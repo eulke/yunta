@@ -61,35 +61,33 @@ fn a_ribbon_with_no_stretch_draws_nothing() {
     assert!(Ribbon::new([]).lines(&look(80)).is_empty());
 }
 
-/// Where the names do not fit, the ribbon is the page's furrow, drawn as the
-/// furrow draws it.
+/// Where the names do not fit, the ribbon draws its strokes alone, a stroke a node, each
+/// as long as the line shares out evenly less the gap after it: fifteen nodes on 78 cells
+/// take four cells each, and the cells left over stay blank at the line's end.
 #[test]
-fn a_ribbon_whose_names_do_not_fit_is_the_page_furrow() {
-    let names = [
-        "implement",
-        "review",
-        "conform",
-        "approve",
-        "fix-lint",
-        "tests",
-        "ship",
-    ];
+fn a_ribbon_whose_names_do_not_fit_draws_even_strokes_alone() {
     let standings = [Standing::Finished, Standing::Running, Standing::NeverRan];
-    let stretches = names
-        .iter()
-        .enumerate()
-        .map(|(at, name)| Stretch::new(format!("{name}-{at}"), standings[at % 3]));
-    let ribbon = Ribbon::new(stretches);
-    let furrow = Furrow(
-        names
-            .iter()
-            .enumerate()
-            .map(|(at, _)| standings[at % 3])
-            .collect(),
+    let stretches = (0..15).map(|at| Stretch::new(format!("implement-{at}"), standings[at.min(2)]));
+    let drawn = Terminal::on(look(78)).block(&Block::Ribbon(Ribbon::new(stretches)));
+    assert_eq!(drawn.len(), 1, "{drawn:?}");
+    let strokes: Vec<String> = drawn[0].text().split(' ').map(String::from).collect();
+    assert_eq!(strokes.len(), 15, "{strokes:?}");
+    assert!(
+        strokes.iter().all(|stroke| cell_width(stroke) == 4),
+        "{strokes:?}"
     );
+}
+
+/// A line too narrow for a cell and a gap a node draws the page's furrow, a cell standing
+/// for the nodes it covers.
+#[test]
+fn a_ribbon_too_many_for_its_line_is_the_page_furrow() {
+    let standings = [Standing::Finished, Standing::Running, Standing::NeverRan];
+    let stretches = (0..40).map(|at| Stretch::new(format!("n{at}"), standings[at % 3]));
+    let furrow = Furrow((0..40).map(|at| standings[at % 3]).collect());
     let terminal = Terminal::on(look(60));
-
-    let drawn = terminal.block(&Block::Ribbon(ribbon));
-
-    assert_eq!(drawn, terminal.block(&Block::Furrow(furrow)));
+    assert_eq!(
+        terminal.block(&Block::Ribbon(Ribbon::new(stretches))),
+        terminal.block(&Block::Furrow(furrow))
+    );
 }

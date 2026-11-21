@@ -1,6 +1,6 @@
 ␛[1;35m◆␛[0m ␛[1mdecision␛[0m␛[2m ·␛[0m␛[1;35m needs you␛[0m
 
-␛[1mplan␛[0m: 2 tasks in 2 steps, 1 decided for you, 1 risk, 1 left out
+␛[1mplan␛[0m: 2 tasks in 2 steps, 2 decided for you, 1 risk, 1 left out
   Greet a person by name, and say goodbye too.
 
   ␛[33m▲␛[0m 2 problems keep this plan from being proven as it is written
@@ -23,11 +23,10 @@
       ␛[2m            ␛[0m Ask for a name
       ␛[2mbecause     ␛[0m A program run with no arguments should still say something.
 
-  ␛[1myou answered␛[0m
-
-    ␛[1m1  ␛[0m␛[1mWhich word should the greeting use?␛[0m
-      ␛[2myou said    ␛[0m hello
-      ␛[2mthe plan    ␛[0m It says `hello`.
+    ␛[1m2  ␛[0m␛[1mWhich word greets?␛[0m
+      ␛[2mchose       ␛[0m It says `hello`.
+      ␛[2masked       ␛[0m Which word should the greeting use?
+      ␛[2myou answered␛[0m hello
 
   ␛[1mleft out␛[0m
     ␛[2m◌␛[0m Greeting in other languages.

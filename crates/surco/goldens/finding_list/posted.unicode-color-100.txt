@@ -1,0 +1,14 @@
+␛[1;35m▸␛[0m ␛[33m▲␛[0m ␛[2mmajor   ␛[0m ␛[1mGlobal pack paths ignore the configured YUNTA_HOME␛[0m
+  ␛[33m▲␛[0m ␛[2mmajor   ␛[0m Global pack commands ignore the configured YUNTA_HOME state root
+  ␛[2m◌␛[0m ␛[2mminor   ␛[0m Pack audit cannot inspect globally installed packs
+  ␛[31m✗␛[0m ␛[2mblocking␛[0m Pack target API shapes are defined outside the declared file
+
+␛[1;35m▸␛[0m ␛[33m▲␛[0m ␛[2mmajor   ␛[0m ␛[1mGlobal pack paths ignore the configured YUNTA_HOME␛[0m
+  ␛[33m▲␛[0m ␛[2mmajor   ␛[0m Global pack commands ignore the configured YUNTA_HOME state root
+  ␛[2m◌␛[0m ␛[2mminor   ␛[0m Pack audit cannot inspect globally installed packs
+  ␛[31m✗␛[0m ␛[2mblocking␛[0m Pack target API shapes are defined outside the declared file
+
+␛[1;35m▸␛[0m ␛[33m▲␛[0m ␛[2mmajor   ␛[0m ␛[1mGlobal pack paths ignore the configured YUNT␛[0m␛[1m…␛[0m
+  ␛[33m▲␛[0m ␛[2mmajor   ␛[0m Global pack commands ignore the configured Y…
+  ␛[2m◌␛[0m ␛[2mminor   ␛[0m Pack audit cannot inspect globally installed…
+  ␛[31m✗␛[0m ␛[2mblocking␛[0m Pack target API shapes are defined outside t…

@@ -7,6 +7,12 @@
 //! The design's timeline is [`TIMELINE`]. Its seconds are the design's: each
 //! node works as long as the design shows it working, and each pause waits as
 //! long as the design shows a person taking.
+//!
+//! A node at work beside others gives its checkout back after its close is on
+//! the log, and the pool dates that give-back by the run's clock, which ranks the
+//! checkout for whoever takes one next. So the clock moves past such a node only
+//! once its checkout is given back ([`Act::GivenBack`]): moved first, it would
+//! date the give-back by the move or not, as the engine and the recording race.
 
 use yunta_core::events::StoredEvent;
 use yunta_testkit::wait_until_async;
@@ -41,6 +47,10 @@ pub(crate) enum Act {
     /// Waits until the unit of this name is held at its start, and lets it
     /// start.
     LetsStart(&'static str),
+    /// Waits until checkout `slot-N` of the run's pool is given back, by its
+    /// number: what a node at work beside others worked in, its close on the
+    /// log already.
+    GivenBack(u32),
 }
 
 /// What the recording does with the run.
@@ -61,7 +71,9 @@ pub(crate) enum Step {
     Wakes(&'static [Act]),
 }
 
-use Act::{Arms, FailsOnce, Gives, Held, HoldsStart, LetsStart, LetsSurvey, Logged, Moves};
+use Act::{
+    Arms, FailsOnce, GivenBack, Gives, Held, HoldsStart, LetsStart, LetsSurvey, Logged, Moves,
+};
 
 /// The kind of event a session's opening writes.
 pub(crate) const OPENED: &str = "agent_session_opened";
@@ -194,9 +206,11 @@ const REVIEWING: &[Act] = &[
     Moves(5),
     Gives("conform-2"),
     Logged(FINISHED, Some("conform"), 1),
+    GivenBack(3),
     Moves(17),
     Gives("review-alt-2"),
     Logged(FINISHED, Some("review@reviewer-alt"), 1),
+    GivenBack(1),
     Moves(78),
     Gives("review-2"),
     Logged(OPENED, Some("fix-findings"), 1),
@@ -350,6 +364,14 @@ pub(crate) async fn acted(place: &Place, acts: &[Act]) {
                 place.disarm("surveys");
                 let first = place.held_surveys().first().copied();
                 place.let_survey(first.expect("a survey held"));
+            }
+            GivenBack(number) => {
+                waited(
+                    place,
+                    || place.given_back(number),
+                    || format!("`slot-{number}` given back"),
+                )
+                .await
             }
             LetsStart(unit) => {
                 let start = Place::start_of(unit);

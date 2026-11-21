@@ -38,14 +38,9 @@ pub enum Operation {
     Pack(PackOperation),
     /// What a run leaves: its receipt, its verification, its page for a browser.
     Evidence(EvidenceOperation),
-    /// `run`'s page.
-    ReadPage { run: RunId },
-    /// The page of `run`'s node `node`.
-    ReadNodePage { run: RunId, node: NodeId },
-    /// The round of questions `run` is parked on.
-    ReadQuestions { run: RunId },
-    /// The decision `run` waits on, with the documents it shows.
-    ReadDecision { run: RunId },
+    /// The pull request of the gate `run` waits at, polled once on the run's forge,
+    /// which reads it and changes nothing.
+    ReadPullRequest { run: RunId },
     /// The past runs of the workflow called `workflow`, as `yunta stats --workflow`
     /// reads them.
     ReadHistory { workflow: WorkflowName },
@@ -90,10 +85,7 @@ impl Operation {
             Operation::ReadRepository
             | Operation::DetectProject
             | Operation::ReadCatalog
-            | Operation::ReadPage { .. }
-            | Operation::ReadNodePage { .. }
-            | Operation::ReadQuestions { .. }
-            | Operation::ReadDecision { .. }
+            | Operation::ReadPullRequest { .. }
             | Operation::ReadHistory { .. }
             | Operation::ReadGraph { .. } => true,
             Operation::Doctor { sessions } => !sessions,
@@ -131,10 +123,7 @@ impl Operation {
             | Operation::Workflow(_)
             | Operation::Pack(_)
             | Operation::Evidence(_)
-            | Operation::ReadPage { .. }
-            | Operation::ReadNodePage { .. }
-            | Operation::ReadQuestions { .. }
-            | Operation::ReadDecision { .. }
+            | Operation::ReadPullRequest { .. }
             | Operation::ReadHistory { .. }
             | Operation::ReadGraph { .. }
             | Operation::Decide { .. }

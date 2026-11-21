@@ -348,6 +348,17 @@ pub enum CheckBuiltin {
 }
 
 impl CheckBuiltin {
+    /// The `builtin:` this check declares, spelled as YAML spells it: the
+    /// tag its serialized form carries. Exhaustive: a new builtin does not
+    /// compile until it names itself here.
+    pub fn builtin_name(&self) -> &'static str {
+        match self {
+            CheckBuiltin::BaselineCompare => "baseline_compare",
+            CheckBuiltin::CoverageGate => "coverage_gate",
+            CheckBuiltin::FindingsGate { .. } => "findings_gate",
+        }
+    }
+
     /// Whether the check's verdict is a function of the run's tree: it
     /// runs a command there, as deterministic as a criterion, so the same
     /// tree always answers the same. `findings_gate` reads the log.

@@ -1,16 +1,20 @@
 //! See [`super`]. The run in view's fold: the run read whole, then each piece of news of
 //! it taken once, what its sessions said kept to the nodes at work, and when it stands
-//! caught up with the log.
+//! caught up with the log; and what it keeps, read for the pause it stands at: the decision
+//! or the round it waits on, and the change a node counted.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use yunta_api::{waiting_round, Document, FollowedRun, RunNews};
+use yunta_api::{
+    waiting_round, Awaited, Document, FollowedRun, RunNews, WaitingDecision, WaitingQuestions,
+};
+use yunta_core::events::run::happening;
 use yunta_core::events::{Shown, StoredEvent};
 use yunta_core::port::Said;
 use yunta_core::{NodeId, RunId, Seq};
 use yunta_render::watched::Heard;
-use yunta_replay::frame::{chronicle, Moment, RunPhase};
+use yunta_replay::frame::{chronicle, Happening, Moment, RunFrame, RunPhase};
 
 use super::{AwaitedReading, RunInView};
 
@@ -27,6 +31,7 @@ impl RunInView {
             missed: 0,
             awaited: None,
             remarks: Vec::new(),
+            successor: None,
             no_successor: false,
         };
         read.told(chronicle(events));
@@ -45,9 +50,9 @@ impl RunInView {
     }
 
     /// `news` of the run folded in: the moments the events that came are, its engine, what
-    /// a session said with the words missed before it, a successor read whole in its place,
-    /// no successor come, what it waits on a person for, a document handed over and a
-    /// remark.
+    /// a session said with the words missed before it, a successor read whole and kept
+    /// beside it, no successor come, what it waits on a person for, a document handed over
+    /// and a remark.
     pub(super) fn took(&mut self, news: RunNews) {
         match news {
             RunNews::Events(_) | RunNews::Engine(_) => {
@@ -65,7 +70,9 @@ impl RunInView {
                     self.heard.hear(said);
                 }
             }
-            RunNews::Successor { run, events } => *self = RunInView::read_whole(*run, &events),
+            RunNews::Successor { run, events } => {
+                self.successor = Some(Box::new(RunInView::read_whole(*run, &events)));
+            }
             RunNews::NoSuccessor => self.no_successor = true,
             RunNews::Awaited(awaited) => {
                 let read = |(pause, awaited)| AwaitedReading::Read { pause, awaited };
@@ -121,18 +128,32 @@ impl RunInView {
         }
     }
 
-    /// Whether it stands at its head in `heads`; where it stands parked on a person at
-    /// `now` with a menu or a round, what it waits for is read for that pause; and where it
-    /// closed promoted, no successor came, since one that comes takes its place.
+    /// Whether it stands at its head in `heads`, every document its nodes handed over by
+    /// then kept, read or not; where it stands parked on a person at `now` with a menu or a
+    /// round, what it waits for is read for that pause; and where it closed promoted, its
+    /// successor came, or none did.
     pub(super) fn caught_up(&self, heads: &BTreeMap<RunId, Seq>, now: DateTime<Utc>) -> bool {
         let at_head = self.run.state.head() == heads.get(&self.run.run).copied();
         let read_for = self.awaited.as_ref().map(|read| read.pause().seq());
         let promoted = matches!(self.run.frame(now).phase, RunPhase::Promoted { .. });
         at_head
-            && (!promoted || self.no_successor)
+            && self.handed_over_kept()
+            && (!promoted || self.no_successor || self.successor.is_some())
             && self
                 .parked_on_a_person(now)
                 .is_none_or(|pause| read_for == Some(pause))
+    }
+
+    /// Whether every document its nodes handed over that a person reads whole is kept under
+    /// the node that handed it over, read or not: what its following hands of it by the head
+    /// it stands at, after the run read whole.
+    fn handed_over_kept(&self) -> bool {
+        Document::handed_over_in(&self.run.state)
+            .iter()
+            .all(|(node, due)| {
+                let kept = self.handed_over.get(node).into_iter().flatten();
+                kept.map(shown).any(|kept| kept == due)
+            })
     }
 
     /// Where the log holds the event of the pause it stands parked on a person at, at
@@ -142,9 +163,83 @@ impl RunInView {
     fn parked_on_a_person(&self, now: DateTime<Utc>) -> Option<Seq> {
         let (_, paused_at) = self.run.state.run.paused()?;
         match waiting_round(&self.run.frame(now)) {
-            Some(node) => Some(self.run.state.gates.get(node)?.rounds.last()?.asked_at),
+            Some(node) => self.round_asked_at(node),
             None => self.run.menu.then_some(paused_at),
         }
+    }
+
+    /// Where the log holds the `questions_asked` that opened the round `node` asked last,
+    /// while no answer to it is recorded: once one is, the round waits on its resume, not on
+    /// a person.
+    fn round_asked_at(&self, node: &NodeId) -> Option<Seq> {
+        let round = self.run.state.gates.get(node)?.rounds.last()?;
+        round.answered.is_none().then_some(round.asked_at)
+    }
+
+    /// The decision it waits on a person for, as read for the `run_paused` it stands at:
+    /// none while it stands at none, before what it waits on is read for that pause, and
+    /// where it could not be read.
+    pub(crate) fn awaited_decision(&self) -> Option<&WaitingDecision> {
+        let paused_at = self.run.state.run.paused().map(|(_, at)| at);
+        match &self.awaited {
+            Some(AwaitedReading::Read {
+                pause,
+                awaited: Awaited::Decision(decision),
+            }) => (Some(pause.seq()) == paused_at).then_some(&**decision),
+            Some(AwaitedReading::Read {
+                awaited: Awaited::Round(_),
+                ..
+            })
+            | Some(AwaitedReading::Unread { .. })
+            | None => None,
+        }
+    }
+
+    /// The round of questions it waits on a person for, framed as `frame`, as read for the
+    /// `questions_asked` that opened the round its node is parked on: none while it is
+    /// parked on none, before that round is read, and where it could not be read.
+    pub(crate) fn awaited_round(&self, frame: &RunFrame) -> Option<&WaitingQuestions> {
+        let asked_at = waiting_round(frame).and_then(|node| self.round_asked_at(node));
+        match &self.awaited {
+            Some(AwaitedReading::Read {
+                pause,
+                awaited: Awaited::Round(round),
+            }) => (Some(pause.seq()) == asked_at).then_some(&**round),
+            Some(AwaitedReading::Read {
+                awaited: Awaited::Decision(_),
+                ..
+            })
+            | Some(AwaitedReading::Unread { .. })
+            | None => None,
+        }
+    }
+
+    /// Why what the run framed as `frame` waits on a person for could not be read, where it
+    /// could not be read for the pause it stands parked on: the decision of its `run_paused`
+    /// with a menu, or the round its node opened. None where it was read, where it is not
+    /// read yet, and while it stands parked on neither.
+    pub(crate) fn unreadable_ask(&self, frame: &RunFrame) -> Option<&str> {
+        let Some(AwaitedReading::Unread { pause, why }) = &self.awaited else {
+            return None;
+        };
+        let stands_at = match waiting_round(frame) {
+            Some(node) => self.round_asked_at(node),
+            None => self.run.state.run.paused().map(|(_, at)| at),
+        };
+        (Some(pause.seq()) == stands_at).then_some(why.as_str())
+    }
+
+    /// How many files the change the run last counted at `node` holds, as its chronicle
+    /// says it (`the change counted: …`): none where it counted none there.
+    pub(crate) fn change_counted_at(&self, node: &NodeId) -> Option<u32> {
+        let moments = self.by_node.get(node)?;
+        moments.iter().rev().find_map(|at| {
+            let moment = self.moments.get(*at)?;
+            match &moment.happening {
+                Happening::Run(happening::Happening::ChangesCounted { files, .. }) => Some(*files),
+                _ => None,
+            }
+        })
     }
 }
 

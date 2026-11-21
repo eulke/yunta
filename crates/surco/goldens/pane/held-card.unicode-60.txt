@@ -1,10 +1,10 @@
-  The plan the planner handed over.
-
-▎ ◆ Plan and its tests registered. Approve?
-▎
+▎ ◆ Plan and its tests registered. A…  approve-plan · 3GQF5Q
+▎   a  does it
 ▎   b  does it
 ▎ ▸ c  does it
-▎ … 6 more options
-▎
-▎ ↑↓ move · enter chooses · n adds a note · esc leaves it
-▎ for later
+▎   d  does it
+▎   e  does it
+▎   f  does it
+▎ … 2 more options
+▎ ↑↓ choose · enter answer · n add a note
+▎ esc leave it for later

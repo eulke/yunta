@@ -286,6 +286,18 @@ fn a_line_past_a_panes_edge_goes_on_under_where_its_text_starts() {
     assert_eq!(line.rows_within(54), vec![line.clone()]);
 }
 
+/// A word that ends on a pane's last cell stays on its row, the space after it
+/// the row's end, as a paragraph wraps its words at the same width.
+#[test]
+fn a_word_that_ends_on_the_last_cell_stays_on_its_row() {
+    let line = Line::new().plain("one two three four fives six");
+
+    let said: Vec<String> = line.rows_within(24).iter().map(Line::text).collect();
+
+    assert_eq!(said, ["one two three four fives", "six"]);
+    assert_eq!(said, crate::width::wrap_unbroken(&line.text(), 24));
+}
+
 /// A word wider than what a row has left is broken at the edge, so no row
 /// passes it and no character is lost.
 #[test]
@@ -297,4 +309,54 @@ fn a_word_wider_than_its_row_breaks_at_the_edge() {
     let said: Vec<String> = line.rows_within(12).iter().map(Line::text).collect();
 
     assert_eq!(said, ["  limits.max", "  _tokens_pe", "  r_run"]);
+}
+
+/// A row a pointer moves along: the one pointed at leads with the pointer in the needs-you
+/// tone and a space, and stands on the selection to its region's edge; one not pointed at
+/// keeps the pointer's cells blank, so no row moves when the pointer does, and has no fill.
+#[test]
+fn a_pointed_row_leads_with_the_pointer_and_is_filled_with_the_selection() {
+    for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
+        let pointer = glyphs.pointer().to_string();
+        let pointed = Line::pointed(true, glyphs).push(Tone::Strong, "adjust");
+        assert_eq!(pointed.text(), format!("{pointer} adjust"));
+        assert_eq!(pointed.spans()[0].text, pointer);
+        assert_eq!(pointed.spans()[0].tone, Tone::NeedsYou);
+        assert_eq!(pointed.fill(), Some(Fill::Selection));
+
+        let other = Line::pointed(false, glyphs).plain("abort");
+        assert_eq!(other.text(), "  abort");
+        assert_eq!(other.fill(), None);
+        assert!(other
+            .spans()
+            .iter()
+            .all(|span| span.tone == Tone::Plain && span.fill.is_none()));
+    }
+}
+
+/// A pointed row between two rows not pointed at, on the sixteen colors: the pointer in
+/// the needs-you tone, the name strong, the rows around it as they read.
+#[test]
+fn a_pointed_row_and_its_neighbours_match_their_golden() {
+    let environment = crate::golden::ENVIRONMENTS[0];
+    let glyphs = Glyphs::Unicode;
+    let rows = [
+        ("approve", "resolve the gate"),
+        ("adjust", "back to `plan`, with what you say"),
+        ("abort", "pause here; nothing runs"),
+    ];
+    let drawn: String = rows
+        .iter()
+        .enumerate()
+        .map(|(at, (name, said))| {
+            let pointed = at == 1;
+            let name_tone = if pointed { Tone::Strong } else { Tone::Plain };
+            let row = Line::pointed(pointed, glyphs)
+                .push(name_tone, format!("{name:<9}"))
+                .plain(*said);
+            format!("{}\n", environment.paint.line(&row))
+        })
+        .collect();
+    let goldens = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/components");
+    crate::golden::assert_golden(&environment.golden(&goldens, "pointed"), &drawn);
 }

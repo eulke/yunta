@@ -1,4 +1,4 @@
- plan · A32BZY                      needs you  approve-plan
+ plan · A32BZY · reviewed-plan · 2 tasks
  Make it
  you asked  a file the run is about
 
@@ -15,4 +15,4 @@
 
  ◆ Plan registered. Approve?
  1 approve   2 adjust   3 abort
- j k task · p the card · esc leaves the run waiting
+ tab next place · p proof · esc leave it waiting

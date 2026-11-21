@@ -35,7 +35,9 @@
 //! of its own, off the look's path, and handed with the [`AnswerablePause`] it waits at:
 //! `awaited`'s. Each [`Document`] its nodes hand over is read once, as the look that
 //! reads the event handing it over ends, and the keys of its manifest this binary does
-//! not read are said once for each run read whole: `document`'s.
+//! not read are said once for each run read whole: `document`'s. Both are read as of the
+//! head the following holds the run at, never past it, so no news of a run runs ahead of
+//! the events handed of it: what the log took past that head comes in the next batch first.
 
 mod awaited;
 mod document;
@@ -65,7 +67,7 @@ pub use following::Following;
 /// What a following follows: the field as far as a reach goes, and at most one run read
 /// whole, which an interface names and names again as what it shows changes. Not
 /// [`FollowedRun`], the run as the following read it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Followed {
     /// The runs as far as it reaches, each at its head; none follows no field.
     pub field: Option<FieldReach>,

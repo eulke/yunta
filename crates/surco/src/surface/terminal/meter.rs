@@ -3,7 +3,8 @@
 //!
 //! The bars go first, since the figures beside them say in numbers what they show; then each
 //! time from the last. A part goes whole, so a cut never falls inside a figure: only a count
-//! wider than the row alone is cut, at the edge.
+//! wider than the row alone is cut, at the edge. A screen short of rows draws the figures
+//! alone whatever its width: its look, not its width, lets the bars go.
 
 use super::Terminal;
 use crate::bars::sparkline;
@@ -53,16 +54,23 @@ impl Meter {
 }
 
 impl Terminal {
-    /// The meter's row at this look's width: whole where it fits; else without its bars and
-    /// with as many of its times, from the first, as fit beside the count.
+    /// The meter's row at this look's width: whole where it fits; else as
+    /// [`Terminal::meter_figures`] draws it.
     pub fn meter(&self, meter: &Meter) -> Line {
+        let whole = meter.said(self.look.glyphs);
+        match cell_width(&whole.text()) <= self.look.width.cells() {
+            true => whole,
+            false => self.meter_figures(meter),
+        }
+    }
+
+    /// The meter's row in figures alone, its bars given way: as many of its times, from the
+    /// first, as fit beside the count at this look's width, a count wider than the row cut.
+    /// What a screen short of rows draws, whose look lets the bars go wherever they would fit.
+    pub fn meter_figures(&self, meter: &Meter) -> Line {
         let glyphs = self.look.glyphs;
         let cells = self.look.width.cells();
         let fits = |row: &Line| cell_width(&row.text()) <= cells;
-        let whole = meter.said(glyphs);
-        if fits(&whole) {
-            return whole;
-        }
         (0..=meter.times.len())
             .rev()
             .map(|times| meter.row(glyphs, false, times))

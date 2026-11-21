@@ -1,4 +1,5 @@
-filter n
-  one-node  one command whose exit code is the check
-* lint-fix  a check, and an agent that fixes what it finds
-up/down move ; type to filter ; enter chooses ; esc takes the first
+ * n
+
+  one-node   one command whose exit code is the check
+* lint-fix   a check, and an agent that fixes what it finds
+up/down choose ; enter answer ; esc take the first

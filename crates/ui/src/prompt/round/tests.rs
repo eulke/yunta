@@ -137,7 +137,11 @@ fn a_choice_is_answered_by_arrow_or_by_typing() {
 
     let mut by_typing = round(vec![asked("env", "Which?", AnswerType::Choice, true)]);
     typed(&mut by_typing, "prod");
-    assert!(holds(&by_typing, "filter prod"), "{:?}", rows(&by_typing));
+    assert!(
+        rows(&by_typing).iter().any(|row| row.ends_with(" * prod")),
+        "what was typed stands after the list's own pointer: {:?}",
+        rows(&by_typing)
+    );
     assert_eq!(
         ended(by_typing.press(Stroke::Enter)),
         [pair("env", "production")]
@@ -186,12 +190,12 @@ fn shift_tab_goes_back_with_what_was_said_and_keeps_what_came_after() {
     assert_eq!(round.press(Stroke::BackTab), Press::Moved);
     assert_eq!(round.press(Stroke::BackTab), Press::Moved);
     assert!(holds(&round, "? One?"), "{:?}", rows(&round));
-    assert!(holds(&round, "> first"), "{:?}", rows(&round));
+    assert!(holds(&round, "| first"), "{:?}", rows(&round));
     assert!(holds(&round, "+ Two?  second"), "{:?}", rows(&round));
     typed(&mut round, "!");
     assert_eq!(round.press(Stroke::Enter), Press::Moved);
     assert!(holds(&round, "? Two?"), "{:?}", rows(&round));
-    assert!(holds(&round, "> second"), "{:?}", rows(&round));
+    assert!(holds(&round, "| second"), "{:?}", rows(&round));
     round.press(Stroke::Enter);
     typed(&mut round, "third");
     assert_eq!(
@@ -269,7 +273,7 @@ fn what_was_folded_is_said_only_of_an_answer_that_stands() {
     let mut confirmed = two_typed();
     folded_answer(&mut confirmed);
     confirmed.press(Stroke::BackTab);
-    assert!(holds(&confirmed, "> a b"), "{:?}", rows(&confirmed));
+    assert!(holds(&confirmed, "| a b"), "{:?}", rows(&confirmed));
     assert_eq!(confirmed.press(Stroke::Enter), Press::Moved);
     typed(&mut confirmed, "none");
     assert!(
@@ -295,21 +299,18 @@ fn only_a_typed_question_takes_a_paste() {
     assert!(!round(vec![asked("env", "Which?", AnswerType::Choice, true)]).typing());
 }
 
-/// A round says how many answers it needs, whose they are, and that nothing is kept
-/// until all of them are given; a single question has nothing else to wait for.
+/// A round says whose questions they are, and that nothing is kept until all of them are
+/// answered; a single question has nothing else to wait for.
 #[test]
-fn a_round_says_what_it_needs_and_that_nothing_is_recorded_until_the_end() {
+fn a_round_says_who_asks_and_that_nothing_is_recorded_until_the_end() {
     let drawn = rows(&two_typed());
-    assert!(
-        drawn[0].contains("2 answers before `ask` goes on"),
-        "{drawn:?}"
-    );
+    assert!(drawn[0].ends_with(" ask asks"), "{drawn:?}");
     assert!(
         drawn[1].contains("nothing is recorded until every one is answered"),
         "{drawn:?}"
     );
     let one = rows(&round(vec![asked("a", "One?", AnswerType::Text, true)]));
-    assert!(one[0].contains("1 answer before `ask` goes on"), "{one:?}");
+    assert!(one[0].ends_with(" ask asks"), "{one:?}");
     assert!(
         !one.iter().any(|row| row.contains("nothing is recorded")),
         "{one:?}"
@@ -326,20 +327,20 @@ fn the_keys_say_what_each_question_answers_to() {
     ]);
     let keys = |round: &Round| rows(round).join(" ");
     assert!(
-        !keys(&round).contains("shift-tab goes back"),
+        !keys(&round).contains("shift-tab go back"),
         "{}",
         keys(&round)
     );
     assert!(!keys(&round).contains("type to filter"), "{}", keys(&round));
     assert!(
-        keys(&round).contains("esc leaves it for later"),
+        keys(&round).contains("esc leave it for later"),
         "{}",
         keys(&round)
     );
     typed(&mut round, "x");
     round.press(Stroke::Enter);
     assert!(
-        keys(&round).contains("shift-tab goes back"),
+        keys(&round).contains("shift-tab go back"),
         "{}",
         keys(&round)
     );

@@ -3,7 +3,7 @@
 
 use surco::components::Legend;
 
-use crate::prompt::{Escape, ESC};
+use crate::prompt::{Escape, PromptAct, ENTER, ESC};
 
 /// Where setting a repository up stands on the trail.
 pub const SETUP: &str = "setup";
@@ -24,7 +24,7 @@ pub const SETUP_LET_GO: &str =
 /// empty line or Escape keeps what was detected.
 pub fn setup_legend() -> Legend {
     Legend::new()
-        .key("enter", "answers")
+        .key(ENTER, PromptAct::Answer.said())
         .key(ESC, Escape::KeepsDefault.does())
 }
 

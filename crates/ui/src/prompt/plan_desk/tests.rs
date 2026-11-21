@@ -11,7 +11,8 @@ use yunta_render::page::desk::Reading;
 use yunta_render::prompt::Escape;
 
 use super::{Asked, Leaving, Left, PlanDesk};
-use crate::prompt::{Answerable, Press, Stroke};
+use crate::prompt::decision_card::Offered;
+use crate::prompt::{Answerable, PickedOption, Press, Stroke};
 
 /// A terminal with room for a rail, in the rows these tests read.
 const COLUMNS: usize = 110;
@@ -93,26 +94,45 @@ pub(crate) fn review() -> PlanReview {
     }
 }
 
-fn option(name: &str, said: &str) -> ChoiceRow {
-    ChoiceRow {
-        name: name.to_string(),
-        said: Some(said.to_string()),
-        cost: None,
+/// The option `name`, which says `said`, asking `asks` of words where it asks any.
+fn option(name: &str, said: &str, asks: Option<&str>) -> Offered {
+    Offered {
+        id: name.parse().expect("an option's id"),
+        row: ChoiceRow {
+            name: name.to_string(),
+            said: Some(said.to_string()),
+            cost: None,
+            key: None,
+        },
+        asks: asks.map(str::to_string),
     }
+}
+
+/// `option` chosen at the desk, with no words.
+fn chose(option: &str) -> Press<Left> {
+    Press::Answer(Left::Chose(PickedOption {
+        option: option.parse().expect("an option's id"),
+        words: None,
+        folded: false,
+    }))
 }
 
 fn desk(review: &PlanReview, leaving: Leaving) -> PlanDesk {
     PlanDesk::new(
-        Reading::of(review.clone(), Vec::new()),
+        Reading::of(review.clone()),
         Asked {
             question: "Plan registered. Approve?".to_string(),
             node: Some("approve-plan".to_string()),
             run: Some("EKPBGE".to_string()),
-            called: Some("harvest (standard)".to_string()),
+            workflow: Some("harvest".to_string()),
         },
         vec![
-            option("approve", "On to `ship`: resolves this gate"),
-            option("adjust", "Back to `plan`: sends what you say"),
+            option("approve", "On to `ship`: resolves this gate", None),
+            option(
+                "adjust",
+                "Back to `plan`: sends what you say",
+                Some("what should change?"),
+            ),
         ],
         leaving,
     )
@@ -157,7 +177,7 @@ fn j_and_k_walk_the_stops_and_go_around() {
     assert!(holds(&mut desk, "The program says nothing today"));
     press(&mut desk, "j");
     assert!(holds(&mut desk, "▸ greet"), "{:#?}", rows(&mut desk));
-    assert!(holds(&mut desk, "Greet by name"));
+    assert!(holds(&mut desk, "prints `hello, ana`"));
     assert!(holds(&mut desk, "step 1 of 2"), "{:#?}", rows(&mut desk));
     press(&mut desk, "j");
     assert!(holds(&mut desk, "▸ farewell"));
@@ -240,20 +260,86 @@ fn a_tenth_option_is_on_the_card() {
     let review = review();
     let mut many = desk(&review, Leaving::ToTheCard);
     many.offered = (1..=11)
-        .map(|at| option(&format!("o{at}"), "does something"))
+        .map(|at| option(&format!("o{at}"), "does something", None))
         .collect();
     assert!(holds(&mut many, "9 o9"), "{:#?}", rows(&mut many));
     assert!(!holds(&mut many, "10 o10"), "{:#?}", rows(&mut many));
-    assert!(
-        holds(&mut many, "2 more options on the card"),
-        "{:#?}",
-        rows(&mut many)
-    );
+    let drawn = rows(&mut many);
+    let foot: Vec<&str> = drawn.iter().map(|row| row.trim()).collect();
+    let foot = foot.join(" ");
+    assert!(foot.contains("2 more options on the card"), "{foot}");
     press(&mut many, "9");
-    assert_eq!(many.press(Stroke::Enter), Press::Answer(Left::Picked(8)));
+    assert_eq!(many.press(Stroke::Enter), chose("o9"));
 }
 
-/// `p` turns a task's card over, and `j` walks the proofs while it is.
+/// A run's screen opens the desk on the plan's first task, what the plan says of itself a
+/// key back.
+#[test]
+fn on_a_runs_screen_it_opens_on_the_plans_first_task() {
+    let review = review();
+    let mut desk = desk(&review, Leaving::ToTheCard).on_its_first_task();
+    assert!(holds(&mut desk, "▸ greet"), "{:#?}", rows(&mut desk));
+    press(&mut desk, "k");
+    assert!(holds(&mut desk, "▸ the change"), "{:#?}", rows(&mut desk));
+}
+
+/// Held beside keys of its own, the desk takes only the keys it reads by: a number that
+/// names an option, the walk, `p`, `d` and the keys that scroll; `enter` and `esc` only while
+/// a number waits to be confirmed; every key while words are typed at its foot, the only time
+/// what is typed or pasted there is words. The screen's legend says them.
+#[test]
+fn on_a_screen_it_takes_only_the_keys_it_reads_by() {
+    let review = review();
+    let mut desk = desk(&review, Leaving::TheCommand(Escape::LeavesWaiting)).on_its_first_task();
+    let reads_by = [
+        Stroke::Insert('1'),
+        Stroke::Insert('2'),
+        Stroke::Insert('j'),
+        Stroke::Insert('k'),
+        Stroke::Tab,
+        Stroke::BackTab,
+        Stroke::Insert('p'),
+        Stroke::Insert('d'),
+        Stroke::Down,
+        Stroke::PageUp,
+    ];
+    let the_screens = [
+        Stroke::Insert('3'),
+        Stroke::Enter,
+        Stroke::Decline,
+        Stroke::Interrupt,
+        Stroke::Insert('q'),
+        Stroke::Insert('s'),
+    ];
+    assert!(reads_by.iter().all(|stroke| desk.takes(*stroke)) && !desk.typing());
+    assert!(!the_screens.iter().any(|stroke| desk.takes(*stroke)));
+    assert_eq!(
+        desk.legend_on_a_screen().spelled(Glyphs::Unicode),
+        "1 2 answer · tab next place · ↑↓ scroll · p proof · d decided for you · esc leave it \
+         waiting"
+    );
+    press(&mut desk, "1");
+    assert!(desk.takes(Stroke::Enter) && desk.takes(Stroke::Decline));
+    assert_eq!(
+        desk.legend_on_a_screen().spelled(Glyphs::Unicode),
+        "enter confirm · esc go back"
+    );
+    press(&mut desk, "2");
+    assert!(
+        !desk.typing(),
+        "a number waiting to be confirmed is no words"
+    );
+    assert_eq!(desk.press(Stroke::Enter), Press::Stay);
+    assert!(desk.typing());
+    assert!(the_screens.iter().all(|stroke| desk.takes(*stroke)));
+    assert_eq!(
+        desk.legend_on_a_screen().spelled(Glyphs::Unicode),
+        "enter send it · esc go back"
+    );
+}
+
+/// `p` turns a task's card over, and `j` walks the proofs while it is. The suite every task
+/// keeps passing is the whole plan's proof's to say.
 #[test]
 fn p_shows_what_proves_the_task_and_walks_with_it() {
     let review = review();
@@ -266,65 +352,62 @@ fn p_shows_what_proves_the_task_and_walks_with_it() {
         rows(&mut desk)
     );
     assert!(holds(&mut desk, "the suite"), "{:#?}", rows(&mut desk));
-    assert!(holds(&mut desk, "p the card"), "{:#?}", rows(&mut desk));
-    press(&mut desk, "j");
-    assert!(holds(&mut desk, "proof · greet"), "{:#?}", rows(&mut desk));
-    assert!(holds(&mut desk, "the suite"), "{:#?}", rows(&mut desk));
+    assert!(holds(&mut desk, "p proof"), "{:#?}", rows(&mut desk));
     press(&mut desk, "j");
     assert!(
-        holds(&mut desk, "proof · farewell"),
+        holds(&mut desk, "greet, its proof"),
+        "{:#?}",
+        rows(&mut desk)
+    );
+    assert!(!holds(&mut desk, "the suite"), "{:#?}", rows(&mut desk));
+    press(&mut desk, "j");
+    assert!(
+        holds(&mut desk, "farewell, its proof"),
         "{:#?}",
         rows(&mut desk)
     );
     press(&mut desk, "p");
-    assert!(holds(&mut desk, "Say goodbye"), "{:#?}", rows(&mut desk));
-}
-
-/// `d` opens what was decided, one decision open at a time, with `j` and `k` between them.
-#[test]
-fn d_shows_what_was_decided_and_j_walks_the_choices() {
-    let review = review();
-    let mut desk = desk(&review, Leaving::ToTheCard);
-    press(&mut desk, "d");
     assert!(
-        holds(&mut desk, "decided for you"),
+        holds(&mut desk, "prints a goodbye"),
         "{:#?}",
         rows(&mut desk)
     );
+}
+
+/// `d` opens what the plan decided, every decision whole, the rail still pointing at the
+/// place stood on; what it risks the rail counts. `j` walks on to the next place and shows
+/// it, and `d` goes back.
+#[test]
+fn d_shows_every_decision_and_j_walks_on_to_the_next_place() {
+    let review = review();
+    let mut desk = desk(&review, Leaving::ToTheCard);
+    press(&mut desk, "d");
+    assert!(holds(&mut desk, "2 choices"), "{:#?}", rows(&mut desk));
     assert!(
-        holds(&mut desk, "▸ 1 What does it say"),
+        holds(&mut desk, "What does it say"),
         "{:#?}",
         rows(&mut desk)
     );
     assert!(holds(&mut desk, "It greets"), "{:#?}", rows(&mut desk));
-    assert!(!holds(&mut desk, "It says"), "{:#?}", rows(&mut desk));
-    assert!(
-        holds(&mut desk, "breaks the line"),
-        "its risks: {:#?}",
-        rows(&mut desk)
-    );
-    assert!(
-        !rows(&mut desk)
-            .iter()
-            .any(|row| row.contains("▸ the change")),
-        "the rail points at no task: {:#?}",
-        rows(&mut desk)
-    );
-    assert!(holds(&mut desk, "j k choice"), "{:#?}", rows(&mut desk));
-    press(&mut desk, "j");
-    assert!(
-        holds(&mut desk, "▸ 2 Which word greets"),
-        "{:#?}",
-        rows(&mut desk)
-    );
     assert!(holds(&mut desk, "It says"), "{:#?}", rows(&mut desk));
-    assert!(!holds(&mut desk, "It greets"), "{:#?}", rows(&mut desk));
-    press(&mut desk, "j");
-    assert!(holds(&mut desk, "▸ 1 What does it say"), "it goes around");
+    assert!(
+        !holds(&mut desk, "breaks the line"),
+        "its risks are counted on the rail: {:#?}",
+        rows(&mut desk)
+    );
+    assert!(holds(&mut desk, "▸ the change"), "{:#?}", rows(&mut desk));
+    assert!(holds(&mut desk, "tab next place"), "{:#?}", rows(&mut desk));
     press(&mut desk, "d");
     assert!(
-        holds(&mut desk, "▸ the change"),
+        holds(&mut desk, "The program says nothing today"),
         "and d goes back: {:#?}",
+        rows(&mut desk)
+    );
+    press(&mut desk, "dj");
+    assert!(holds(&mut desk, "▸ greet"), "{:#?}", rows(&mut desk));
+    assert!(
+        holds(&mut desk, "prints `hello, ana`"),
+        "{:#?}",
         rows(&mut desk)
     );
 }
@@ -342,13 +425,14 @@ fn a_number_asks_and_enter_confirms() {
     );
     press(&mut desk, "1");
     assert!(holds(&mut desk, "On to `ship`"), "{:#?}", rows(&mut desk));
-    assert!(holds(&mut desk, "enter confirms"), "{:#?}", rows(&mut desk));
+    assert!(holds(&mut desk, "enter confirm"), "{:#?}", rows(&mut desk));
     press(&mut desk, "2");
     assert!(
         holds(&mut desk, "Back to `plan`"),
         "another number changes it"
     );
-    assert_eq!(desk.press(Stroke::Enter), Press::Answer(Left::Picked(1)));
+    press(&mut desk, "1");
+    assert_eq!(desk.press(Stroke::Enter), chose("approve"));
 }
 
 #[test]
@@ -408,11 +492,4 @@ fn the_keys_say_where_esc_goes() {
         "{:#?}",
         rows(&mut opened)
     );
-}
-
-/// Nothing a person types here is words, so a paste answers nothing.
-#[test]
-fn it_is_never_typing() {
-    let review = review();
-    assert!(!desk(&review, Leaving::ToTheCard).typing());
 }

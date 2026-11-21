@@ -1,0 +1,6 @@
+▎ ◆ What does global mean in terms of where a pack is ins…
+▎      ▸ type to filter
+▎     ▸ The current user's platform data directory, share…
+▎       A fixed home-directory path such as ~/.yunta
+▎       A machine-wide directory shared across users
+▎ … 2 under

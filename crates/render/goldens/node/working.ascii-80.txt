@@ -1,10 +1,11 @@
 > node plan of run Q78GRR ; running
 
+  stands       running
+  took         1m36s
+  tokens       635k tokens ; 610k in / 25k out (586k cached)
   kind         prompt
   attempt      1
   runner       planner on mock/gpt-6-luna
-  tokens       610k in / 25k out (586k cached)
-  took         1m36s
 
 what it hands over
 . tasks  not yet

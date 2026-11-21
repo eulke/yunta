@@ -111,7 +111,7 @@ fn init_asks_through_the_console_and_honours_escape() {
     let drawn = terminal.ended();
     assert!(terminal.ran_to_the_end(), "{drawn}");
     assert!(
-        drawn.contains("esc keeps the detected default"),
+        drawn.contains("esc keep the detected default"),
         "every prompt says what Escape does — and this one has no run to \
          park, so it says the other thing:\n{drawn}"
     );

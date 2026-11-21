@@ -1,0 +1,6 @@
+▎ … 1 above
+▎ ◆ How should someone request a global installation, and…
+▎     ▸ --global on pack add, update, remove and list
+▎       A separate pack global command group
+▎       A global-by-default install
+▎ … 1 under

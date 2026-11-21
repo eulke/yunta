@@ -23,6 +23,6 @@
   ␛[1;35m▎␛[0m   ␛[2mnothing runs; this decision stays open␛[0m
   ␛[1;35m▎␛[0m   ␛[1myunta resolve-gate 7E5PH4 abort␛[0m
   ␛[1;35m▎␛[0m ␛[2mor␛[0m
-  ␛[1;35m▎␛[0m   ␛[1myunta close 7E5PH4␛[0m   ␛[2mcloses it for good␛[0m
+  ␛[1;35m▎␛[0m   ␛[1myunta close 7E5PH4␛[0m   ␛[2mclose it for good␛[0m
     ␛[2mthe run holds its own state on disk, so close this terminal whenever you like and answer from␛[0m
     ␛[2manywhere.␛[0m

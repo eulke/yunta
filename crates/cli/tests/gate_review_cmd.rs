@@ -138,7 +138,7 @@ fn an_option_that_asks_requires_its_words() {
     );
     let drawn = terminal.drawn();
     assert!(
-        !drawn.contains("enter records it"),
+        !drawn.contains("enter record it"),
         "an option that needs words is never settled with a key:\n{drawn}"
     );
 }
@@ -157,7 +157,7 @@ fn resolve_gate_without_an_option_offers_the_plan_its_gate_shows() {
     terminal.wait_on_screen("▸ ", "the run's own card was never put to the terminal");
     let screen = terminal.screen();
     assert!(
-        screen.holds("r reads the plan") && screen.holds("Make it"),
+        screen.holds("r read the plan") && screen.holds("Make it"),
         "resolve-gate offered a decision without the plan it decides on: {screen:#?}"
     );
     terminal.keys("r");
@@ -243,9 +243,7 @@ fn the_card_opens_right_under_the_run_with_the_question_and_its_options() {
         drawn.contains(yunta_testkit::handle(&id)),
         "the card's far edge does not name the run:\n{drawn}"
     );
-    let question = drawn
-        .find("◆ Plan registered. Approve?")
-        .expect("the decision was put");
+    let question = drawn.find("◆ Approve?").expect("the decision was put");
     let asked = &drawn[question..];
     assert!(
         asked.contains("Pause here: nothing runs"),
@@ -356,8 +354,11 @@ sessions:
     outcome: { type: completed, summary: "planned" }
 "##;
 
+/// The plan's desk reads the plan alone, the brief its gate shows beside it no place of the
+/// desk's: it opens on what the plan says of itself, the first of its two places, and walks
+/// them, the pane saying where it stands among them where no rail does.
 #[test]
-fn what_was_asked_is_read_before_the_plan_that_answers_it() {
+fn the_plans_desk_reads_the_plan_and_not_the_brief_shown_beside_it() {
     let root = tempfile::tempdir().unwrap();
     let checkout = Checkout::under(root.path())
         .config(
@@ -371,12 +372,22 @@ fn what_was_asked_is_read_before_the_plan_that_answers_it() {
     terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     terminal.keys("r");
     terminal.wait_on_screen(
-        "A pack installs for the user, not one project.",
-        "the brief is not what the plan's desk opens on",
+        "Writes the file the run is about.",
+        "the plan's desk does not open on what the plan says of itself",
     );
     terminal.keys("j");
     terminal.wait_on_screen(
-        "Writes the file the run is about.",
-        "what the plan says of itself does not follow it",
+        "2 of 2 · step 1 of 1",
+        "the desk's next place is not the task",
+    );
+    terminal.keys("j");
+    terminal.wait_on_screen(
+        "1 of 2 · 1 task",
+        "the desk walks a place the plan does not hold",
+    );
+    let screen = terminal.screen();
+    assert!(
+        !screen.holds("A pack installs for the user"),
+        "the brief is read on the printed page: {screen:#?}"
     );
 }

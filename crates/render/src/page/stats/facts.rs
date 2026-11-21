@@ -8,13 +8,12 @@ use surco::glyphs::Glyphs;
 use yunta_replay::stats::RunStats;
 
 /// What a verified task cost — the rate a run is read by first, and the
-/// one its acronym names.
-pub(super) fn cptv(stats: &RunStats, glyphs: Glyphs) -> String {
+/// one its acronym names — and how many tasks are done, in one sentence.
+pub(super) fn cptv(stats: &RunStats) -> String {
     match stats.cptv {
         Some(cptv) => format!(
-            "{} per verified task {} {}",
+            "{} per verified task, {}",
             Tokens::rounded(cptv),
-            glyphs.sep(),
             surco::text::counted_as(stats.tasks_done, "task done", "tasks done")
         ),
         None => "n/a: no task is done, so no cost per verified task".to_string(),

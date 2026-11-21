@@ -325,6 +325,16 @@ impl Place {
         self.words.word(&format!("held-{name}")).exists()
     }
 
+    /// Whether checkout `number` of the run's pool stands given back: no hold of
+    /// it stands, its lock let go.
+    pub(crate) fn given_back(&self, number: u32) -> bool {
+        !self
+            .bench
+            .pool()
+            .join(format!("slot-{number}.lock"))
+            .exists()
+    }
+
     /// The name the start of `unit` is held by: the index the engine opens its
     /// checkout through is named by the hash of the unit's name, `node/<id>`
     /// for a node.

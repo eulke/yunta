@@ -1,0 +1,5 @@
+␛[2mwhat it is doing · 3 calls␛[0m
+␛[2m… 2 above␛[0m
+read    crates/cli/src/commands/pack.rs
+read    crates/cli/src/cli/pack.rs
+␛[1mread    crates/engine/src/catalog.rs␛[0m

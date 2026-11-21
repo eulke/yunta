@@ -10,5 +10,5 @@
 ▎
 ▎ then  review ×2, conform → ship
 ▎
-▎ ↑↓ move · enter chooses · n adds a note · esc leaves it
-▎ for later
+▎ ↑↓ choose · enter answer · n add a note
+▎ esc leave it for later

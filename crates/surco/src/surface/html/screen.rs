@@ -5,9 +5,11 @@
 use super::blocks::{draw_all, stroke, Reader};
 use super::text::{command, esc, mark, words};
 use super::GLYPHS;
-use crate::components::{Answer, Attention, Binding, Legend, Region, Ribbon, Screen};
+use crate::components::{
+    Answer, Attention, Binding, KeyList, Legend, Noted, Region, Ribbon, Screen, Tally,
+};
 use crate::glyphs::Mark;
-use crate::words::Standing;
+use crate::words::{Standing, NOTHING_NEEDS_YOU};
 
 /// Each node's name over its stroke of the furrow, in the class of its word;
 /// every name with its word is said in the element's label. Nothing is drawn
@@ -51,6 +53,40 @@ pub(super) fn legend(legend: &Legend) -> String {
     format!(r#"<div class="legend">{}</div>"#, bindings.join(" "))
 }
 
+/// A screen's keys as a row of buttons: its own, then the far keys apart at the row's far
+/// end.
+fn keys(own: &Legend, anywhere: &Legend) -> String {
+    if anywhere.is_empty() {
+        return legend(own);
+    }
+    let buttons = |keys: &Legend| keys.0.iter().map(key).collect::<Vec<_>>().join(" ");
+    format!(
+        r#"<div class="legend">{} <span class="far">{}</span></div>"#,
+        buttons(own),
+        buttons(anywhere)
+    )
+}
+
+/// A list of keys: its sentence, muted, then a key an item, each a button beside what it
+/// does. Nothing for a list with neither.
+pub(super) fn key_list(list: &KeyList) -> String {
+    let said = list
+        .said
+        .as_deref()
+        .map(|said| format!(r#"<p class="muted">{}</p>"#, words(said)))
+        .unwrap_or_default();
+    let keys: String = list
+        .keys
+        .0
+        .iter()
+        .map(|binding| format!("<li>{}</li>", key(binding)))
+        .collect();
+    match keys.is_empty() {
+        true => said,
+        false => format!(r#"{said}<ul class="keys">{keys}</ul>"#),
+    }
+}
+
 /// One key as a button carrying it as a program names it, beside what it
 /// does.
 fn key(binding: &Binding) -> String {
@@ -65,7 +101,8 @@ fn key(binding: &Binding) -> String {
 /// An attention as the page's status: the mark and `needs you`, its subject
 /// in bold, and the answer, a command to copy before what is asked or a key's
 /// button after it, or what is asked alone when it is answered at another
-/// terminal. A page tints it, as a screen tints its row.
+/// terminal or said where a line is typed. A page tints it, as a screen tints
+/// its row.
 pub(super) fn attention(attention: &Attention) -> String {
     if attention.asks.trim().is_empty() {
         return String::new();
@@ -82,15 +119,27 @@ pub(super) fn attention(attention: &Attention) -> String {
             command(typed)
         ),
         Answer::Key(binding) => format!("{head}{asks} {}", key(binding)),
-        Answer::Elsewhere => format!("{head}{asks}"),
+        Answer::Elsewhere | Answer::Unkeyed => format!("{head}{asks}"),
     };
     format!(r#"<p class="attention" role="status">{said}</p>"#)
 }
 
+/// A note as the page's status, in the attention's place: its mark, then what
+/// the act did. Nothing tints it, as nothing tints a screen's note.
+pub(super) fn noted(noted: &Noted) -> String {
+    format!(
+        r#"<p class="noted" role="status">{} {}</p>"#,
+        mark(noted.mark),
+        words(&noted.said)
+    )
+}
+
 /// A screen as a page's elements, each on a line of its own: where the person
 /// is and what is counted in its header, what it is about, the regions in its
-/// `main`, the one the keys act on current, what needs the person and the keys
-/// in its footer, and what is open over it as a dialog.
+/// `main`, the one the keys act on current, what the run it is about has spent,
+/// what needs the person, or in its place what their last act came to, and the
+/// keys in its footer, the far keys at their row's far end, and what is open over
+/// it as a dialog.
 pub(super) fn screen(screen: &Screen) -> String {
     let mut reader = Reader::headed();
     let mut lines = vec![r#"<div class="screen">"#.to_string()];
@@ -106,11 +155,15 @@ pub(super) fn screen(screen: &Screen) -> String {
     let main = &screen.main;
     lines.push(region(&mut reader, main, "main", screen.main_focused()));
     lines.push("</main>".to_string());
-    let act: Vec<String> = screen
-        .attention
-        .iter()
-        .map(attention)
-        .chain(std::iter::once(legend(&screen.legend)))
+    let meter = screen.meter.iter().map(|meter| meter.said(GLYPHS));
+    lines.extend(meter.map(|said| super::blocks::lines(&[said])));
+    let said = match &screen.noted {
+        Some(said) => Some(noted(said)),
+        None => screen.attention.as_ref().map(attention),
+    };
+    let act: Vec<String> = said
+        .into_iter()
+        .chain(std::iter::once(keys(&screen.legend, &screen.anywhere)))
         .filter(|drawn| !drawn.is_empty())
         .collect();
     if !act.is_empty() {
@@ -132,8 +185,9 @@ pub(super) fn screen(screen: &Screen) -> String {
 }
 
 /// Where the person is, the outermost place in bold, and how many runs stand
-/// at each word that asks for a look, each count after its mark. Nothing for a
-/// screen that says neither.
+/// at each word that asks for a look, each count after its mark, or that nothing
+/// needs the person where the runs counted need nothing. Nothing for a screen
+/// that says neither.
 fn place(screen: &Screen) -> Option<String> {
     let within = format!(r#"<span class="within"> {} </span>"#, GLYPHS.within());
     let trail: Vec<String> = screen
@@ -152,11 +206,14 @@ fn place(screen: &Screen) -> Option<String> {
         )
     });
     let sep = format!(r#"<span class="sep"> {} </span>"#, GLYPHS.sep());
-    let counts: Vec<String> = screen
-        .tally
-        .iter()
-        .map(|count| format!("{} {}", mark(count.standing.mark()), esc(&count.said())))
-        .collect();
+    let counts: Vec<String> = match &screen.tally {
+        Tally::Uncounted => Vec::new(),
+        Tally::Counted(counts) if counts.is_empty() => vec![esc(NOTHING_NEEDS_YOU)],
+        Tally::Counted(counts) => counts
+            .iter()
+            .map(|count| format!("{} {}", mark(count.standing.mark()), esc(&count.said())))
+            .collect(),
+    };
     let tally = (!counts.is_empty())
         .then(|| format!(r#"<span class="tally">{}</span>"#, counts.join(&sep)));
     let said: Vec<String> = trail.into_iter().chain(tally).collect();
@@ -164,14 +221,22 @@ fn place(screen: &Screen) -> Option<String> {
 }
 
 /// A region as a section in the class of its `part`, its title the heading
-/// over its document, current when the keys act on it.
+/// over its document, its parts apart by the separator and its edge at the
+/// heading's far end, current when the keys act on it.
 fn region(reader: &mut Reader, region: &Region, part: &str, focused: bool) -> String {
-    let (label, heading) = match &region.title {
-        Some(title) => (
-            format!(r#" aria-label="{}""#, esc(title)),
-            format!("<h3>{}</h3>", esc(title)),
-        ),
-        None => (String::new(), String::new()),
+    let sep = format!(" {} ", GLYPHS.sep());
+    let (label, heading) = match region.title.is_empty() {
+        false => {
+            let title = region.title.join(&sep);
+            let edge = region.edge.as_deref().map_or(String::new(), |edge| {
+                format!(r#" <span class="edge">{}</span>"#, esc(edge))
+            });
+            (
+                format!(r#" aria-label="{}""#, esc(&title)),
+                format!("<h3>{}{edge}</h3>", esc(&title)),
+            )
+        }
+        true => (String::new(), String::new()),
     };
     let current = match focused {
         true => r#" aria-current="true""#,

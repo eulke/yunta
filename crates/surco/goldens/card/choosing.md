@@ -8,4 +8,4 @@ the tasks document the planner handed over
 
 then plan, then this gate asks again
 
-`↑↓` move · `enter` chooses · `esc` leaves the run waiting
+`↑↓` choose · `enter` answer · `esc` leave it waiting

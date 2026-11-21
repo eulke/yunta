@@ -83,7 +83,7 @@ fn every_place_of_the_home_a_target_opens_in_holds_what_the_target_needs() {
             let Stands::Home(place) = target.stands else {
                 panic!("`{name}` opens on a cut: it needs a place of the home holding {needs:?}");
             };
-            let workspace = home.workspace_at(place);
+            let workspace = home.workspace_at(place).await;
             for need in *needs {
                 holds(&workspace, *need, name).await;
             }

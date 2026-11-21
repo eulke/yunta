@@ -199,3 +199,6 @@ fn beside(head: Line, subject: &str, said: Vec<String>, layout: &Layout) -> Vec<
     lines.extend(said.map(|part| Line::new().plain(layout.under.as_str()).plain(part)));
     lines
 }
+
+#[cfg(test)]
+mod tests;

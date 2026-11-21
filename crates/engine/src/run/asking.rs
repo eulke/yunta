@@ -29,18 +29,12 @@ impl RunCtx<'_> {
         // a gate's page says it while the count stands on the tree the run
         // stands on.
         let state = self.run_view().await?.state;
-        let shown = match escalation.shows().is_empty() {
-            true => Vec::new(),
-            false => {
-                crate::artifacts::shown::documents(
-                    self.run_dir,
-                    escalation.shows(),
-                    &state,
-                    self.manifest.request(),
-                )
-                .await?
-            }
-        };
+        let shown = self.shown(escalation, &state).await?;
+        let ahead = yunta_core::ahead::NodesAhead::of(
+            &self.manifest.workflow,
+            &self.manifest.config,
+            state.run.left_out(),
+        );
         let asking = yunta_core::port::DecisionAsked {
             shown: &shown,
             run: self.run_id,
@@ -49,6 +43,7 @@ impl RunCtx<'_> {
             left_out: state.run.left_out(),
             node,
             mode: state.run.mode(),
+            ahead: &ahead,
         };
         let answered = {
             let _asking = self.asking(node, task).await?;
@@ -65,6 +60,26 @@ impl RunCtx<'_> {
                 failure: escalation.failure().cloned().map(Box::new),
             })?;
         Ok(Some(choice))
+    }
+
+    /// The documents `escalation` shows, read from the run whose events derive `state`;
+    /// none when it shows none.
+    async fn shown(
+        &self,
+        escalation: &GateWaitingPayload,
+        state: &yunta_replay::RunState,
+    ) -> Result<Vec<yunta_core::shown::ShownDocument>, RunError> {
+        if escalation.shows().is_empty() {
+            return Ok(Vec::new());
+        }
+        let shown = crate::artifacts::shown::documents(
+            self.run_dir,
+            escalation.shows(),
+            state,
+            self.manifest.request(),
+        )
+        .await?;
+        Ok(shown)
     }
 
     /// Says in the run's registry that `node` is asking a person at this

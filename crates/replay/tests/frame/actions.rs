@@ -156,11 +156,22 @@ fn a_run_a_person_stopped_is_continued_while_open_and_left_once_closed() {
         .is_empty());
 }
 
+/// A run that ended with its work, finished or reported, is certified and its evidence
+/// verified, the receipt standing on the chain verifying checks; a broken one is verified;
+/// a moving one stopped.
 #[test]
-fn a_finished_run_is_certified_a_broken_one_verified_and_a_moving_one_stopped() {
+fn a_finished_run_is_certified_and_verified_a_broken_one_verified_and_a_moving_one_stopped() {
+    let certified_and_verified = vec![
+        action(NextStep::Receipt { run: run() }, Effect::Certifies),
+        action(NextStep::Verify { run: run() }, Effect::Verifies),
+    ];
     assert_eq!(
         frame(Standing::Finished, RunPhase::Finished).actions(None),
-        vec![action(NextStep::Receipt { run: run() }, Effect::Certifies)]
+        certified_and_verified
+    );
+    assert_eq!(
+        frame(Standing::Reported, RunPhase::Finished).actions(None),
+        certified_and_verified
     );
     assert_eq!(
         frame(
@@ -170,10 +181,7 @@ fn a_finished_run_is_certified_a_broken_one_verified_and_a_moving_one_stopped() 
             }
         )
         .actions(None),
-        vec![action(
-            NextStep::Verify { run: run() },
-            Effect::FindsWhereLogStops
-        )]
+        vec![action(NextStep::Verify { run: run() }, Effect::Verifies)]
     );
     assert_eq!(
         frame(Standing::Running, RunPhase::Running).actions(None),

@@ -1,13 +1,11 @@
 //! See [`crate`]. What reaches the application.
 
-use std::path::PathBuf;
-
 use chrono::{DateTime, Utc};
 use surco::components::ScreenLaid;
 use yunta_api::{FollowNews, Remark};
 
 use crate::prompt::Stroke;
-use crate::{News, Outcome, Ticket};
+use crate::{Address, News, Outcome, Ticket};
 
 /// What reaches the application: a stroke a person gave, what a surface laid out, the
 /// time, what work it asked for says while it works, hands back while it lasts and came
@@ -35,6 +33,7 @@ pub enum Input {
     /// news; the following goes on, or is made again. Not `FollowNews::Unreadable`, one run
     /// the field cannot read.
     LookFailed(String),
-    /// A page the surface was asked to show and could not: the person opens it themselves.
-    Unshown(PathBuf),
+    /// A page or a link the surface was asked to show and could not: the person opens it
+    /// themselves.
+    Unshown(Address),
 }

@@ -6,16 +6,16 @@ use std::sync::Arc;
 
 use surco::components::Check;
 use yunta_api::{
-    AuditedPack, HistoryReading, InitializedProject, ProjectDraft, Repository, WaitingDecision,
-    WaitingQuestions, WorkflowCheck,
+    AuditedPack, HistoryReading, InitializedProject, ProjectDraft, PullRequestPolled, Repository,
+    WorkflowCheck,
 };
-use yunta_core::receipt::Receipt;
+use yunta_core::receipt::{EventChainStatus, Receipt};
 use yunta_core::step::NextStep;
 use yunta_core::{CommitSha, PackAudit, PackManifest, PackRef, PricingEntry, RunId, WorkflowShape};
 use yunta_render::page::doctor::Finding;
 use yunta_render::page::pack::{Cases, Listed, Needs, NewPackCheck};
 use yunta_render::page::Collected;
-use yunta_render::page::{CancelState, Catalog, Diagnosis, Graph, Node, Run, Tested};
+use yunta_render::page::{CancelState, Catalog, Diagnosis, Graph, Tested};
 use yunta_render::refusal::Refused;
 
 use crate::Ticket;
@@ -43,14 +43,9 @@ pub enum Outcome {
     Pack(PackOutcome),
     /// What a run leaves.
     Evidence(EvidenceOutcome),
-    /// A run's page.
-    Page(Box<Run>),
-    /// The page of a run's node.
-    NodePage(Box<Node>),
-    /// The round of questions a run is parked on.
-    Questions(Box<WaitingQuestions>),
-    /// The decision a run waits on, with the documents it shows.
-    Decision(Box<WaitingDecision>),
+    /// The pull request of the gate a run waits at, as its forge answered a poll; none
+    /// where the run waits at no gate a forge holds, as one that went on reads.
+    PullRequest(Option<Box<PullRequestPolled>>),
     /// A workflow's past runs, and what their logs say of its checks.
     History(Box<HistoryReading>),
     /// A workflow's graph, as written.
@@ -83,6 +78,37 @@ pub enum Outcome {
     Failed(String),
     /// The work was stopped before it ended.
     Stopped,
+}
+
+impl Outcome {
+    /// The run the work handed to a detached engine, which writes the run's registry once it
+    /// holds it: one started, one resumed, and one whose decision or answers were recorded,
+    /// which a resume then takes up. None for any other outcome.
+    pub(crate) fn handed_on(&self) -> Option<&RunId> {
+        match self {
+            Outcome::Started { run }
+            | Outcome::Resumed { run }
+            | Outcome::Decided { run }
+            | Outcome::Answered { run } => Some(run),
+            Outcome::Repository(_)
+            | Outcome::Detected { .. }
+            | Outcome::Initialized(_)
+            | Outcome::Catalog(_)
+            | Outcome::Workflow(_)
+            | Outcome::Pack(_)
+            | Outcome::Evidence(_)
+            | Outcome::PullRequest(_)
+            | Outcome::History(_)
+            | Outcome::Graph(_)
+            | Outcome::Doctor(_)
+            | Outcome::Collected(_)
+            | Outcome::Cancelled { .. }
+            | Outcome::Closed { .. }
+            | Outcome::Refused(_)
+            | Outcome::Failed(_)
+            | Outcome::Stopped => None,
+        }
+    }
 }
 
 /// The repository the application works in, read as it opens: where Yunta stands in it,
@@ -144,8 +170,13 @@ pub enum PackOutcome {
 pub enum EvidenceOutcome {
     /// The receipt, as it was written beside the run.
     Receipt(Box<Receipt>),
-    /// Each check of `run`'s evidence, in the order it ran.
-    Verified { run: RunId, checks: Vec<Check> },
+    /// Each check of `run`'s evidence, in the order it ran, and what its event chain's
+    /// check found, which a run's receipt says.
+    Verified {
+        run: RunId,
+        chain: EventChainStatus,
+        checks: Vec<Check>,
+    },
     /// Where the run's page for a browser was written.
     PageWritten { page: PathBuf },
 }

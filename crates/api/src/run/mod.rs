@@ -22,7 +22,7 @@ use yunta_storage::Storage;
 
 use crate::{Error, Failure, Project, Remark};
 
-pub use reading::RunReading;
+pub use reading::{PullRequestPolled, RunReading};
 pub use reference::RunRef;
 pub use stats::StatsReading;
 

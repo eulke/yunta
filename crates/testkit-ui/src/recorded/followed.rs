@@ -3,6 +3,17 @@
 //! it stands caught up with the place's log, each piece kept by what it is about. A state
 //! opened as though its repository stood otherwise than it does is told the place's own
 //! store and prices with it (`read_as`), as the recordings of a setup are.
+//!
+//! A piece about a run is kept under the head the run's log stands at in the place it was
+//! recorded in, since one run stands in several places at several heads, the design's run at
+//! each of its moments: a state that holds the run read whole is handed only the pieces of
+//! the place it was read in, so it never takes for one run's news what another place's log
+//! says of it; a state that holds none of it yet is handed every place's, and comes to
+//! stand at each.
+//!
+//! The runs whose screens the walk opens on a scene stand in places of their own, the cuts
+//! of the home, whose fields are no field the walk shows: there only what is about a run is
+//! kept, beside what the run's screen asks to read as its scene opens (`on_their_screens`).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -14,7 +25,9 @@ use yunta_core::events::Channel;
 use yunta_core::step::NextStep;
 use yunta_core::{RunId, Seq};
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, Outcome, Performer, RepositoryReading, Request, State};
+use yunta_ui::{
+    Input, News, Operation, Outcome, Performer, RepositoryReading, Request, State, Ticket,
+};
 
 use super::Recordings;
 use crate::home::{root_of, Home};
@@ -26,16 +39,19 @@ use crate::sandbox::{now, workspace};
 const STANDING: Duration = Duration::from_secs(30);
 
 /// What the application's following handed where it was recorded, each piece by what it
-/// is about: the field, by the reach it was followed at, or the run it names.
+/// is about: the field, by the reach it was followed at, or the run it names, by the head
+/// that run's log stood at where it was recorded.
 #[derive(Default)]
 pub(super) struct FollowedNews {
     fields: Vec<(FieldReach, Vec<FollowNews>)>,
-    runs: BTreeMap<RunId, Vec<FollowNews>>,
+    runs: BTreeMap<RunId, BTreeMap<Seq, Vec<FollowNews>>>,
 }
 
 impl FollowedNews {
-    /// Each piece about what `followed` names: of the field at its reach, then of its run.
-    pub(super) fn about(&self, followed: &Followed) -> Vec<&FollowNews> {
+    /// Each piece about what `followed` names: of the field at its reach, then of its run,
+    /// those recorded where its log stood at `held`, the head a state holds it read whole
+    /// at, or every place's where it holds none of it.
+    pub(super) fn about(&self, followed: &Followed, held: Option<Seq>) -> Vec<&FollowNews> {
         let field = self
             .fields
             .iter()
@@ -45,8 +61,17 @@ impl FollowedNews {
             .run
             .iter()
             .filter_map(|run| self.runs.get(run))
-            .flatten();
+            .flat_map(|places| places.iter())
+            .filter(|(head, _)| held.is_none_or(|held| held == **head))
+            .flat_map(|(_, news)| news);
         field.chain(run).collect()
+    }
+
+    /// `run` recorded as followed, whatever its following handed: a successor read whole
+    /// with its predecessor's news is followed on, and its following hands nothing of it
+    /// again.
+    fn followed_on(&mut self, run: RunId) {
+        self.runs.entry(run).or_default();
     }
 
     /// Whether each thing `followed` names was recorded: the field at its reach and the
@@ -62,10 +87,11 @@ impl FollowedNews {
         field && run
     }
 
-    /// `news`, taken by a state following `followed`, kept under what it is about: a
-    /// piece of the field under the reach followed, and a piece of a run under that run.
-    /// A piece of a field no longer followed is dropped, as the state drops it.
-    fn kept(&mut self, followed: &Followed, news: FollowNews) {
+    /// `news`, taken in a place whose log stands at `heads` by a state following the field
+    /// at `reach`, kept under what it is about: a piece of the field under that reach, and a
+    /// piece of a run under that run and its head there. A piece of a field followed at no
+    /// reach is dropped, as the state drops a field it no longer follows.
+    fn kept(&mut self, reach: Option<FieldReach>, news: FollowNews, heads: &BTreeMap<RunId, Seq>) {
         let run = match &news {
             FollowNews::Field(_)
             | FollowNews::Joined(_)
@@ -75,8 +101,14 @@ impl FollowedNews {
             FollowNews::Whole { run, .. } => Some(run.run.clone()),
             FollowNews::Run { run, .. } => Some(run.clone()),
         };
-        match (run, followed.field) {
-            (Some(run), _) => self.runs.entry(run).or_default().push(news),
+        match (run, reach) {
+            (Some(run), _) => {
+                let head = *heads
+                    .get(&run)
+                    .unwrap_or_else(|| panic!("{run:?}, which is followed, stands in the log"));
+                let places = self.runs.entry(run).or_default();
+                places.entry(head).or_default().push(news);
+            }
             (None, Some(reach)) => match self.fields.iter_mut().find(|(at, _)| *at == reach) {
                 Some((_, kept)) => kept.push(news),
                 None => self.fields.push((reach, vec![news])),
@@ -88,14 +120,15 @@ impl FollowedNews {
 
 impl Recordings {
     /// What the application follows in the places the walk's field comes from, and of each
-    /// run whose page it reads, as a state opened there follows it. A field is followed
+    /// run whose screen it opens, as a state opened there follows it. A field is followed
     /// only in a repository set up: in a place never set up, the state is told its
     /// repository is set up, as the walk answers its opening, and follows the field there:
     /// here, where no run stands and its first request does; here and then at the machine's
     /// reach, where the field stands. Each run is followed from the application opened on
-    /// following it: one in a repository never set up stands over its setup, and the
-    /// reviewing run over its field, which it goes back to and follows at the machine's
-    /// reach.
+    /// following it: one in a repository never set up stands over its setup, the asking
+    /// runs, the typed round's and the round of choices', each in its own place, and the reviewing run over its field, which it goes back to, its
+    /// prompt in place put aside first, and follows at the machine's reach. Then each run of
+    /// the home's cuts, on its screen in its cut.
     pub(super) async fn followings(&mut self, home: &Home) {
         let here = Followed {
             field: Some(FieldReach::Here),
@@ -119,14 +152,13 @@ impl Recordings {
         let opened = told_set_up(&worked);
         self.followed_through(worked.clone(), &at_worked, opened, &each_reach)
             .await;
-        for run in [home.worked.run_id.clone(), home.parked.clone()] {
-            let opened = opened_following(&run);
-            let alone = Followed {
-                field: None,
-                run: Some(run),
-            };
-            self.followed_through(worked.clone(), &at_worked, opened, &[(None, alone)])
-                .await;
+        for run in [&home.worked.run_id, &home.parked] {
+            self.followed_alone(worked.clone(), &at_worked, run).await;
+        }
+        for asking in [&home.asking, &home.scenes.choosing] {
+            let place = workspace(&asking.worktree, root_of(asking));
+            let at_asking = yunta_testkit::heads(asking.store_path());
+            self.followed_alone(place, &at_asking, &asking.run_id).await;
         }
         let reviewing = &home.reviewing;
         let over_its_field = Followed {
@@ -134,19 +166,36 @@ impl Recordings {
             run: Some(reviewing.run_id.clone()),
         };
         let back_and_further = [
-            (None, over_its_field),
+            (None, over_its_field.clone()),
+            (Some(Stroke::Decline), over_its_field),
             (Some(Stroke::Decline), here),
             (further, machine),
         ];
         let opened = opened_following(&reviewing.run_id);
         let place = workspace(&reviewing.worktree, root_of(reviewing));
-        self.followed_through(
-            place,
-            &yunta_testkit::heads(reviewing.store_path()),
-            opened,
-            &back_and_further,
-        )
-        .await;
+        let at_reviewing = yunta_testkit::heads(reviewing.store_path());
+        self.followed_through(place, &at_reviewing, opened, &back_and_further)
+            .await;
+        for cut in home.scenes.cuts() {
+            self.on_their_screens(cut.workspace(), cut.runs()).await;
+        }
+    }
+
+    /// What the following of `run` alone hands, the application opened on its screen in
+    /// `place`, whose log stands at `heads`.
+    async fn followed_alone(
+        &mut self,
+        place: Workspace,
+        heads: &BTreeMap<RunId, Seq>,
+        run: &RunId,
+    ) {
+        let alone = Followed {
+            field: None,
+            run: Some(run.clone()),
+        };
+        let opened = opened_following(run);
+        self.followed_through(place, heads, opened, &[(None, alone)])
+            .await;
     }
 
     /// What the following of `state`, just opened and asking `asked`, hands, its work
@@ -190,12 +239,107 @@ impl Recordings {
                     })
                     .expect("the performer hands back what it reads");
                 match &input {
-                    Input::FollowNews(news) => self.followed.kept(&state.followed(), news.clone()),
+                    Input::FollowNews(news) => {
+                        let reach = state.followed().field;
+                        self.followed.kept(reach, news.clone(), heads);
+                    }
                     Input::LookFailed(why) => panic!("a look at what is followed failed: {why}"),
                     _ => {}
                 }
                 asked = state.update(input);
             }
+        }
+    }
+
+    /// What the following hands of each run of `runs`, the application opened on the run's
+    /// screen in `place`, and what each screen asks to read as its scene opens there, a
+    /// pull request read or a run's events verified: each piece about a run kept under the
+    /// run and its head here, those of the run its screen moves onto, a child or a
+    /// successor, among them; each reading kept under its kind. Pieces of the field are
+    /// left out, and the reading of where the application stands as it opens, which no
+    /// scene asks. Each screen is taken until it waits on nothing and stands caught up with
+    /// the place's log; the run it then follows is recorded as followed, whatever its
+    /// following handed.
+    pub(super) async fn on_their_screens(&mut self, place: Workspace, runs: &[RunId]) {
+        let project = place
+            .project()
+            .expect("the place's project names its store");
+        let heads = yunta_testkit::heads(&project.storage_path);
+        for run in runs {
+            let performer = Arc::new(Performer::new(place.clone(), Channel::Tty));
+            let (inputs, mut received) = mpsc::unbounded_channel();
+            let (mut state, opening) = opened_following(run);
+            for request in opening {
+                performer.take(request, &inputs);
+            }
+            let mut asked = Vec::new();
+            let mut readings = Readings::default();
+            loop {
+                for request in asked.drain(..) {
+                    readings.asked(&request);
+                    performer.take(request, &inputs);
+                }
+                if state.waiting_on().is_empty() && state.caught_up(&heads) {
+                    break;
+                }
+                let came = tokio::time::timeout(STANDING, received.recv()).await;
+                let input = came
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "{run:?}'s screen never stands caught up at {heads:?}: it follows \
+                             {:?} and waits on {:?}",
+                            state.followed(),
+                            state.waiting_on()
+                        )
+                    })
+                    .expect("the performer hands back what it reads");
+                match &input {
+                    Input::FollowNews(news) => self.followed.kept(None, news.clone(), &heads),
+                    Input::LookFailed(why) => panic!("a look at what is followed failed: {why}"),
+                    other => {
+                        if let Some(read) = readings.came(other) {
+                            self.kept(read);
+                        }
+                    }
+                }
+                asked = state.update(input);
+            }
+            if let Some(run) = state.followed().run {
+                self.followed.followed_on(run);
+            }
+        }
+    }
+}
+
+/// The readings a run's screen asked as its scene opened, each under the ticket it was asked
+/// under, with what it found so far.
+#[derive(Default)]
+struct Readings {
+    asked: BTreeMap<Ticket, (Operation, Vec<News>)>,
+}
+
+impl Readings {
+    /// `request`, kept where it asks for a reading.
+    fn asked(&mut self, request: &Request) {
+        if let Request::Perform(ticket, operation) = request {
+            self.asked.insert(*ticket, (operation.clone(), Vec::new()));
+        }
+    }
+
+    /// `input`, folded into the reading it answers: what it found kept, and the reading
+    /// handed back with all it found once it came to its outcome.
+    fn came(&mut self, input: &Input) -> Option<(Operation, Vec<News>, Outcome)> {
+        match input {
+            Input::News(ticket, news) => {
+                let (_, found) = self.asked.get_mut(ticket)?;
+                found.push(news.clone());
+                None
+            }
+            Input::Outcome(ticket, outcome) => {
+                let (operation, found) = self.asked.remove(ticket)?;
+                Some((operation, found, outcome.clone()))
+            }
+            _ => None,
         }
     }
 }
@@ -225,8 +369,8 @@ fn told_set_up(workspace: &Workspace) -> (State, Vec<Request>) {
     (state, requests)
 }
 
-/// The application opened on following `run`, and what it asks first.
+/// The application opened on `run`'s screen, which follows the run, and what it asks first.
 fn opened_following(run: &RunId) -> (State, Vec<Request>) {
-    let follow = NextStep::Follow { run: run.clone() };
-    State::opened_on(now(), &follow).expect("the run's stage takes following it")
+    let status = NextStep::status(run);
+    State::opened_on(now(), &status).expect("the run's stage takes its status")
 }

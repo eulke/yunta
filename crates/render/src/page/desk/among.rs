@@ -1,13 +1,12 @@
 //! See [`super`]. The plan among what a decision shows, read for its desk: the first
-//! document that is a plan with a place to stand on, the reading of it with the other
-//! documents as what else it shows, and what a decision's card says of it.
+//! document that is a plan with a place to stand on, the reading of it, and what a
+//! decision's card says of it.
 
 use surco::glyphs::Glyphs;
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
-use yunta_core::RunId;
 
-use super::super::plan::{head, said, tree, Form};
-use super::{says_of_itself, AlsoShown, Reading};
+use super::super::plan::{head, said, tree};
+use super::{says_of_itself, Reading};
 
 /// The lines a decision's card says of `review`: what it is about, unless `question` says
 /// it; how big it is, a fact each; and what it implies past its tasks.
@@ -26,27 +25,12 @@ pub fn about(review: &PlanReview, question: &str, glyphs: Glyphs) -> Vec<String>
     lines
 }
 
-/// The plan among `documents`, the run `run`'s, as a person reads it, with the others
-/// as what else it shows; `None` when no document is a plan, or the plan has no place to
-/// stand on.
-pub fn reading(documents: &[ShownDocument], run: &RunId) -> Option<Reading> {
-    let (plan, review) = plan_among(documents)?;
-    let mut leads = true;
-    let mut also = Vec::new();
-    for document in documents {
-        if std::ptr::eq(document, plan) {
-            leads = false;
-            continue;
-        }
-        also.push(AlsoShown {
-            name: super::super::shown::called(document),
-            document: document.clone(),
-            run: run.clone(),
-            form: Form::Review,
-            leads,
-        });
-    }
-    Some(Reading::of(review.clone(), also))
+/// The plan among `documents` as a person reads it at its desk; `None` when no document is
+/// a plan, or the plan has no place to stand on. The other documents are no place of the
+/// desk's.
+pub fn reading(documents: &[ShownDocument]) -> Option<Reading> {
+    let (_, review) = plan_among(documents)?;
+    Some(Reading::of(review.clone()))
 }
 
 /// Whether `review` holds a place for a person to stand on: a task, or what it says of

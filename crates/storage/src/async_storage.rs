@@ -68,6 +68,19 @@ impl AsyncStorage {
             .await
     }
 
+    /// [`Storage::append_together_at`], from async code: `drafts` as one
+    /// commit, stamped with `at`.
+    pub async fn append_together<const N: usize>(
+        &self,
+        drafts: [EventDraft; N],
+        at: DateTime<Utc>,
+    ) -> Result<[Seq; N]> {
+        self.blocking("append together", move |storage| {
+            storage.append_together_at(&drafts, at)
+        })
+        .await
+    }
+
     pub async fn events_for_run(&self, run_id: RunId) -> Result<Vec<StoredEvent>> {
         self.blocking("read a run's events", move |storage| {
             storage.events_for_run(&run_id)

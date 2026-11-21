@@ -219,6 +219,7 @@ fn workspace(repo: &Path, root: &Path) -> Workspace {
         clock: Arc::new(FixedClock),
         ids: Arc::new(SystemIdSource),
         secrets: Arc::new(ProcessSecrets),
+        forges: Arc::new(yunta_api::DeclaredForge),
         binary: "yunta".into(),
     }
 }

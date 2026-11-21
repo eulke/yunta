@@ -5,7 +5,7 @@
 use surco::components::Legend;
 use surco::line::{Line, Tone};
 
-use crate::prompt::ESC;
+use crate::prompt::{PromptAct, ENTER, ESC};
 
 /// Where the workflows a repository can run stand on the trail.
 pub const WORKFLOWS: &str = "workflows";
@@ -48,7 +48,7 @@ pub fn new_workflow_asks() -> Line {
 /// workflows.
 pub fn naming_legend() -> Legend {
     Legend::new()
-        .key("enter", "answers")
+        .key(ENTER, PromptAct::Answer.said())
         .key(ESC, "back to the workflows")
 }
 
@@ -91,7 +91,7 @@ pub fn pack_page_legend() -> Legend {
 /// The keys of a new pack's name: Enter answers, Escape goes back to the packs.
 pub fn pack_naming_legend() -> Legend {
     Legend::new()
-        .key("enter", "answers")
+        .key(ENTER, PromptAct::Answer.said())
         .key(ESC, "back to the packs")
 }
 

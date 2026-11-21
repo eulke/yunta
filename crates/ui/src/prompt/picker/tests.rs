@@ -164,13 +164,17 @@ fn esc_declines_and_ctrl_c_interrupts() {
     assert_eq!(picker().press(Stroke::Interrupt), Press::Interrupt);
 }
 
-/// The list says its keys, and what esc does here.
+/// The list says its keys, and what esc does here; the row it is narrowed on says that
+/// what is typed narrows it.
 #[test]
 fn the_list_says_its_keys() {
     let drawn = rows(&picker(), usize::MAX);
     let keys = drawn.last().cloned().unwrap_or_default();
-    assert!(keys.contains("type to filter"), "{drawn:?}");
-    assert!(keys.contains("esc leaves it for later"), "{drawn:?}");
+    assert!(drawn[0].contains("type to filter"), "{drawn:?}");
+    assert!(
+        keys.ends_with("choose ; enter answer ; esc leave it for later"),
+        "{drawn:?}"
+    );
 }
 
 /// A list too long for its room shows the rows around the pointer.

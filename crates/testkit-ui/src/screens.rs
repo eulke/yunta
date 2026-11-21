@@ -3,18 +3,17 @@
 //! instant every test stands at, and a person's keys pressed on it.
 //!
 //! - [`field`]: a repository's runs, one finished and one parked on its gate, which the
-//!   attention row names;
-//! - [`run`]: the run parked on its gate, its ribbon across the screen, its chronicle, and
-//!   the page of its gate beside it;
-//! - [`card`]: the run's decision, its card put to the person;
-//! - [`desk`]: the plan it is on, read at its desk;
-//! - [`confirmation`]: a run's stop asked over the field;
-//! - [`palette`] and [`help`], each over the run.
+//!   attention row names.
+//! - [`mod@run`]: a run's screen as a target's cut stands, by the target's name, the
+//!   design's run or a small run in place of a bench's: what every test of a scene builds
+//!   its state from.
 //!
 //! And [`walked_to`], where a person's keys take them from the field, beside
-//! [`reviewed`]: the application opened on `yunta review` of the parked run, which stands
-//! where a person walks to the plan, and goes back the way they walked. [`World`] is the
-//! repository they all stand in, for a test that reads its log beside a state.
+//! [`reviewed`]: the application opened on `yunta review` of the parked run, the run's screen
+//! on its plan over the field. [`World`] is the repository they all stand in, for a test that
+//! reads its log beside a state.
+
+pub mod run;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -55,45 +54,14 @@ pub async fn field() -> State {
     walked_to(&[]).await
 }
 
-/// The run parked on its gate, opened from the field, the page of its gate beside it: a
-/// node that produced no file, so the page names no path of the bench's.
-pub async fn run() -> State {
-    walked_to(&[Stroke::Enter, Stroke::Down, Stroke::Enter]).await
-}
-
-/// The run's decision, its card put to the person.
-pub async fn card() -> State {
-    walked_to(&[Stroke::Enter, Stroke::Insert('a')]).await
-}
-
-/// The plan the run's decision is on, read at its desk.
-pub async fn desk() -> State {
-    walked_to(&[Stroke::Enter, Stroke::Insert('a'), Stroke::Insert('r')]).await
-}
-
 /// The application opened on `yunta review` of the parked run, its work answered, then
-/// `strokes` pressed: where `review` opens it, over the run and the field.
+/// `strokes` pressed: where `review` opens it, the run's screen on its plan, over the field.
 pub async fn reviewed(strokes: &[Stroke]) -> State {
     let run = PARKED.parse().expect("the parked run's id");
     World::made()
         .await
         .driven_from(&NextStep::Review { run }, strokes)
         .await
-}
-
-/// Stopping the parked run, asked over the field.
-pub async fn confirmation() -> State {
-    walked_to(&[Stroke::Insert('c')]).await
-}
-
-/// The palette, over the run.
-pub async fn palette() -> State {
-    walked_to(&[Stroke::Enter, Stroke::Insert('/')]).await
-}
-
-/// Help, over the run.
-pub async fn help() -> State {
-    walked_to(&[Stroke::Enter, Stroke::Insert('?')]).await
 }
 
 /// A repository whose runs a bench made, one finished and one parked on its plan's gate,

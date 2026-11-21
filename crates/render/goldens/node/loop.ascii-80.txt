@@ -1,10 +1,11 @@
 > node implement of run Q78GRR ; running
 
+  stands       running
+  took         20m21s
+  tokens       6.09M tokens ; 5.85M in / 240k out (5.62M cached)
   kind         loop
   attempt      1
   runner       executor on mock/gpt-6-luna
-  tokens       5.85M in / 240k out (5.62M cached)
-  took         20m21s
 
 > global-pack-install  Add explicit global pack install target ; attempt 1
 

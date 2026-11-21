@@ -176,12 +176,19 @@ fn a_task_checked_red_after_its_work_then_green_is_counted_green_once() {
         CriteriaSummary {
             total: 1,
             green: 1,
+            tasks: 1,
+            proving: 1,
+            proved: 1,
+            red_before: 1,
+            guards: 0,
+            guards_green: 0,
             entries: vec![CriterionEntry {
                 task_id: "T001".to_string(),
                 cmd: SUITE.to_string(),
                 exit_code: 0,
             }],
         },
-        "a retried task is certified by its last check after the work, and only by it"
+        "a retried task is certified by its last check after the work, and only by it, red \
+         before the work as its check before it found"
     );
 }

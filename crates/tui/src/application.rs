@@ -10,11 +10,11 @@
 //! drawing that changes no cell writes nothing, so a screen at rest costs the terminal
 //! nothing.
 //!
-//! What only a terminal does is done here: a page shown with what the binary hands in to
-//! show one, a failure handed back as [`Input::Unshown`]; the window's title, which each
-//! drawing gives as its screen asks, given back with the terminal; the bell, rung after the
-//! drawing that follows a call of the person ([`Request::CallThePerson`]) where the binary
-//! hands in that the person asked for one; Ctrl-Z, the terminal's own key, suspends;
+//! What only a terminal does is done here: a page or a link shown with what the binary
+//! hands in to show one, a failure handed back as [`Input::Unshown`]; the window's title,
+//! which each drawing gives as its screen asks, given back with the terminal; the bell,
+//! rung after the drawing that follows a call of the person ([`Request::CallThePerson`])
+//! where the binary hands in that the person asked for one; Ctrl-Z, the terminal's own key, suspends;
 //! leaving ends the loop, and the terminal is given back on every way out. A
 //! terminal that fails the application is said apart from how it ended
 //! ([`TerminalFailure`]): before it was held, the binary can print instead; after, it can
@@ -27,7 +27,6 @@
 use std::collections::VecDeque;
 use std::future::Future;
 use std::io::{self, stdout, Write};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crossterm::event::{Event, EventStream};
@@ -42,7 +41,7 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 use yunta_core::Clock;
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Input, Performer, Request, State};
+use yunta_ui::{Address, Input, Performer, Request, State};
 
 use crate::drawn::drawn;
 use crate::full_screen::{FullScreen, WindowTitle};
@@ -51,12 +50,12 @@ use crate::layout;
 
 /// The application at a terminal, with what it is handed to run: the performer that
 /// carries its work out, the look it draws in, the clock it reads the time from, what
-/// shows a page, and whether calling the person rings the bell.
+/// shows a page or a link, and whether calling the person rings the bell.
 pub struct Application {
     performer: Arc<Performer>,
     look: Look,
     clock: Arc<dyn Clock>,
-    show_page: fn(&Path) -> std::io::Result<()>,
+    show_page: fn(&Address) -> std::io::Result<()>,
     /// Whether calling the person rings the terminal's bell: whether they asked for one.
     bell: bool,
 }
@@ -109,7 +108,7 @@ impl Application {
         performer: Arc<Performer>,
         look: Look,
         clock: Arc<dyn Clock>,
-        show_page: fn(&Path) -> std::io::Result<()>,
+        show_page: fn(&Address) -> std::io::Result<()>,
         bell: bool,
     ) -> Self {
         Application {
@@ -278,9 +277,9 @@ impl Running<'_> {
                         false => Exit::Left,
                     })
                 }
-                Some(Request::ShowPage(page)) => {
-                    if (self.application.show_page)(&page).is_err() {
-                        waiting.extend(state.update(Input::Unshown(page)));
+                Some(Request::ShowPage(address)) => {
+                    if (self.application.show_page)(&address).is_err() {
+                        waiting.extend(state.update(Input::Unshown(address)));
                     }
                 }
                 Some(Request::CallThePerson) => self.ringing |= self.application.bell,

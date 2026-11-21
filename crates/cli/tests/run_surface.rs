@@ -732,10 +732,7 @@ fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
     let (repo, home) = project(root.path(), EXHAUSTED);
 
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    terminal.wait_on_screen(
-        "esc leaves it for later",
-        "the card was never put to anyone",
-    );
+    terminal.wait_on_screen("esc leave it for later", "the card was never put to anyone");
     terminal.keys("\x1b");
 
     let drawn = terminal.ended();

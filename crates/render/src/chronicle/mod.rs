@@ -12,7 +12,9 @@
 //! A node's feed is one more of those surfaces: `in_feed` says which of a
 //! node's moments it lists, and each row says what `line` says of its moment
 //! without the subject the node's pane already names, a call's verb in a
-//! column of its own.
+//! column of its own. The run's whole chronicle, as the application shows it,
+//! is a feed too (`whole`): every moment, each row's subject set apart before
+//! its words.
 //!
 //! Every state word comes from [`crate::state::NodeDisplay`], every run or
 //! child close from [`crate::children::closed_as`], every capability from
@@ -42,8 +44,9 @@ use yunta_replay::frame::{Happening, Moment};
 
 use crate::blocks::FailureDetail;
 use crate::command;
-pub use feed::{feed, feed_heading, in_feed};
+pub use feed::{feed, feed_heading, in_feed, open_attempt_calls, whole, whole_heading};
 use words::carried;
+pub(crate) use words::{resolution, who_answered};
 
 /// One moment as a surface says it, before any layout decides where it
 /// goes.

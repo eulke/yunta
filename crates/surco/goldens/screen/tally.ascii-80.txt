@@ -1,0 +1,8 @@
+yunta :: /home/set-up                                        nothing needs you
+yunta :: workflows                                           nothing needs you
+yunta
+yunta :: /cut/worktree                              ? 5 need you ; ^ 1 stalled
+yunta :: /home/set-up                    nothing needs you
+yunta :: workflows                       nothing needs you
+yunta
+yunta :: /cut/worktree          ? 5 need you ; ^ 1 stalled

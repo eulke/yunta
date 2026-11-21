@@ -3,12 +3,13 @@
 //! workflow of the catalog started. Each run starts detached, an engine of its own that
 //! the application follows and leaves moving, and `yunta list` lists it.
 
+use yunta_render::screen::Leaving;
 use yunta_testkit::workflows::{FINISHES, GREETS};
 use yunta_testkit::{
     handle, run_ids, stdout, wait_until, yunta_at, yunta_on_terminal, Checkout, Hold, Terminal,
 };
 
-use super::{engine_of, given_back, opened, outcome, FINISHED, FOLLOWED};
+use super::{engine_of, given_back, left_through_the_field, opened, outcome, FINISHED, FOLLOWED};
 
 /// What the first run of a repository asks.
 const ASKED_FIRST: &str = "What do you want to build?";
@@ -17,7 +18,7 @@ const ASKED_FIRST: &str = "What do you want to build?";
 /// its list opens on.
 fn started_with(terminal: &mut Terminal, asked: &str) {
     terminal.keys(asked);
-    terminal.wait_on_screen(&format!("> {asked}"), "what was typed never showed");
+    terminal.wait_on_screen(&format!("│ {asked}"), "what was typed never showed");
     terminal.keys("\r");
     terminal.wait_on_screen(
         "Which adapter runs its sessions?",
@@ -43,7 +44,7 @@ fn the_first_run_typed_at_an_empty_field_starts_detached_and_is_followed_to_its_
     // it: an `enter` before that finds no workflow to go on with.
     terminal.wait_on_screen("yunta run greet", "the workflows were never read");
     terminal.keys("greet ana");
-    terminal.wait_on_screen("> greet ana", "what was typed never showed");
+    terminal.wait_on_screen("│ greet ana", "what was typed never showed");
     terminal.keys("\r");
     terminal.wait_on_screen("Which workflow builds it?", "the workflow was never asked");
     terminal.keys("\r");
@@ -55,7 +56,7 @@ fn the_first_run_typed_at_an_empty_field_starts_detached_and_is_followed_to_its_
     terminal.wait_on_screen(FINISHED, "the run started was never followed to its end");
     let [id] = run_ids(&checkout.home).try_into().expect("one run started");
     assert!(listed(&checkout, &id), "`yunta list` lists it");
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, Some(Leaving::Ended));
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 
@@ -95,7 +96,7 @@ fn a_workflow_started_from_the_field_runs_detached_and_goes_on_once_the_applicat
         u64::from(terminal.process_id()),
         "the run is an engine of its own"
     );
-    terminal.keys("q");
+    left_through_the_field(&mut terminal, Some(Leaving::KeepsGoing));
     wait_until(
         || terminal.exited(),
         || "the application never left".to_string(),

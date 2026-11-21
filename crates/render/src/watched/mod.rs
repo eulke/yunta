@@ -1,7 +1,10 @@
-//! How a moving run's [`RunFrame`] reads as the rows a person watches: the
-//! line that says whether the run needs them, the line each working node
-//! gets with what its session last said under it, and under it all the
-//! run's gist ([`gist()`]) and what it has spent ([`spent()`]).
+//! How a moving run's [`RunFrame`] reads as the rows a person watches: on the CLI's region
+//! the line that says whether the run needs them, the line each working node gets with what
+//! its session last said under it, and under it all the run's gist ([`gist()`]) and what it
+//! has spent ([`spent()`]); across a run's screen in the application its headline
+//! ([`headline`]), its ribbon with each stretch named ([`ribbon`], [`stretch_names`]) and its
+//! gist, beside its pane its nodes ([`nodes()`]), above a node's work standing still what
+//! holds it and what moves it again ([`still()`]), and under it what it spent.
 //!
 //! Every surface that watches a run draws the same frame, the terminal's
 //! live region and the run as the user interface follows it, so this is
@@ -12,34 +15,41 @@
 //!
 //! What the run has spent is Surco's `Meter`, named here by what it says rather than by
 //! the component that draws it: [`spent()`] hands the figures, and each surface draws them
-//! with its own look. The application's run screen closes on the counters of [`footer`]
-//! instead.
+//! with its own look, the CLI's region and the application's run screen alike.
+//!
+//! The row that asks for the person is two: the CLI's region opens on [`attention`], which
+//! names the command that answers; a screen of the application frames itself with
+//! [`needing`], which names the run by its handle and the key that goes to it.
 
 use std::time::Duration;
 
 use surco::motion::Motion;
-use surco::words::{Standing, NOTHING_NEEDS_YOU};
+use surco::words::Standing;
 use yunta_core::step::{Choice, NextStep};
-use yunta_core::{NodeId, RunId};
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
+use yunta_core::RunId;
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase};
 
 use crate::command;
 use crate::engine;
 use crate::pause;
-use crate::spend::Breakdown;
 
 mod gist;
 mod heard;
+mod nodes;
 mod said;
 mod spent;
+mod still;
 
 pub use gist::gist;
 pub use heard::Heard;
+pub use nodes::nodes;
+pub(crate) use nodes::{listed_as, time_taken};
 pub use spent::spent;
+pub use still::still;
 
 use crate::children::{child_row, children_of};
 
-use surco::components::{Attention, Ribbon, Stretch};
+use surco::components::{Attention, Headline, Ribbon, Stretch};
 use surco::doc::Block;
 use surco::figures::duration;
 use surco::glyphs::Glyphs;
@@ -85,105 +95,23 @@ pub fn attention(frame: &RunFrame, run_id: &RunId, answerable: bool, look: &Look
         .next()
 }
 
-/// The last row of the application's run screen, which answers on every
-/// redraw: the run's furrow when the row has room for it, then how far the
-/// run has come, what it has spent, how long it has taken — beside how long
-/// this workflow usually takes, when its history says — and whether anything
-/// needs the person.
-///
-/// It is drawn for every phase, including the ones that need nobody,
-/// because a surface that says so only when there is something to say
-/// makes its absence mean two things at once — nothing is needed, or the
-/// surface has not drawn yet. The words are measured first, and the furrow
-/// takes what the row leaves: whole when it fits, squeezed when the row
-/// leaves it the fewest cells a squeezed furrow is drawn in, and left out on a
-/// row that leaves fewer.
-pub fn footer(frame: &RunFrame, look: &Look) -> Line {
-    let width = look.width.cells();
-    let words = footer_words(frame, look.glyphs, width);
-    let room = width.saturating_sub(cell_width(&words.text()) + 1);
-    let nodes: Vec<Standing> = frame.nodes.iter().map(|node| node.standing).collect();
-    let terminal = Terminal::on(*look);
-    let whole = terminal.furrow(&nodes, usize::MAX);
-    let furrow = match cell_width(&whole.text()) {
-        0 => return words,
-        drawn if drawn <= room => whole,
-        _ if room >= FURROW_LEAST => terminal.furrow(&nodes, room),
-        _ => return words,
+/// The key a screen of the application goes to what needs the person with, and what it
+/// does there.
+const GO_THERE: (&str, &str) = ("a", "go there");
+
+/// The attention row a screen of the application gives `frame`, a run that needs the
+/// person: its handle, what holds it in its gist's words, then the key that goes there.
+/// Where a line is typed (`typed`), every key types, `a` among them, so the row names no
+/// key. Not [`attention`], the row the CLI's region opens with, which names the command
+/// that answers.
+pub fn needing(frame: &RunFrame, typed: bool) -> Attention {
+    let asks = crate::state::gist(frame).unwrap_or_default();
+    let (key, does) = GO_THERE;
+    let row = match typed {
+        true => Attention::unkeyed(asks),
+        false => Attention::key(asks, key, does),
     };
-    furrow.plain(" ").then(words)
-}
-
-/// The fewest cells a furrow squeezed into a footer is drawn in: fewer say
-/// nothing of where the nodes stand, and the words keep the row.
-const FURROW_LEAST: usize = 8;
-
-/// What a footer says before its answer, in the order it is dropped from a
-/// row too narrow for it: the tokens first, then the usual time, then the
-/// elapsed time, then the counter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Said {
-    Tokens,
-    Usually,
-    Elapsed,
-    Counter,
-}
-
-/// The footer's words within `width` cells, in the order a reader reads
-/// them: the counter, what the run has spent, how long it has taken and
-/// usually takes, and last the word that answers whether anything needs the
-/// person. A row too narrow for them drops what it can spare in [`Said`]'s
-/// order; the answer is never dropped.
-fn footer_words(frame: &RunFrame, glyphs: Glyphs, width: usize) -> Line {
-    let sep = format!(" {} ", glyphs.sep());
-    let mut said = vec![(Said::Counter, crate::progress::line(frame, glyphs))];
-    if frame.tokens.total() > 0 {
-        said.push((Said::Tokens, Breakdown(&frame.tokens).to_string()));
-    }
-    if let Some(elapsed) = frame.elapsed {
-        said.push((Said::Elapsed, duration(elapsed)));
-    }
-    if let Some(usually) = frame
-        .prior
-        .as_ref()
-        .and_then(|prior| prior.wall_clock_secs.as_ref())
-    {
-        said.push((
-            Said::Usually,
-            format!(
-                "usually ~{}",
-                duration(Duration::from_secs_f64(usually.median))
-            ),
-        ));
-    }
-    let (tone, answer) = answer(frame);
-    let before = |said: &[(Said, String)]| -> String {
-        said.iter()
-            .map(|(_, words)| format!("{words}{sep}"))
-            .collect()
-    };
-    while cell_width(&format!("{}{answer}", before(&said))) > width {
-        let Some(least) = said.iter().map(|(rank, _)| *rank).min() else {
-            break;
-        };
-        said.retain(|(rank, _)| *rank != least);
-    }
-    Line::new()
-        .push(Tone::Muted, before(&said))
-        .push(tone, answer)
-}
-
-/// The word the footer answers with, in its tone: that the run waits on a
-/// clock, that it needs the person, or that nothing does.
-fn answer(frame: &RunFrame) -> (Tone, String) {
-    match frame.standing {
-        Standing::Waiting => (
-            Tone::Muted,
-            format!("{} for a reset", Standing::Waiting.word()),
-        ),
-        Standing::NeedsYou => (Tone::NeedsYou, Standing::NeedsYou.word().to_string()),
-        _ => (Tone::Muted, NOTHING_NEEDS_YOU.to_string()),
-    }
+    row.of(frame.run_id.handle())
 }
 
 /// The command that moves a parked run: an option off its own menu when
@@ -222,7 +150,7 @@ pub fn node_rows(
         None => String::new(),
     };
     let detail = format!("{under}{}", indent(DETAIL_DEPTH));
-    let mut rows = vec![headline(node, glyphs, look.motion).under(&under)];
+    let mut rows = vec![own_row(node, glyphs, look.motion).under(&under)];
     if !node.running_tasks.is_empty() {
         rows.push(Line::new().plain(detail.as_str()).push(
             Tone::Muted,
@@ -260,7 +188,7 @@ const QUIET_AFTER: Duration = Duration::from_secs(10);
 /// how long it has worked; how long it has been quiet, past [`QUIET_AFTER`]; and
 /// the runner it resolved through with the adapter and model behind it. When a
 /// row is cut to fit, what it runs on goes first.
-fn headline(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
+fn own_row(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
     let standing = crate::state::NodeDisplay::from(node).standing;
     let running = standing == Standing::Running;
     let quiet = node
@@ -306,11 +234,12 @@ fn headline(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
     }
 }
 
-/// The rows a person watches a moving run by: the row that asks for them where something
-/// does, and each working node's rows with what its session said last. A surface closes
-/// them on what the run comes to and what it spent: a terminal's region on the run's
-/// [`gist()`] and [`spent()`], the application's run screen on the [`footer`]. Not the
-/// run's chronicle, which says what happened, in order.
+/// The rows the CLI's region watches a moving run by: the row that asks for the person where
+/// something does, and each working node's rows with what its session said last. The region
+/// closes them on what the run comes to and what it spent, the run's [`gist()`] and
+/// [`spent()`]. Not the run's chronicle, which says what happened, in order; nor what stands
+/// across a run's screen in the application, which says the run by its [`headline`], its
+/// [`ribbon`] and its gist, and its nodes beside its pane ([`nodes()`]).
 pub struct Rows {
     /// The row that asks for the person, or says whom the run's engine asks at its own
     /// terminal; absent while nothing needs them.
@@ -341,16 +270,17 @@ pub fn rows(
     Rows { attention, nodes }
 }
 
-/// The run's signature at the top of a screen that watches it: each node's name over
-/// its stretch, in the workflow's order, and, where the view moves, the plow along the
+/// The run's signature at the top of a screen that watches it: each node's stretch in the
+/// workflow's order, named by [`stretch_names`], and, where the view moves, the plow along the
 /// running node's stretch a cell for each event it has had.
 pub fn ribbon(frame: &RunFrame, motion: Motion) -> Ribbon {
-    let ribbon = Ribbon::new(
-        frame
-            .nodes
-            .iter()
-            .map(|node| Stretch::new(node.id.as_str(), node.standing)),
-    );
+    let ids: Vec<&str> = frame.nodes.iter().map(|node| node.id.as_str()).collect();
+    let stretches = frame
+        .nodes
+        .iter()
+        .zip(stretch_names(&ids))
+        .map(|(node, name)| Stretch::new(name, node.standing));
+    let ribbon = Ribbon::new(stretches);
     let running = frame
         .nodes
         .iter()
@@ -358,6 +288,61 @@ pub fn ribbon(frame: &RunFrame, motion: Motion) -> Ribbon {
     match (motion, running) {
         (Motion::Moves, Some(node)) => ribbon.plowed(node.events),
         (Motion::Moves, None) | (Motion::Still, _) => ribbon,
+    }
+}
+
+/// The name over each stretch of a ribbon, for `ids`, a workflow's node ids in the order it
+/// declares them: the part of an id before `@`, else its first word split at `-`, where no
+/// stretch before it in that order has that name; else its last word, where none has that;
+/// else its whole id. A ribbon names its stretches short so that a workflow's whole row of
+/// them fits a screen: fragua's fifteen take 95 cells. Not a node's id, which a node's own
+/// row and the trail say whole.
+pub fn stretch_names(ids: &[&str]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::with_capacity(ids.len());
+    for &id in ids {
+        let first = match id.split_once('@') {
+            Some((before, _)) => before,
+            None => id.split('-').next().unwrap_or(id),
+        };
+        let last = id.rsplit('-').next().unwrap_or(id);
+        let free = |name: &&str| !names.iter().any(|taken| taken == name);
+        let name = [first, last].into_iter().find(free).unwrap_or(id);
+        names.push(name.to_string());
+    }
+    names
+}
+
+/// The headline across a watched run's screen: the run's mark, its workflow and mode, its
+/// word, how long it has stood there, and its handle at the far end. An open run has stood
+/// there `for` as long as a person sees it hold: since it was asked at a terminal, since its
+/// last event where it parked or went quiet, since it started where it moves. A closed one
+/// took what it took `in` its whole span. The handle gives way first on a row too narrow
+/// for the whole headline, since the screen's trail names the run too. Not
+/// [`Run::headline`](crate::page::Run::headline), a printed page's, which keeps its handle,
+/// says how long ago a closed run stopped and that a stalled one went quiet.
+pub fn headline(frame: &RunFrame) -> Headline {
+    let word = frame.standing;
+    let headline = Headline::new(
+        word.mark(),
+        crate::state::called(&frame.workflow, &frame.mode),
+        word.word(),
+    );
+    stood(frame)
+        .into_iter()
+        .fold(headline, Headline::fact)
+        .edge_said_elsewhere(frame.run_id.handle())
+}
+
+/// How long the run `frame` has stood where it is, as its headline says it: `for` as long as
+/// a person sees an open run hold, `in` the whole span of one that closed.
+pub(crate) fn stood(frame: &RunFrame) -> Option<String> {
+    let open = matches!(
+        frame.phase,
+        RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
+    );
+    match open {
+        true => crate::page::stood_open(frame).map(|stood| format!("for {}", duration(stood))),
+        false => frame.elapsed.map(|took| format!("in {}", duration(took))),
     }
 }
 
@@ -399,36 +384,6 @@ fn calls_row(node: &NodeFrame, look: &Look, taken: usize) -> String {
     }
     kept.reverse();
     kept.join(apart.as_str())
-}
-
-/// The run's nodes, one a row in the workflow's order, which a person moves along: the
-/// pointer on the one `pointed` at, each with its standing's mark in its tone, and how
-/// long it worked where it did.
-pub fn nodes(frame: &RunFrame, pointed: Option<&NodeId>, look: &Look) -> Vec<Line> {
-    let glyphs = look.glyphs;
-    frame
-        .nodes
-        .iter()
-        .map(|node| {
-            let mark = node.standing.mark();
-            let row = match pointed == Some(&node.id) {
-                true => Line::new()
-                    .push(Tone::NeedsYou, format!("{} ", glyphs.pointer()))
-                    .push(Tone::of(mark), glyphs.mark(mark).to_string())
-                    .plain(" ")
-                    .push(Tone::Strong, node.id.to_string()),
-                false => Line::new()
-                    .plain("  ")
-                    .push(Tone::of(mark), glyphs.mark(mark).to_string())
-                    .plain(" ")
-                    .plain(node.id.to_string()),
-            };
-            match node.elapsed {
-                Some(worked) => row.push(Tone::Muted, format!("  {}", duration(worked))),
-                None => row,
-            }
-        })
-        .collect()
 }
 
 /// Every node the run is working on right now, in the workflow's own

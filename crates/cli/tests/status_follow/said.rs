@@ -36,7 +36,7 @@ fn every_place_that_says_follows_it_offers_follow() {
 
     let refused = yunta_in!(&checkout.repo, &checkout.home, &["resume", &id]);
     let said = unwrapped(&yunta_testkit::stderr(&refused));
-    let moving = format!("{} follows it", follows(&id));
+    let moving = format!("{} follow it as it moves", follows(&id));
     assert!(said.contains(&moving), "no `{moving}` in: {said}");
     let refused = yunta_in!(&checkout.repo, &checkout.home, &["resume", &id, "--json"]);
     let document: serde_json::Value = serde_json::from_slice(&refused.stdout).unwrap();
@@ -53,6 +53,6 @@ fn every_place_that_says_follows_it_offers_follow() {
     let (checkout, id) = ran(gated.path(), GATED);
     let answered = yunta_in!(&checkout.repo, &checkout.home, &["resolve-gate", &id, "go"]);
     let said = unwrapped(&stdout(&answered));
-    let next = format!("{} follows it", follows(&id));
+    let next = format!("{} follow it as it moves", follows(&id));
     assert!(said.contains(&next), "no `{next}` in: {said}");
 }

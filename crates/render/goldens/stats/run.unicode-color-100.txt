@@ -1,7 +1,7 @@
 ␛[36m●␛[0m ␛[1mpaced (default)␛[0m␛[2m ·␛[0m␛[36m running ␛[0m␛[2m· 7m30s so far␛[0m                                                    9G5FAV
 ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m
 
-  ␛[2mtask cost   ␛[0m 19.8k tokens per verified task · 1 task done
+  ␛[2mtask cost   ␛[0m 19.8k tokens per verified task, 1 task done
   ␛[2mrework      ␛[0m 12% of tokens went to retries and reroutes
   ␛[2mcache       ␛[0m 1.4× cached tokens per input token
   ␛[2mtokens      ␛[0m 18k in / 1.8k out (25.2k cached)
@@ -9,9 +9,9 @@
   ␛[2mfindings    ␛[0m 5 posted, 1 updated, 1 withdrawn; 4 standing
   ␛[2manswers     ␛[0m 2 given, 1 proved; 1 settled
 
+␛[2mwho spent it␛[0m
+implementer   ␛[36m████████████████████████████␛[0m  ␛[2m19.8k tokens␛[0m
+
 nodes:
   ␛[32m✓␛[0m finished  plan                            40s ␛[32m██▋␛[0m                      4.4k tokens
   ␛[32m✓␛[0m finished  implement-the-whole-feature   5m00s ␛[32m████████████████████␛[0m    15.4k tokens
-
-runners:
-  implementer ␛[36m████████████████████␛[0m  19.8k tokens

@@ -2,7 +2,7 @@
 //! remark, and how a person meets them. Every interface says a remark through here,
 //! so a caution reads the same on a terminal's stream and on a screen.
 
-use surco::glyphs::Glyphs;
+use surco::glyphs::{Glyphs, Mark};
 use yunta_api::Remark;
 use yunta_render::ending;
 
@@ -15,6 +15,18 @@ pub enum Weight {
     Note,
     /// How far the work has come, for a person who asked to watch it.
     Progress,
+}
+
+impl Weight {
+    /// The mark a screen's note says a remark of this weight under: a caution for what a
+    /// person should know and for a word beside the work, neither of which they answer;
+    /// moving, for how far the work has come.
+    pub fn mark(self) -> Mark {
+        match self {
+            Weight::Warning | Weight::Note => Mark::Caution,
+            Weight::Progress => Mark::Running,
+        }
+    }
 }
 
 /// What a remark says, and how a person meets it.

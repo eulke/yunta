@@ -1,0 +1,8 @@
+| ? ask asks                                                                                            REFVSE
+|
+| ? What is the release called?
+|     .------------------------------------------------------------------------------------------------------.
+|     | Spring release                                                                                       |
+|     '------------------------------------------------------------------------------------------------------'
+|     ! this question is `required` and nothing answers it
+| . Which environment?  optional, assumes staging
