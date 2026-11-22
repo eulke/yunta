@@ -9,14 +9,16 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::agents::{self, Docs, Tag, AGENT_DOCS, MAP, RULE_SETS};
+use super::agents::{self, Docs, Tag, AGENT_DOCS, INDEX, MAP, RULE_SETS};
 use super::repo::Repo;
 
 /// The byte budget of each doc: past it, a doc carries what the code, a test
-/// or a commit message should.
+/// or a commit message should. Every session loads the map whole, so its
+/// budget leaves room for a few rules past what it holds; the index has room
+/// for what each doc holds and when to read it.
 const BUDGETS: [(&str, usize); 6] = [
-    (MAP, 8192),
-    (".agents/README.md", 1024),
+    (MAP, 6144),
+    (INDEX, 2048),
     (".agents/architecture.md", 6144),
     (".agents/choices.md", 6144),
     (".agents/open.md", 8192),
@@ -40,7 +42,7 @@ pub(super) fn all(repo: &Repo, docs: &Docs) -> Result<Vec<String>, String> {
     problems.extend(shapes(docs));
     problems.extend(pointers(repo, docs)?);
     problems.extend(rule_tags(repo, docs)?);
-    problems.extend(map_terms(repo, docs));
+    problems.extend(index_alone(docs));
     problems.extend(crate_table(repo, docs)?);
     problems.extend(crate_maps(repo)?);
     problems.extend(reach_notes(repo)?);
@@ -350,50 +352,26 @@ fn test_attribute() -> &'static Regex {
     })
 }
 
-/// Each term a row of the map names is in the module doc of a file the row
-/// opens: the map sends a session there, and the `//!` it reads says it.
-fn map_terms(repo: &Repo, docs: &Docs) -> Vec<String> {
+/// The map names no agent doc but their index.
+fn index_alone(docs: &Docs) -> Vec<String> {
     let Some(map) = docs.text(MAP) else {
         return Vec::new();
     };
-    let mut problems = Vec::new();
-    for (line, cells) in agents::table(map, "You are changing") {
-        let (Some(terms), Some(files)) = (cells.first(), cells.get(1)) else {
-            continue;
-        };
-        let rust: Vec<String> = agents::spans(files)
-            .into_iter()
-            .filter(|file| file.ends_with(".rs"))
-            .collect();
-        if rust.is_empty() {
-            continue;
-        }
-        let told: String = rust
-            .iter()
-            .filter_map(|file| repo.read_if_there(file))
-            .map(|text| module_doc(&text))
-            .collect::<Vec<_>>()
-            .join(" ")
-            .to_lowercase();
-        for term in terms.split(", ").map(str::trim) {
-            if !names(&told, term) {
-                problems.push(format!(
-                    "{MAP}:{line}: no module doc the row opens names `{term}`; say it in the `//!` of the file it sends a session to"
-                ));
-            }
-        }
-    }
-    problems
+    docs_named_beside_the_index(map)
+        .into_iter()
+        .map(|(line, doc)| {
+            format!(
+                "{MAP}:{line}: names `{doc}`; say what it holds and when to read it in `{INDEX}`, the one agent doc the map names"
+            )
+        })
+        .collect()
 }
 
-/// Whether `told` names `term` as whole words, in its plural or its singular.
-fn names(told: &str, term: &str) -> bool {
-    let term = term.to_lowercase();
-    let says = |words: &str| {
-        Regex::new(&format!(r"\b{}\b", regex::escape(words)))
-            .is_ok_and(|words| words.is_match(told))
-    };
-    says(&term) || term.strip_suffix('s').is_some_and(says)
+fn docs_named_beside_the_index(map: &str) -> Vec<(usize, String)> {
+    agents::spans_by_line(map)
+        .into_iter()
+        .filter(|(_, span)| span != INDEX && AGENT_DOCS.contains(&span.as_str()))
+        .collect()
 }
 
 /// The architecture's crate table says what each workspace member depends on,
@@ -778,17 +756,12 @@ mod tests {
     }
 
     #[test]
-    fn a_term_counts_in_its_plural_or_its_singular() {
-        assert!(names("each event kind is a name", "event kinds"));
-        assert!(names("the payload fields of a kind", "payload fields"));
-        assert!(!names("nothing about it", "config keys"));
-    }
-
-    #[test]
-    fn a_term_counts_only_as_whole_words() {
-        assert!(names("all four checks run in ci.", "CI"));
-        assert!(!names("the decision index", "CI"));
-        assert!(!names("it may delegate the work", "gates"));
+    fn the_map_names_the_index_and_no_other_agent_doc() {
+        let map = "The file `.agents/README.md` names for it.\n\nRead `.agents/traps.md` first.\nAn `.agents/*.md` file, and nothing under `.agents/skills/`.\n";
+        assert_eq!(
+            docs_named_beside_the_index(map),
+            [(3, ".agents/traps.md".to_string())]
+        );
     }
 
     #[test]

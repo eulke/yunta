@@ -1,6 +1,6 @@
 //! The agent docs as the checker and the digest read them: in `AGENTS.md`, its
-//! tables and its rules; in `.agents/`, the entries (a `### ` heading and its
-//! fields), the rules (a bullet and its tags) and the crate table.
+//! rules; in `.agents/`, the entries (a `### ` heading and its fields), the
+//! rules (a bullet and its tags) and the crate table.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -12,9 +12,12 @@ use super::repo::Repo;
 /// The map every agent CLI loads.
 pub(super) const MAP: &str = "AGENTS.md";
 
+/// The index of the agent docs: what each holds and when to read it.
+pub(super) const INDEX: &str = ".agents/README.md";
+
 /// The agent docs, the whole of `.agents/` but a skills root.
 pub(super) const AGENT_DOCS: [&str; 5] = [
-    ".agents/README.md",
+    INDEX,
     ".agents/architecture.md",
     ".agents/choices.md",
     ".agents/open.md",
@@ -364,10 +367,10 @@ mod tests {
 
     #[test]
     fn a_table_is_its_rows_after_the_header() {
-        let text = "| You are changing | Open |\n|---|---|\n| event kinds | `a.rs` |\n| config keys | `b.rs`, `c.rs` |\n\nafter\n";
-        let rows = table(text, "You are changing");
+        let text = "| Crate | Owns | Depends on |\n|---|---|---|\n| `yunta-a` | words | nothing in the workspace |\n| `yunta-b` | the port | a, `c` |\n\nafter\n";
+        let rows = table(text, "Crate");
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[1].1, ["config keys", "`b.rs`, `c.rs`"]);
-        assert_eq!(spans(&rows[1].1[1]), ["b.rs", "c.rs"]);
+        assert_eq!(rows[1].1, ["`yunta-b`", "the port", "a, `c`"]);
+        assert_eq!(spans(&rows[1].1[2]), ["c"]);
     }
 }
