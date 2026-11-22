@@ -80,9 +80,25 @@ the API's async paths and the readers of tasks, questions and specs through `ser
 much of it is a second copy of what the CLI's commands already instantiate. A symbol by symbol diff of the two
 builds answers that before any change.
 
+### A Claude Code session needs what `--bare` skips
+Paths: `crates/adapters/src/claude_code/mod.rs`, `crates/adapters/src/claude_code/rail.rs`
+The adapter starts a session with `-p` and names no mode. Claude Code's guide to `-p` says `--bare` becomes
+what it does when none is named. On 2.1.326 a bare session reads no login but `ANTHROPIC_API_KEY`, so one started
+on a logged-in machine ends with `Not logged in`; its help says it runs no hook a settings file defines, and the
+rail is one, and that it finds no instruction file. Not decided: what the adapter passes so a session keeps all
+three whichever the CLI's default.
+
+### The repository's checks wait on builds they do not need
+Paths: `xtask/Cargo.toml`, `xtask/src/smells.rs`, `xtask/src/smells/**`, `xtask/src/docs/about.rs`
+The tool is one package that depends on core and Surco, so a change to either recompiles it before
+a `docs --about` prints: about 9 s against 2 s. A `smells --check` spends 18 s of CPU in unoptimized code, its
+counters and Surco's lexer, where a release build spends 3. An `opt-level` of 2 for the tool and for Surco halves
+the check and adds 7 s to each rebuild; measured beside other builds, so the gain is not settled. Not decided:
+one read and one mask of each file for every counter, an optimized profile for the tool, or the lookup in a
+package of its own.
+
 ### A pack's skill cannot be named
-Paths: `crates/engine/src/skills.rs`, `crates/core/src/ids.rs`, `crates/core/src/config/**`
-A pack declares skills under `contents.skills`, and the lookup in `skills.rs` reads them by `publisher/skill` in
-the project's packs, then the user's. No name reaches it: a node's `skills:` and `skills.always` hold a
-`SkillName`, which takes no `/`, so the lookup is dead and a pack's skill mounts in no session. Deciding how a
-workflow names one (a `publisher/skill` form of `SkillName`, or a key of its own) comes before any fix.
+Paths: `crates/engine/src/skills.rs`, `crates/core/src/ids.rs`
+A pack declares `contents.skills` and `skills.rs` looks them up by `publisher/skill`, but a `SkillName` takes no
+`/`, so no name reaches the lookup and a pack's skill mounts in no session. Not decided: how a workflow names
+one, a `publisher/skill` form of `SkillName` or a key of its own.
