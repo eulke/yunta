@@ -1,17 +1,17 @@
 //! `cargo xtask docs --check | --about [<paths>]` — the agent docs and the map
 //! that routes a session to them.
 //!
-//! `AGENTS.md` maps where to read before a change and where knowledge goes.
+//! `AGENTS.md` maps where knowledge lives.
 //! `.agents/` holds the five files that say what the code cannot: `README.md`,
-//! `architecture.md`, `choices.md`, `open.md` and `traps.md`. `--check` holds
-//! them to their shapes ([`checks`]): the exact tree, the byte budgets, the
-//! paths and globs they name, each rule's tags, the map's terms in the module
-//! docs it points to, the crate table against the manifests, each crate
-//! root's map of its modules, the `Reached by:` notes of the tests, the
-//! separation from the user docs, and that no design records grow back under
-//! `docs/design/`. `--about` prints, for the files named or
-//! for the diff, the module chain and the rules, traps, open work and tests
-//! that reach those paths ([`about`](mod@about)).
+//! the index, and `architecture.md`, `choices.md`, `open.md` and `traps.md`.
+//! `--check` holds them to their shapes ([`checks`]): the exact tree, the
+//! byte budgets, the paths and globs they name, each rule's tags, the index
+//! as the one agent doc the map names, the crate table against the
+//! manifests, each crate root's map of its modules, the `Reached by:` notes
+//! of the tests, the separation from the user docs, and that no design
+//! records grow back under `docs/design/`. `--about` prints, for the files
+//! named or for the diff, the module chain and the rules, traps, open work
+//! and tests that reach those paths ([`about`](mod@about)).
 
 mod about;
 mod agents;
