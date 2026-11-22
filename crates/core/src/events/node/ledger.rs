@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
@@ -89,7 +89,7 @@ pub struct Reroute {
     pub attempt: Option<u32>,
     pub max: Option<u32>,
     pub origin: RerouteOrigin,
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     pub seq: Seq,
 }
 
@@ -126,12 +126,12 @@ pub struct NodeRecord {
     pub attempts: u32,
     pub state: Option<NodeState>,
     /// Where and when the open attempt started; `None` once it closed.
-    pub open_since: Option<(Seq, DateTime<Utc>)>,
+    pub open_since: Option<(Seq, Timestamp)>,
     /// Where the latest attempt started; unlike `open_since`, kept once
     /// the attempt closes.
     pub last_started: Option<Seq>,
     /// When the node first started, across all of its attempts.
-    pub first_started: Option<DateTime<Utc>>,
+    pub first_started: Option<Timestamp>,
     /// The run's tree as the node's latest finish left it; `None` when
     /// it never finished, or its finish named no tree.
     pub left_tree: Option<TreeId>,
@@ -151,7 +151,7 @@ pub struct NodeRecord {
     pub run_scope: Option<Vec<crate::ScopeGlob>>,
     pub last_terminal: Option<Seq>,
     /// When the node last reached a terminal state.
-    pub last_terminal_at: Option<DateTime<Utc>>,
+    pub last_terminal_at: Option<Timestamp>,
     pub last_failed: Option<Seq>,
     pub last_finished: Option<Seq>,
     /// Every failure the node recorded, oldest first.
@@ -176,7 +176,7 @@ pub struct NodeRecord {
     pub rework: TokenUsage,
     /// Where the open attempt's current working stretch began. `None` while
     /// the node waits on a person, and once the attempt has closed.
-    pub working_since: Option<DateTime<Utc>>,
+    pub working_since: Option<Timestamp>,
     /// The working time of every stretch that has closed, across attempts.
     pub active: Duration,
     /// The working time of the attempt now or last open. Reset when an
@@ -199,7 +199,7 @@ pub struct NodeRecord {
     /// Last failed run-tool call of the current or most recently closed
     /// attempt. A new start clears it; a terminal preserves it.
     pub last_tool_failure: Option<crate::events::RunToolFailedPayload>,
-    pub last_event_at: Option<DateTime<Utc>>,
+    pub last_event_at: Option<Timestamp>,
     /// Whether the node's session lost its service and has not got it back.
     /// A terminal clears it.
     pub unreachable: bool,

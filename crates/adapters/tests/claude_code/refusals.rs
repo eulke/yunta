@@ -3,7 +3,7 @@
 //! and a limit is read from the stream's own fields, never from its text.
 
 use super::*;
-use chrono::DateTime;
+use jiff::Timestamp;
 use yunta_core::events::{FailureCause, RefusalCause};
 
 #[tokio::test]
@@ -134,7 +134,7 @@ fn last_cause(events: &[AgentEvent]) -> &FailureCause {
 /// captures' text says "temporarily limiting requests" in both forms.
 #[tokio::test]
 async fn a_claude_limit_is_read_from_its_stream_fields() {
-    let rejected = DateTime::from_timestamp(1791730875, 0);
+    let rejected = Timestamp::from_second(1791730875).ok();
     for capture in [
         include_str!("../fixtures/limits/claude-429-reset.txt"),
         include_str!("../fixtures/limits/claude-429-reset-body.txt"),

@@ -96,7 +96,7 @@ impl Moment {
     pub fn sample(node: Option<&str>, happening: Happening) -> Moment {
         Moment {
             seq: 1.into(),
-            at: chrono::DateTime::UNIX_EPOCH,
+            at: jiff::Timestamp::UNIX_EPOCH,
             elapsed: Duration::from_secs(3),
             node: node.map(NodeId::from),
             happening,

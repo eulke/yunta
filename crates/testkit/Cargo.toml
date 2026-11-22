@@ -32,7 +32,6 @@ yunta-adapters.workspace = true
 yunta-engine.workspace = true
 # A frame a surface test builds carries the word its run and nodes stand at.
 yunta-surco.workspace = true
-chrono.workspace = true
 tempfile.workspace = true
 # Benches parse workflow/config/fixture YAML literals the tests write.
 # An event a constructor refuses still reaches a reader off disk: the

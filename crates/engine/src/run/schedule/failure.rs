@@ -2,7 +2,7 @@
 //! on its menu, or left for a person. Its facts come from the log, and the
 //! menu it offers is [`Failure::remedies`].
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{Facts, Failure, NodeState, Outlook, PauseReason, Stuck};
 use yunta_core::{DefaultOnFailure, Node, NodeId};
 
@@ -12,7 +12,7 @@ impl Board<'_> {
     /// What the log holds beside `failure` of `node`: the clock it failed
     /// at, the node's tasks, whether a person may widen its scope, and
     /// whether the run's tree moved since. Read from the log alone.
-    fn facts_of(&self, node: &Node, failure: &Failure, failed_at: DateTime<Utc>) -> Facts {
+    fn facts_of(&self, node: &Node, failure: &Failure, failed_at: Timestamp) -> Facts {
         Facts {
             failed_at,
             continuable: self.state.tasks.continuable_by(&node.id),
@@ -41,7 +41,7 @@ pub(super) fn failure_step(board: &Board<'_>) -> Option<Decision> {
 
         match rerouted_for_this_failure {
             None => {
-                let failed_at = record.last_terminal_at.unwrap_or(DateTime::UNIX_EPOCH);
+                let failed_at = record.last_terminal_at.unwrap_or(Timestamp::UNIX_EPOCH);
                 if let Some(decision) =
                     unrerouted(board, node, failure, record.on_failure_reroutes, failed_at)
                 {
@@ -76,7 +76,7 @@ fn unrerouted(
     node: &Node,
     failure: &Failure,
     reroutes: u32,
-    failed_at: DateTime<Utc>,
+    failed_at: Timestamp,
 ) -> Option<Decision> {
     let outlook = failure.remedies(&board.facts_of(node, failure, failed_at));
     let correctable = node

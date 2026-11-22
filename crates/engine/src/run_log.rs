@@ -119,7 +119,7 @@ impl<'a> RunLog<'a> {
         &self,
         node: Option<&NodeId>,
         payload: EventPayload,
-        at: chrono::DateTime<chrono::Utc>,
+        at: jiff::Timestamp,
     ) -> Result<Seq, StorageError> {
         // A payload that cannot be redacted is refused before the draft exists.
         let payload = self.redacted(payload)?;

@@ -115,7 +115,7 @@ fn kept_from_event(payload: EventPayload) -> bool {
         seq: 1.into(),
         run_id: "01JQ0000000000000000000000".into(),
         node_id: Some("work".into()),
-        timestamp: chrono::DateTime::UNIX_EPOCH,
+        timestamp: jiff::Timestamp::UNIX_EPOCH,
         body: EventBody::Known(payload),
     }];
     kept(&derive_chronicle(&events)[0].happening)

@@ -8,7 +8,7 @@ fn said(seq: u64, text: &str) -> Said {
         session_id: SessionId::from_static("session-1"),
         task_id: Some(TaskId::from_static("T001")),
         seq: Seq::from(seq),
-        at: chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap_or_default(),
+        at: jiff::Timestamp::from_second(1_800_000_000).unwrap_or_default(),
         text: text.to_string(),
         cut: false,
     }

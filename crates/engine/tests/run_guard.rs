@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, TimeZone, Utc};
+use jiff::Timestamp;
 use tokio::sync::Barrier;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
@@ -26,7 +26,7 @@ async fn hold(run_dir: &Path, contention: Contention) -> Result<RunHold, LockErr
 }
 
 /// Writes the lock a process that is not this test left behind.
-fn names_holder(run_dir: &Path, pid: Pid, started_at: DateTime<Utc>) {
+fn names_holder(run_dir: &Path, pid: Pid, started_at: Timestamp) {
     let path = engine_lock(run_dir);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let record = LockOwner {
@@ -46,8 +46,8 @@ fn a_pid_nothing_runs_under() -> Pid {
 
 /// Later than any process on this host started, so nothing reads as having taken
 /// the holder's pid after the lock was written.
-fn after_any_process_started() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2100, 1, 1, 0, 0, 0).unwrap()
+fn after_any_process_started() -> Timestamp {
+    "2100-01-01T00:00:00Z".parse::<Timestamp>().unwrap()
 }
 
 /// What replay derives from a log whose last event is a pause.
@@ -120,7 +120,7 @@ async fn a_holder_that_died_is_replaced_and_its_lock_goes_with_the_new_hold() {
 #[tokio::test]
 async fn a_pid_reused_by_a_later_process_is_replaced() {
     let dir = tempfile::tempdir().unwrap();
-    let long_ago = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
+    let long_ago = "2000-01-01T00:00:00Z".parse::<Timestamp>().unwrap();
     names_holder(dir.path(), Pid::current(), long_ago);
     let _held = hold(dir.path(), Contention::Refuse)
         .await

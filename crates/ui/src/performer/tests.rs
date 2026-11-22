@@ -29,7 +29,7 @@ async fn work_let_go_the_moment_after_it_is_asked_is_stopped_where_it_stands() {
     let dir = tempfile::tempdir().expect("a directory");
     let performer = performer(dir.path().to_path_buf());
     let (_, requests) =
-        State::opened(chrono::DateTime::from_timestamp(1_800_000_000, 0).expect("an instant"));
+        State::opened(jiff::Timestamp::from_second(1_800_000_000).expect("an instant"));
     let Some(Request::Perform(ticket, _)) = requests.into_iter().next() else {
         panic!("the application asks something as it opens");
     };

@@ -7,14 +7,14 @@ use yunta_testkit_core::AtClock;
 /// instant, under every pid.
 struct Host {
     alive: Liveness,
-    started: Option<DateTime<Utc>>,
+    started: Option<Timestamp>,
 }
 
 impl OwnerProbe for Host {
     fn liveness(&self, _pid: Pid) -> Liveness {
         self.alive
     }
-    fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
+    fn started(&self, _pid: Pid) -> Option<Timestamp> {
         self.started
     }
 }
@@ -28,7 +28,7 @@ const SILENT: Host = Host {
 
 /// A registry the way a crashed engine leaves one: written, and never
 /// cleared.
-fn left_behind(run_dir: &Path, started_at: DateTime<Utc>) {
+fn left_behind(run_dir: &Path, started_at: Timestamp) {
     let pid = Pid::try_from(4321u32).expect("a pid");
     std::fs::create_dir_all(registry_path(run_dir).parent().expect("a parent")).unwrap();
     std::mem::forget(
@@ -44,10 +44,10 @@ fn left_behind(run_dir: &Path, started_at: DateTime<Utc>) {
 fn a_registry_under_a_frozen_clock_names_its_live_engine() {
     let run = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
-    let frozen = DateTime::from_timestamp(1_600_000_000, 0).unwrap();
+    let frozen = Timestamp::from_second(1_600_000_000).unwrap();
     let host = Host {
         alive: Liveness::Alive,
-        started: Some(DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+        started: Some(Timestamp::from_second(1_700_000_000).unwrap()),
     };
     let _registry = ProcessRegistry::create(
         run.path(),
@@ -69,10 +69,7 @@ fn a_registry_under_a_frozen_clock_names_its_live_engine() {
 #[test]
 fn an_engine_record_naming_a_process_that_exited_reads_as_dead() {
     let run = tempfile::tempdir().unwrap();
-    left_behind(
-        run.path(),
-        DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
-    );
+    left_behind(run.path(), Timestamp::from_second(1_700_000_000).unwrap());
     let gone = Host {
         alive: Liveness::Dead,
         started: None,
@@ -83,11 +80,11 @@ fn an_engine_record_naming_a_process_that_exited_reads_as_dead() {
 #[test]
 fn a_reused_pid_that_started_after_the_record_reads_as_dead() {
     let run = tempfile::tempdir().unwrap();
-    let recorded = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+    let recorded = Timestamp::from_second(1_700_000_000).unwrap();
     left_behind(run.path(), recorded);
     let stranger = Host {
         alive: Liveness::Alive,
-        started: Some(recorded + chrono::Duration::hours(1)),
+        started: Some(recorded + jiff::SignedDuration::from_hours(1)),
     };
     assert_eq!(read_engine(run.path(), &stranger), Engine::Dead);
     let engine = Host {
@@ -130,7 +127,7 @@ fn a_registry_that_does_not_read_proves_nothing() {
 #[test]
 fn concurrent_registrations_leave_every_group_on_disk() {
     let run = tempfile::tempdir().unwrap();
-    let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+    let started = Timestamp::from_second(1_700_000_000).unwrap();
     // `create` writes under `scratch/`, which a run creates and a bare directory does not have.
     std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
     for round in 0..200u32 {
@@ -172,7 +169,7 @@ fn concurrent_registrations_leave_every_group_on_disk() {
 fn the_registry_file_is_private_to_its_owner() {
     use std::os::unix::fs::PermissionsExt;
     let run = tempfile::tempdir().unwrap();
-    let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+    let started = Timestamp::from_second(1_700_000_000).unwrap();
     std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
     let _registry = ProcessRegistry::create(
         run.path(),
@@ -225,7 +222,7 @@ fn running_groups_keeps_a_group_whose_leader_exited_while_a_child_runs() {
 fn the_registry_reading_names_the_socket_only_while_its_engine_lives() {
     let run = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
-    let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+    let started = Timestamp::from_second(1_700_000_000).unwrap();
     let alive = Host {
         alive: Liveness::Alive,
         started: Some(started),
@@ -266,14 +263,14 @@ fn the_registry_reading_names_the_socket_only_while_its_engine_lives() {
 fn an_engine_asking_writes_the_node_and_the_instant_and_reads_them_back() {
     let run = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
-    let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+    let started = Timestamp::from_second(1_700_000_000).unwrap();
     let alive = Host {
         alive: Liveness::Alive,
         started: Some(started),
     };
     let pid = Pid::try_from(1u32).unwrap();
     let registry = ProcessRegistry::create(run.path(), pid, &alive, &AtClock(started)).unwrap();
-    let since = started + chrono::Duration::seconds(5);
+    let since = started + jiff::SignedDuration::from_secs(5);
     registry.asking(Some(Prompt {
         node: Some(NodeId::from("approve")),
         since,

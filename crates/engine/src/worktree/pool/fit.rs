@@ -149,7 +149,7 @@ pub(super) struct Rank {
     claim: Claim,
     warmth: (Build, Option<Size>),
     away: usize,
-    used: Reverse<Option<chrono::DateTime<chrono::Utc>>>,
+    used: Reverse<Option<jiff::Timestamp>>,
     number: u32,
 }
 

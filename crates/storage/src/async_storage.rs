@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{EventDraft, StoredEvent};
 use yunta_core::{RunId, Seq};
 
@@ -62,7 +62,7 @@ impl AsyncStorage {
 
     /// Appends `draft`, stamped with `at` — the instant the caller's
     /// clock reported before the hop to the blocking thread.
-    pub async fn append(&self, draft: EventDraft, at: DateTime<Utc>) -> Result<Seq> {
+    pub async fn append(&self, draft: EventDraft, at: Timestamp) -> Result<Seq> {
         self.blocking("append", move |storage| storage.append_at(&draft, at))
             .await
     }

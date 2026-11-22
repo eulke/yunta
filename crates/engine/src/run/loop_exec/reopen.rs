@@ -5,7 +5,7 @@
 //! asked. A task a limit stopped goes back to its session once the
 //! limit's reset has come, with no person.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{
     EventPayload, Failure, TaskCause, TaskEvent, TaskRecord, TaskStatus, TaskStatusChangedPayload,
 };
@@ -118,13 +118,13 @@ pub(super) async fn after_reset(
 }
 
 /// Whether `record` is a task a limit stopped whose reset had come by `at`.
-fn reset_came(record: &TaskRecord, at: DateTime<Utc>) -> bool {
+fn reset_came(record: &TaskRecord, at: Timestamp) -> bool {
     record.status == TaskStatus::Blocked && limit_reset_by(record.stop.as_ref(), at)
 }
 
 /// Whether `stop` is a limit that named its reset, and that reset had come
 /// by `at`. A limit that named none waits for a person.
-fn limit_reset_by(stop: Option<&TaskCause>, at: DateTime<Utc>) -> bool {
+fn limit_reset_by(stop: Option<&TaskCause>, at: Timestamp) -> bool {
     matches!(
         stop,
         Some(TaskCause::SessionLimited(limit)) if limit.resets_at.is_some_and(|reset| reset <= at)
@@ -184,7 +184,7 @@ mod tests {
     use super::*;
     use yunta_core::events::{AccountLimit, LimitSource};
 
-    fn limited(resets_at: Option<DateTime<Utc>>) -> TaskCause {
+    fn limited(resets_at: Option<Timestamp>) -> TaskCause {
         TaskCause::SessionLimited(AccountLimit {
             source: LimitSource::Session {
                 adapter: "claude-code".into(),
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn a_task_a_limit_stopped_goes_back_once_its_reset_has_come() {
         let reset = yunta_testkit_core::fixed_now();
-        let later = reset + chrono::Duration::seconds(1);
+        let later = reset + jiff::SignedDuration::from_secs(1);
         assert!(limit_reset_by(Some(&limited(Some(reset))), reset));
         assert!(limit_reset_by(Some(&limited(Some(reset))), later));
         assert!(!limit_reset_by(Some(&limited(Some(later))), reset));

@@ -1,6 +1,6 @@
 //! A deterministic id source, so no assertion ever races a minted id.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::{IdSource, RunId};
 
 /// Reproducible ids for tests: `<prefix>-1`, `<prefix>-2`, … in
@@ -25,7 +25,7 @@ impl SeqIdSource {
 // construction, so a fixture whose prefix breaks that aborts the test.
 #[allow(clippy::expect_used)]
 impl IdSource for SeqIdSource {
-    fn mint_run_id(&self, _at: DateTime<Utc>) -> RunId {
+    fn mint_run_id(&self, _at: Timestamp) -> RunId {
         let n = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         RunId::try_from(format!("{}-{n}", self.prefix))
             .expect("a path segment followed by `-<n>` is a run id")

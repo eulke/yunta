@@ -9,7 +9,7 @@
 //! frame answers *what* a person is being asked for and not only *which*
 //! node is asking. No surface goes back to the log for it.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{Failure, LoggedWords, NodeState, NodeWait, PauseReason, TerminalState};
 use yunta_core::{ModeName, NodeId, Workflow};
 
@@ -76,7 +76,7 @@ impl RunPhase {
 
     /// The node a run paused on a limit's reset is held for, and the moment
     /// the run resumes at by itself. `None` for a run in any other state.
-    pub fn reset_wait(&self) -> Option<(&NodeId, DateTime<Utc>)> {
+    pub fn reset_wait(&self) -> Option<(&NodeId, Timestamp)> {
         match self {
             RunPhase::Waiting {
                 on: WaitingOn::Run { reason },

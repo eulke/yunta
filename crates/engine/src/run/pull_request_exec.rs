@@ -5,7 +5,7 @@
 //! Running it again pushes the same branch and finds the pull request it
 //! opened by the run's marker, so a rerun never opens a second one.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{
     AccountLimit, EngineError, EngineFact, EngineStep, EventPayload, Failure, LimitSource,
     NodeEvent, NodeOutcome, PullRequestOpenedPayload, TokenUsage,
@@ -114,13 +114,11 @@ async fn open_refused(
 /// The failure a forge refusal leaves when the forge's rate limit is spent:
 /// the account's limit, resetting `retry_after` past `failed_at` when the
 /// forge named a wait. Any other refusal is not a limit, so `None`.
-pub(super) fn forge_limit(error: &ForgeError, failed_at: DateTime<Utc>) -> Option<Failure> {
+pub(super) fn forge_limit(error: &ForgeError, failed_at: Timestamp) -> Option<Failure> {
     let ForgeError::RateLimited { retry_after, .. } = error else {
         return None;
     };
-    let resets_at = retry_after
-        .and_then(|wait| chrono::Duration::from_std(wait).ok())
-        .map(|wait| failed_at + wait);
+    let resets_at = retry_after.and_then(|wait| failed_at.checked_add(wait).ok());
     Some(Failure::Limit {
         limit: AccountLimit {
             source: LimitSource::Forge,

@@ -278,7 +278,7 @@ mod tests {
     fn apply_at(ledger: &mut GateLedger, node: &NodeId, seq: u64, event: GateEvent) {
         let meta = EventMeta {
             seq: Seq::from(seq),
-            at: chrono::DateTime::UNIX_EPOCH,
+            at: jiff::Timestamp::UNIX_EPOCH,
             node: Some(node),
         };
         ledger.apply(&event, &meta);

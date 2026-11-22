@@ -16,7 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde_json::Value;
 use yunta_core::{InvalidId, ModelName, RunTool, SessionId, ToolNaming};
 
@@ -67,7 +67,7 @@ struct SystemLine {
 #[derive(Debug, Default)]
 pub(super) struct LimitReading {
     /// The reset of the last window the CLI reported as rejected.
-    resets_at: Option<DateTime<Utc>>,
+    resets_at: Option<Timestamp>,
     /// The last assistant message ended on a `rate_limit` error.
     assistant_limited: bool,
 }
@@ -84,7 +84,7 @@ impl LimitReading {
             self.resets_at = info
                 .and_then(|info| info.get("resetsAt"))
                 .and_then(Value::as_i64)
-                .and_then(|secs| DateTime::from_timestamp(secs, 0));
+                .and_then(|secs| Timestamp::from_second(secs).ok());
         }
     }
 

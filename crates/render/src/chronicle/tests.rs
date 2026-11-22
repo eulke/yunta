@@ -26,7 +26,7 @@ fn said_for(payload: EventPayload) -> String {
         seq: 1.into(),
         run_id: "01JQ0000000000000000000000".into(),
         node_id: None,
-        timestamp: chrono::DateTime::UNIX_EPOCH,
+        timestamp: jiff::Timestamp::UNIX_EPOCH,
         body: EventBody::Known(payload),
     }];
     let moments = derive_chronicle(&events);
@@ -67,7 +67,7 @@ fn a_closed_child_is_marked_by_how_it_closed() {
             seq: 1.into(),
             run_id: "01JQ0000000000000000000000".into(),
             node_id: Some("compose".into()),
-            timestamp: chrono::DateTime::UNIX_EPOCH,
+            timestamp: jiff::Timestamp::UNIX_EPOCH,
             body: EventBody::Known(EventPayload::Children(ChildEvent::Finished(
                 ChildRunFinishedPayload {
                     child_run_id: "01JQ0000000000000000000001".into(),
@@ -413,7 +413,7 @@ fn the_chronicle_told_logs_each_moment_on_the_line_a_pipe_writes() {
             seq: (at as u64 + 1).into(),
             run_id: "01JQ0000000000000000000000".into(),
             node_id: None,
-            timestamp: chrono::DateTime::UNIX_EPOCH + chrono::Duration::seconds(seconds),
+            timestamp: jiff::Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(seconds),
             body: EventBody::Known(rerouted(cause)),
         })
         .collect();

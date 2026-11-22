@@ -30,7 +30,7 @@ yunta-render.workspace = true
 yunta-surco = { workspace = true, features = ["clap"] }
 clap = { workspace = true, features = ["derive"] }
 clap_complete.workspace = true
-chrono.workspace = true
+jiff.workspace = true
 serde = { workspace = true, features = ["derive"] }
 # The documents a command writes as JSON, and the JSON a test reads back.
 serde_json.workspace = true

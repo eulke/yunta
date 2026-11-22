@@ -28,7 +28,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{
     CriterionResult, CriterionType, EventPayload, GateLedger, NodeEvent, NodeLedger, PauseReason,
     Phase, RunEvent, RunLedger, RunPhaseRaw, SessionEvent, StoredEvent, Suspensions, TaskEvent,
@@ -84,8 +84,8 @@ impl TimeSpent {
 /// and every stretch booked between the two.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Timeline {
-    first_at: Option<DateTime<Utc>>,
-    last_at: Option<DateTime<Utc>>,
+    first_at: Option<Timestamp>,
+    last_at: Option<Timestamp>,
     /// The stretches booked so far, by bucket. Write-formatting time is
     /// not in here: it leaves `working` when the clock is read.
     booked: TimeSpent,
@@ -98,12 +98,12 @@ pub struct Timeline {
 
 impl Timeline {
     /// When the run's first event was written; `None` for a log with none.
-    pub fn first_at(&self) -> Option<DateTime<Utc>> {
+    pub fn first_at(&self) -> Option<Timestamp> {
         self.first_at
     }
 
     /// When the last applied event was written; `None` for a log with none.
-    pub fn last_at(&self) -> Option<DateTime<Utc>> {
+    pub fn last_at(&self) -> Option<Timestamp> {
         self.last_at
     }
 
@@ -111,15 +111,15 @@ impl Timeline {
     /// stood where it is. Zero for an event stamped after `now`, since a run
     /// cannot have been somewhere for a negative time; `None` for a log with
     /// no event.
-    pub fn since_last(&self, now: DateTime<Utc>) -> Option<Duration> {
+    pub fn since_last(&self, now: Timestamp) -> Option<Duration> {
         self.last_at
-            .map(|last| (now - last).to_std().unwrap_or_default())
+            .map(|last| Duration::try_from(now - last).unwrap_or_default())
     }
 
     /// The span the clock covers up to `until`, or up to the last applied
     /// event when `until` is `None`: from the first event to that end.
     /// `None` for a log with no event.
-    pub fn window(&self, until: Option<DateTime<Utc>>) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
+    pub fn window(&self, until: Option<Timestamp>) -> Option<(Timestamp, Timestamp)> {
         self.first_at.zip(until.or(self.last_at))
     }
 
@@ -153,7 +153,7 @@ impl Timeline {
         &self,
         open: &Open,
         asleep: &Suspensions,
-        until: Option<DateTime<Utc>>,
+        until: Option<Timestamp>,
     ) -> TimeSpent {
         let mut spent = self.booked;
         if let (Some(last), Some(until)) = (self.last_at, until) {
@@ -173,7 +173,7 @@ impl Timeline {
         &self,
         open: &Open,
         asleep: &Suspensions,
-        until: Option<DateTime<Utc>>,
+        until: Option<Timestamp>,
     ) -> BTreeMap<NodeId, Duration> {
         let mut people = self.people_at.clone();
         if let (Some(last), Some(until)) = (self.last_at, until) {

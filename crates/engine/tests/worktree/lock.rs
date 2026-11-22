@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use tokio_util::sync::CancellationToken;
 use yunta_core::process::signal::Liveness;
 use yunta_core::{Isolation, Pid};
@@ -30,7 +30,7 @@ pub(super) fn mutation_lock_file(repo: &Path) -> std::path::PathBuf {
 
 /// The record every lock writer produces: the holder's pid and when it
 /// took the lock.
-pub(super) fn owner_record(pid: u32, started_at: DateTime<Utc>) -> String {
+pub(super) fn owner_record(pid: u32, started_at: Timestamp) -> String {
     serde_json::json!({ "pid": pid, "started_at": started_at }).to_string()
 }
 
@@ -45,7 +45,7 @@ pub(super) fn dead_pid() -> u32 {
 /// A probe that answers what the test decides, whatever the pid.
 struct Scripted {
     liveness: Liveness,
-    started: Option<DateTime<Utc>>,
+    started: Option<Timestamp>,
 }
 
 impl OwnerProbe for Scripted {
@@ -53,7 +53,7 @@ impl OwnerProbe for Scripted {
         self.liveness
     }
 
-    fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
+    fn started(&self, _pid: Pid) -> Option<Timestamp> {
         self.started
     }
 }
@@ -119,7 +119,7 @@ async fn a_live_owner_s_lock_still_refuses() {
     // the host reports for it, since a process that started after its record
     // reads as a reused pid; a host that reports no start reads it as alive.
     let started = yunta_core::process::process_start::process_start(Pid::current())
-        .map(DateTime::<Utc>::from)
+        .and_then(|start| Timestamp::try_from(start).ok())
         .unwrap_or_else(fixed_now);
     std::fs::write(lock_file(&repo), owner_record(std::process::id(), started)).unwrap();
 
@@ -281,7 +281,7 @@ async fn a_reused_pid_is_not_the_owner() {
     // the old owner's pid.
     let newcomer = Scripted {
         liveness: Liveness::Alive,
-        started: Some(taken + chrono::Duration::minutes(1)),
+        started: Some(taken + jiff::SignedDuration::from_mins(1)),
     };
     let acquired = acquire(
         &lock_path,
@@ -344,7 +344,7 @@ async fn a_live_holder_with_an_unknown_start_time_keeps_its_lock() {
 fn releasing_a_lock_another_process_took_leaves_it_in_place() {
     let dir = tempfile::tempdir().unwrap();
     let lock_path = dir.path().join("yunta.lock");
-    let taken = DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap();
+    let taken = Timestamp::from_second(1_700_000_000).unwrap();
     std::fs::write(&lock_path, owner_record(4242, taken)).unwrap();
     let ours = LockOwner {
         schema_version: 1,

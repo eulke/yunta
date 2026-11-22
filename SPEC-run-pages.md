@@ -82,7 +82,7 @@ The decision a gate's page ends with is built in `gate` (`decision`, `record`, `
   - how long a run has stood where it is: the field's `time_in_state`, and the run page's `since`;
   - where its time went: the run page's facts and the JSON, each with `state.time_spent`, which the frame's own stats already compute.
   
-  Each subtracts `chrono` instants. `yunta-render` names no clock type, so the run page could not move as it is written.
+  Each subtracts `jiff` instants. `yunta-render` names no clock type, so the run page could not move as it is written.
 
 **What a person can do next:**
 - **The table:** `advice::after_for(frame, decision, reader) -> Vec<(String, &'static str)>` decides the steps by the run's standing and the decision it waits on. It spells each one as a command and words what it does, in one function.
@@ -279,7 +279,7 @@ Each item gets the one path and the name it should always have had, where it mov
 
 ## Tech Stack
 
-Rust 1.98.0. `yunta-render` gains `yunta-replay` as a dependency, and `chrono`, already the workspace's, to name the instant its caller hands the page `open` writes. `yunta-render` reads no clock: every duration it says is measured in `yunta-replay`. Surco's `golden` feature holds the goldens, as it does now.
+Rust 1.98.0. `yunta-render` gains `yunta-replay` as a dependency, and `jiff`, already the workspace's, to name the instant its caller hands the page `open` writes. `yunta-render` reads no clock: every duration it says is measured in `yunta-replay`. Surco's `golden` feature holds the goldens, as it does now.
 
 ## Commands
 

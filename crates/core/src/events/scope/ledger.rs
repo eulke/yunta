@@ -221,7 +221,7 @@ mod tests {
     fn fold(ledger: &mut GrantLedger, seq: u64, event: ScopeEvent) {
         let meta = EventMeta {
             seq: Seq::from(seq),
-            at: chrono::DateTime::UNIX_EPOCH,
+            at: jiff::Timestamp::UNIX_EPOCH,
             node: None,
         };
         ledger

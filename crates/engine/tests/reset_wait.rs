@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{
     EventPayload, NodeEvent, PauseReason, SessionEvent, TaskEvent, TaskStatus,
@@ -47,7 +47,7 @@ fn forged_on(host: &Arc<HostClock>, state: &MockForgeState) -> Bench {
 }
 
 /// The node a paused run awaits the reset of, and the instant of that reset.
-fn awaiting_reset(terminal: &RunTerminal) -> (String, DateTime<Utc>) {
+fn awaiting_reset(terminal: &RunTerminal) -> (String, Timestamp) {
     let RunTerminal::Paused {
         reason: PauseReason::AwaitingReset { node, at },
     } = terminal
@@ -74,7 +74,7 @@ fn started(bench: &Bench, node: &str) -> usize {
 
 /// Runs the workflow with the forge refusing its pull request for
 /// `RETRY_AFTER`, and returns the reset the run pauses awaiting.
-async fn parked_on_the_reset(bench: &Bench, state: &MockForgeState) -> (String, DateTime<Utc>) {
+async fn parked_on_the_reset(bench: &Bench, state: &MockForgeState) -> (String, Timestamp) {
     // Any retry-after serves: the run only has to pause on the reset it names.
     state.rate_limit_next(RETRY_AFTER);
     let RunReport { terminal, .. } = bench
@@ -98,8 +98,7 @@ async fn a_forge_limit_with_a_reset_pauses_awaiting_that_reset() {
     let (node, at) = parked_on_the_reset(&bench, &state).await;
 
     assert_eq!(node, "pr");
-    let wait = chrono::Duration::from_std(RETRY_AFTER).unwrap();
-    assert_eq!(at, fixed_now() + wait);
+    assert_eq!(at, fixed_now() + RETRY_AFTER);
     assert_eq!(started(&bench, "pr"), 1, "only the refused attempt so far");
 }
 
@@ -147,8 +146,8 @@ const TWO_FILES: &str = "tasks:\n  - id: task-h\n    title: \"Write both files\"
 
 /// The reset the account's limit names: a minute past the bench clock's
 /// origin.
-fn session_reset() -> DateTime<Utc> {
-    fixed_now() + chrono::Duration::seconds(60)
+fn session_reset() -> Timestamp {
+    fixed_now() + jiff::SignedDuration::from_secs(60)
 }
 
 /// The planner hands over [`TWO_FILES`]; the task's first session writes
@@ -158,7 +157,7 @@ fn limited_task_fixture() -> String {
     let mut fixture = plan_session(TWO_FILES);
     fixture.push_str(&format!(
         "  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n    outcome: {{ type: limited, resets_at: {} }}\n",
-        session_reset().timestamp()
+        session_reset().as_second()
     ));
     fixture.push_str(
         "  - effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-h }\n",

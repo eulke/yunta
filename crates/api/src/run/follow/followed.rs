@@ -3,7 +3,7 @@
 //! an interface keeps one beside what it draws and folds into it each piece of news a
 //! [`Following`](super::Following) hands back, by the fold the following itself makes.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId, Seq};
 use yunta_replay::frame::RunFrame;
@@ -60,7 +60,7 @@ impl FollowedRun {
     }
 
     /// The run's frame at `now`.
-    pub fn frame(&self, now: DateTime<Utc>) -> RunFrame {
+    pub fn frame(&self, now: Timestamp) -> RunFrame {
         RunFrame::of(
             &self.run,
             &self.manifest.workflow,

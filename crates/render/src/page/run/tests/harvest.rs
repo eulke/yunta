@@ -144,7 +144,7 @@ fn time_is_said_only_where_a_person_weighed_in_it() {
 fn a_wait_still_open_runs_to_the_instant_the_page_is_read_at() {
     let asked = GateEvent::AskingOpened(AskingOpenedPayload { task_id: None });
     let events = Log::for_run(RUN.as_str())
-        .at(fixed_now() - chrono::Duration::seconds(90))
+        .at(fixed_now() - jiff::SignedDuration::from_secs(90))
         .node("plan", EventPayload::Gates(asked))
         .build();
     let mut page = page_of(events, RunScope::Status);

@@ -21,7 +21,7 @@
 //! here degrades to a `tracing` warning, never to a failed run — but it
 //! degrades *loudly*, never silently.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -58,7 +58,7 @@ pub struct EngineProcessFile {
     /// clock, because [`EngineProcessFile::liveness`] compares it
     /// against that same table — the reason the lock reads it there
     /// too.
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
     pub process_groups: Vec<Pid>,

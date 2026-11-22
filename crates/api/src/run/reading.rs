@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{DecisionOn, Escalation, NodeState};
 use yunta_core::shown::ShownDocument;
 use yunta_core::NodeId;
@@ -30,7 +30,7 @@ pub struct RunReading<'p> {
     /// The run's own branch, which its tree works on.
     pub branch: String,
     /// The instant it was read at.
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 impl<'p> OpenedRun<'p> {
@@ -66,7 +66,7 @@ impl<'p> OpenedRun<'p> {
 
     /// The frame `state` derives at `now`, beside the engine the run's lock
     /// names.
-    pub(crate) fn frame_of(&self, state: &RunState, now: DateTime<Utc>) -> RunFrame {
+    pub(crate) fn frame_of(&self, state: &RunState, now: Timestamp) -> RunFrame {
         let engine = self.registry().engine();
         let workflow = &self.manifest.doc.workflow;
         RunFrame::of(&self.id, workflow, state, None, &engine, now)

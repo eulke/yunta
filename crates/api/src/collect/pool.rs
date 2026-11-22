@@ -54,7 +54,7 @@ impl Collection<'_> {
             .storage
             .as_ref()
             .and_then(|storage| storage.retention_days)
-            .map(|days| chrono::Duration::days(i64::from(days)));
+            .map(|days| jiff::SignedDuration::from_hours(24 * i64::from(days)));
         let tidied = match self.pool.tidy(unused, self.supervision()).await {
             Ok(tidied) => tidied,
             Err(e) => {

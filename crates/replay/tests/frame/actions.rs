@@ -126,7 +126,7 @@ fn a_run_waiting_on_a_reset_resumes_once_it_resets() {
             on: WaitingOn::Run {
                 reason: PauseReason::AwaitingReset {
                     node: NodeId::from_static("build"),
-                    at: Utc.with_ymd_and_hms(2026, 10, 13, 12, 0, 0).unwrap(),
+                    at: "2026-10-13T12:00:00Z".parse::<jiff::Timestamp>().unwrap(),
                 },
             },
         },

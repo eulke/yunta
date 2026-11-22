@@ -2,13 +2,13 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, TimeZone, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{
     EventMeta, HostSuspendedPayload, RunEvent, RunLedger, Suspension, Suspensions,
 };
 
-fn at(minutes: i64) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap() + chrono::Duration::minutes(minutes)
+fn at(minutes: i64) -> Timestamp {
+    "2026-01-01T00:00:00Z".parse::<Timestamp>().unwrap() + jiff::SignedDuration::from_mins(minutes)
 }
 
 fn minutes(n: u64) -> Duration {

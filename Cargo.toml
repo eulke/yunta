@@ -53,7 +53,6 @@ yunta-testkit-ui = { path = "crates/testkit-ui", version = "0.0.5" }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.23"
-chrono = "0.4"
 clap = "4"
 clap_complete = "4"
 futures = "0.3"
@@ -61,13 +60,16 @@ globset = "0.4"
 errno = "0.3"
 indexmap = "2"
 indicatif = "0.18"
+# Instants and spans in UTC, read from the clock, parsed, written and
+# serialized; Yunta names no time zone, so none of jiff's zone features.
+jiff = { version = "1", default-features = false, features = ["std", "serde"] }
 console = "0.16"
 crossterm = "0.29"
 nix = { version = "0.32", features = ["signal", "process"] }
 libc = "0.2"
 rustix = { version = "1.1", features = ["fs", "process"] }
-# Only the process table is read: the defaults add chrono for boot times and
-# flate2 for `/proc/config.gz`, neither of which Yunta reads.
+# Only the process table is read: the defaults add a date library for boot
+# times and flate2 for `/proc/config.gz`, neither of which Yunta reads.
 procfs = { version = "0.18", default-features = false }
 libproc = "0.15"
 # Reads another process's environment on macOS, where `sysctl(KERN_PROCARGS2)`

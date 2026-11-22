@@ -1,9 +1,9 @@
 //! Injected time — the engine's
-//! decision logic never calls `Utc::now()` itself; whoever drives it
+//! decision logic never calls `Timestamp::now()` itself; whoever drives it
 //! passes a [`Clock`]. Tests inject a clock of their own and get
 //! reproducible event timestamps; the binary passes [`SystemClock`].
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 /// How long a host that slept has to stay awake, by [`Clock::awake`], before a
 /// session opens on it: longer than the wakes a laptop makes for maintenance,
@@ -12,7 +12,7 @@ pub const SETTLE_AFTER_SUSPENSION: std::time::Duration = std::time::Duration::fr
 
 pub trait Clock: Send + Sync {
     /// Wall time: when something happened, as a person reads it.
-    fn now(&self) -> DateTime<Utc>;
+    fn now(&self) -> Timestamp;
 
     /// Time that stands still while the host is suspended — how long the
     /// machine has been awake. The wall clock outrunning it by more than
@@ -33,7 +33,7 @@ pub trait Clock: Send + Sync {
 pub struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }

@@ -228,7 +228,7 @@ fn field() -> Vec<FieldRow> {
     // Asked at its terminal, by an engine alive now, about `implement`.
     let mut asking = row(OLDEST, FieldGroup::NeedsYou, 32 * 60);
     asking.frame.phase = RunPhase::Running;
-    let since = fixed_now() - chrono::Duration::minutes(32);
+    let since = fixed_now() - jiff::SignedDuration::from_mins(32);
     let engine = Engine::Alive {
         pid: Pid::current(),
         prompt: Some(Prompt {

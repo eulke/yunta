@@ -277,7 +277,7 @@ mod tests {
             let task: TaskId = id.as_ref().into();
             let meta = yunta_core::events::EventMeta {
                 seq: (seq as u64 + 1).into(),
-                at: chrono::DateTime::UNIX_EPOCH,
+                at: jiff::Timestamp::UNIX_EPOCH,
                 node: None,
             };
             ledger

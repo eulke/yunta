@@ -2,7 +2,7 @@
 //! scheduler loop in [`super::exec`] dispatches to, each named for the step it
 //! serves so the loop reads as the schedule it runs.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{
     EngineFact, EventPayload, Evidence, Failure, NodeOutcome, NodeReroutedPayload, Outlook,
     PauseReason, PromotionCause, PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload,
@@ -106,7 +106,7 @@ pub(super) async fn run_failed(
 pub(super) async fn pause_for_reset(
     ctx: &RunCtx<'_>,
     node: NodeId,
-    at: DateTime<Utc>,
+    at: Timestamp,
 ) -> Result<RunReport, RunError> {
     pause(ctx, PauseReason::AwaitingReset { node, at }).await
 }

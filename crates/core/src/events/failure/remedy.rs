@@ -3,7 +3,7 @@
 //! failure and [`Facts`]; the engine reads the facts from the log, and
 //! render writes every word of the result.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::events::{Surprise, TaskCause, TaskStop};
@@ -71,7 +71,7 @@ pub enum Stuck {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outlook {
     /// The run pauses until the reset at `at`; a wake at or after that instant runs the node.
-    WaitUntil { at: DateTime<Utc> },
+    WaitUntil { at: Timestamp },
     /// The options a person may choose from, each with its input.
     Choose(Vec<Remedy>),
     /// No option helps, and why.
@@ -82,7 +82,7 @@ pub enum Outlook {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Facts {
     /// When the failure happened; a reset is read against it.
-    pub failed_at: DateTime<Utc>,
+    pub failed_at: Timestamp,
     /// Whether the node's tasks hold work a continuation can pick up.
     pub continuable: bool,
     /// Whether the run may still grant the scope the failure asks for.
@@ -293,7 +293,7 @@ fn stopped_outlook(stopped: &[TaskStop], facts: &Facts) -> Outlook {
         });
     }
     let mut stuck: Option<Stuck> = None;
-    let mut wait: Option<DateTime<Utc>> = None;
+    let mut wait: Option<Timestamp> = None;
     for stop in stopped {
         match stop_outlook(&stop.cause, facts) {
             Outlook::Choose(found) => {

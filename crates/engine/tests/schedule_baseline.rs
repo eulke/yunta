@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use chrono::{DateTime, TimeZone, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{
     BaselineCapturedPayload, BaselineOrigin, BaselineResults, EventBody, EventPayload, NodeEvent,
     NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RunCreatedPayload, RunEvent, StoredEvent,
@@ -45,14 +45,14 @@ fn policy() -> SchedulingPolicy {
 }
 
 fn log(entries: Vec<(Option<&str>, EventPayload)>) -> Vec<StoredEvent> {
-    let start: DateTime<Utc> = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+    let start: Timestamp = "2024-01-01T00:00:00Z".parse().unwrap();
     entries
         .into_iter()
         .enumerate()
         .map(|(index, (node, payload))| StoredEvent {
             run_id: "run-1".into(),
             seq: (index as u64 + 1).into(),
-            timestamp: start + chrono::Duration::seconds(index as i64),
+            timestamp: start + jiff::SignedDuration::from_secs(index as i64),
             node_id: node.map(Into::into),
             body: EventBody::Known(payload),
         })

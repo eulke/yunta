@@ -49,7 +49,7 @@ impl RunState {
 
 #[cfg(test)]
 mod tests {
-    use chrono::DateTime;
+    use jiff::Timestamp;
     use yunta_core::events::{
         ChangesCountedPayload, EventBody, EventPayload, Failure, NodeEvent, NodeFailedPayload,
         NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RunEvent, RunResumedPayload,
@@ -67,7 +67,7 @@ mod tests {
             .map(|(index, (node, payload))| StoredEvent {
                 run_id: "run-1".into(),
                 seq: (index as u64 + 1).into(),
-                timestamp: DateTime::UNIX_EPOCH,
+                timestamp: Timestamp::UNIX_EPOCH,
                 node_id: node.map(Into::into),
                 body: EventBody::Known(payload),
             })

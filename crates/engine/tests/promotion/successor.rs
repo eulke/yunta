@@ -377,9 +377,9 @@ async fn a_promotion_successor_is_stamped_by_the_run_clock() {
     let born = events.first().expect("the successor's own birth");
     assert_eq!(
         born.timestamp,
-        chrono::DateTime::parse_from_rfc3339(yunta_testkit_core::FIXED_NOW)
-            .unwrap()
-            .with_timezone(&chrono::Utc),
+        yunta_testkit_core::FIXED_NOW
+            .parse::<jiff::Timestamp>()
+            .unwrap(),
         "the clock the caller handed in, not the one on the wall"
     );
 }

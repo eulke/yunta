@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::PauseReason;
 use yunta_core::step::NextStep;
 use yunta_core::{Isolation, Pid, RunId};
@@ -159,7 +159,7 @@ async fn hand_off(
 /// The instant a run paused on a limit's reset resumes at, or `None` for any
 /// other run. A resume of such a run waits for that instant before it takes
 /// anything.
-pub(crate) fn reset_at(state: &RunState) -> Option<DateTime<Utc>> {
+pub(crate) fn reset_at(state: &RunState) -> Option<Timestamp> {
     match state.run.paused() {
         Some((PauseReason::AwaitingReset { at, .. }, _)) => Some(*at),
         _ => None,

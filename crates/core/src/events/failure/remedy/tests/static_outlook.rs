@@ -17,7 +17,7 @@ use super::*;
 
 /// Every failure in `failures` has the outlook `expected`, at a fixed time.
 fn outlook_on(failures: Vec<Failure>, expected: Outlook) {
-    let facts = facts_at(Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap());
+    let facts = facts_at("2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap());
     for failure in failures {
         assert_eq!(failure.remedies(&facts), expected, "{failure:?}");
     }

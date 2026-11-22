@@ -425,7 +425,7 @@ mod tests {
         {
             let meta = EventMeta {
                 seq: Seq::from(seq as u64 + 1),
-                at: chrono::DateTime::UNIX_EPOCH,
+                at: jiff::Timestamp::UNIX_EPOCH,
                 node: None,
             };
             ledger.apply(event, &meta).expect("a reading names no task");

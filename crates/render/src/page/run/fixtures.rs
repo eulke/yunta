@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::escalation::Decision;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::doc::Depth;
 use surco::words::Standing;
 use yunta_core::events::{
@@ -113,7 +113,7 @@ pub(crate) fn failed_lint() -> NodeFrame {
 /// A node a session's usage limit stopped, which the run waits on: its log
 /// says it failed, and it stands `waiting`, as the engine words a node a
 /// reset holds, until the limit resets at `resets_at` and it runs again.
-fn failed_on_limit(id: &str, resets_at: DateTime<Utc>) -> NodeFrame {
+fn failed_on_limit(id: &str, resets_at: Timestamp) -> NodeFrame {
     NodeFrame {
         standing: Standing::Waiting,
         ..reached(
@@ -308,8 +308,7 @@ impl Case {
     /// `RunFrame::of` measures it.
     fn logged(name: &'static str, frame: RunFrame, log: &[StoredEvent]) -> Self {
         let state = yunta_replay::RunState::replay(log);
-        let read_at = state.clock().last_at().unwrap_or_else(fixed_now)
-            + chrono::Duration::from_std(READ_AFTER).expect("a wait fits a chrono duration");
+        let read_at = state.clock().last_at().unwrap_or_else(fixed_now) + READ_AFTER;
         let frame = RunFrame {
             since_last_event: Some(READ_AFTER),
             time: state.time_spent((!state.ended()).then_some(read_at)),
@@ -355,7 +354,7 @@ pub(crate) fn cases() -> Vec<Case> {
     let failed = RunPhase::Failed {
         failure: Some(lint_failure()),
     };
-    let reset = fixed_now() + chrono::Duration::hours(2);
+    let reset = fixed_now() + jiff::SignedDuration::from_hours(2);
     vec![
         needs_you(),
         Case::new(

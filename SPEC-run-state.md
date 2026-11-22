@@ -14,7 +14,7 @@ Every import of that code changes in this move, so it is also when each item get
 Measured on the tree, not taken from the map (the map's "about 2,650 lines" was counted at `34790ab8`):
 
 - **The code is 4,143 lines in eight modules of `crates/engine/src`:** `replay.rs` and `replay/` (1,613), `view/` (1,041), `stats.rs` (412), `receipt/` (338), `verification_effectiveness.rs` (321), `modes.rs` (207), `history.rs` (144), `live.rs` (67). `replay/tree.rs` and `modes.rs` hold 13 inline tests.
-- **It reads nothing but its inputs.** None of these files names `tokio`, `rusqlite`, `yunta-storage`, `std::fs`, `std::process`, `std::env`, `Utc::now` or `SystemTime`. They import `yunta-core`, `yunta-surco`, `chrono`, `serde`, `serde_json`, `thiserror`, `std` and each other, and three value types of `process_registry.rs`: `Engine`, `EngineLiveness` and `Prompt`.
+- **It reads nothing but its inputs.** None of these files names `tokio`, `rusqlite`, `yunta-storage`, `std::fs`, `std::process`, `std::env`, `Timestamp::now` or `SystemTime`. They import `yunta-core`, `yunta-surco`, `jiff`, `serde`, `serde_json`, `thiserror`, `std` and each other, and three value types of `process_registry.rs`: `Engine`, `EngineLiveness` and `Prompt`.
 - **The value types sit beside the code that reads the disk.** `process_registry.rs` defines them next to `read_registry`, `engine_liveness`, `engine_prompt`, `engine_words` and `Engine::read`, which read `engine.json` through a `lock::OwnerProbe`, and `child_pid`, which takes a `tokio::process::Child`. `Engine::read` has 4 callers; `Engine::this`, which reads nothing, has 20.
 - **One cycle.** `replay/activity.rs` counts submissions and finding calls into `Submissions` and `FindingActivity`, which `stats.rs` defines, and `stats.rs` derives from `replay`. Every other edge points one way: `live`, `history`, `receipt` and `verification_effectiveness` read `replay`; `history` reads `stats`; `view` reads `replay`, `stats`, `history`, `live`, `modes` and the registry's value types; `modes` reads none of them.
 - **Items have two paths, and some names only read after a rename.**
@@ -50,7 +50,7 @@ Measured on the tree, not taken from the map (the map's "about 2,650 lines" was 
 
 ### What each of them gets
 
-1. **A crate for what a run is, as its log says,** at `crates/replay`, named `yunta-replay` (the map's `yunta-state`, renamed at the user's choice). It depends on `yunta-core` and `yunta-surco`, and on `chrono`, `serde`, `serde_json` and `thiserror`, which the workspace already declares. It holds the eight modules and the registry's three value types.
+1. **A crate for what a run is, as its log says,** at `crates/replay`, named `yunta-replay` (the map's `yunta-state`, renamed at the user's choice). It depends on `yunta-core` and `yunta-surco`, and on `jiff`, `serde`, `serde_json` and `thiserror`, which the workspace already declares. It holds the eight modules and the registry's three value types.
 2. **Pure, and held to it.** Its manifest names neither `tokio`, `rusqlite`, `sqlx`, `yunta-storage` nor `yunta-engine`, and a test that reads the manifest says so the day someone adds one, as `no_sql_dependency.rs` does for the engine.
 3. **No cycle.** `Submissions` and `FindingActivity` are what replay counts from the log, so they are replay's, and the stats read them from there. A test reads the crate's sources and holds the order of its modules: each names only the modules beneath it.
 4. **One path to each item.**
@@ -148,7 +148,7 @@ Before a commit, every step of the `ci` job in `.github/workflows/ci.yml` runs, 
 ## Project Structure
 
 ```
-crates/replay/Cargo.toml             core, surco, chrono, serde, serde_json, thiserror
+crates/replay/Cargo.toml             core, surco, jiff, serde, serde_json, thiserror
 crates/replay/src/lib.rs             what a run is as its log says: RunState, replayed; the crate's map
 crates/replay/src/{clock,activity,decisions,refuse,tree}.rs
                                      replay's parts, moved from crates/engine/src/replay/

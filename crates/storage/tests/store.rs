@@ -5,7 +5,9 @@
 //! connections append at once, and a reopened database keeps what it
 //! held. The chain verifies an untouched log intact and names the exact
 //! seq where a tampered payload, a deleted row or a single flipped byte
-//! breaks it, and a log whose tail was deleted reads as broken.
+//! breaks it, and a log whose tail was deleted reads as broken. A log an
+//! earlier binary wrote, its timestamps spelled with a `+00:00` offset,
+//! verifies, reads and lists in its place beside what this one writes.
 
 use std::sync::Arc;
 use std::thread;
@@ -21,6 +23,8 @@ use yunta_testkit_core::FixedClock;
 
 #[path = "store/chain.rs"]
 mod chain;
+#[path = "store/earlier.rs"]
+mod earlier;
 #[path = "store/events.rs"]
 mod events;
 #[path = "store/heads.rs"]
@@ -408,9 +412,9 @@ async fn async_storage_appends_off_the_runtime_thread_and_reads_back() {
     let storage = AsyncStorage::open(dir.path().join("yunta.db"))
         .await
         .unwrap();
-    let instant = chrono::DateTime::parse_from_rfc3339("2026-09-02T10:00:00+00:00")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
+    let instant = "2026-09-02T10:00:00+00:00"
+        .parse::<jiff::Timestamp>()
+        .unwrap();
 
     let first = storage
         .append(created_draft("run-1"), instant)
@@ -442,9 +446,9 @@ async fn async_storage_runs_a_compound_operation_on_one_blocking_connection() {
     let storage = AsyncStorage::open(dir.path().join("yunta.db"))
         .await
         .unwrap();
-    let instant = chrono::DateTime::parse_from_rfc3339("2026-09-02T10:00:00+00:00")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
+    let instant = "2026-09-02T10:00:00+00:00"
+        .parse::<jiff::Timestamp>()
+        .unwrap();
     storage
         .append(created_draft("run-1"), instant)
         .await

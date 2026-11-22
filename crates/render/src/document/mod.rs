@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use crate::spend::SpendJson;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::caution::Caution;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, StoredEvent};
 use yunta_core::{Manifest, RunId};
@@ -241,7 +241,7 @@ pub struct RunDocument {
 #[derive(serde::Serialize)]
 pub struct AwaitingResetJson {
     node: String,
-    at: DateTime<Utc>,
+    at: Timestamp,
 }
 
 impl RunDocument {

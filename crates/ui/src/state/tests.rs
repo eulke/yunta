@@ -10,7 +10,7 @@ use crate::{Operation, Request};
 /// What asking `then`, with `first` under way, lets go.
 fn let_go_by(first: Operation, then: Operation) -> Vec<Request> {
     let (mut state, _) =
-        State::opened(chrono::DateTime::from_timestamp(1_800_000_000, 0).expect("an instant"));
+        State::opened(jiff::Timestamp::from_second(1_800_000_000).expect("an instant"));
     state.asked(first);
     state
         .asked(then)

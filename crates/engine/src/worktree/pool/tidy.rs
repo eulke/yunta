@@ -79,7 +79,7 @@ impl CheckoutPool {
     /// removes the free checkouts that hold no build.
     pub async fn tidy(
         &self,
-        unused: Option<chrono::Duration>,
+        unused: Option<jiff::SignedDuration>,
         supervision: Supervision<'_>,
     ) -> Result<Tidied, WorktreeError> {
         let home = self.home(supervision).await?;
@@ -117,7 +117,7 @@ impl CheckoutPool {
     async fn empty_idle(
         &self,
         home: &Path,
-        unused: Option<chrono::Duration>,
+        unused: Option<jiff::SignedDuration>,
         supervision: Supervision<'_>,
     ) -> Result<Vec<(PathBuf, u64)>, WorktreeError> {
         let now = supervision.clock.now();

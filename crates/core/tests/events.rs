@@ -200,9 +200,7 @@ fn the_envelope_flattens_kind_and_payload_fields_together() {
     let event = StoredEvent {
         run_id: RunId::from("run-1"),
         seq: 1.into(),
-        timestamp: chrono::DateTime::parse_from_rfc3339("2026-08-18T00:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc),
+        timestamp: "2026-08-18T00:00:00Z".parse::<jiff::Timestamp>().unwrap(),
         node_id: None,
         body: EventBody::Known(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
             &PauseReason::Recorded {
@@ -684,7 +682,7 @@ fn a_grant_naming_no_subject_counts_for_nothing() {
     });
     let meta = EventMeta {
         seq: 1.into(),
-        at: chrono::DateTime::UNIX_EPOCH,
+        at: jiff::Timestamp::UNIX_EPOCH,
         node: None,
     };
     let mut ledger = GrantLedger::default();

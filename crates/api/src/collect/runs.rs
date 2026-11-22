@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{OrphanedSession, StoredEvent};
 use yunta_core::{Isolation, RunId};
 use yunta_render::page::{Reclaim, Uncollected};
@@ -298,13 +298,13 @@ enum Removal {
 /// pass's instant.
 #[derive(Debug, Clone, Copy)]
 struct Retention {
-    now: DateTime<Utc>,
+    now: Timestamp,
     days: i64,
 }
 
 impl Retention {
     /// Whether a run whose last event is at `last` is past retention.
-    fn passed(self, last: DateTime<Utc>) -> bool {
-        (self.now - last).num_days() >= self.days
+    fn passed(self, last: Timestamp) -> bool {
+        (self.now - last).as_hours() / 24 >= self.days
     }
 }

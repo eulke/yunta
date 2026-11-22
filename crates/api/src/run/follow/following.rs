@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::words::Standing;
 use tokio::sync::mpsc;
 use yunta_core::events::StoredEvent;
@@ -75,7 +75,7 @@ pub struct Following {
     /// The registry the run followed now keeps beside it, in its directory.
     registry: RunRegistry,
     /// When the registry was last read: it is read again once a second has passed.
-    registry_read_at: DateTime<Utc>,
+    registry_read_at: Timestamp,
     /// When the run was last looked at, which the next look is spaced from.
     looked_at: tokio::time::Instant,
     listening: Listening,
@@ -203,10 +203,9 @@ impl Following {
 
     /// Reads the registry again once it is a second old, and tells when the engine it
     /// names changed.
-    fn read_registry(&mut self, now: DateTime<Utc>) {
-        let stale = (now - self.registry_read_at)
-            .to_std()
-            .is_ok_and(|age| age >= REGISTRY_EVERY);
+    fn read_registry(&mut self, now: Timestamp) {
+        let stale =
+            Duration::try_from(now - self.registry_read_at).is_ok_and(|age| age >= REGISTRY_EVERY);
         if !stale {
             return;
         }
@@ -221,7 +220,8 @@ impl Following {
     /// ends as stopped when none comes.
     async fn onto_successor(&mut self, stop: &Stop) -> Result<(), Error> {
         let since = self.clock.now();
-        let waited = |clock: &dyn Clock| (clock.now() - since).to_std().unwrap_or_default();
+        let waited =
+            |clock: &dyn Clock| Duration::try_from(clock.now() - since).unwrap_or_default();
         while waited(self.clock.as_ref()) < SUCCESSOR_WAIT {
             if let Some(successor) = self.chain.successor(&self.log).await? {
                 return self.go_on_with(successor).await;

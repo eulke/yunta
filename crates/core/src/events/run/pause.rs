@@ -1,6 +1,6 @@
 //! Why a run is parked, as a fact.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::events::gates::escalation::Escalation;
@@ -48,7 +48,11 @@ pub enum PauseReason {
     /// A node failed and nothing rerouted it.
     NodeFailed { node: NodeId, failure: Failure },
     /// The account's limit resets at `at`; the run resumes detached then.
-    AwaitingReset { node: NodeId, at: DateTime<Utc> },
+    AwaitingReset {
+        node: NodeId,
+        #[schemars(with = "crate::schema::Instant")]
+        at: Timestamp,
+    },
     /// Nothing is runnable: `node` waits on `on`, which this pass left
     /// unresolved.
     Blocked { node: NodeId, on: Vec<NodeId> },
@@ -93,7 +97,7 @@ impl PauseReason {
     /// The node a limit's reset holds the run for, and the moment the run
     /// resumes at by itself. A pause of that kind is a wait nobody answers,
     /// not a stop a person has to. `None` for every other pause.
-    pub fn reset_wait(&self) -> Option<(&NodeId, DateTime<Utc>)> {
+    pub fn reset_wait(&self) -> Option<(&NodeId, Timestamp)> {
         match self {
             PauseReason::AwaitingReset { node, at } => Some((node, *at)),
             _ => None,
@@ -167,7 +171,7 @@ mod tests {
             PauseReason::Cancelled,
             PauseReason::AwaitingReset {
                 node: NodeId::from_static("limited"),
-                at: chrono::DateTime::UNIX_EPOCH,
+                at: jiff::Timestamp::UNIX_EPOCH,
             },
             PauseReason::BudgetExhausted { spent: 5, cap: 4 },
             PauseReason::UncertainOrphans {
@@ -200,7 +204,7 @@ mod tests {
     #[test]
     fn only_a_limit_reset_is_a_wait_nobody_answers() {
         let node = NodeId::from_static("limited");
-        let at = DateTime::UNIX_EPOCH;
+        let at = Timestamp::UNIX_EPOCH;
         let reset = PauseReason::AwaitingReset {
             node: node.clone(),
             at,

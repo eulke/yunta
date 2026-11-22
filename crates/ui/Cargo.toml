@@ -27,7 +27,7 @@ yunta-render.workspace = true
 # The screen a stage draws, and the blocks a prompt draws as.
 yunta-surco.workspace = true
 # The instant the application stands at, which every input that reads time hands in.
-chrono.workspace = true
+jiff.workspace = true
 # The performer's runtime, as the API's: the work a stage asks for is async.
 tokio.workspace = true
 

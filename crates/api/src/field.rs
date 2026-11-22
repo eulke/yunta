@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::{Manifest, RunId};
 use yunta_engine::git::Cause;
 use yunta_render::page::{FieldGroup, FieldRow, RunUnread, UnreadableRun};
@@ -210,7 +210,7 @@ fn run_row(
     project: &Project,
     storage: &Storage,
     run_id: RunId,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(FieldRow, Option<PathBuf>), UnreadableRun> {
     let events = storage
         .events_for_run(&run_id)

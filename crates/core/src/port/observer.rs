@@ -40,7 +40,7 @@
 //! run's socket gets in another process. The list above does not count
 //! them, and nothing an observer derives from the log moves on them.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::events::EventPayload;
@@ -112,7 +112,7 @@ pub struct Observed<'a> {
     pub seq: Seq,
     /// The run's injected clock, read once for this event and carried
     /// on the log's own row.
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     /// The node the event concerns, or `None` for a run-level event.
     pub node_id: Option<&'a NodeId>,
     /// What happened, in the same shape the log row carries. Its
@@ -135,7 +135,7 @@ pub struct Said {
     /// run's events.
     pub seq: Seq,
     /// When it was said, by the run's clock.
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     pub text: String,
     /// Whether `text` was cut to the most one frame carries, which the
     /// engine's voices bound before they hand a frame on.

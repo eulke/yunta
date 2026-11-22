@@ -1,6 +1,6 @@
 //! What the run does next, as the scheduler answers it.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{Failure, Outlook, PauseReason};
 use yunta_core::NodeId;
 
@@ -73,7 +73,7 @@ pub enum Decision {
     /// picks the run up.
     WaitUntil {
         node: NodeId,
-        at: DateTime<Utc>,
+        at: Timestamp,
     },
     /// A `kind: gate` node is ready and has never been published —
     /// the imperative shell commits its declared artifacts,

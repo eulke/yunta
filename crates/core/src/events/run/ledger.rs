@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use crate::events::meta::EventMeta;
 use crate::events::run::kinds::RunEvent;
@@ -52,7 +52,7 @@ pub struct Promotion {
 pub struct Finished {
     pub terminal: TerminalState,
     pub seq: Seq,
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     pub metrics: RunMetrics,
     pub closed_by: Option<crate::Responder>,
 }
@@ -116,7 +116,7 @@ pub struct RunLedger {
     /// wake. `None` when the latest wake found none.
     woke_on: Option<(Seq, TreeId)>,
     /// When the latest wake was logged, whether or not it found a tree.
-    resumed_at: Option<DateTime<Utc>>,
+    resumed_at: Option<Timestamp>,
 }
 
 impl RunLedger {
@@ -140,7 +140,7 @@ impl RunLedger {
     }
 
     /// When the latest wake was logged, whether or not it found a tree.
-    pub fn resumed_at(&self) -> Option<DateTime<Utc>> {
+    pub fn resumed_at(&self) -> Option<Timestamp> {
         self.resumed_at
     }
 
