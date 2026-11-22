@@ -308,7 +308,7 @@ Its groups, each green before the next: the base; Surco's parts; the crates; the
 
 **Description:**
 - **`crates/testkit-ui`**, package `yunta-testkit-ui`, joins the workspace, `publish = false` as the other testkits.
-  - Its manifest names `yunta-ui`, `yunta-surco`, `yunta-core`, `yunta-replay`, `yunta-render`, `yunta-api`, `yunta-testkit`, `yunta-testkit-core`, `yunta-storage` (`testkit`), `tempfile`, `tokio` and `jiff`, each with its reason.
+  - Its manifest names `yunta-ui`, `yunta-surco`, `yunta-core`, `yunta-replay`, `yunta-render`, `yunta-api`, `yunta-testkit`, `yunta-testkit-core`, `yunta-storage` (`testkit`), `tempfile`, `tokio` and `chrono`, each with its reason.
   - Its `//!` says what it is: what every surface's tests of the application share.
 - **`sandbox.rs`** takes, from `crates/ui/tests/support/mod.rs`, what makes a test's world:
   - the workspace a test works in, and the one on a `PATH` of its own;
