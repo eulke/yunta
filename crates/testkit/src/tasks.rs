@@ -11,7 +11,12 @@ use yunta_core::TasksFile;
 /// which is everything a test about registration, crossing or re-plan
 /// needs to tell two tasks apart.
 pub fn tasks_document(tasks: &[(&str, &str, &str)]) -> TasksFile {
-    let mut yaml = String::from("tasks:\n");
+    // A key left blank is YAML null, which the reader refuses as a list.
+    let mut yaml = String::from(if tasks.is_empty() {
+        "tasks: []\n"
+    } else {
+        "tasks:\n"
+    });
     for (id, scope, criterion) in tasks {
         yaml.push_str(&format!("  - id: {id}\n"));
         yaml.push_str(&format!("    title: \"{id}\"\n"));
