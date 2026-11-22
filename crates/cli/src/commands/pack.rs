@@ -25,13 +25,12 @@ pub async fn add(
     source: &str,
     confirmed_executors: bool,
     run_tests: bool,
-    global: bool,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let project = shell.workspace().project()?;
     let stop = shell.stop();
     let say = |remark: Remark| crate::remarks::say(remark, Mode::Human, look);
-    let packs = selected_packs(shell, global)?;
+    let packs = shell.workspace().packs();
     let fetched = packs.fetch(source, confirmed_executors, &stop).await?;
     // The audit is read, never run: the inventory a person confirms against,
     // shown before anything is vendored.
@@ -73,11 +72,10 @@ pub async fn update(
     pack: &PackRef,
     new_ref: &str,
     confirmed_executors: bool,
-    global: bool,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let stop = shell.stop();
-    let packs = selected_packs(shell, global)?;
+    let packs = shell.workspace().packs();
     let fetched = packs
         .fetch_update(pack, new_ref, confirmed_executors, &stop)
         .await?;
@@ -104,22 +102,17 @@ pub async fn update(
 }
 
 /// `yunta pack remove`: waits while another pack command holds the packs.
-pub async fn remove(
-    shell: &Shell,
-    pack: &PackRef,
-    global: bool,
-    look: &Look,
-) -> Result<Outcome, CliError> {
+pub async fn remove(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let say = |remark: Remark| crate::remarks::say(remark, Mode::Human, look);
-    let packs = selected_packs(shell, global)?;
+    let packs = shell.workspace().packs();
     packs.remove(pack, &say, &shell.stop()).await?;
     show(look, &Removed { pack });
     Ok(Outcome::Success)
 }
 
 /// `yunta pack list`.
-pub fn list(shell: &Shell, global: bool, look: &Look) -> Result<Outcome, CliError> {
-    let listed = selected_packs(shell, global)?.list()?;
+pub fn list(shell: &Shell, look: &Look) -> Result<Outcome, CliError> {
+    let listed = shell.workspace().packs().list()?;
     show(look, &listed);
     Ok(Outcome::Success)
 }
@@ -130,14 +123,9 @@ pub fn list(shell: &Shell, global: bool, look: &Look) -> Result<Outcome, CliErro
 /// full, untrimmed prompt), then whether it ships cases of its own and
 /// whether they pass. Inventory, never verdict: nothing here flags content
 /// as suspicious, it only shows all of it.
-pub async fn audit(
-    shell: &Shell,
-    pack: &PackRef,
-    global: bool,
-    look: &Look,
-) -> Result<Outcome, CliError> {
+pub async fn audit(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let say = |remark: Remark| crate::remarks::say(remark, Mode::Human, look);
-    let packs = selected_packs(shell, global)?;
+    let packs = shell.workspace().packs();
     let audited = packs.audit(pack, &say, &shell.stop()).await?;
     let inventory = Inventory::Audited {
         audit: &audited.audit,
@@ -146,14 +134,6 @@ pub async fn audit(
     };
     show(look, &inventory);
     Ok(Outcome::Success)
-}
-
-fn selected_packs<'a>(shell: &'a Shell, global: bool) -> Result<yunta_api::Packs<'a>, CliError> {
-    match global {
-        true => shell.workspace().global_packs(),
-        false => Ok(shell.workspace().packs()),
-    }
-    .map_err(Into::into)
 }
 
 /// `yunta pack new`: the skeleton written, its example checked, and, when

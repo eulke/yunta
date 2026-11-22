@@ -27,14 +27,7 @@ async fn freeze_reviewer(
         "name: parent\nnodes:\n  - { id: audit, kind: prompt, runner: executor, agent: reviewer, prompt: \"x\" }\n",
         repo,
     );
-    freeze(
-        repo,
-        &parent,
-        &ConfigLayer::default(),
-        None,
-        &yunta_core::Env::default(),
-    )
-    .await
+    freeze(repo, &parent, &ConfigLayer::default(), None).await
 }
 
 #[tokio::test]
@@ -56,14 +49,7 @@ async fn a_pack_path_that_leaves_its_pack_is_refused_at_freeze() {
         "name: parent\nnodes:\n  - { id: call, kind: workflow, use: pub/outside }\n",
         repo,
     );
-    let refused = freeze(
-        repo,
-        &parent,
-        &ConfigLayer::default(),
-        None,
-        &yunta_core::Env::default(),
-    )
-    .await;
+    let refused = freeze(repo, &parent, &ConfigLayer::default(), None).await;
     assert!(
         matches!(
             &refused,
@@ -89,15 +75,9 @@ async fn a_frozen_skill_that_changed_on_disk_is_refused_before_it_mounts() {
         "name: frozen\nnodes:\n  - { id: audit, kind: prompt, runner: executor, agent: reviewer, skills: [notes], prompt: \"x\" }\n",
         &repo,
     );
-    let (frozen, blobs) = freeze(
-        &repo,
-        &parent,
-        &ConfigLayer::default(),
-        None,
-        &yunta_core::Env::default(),
-    )
-    .await
-    .unwrap();
+    let (frozen, blobs) = freeze(&repo, &parent, &ConfigLayer::default(), None)
+        .await
+        .unwrap();
     store::write_at_birth(&run, &blobs, Some(&frozen))
         .await
         .unwrap();
@@ -151,9 +131,7 @@ async fn an_org_knowledge_file_is_named_the_same_frozen_and_read_from_the_checko
         &repo,
     );
     let config = ConfigLayer::default();
-    let (frozen, blobs) = freeze(&repo, &parent, &config, None, &yunta_core::Env::default())
-        .await
-        .unwrap();
+    let (frozen, blobs) = freeze(&repo, &parent, &config, None).await.unwrap();
     store::write_at_birth(&run, &blobs, Some(&frozen))
         .await
         .unwrap();

@@ -21,9 +21,6 @@ pub(super) enum PackAction {
         /// pack executes during `add`: the audit is read, not run.
         #[arg(long)]
         run_tests: bool,
-        /// Installs in the user's shared pack store.
-        #[arg(long)]
-        global: bool,
     },
     /// Re-clones an installed pack at a new ref and re-vendors it.
     Update {
@@ -36,9 +33,6 @@ pub(super) enum PackAction {
         /// regardless; `allow` skips the confirmation.
         #[arg(long)]
         yes: bool,
-        /// Updates the user's shared pack store.
-        #[arg(long)]
-        global: bool,
     },
     /// Scaffolds a new pack at `./<name>`: a manifest, one verified
     /// workflow, a self-test config and case, and a README. Checks and
@@ -51,17 +45,10 @@ pub(super) enum PackAction {
     Remove {
         /// `publisher/name`.
         pack: PackRef,
-        /// Removes from the user's shared pack store.
-        #[arg(long)]
-        global: bool,
     },
     /// Lists every locked pack, verifying its vendored content against
     /// the lock.
-    List {
-        /// Lists the user's shared pack store.
-        #[arg(long)]
-        global: bool,
-    },
+    List,
     /// Full static inventory of an installed pack: every
     /// command, context source, per-node permission, required agent,
     /// mcp server, executor, and each workflow's full prompt text,
@@ -71,8 +58,5 @@ pub(super) enum PackAction {
     Audit {
         /// `publisher/name`.
         pack: PackRef,
-        /// Audits the user's shared pack store.
-        #[arg(long)]
-        global: bool,
     },
 }

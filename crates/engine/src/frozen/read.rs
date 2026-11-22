@@ -211,14 +211,8 @@ impl<'a> Source<'a> {
                     parent: frozen,
                 })
             }
-            Source::Checkout {
-                worktree, ambient, ..
-            } => {
-                let global_root = ambient
-                    .and_then(yunta_core::user_state_root)
-                    .unwrap_or_else(|| worktree.to_path_buf())
-                    .join(".yunta/packs");
-                let resolved = catalog::resolve_workflow(worktree, &global_root, use_name)
+            Source::Checkout { worktree, .. } => {
+                let resolved = catalog::resolve_workflow(worktree, use_name)
                     .map_err(FrozenError::unresolved)?;
                 let text = read_file_text(&resolved.path).await?;
                 Ok(ChildWorkflow::Checkout {
