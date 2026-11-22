@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use yunta_core::{
-    AgentName, ConfigLayer, ContentHash, ContextSpec, ExecutorName, Frozen, FrozenWorkflow,
+    AgentName, ConfigLayer, ContentHash, ContextSpec, Env, ExecutorName, Frozen, FrozenWorkflow,
     KnowledgeLayer, Node, NodeKind, RunnerCandidate, SkillName, Workflow,
 };
 
@@ -28,7 +28,8 @@ use crate::skills;
 
 /// Freezes what a run born in `repo` from `workflow` under `config` will
 /// interpret: its agents, skills, executors, child workflows and knowledge.
-/// `user_knowledge` is the user layer's directory, when there is one.
+/// `ambient` is the environment the user layer is read from: the user's
+/// knowledge and the user's packs. `None` reads neither.
 ///
 /// `workflow` is the graph the run is built from, fan-out expanded. The
 /// bytes behind the frozen set come back with it, each under the hash it
@@ -37,7 +38,7 @@ pub(crate) async fn freeze(
     repo: &Path,
     workflow: &Workflow,
     config: &ConfigLayer,
-    user_knowledge: Option<&Path>,
+    ambient: Option<&Env>,
 ) -> Result<(Frozen, Vec<(ContentHash, Vec<u8>)>), FrozenError> {
     let mut reach = Reach::default();
     reach.visit(workflow, config);
@@ -45,17 +46,17 @@ pub(crate) async fn freeze(
         if reach.children.contains_key(&use_name) {
             continue;
         }
-        let (child, child_workflow) = read_child(repo, &use_name).await?;
+        let (child, child_workflow) = read_child(repo, ambient, &use_name).await?;
         reach.children.insert(use_name, child);
         reach.visit(&child_workflow, config);
     }
     let mut blobs = Blobs::default();
     let frozen = Frozen {
-        agents: freeze_agents(repo, &reach.agents, &mut blobs).await?,
-        skills: freeze_skills(repo, config, &reach.skills, &mut blobs).await?,
+        agents: freeze_agents(repo, ambient, &reach.agents, &mut blobs).await?,
+        skills: freeze_skills(repo, ambient, config, &reach.skills, &mut blobs).await?,
         executors: freeze_executors(repo, config, &reach.executors, &mut blobs).await?,
         workflows: reach.children,
-        knowledge: freeze_knowledge(repo, user_knowledge, &reach.layers, &mut blobs).await?,
+        knowledge: freeze_knowledge(repo, ambient, &reach.layers, &mut blobs).await?,
     };
     Ok((frozen, blobs.into_pairs()))
 }
@@ -156,13 +157,14 @@ impl Blobs {
 /// its nodes read and the pack it came from, as the tree stands now.
 async fn read_child(
     repo: &Path,
+    ambient: Option<&Env>,
     use_name: &str,
 ) -> Result<(FrozenWorkflow, Workflow), FrozenError> {
-    let (path, declared) =
-        match catalog::name_workflow(repo, use_name).map_err(FrozenError::unresolved)? {
-            Named::Repo(path) => (path, None),
-            Named::Pack { declared, .. } => (contained(&declared)?, Some(declared)),
-        };
+    let named = catalog::name_workflow(repo, ambient, use_name).map_err(FrozenError::unresolved)?;
+    let (path, declared) = match named {
+        Named::Repo(path) => (path, None),
+        Named::Pack { declared, .. } => (contained(&declared)?, Some(declared)),
+    };
     let dir = workflow_dir(repo, &path);
     let root = match declared {
         Some(declared) => PromptRoot::Pack {
@@ -176,7 +178,7 @@ async fn read_child(
     let workflow =
         yunta_core::workflow::read::read(&text, &path).map_err(FrozenError::unresolved)?;
     let prompts = read_prompts(&workflow, &root).await?;
-    let (pack, provenance_gaps) = pack_provenance(repo, &dir).await;
+    let (pack, provenance_gaps) = pack_provenance(repo, ambient, &dir).await;
     Ok((
         FrozenWorkflow {
             text,
@@ -190,12 +192,13 @@ async fn read_child(
 
 async fn freeze_agents(
     repo: &Path,
+    ambient: Option<&Env>,
     names: &BTreeSet<AgentName>,
     blobs: &mut Blobs,
 ) -> Result<BTreeMap<AgentName, ContentHash>, FrozenError> {
     let mut frozen = BTreeMap::new();
     for name in names {
-        let path = agent_path(repo, name)?;
+        let path = agent_path(repo, ambient, name)?;
         let bytes = read_file(&path).await?;
         check_agent(name, &path, &bytes)?;
         frozen.insert(name.clone(), blobs.keep(bytes));
@@ -205,8 +208,12 @@ async fn freeze_agents(
 
 /// The path of the definition `name` names in the tree the run is born in:
 /// the project's own file, else the one pack file that declares it.
-fn agent_path(repo: &Path, name: &AgentName) -> Result<PathBuf, FrozenError> {
-    match agents::locate(repo, name).map_err(FrozenError::unresolved)? {
+fn agent_path(
+    repo: &Path,
+    ambient: Option<&Env>,
+    name: &AgentName,
+) -> Result<PathBuf, FrozenError> {
+    match agents::locate(repo, ambient, name).map_err(FrozenError::unresolved)? {
         agents::Location::Project(path) => Ok(path),
         agents::Location::Pack(declared) => contained(&declared),
     }
@@ -230,13 +237,14 @@ fn check_agent(name: &AgentName, path: &Path, bytes: &[u8]) -> Result<(), Frozen
 
 async fn freeze_skills(
     repo: &Path,
+    ambient: Option<&Env>,
     config: &ConfigLayer,
     names: &BTreeSet<SkillName>,
     blobs: &mut Blobs,
 ) -> Result<BTreeMap<SkillName, BTreeMap<PathBuf, ContentHash>>, FrozenError> {
     let mut frozen = BTreeMap::new();
     for name in names {
-        let dir = skill_root(repo, config, name)?;
+        let dir = skill_root(repo, ambient, config, name)?;
         let mut files = BTreeMap::new();
         for file in skill_files(&dir).await? {
             let bytes = read_file(&dir.join(&file)).await?;
@@ -248,8 +256,13 @@ async fn freeze_skills(
 }
 
 /// The directory a skill name names in the tree the run is born in.
-fn skill_root(repo: &Path, config: &ConfigLayer, name: &SkillName) -> Result<PathBuf, FrozenError> {
-    match skills::locate(config, repo, name).map_err(FrozenError::unresolved)? {
+fn skill_root(
+    repo: &Path,
+    ambient: Option<&Env>,
+    config: &ConfigLayer,
+    name: &SkillName,
+) -> Result<PathBuf, FrozenError> {
+    match skills::locate(config, repo, ambient, name).map_err(FrozenError::unresolved)? {
         skills::Location::Dir(dir) => Ok(dir),
         skills::Location::Pack(declared) => contained(&declared),
     }
@@ -284,13 +297,13 @@ async fn freeze_executors(
 
 async fn freeze_knowledge(
     repo: &Path,
-    user: Option<&Path>,
+    ambient: Option<&Env>,
     layers: &[KnowledgeLayer],
     blobs: &mut Blobs,
 ) -> Result<BTreeMap<String, ContentHash>, FrozenError> {
     let mut frozen = BTreeMap::new();
     for layer in layers {
-        for file in layer_files(*layer, repo, user, contained).await? {
+        for file in layer_files(*layer, repo, ambient, contained).await? {
             let key = knowledge_key(*layer, file.pack.as_deref(), &file.relative);
             let bytes = read_file(&file.path).await?;
             frozen.insert(key, blobs.keep(bytes));

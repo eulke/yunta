@@ -14,15 +14,17 @@ use crate::catalog::{resolve_workflow, CatalogError, ResolvedWorkflow, WorkflowO
 /// that composes it would check it at birth — against the same config,
 /// holding what its node mounts — so a child that would be refused
 /// halfway through the parent's run is refused before the parent spends
-/// anything.
+/// anything. `ambient` is the environment the user's packs are found in, as
+/// a run born here would read them; `None` reads only the project's.
 pub fn check_workflow_refs(
     workflow: &Workflow,
     config: &ConfigLayer,
     repo_root: &std::path::Path,
+    ambient: Option<&yunta_core::Env>,
     workflow_origin: &crate::catalog::WorkflowOrigin,
     declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
 ) -> RefsCheck {
-    let mut errors = check_declares_ceiling(workflow, workflow_origin, repo_root);
+    let mut errors = check_declares_ceiling(workflow, workflow_origin);
     let max_depth = config.resolved_max_workflow_depth();
     let mut path: Vec<String> = Vec::new();
     let mut compares = comparisons(workflow, &path);
@@ -30,6 +32,7 @@ pub fn check_workflow_refs(
         workflow,
         Walk {
             repo_root,
+            ambient,
             config,
             declared,
             max_depth,
@@ -71,6 +74,7 @@ pub fn check_workflow_refs(
 #[derive(Clone, Copy)]
 pub(crate) struct Walk<'a> {
     repo_root: &'a std::path::Path,
+    ambient: Option<&'a yunta_core::Env>,
     config: &'a ConfigLayer,
     declared: &'a dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
     max_depth: u32,
@@ -127,7 +131,7 @@ pub(crate) fn walk_workflow_refs(
             errors.push(CheckError::Composition(refusal));
             continue;
         }
-        let resolved = match resolve_reference(walk.repo_root, current_origin, &node, &name) {
+        let resolved = match resolve_reference(walk, current_origin, &node, &name) {
             Ok(resolved) => resolved,
             Err(refusal) => {
                 errors.push(CheckError::Composition(refusal));
@@ -141,11 +145,7 @@ pub(crate) fn walk_workflow_refs(
                 continue;
             }
         };
-        errors.extend(check_declares_ceiling(
-            &child,
-            &resolved.origin,
-            walk.repo_root,
-        ));
+        errors.extend(check_declares_ceiling(&child, &resolved.origin));
         let problems = crate::check::check_mounted(
             &child,
             walk.config,
@@ -189,14 +189,14 @@ fn nesting_refusal(path: &[String], name: &str, max_depth: u32) -> Option<Compos
 
 /// Resolves the `use:` `name` of `node` from inside `current`: the refusal
 /// when the name is ambiguous or names no workflow, or names a workflow of
-/// another pack.
+/// another pack, the same pack in another store among them.
 fn resolve_reference(
-    repo_root: &std::path::Path,
+    walk: Walk<'_>,
     current: &WorkflowOrigin,
     node: &NodeId,
     name: &str,
 ) -> Result<ResolvedWorkflow, Composition> {
-    let resolved = resolve_workflow(repo_root, name).map_err(|error| {
+    let resolved = resolve_workflow(walk.repo_root, walk.ambient, name).map_err(|error| {
         let detail = error.to_string();
         match error {
             CatalogError::Ambiguous { .. } => Composition::Ambiguous {
@@ -214,18 +214,14 @@ fn resolve_reference(
     // Composing from inside a pack may only reach other
     // workflows in that *same* pack — never back out to the repo,
     // never sideways into a different pack (no transitive pack
-    // dependencies).
+    // dependencies), never into its copy in another store.
     if let WorkflowOrigin::Pack {
         publisher,
         pack_name,
+        ..
     } = current
     {
-        let same_pack = matches!(
-            &resolved.origin,
-            WorkflowOrigin::Pack { publisher: p2, pack_name: n2 }
-                if p2 == publisher && n2 == pack_name
-        );
-        if !same_pack {
+        if resolved.origin != *current {
             return Err(Composition::CrossPack {
                 node: node.clone(),
                 name: name.to_string(),

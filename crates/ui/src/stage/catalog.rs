@@ -29,7 +29,7 @@ use super::{Stage, StartStage, Want};
 use crate::dialog::Confirmation;
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
-use crate::{News, Operation, Outcome, PackOperation, WorkflowOperation, WorkflowOutcome};
+use crate::{News, Operation, Outcome, WorkflowOperation, WorkflowOutcome};
 use cases::CasesRun;
 use new_workflow::NewWorkflowAsked;
 use packs::PacksView;
@@ -252,8 +252,9 @@ impl CatalogStage {
                 vec![Want::Work(Operation::Workflow(WorkflowOperation::RunCases))]
             }
             Stroke::Insert('p') => {
-                self.shown = Shown::Packs(Box::new(PacksView::reading()));
-                vec![Want::Work(Operation::Pack(PackOperation::List))]
+                let (packs, read) = PacksView::reading();
+                self.shown = Shown::Packs(Box::new(packs));
+                vec![Want::Work(read)]
             }
             Stroke::Decline => vec![Want::Back],
             Stroke::Insert('q') | Stroke::Interrupt => vec![Want::Leave],

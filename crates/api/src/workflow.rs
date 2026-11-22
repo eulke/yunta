@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::Report;
-use yunta_core::Workflow;
+use yunta_core::{Env, Workflow};
 use yunta_render::refusal::Refused;
 
 use crate::{Error, Failure, Workspace};
@@ -34,15 +34,18 @@ pub struct AuditedWorkflow {
 impl Workspace {
     /// The file a workflow reference names, the one rule every interface
     /// shares: a bare catalog name (no extension) resolves through the
-    /// repository's catalog, then a publisher's vendored packs
-    /// (`acme/review`); anything carrying an extension is taken as a literal
-    /// path.
-    pub fn workflow_file(&self, reference: &Path) -> Result<PathBuf, Error> {
+    /// repository's catalog, then a publisher's packs (`acme/review`), the
+    /// project's before the user's; anything carrying an extension is taken
+    /// as a literal path. A workflow of the user's packs is named by its full
+    /// path. `ambient` is the environment the user's packs are found in:
+    /// this workspace's, or none for a run that reads none of them.
+    pub fn workflow_file(&self, reference: &Path, ambient: Option<&Env>) -> Result<PathBuf, Error> {
         if reference.extension().is_some() {
             return Ok(reference.to_path_buf());
         }
-        let resolved = yunta_engine::resolve_workflow(&self.dir, &reference.to_string_lossy())
-            .map_err(Failure::new)?;
+        let name = reference.to_string_lossy();
+        let resolved =
+            yunta_engine::resolve_workflow(&self.dir, ambient, &name).map_err(Failure::new)?;
         Ok(resolved.path)
     }
 
@@ -50,7 +53,7 @@ impl Workspace {
     /// it to its own rules: a file that breaks one is refused, every problem
     /// pointed at in its text.
     pub fn read_workflow(&self, reference: &Path) -> Result<WorkflowFile, Error> {
-        let path = self.workflow_file(reference)?;
+        let path = self.workflow_file(reference, Some(&self.env))?;
         let workflow = read(&self.dir.join(&path), &path)?;
         Ok(WorkflowFile { path, workflow })
     }
@@ -60,7 +63,7 @@ impl Workspace {
     /// are taken out. Refused, every problem pointed at in its text, when what
     /// is left does not read.
     pub fn audit_workflow(&self, reference: &Path) -> Result<AuditedWorkflow, Error> {
-        let path = self.workflow_file(reference)?;
+        let path = self.workflow_file(reference, Some(&self.env))?;
         let text = text_of(&self.dir.join(&path), &path)?;
         let (workflow, problems) = yunta_core::workflow::read::read_all(&text, &path);
         let Some(workflow) = workflow else {

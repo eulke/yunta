@@ -1,7 +1,8 @@
-//! See [`super`]. The skeleton a new pack starts from. Its files are literal
-//! templates, parsed back into their types before anything is written, and
-//! the new pack's example workflow is checked against the pack's own
-//! self-test config once it is on disk.
+//! See [`super`]. The skeleton a new pack starts from, written beside the
+//! working directory, in no store. Its files are literal templates, parsed
+//! back into their types before anything is written, and the new pack's
+//! example workflow is checked against the pack's own self-test config once it
+//! is on disk.
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +12,7 @@ use yunta_core::{ConfigLayer, PackManifest, PackRef, Workflow};
 use yunta_render::command;
 use yunta_render::page::pack::NewPackCheck;
 
-use super::{refused, Packs};
+use super::refused;
 use crate::{Error, Failure, Remarks, Stop, Workspace};
 
 // Written as literal templates (not built from the typed values) so the
@@ -118,14 +119,14 @@ fn filled(template: &str, pack: &PackRef) -> String {
         )
 }
 
-impl<'w> Packs<'w> {
+impl Workspace {
     /// Scaffolds a new pack at `<dir>/<name>`, beside the repository's own
     /// files: a manifest, one verified workflow, a self-test config and case,
     /// and a README. The manifest and the workflow are parsed before any file
     /// is written, so a skeleton that does not parse never reaches disk.
     /// Refused where a directory already stands.
-    pub async fn scaffold(&self, pack: &PackRef) -> Result<ScaffoldedPack<'w>, Error> {
-        let dir = self.workspace.dir.join(pack.name().as_str());
+    pub async fn scaffold_pack(&self, pack: &PackRef) -> Result<ScaffoldedPack<'_>, Error> {
+        let dir = self.dir.join(pack.name().as_str());
         if dir.exists() {
             return Err(refused(PackRefusal::DirectoryExists { dir }));
         }
@@ -144,7 +145,7 @@ impl<'w> Packs<'w> {
         let fixture = ".yunta/tests/fixtures/example.yaml";
         write_under(&dir, fixture, PACK_FIXTURE_TEMPLATE).await?;
         Ok(ScaffoldedPack {
-            workspace: self.workspace,
+            workspace: self,
             dir,
             workflow,
         })

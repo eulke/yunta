@@ -1,6 +1,7 @@
-//! See [`super`]. What `doctor` finds of the packs installed here: what each
-//! manifest requires that this project lacks, and what each pack's workflows
-//! would be refused for, each with what to declare when that is known.
+//! See [`super`]. What `doctor` finds of the packs this project reads, its
+//! own and the user's it does not shadow: what each manifest requires that
+//! this project lacks, and what each pack's workflows would be refused for,
+//! each with what to declare when that is known.
 
 use yunta_core::{Detected, MachineAdapters};
 use yunta_render::declare;
@@ -20,8 +21,9 @@ pub(super) fn check_requires(
     findings: &mut Vec<Finding>,
 ) {
     let repo = &project.workspace.dir;
-    for publisher in yunta_engine::installed_publishers(repo) {
-        let packs = yunta_engine::packs_for_publisher(repo, &publisher);
+    let ambient = Some(&project.workspace.env);
+    for publisher in yunta_engine::installed_publishers(repo, ambient) {
+        let packs = yunta_engine::packs_for_publisher(repo, ambient, &publisher);
         // A broken pack is a real gap: its manifest is the only place its
         // requirements are declared, so it is named, never skipped.
         for err in &packs.broken {
@@ -29,8 +31,8 @@ pub(super) fn check_requires(
                 said: err.to_string(),
             });
         }
-        for (_, manifest) in packs.installed {
-            let gap = yunta_engine::check_pack_requires(&manifest, &project.config);
+        for pack in packs.installed {
+            let gap = yunta_engine::check_pack_requires(&pack.manifest, &project.config);
             check_gap(&project.workspace.env, &gap, answered, findings);
         }
     }
@@ -97,23 +99,22 @@ pub(super) async fn check_workflows(
         adapters: answered.clone(),
         ..crate::machine::in_repo(&project.workspace, repo, stop).await?
     };
-    for publisher in yunta_engine::installed_publishers(repo) {
-        for (pack_dir, manifest) in yunta_engine::packs_for_publisher(repo, &publisher).installed {
+    let ambient = Some(&project.workspace.env);
+    for publisher in yunta_engine::installed_publishers(repo, ambient) {
+        for pack in yunta_engine::packs_for_publisher(repo, ambient, &publisher).installed {
+            let origin = pack.origin();
+            let manifest = &pack.manifest;
             for declared in &manifest.contents.workflows {
-                let path = pack_dir.join(declared);
+                let path = pack.dir.join(declared);
                 let Ok(workflow) = crate::workflow::read(&path, &path) else {
                     continue;
                 };
-                let origin = yunta_engine::WorkflowOrigin::Pack {
-                    publisher: publisher.clone(),
-                    pack_name: manifest.name.clone(),
-                };
+                let refs = yunta_engine::check_workflow_refs(
+                    &workflow, config, repo, ambient, &origin, &facts,
+                );
                 let refused = yunta_engine::check(&workflow, config, &facts)
                     .into_iter()
-                    .chain(
-                        yunta_engine::check_workflow_refs(&workflow, config, repo, &origin, &facts)
-                            .errors,
-                    );
+                    .chain(refs.errors);
                 let found = project
                     .context_files_at_head(&workflow, isolation, stop)
                     .await?;

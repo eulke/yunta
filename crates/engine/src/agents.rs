@@ -1,8 +1,9 @@
 //! Agent-name resolution: `agent:` on a node or a runner, resolved to a
 //! definition the run owns. A project's own agents live under
 //! `.yunta/agents/<name>.md`; a pack's are named `publisher/agent` and
-//! found among the pack's declared `contents.agents`, the same layering
-//! skills follow: a project file at the same path wins over the pack's.
+//! found among the pack's declared `contents.agents`, the project's packs
+//! before the user's, the same layering skills follow: a project file at the
+//! same path wins over any pack's.
 //! The walk that freezes a run reads these names once, at birth; a node of
 //! a run that predates frozen sets reads them from the checkout, through
 //! the same lookup. Handing the instructions to the CLI is the adapter's.
@@ -10,9 +11,9 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::agent::{AgentDefinition, AgentDefinitionError};
-use yunta_core::{AgentName, Publisher};
+use yunta_core::{AgentName, Env, Publisher};
 
-use crate::catalog::{packs_for_publisher, DeclaredPath};
+use crate::catalog::{pack_declaring, DeclaredPath};
 
 /// Where a project keeps its own agents, relative to its checkout.
 const PROJECT_AGENTS: &str = ".yunta/agents";
@@ -46,13 +47,18 @@ pub(crate) enum Location {
 }
 
 /// The file `name` names in the checkout at `worktree`: the project's own
-/// file at its path, else the one pack file that declares the name.
-pub(crate) fn locate(worktree: &Path, name: &AgentName) -> Result<Location, AgentsError> {
+/// file at its path, else the one pack file that declares the name. `ambient`
+/// is the environment the user's packs are found in.
+pub(crate) fn locate(
+    worktree: &Path,
+    ambient: Option<&Env>,
+    name: &AgentName,
+) -> Result<Location, AgentsError> {
     let project = worktree.join(PROJECT_AGENTS).join(format!("{name}.md"));
     if project.is_file() {
         return Ok(Location::Project(project));
     }
-    pack_agent(worktree, name.as_str())
+    pack_agent(worktree, ambient, name.as_str())
         .map(Location::Pack)
         .ok_or_else(|| AgentsError::NotFound {
             name: name.clone(),
@@ -78,29 +84,26 @@ pub(crate) fn definition(name: &AgentName, text: &str) -> Result<AgentDefinition
 }
 
 /// `publisher/agent`: the one file among a publisher's installed packs'
-/// declared agents whose stem is `agent` — none when two packs ship one.
-fn pack_agent(worktree: &Path, name: &str) -> Option<DeclaredPath> {
+/// declared agents whose stem is `agent`, from the first store whose packs
+/// ship one — none when two packs of that store ship one.
+fn pack_agent(worktree: &Path, ambient: Option<&Env>, name: &str) -> Option<DeclaredPath> {
     let (publisher, agent) = name.split_once('/')?;
     let publisher = publisher.parse::<Publisher>().ok()?;
-    let mut found: Option<DeclaredPath> = None;
-    for (pack_dir, manifest) in packs_for_publisher(worktree, &publisher).installed {
-        for declared in &manifest.contents.agents {
-            let stem = Path::new(declared)
+    pack_declaring(worktree, ambient, &publisher, |manifest| {
+        let names_agent = |declared: &&String| {
+            Path::new(declared.as_str())
                 .file_stem()
-                .and_then(|stem| stem.to_str());
-            if stem == Some(agent) {
-                if found.is_some() {
-                    return None;
-                }
-                found = Some(DeclaredPath::of_pack(
-                    pack_dir.clone(),
-                    &manifest,
-                    declared.clone(),
-                ));
-            }
-        }
-    }
-    found
+                .and_then(|stem| stem.to_str())
+                == Some(agent)
+        };
+        manifest
+            .contents
+            .agents
+            .iter()
+            .filter(names_agent)
+            .cloned()
+            .collect()
+    })
 }
 
 #[cfg(test)]

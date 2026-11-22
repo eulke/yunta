@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use surco::doc::Depth;
 use yunta_core::step::samples::every_step;
 use yunta_core::step::{Arg, Choice, NextStep};
-use yunta_core::{NodeId, OptionId, PackRef, RunId, WorkflowName, WorkflowShape};
+use yunta_core::{NodeId, OptionId, PackRef, PackScope, RunId, WorkflowName, WorkflowShape};
 use yunta_replay::frame::{Action, Effect};
 
 use super::*;
@@ -159,12 +159,11 @@ fn an_action_is_said_as_its_line_and_what_it_does() {
 }
 
 /// The commands a person types that no run's action names: what a run and a
-/// workflow cost, their graphs, a new workflow, the packs listed and audited, and
-/// a reclaim that only says what it would do.
+/// workflow cost, their graphs, a new workflow, and a reclaim that only says what
+/// it would do.
 #[test]
 fn every_command_a_person_types_has_its_line() {
     let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
-    let pack = "acme/lint".parse::<PackRef>().expect("a pack reference");
     let lines = [
         (NextStep::Stats { run: run.clone() }, "yunta stats AAAAAA"),
         (
@@ -200,12 +199,68 @@ fn every_command_a_person_types_has_its_line() {
             },
             "yunta new <name> --shape tasks",
         ),
-        (NextStep::PackList, "yunta pack list"),
-        (NextStep::PackAudit { pack }, "yunta pack audit acme/lint"),
         (NextStep::Gc { dry_run: true }, "yunta gc --dry-run"),
     ];
     for (step, written) in lines {
         assert_eq!(line(&step), written);
+    }
+}
+
+/// Each step that acts on the pack store `scope` names: installing, updating,
+/// removing, listing and auditing its packs.
+fn pack_store_steps(scope: PackScope) -> [NextStep; 6] {
+    let pack = || "acme/lint".parse::<PackRef>().expect("a pack reference");
+    let source = Arg::Given("github.com/acme/lint".to_string());
+    let reference = Arg::Given("v2".to_string());
+    [
+        NextStep::PackAdd { source, scope },
+        NextStep::PackAdd {
+            source: Arg::Blank,
+            scope,
+        },
+        NextStep::PackUpdate {
+            pack: pack(),
+            reference,
+            scope,
+        },
+        NextStep::PackRemove {
+            pack: pack(),
+            scope,
+        },
+        NextStep::PackList { scope },
+        NextStep::PackAudit {
+            pack: pack(),
+            scope,
+        },
+    ]
+}
+
+/// A step on the user's packs, which every project reads, carries `--global` right
+/// after its verb, the flag the CLI takes there; the same step on this project's packs
+/// carries none.
+#[test]
+fn a_step_on_the_users_packs_says_global_right_after_its_verb() {
+    let users = [
+        "yunta pack add --global github.com/acme/lint",
+        "yunta pack add --global <source>",
+        "yunta pack update --global acme/lint v2",
+        "yunta pack remove --global acme/lint",
+        "yunta pack list --global",
+        "yunta pack audit --global acme/lint",
+    ];
+    for (step, written) in pack_store_steps(PackScope::User).iter().zip(users) {
+        assert_eq!(line(step), written);
+    }
+    let projects = [
+        "yunta pack add github.com/acme/lint",
+        "yunta pack add <source>",
+        "yunta pack update acme/lint v2",
+        "yunta pack remove acme/lint",
+        "yunta pack list",
+        "yunta pack audit acme/lint",
+    ];
+    for (step, written) in pack_store_steps(PackScope::Project).iter().zip(projects) {
+        assert_eq!(line(step), written);
     }
 }
 

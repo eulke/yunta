@@ -4,6 +4,7 @@
 
 use surco::components::Legend;
 use surco::line::{Line, Tone};
+use yunta_core::PackScope;
 
 use crate::prompt::ESC;
 
@@ -63,12 +64,22 @@ pub const PACKS: &str = "packs";
 /// Where a pack being installed stands on the trail before it is known.
 pub const INSTALL: &str = "install";
 
-/// What stands while the packs installed are read.
-pub const READING_THE_PACKS: &str = "reading the packs installed";
+/// What stands while the packs of the store `scope` names are read.
+pub fn reading_the_packs(scope: PackScope) -> &'static str {
+    match scope {
+        PackScope::Project => "reading the packs installed",
+        PackScope::User => "reading the user's packs",
+    }
+}
 
-/// The keys of the packs: moving through them, auditing, updating or removing the
-/// one pointed at, installing one, a new one, back to the workflows, and leaving.
-pub fn packs_legend() -> Legend {
+/// The keys of the packs of the store `scope` names: moving through them,
+/// auditing, updating or removing the one pointed at, installing one, a new one,
+/// the other store's packs, back to the workflows, and leaving.
+pub fn packs_legend(scope: PackScope) -> Legend {
+    let other = match scope {
+        PackScope::Project => "the user's packs",
+        PackScope::User => "this project's packs",
+    };
     Legend::new()
         .key("j k", "move")
         .key("a", "audits it")
@@ -76,6 +87,7 @@ pub fn packs_legend() -> Legend {
         .key("x", "removes it")
         .key("i", "installs one")
         .key("n", "a new pack")
+        .key("g", other)
         .key(ESC, "back to the workflows")
         .key("q", "leaves yunta")
 }
@@ -154,9 +166,17 @@ pub fn executing(pack: &str, executors: &[String]) -> String {
 /// pack is fetched again to install it.
 pub const PACK_LET_GO: &str = "the pack fetched was let go before it was installed";
 
-/// What removing `pack` asks before it does.
-pub fn removing_pack(pack: &str) -> String {
-    format!("remove {pack} from this project? Its files and its lock entry go.")
+/// What removing `pack` from the store `scope` names asks before it does.
+pub fn removing_pack(pack: &str, scope: PackScope) -> String {
+    match scope {
+        PackScope::Project => {
+            format!("remove {pack} from this project? Its files and its lock entry go.")
+        }
+        PackScope::User => format!(
+            "remove {pack} from the user's packs? Its files and its lock entry go, for every \
+             project."
+        ),
+    }
 }
 
 /// Where the cases stand on the trail.

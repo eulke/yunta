@@ -194,7 +194,7 @@ impl crate::persisted::Persisted for PackLock {
 }
 
 /// A manifest field whose value would reach outside the pack once it
-/// is vendored under `.yunta/packs/<publisher>/<name>/`.
+/// is vendored under a store's `packs/<publisher>/<name>/`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PackManifestError {
     #[error("`{field}` names `{value}`; every path in `contents` stays inside the pack: relative, with no `..` component")]

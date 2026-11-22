@@ -12,9 +12,9 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{ConfigLayer, Node, Publisher, SkillName, Workflow};
+use yunta_core::{ConfigLayer, Env, Node, Publisher, SkillName, Workflow};
 
-use crate::catalog::{packs_for_publisher, DeclaredPath};
+use crate::catalog::{pack_declaring, DeclaredPath};
 
 /// The names one node mounts: `skills.always` first, then the node's
 /// own list (or `node_defaults.skills` when the node declares none —
@@ -67,10 +67,12 @@ pub(crate) enum Location {
 /// Resolves one skill name to its directory in the checkout at `worktree`,
 /// or says which name failed and where it looked. Relative search paths
 /// resolve against `worktree` (the run's checkout carries the repo's own
-/// `.yunta/skills`); `~/` expands against `$HOME`.
+/// `.yunta/skills`); `~/` expands against `$HOME`. `ambient` is the
+/// environment the user's packs are found in.
 pub(crate) fn locate(
     config: &ConfigLayer,
     worktree: &Path,
+    ambient: Option<&Env>,
     name: &SkillName,
 ) -> Result<Location, SkillsError> {
     let roots = search_roots(config, worktree);
@@ -86,7 +88,7 @@ pub(crate) fn locate(
     // `publisher/skill` — a publisher's vendored packs are the fallback
     // layer, never the first one (a repo directory that happens to occupy
     // that path still wins, same shadowing rule `use:` follows).
-    resolve_pack_skill(worktree, name.as_str())
+    resolve_pack_skill(worktree, ambient, name.as_str())
         .map(Location::Pack)
         .ok_or_else(|| SkillsError::NotFound {
             name: name.clone(),
@@ -112,31 +114,25 @@ fn search_roots(config: &ConfigLayer, worktree: &Path) -> Vec<PathBuf> {
 /// `publisher/skill` — a publisher's installed packs share one
 /// flat skill namespace, same rule [`crate::catalog::resolve_workflow`]
 /// applies to workflows: a directory basename match against some pack's
-/// declared `contents.skills`, ambiguity between two packs left
-/// unresolved (reported as "not found" here — a workflow-level
-/// `Ambiguous` error doesn't apply to a mount-time lookup with no
-/// `check`-time diagnostic surface of its own).
-fn resolve_pack_skill(worktree: &Path, name: &str) -> Option<DeclaredPath> {
+/// declared `contents.skills`, from the first store whose packs declare
+/// one, ambiguity between two packs of that store left unresolved (reported
+/// as "not found" here — a workflow-level `Ambiguous` error doesn't apply to
+/// a mount-time lookup with no `check`-time diagnostic surface of its own).
+fn resolve_pack_skill(worktree: &Path, ambient: Option<&Env>, name: &str) -> Option<DeclaredPath> {
     let (publisher, skill) = name.split_once('/')?;
     let publisher = publisher.parse::<Publisher>().ok()?;
-    let mut found: Option<DeclaredPath> = None;
-    for (pack_dir, manifest) in packs_for_publisher(worktree, &publisher).installed {
-        for declared in &manifest.contents.skills {
-            let trimmed = declared.trim_end_matches('/');
-            let stem = Path::new(trimmed).file_name().and_then(|s| s.to_str());
-            if stem == Some(skill) {
-                if found.is_some() {
-                    return None; // ambiguous across packs — no silent first-match
-                }
-                found = Some(DeclaredPath::of_pack(
-                    pack_dir.clone(),
-                    &manifest,
-                    trimmed.to_string(),
-                ));
-            }
-        }
-    }
-    found
+    pack_declaring(worktree, ambient, &publisher, |manifest| {
+        let named =
+            |trimmed: &&str| Path::new(trimmed).file_name().and_then(|s| s.to_str()) == Some(skill);
+        manifest
+            .contents
+            .skills
+            .iter()
+            .map(|declared| declared.trim_end_matches('/'))
+            .filter(named)
+            .map(str::to_string)
+            .collect()
+    })
 }
 
 /// A configured skills path is absolute, or relative to the worktree;

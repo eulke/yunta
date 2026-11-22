@@ -1,19 +1,41 @@
-//! Namespaced resolution: a bare name always means
-//! the repo's own `.yunta/workflows/`; a `publisher/name` reference
-//! falls through to that publisher's vendored packs *only when the repo
-//! has nothing by that literal name* — a local workflow with the same
-//! name shadows the one from a pack. Within a publisher, `name` addresses a
-//! **workflow's own file basename** as declared in some installed
-//! pack's `contents.workflows` — not the pack's own `name` field, which
-//! is packaging/versioning metadata (`review-pack`, `1.2.0`), distinct
-//! from the workflow files it ships (`review.yaml`). A publisher's
-//! installed packs share one flat namespace; two packs from the same
-//! publisher declaring the same workflow basename is ambiguous, not
-//! silently resolved by install order.
+//! What a workflow name means. A bare name always means the repository's own
+//! `.yunta/workflows/`. A `publisher/name` reference means the repository's
+//! own file at that path when there is one, so a local workflow shadows a
+//! pack's, and otherwise a workflow the publisher's installed packs declare.
+//! Within a publisher, `name` is the basename of a file a pack declares in
+//! `contents.workflows`, not the pack's own `name`, which is packaging and
+//! versioning metadata (`review-pack`, `1.2.0`) distinct from the files it
+//! ships (`review.yaml`).
+//!
+//! A project reads packs from two stores ([`yunta_core::PackStores`]): its
+//! own, then the user's. A user's pack the project also installs, by
+//! `publisher/name`, is shadowed whole: the project reads its own copy and
+//! nothing of the user's. The first store whose packs declare a name answers
+//! it, so the user's store never changes what the project's packs already
+//! answer, and two packs of the store that answers are ambiguous rather than
+//! settled by install order. The user's store is read only when the
+//! project's leaves a name unanswered, so a broken pack there breaks nothing
+//! the project answers. Agents and skills are named the same way, and the
+//! `org` knowledge layer merges the stores' files by the same order.
+//!
+//! [`packs`] holds both rules once: one function lists, per store, the pack
+//! directories a project reads, shadowing applied, and one asks the stores in
+//! order for the first answer. The alternative it rejects is a loop per kind
+//! of name, each deciding again which store comes first and what shadows
+//! what. A new kind of name a pack ships reads through `pack_declaring`; a
+//! new store is one more in `PackStores::in_order`.
+
+mod packs;
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{PackManifest, PackName, Publisher};
+use yunta_core::{Env, PackManifest, PackName, PackRef, PackStore, PackStores, Publisher};
+
+pub(crate) use packs::{declared_knowledge, pack_declaring};
+pub use packs::{installed_publishers, packs_for_publisher, PublisherPacks, StoredPack};
+
+/// The file a pack's manifest is, in the pack's own directory.
+const PACK_MANIFEST: &str = "pack.yaml";
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CatalogError {
@@ -56,26 +78,40 @@ pub enum CatalogError {
     Escapes { pack: String, path: String },
 }
 
-/// Every pack under a publisher: the ones whose `pack.yaml` parsed, and
-/// the ones that did not. A broken pack is named (as a
-/// [`CatalogError::Unreadable`] or [`CatalogError::Malformed`]), never
-/// silently dropped from the catalog a human is looking at.
-pub struct PublisherPacks {
-    pub installed: Vec<(PathBuf, PackManifest)>,
-    pub broken: Vec<CatalogError>,
-}
-
-/// Where a resolved workflow file actually came from — `check`'s
-/// cross-pack composition rule (cross-pack references aren't supported)
-/// needs this to tell "still inside the same pack" from
-/// "left it", which a bare [`PathBuf`] can't say on its own.
+/// Where a resolved workflow file actually came from: the repository, or a
+/// pack in one store. `check`'s cross-pack composition rule needs this to
+/// tell "still inside the same pack" from "left it", which a bare
+/// [`PathBuf`] can't say on its own; two copies of one pack in two stores
+/// are two origins.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkflowOrigin {
     Repo,
     Pack {
         publisher: Publisher,
         pack_name: PackName,
+        store: PackStore,
     },
+}
+
+impl WorkflowOrigin {
+    /// The directory of the pack a pack origin names, in its store; `None`
+    /// for the repository.
+    pub fn pack_dir(&self) -> Option<PathBuf> {
+        match self {
+            WorkflowOrigin::Repo => None,
+            WorkflowOrigin::Pack {
+                publisher,
+                pack_name,
+                store,
+            } => Some(store.pack_dir(&PackRef::new(publisher.clone(), pack_name.clone()))),
+        }
+    }
+
+    /// The manifest of the pack a pack origin names, which judges the pack
+    /// wherever it is installed; `None` for the repository.
+    pub fn manifest_file(&self) -> Option<PathBuf> {
+        self.pack_dir().map(|dir| dir.join(PACK_MANIFEST))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -132,12 +168,17 @@ pub(crate) enum Named {
 }
 
 /// Resolves a `use:`/`yunta run` target name against the repo catalog
-/// first, packs second (packs are the bottom
-/// layer, never shadowing something the repo already names). A pack's
-/// declared path that leaves the pack is refused, naming the pack and the
-/// path, so no reader loads a file outside the pack that declares it.
-pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError> {
-    Ok(match name_workflow(repo_root, name)? {
+/// first, packs second (packs are the bottom layer, never shadowing
+/// something the repo already names). `ambient` is the environment the
+/// user's store is found in; `None` reads only the project's packs. A
+/// pack's declared path that leaves the pack is refused, naming the pack and
+/// the path, so no reader loads a file outside the pack that declares it.
+pub fn resolve_workflow(
+    repo_root: &Path,
+    ambient: Option<&Env>,
+    name: &str,
+) -> Result<ResolvedWorkflow, CatalogError> {
+    Ok(match name_workflow(repo_root, ambient, name)? {
         Named::Repo(path) => ResolvedWorkflow {
             path,
             origin: WorkflowOrigin::Repo,
@@ -154,7 +195,11 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
 
 /// The lookup [`resolve_workflow`] makes, with a pack's declared path left
 /// unjoined: the freeze checks that it stays inside its pack first.
-pub(crate) fn name_workflow(repo_root: &Path, name: &str) -> Result<Named, CatalogError> {
+pub(crate) fn name_workflow(
+    repo_root: &Path,
+    ambient: Option<&Env>,
+    name: &str,
+) -> Result<Named, CatalogError> {
     if !is_reference(name) {
         return Err(CatalogError::InvalidName {
             name: name.to_string(),
@@ -179,22 +224,12 @@ pub(crate) fn name_workflow(repo_root: &Path, name: &str) -> Result<Named, Catal
         });
     };
 
-    let publisher_dir = repo_root.join(".yunta/packs").join(publisher);
-    let Some(candidates) = declaring_packs(&publisher_dir, workflow)? else {
-        return Err(CatalogError::NotFound {
-            name: name.to_string(),
-            repo_path,
-            publisher: publisher.to_string(),
-            workflow: workflow.to_string(),
-        });
-    };
-    let (pack_name, declared) = choose(name, repo_path, publisher, workflow, candidates)?;
+    let stores = PackStores::of(repo_root, ambient);
+    let candidates = packs::declaring_packs(&stores, &publisher_id, workflow)?;
+    let (pack, declared) = choose(name, repo_path, publisher, workflow, candidates)?;
     Ok(Named::Pack {
         declared,
-        origin: WorkflowOrigin::Pack {
-            publisher: publisher_id,
-            pack_name,
-        },
+        origin: pack.origin(),
     })
 }
 
@@ -217,8 +252,8 @@ fn choose(
     repo_path: PathBuf,
     publisher: &str,
     workflow: &str,
-    mut candidates: Vec<(PackName, DeclaredPath)>,
-) -> Result<(PackName, DeclaredPath), CatalogError> {
+    mut candidates: Vec<(StoredPack, DeclaredPath)>,
+) -> Result<(StoredPack, DeclaredPath), CatalogError> {
     if candidates.len() > 1 {
         return Err(CatalogError::Ambiguous {
             name: name.to_string(),
@@ -227,7 +262,7 @@ fn choose(
             count: candidates.len(),
             candidates: candidates
                 .iter()
-                .map(|(pack_name, _)| pack_name.as_str())
+                .map(|(pack, _)| pack.manifest.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
         });
@@ -243,176 +278,35 @@ fn choose(
     })
 }
 
-/// The installed packs under a publisher's directory that declare a
-/// workflow file whose basename is `workflow`, each with the path it
-/// declares. `None` when the publisher has no readable directory.
-fn declaring_packs(
-    publisher_dir: &Path,
-    workflow: &str,
-) -> Result<Option<Vec<(PackName, DeclaredPath)>>, CatalogError> {
-    let Ok(entries) = std::fs::read_dir(publisher_dir) else {
-        return Ok(None);
-    };
-    let mut candidates = Vec::new();
-    for entry in entries.flatten() {
-        let pack_dir = entry.path();
-        if !pack_dir.is_dir() {
-            continue;
-        }
-        // A broken pack in the search path is named, never skipped: it
-        // may be the very pack that declares `workflow`, so passing it by
-        // would resolve to `NotFound` and hide the real fault. A
-        // directory with no `pack.yaml` at all is not a pack, so that one
-        // case is skipped.
-        let manifest_path = pack_dir.join("pack.yaml");
-        let manifest_text = match std::fs::read_to_string(&manifest_path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => {
-                return Err(CatalogError::Unreadable {
-                    path: manifest_path,
-                    detail: e.to_string(),
-                })
-            }
-        };
-        let manifest = PackManifest::read(&manifest_text).map_err(|e| CatalogError::Malformed {
-            path: manifest_path,
-            detail: e.to_string(),
-        })?;
-        for declared in &manifest.contents.workflows {
-            let stem_matches = Path::new(declared)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .is_some_and(|stem| stem == workflow);
-            if stem_matches {
-                let found = DeclaredPath::of_pack(pack_dir.clone(), &manifest, declared.clone());
-                candidates.push((manifest.name.clone(), found));
-            }
-        }
-    }
-    Ok(Some(candidates))
-}
-
-/// Every pack vendored under `.yunta/packs/<publisher>/` whose manifest
-/// parses — `yunta list`'s own catalog view walks every publisher
-/// directory and calls this per publisher, same resolver both surfaces
-/// share.
-pub fn packs_for_publisher(repo_root: &Path, publisher: &Publisher) -> PublisherPacks {
-    let publisher_dir = repo_root.join(".yunta/packs").join(publisher.as_str());
-    let mut packs = PublisherPacks {
-        installed: Vec::new(),
-        broken: Vec::new(),
-    };
-    let Ok(entries) = std::fs::read_dir(&publisher_dir) else {
-        return packs;
-    };
-    for entry in entries.flatten() {
-        let pack_dir = entry.path();
-        if !pack_dir.is_dir() {
-            continue;
-        }
-        // A directory with no `pack.yaml` is not a pack; one whose
-        // manifest exists but cannot be read or parsed is a broken pack,
-        // named — never dropped from what `yunta list`/`doctor` show.
-        let manifest_path = pack_dir.join("pack.yaml");
-        let manifest_text = match std::fs::read_to_string(&manifest_path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => {
-                packs.broken.push(CatalogError::Unreadable {
-                    path: manifest_path,
-                    detail: e.to_string(),
-                });
-                continue;
-            }
-        };
-        match PackManifest::read(&manifest_text) {
-            Ok(manifest) => packs.installed.push((pack_dir, manifest)),
-            Err(e) => packs.broken.push(CatalogError::Malformed {
-                path: manifest_path,
-                detail: e.to_string(),
-            }),
-        }
-    }
-    packs
-}
-
-/// Every path an installed pack declares as knowledge, unjoined, in the
-/// order the packs are listed.
-pub(crate) fn declared_knowledge(repo_root: &Path) -> Vec<DeclaredPath> {
-    let mut declared = Vec::new();
-    for publisher in installed_publishers(repo_root) {
-        for (pack_dir, manifest) in packs_for_publisher(repo_root, &publisher).installed {
-            for path in &manifest.contents.knowledge {
-                declared.push(DeclaredPath::of_pack(
-                    pack_dir.clone(),
-                    &manifest,
-                    path.clone(),
-                ));
-            }
-        }
-    }
-    declared
-}
-
-/// Where `workflow_path` actually lives, relative to `repo_root` — the
-/// origin `check_workflow_refs`'s caller must supply for its *top-level*
-/// workflow, since that function only ever sees a parsed
-/// [`Workflow`](yunta_core::Workflow) value with no memory of the file it
-/// came from. `.yunta/packs/
-/// <publisher>/<pack>/...` reports `Pack`; anything else (including a
-/// path outside `repo_root` entirely) reports `Repo` — the safe default
-/// that permits ordinary composition instead of one that would refuse
-/// it, since only `Pack` narrows what `use:` may reach.
-pub fn origin_of(repo_root: &Path, workflow_path: &Path) -> WorkflowOrigin {
-    let packs_root = repo_root.join(".yunta/packs");
+/// Where `workflow_path` actually lives: the origin `check_workflow_refs`'s
+/// caller must supply for its *top-level* workflow, since that function only
+/// ever sees a parsed [`Workflow`](yunta_core::Workflow) value with no memory
+/// of the file it came from. A path under the packs of either store the
+/// project reads (`ambient` names the user's) is a `Pack` origin with that
+/// store, shadowed or not, the project's store asked first. A relative path
+/// is the repository's. Anything else, a path outside every store included,
+/// reports `Repo`: the safe default that permits ordinary composition instead
+/// of one that would refuse it, since only `Pack` narrows what `use:` may
+/// reach.
+pub fn origin_of(repo_root: &Path, ambient: Option<&Env>, workflow_path: &Path) -> WorkflowOrigin {
     // A relative `workflow_path` (the common case — a CLI arg typed
     // as-is) is relative to `repo_root`, same as every other path this
-    // module resolves; comparing it against an absolute `packs_root`
-    // without this would always miss.
+    // module resolves; comparing it against an absolute store without
+    // this would always miss.
     let absolute = if workflow_path.is_relative() {
         repo_root.join(workflow_path)
     } else {
         workflow_path.to_path_buf()
     };
-    let Ok(relative) = absolute.strip_prefix(&packs_root) else {
-        return WorkflowOrigin::Repo;
-    };
-    let mut components = relative.components();
-    let (Some(publisher), Some(pack_name)) = (components.next(), components.next()) else {
-        return WorkflowOrigin::Repo;
-    };
-    // A directory pair that is not a `publisher/name` was never vendored
-    // by `pack add`; it is not a pack origin.
-    let parsed = (
-        publisher.as_os_str().to_str().and_then(|s| s.parse().ok()),
-        pack_name.as_os_str().to_str().and_then(|s| s.parse().ok()),
-    );
-    match parsed {
-        (Some(publisher), Some(pack_name)) => WorkflowOrigin::Pack {
-            publisher,
-            pack_name,
-        },
-        _ => WorkflowOrigin::Repo,
-    }
-}
-
-/// Every installed publisher — top-level names under `.yunta/packs/`.
-pub fn installed_publishers(repo_root: &Path) -> Vec<Publisher> {
-    let packs_root = repo_root.join(".yunta/packs");
-    let Ok(entries) = std::fs::read_dir(&packs_root) else {
-        return Vec::new();
-    };
-    let mut publishers: Vec<Publisher> = entries
-        .flatten()
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .and_then(|name| name.parse().ok())
+    PackStores::of(repo_root, ambient)
+        .in_order()
+        .find_map(|store| {
+            let pack = store.pack_holding(&absolute)?;
+            Some(WorkflowOrigin::Pack {
+                publisher: pack.publisher().clone(),
+                pack_name: pack.name().clone(),
+                store: store.clone(),
+            })
         })
-        .collect();
-    publishers.sort();
-    publishers
+        .unwrap_or(WorkflowOrigin::Repo)
 }

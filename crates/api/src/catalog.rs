@@ -1,8 +1,10 @@
 //! See [`crate`]. The catalog: the workflows the repository a workspace works
 //! in offers. It is two layers: the repository's own `.yunta/workflows/`, then
-//! every installed pack's declared `contents.workflows`, addressed
-//! `publisher/name`. A repository's own entry shadows a pack's of the same
-//! name, so a bare repository name never collides with a pack entry.
+//! the declared `contents.workflows` of every pack the project reads, its own
+//! and the user's, addressed `publisher/name`. A repository's own entry
+//! shadows a pack's of the same name, so a bare repository name never
+//! collides with a pack entry, and a pack name is listed from the store that
+//! answers it, as a run resolves it.
 //!
 //! What the catalog offers is read off the repository alone; how each
 //! workflow's past runs usually went is read off the project's history when
@@ -12,7 +14,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use yunta_core::Workflow;
+use yunta_core::{Env, PackStore, Workflow};
 use yunta_render::page::{Catalog, OfferedWorkflow, ReadableWorkflow, UnreadableWorkflow};
 
 use crate::{Project, Workspace};
@@ -32,7 +34,7 @@ impl Workspace {
         let project = self.project().ok();
         let mut entries = repository_entries(&self.dir);
         let shadowed: HashSet<String> = entries.iter().map(|entry| entry.name.clone()).collect();
-        let (pack_entries, broken_packs) = pack_entries(&self.dir);
+        let (pack_entries, broken_packs) = pack_entries(&self.dir, &self.env);
         entries.extend(
             pack_entries
                 .into_iter()
@@ -45,7 +47,8 @@ impl Workspace {
         Catalog {
             broken_packs: broken_packs.iter().map(ToString::to_string).collect(),
             workflows_dir: self.dir.join(".yunta/workflows"),
-            packs_dir: self.dir.join(".yunta/packs"),
+            packs_dir: PackStore::of_project(&self.dir).packs_dir(),
+            user_packs_dir: PackStore::of_user(&self.env).map(|store| store.packs_dir()),
             offered,
         }
     }
@@ -56,7 +59,7 @@ impl Workspace {
     pub fn catalog_workflows(&self) -> Vec<(String, Workflow)> {
         repository_entries(&self.dir)
             .into_iter()
-            .chain(pack_entries(&self.dir).0)
+            .chain(pack_entries(&self.dir, &self.env).0)
             .filter_map(|entry| {
                 let contents = std::fs::read_to_string(&entry.path).ok()?;
                 let workflow = yunta_core::workflow::read::read(&contents, &entry.path).ok()?;
@@ -146,24 +149,23 @@ fn walk_yaml_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Every workflow the installed packs under `dir` declare, by
-/// `publisher/name`, and the packs that do not read.
-fn pack_entries(dir: &Path) -> (Vec<CatalogEntry>, Vec<yunta_engine::CatalogError>) {
+/// Every workflow the packs the project in `dir` reads declare, by
+/// `publisher/name`, each from the store that answers its name, and the
+/// packs that do not read. `env` names the user's store.
+fn pack_entries(dir: &Path, env: &Env) -> (Vec<CatalogEntry>, Vec<yunta_engine::CatalogError>) {
     let mut entries = Vec::new();
     let mut broken = Vec::new();
-    for publisher in yunta_engine::installed_publishers(dir) {
-        let packs = yunta_engine::packs_for_publisher(dir, &publisher);
-        for (pack_dir, manifest) in packs.installed {
-            for declared in &manifest.contents.workflows {
-                let Some(stem) = Path::new(declared).file_stem().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                entries.push(CatalogEntry {
+    for publisher in yunta_engine::installed_publishers(dir, Some(env)) {
+        let packs = yunta_engine::packs_for_publisher(dir, Some(env), &publisher);
+        entries.extend(
+            packs
+                .workflows()
+                .into_iter()
+                .map(|(stem, path)| CatalogEntry {
                     name: format!("{publisher}/{stem}"),
-                    path: pack_dir.join(declared),
-                });
-            }
-        }
+                    path,
+                }),
+        );
         broken.extend(packs.broken);
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));

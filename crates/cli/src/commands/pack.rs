@@ -1,13 +1,13 @@
 //! `yunta pack add/new/remove/list/update/audit`: the command layer over the
-//! API's packs. It hands the arguments in, shows the audit a person confirms
-//! against before anything is vendored, and draws render's `page::pack`; the
-//! policy, the vendoring, the lock and the pack's own cases are the API's.
-//! The cases run only behind `--run-tests`, after the install; `audit` and
-//! `new` run them where they audit and check.
+//! API's packs. It hands the arguments in, on the store `--global` names, shows
+//! the audit a person confirms against before anything is vendored, and draws
+//! render's `page::pack`; the policy, the vendoring, the lock and the pack's
+//! own cases are the API's. The cases run only behind `--run-tests`, after the
+//! install; `audit` and `new` run them where they audit and check.
 
 use surco::look::Look;
 use yunta_api::Remark;
-use yunta_core::PackRef;
+use yunta_core::{PackRef, PackScope};
 use yunta_render::page::pack::{
     Installed, Inventory, Needs, NewPack, NewPackCheck, Removed, Updated,
 };
@@ -16,12 +16,14 @@ use crate::error::CliError;
 use crate::output::{blank, show, Mode, Outcome};
 use crate::shell::Shell;
 
-/// `yunta pack add`: the pack fetched, refused before anything is shown by
-/// the policy that leaves no decision; its audit shown; installed once a
-/// person confirmed what it executes; its cases counted, or run on request;
-/// and what its workflows need from the project said.
+/// `yunta pack add`: the pack fetched for the store `scope` names, refused
+/// before anything is shown by the policy that leaves no decision; its audit
+/// shown; installed once a person confirmed what it executes; its cases
+/// counted, or run on request; and what its workflows need from the project
+/// said.
 pub async fn add(
     shell: &Shell,
+    scope: PackScope,
     source: &str,
     confirmed_executors: bool,
     run_tests: bool,
@@ -30,7 +32,7 @@ pub async fn add(
     let project = shell.workspace().project()?;
     let stop = shell.stop();
     let say = |remark: Remark| crate::remarks::say(remark, Mode::Human, look);
-    let packs = shell.workspace().packs();
+    let packs = shell.workspace().packs(scope)?;
     let fetched = packs.fetch(source, confirmed_executors, &stop).await?;
     // The audit is read, never run: the inventory a person confirms against,
     // shown before anything is vendored.
@@ -64,18 +66,20 @@ pub async fn add(
     Ok(Outcome::Success)
 }
 
-/// `yunta pack update`: the installed pack fetched at `new_ref`, held to the
-/// gates an install meets; its audit shown when it ships executors, since a
-/// new ref is where new executor code first appears; then installed.
+/// `yunta pack update`: the pack installed in the store `scope` names fetched
+/// at `new_ref`, held to the gates an install meets; its audit shown when it
+/// ships executors, since a new ref is where new executor code first appears;
+/// then installed.
 pub async fn update(
     shell: &Shell,
+    scope: PackScope,
     pack: &PackRef,
     new_ref: &str,
     confirmed_executors: bool,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let stop = shell.stop();
-    let packs = shell.workspace().packs();
+    let packs = shell.workspace().packs(scope)?;
     let fetched = packs
         .fetch_update(pack, new_ref, confirmed_executors, &stop)
         .await?;
@@ -101,18 +105,24 @@ pub async fn update(
     Ok(Outcome::Success)
 }
 
-/// `yunta pack remove`: waits while another pack command holds the packs.
-pub async fn remove(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
+/// `yunta pack remove`, from the store `scope` names: waits while another pack
+/// command holds its packs.
+pub async fn remove(
+    shell: &Shell,
+    scope: PackScope,
+    pack: &PackRef,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     let say = |remark: Remark| crate::remarks::say(remark, Mode::Human, look);
-    let packs = shell.workspace().packs();
+    let packs = shell.workspace().packs(scope)?;
     packs.remove(pack, &say, &shell.stop()).await?;
     show(look, &Removed { pack });
     Ok(Outcome::Success)
 }
 
-/// `yunta pack list`.
-pub fn list(shell: &Shell, look: &Look) -> Result<Outcome, CliError> {
-    let listed = shell.workspace().packs().list()?;
+/// `yunta pack list`, of the store `scope` names.
+pub fn list(shell: &Shell, scope: PackScope, look: &Look) -> Result<Outcome, CliError> {
+    let listed = shell.workspace().packs(scope)?.list()?;
     show(look, &listed);
     Ok(Outcome::Success)
 }
@@ -121,11 +131,17 @@ pub fn list(shell: &Shell, look: &Look) -> Result<Outcome, CliError> {
 /// command, context source, per-node permission, required agent, `mcp`
 /// server, executor, repository path a scope names, and each workflow's
 /// full, untrimmed prompt), then whether it ships cases of its own and
-/// whether they pass. Inventory, never verdict: nothing here flags content
-/// as suspicious, it only shows all of it.
-pub async fn audit(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
+/// whether they pass, of the pack installed in the store `scope` names.
+/// Inventory, never verdict: nothing here flags content as suspicious, it
+/// only shows all of it.
+pub async fn audit(
+    shell: &Shell,
+    scope: PackScope,
+    pack: &PackRef,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     let say = |remark: Remark| crate::remarks::say(remark, Mode::Human, look);
-    let packs = shell.workspace().packs();
+    let packs = shell.workspace().packs(scope)?;
     let audited = packs.audit(pack, &say, &shell.stop()).await?;
     let inventory = Inventory::Audited {
         audit: &audited.audit,
@@ -141,7 +157,7 @@ pub async fn audit(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome
 /// first command.
 pub async fn new_pack(shell: &Shell, pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let workspace = shell.workspace();
-    let scaffolded = workspace.packs().scaffold(pack).await?;
+    let scaffolded = workspace.scaffold_pack(pack).await?;
     let at = workspace.shown(&scaffolded.dir);
     let page = |checked| NewPack {
         pack,

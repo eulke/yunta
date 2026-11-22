@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use crate::diagnostic::Report;
 use crate::events::{Asks, Withheld};
-use crate::{AdapterId, NodeId, OptionId, PackRef, Publisher, RunnerName, SchemaRange};
+use crate::{AdapterId, NodeId, OptionId, PackRef, PackScope, Publisher, RunnerName, SchemaRange};
 
 /// Why a decision put to a run is not recorded. Each variant's display is
 /// its code; the words a person reads are render's.
@@ -111,22 +111,43 @@ pub enum Unservable {
 }
 
 /// Why a pack command refuses: what the pack is, where it stands, or the
-/// policy the project's config sets on packs. Each variant's display is its
-/// code; the words a person reads are render's.
+/// policy the config sets on packs. A refusal about where a pack stands names
+/// the store it was asked of, `scope`, so the commands it suggests act on that
+/// store. One about a pack that store lacks names the other store in
+/// `found_in` when that one holds the pack, so the command it suggests
+/// reaches the pack where it is. Each variant's display is its code; the
+/// words a person reads are render's.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PackRefusal {
-    /// An `add` of a pack this project already has vendored at `at`.
+    /// An `add` of a pack the store already has vendored at `at`.
     #[error("already_installed")]
-    AlreadyInstalled { pack: PackRef, at: PathBuf },
-    /// An `update` of a pack this project's lock does not name.
+    AlreadyInstalled {
+        pack: PackRef,
+        at: PathBuf,
+        scope: PackScope,
+    },
+    /// An `update` of a pack the store's lock does not name.
     #[error("not_installed")]
-    NotInstalled { pack: PackRef },
-    /// A `remove` of a pack this project's lock does not name.
+    NotInstalled {
+        pack: PackRef,
+        scope: PackScope,
+        found_in: Option<PackScope>,
+    },
+    /// A `remove` of a pack the store's lock does not name.
     #[error("nothing_to_remove")]
-    NothingToRemove { pack: PackRef },
-    /// An `audit` of a pack not vendored under `root`.
+    NothingToRemove {
+        pack: PackRef,
+        scope: PackScope,
+        found_in: Option<PackScope>,
+    },
+    /// An `audit` of a pack not vendored under `root`, the store's packs.
     #[error("not_vendored")]
-    NotVendored { pack: PackRef, root: PathBuf },
+    NotVendored {
+        pack: PackRef,
+        root: PathBuf,
+        scope: PackScope,
+        found_in: Option<PackScope>,
+    },
     /// A pack whose `yunta_schema` range leaves out the schema this binary
     /// speaks.
     #[error("schema_outside")]

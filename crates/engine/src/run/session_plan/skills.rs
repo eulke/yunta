@@ -63,7 +63,7 @@ pub(super) async fn mount_skills(
 /// The checkout is the only source whose lookup fails this way, and it
 /// searches the roots its config names, the same way again.
 fn searched_roots(ctx: &crate::run::RunCtx<'_>, name: &yunta_core::SkillName) -> Vec<PathBuf> {
-    match crate::skills::locate(&ctx.manifest.config, ctx.worktree, name) {
+    match crate::skills::locate(&ctx.manifest.config, ctx.worktree, ctx.ambient, name) {
         Err(crate::skills::SkillsError::NotFound { searched, .. }) => searched,
         Ok(_) => Vec::new(),
     }

@@ -11,7 +11,8 @@ use tokio::sync::mpsc;
 use yunta_api::{FieldReach, Repository, RunRequest, Workspace};
 use yunta_core::step::NextStep;
 use yunta_core::{
-    Answer, InputName, NodeId, OptionId, PackRef, QuestionId, WorkflowName, WorkflowShape,
+    Answer, InputName, NodeId, OptionId, PackRef, PackScope, QuestionId, WorkflowName,
+    WorkflowShape,
 };
 use yunta_ui::{
     EvidenceOperation, EvidenceOutcome, Input, News, Operation, OperationKind, Outcome,
@@ -105,19 +106,32 @@ impl Recordings {
         let cases = Operation::Workflow(WorkflowOperation::RunCases);
         self.kept(performed(set_up, unworked, cases).await);
         let packed = home.packed.as_path();
-        for dir in [set_up, packed] {
-            let listing = Operation::Pack(PackOperation::List);
+        let project = PackScope::Project;
+        for (dir, scope) in [
+            (set_up, project),
+            (packed, project),
+            (set_up, PackScope::User),
+        ] {
+            let listing = Operation::Pack(PackOperation::List { scope });
             self.kept(performed(dir, unworked, listing).await);
         }
         let demo = "acme/demo".parse::<PackRef>().expect("a pack reference");
-        let audit = Operation::Pack(PackOperation::Audit { pack: demo.clone() });
+        let pack = demo.clone();
+        let audit = Operation::Pack(PackOperation::Audit {
+            pack,
+            scope: project,
+        });
         self.kept(performed(packed, unworked, audit).await);
-        let tools = home.tools.to_string_lossy().to_string();
-        let fetch = Operation::Pack(PackOperation::Fetch { source: tools });
+        let source = home.tools.to_string_lossy().to_string();
+        let fetch = Operation::Pack(PackOperation::Fetch {
+            source,
+            scope: project,
+        });
         self.kept(performed(set_up, unworked, fetch).await);
         let update = PackOperation::FetchUpdate {
             pack: demo,
             reference: String::new(),
+            scope: project,
         };
         self.kept(performed(packed, unworked, Operation::Pack(update)).await);
     }
@@ -231,7 +245,8 @@ impl Recordings {
             self.kept(performed(&home.set_up, home.root(), Operation::Pack(new)).await);
         }
         let demo = "acme/demo".parse::<PackRef>().expect("a pack reference");
-        let removal = Operation::Pack(PackOperation::Remove { pack: demo });
+        let scope = PackScope::Project;
+        let removal = Operation::Pack(PackOperation::Remove { pack: demo, scope });
         self.kept(performed(&home.packed, home.root(), removal).await);
         let source = home.tools.to_string_lossy().to_string();
         self.kept(installed(workspace(&home.set_up, home.root()), source).await);
@@ -403,7 +418,8 @@ async fn installed(workspace: Workspace, source: String) -> (Operation, Vec<News
     };
     let performer = Performer::new(workspace);
     let (inputs, mut received) = mpsc::unbounded_channel();
-    let fetch = Operation::Pack(PackOperation::Fetch { source });
+    let scope = PackScope::Project;
+    let fetch = Operation::Pack(PackOperation::Fetch { source, scope });
     performer.perform(*fetching, fetch, inputs.clone()).await;
     let held = loop {
         match received.recv().await {

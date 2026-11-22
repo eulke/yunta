@@ -1,15 +1,16 @@
-//! See [`super`]. A pack installed or updated from the packs: where it is, or the
-//! ref the installed one moves to, asked ([`PackAsked`]); the pack fetched, its copy
-//! held under the fetch's ticket and its inventory read; then installed from that
-//! very copy, a confirmation naming what it executes first where that waits on a
-//! person; and what installing came to.
+//! See [`super`]. A pack installed or updated from the packs, in the store the
+//! listing shows: where it is, or the ref the installed one moves to, asked
+//! ([`PackAsked`]); the pack fetched for that store, its copy held under the
+//! fetch's ticket and its inventory read; then installed from that very copy, a
+//! confirmation naming what it executes first where that waits on a person; and
+//! what installing came to.
 
 use std::sync::Arc;
 
 use surco::components::{Legend, Note};
 use surco::doc::Doc;
 use surco::look::Look;
-use yunta_core::PackRef;
+use yunta_core::{PackRef, PackScope};
 use yunta_render::page::pack::{Installed, Inventory, Needs, Updated};
 use yunta_render::page::Page;
 
@@ -58,14 +59,15 @@ impl PackAsked {
         }
     }
 
-    /// What `stroke` does to the line: answered, the fetch it asks for and what is
-    /// fetched as a person reads it; or what the line makes of it otherwise.
-    fn pressed(&mut self, stroke: Stroke) -> Press<(PackOperation, String)> {
+    /// What `stroke` does to the line: answered, the fetch it asks for, for the
+    /// store `scope` names, and what is fetched as a person reads it; or what the
+    /// line makes of it otherwise.
+    fn pressed(&mut self, stroke: Stroke, scope: PackScope) -> Press<(PackOperation, String)> {
         let line = match self {
             PackAsked::Source(line) | PackAsked::Reference { line, .. } => line,
         };
         match line.press(stroke) {
-            Press::Answer(typed) => Press::Answer(self.fetch(typed.value)),
+            Press::Answer(typed) => Press::Answer(self.fetch(typed.value, scope)),
             Press::Stay => Press::Stay,
             Press::Moved => Press::Moved,
             Press::Decline => Press::Decline,
@@ -73,13 +75,15 @@ impl PackAsked {
         }
     }
 
-    /// The fetch `typed` answers the question with, and what it fetches as a person
-    /// reads it: the source typed, or the pack updated.
-    fn fetch(&self, typed: String) -> (PackOperation, String) {
+    /// The fetch for the store `scope` names that `typed` answers the question
+    /// with, and what it fetches as a person reads it: the source typed, or the
+    /// pack updated.
+    fn fetch(&self, typed: String, scope: PackScope) -> (PackOperation, String) {
         match self {
             PackAsked::Source(_) => (
                 PackOperation::Fetch {
                     source: typed.clone(),
+                    scope,
                 },
                 typed,
             ),
@@ -87,6 +91,7 @@ impl PackAsked {
                 PackOperation::FetchUpdate {
                     pack: pack.clone(),
                     reference: typed,
+                    scope,
                 },
                 pack.to_string(),
             ),
@@ -98,7 +103,7 @@ impl PacksView {
     /// What `stroke` does while a pack is asked for, fetched or installed.
     pub(super) fn pressed_installing(&mut self, stroke: Stroke) -> Next {
         match &mut self.shown {
-            PacksShown::Asking(asked) => match asked.pressed(stroke) {
+            PacksShown::Asking(asked) => match asked.pressed(stroke, self.scope) {
                 Press::Answer((work, what)) => self.fetching(work, what),
                 other => self.left(other),
             },
@@ -132,7 +137,7 @@ impl PacksView {
                 Stroke::Decline | Stroke::Enter => {
                     self.shown = PacksShown::Listing;
                     self.remarked.clear();
-                    Next::Work(Operation::Pack(PackOperation::List))
+                    Next::Work(self.read_again())
                 }
                 Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
                 _ => Next::Stays,

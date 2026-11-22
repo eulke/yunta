@@ -1,0 +1,6 @@
+✓ the user's packs · 1 installed
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+  ✓ acme/lint  v1.0.0 (3f9c2e1a0b4d), as its lock records it
+
+  lock         ~/.yunta/yunta.lock

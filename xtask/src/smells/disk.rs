@@ -39,7 +39,7 @@ pub(super) fn discarded_results(text: &str) -> usize {
 /// a `// blocking:` comment is the call.
 pub(super) fn count_engine_fs_outside_runtime(root: &Path) -> usize {
     const SHELL: [&str; 3] = ["process.rs", "process/", "process_registry.rs"];
-    const NO_RUNTIME: [&str; 3] = ["catalog.rs", "check/", "pack_audit.rs"];
+    const NO_RUNTIME: [&str; 4] = ["catalog.rs", "catalog/", "check/", "pack_audit.rs"];
     let src = root.join("crates/engine/src");
     rs_files(&src)
         .iter()

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use yunta_core::protected::{LoadedLink, Protected, ProtectedError};
 use yunta_core::{
-    content_hash, CommitSha, ConfigLayer, ContentHash, Frozen, FrozenWorkflow, InputName,
+    content_hash, CommitSha, ConfigLayer, ContentHash, Env, Frozen, FrozenWorkflow, InputName,
     InvalidId, Manifest, NodeId, PackProvenance, ProvenanceGap, RunAdapter, Workflow,
 };
 
@@ -95,8 +95,9 @@ impl FrozenRun {
 /// and held to its kind here, before the base commit is even asked for,
 /// so a document nobody can use costs no worktree and no baseline.
 ///
-/// `user_knowledge` is the directory of the user's knowledge layer, when
-/// the caller has one: what the workflow reads from it is frozen too.
+/// `ambient` is the environment the user layer is read from, when the
+/// caller reads one: the user's knowledge and the user's packs the workflow
+/// reaches are frozen too. `None` reads neither.
 pub async fn build_manifest(
     workflow: &Workflow,
     config: &ConfigLayer,
@@ -104,7 +105,7 @@ pub async fn build_manifest(
     repo: &Path,
     provided_inputs: &HashMap<InputName, String>,
     supervision: crate::process::Supervision<'_>,
-    user_knowledge: Option<&Path>,
+    ambient: Option<&Env>,
 ) -> Result<FrozenRun, ManifestError> {
     birth(
         workflow,
@@ -114,7 +115,7 @@ pub async fn build_manifest(
         supervision,
         Origin::Tree {
             workflow_dir,
-            user_knowledge,
+            ambient,
         },
     )
     .await
@@ -157,7 +158,7 @@ enum Origin<'a> {
     /// workflow reaches are read now.
     Tree {
         workflow_dir: &'a Path,
-        user_knowledge: Option<&'a Path>,
+        ambient: Option<&'a Env>,
     },
     /// The set the parent run was born with, and the run directory its
     /// objects are in.
@@ -235,8 +236,8 @@ async fn freeze_origin(
     match origin {
         Origin::Tree {
             workflow_dir,
-            user_knowledge,
-        } => freeze_tree(workflow, config, repo, workflow_dir, user_knowledge).await,
+            ambient,
+        } => freeze_tree(workflow, config, repo, workflow_dir, ambient).await,
         Origin::Parent(ParentRun {
             use_name,
             frozen,
@@ -252,13 +253,12 @@ async fn freeze_tree(
     config: &ConfigLayer,
     repo: &Path,
     workflow_dir: &Path,
-    user_knowledge: Option<&Path>,
+    ambient: Option<&Env>,
 ) -> Result<Freezing, ManifestError> {
-    let root = PromptRoot::of_tree(repo, workflow_dir).await;
+    let root = PromptRoot::of_tree(repo, ambient, workflow_dir).await;
     let prompts = read_prompts(workflow, &root).await?;
-    let (frozen, blobs) =
-        crate::frozen::walk::freeze(repo, workflow, config, user_knowledge).await?;
-    let (pack, provenance_gaps) = pack_provenance(repo, workflow_dir).await;
+    let (frozen, blobs) = crate::frozen::walk::freeze(repo, workflow, config, ambient).await?;
+    let (pack, provenance_gaps) = pack_provenance(repo, ambient, workflow_dir).await;
     Ok(Freezing {
         prompts,
         frozen,

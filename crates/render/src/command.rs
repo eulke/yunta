@@ -15,7 +15,7 @@
 use surco::doc::Depth;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::step::{Arg, Choice, NextStep, Reach};
-use yunta_core::{NodeId, OptionId, RunId, WorkflowShape};
+use yunta_core::{NodeId, OptionId, PackScope, RunId, WorkflowShape};
 use yunta_replay::frame::{Action, Effect};
 
 /// Who copies a command off a line: a person, who reads a run by its handle,
@@ -73,14 +73,22 @@ pub fn line_for(step: &NextStep, reader: Reader) -> String {
         NextStep::Test { dir: Some(dir) } => format!("yunta test --dir {dir}"),
         NextStep::Init => "yunta init".to_string(),
         NextStep::NewWorkflow { name, shape } => new_workflow(name, *shape),
-        NextStep::PackAdd { source } => format!("yunta pack add {}", given(source, "<source>")),
-        NextStep::PackUpdate { pack, reference } => {
-            format!("yunta pack update {pack} {}", given(reference, "<ref>"))
+        NextStep::PackAdd { source, scope } => {
+            pack_line("add", *scope, &[given(source, "<source>")])
         }
-        NextStep::PackRemove { pack } => format!("yunta pack remove {pack}"),
+        NextStep::PackUpdate {
+            pack,
+            reference,
+            scope,
+        } => pack_line(
+            "update",
+            *scope,
+            &[&pack.to_string(), given(reference, "<ref>")],
+        ),
+        NextStep::PackRemove { pack, scope } => pack_line("remove", *scope, &[&pack.to_string()]),
         NextStep::PackNew { pack } => format!("yunta pack new {pack}"),
-        NextStep::PackList => "yunta pack list".to_string(),
-        NextStep::PackAudit { pack } => format!("yunta pack audit {pack}"),
+        NextStep::PackList { scope } => pack_line("list", *scope, &[]),
+        NextStep::PackAudit { pack, scope } => pack_line("audit", *scope, &[&pack.to_string()]),
         NextStep::Gc { dry_run } => format!("yunta gc{}", flag(*dry_run, " --dry-run")),
         NextStep::Help => "yunta --help".to_string(),
         NextStep::ShowCommit { commit } => format!("git show {commit}"),
@@ -91,6 +99,9 @@ pub fn line_for(step: &NextStep, reader: Reader) -> String {
 /// help. Not what an action does to the run it names ([`effect`]), which a run's
 /// page says.
 pub fn does(step: &NextStep) -> &'static str {
+    if let Some(words) = users_pack_does(step) {
+        return words;
+    }
     match step {
         NextStep::Status { node, depth, .. } => status_does(node.is_some(), *depth),
         NextStep::Needs => "shows the run waiting on you, and how to answer it",
@@ -121,12 +132,32 @@ pub fn does(step: &NextStep) -> &'static str {
         NextStep::PackUpdate { .. } => "updates a pack to another reference",
         NextStep::PackRemove { .. } => "removes a pack",
         NextStep::PackNew { .. } => "writes the skeleton a new pack starts from",
-        NextStep::PackList => "lists the installed packs, each checked against the lock",
+        NextStep::PackList { .. } => "lists the installed packs, each checked against the lock",
         NextStep::PackAudit { .. } => "audits everything a pack holds and asks for",
         NextStep::Gc { dry_run } => gc_does(*dry_run),
         NextStep::Help => "says what yunta does, and every command it takes",
         NextStep::ShowCommit { .. } => "shows the commit the run's work is held in",
     }
+}
+
+/// What a step on the user's packs, which every project reads, does; `None` for
+/// every other step.
+fn users_pack_does(step: &NextStep) -> Option<&'static str> {
+    use PackScope::User;
+    Some(match step {
+        NextStep::PackAdd { scope: User, .. } => "installs a pack every project reads",
+        NextStep::PackUpdate { scope: User, .. } => {
+            "updates one of the user's packs to another reference"
+        }
+        NextStep::PackRemove { scope: User, .. } => "removes one of the user's packs",
+        NextStep::PackList { scope: User } => {
+            "lists the user's packs, each checked against the lock"
+        }
+        NextStep::PackAudit { scope: User, .. } => {
+            "audits everything one of the user's packs holds and asks for"
+        }
+        _ => return None,
+    })
 }
 
 /// What a `status` step does: one node whole, or the run at `depth`.
@@ -231,6 +262,18 @@ fn resolve_gate(run: &str, choice: &Choice) -> String {
             format!("yunta resolve-gate {run} {option}{words}")
         }
     }
+}
+
+/// `yunta pack <verb>` on the store `scope` names, then `operands`: the user's
+/// store carries `--global` right after the verb, this project's nothing.
+fn pack_line(verb: &str, scope: PackScope, operands: &[&str]) -> String {
+    let global = flag(scope == PackScope::User, " --global");
+    let mut line = format!("yunta pack {verb}{global}");
+    for operand in operands {
+        line.push(' ');
+        line.push_str(operand);
+    }
+    line
 }
 
 /// `yunta list --runs`, as far as `reach` reaches.

@@ -79,3 +79,10 @@ of which the application's own crates are about 90 KB. The growth is the perform
 the API's async paths and the readers of tasks, questions and specs through `serde_path_to_error`. Not known: how
 much of it is a second copy of what the CLI's commands already instantiate. A symbol by symbol diff of the two
 builds answers that before any change.
+
+### A pack's skill cannot be named
+Paths: `crates/engine/src/skills.rs`, `crates/core/src/ids.rs`, `crates/core/src/config/**`
+A pack declares skills under `contents.skills`, and the lookup in `skills.rs` reads them by `publisher/skill` in
+the project's packs, then the user's. No name reaches it: a node's `skills:` and `skills.always` hold a
+`SkillName`, which takes no `/`, so the lookup is dead and a pack's skill mounts in no session. Deciding how a
+workflow names one (a `publisher/skill` form of `SkillName`, or a key of its own) comes before any fix.

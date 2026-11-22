@@ -17,8 +17,9 @@
 //! - What a workspace resolves: `project`, the [`Project`] rooted where it
 //!   works, its config layers merged and the roots its runs live under;
 //!   `catalog`, the workflows its repository and installed packs offer;
-//!   `packs`, the repository's [`Packs`], fetched, installed, updated,
-//!   removed, listed, audited and scaffolded; and `setup`, the repository
+//!   `packs`, the [`Packs`] of this project's store or of the user's,
+//!   fetched, installed, updated, removed, listed and audited, and a new pack
+//!   scaffolded beside it; and `setup`, the repository
 //!   set up for Yunta, a [`DetectedProject`] written by `init` and a new
 //!   workflow written from the shape it starts as.
 //! - What a repository's cases do: `cases`, the [`CaseSuite`] under a

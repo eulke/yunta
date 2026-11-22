@@ -12,9 +12,10 @@ use super::error::ContextResolveError;
 use crate::frozen::{KnowledgeFile, Source};
 use crate::run::RunCtx;
 
-/// The org layer's files, one per filename. Between two installed packs
-/// there is no order, so a filename both ship is a typed error naming both;
-/// within one pack the later entry wins.
+/// The org layer's files, one per filename. A user's pack never ships a
+/// filename a project's pack ships here: the layer's listing leaves it out.
+/// Between two packs of one store there is no order, so a filename both ship
+/// is a typed error naming both; within one pack the later entry wins.
 fn org_files(
     files: Vec<KnowledgeFile>,
     node: &NodeId,

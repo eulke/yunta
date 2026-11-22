@@ -1,25 +1,28 @@
-//! The packs a project has installed, as `pack list` says them: each as its
-//! vendored tree stands against the content its lock records, and where the
-//! lock is; or where none is. The application moves through them with one
-//! pointed at: [`PointedPacks`], the same rows with the pointer on one.
+//! The packs a store holds, as `pack list` says them: each as its vendored
+//! tree stands against the content its lock records, and where the lock is; or
+//! where none is. Its headline says whose packs they are: this project's are
+//! `packs`, and the user's, which every project reads, `the user's packs`. The
+//! application moves through them with one pointed at: [`PointedPacks`], the
+//! same rows with the pointer on one.
 
 use surco::components::{Checklist, Fields, Found, Furrow, Headline};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
-use yunta_core::{PackLockEntry, PackRef};
+use yunta_core::{PackLockEntry, PackRef, PackScope};
 
 use crate::page::Page;
 
-/// The packs a project has installed, as `pack list` says them.
+/// The packs the store `scope` names holds, as `pack list` says them.
 #[derive(Debug)]
 pub enum Listed {
     /// No pack is installed under `looked_in`, as a reader in the project
     /// names it.
-    Empty { looked_in: String },
+    Empty { scope: PackScope, looked_in: String },
     /// Each pack the lock holds, as its vendored tree stands against the
     /// lock, and where the lock is, as a reader in the project names it.
     Locked {
+        scope: PackScope,
         packs: Vec<VendoredPack>,
         lock: String,
     },
@@ -99,6 +102,13 @@ impl Page for PointedPacks<'_> {
 }
 
 impl Listed {
+    /// Whose packs it lists: the store it read.
+    pub fn scope(&self) -> PackScope {
+        match self {
+            Listed::Empty { scope, .. } | Listed::Locked { scope, .. } => *scope,
+        }
+    }
+
     /// The packs it lists, in its order: what a pointer moves through.
     pub fn packs(&self) -> Vec<&PackRef> {
         match self {
@@ -109,12 +119,13 @@ impl Listed {
 
     /// The page, the pointer on the row of `pointed` where it names one.
     fn drawn(&self, pointed: Option<&PackRef>) -> Doc {
+        let whose = whose_packs(self.scope());
         match self {
-            Listed::Empty { looked_in } => Doc::new()
-                .with(Headline::new(Mark::Absent, "packs", "none installed"))
+            Listed::Empty { looked_in, .. } => Doc::new()
+                .with(Headline::new(Mark::Absent, whose, "none installed"))
                 .with(Furrow(Vec::new()))
                 .with(Fields::new().push_if("looked in", looked_in.as_str())),
-            Listed::Locked { packs, lock } => {
+            Listed::Locked { packs, lock, .. } => {
                 let mut checks = Checklist::default();
                 if let Some(pointed) = pointed {
                     checks = checks.pointing_at(pointed.to_string());
@@ -126,7 +137,7 @@ impl Listed {
                     true => Mark::Done,
                     false => Mark::Failed,
                 };
-                let installed = Headline::new(mark, "packs", format!("{} installed", packs.len()))
+                let installed = Headline::new(mark, whose, format!("{} installed", packs.len()))
                     .tally(checks.count(Found::Problem), checks.count(Found::Caution));
                 Doc::new()
                     .with(installed)
@@ -135,5 +146,14 @@ impl Listed {
                     .with(Fields::new().push_if("lock", lock.as_str()))
             }
         }
+    }
+}
+
+/// Whose packs a listing's headline names: this project's are `packs`, the
+/// user's, which every project reads, `the user's packs`.
+fn whose_packs(scope: PackScope) -> &'static str {
+    match scope {
+        PackScope::Project => "packs",
+        PackScope::User => "the user's packs",
     }
 }

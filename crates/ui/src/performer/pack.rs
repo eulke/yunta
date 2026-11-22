@@ -1,13 +1,14 @@
 //! See [`super`]. The work the packs ask for: the listing, an audit, a removal, a
 //! new pack, and a pack fetched then installed or updated, each as its `yunta pack`
-//! command does it. A fetched pack's copy is held under the fetch's ticket, so its
-//! install vendors the commit its audit read, never fetched again.
+//! command does it, on the store the work names. A fetched pack's copy is held under
+//! the fetch's ticket, so its install vendors the commit its audit read, never
+//! fetched again, into the store it was fetched for.
 
 use std::sync::Arc;
 
 use yunta_api::{Error, FetchedPack, Project, Remarks, Stop};
 use yunta_core::step::{Arg, NextStep};
-use yunta_core::PackRef;
+use yunta_core::{PackRef, PackScope};
 use yunta_render::refusal::Refused;
 
 use super::held::Found;
@@ -27,20 +28,27 @@ impl Performer {
         remarks: &dyn Remarks,
         stop: &Stop,
     ) -> Result<Outcome, Error> {
-        let packs = project.workspace.packs();
+        let workspace = &project.workspace;
         let outcome = match work {
-            PackOperation::Fetch { source } => {
-                let fetched = packs.fetch(&source, false, stop).await?;
+            PackOperation::Fetch { source, scope } => {
+                let fetched = workspace.packs(scope)?.fetch(&source, false, stop).await?;
                 let installs_as = NextStep::PackAdd {
                     source: Arg::Given(source),
+                    scope,
                 };
                 self.kept_fetched(ticket, fetched, installs_as)?
             }
-            PackOperation::FetchUpdate { pack, reference } => {
+            PackOperation::FetchUpdate {
+                pack,
+                reference,
+                scope,
+            } => {
+                let packs = workspace.packs(scope)?;
                 let fetched = packs.fetch_update(&pack, &reference, false, stop).await?;
                 let installs_as = NextStep::PackUpdate {
                     pack,
                     reference: Arg::Given(reference),
+                    scope,
                 };
                 self.kept_fetched(ticket, fetched, installs_as)?
             }
@@ -123,15 +131,16 @@ async fn other_performed(
     remarks: &dyn Remarks,
     stop: &Stop,
 ) -> Result<PackOutcome, Error> {
-    let packs = project.workspace.packs();
+    let packs = |scope: PackScope| project.workspace.packs(scope);
     let outcome = match work {
-        PackOperation::List => PackOutcome::Listed(Arc::new(packs.list()?)),
-        PackOperation::Audit { pack } => {
-            let audited = Arc::new(packs.audit(&pack, remarks, stop).await?);
+        PackOperation::List { scope } => PackOutcome::Listed(Arc::new(packs(scope)?.list()?)),
+        PackOperation::Audit { pack, scope } => {
+            let audited = packs(scope)?.audit(&pack, remarks, stop).await?;
+            let audited = Arc::new(audited);
             PackOutcome::Audited { pack, audited }
         }
-        PackOperation::Remove { pack } => {
-            packs.remove(&pack, remarks, stop).await?;
+        PackOperation::Remove { pack, scope } => {
+            packs(scope)?.remove(&pack, remarks, stop).await?;
             PackOutcome::Removed { pack }
         }
         PackOperation::Scaffold { pack } => pack_scaffolded(project, &pack, remarks, stop).await?,
@@ -152,7 +161,7 @@ async fn pack_scaffolded(
     stop: &Stop,
 ) -> Result<PackOutcome, Error> {
     let pack: PackRef = typed.parse().map_err(Refused::InvalidId)?;
-    let scaffolded = project.workspace.packs().scaffold(&pack).await?;
+    let scaffolded = project.workspace.scaffold_pack(&pack).await?;
     let checked = scaffolded
         .check(remarks, stop)
         .await
