@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use crate::RunState;
 use yunta_core::events::meta::EventMeta;
@@ -24,7 +24,7 @@ use yunta_core::{NodeId, Seq};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Moment {
     pub seq: Seq,
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     /// The run's own clock at this point: from its first event to this
     /// one. A reader following a run reads elapsed time, never a wall
     /// clock they have to subtract in their head.

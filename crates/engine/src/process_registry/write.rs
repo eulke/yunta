@@ -276,7 +276,7 @@ fn lock(state: &Mutex<EngineProcessFile>) -> std::sync::MutexGuard<'_, EnginePro
 mod tests {
     use super::*;
     use crate::process_registry::{read_registry, registry_path, Registry};
-    use chrono::{DateTime, Utc};
+    use jiff::Timestamp;
     use yunta_core::process::signal::Liveness;
 
     /// A host that cannot say when a pid started: the clock is then the only
@@ -287,7 +287,7 @@ mod tests {
         fn liveness(&self, _pid: Pid) -> Liveness {
             Liveness::Unknown
         }
-        fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
+        fn started(&self, _pid: Pid) -> Option<Timestamp> {
             None
         }
     }
@@ -296,7 +296,7 @@ mod tests {
     /// directory first, then the file.
     fn registry_in(run_dir: &Path) -> ProcessRegistry {
         std::fs::create_dir_all(registry_path(run_dir).parent().expect("a parent")).unwrap();
-        let started = DateTime::from_timestamp(1_700_000_000, 0).expect("a timestamp");
+        let started = Timestamp::from_second(1_700_000_000).expect("a timestamp");
         ProcessRegistry::create(
             run_dir,
             Pid::try_from(1u32).expect("a pid"),

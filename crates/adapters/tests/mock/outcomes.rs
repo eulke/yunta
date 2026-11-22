@@ -96,7 +96,7 @@ async fn a_limited_claude_session_ends_on_the_limit_and_the_reset_it_names() {
 
     let events = drain(mock.spawn(request(dir.path().to_path_buf())).await.unwrap()).await;
 
-    let reset = chrono::DateTime::from_timestamp(RESETS_AT, 0);
+    let reset = jiff::Timestamp::from_second(RESETS_AT).ok();
     assert!(
         matches!(
             events.last(),

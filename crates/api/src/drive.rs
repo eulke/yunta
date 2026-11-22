@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_adapters::{MockAdapter, MockFixture, RunPaths};
 use yunta_core::events::{self, DecisionOn, GateWaitingPayload, PauseReason};
 use yunta_core::port::{Forge, HumanInteraction, RunObserver};
@@ -83,7 +83,7 @@ pub struct ClosingReading {
     pub state: RunState,
     pub decision: Option<(DecisionOn, GateWaitingPayload)>,
     pub shown: Vec<ShownDocument>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// One run of a chain, handed to the engine with the claim this process

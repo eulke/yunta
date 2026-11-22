@@ -211,7 +211,7 @@ async fn write_provenance(
         workflow: ctx.manifest.workflow.name.clone(),
         workflow_hash: format!("sha256:{}", ctx.manifest.workflow_hash),
         mode: mode.to_string(),
-        distilled_at: ctx.clock.now().to_rfc3339(),
+        distilled_at: ctx.clock.now().to_string(),
         artifacts,
         verification: verification(&ctx.load_events().await?),
     };

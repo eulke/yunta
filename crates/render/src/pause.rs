@@ -95,7 +95,7 @@ pub fn sentence(pause: &PauseReason) -> String {
         PauseReason::AwaitingReset { node, at } => format!(
             "node `{node}` waits for its limit to reset at {}, and the run resumes on its own \
              then",
-            at.format(crate::INSTANT_FORMAT)
+            at.strftime(crate::INSTANT_FORMAT)
         ),
         PauseReason::Blocked { node, on } => blocked(node, on),
         PauseReason::GateAborted { node, free_text } => gate_aborted(node, free_text.as_deref()),

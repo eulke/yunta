@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use chrono::{DateTime, TimeZone, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{
     EventBody, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeFinishedPayload,
     NodeOutcome, NodeStartedPayload, RunCreatedPayload, RunEvent, StoredEvent, TokenUsage,
@@ -50,8 +50,9 @@ fn policy() -> SchedulingPolicy {
     }
 }
 
-fn at(offset_secs: i64) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap() + chrono::Duration::seconds(offset_secs)
+fn at(offset_secs: i64) -> Timestamp {
+    "2024-01-01T00:00:00Z".parse::<Timestamp>().unwrap()
+        + jiff::SignedDuration::from_secs(offset_secs)
 }
 
 fn tree(id: &str) -> TreeId {

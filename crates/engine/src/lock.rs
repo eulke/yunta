@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -30,7 +30,7 @@ pub trait OwnerProbe: Send + Sync {
     fn liveness(&self, pid: Pid) -> Liveness;
 
     /// When the process with `pid` started, where the host can tell.
-    fn started(&self, pid: Pid) -> Option<DateTime<Utc>>;
+    fn started(&self, pid: Pid) -> Option<Timestamp>;
 }
 
 /// The host's own process table.
@@ -41,8 +41,9 @@ impl OwnerProbe for SystemProbe {
         signal::liveness(pid)
     }
 
-    fn started(&self, pid: Pid) -> Option<DateTime<Utc>> {
-        yunta_core::process::process_start::process_start(pid).map(DateTime::from)
+    fn started(&self, pid: Pid) -> Option<Timestamp> {
+        yunta_core::process::process_start::process_start(pid)
+            .and_then(|start| Timestamp::try_from(start).ok())
     }
 }
 
@@ -55,7 +56,7 @@ pub struct LockOwner {
     #[serde(default)]
     pub schema_version: u32,
     pub pid: Pid,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
 }
 
 impl yunta_core::persisted::Persisted for LockOwner {
@@ -367,7 +368,7 @@ pub fn release(lock_path: &Path, owner: &LockOwner) -> Result<(), LockError> {
 /// host, would make every live holder read as a stranger and every lock
 /// stealable. The clock is only the fallback for a host that cannot say
 /// when a process started, where the comparison cannot happen anyway.
-pub(crate) fn taken_at(pid: Pid, probe: &dyn OwnerProbe, clock: &dyn Clock) -> DateTime<Utc> {
+pub(crate) fn taken_at(pid: Pid, probe: &dyn OwnerProbe, clock: &dyn Clock) -> Timestamp {
     probe.started(pid).unwrap_or_else(|| clock.now())
 }
 

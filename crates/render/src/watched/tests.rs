@@ -167,7 +167,7 @@ fn activity() -> Vec<yunta_core::events::ToolCall> {
         tool_name: Some("any".to_string()),
         action,
         target,
-        at: chrono::DateTime::UNIX_EPOCH,
+        at: jiff::Timestamp::UNIX_EPOCH,
     };
     let path = |path: &str| Some(ToolTarget::of_path(std::path::Path::new(path)));
     vec![
@@ -318,7 +318,7 @@ fn the_row_of_a_run_asked_at_its_terminal_says_whom_it_asks() {
         pid: yunta_core::Pid::current(),
         prompt: yunta_replay::registry::Prompt {
             node: Some(NodeId::from_static("implement")),
-            since: chrono::DateTime::UNIX_EPOCH,
+            since: jiff::Timestamp::UNIX_EPOCH,
         },
         waited: std::time::Duration::ZERO,
     };

@@ -86,9 +86,9 @@ async-trait.workspace = true
 # it.
 indexmap.workspace = true
 # The instants the engine stamps and compares: a lock's holder, a
-# registry's reading, a wait's deadline — already this exact `chrono`
-# version via `yunta-core`'s own dependency.
-chrono.workspace = true
+# registry's reading, a wait's deadline — the same `jiff` `yunta-core`
+# names them with.
+jiff.workspace = true
 # A canonical artifact is written through the run's own `scratch/` and
 # renamed into place, so a reader never meets half a document.
 tempfile.workspace = true

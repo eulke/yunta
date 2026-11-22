@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::disk::Space;
 use yunta_core::PoolConfig;
 
@@ -66,7 +66,7 @@ struct Emptiable {
     number: u32,
     path: PathBuf,
     bytes: u64,
-    used: Option<DateTime<Utc>>,
+    used: Option<Timestamp>,
 }
 
 impl Builds {

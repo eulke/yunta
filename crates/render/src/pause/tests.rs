@@ -2,8 +2,6 @@ use surco::words::Standing;
 use yunta_core::events::{Failure, PauseReason};
 use yunta_core::{NodeId, QuestionId, RunId};
 
-use chrono::TimeZone;
-
 use super::{asked_questions, run_waits, sentence, standing};
 
 #[test]
@@ -171,9 +169,7 @@ fn questions_awaiting_an_answer_are_said_one_way() {
 #[test]
 fn the_wait_line_names_the_run_its_word_and_the_node_the_reset_is_for() {
     let run = RunId::from_static("run-1");
-    let at = chrono::Utc
-        .with_ymd_and_hms(2026, 10, 13, 12, 0, 0)
-        .unwrap();
+    let at = "2026-10-13T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let reason = PauseReason::AwaitingReset {
         node: NodeId::from_static("build"),
         at,

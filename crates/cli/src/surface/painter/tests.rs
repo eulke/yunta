@@ -163,11 +163,11 @@ fn registered(dir: &Path, pid: Pid, asking: Option<&str>) {
         engine_pid: pid,
         started_at: yunta_engine::lock::SystemProbe
             .started(pid)
-            .unwrap_or(chrono::DateTime::UNIX_EPOCH),
+            .unwrap_or(jiff::Timestamp::UNIX_EPOCH),
         process_groups: Vec::new(),
         asking: asking.map(|node| Prompt {
             node: Some(NodeId::from(node)),
-            since: chrono::DateTime::UNIX_EPOCH,
+            since: jiff::Timestamp::UNIX_EPOCH,
         }),
         words: None,
     };

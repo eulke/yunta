@@ -1,27 +1,27 @@
 use super::*;
 
 /// A probe that says a process started at a fixed instant.
-struct Table(Option<DateTime<Utc>>);
+struct Table(Option<Timestamp>);
 
 impl OwnerProbe for Table {
     fn liveness(&self, _pid: Pid) -> Liveness {
         Liveness::Alive
     }
-    fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
+    fn started(&self, _pid: Pid) -> Option<Timestamp> {
         self.0
     }
 }
 
-struct Frozen(DateTime<Utc>);
+struct Frozen(Timestamp);
 
 impl Clock for Frozen {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         self.0
     }
 }
 
-fn at(year: i32) -> DateTime<Utc> {
-    chrono::TimeZone::with_ymd_and_hms(&Utc, year, 1, 1, 0, 0, 0).unwrap()
+fn at(year: i32) -> Timestamp {
+    format!("{year}-01-01T00:00:00Z").parse().unwrap()
 }
 
 /// The record states when the process started *by the same table*
@@ -77,13 +77,13 @@ fn a_pid_reused_by_a_later_process_reads_as_gone() {
 
 /// A probe that says a pid's process cannot be signalled, as another
 /// user's cannot, and when it started.
-struct Foreign(Option<DateTime<Utc>>);
+struct Foreign(Option<Timestamp>);
 
 impl OwnerProbe for Foreign {
     fn liveness(&self, _pid: Pid) -> Liveness {
         Liveness::Unknown
     }
-    fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
+    fn started(&self, _pid: Pid) -> Option<Timestamp> {
         self.0
     }
 }

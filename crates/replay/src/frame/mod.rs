@@ -25,7 +25,7 @@ mod sample;
 use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::words::Standing;
 
 use crate::clock::TimeSpent;
@@ -196,7 +196,7 @@ impl RunFrame {
         state: &RunState,
         prior: Option<&PriorEstimation>,
         engine: &Engine,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> RunFrame {
         let stats = RunStats::at(state, workflow, now);
         let mode = state.run.mode().clone();

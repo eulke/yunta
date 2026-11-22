@@ -72,7 +72,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::findings::FindingLedger;
 use yunta_core::events::tasks::ledger::UnknownTask;
@@ -255,7 +255,7 @@ impl RunState {
     /// Where the run's wall-clock went. With `until`, the stretch from the
     /// last applied event to it is counted too, classified by what is open
     /// now.
-    pub fn time_spent(&self, until: Option<DateTime<Utc>>) -> TimeSpent {
+    pub fn time_spent(&self, until: Option<Timestamp>) -> TimeSpent {
         let open = Open::of(&self.run, &self.nodes, &self.gates, &self.tasks);
         self.clock.spent(&open, self.run.suspensions(), until)
     }
@@ -266,14 +266,14 @@ impl RunState {
     /// the last applied event to it, classified by what is open now. Two
     /// nodes asked at once each hold the stretch the run counts once. A node
     /// no person was asked about is absent.
-    pub fn people_at(&self, until: Option<DateTime<Utc>>) -> BTreeMap<NodeId, Duration> {
+    pub fn people_at(&self, until: Option<Timestamp>) -> BTreeMap<NodeId, Duration> {
         let open = Open::of(&self.run, &self.nodes, &self.gates, &self.tasks);
         self.clock.people_at(&open, self.run.suspensions(), until)
     }
 
     /// The awake time from the first event to `until`, or to the last
     /// applied event when `until` is `None`. `None` for a log with no event.
-    pub fn elapsed(&self, until: Option<DateTime<Utc>>) -> Option<Duration> {
+    pub fn elapsed(&self, until: Option<Timestamp>) -> Option<Duration> {
         let (first, end) = self.clock.window(until)?;
         Some(self.run.suspensions().awake_between(first, end))
     }

@@ -14,7 +14,7 @@ fn fold(events: Vec<NodeEvent>) -> NodeLedger {
     for (seq, event) in events.iter().enumerate() {
         let meta = EventMeta {
             seq: (seq as u64 + 1).into(),
-            at: chrono::DateTime::UNIX_EPOCH,
+            at: jiff::Timestamp::UNIX_EPOCH,
             node: Some(&node),
         };
         ledger.apply(event, &meta, &Suspensions::default());
@@ -74,7 +74,7 @@ fn fold_nodes(events: Vec<(&str, NodeEvent)>) -> NodeLedger {
             event,
             &EventMeta {
                 seq: (seq as u64 + 1).into(),
-                at: chrono::DateTime::UNIX_EPOCH,
+                at: jiff::Timestamp::UNIX_EPOCH,
                 node: Some(&node),
             },
             &Suspensions::default(),
@@ -211,7 +211,7 @@ fn heard(events: &[SessionEvent]) -> NodeLedger {
     for (seq, event) in events.iter().enumerate() {
         let meta = EventMeta {
             seq: (seq as u64 + 1).into(),
-            at: chrono::DateTime::UNIX_EPOCH,
+            at: jiff::Timestamp::UNIX_EPOCH,
             node: Some(&node),
         };
         ledger.apply_session(event, &meta).unwrap();

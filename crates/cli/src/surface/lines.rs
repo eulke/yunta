@@ -182,7 +182,7 @@ mod pause_reason_tests {
             },
             PauseReason::AwaitingReset {
                 node: NodeId::from("build"),
-                at: chrono::DateTime::UNIX_EPOCH,
+                at: jiff::Timestamp::UNIX_EPOCH,
             },
             PauseReason::Blocked {
                 node: NodeId::from("ship"),
@@ -247,7 +247,7 @@ mod pause_reason_tests {
             seq: 1.into(),
             run_id: "01JQ0000000000000000000000".into(),
             node_id: Some("approve".into()),
-            timestamp: chrono::DateTime::UNIX_EPOCH,
+            timestamp: jiff::Timestamp::UNIX_EPOCH,
             body: EventBody::Known(EventPayload::Node(NodeEvent::Failed(
                 NodeFailedPayload::new(failure, TokenUsage::default()),
             ))),

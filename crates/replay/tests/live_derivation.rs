@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use proptest::prelude::*;
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, Capabilities, EventPayload,
@@ -30,8 +30,8 @@ mod messages;
 use messages::{tool_use, usage};
 
 /// The instant `offset_secs` from the origin every log here starts at.
-fn at(offset_secs: i64) -> DateTime<Utc> {
-    fixed_now() + chrono::Duration::seconds(offset_secs)
+fn at(offset_secs: i64) -> Timestamp {
+    fixed_now() + jiff::SignedDuration::from_secs(offset_secs)
 }
 
 fn node(id: &str) -> Node {
@@ -290,7 +290,7 @@ fn an_open_attempts_elapsed_is_the_time_since_the_start_the_log_names() {
     let stats = RunStats::at(&RunState::replay(&events), &workflow(&["build"]), now);
     assert_eq!(
         stats.nodes[0].open_attempt,
-        Some((now - started).to_std().expect("now is after the start"))
+        Some(Duration::try_from(now - started).expect("now is after the start"))
     );
 }
 

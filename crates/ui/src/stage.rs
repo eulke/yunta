@@ -44,7 +44,7 @@ pub use start::StartStage;
 pub use stats::StatsStage;
 pub use upkeep::UpkeepStage;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::components::{Screen, ScreenLaid};
 use surco::look::Look;
 
@@ -225,7 +225,7 @@ impl Stage {
     /// What the stage offers at `now`, each with the key that takes it here: what a
     /// palette over it lists first. A stage whose prompt is the act, a decision's card,
     /// a question, a form, offers none of its own.
-    pub(crate) fn offered(&self, now: DateTime<Utc>) -> Vec<Act> {
+    pub(crate) fn offered(&self, now: Timestamp) -> Vec<Act> {
         match self {
             Stage::Field(field) => field.offered(),
             Stage::Run(run) => run.offered(now),
@@ -245,7 +245,7 @@ impl Stage {
     }
 
     /// The stage as a screen at `now`.
-    pub(crate) fn screen(&self, look: &Look, now: DateTime<Utc>) -> Screen {
+    pub(crate) fn screen(&self, look: &Look, now: Timestamp) -> Screen {
         match self {
             Stage::Signpost => signpost::screen(look),
             Stage::Field(field) => field.screen(look),
@@ -324,7 +324,7 @@ impl Stage {
     }
 
     /// What `stroke` asks for here at `now`.
-    pub(crate) fn pressed(&mut self, stroke: Stroke, now: DateTime<Utc>) -> Vec<Want> {
+    pub(crate) fn pressed(&mut self, stroke: Stroke, now: Timestamp) -> Vec<Want> {
         match self {
             Stage::Signpost => signpost::pressed(stroke),
             Stage::Field(field) => field.pressed(stroke),
@@ -415,7 +415,7 @@ impl Stage {
     }
 
     /// What news of lasting work the stage asked for does here at `now`.
-    pub(crate) fn heard(&mut self, news: News, now: DateTime<Utc>) -> Vec<Want> {
+    pub(crate) fn heard(&mut self, news: News, now: Timestamp) -> Vec<Want> {
         match self {
             Stage::Signpost
             | Stage::Field(_)

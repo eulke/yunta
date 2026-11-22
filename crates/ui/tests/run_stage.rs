@@ -325,10 +325,9 @@ async fn a_moving_runs_time_reads_a_second_more_each_time_it_is_handed_in() {
             .expect("the run across the screen");
         Markdown.draw(&about)
     };
-    let a_while_in = fixed_now() + chrono::Duration::seconds(10);
+    let a_while_in = fixed_now() + jiff::SignedDuration::from_secs(10);
     state.update(Input::Time(a_while_in));
     assert!(across(&state).contains("10s"), "{}", across(&state));
-    let every = chrono::Duration::from_std(State::TIME_EVERY).expect("a cadence in range");
-    state.update(Input::Time(a_while_in + every));
+    state.update(Input::Time(a_while_in + State::TIME_EVERY));
     assert!(across(&state).contains("11s"), "{}", across(&state));
 }

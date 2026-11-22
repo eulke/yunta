@@ -36,7 +36,7 @@ pub enum WaitingOnJson {
         on: &'static str,
         #[serde(skip_serializing_if = "Option::is_none")]
         node: Option<String>,
-        since: chrono::DateTime<chrono::Utc>,
+        since: jiff::Timestamp,
         pid: yunta_core::Pid,
     },
 }

@@ -172,7 +172,7 @@ impl EventDraft {
 pub struct StoredEvent {
     pub run_id: RunId,
     pub seq: Seq,
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: jiff::Timestamp,
     pub node_id: Option<NodeId>,
     pub body: EventBody,
 }
@@ -330,7 +330,8 @@ impl EventBody {
 struct Envelope {
     run_id: RunId,
     seq: Seq,
-    timestamp: chrono::DateTime<chrono::Utc>,
+    #[schemars(with = "crate::schema::Instant")]
+    timestamp: jiff::Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     node_id: Option<NodeId>,
     /// Present only for an unknown kind, whose version has no other

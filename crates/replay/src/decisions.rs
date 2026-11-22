@@ -3,7 +3,7 @@
 //! whether that choice runs the node again, and whether a wait for a limit's
 //! reset is over.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{GateResolvedPayload, HumanChoice, NodeState, PauseReason};
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{NodeId, Seq};
@@ -127,7 +127,7 @@ impl RunState {
     /// a wake logged at or after that reset has resumed it. The engine never
     /// waits for a reset: a wake before it pauses again on the same reset, so
     /// only a resume from the reset on ends the wait.
-    pub fn reset_waited(&self, node: &NodeId, at: DateTime<Utc>) -> bool {
+    pub fn reset_waited(&self, node: &NodeId, at: Timestamp) -> bool {
         matches!(
             self.run.last_pause(),
             Some((PauseReason::AwaitingReset { node: waited, at: due }, _))

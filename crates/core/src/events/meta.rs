@@ -6,7 +6,7 @@
 //! fact was attributed to. That is the envelope, and this is the part of
 //! it a fold reads.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use crate::ids::{NodeId, Seq};
 
@@ -14,7 +14,7 @@ use crate::ids::{NodeId, Seq};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventMeta<'a> {
     pub seq: Seq,
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     /// The node the event was written under; `None` for a run-level
     /// fact.
     pub node: Option<&'a NodeId>,

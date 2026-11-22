@@ -3,27 +3,27 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 /// One suspension: it ended when the engine noticed the host awake again,
 /// and lasted `slept` before that.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suspension {
-    pub woke_at: DateTime<Utc>,
+    pub woke_at: Timestamp,
     pub slept: Duration,
 }
 
 impl Suspension {
     /// When the host went to sleep.
-    fn fell_asleep(&self) -> DateTime<Utc> {
+    fn fell_asleep(&self) -> Timestamp {
         self.woke_at - self.slept
     }
 
     /// How much of `[from, to]` the host spent in this suspension.
-    fn inside(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Duration {
+    fn inside(&self, from: Timestamp, to: Timestamp) -> Duration {
         let start = self.fell_asleep().max(from);
         let end = self.woke_at.min(to);
-        (end - start).to_std().unwrap_or(Duration::ZERO)
+        Duration::try_from(end - start).unwrap_or(Duration::ZERO)
     }
 }
 
@@ -42,7 +42,7 @@ impl Suspensions {
     }
 
     /// How much of `[from, to]` the host spent suspended.
-    pub fn asleep_between(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Duration {
+    pub fn asleep_between(&self, from: Timestamp, to: Timestamp) -> Duration {
         self.0
             .iter()
             .map(|suspension| suspension.inside(from, to))
@@ -56,8 +56,8 @@ impl Suspensions {
     /// Every duration the run reports reads its intervals through this,
     /// so a machine that slept through a node never counts as the node
     /// working.
-    pub fn awake_between(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Duration {
-        let wall = (to - from).to_std().unwrap_or(Duration::ZERO);
+    pub fn awake_between(&self, from: Timestamp, to: Timestamp) -> Duration {
+        let wall = Duration::try_from(to - from).unwrap_or(Duration::ZERO);
         if self.0.is_empty() {
             // A host that never slept: every stretch is awake, and replay
             // asks this once per event.

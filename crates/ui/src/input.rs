@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::components::ScreenLaid;
 use yunta_api::Remark;
 
@@ -19,7 +19,7 @@ pub enum Input {
     /// its first line, a page, the last first line.
     Laid(ScreenLaid),
     /// The instant the application stands at now.
-    Time(DateTime<Utc>),
+    Time(Timestamp),
     /// What a piece of work remarks while it works.
     Remark(Ticket, Remark),
     /// What lasting work hands back while it lasts.

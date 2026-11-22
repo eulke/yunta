@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{EventPayload, SessionEvent};
 use yunta_core::process::signal::Liveness;
 use yunta_core::refusal::Unservable;
@@ -173,7 +173,7 @@ impl<'p> OpenedRun<'p> {
 /// take at `now` is refused as: an engine asking a person at its terminal,
 /// another engine moving it, or a lock that names nobody this user can check.
 /// A stopped wait is the caller's stop.
-fn held_refusal(id: &RunId, dir: &Path, refusal: LockError, now: DateTime<Utc>) -> Error {
+fn held_refusal(id: &RunId, dir: &Path, refusal: LockError, now: Timestamp) -> Error {
     let unclear = |lock, pid| {
         Error::from(Refused::HoldUnclear {
             run: id.clone(),
@@ -283,7 +283,7 @@ async fn waited_out_reset(
 
 /// Waits until `at` before anything is taken. The caller's stop ends the wait
 /// first and returns `false`; a past instant returns at once.
-async fn waited_until(clock: &dyn Clock, at: DateTime<Utc>, stop: &Stop) -> bool {
+async fn waited_until(clock: &dyn Clock, at: Timestamp, stop: &Stop) -> bool {
     waited_out(|| time_until(clock, at), stop).await
 }
 
@@ -305,13 +305,12 @@ async fn waited_out(left: impl Fn() -> Duration, stop: &Stop) -> bool {
 }
 
 /// How long until `at` by `clock`: zero once it has passed.
-pub(crate) fn time_until(clock: &dyn Clock, at: DateTime<Utc>) -> Duration {
-    (at - clock.now()).to_std().unwrap_or_default()
+pub(crate) fn time_until(clock: &dyn Clock, at: Timestamp) -> Duration {
+    Duration::try_from(at - clock.now()).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
 
     use super::*;
     use yunta_core::Pid;
@@ -334,7 +333,7 @@ mod tests {
         LockOwner {
             schema_version: 1,
             pid: Pid::try_from(91930_u32).unwrap(),
-            started_at: DateTime::UNIX_EPOCH,
+            started_at: Timestamp::UNIX_EPOCH,
         }
     }
 
@@ -343,7 +342,7 @@ mod tests {
             &RunId::from_static(WHOLE_ID),
             run_dir(),
             refusal,
-            DateTime::UNIX_EPOCH,
+            Timestamp::UNIX_EPOCH,
         )
     }
 
@@ -442,7 +441,7 @@ mod tests {
         let stop = Stop::new();
         stop.stop();
         // A reset no test run reaches: the wait can only end by the stop.
-        let ahead = Utc.with_ymd_and_hms(2100, 1, 1, 0, 0, 0).unwrap();
+        let ahead = "2100-01-01T00:00:00Z".parse::<Timestamp>().unwrap();
         assert!(!waited_until(&yunta_testkit_core::FixedClock, ahead, &stop).await);
     }
 
@@ -468,7 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_reset_already_past_is_not_waited_for() {
-        let past = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
+        let past = "2000-01-01T00:00:00Z".parse::<Timestamp>().unwrap();
         assert!(waited_until(&yunta_testkit_core::FixedClock, past, &Stop::new()).await);
     }
 }

@@ -3,6 +3,8 @@
 //! drawn with its paint dropped, since a color changes how a word looks and never which
 //! word it is.
 
+use std::num::NonZeroU16;
+
 use surco::paint::{SYNC_BEGIN, SYNC_END};
 
 /// A terminal's screen at one moment, as a person reads it.
@@ -25,7 +27,11 @@ impl Screen {
     /// The screen of a terminal `columns` by `rows` once it read `drawn`: a drawing still
     /// on its way is out of sight, as a terminal that takes one whole keeps it.
     pub(crate) fn of(drawn: &str, (columns, rows): (u16, u16)) -> Screen {
-        let mut parser = vt100::Parser::new(rows, columns, 0);
+        let cells = |count: u16, what: &str| {
+            NonZeroU16::new(count)
+                .unwrap_or_else(|| panic!("a terminal with no {what} draws nothing"))
+        };
+        let mut parser = vt100::Parser::new(cells(rows, "rows"), cells(columns, "columns"), 0);
         parser.process(drawn_whole(drawn).as_bytes());
         let screen = parser.screen();
         Screen {

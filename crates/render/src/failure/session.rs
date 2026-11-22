@@ -73,7 +73,7 @@ pub(crate) fn limit_sentence(limit: &AccountLimit) -> String {
         LimitSource::Forge => "the forge rate-limited its requests".to_string(),
     };
     let said = match &limit.resets_at {
-        Some(at) => format!("{who} until {}", at.format(INSTANT_FORMAT)),
+        Some(at) => format!("{who} until {}", at.strftime(INSTANT_FORMAT)),
         None => who,
     };
     text::detailed(said, &limit.message)

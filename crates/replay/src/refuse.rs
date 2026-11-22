@@ -7,7 +7,7 @@
 //! is the one owner step that reaches two ledgers at once, so it lives here
 //! beside the gate refusals it follows.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{
     EventMeta, EventPayload, GateEvent, NodeEvent, NodeWait, QuestionsAskedPayload, ScopeEvent,
     StoredEvent, TaskEvent,
@@ -224,7 +224,7 @@ impl RunState {
 
     /// Restores the state `node` had before its wait, and resumes the work
     /// the wait stopped.
-    fn unpark(&mut self, node: &NodeId, at: DateTime<Utc>) {
+    fn unpark(&mut self, node: &NodeId, at: Timestamp) {
         let prior = self.pre_gate.remove(node).flatten();
         self.nodes.set_state(node, prior);
         self.nodes.resume_working(node, at);

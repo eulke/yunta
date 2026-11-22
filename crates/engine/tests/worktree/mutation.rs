@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use tokio_util::sync::CancellationToken;
 use yunta_core::{Isolation, Pid};
 use yunta_engine::lock::{self, LockError, SystemProbe};
@@ -27,7 +27,10 @@ async fn both_locks_share_one_protocol() {
 
     // The same stale record on both locks: a dead holder that took them
     // an hour ago.
-    let stale = owner_record(dead_pid(), fixed_now() - chrono::Duration::hours(1));
+    let stale = owner_record(
+        dead_pid(),
+        fixed_now() - jiff::SignedDuration::from_hours(1),
+    );
     std::fs::write(lock_file(&repo), &stale).unwrap();
     std::fs::write(mutation_lock_file(&repo), &stale).unwrap();
     // A hard link to the holder's file: it keeps the stale record if the
@@ -58,7 +61,7 @@ async fn both_locks_share_one_protocol() {
     let holder = read_owner(&lock_file(&repo));
     assert_eq!(holder.pid, Pid::current());
     let expected_start = yunta_core::process::process_start::process_start(Pid::current())
-        .map(DateTime::<Utc>::from)
+        .and_then(|start| Timestamp::try_from(start).ok())
         .unwrap_or_else(|| owner.supervision().clock.now());
     assert_eq!(holder.started_at, expected_start);
     assert_eq!(

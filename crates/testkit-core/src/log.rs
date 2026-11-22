@@ -7,7 +7,7 @@
 //! test says so, and positions from 1 in the order the events were
 //! stated.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use yunta_core::events::{EventBody, EventPayload, StoredEvent};
 use yunta_core::{NodeId, RunId};
@@ -25,7 +25,7 @@ use crate::clock::fixed_now;
 /// ```
 pub struct Log {
     run_id: RunId,
-    at: DateTime<Utc>,
+    at: Timestamp,
     events: Vec<StoredEvent>,
 }
 
@@ -42,7 +42,7 @@ impl Log {
 
     /// Moves the builder's clock to `instant`. Every event stated after
     /// this carries it, until the clock moves again.
-    pub fn at(mut self, instant: DateTime<Utc>) -> Self {
+    pub fn at(mut self, instant: Timestamp) -> Self {
         self.at = instant;
         self
     }
@@ -50,7 +50,7 @@ impl Log {
     /// Moves the builder's clock `secs` forward — how a test says time
     /// passed between two events without naming an instant.
     pub fn after(mut self, secs: i64) -> Self {
-        self.at += chrono::Duration::seconds(secs);
+        self.at += jiff::SignedDuration::from_secs(secs);
         self
     }
 
