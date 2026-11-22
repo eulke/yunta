@@ -8,13 +8,15 @@
 //! parent's `child_run_created`, the successor's `run_created.promoted_from`
 //! — because a relation spelled only in a name is in no log to replay.
 
-use chrono::{DateTime, Utc};
+use std::time::SystemTime;
+
+use jiff::Timestamp;
 
 use crate::RunId;
 
 pub trait IdSource: Send + Sync {
     /// A run id no other run has, for a run born at `at`.
-    fn mint_run_id(&self, at: DateTime<Utc>) -> RunId;
+    fn mint_run_id(&self, at: Timestamp) -> RunId;
 }
 
 /// ULIDs: 26 Crockford base32 characters — the first ten encode the
@@ -24,7 +26,10 @@ pub trait IdSource: Send + Sync {
 pub struct SystemIdSource;
 
 impl IdSource for SystemIdSource {
-    fn mint_run_id(&self, at: DateTime<Utc>) -> RunId {
-        RunId::from(ulid::Ulid::from_datetime(at.into()))
+    fn mint_run_id(&self, at: Timestamp) -> RunId {
+        // A ULID stamps an instant before the epoch as the epoch itself, and
+        // so this stamps one the platform's clock type cannot hold.
+        let at = SystemTime::try_from(at).unwrap_or(SystemTime::UNIX_EPOCH);
+        RunId::from(ulid::Ulid::from_datetime(at))
     }
 }

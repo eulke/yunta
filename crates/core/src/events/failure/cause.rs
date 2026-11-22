@@ -1,7 +1,7 @@
 //! What a session's CLI said when it failed, as data: a limit its account
 //! reached, or a refusal and the reason it gave.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::AdapterId;
@@ -14,7 +14,7 @@ use crate::ids::AdapterId;
 pub enum FailureCause {
     /// The account's limit was reached; becomes `Failure::Limit`, never a refusal.
     /// `None` when the CLI named no reset time.
-    Limit { resets_at: Option<DateTime<Utc>> },
+    Limit { resets_at: Option<Timestamp> },
     /// The session refused the request, and why.
     Refused(RefusalCause),
 }

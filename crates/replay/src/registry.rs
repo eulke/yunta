@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use yunta_core::{NodeId, Pid};
 
@@ -82,7 +82,7 @@ impl Engine {
     /// Whom the live process is asking at its terminal, measured at `at`:
     /// the one place an [`Asking`] is built. `None` when it asks no one, or
     /// none lives.
-    pub fn asking(&self, at: DateTime<Utc>) -> Option<Asking> {
+    pub fn asking(&self, at: Timestamp) -> Option<Asking> {
         let Engine::Alive {
             pid,
             prompt: Some(prompt),
@@ -96,7 +96,7 @@ impl Engine {
             prompt: prompt.clone(),
             // A prompt stamped after the instant it is read at has not
             // waited yet: the host's clock and the registry's disagree.
-            waited: (at - prompt.since).to_std().unwrap_or_default(),
+            waited: Duration::try_from(at - prompt.since).unwrap_or_default(),
         })
     }
 }
@@ -108,7 +108,7 @@ impl Engine {
 pub struct Prompt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<NodeId>,
-    pub since: DateTime<Utc>,
+    pub since: Timestamp,
 }
 
 impl Prompt {

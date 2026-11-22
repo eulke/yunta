@@ -42,7 +42,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use crate::{FindingActivity, RunState, Submissions, TimeSpent};
 use yunta_core::events::{Spend, Suspensions, TokenUsage, UnknownKindCount};
@@ -208,7 +208,7 @@ impl RunStats {
     /// broken stops its clock and its open attempts at its last applied
     /// event, whatever `now` is. `now` is the caller's own instant, injected:
     /// this module never reads a clock.
-    pub fn at(state: &RunState, workflow: &Workflow, now: DateTime<Utc>) -> RunStats {
+    pub fn at(state: &RunState, workflow: &Workflow, now: Timestamp) -> RunStats {
         observed(state, workflow, Some(now))
     }
 
@@ -228,7 +228,7 @@ impl RunStats {
 /// things off one log — a frame reads its stats, its phase and its
 /// tokens — replays it once and hands the answer down, rather than
 /// paying for the same fold again per reader.
-fn observed(state: &RunState, workflow: &Workflow, observed_at: Option<DateTime<Utc>>) -> RunStats {
+fn observed(state: &RunState, workflow: &Workflow, observed_at: Option<Timestamp>) -> RunStats {
     let asleep = state.run.suspensions();
     // The clock is read to the observation while the run is still going,
     // and to its last applied event once it has finished or broken: a
@@ -304,7 +304,7 @@ fn node_stats(
     state: &RunState,
     workflow: &Workflow,
     asleep: &Suspensions,
-    open_at: Option<DateTime<Utc>>,
+    open_at: Option<Timestamp>,
 ) -> Vec<NodeStat> {
     let run_start = state.clock().first_at();
     workflow
@@ -319,8 +319,8 @@ fn node_stat(
     state: &RunState,
     node: &Node,
     asleep: &Suspensions,
-    run_start: Option<DateTime<Utc>>,
-    open_at: Option<DateTime<Utc>>,
+    run_start: Option<Timestamp>,
+    open_at: Option<Timestamp>,
 ) -> Option<NodeStat> {
     let record = state.nodes.get(&node.id)?;
     let started = record.first_started?;

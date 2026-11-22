@@ -38,7 +38,7 @@ rustix.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-chrono = { workspace = true, features = ["serde"] }
+jiff.workspace = true
 sha2.workspace = true
 # Git's blob ids (`git_blob_id`) are SHA-1 digests of a header and the bytes.
 sha1.workspace = true
@@ -67,9 +67,10 @@ serde-saphyr.workspace = true
 # in the workspace graph through `rmcp`.
 ulid.workspace = true
 # The JSON Schema of every document is generated from these types; the
-# crate is already in the workspace graph through `rmcp`, with the same
-# `chrono` support. `indexmap2` describes `modes:`, an ordered map.
-schemars = { workspace = true, features = ["chrono04", "indexmap2"] }
+# crate is already in the workspace graph through `rmcp`. It describes no
+# jiff instant, so `schema::Instant` does. `indexmap2` describes `modes:`,
+# an ordered map.
+schemars = { workspace = true, features = ["indexmap2"] }
 # A session's mark is a random v4 id beside its run's: unique to the session
 # and tied to nothing else. The crate is already in the graph through the engine.
 uuid = { workspace = true, features = ["v4"] }

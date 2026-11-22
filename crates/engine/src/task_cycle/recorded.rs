@@ -125,7 +125,7 @@ mod tests {
                 .parse::<RunId>()
                 .expect("a run id"),
             seq: Seq::from(seq),
-            timestamp: chrono::DateTime::UNIX_EPOCH,
+            timestamp: jiff::Timestamp::UNIX_EPOCH,
             node_id: None,
             body: EventBody::Known(payload),
         }

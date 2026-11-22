@@ -26,7 +26,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use yunta_core::port::Said;
@@ -83,7 +83,7 @@ pub struct Spoken {
 
 impl Spoken {
     /// This, said by `node` of `run` at `at`.
-    pub fn said(self, run_id: RunId, node_id: NodeId, at: DateTime<Utc>) -> Said {
+    pub fn said(self, run_id: RunId, node_id: NodeId, at: Timestamp) -> Said {
         Said {
             run_id,
             node_id,

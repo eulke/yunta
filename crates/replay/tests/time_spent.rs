@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, TimeZone, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{EventBody, StoredEvent};
 use yunta_core::NodeId;
 use yunta_replay::stats::RunStats;
@@ -23,7 +23,7 @@ fn log(entries: &[(i64, Option<&str>, &str)]) -> Vec<StoredEvent> {
 
 /// [`log`], its instants in milliseconds since the run began.
 fn log_ms(entries: &[(i64, Option<&str>, &str)]) -> Vec<StoredEvent> {
-    let start: DateTime<Utc> = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let start: Timestamp = "2026-01-01T00:00:00Z".parse().unwrap();
     entries
         .iter()
         .enumerate()
@@ -34,7 +34,7 @@ fn log_ms(entries: &[(i64, Option<&str>, &str)]) -> Vec<StoredEvent> {
             StoredEvent {
                 run_id: "run-time".into(),
                 seq: (index as u64 + 1).into(),
-                timestamp: start + chrono::Duration::milliseconds(*at),
+                timestamp: start + jiff::SignedDuration::from_millis(*at),
                 node_id: node.map(Into::into),
                 body: EventBody::from_object(object, 1).unwrap(),
             }
@@ -246,7 +246,7 @@ fn a_run_parked_on_a_gate_waits_on_a_person_until_it_wakes() {
 #[test]
 fn a_run_still_parked_on_a_gate_waits_on_a_person_to_the_instant_read() {
     let events = log(&[(0, None, CREATED), (10, None, PARKED_ON_GATE)]);
-    let now = events[0].timestamp + chrono::Duration::seconds(70);
+    let now = events[0].timestamp + jiff::SignedDuration::from_secs(70);
 
     let time = RunState::replay(&events).time_spent(Some(now));
 
@@ -306,7 +306,7 @@ fn a_person_s_time_is_credited_to_each_node_asked_about() {
 fn a_person_still_asked_is_credited_up_to_the_instant_read() {
     let events = log(&[(0, None, CREATED), (10, Some("approve"), ASKING)]);
     let state = RunState::replay(&events);
-    let now = events[0].timestamp + chrono::Duration::seconds(70);
+    let now = events[0].timestamp + jiff::SignedDuration::from_secs(70);
 
     assert_eq!(
         state.people_at(Some(now)).get(&NodeId::from("approve")),
@@ -321,7 +321,7 @@ fn a_person_still_asked_is_credited_up_to_the_instant_read() {
 fn stats_read_at_an_instant_hold_each_node_s_person_time() {
     let events = log(&[(0, None, CREATED), (10, Some("a"), ASKING)]);
     let state = RunState::replay(&events);
-    let now = events[0].timestamp + chrono::Duration::seconds(70);
+    let now = events[0].timestamp + jiff::SignedDuration::from_secs(70);
 
     let stats = RunStats::at(&state, &timed_workflow(), now);
 
@@ -345,7 +345,7 @@ fn an_attempt_still_open_at_a_broken_log_stops_at_its_last_event() {
         (60, Some("b"), FINISHED),
     ]);
     let state = RunState::replay(&events);
-    let later = events[0].timestamp + chrono::Duration::seconds(600);
+    let later = events[0].timestamp + jiff::SignedDuration::from_secs(600);
 
     assert!(state.broken.is_some());
     let stats = RunStats::at(&state, &timed_workflow(), later);
@@ -365,7 +365,7 @@ fn an_attempt_still_open_at_a_finished_run_stops_at_its_close() {
         (45, None, RUN_FINISHED),
     ]);
     let state = RunState::replay(&events);
-    let later = events[0].timestamp + chrono::Duration::seconds(600);
+    let later = events[0].timestamp + jiff::SignedDuration::from_secs(600);
 
     let stats = RunStats::at(&state, &timed_workflow(), later);
 

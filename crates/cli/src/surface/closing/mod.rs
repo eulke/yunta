@@ -14,7 +14,7 @@
 //!
 //! This module gathers what the page reads from a stopped run.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::doc::Depth;
 use yunta_core::events::DecisionOn;
 use yunta_core::events::GateWaitingPayload;
@@ -35,7 +35,7 @@ pub(crate) struct ClosingEnv<'a> {
     /// The run as its log derives it, once the run has stopped.
     pub(crate) state: RunState,
     pub(crate) prior: Option<&'a PriorEstimation>,
-    pub(crate) now: DateTime<Utc>,
+    pub(crate) now: Timestamp,
     /// The decision a parked run stopped on, rebuilt from the manifest and
     /// the log. `None` for a pause with no menu to rebuild, and for a run
     /// that is not parked at all.

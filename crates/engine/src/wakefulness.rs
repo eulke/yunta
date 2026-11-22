@@ -15,7 +15,7 @@ use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use tokio_util::sync::CancellationToken;
 use yunta_core::{Clock, SETTLE_AFTER_SUSPENSION};
 use yunta_storage::StorageError;
@@ -34,7 +34,7 @@ const LOOK: Duration = Duration::from_secs(1);
 /// One reading of both clocks.
 #[derive(Debug, Clone, Copy)]
 struct Sample {
-    wall: DateTime<Utc>,
+    wall: Timestamp,
     awake: Instant,
 }
 
@@ -42,7 +42,7 @@ struct Sample {
 /// time that passed less the awake time that did. A wall clock set back
 /// says nothing about sleep.
 fn slept_between(earlier: &Sample, later: &Sample) -> Option<Duration> {
-    let wall = (later.wall - earlier.wall).to_std().ok()?;
+    let wall = Duration::try_from(later.wall - earlier.wall).ok()?;
     let awake = later.awake.saturating_duration_since(earlier.awake);
     let slept = wall.checked_sub(awake)?;
     (slept >= SUSPENDED_AFTER).then_some(slept)
@@ -74,7 +74,7 @@ impl Wakefulness {
 
     /// Takes a reading at `wall`: how long the host slept since the last
     /// one, if it did.
-    pub(crate) fn observe(&self, wall: DateTime<Utc>) -> Option<Duration> {
+    pub(crate) fn observe(&self, wall: Timestamp) -> Option<Duration> {
         let now = Sample {
             wall,
             awake: self.clock.awake(),
@@ -138,7 +138,7 @@ mod tests {
 
     fn reading(wall_secs: i64, awake: Instant) -> Sample {
         Sample {
-            wall: DateTime::from_timestamp(wall_secs, 0).expect("a valid instant"),
+            wall: Timestamp::from_second(wall_secs).expect("a valid instant"),
             awake,
         }
     }

@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::super::WorktreeError;
@@ -31,7 +31,7 @@ pub(super) const SLOT: &str = "slot-";
 pub(super) struct Held {
     /// The directory of the run that held it.
     pub(super) by: PathBuf,
-    pub(super) at: DateTime<Utc>,
+    pub(super) at: Timestamp,
     /// The ref of the unit whose checkout this is while its work has not
     /// landed: that unit's attempts take it back first, and nobody else
     /// takes it while what it holds is not in where they start.
@@ -174,7 +174,7 @@ fn record_held(home: &Path, number: u32, held: &Held) {
 /// Records that checkout `number` was used until `at`, by the run at
 /// `holder` — or by whoever its record already names, for the pool's own
 /// upkeep.
-pub(super) async fn used(home: &Path, number: u32, holder: Option<&Path>, at: DateTime<Utc>) {
+pub(super) async fn used(home: &Path, number: u32, holder: Option<&Path>, at: Timestamp) {
     let last = last_held(home, number).await;
     let by = match (holder, &last) {
         (Some(holder), _) => holder.to_path_buf(),

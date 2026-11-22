@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_api::{Remark, Stop, Workspace};
 use yunta_core::process::SearchPath;
 use yunta_core::{Env, ProcessSecrets, SystemIdSource};
@@ -131,6 +131,6 @@ pub fn commit_of(repo: &Path) -> String {
 }
 
 /// The instant the application stands at in a test.
-pub fn now() -> DateTime<Utc> {
-    DateTime::from_timestamp(1_800_000_000, 0).expect("an instant")
+pub fn now() -> Timestamp {
+    Timestamp::from_second(1_800_000_000).expect("an instant")
 }

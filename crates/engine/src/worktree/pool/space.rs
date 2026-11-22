@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use yunta_core::Clock;
@@ -33,7 +33,7 @@ pub(super) struct Built {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) bytes: Option<u64>,
     /// When the checkout was given back with it.
-    pub(super) at: DateTime<Utc>,
+    pub(super) at: Timestamp,
 }
 
 /// What a build takes on disk, as far as anybody counted it. Ordered by
@@ -48,7 +48,7 @@ pub(super) enum Size {
 
 impl Built {
     /// No build, as of `at`.
-    pub(super) fn empty(at: DateTime<Utc>) -> Built {
+    pub(super) fn empty(at: Timestamp) -> Built {
         Built {
             roots: Vec::new(),
             bytes: Some(0),
@@ -90,7 +90,7 @@ pub(super) fn given_back(
     home: &Path,
     number: u32,
     roots: Vec<PathBuf>,
-    at: DateTime<Utc>,
+    at: Timestamp,
     walking: &Walking,
 ) -> Built {
     let bytes = roots.is_empty().then_some(0);
@@ -268,7 +268,7 @@ pub(super) async fn measure_now(
     home: &Path,
     number: u32,
     roots: Vec<PathBuf>,
-    at: DateTime<Utc>,
+    at: Timestamp,
 ) -> Option<u64> {
     let walked = roots.clone();
     let bytes = tokio::task::spawn_blocking(move || super::walk::on_disk(&walked))
@@ -286,7 +286,7 @@ pub(super) async fn measure_now(
 
 /// Records that checkout `number` of the pool at `home` holds no build
 /// since `at`. The caller holds the checkout.
-pub(super) fn emptied(home: &Path, number: u32, at: DateTime<Utc>) {
+pub(super) fn emptied(home: &Path, number: u32, at: Timestamp) {
     // blocking: one small record, written whole while the caller holds the checkout.
     record(&built_path(home, number), &Built::empty(at));
 }
@@ -313,7 +313,7 @@ pub(super) async fn ignored(
         .collect())
 }
 
-async fn recorded_at(path: &Path) -> Option<DateTime<Utc>> {
+async fn recorded_at(path: &Path) -> Option<Timestamp> {
     let bytes = tokio::fs::read(path).await.ok()?;
     serde_json::from_slice::<Built>(&bytes)
         .ok()
@@ -336,8 +336,8 @@ fn built_path(home: &Path, number: u32) -> PathBuf {
 mod tests {
     use super::*;
 
-    fn stamp() -> DateTime<Utc> {
-        DateTime::from_timestamp(1_700_000_000, 0).unwrap()
+    fn stamp() -> Timestamp {
+        Timestamp::from_second(1_700_000_000).unwrap()
     }
 
     #[cfg(unix)]

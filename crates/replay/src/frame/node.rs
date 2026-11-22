@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::words::Standing;
 
 use crate::registry::Engine;
@@ -248,7 +248,7 @@ pub(super) struct Reading<'a> {
     /// What the run's birth left out, as `run_created` recorded it.
     pub(super) left_out: &'a [yunta_core::LeftOut],
     pub(super) state: &'a RunState,
-    pub(super) now: DateTime<Utc>,
+    pub(super) now: Timestamp,
     /// Whether the run has not closed: a correction under way belongs to
     /// a run that can still reach it.
     pub(super) open: bool,

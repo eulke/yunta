@@ -1,7 +1,7 @@
 //! The session side of a node's record: the sessions its attempt has
 //! open, the writes their fences refused and the calls they made.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use super::{NodeLedger, NodeRecord};
 use crate::events::meta::EventMeta;
@@ -11,7 +11,7 @@ impl NodeRecord {
     /// A session this node's attempt opened: open while the attempt is,
     /// and — when it is the node's own, not a task's — the one a
     /// continuation picks back up.
-    fn opened(&mut self, p: &crate::events::AgentSessionOpenedPayload, at: DateTime<Utc>) {
+    fn opened(&mut self, p: &crate::events::AgentSessionOpenedPayload, at: Timestamp) {
         if p.task_id.is_none() {
             self.last_session = Some(p.session_id.clone());
         }
@@ -54,7 +54,7 @@ impl NodeRecord {
     /// What an agent message of the open attempt's session records: a tool
     /// it called, or the usage it reported. Usage moves the spend only while
     /// an attempt is open; reported outside one, it belongs to no attempt.
-    fn message(&mut self, p: &AgentMessagePayload, at: DateTime<Utc>) {
+    fn message(&mut self, p: &AgentMessagePayload, at: Timestamp) {
         match p.message_type {
             AgentMessageType::ToolUse => self.calls.push(ToolCall {
                 tool_name: p.tool_name.clone(),
@@ -104,7 +104,7 @@ pub struct OpenSession {
     /// What the session was opened to write and reach; `None` on a log
     /// written before sessions recorded it.
     pub confinement: Option<crate::events::ConfinementRecord>,
-    pub opened_at: DateTime<Utc>,
+    pub opened_at: Timestamp,
 }
 
 /// One write the fence refused: which session tried it, and what it
@@ -134,7 +134,7 @@ pub struct ToolCall {
     /// What the call acted on, as the log carries it; `None` when the
     /// adapter reported none.
     pub target: Option<crate::events::ToolTarget>,
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
 }
 
 impl NodeLedger {

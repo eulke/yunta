@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use chrono::{DateTime, TimeZone, Utc};
+use jiff::Timestamp;
 use surco::words::Standing;
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactId, AuthorGate,
@@ -56,12 +56,12 @@ fn this_process() -> Engine {
     Engine::this(yunta_core::Pid::try_from(1000u32).expect("a pid"))
 }
 
-fn base() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
+fn base() -> Timestamp {
+    "2024-01-01T00:00:00Z".parse::<Timestamp>().unwrap()
 }
 
-fn at(offset_secs: i64) -> DateTime<Utc> {
-    base() + chrono::Duration::seconds(offset_secs)
+fn at(offset_secs: i64) -> Timestamp {
+    base() + jiff::SignedDuration::from_secs(offset_secs)
 }
 
 /// A log from `(offset, node, payload)` entries: storage numbers

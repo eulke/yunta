@@ -3,7 +3,7 @@
 //! without a terminal event, or a command that exited non-zero, each with
 //! the last lines it printed.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::events::HookPhase;
@@ -90,7 +90,8 @@ pub struct AccountLimit {
     pub source: LimitSource,
     /// Absolute: the moment the limit lifts, when the source named one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resets_at: Option<DateTime<Utc>>,
+    #[schemars(with = "Option<crate::schema::Instant>")]
+    pub resets_at: Option<Timestamp>,
     pub message: String,
 }
 

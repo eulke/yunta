@@ -285,7 +285,7 @@ fn count_git_command_outside_git_rs(root: &Path) -> usize {
 fn count_system_clock_outside_boundary(root: &Path) -> usize {
     outside(
         root,
-        &[Text("SystemClock"), Text("Utc::now")],
+        &[Text("SystemClock"), Text("Timestamp::now")],
         &["crates/core/src/clock.rs", "crates/cli/src/shell.rs"],
     )
 }

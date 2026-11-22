@@ -84,6 +84,27 @@ fn titled(mut schema: Schema, title: &str) -> Schema {
     schema
 }
 
+/// How a document describes an instant: an RFC 3339 `date-time` string, the
+/// text an instant serializes to. schemars describes no jiff type, so a field
+/// holding a [`jiff::Timestamp`] names this one with
+/// `#[schemars(with = "crate::schema::Instant")]`, or `Option<…>` around it.
+/// Not an instant: no value of it is ever made.
+pub(crate) struct Instant;
+
+impl schemars::JsonSchema for Instant {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Instant".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> Schema {
+        schemars::json_schema!({ "type": "string", "format": "date-time" })
+    }
+}
+
 /// The published JSON Schema of a workflow, as the repository keeps it:
 /// the committed bytes, as [`json`] gives a document's.
 pub fn workflow_json() -> &'static str {

@@ -17,6 +17,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use jiff::fmt::temporal::DateTimePrinter;
 use rusqlite::{params, Connection, Transaction};
 use yunta_core::events::{EventDraft, EventPayload, KIND_VERSION};
 use yunta_core::ContentHash;
@@ -58,12 +59,18 @@ CREATE TABLE IF NOT EXISTS run_heads (
 );
 ";
 
+/// How a row's `ts` spells its instant: RFC 3339 in UTC with all nine digits
+/// of the second's fraction, so the text sorts as the instants do and
+/// `list_runs` orders runs by it. A row written with a `+00:00` offset and
+/// fewer digits reads the same and sorts in its place beside these.
+const WRITTEN_INSTANT: DateTimePrinter = DateTimePrinter::new().precision(Some(9));
+
 /// One run as `list_runs` reports it: its id and when its first event
 /// was written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunListing {
     pub run_id: RunId,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: jiff::Timestamp,
 }
 
 /// What `purge_run` removed.
@@ -200,7 +207,7 @@ impl Storage {
     /// [`Storage::append`] with the timestamp already read from the
     /// clock — what an async caller does before hopping to a blocking
     /// thread, so the instant recorded is the one its clock reported.
-    pub fn append_at(&self, draft: &EventDraft, at: chrono::DateTime<chrono::Utc>) -> Result<Seq> {
+    pub fn append_at(&self, draft: &EventDraft, at: jiff::Timestamp) -> Result<Seq> {
         let append_err = |error| StorageError::Append {
             run_id: draft.run_id().clone(),
             source: cause(error),
@@ -239,7 +246,7 @@ impl Storage {
         // assigns `seq`, anchored on the previous event's hash.
         let prev_hash = previous_hash(&tx, draft, seq)?;
 
-        let ts = at.to_rfc3339();
+        let ts = WRITTEN_INSTANT.timestamp_to_string(&at);
         let event_hash = chain_hash(ChainHashFields {
             prev_hash: &prev_hash,
             run_id: draft.run_id().as_str(),

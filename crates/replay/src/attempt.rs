@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{OpenSession, ToolCall};
 use yunta_core::NodeId;
 
@@ -20,7 +20,7 @@ impl RunState {
     /// with no terminal after it. `None` for a node that never started and
     /// for one whose last attempt already closed — in both cases there is no
     /// attempt to time.
-    pub fn running_since(&self, node: &NodeId) -> Option<DateTime<Utc>> {
+    pub fn running_since(&self, node: &NodeId) -> Option<Timestamp> {
         self.nodes
             .get(node)
             .and_then(|record| record.open_since)
@@ -32,9 +32,9 @@ impl RunState {
     /// not carry. `None` for a node with no events at all; [`Duration::ZERO`] for an
     /// event stamped after `now`, since a node cannot have been silent for a negative
     /// time.
-    pub fn last_event_age(&self, node: &NodeId, now: DateTime<Utc>) -> Option<Duration> {
+    pub fn last_event_age(&self, node: &NodeId, now: Timestamp) -> Option<Duration> {
         let last = self.nodes.get(node)?.last_event_at?;
-        Some((now - last).to_std().unwrap_or(Duration::ZERO))
+        Some(Duration::try_from(now - last).unwrap_or(Duration::ZERO))
     }
 
     /// The sessions a node has open: every `agent_session_opened` since its

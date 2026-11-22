@@ -9,7 +9,7 @@
 //! invisible to both. Opening a run is where it is found, so the walk goes
 //! through it.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::events::{PauseReason, StoredEvent};
 use yunta_core::{Manifest, ModeName, RunId, Workflow, WorkflowName};
 use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
@@ -51,7 +51,7 @@ impl Project {
             .and_then(|storage| storage.list_runs())
             .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
             .unwrap_or_default();
-        let mut dated: Vec<(DateTime<Utc>, OpenedRun<'_>)> = Vec::new();
+        let mut dated: Vec<(Timestamp, OpenedRun<'_>)> = Vec::new();
         for run_id in run_ids {
             let Ok(open) = self.run(&run_id).await else {
                 continue;
@@ -80,7 +80,7 @@ impl Project {
         &self,
         manifest: &Manifest,
         mode: &ModeName,
-        ahead: Option<DateTime<Utc>>,
+        ahead: Option<Timestamp>,
     ) -> Option<PriorEstimation> {
         PriorEstimation::of(&self.budget_sample(manifest, mode, ahead).await)
     }
@@ -92,7 +92,7 @@ impl Project {
         &self,
         manifest: &Manifest,
         mode: &ModeName,
-        ahead: Option<DateTime<Utc>>,
+        ahead: Option<Timestamp>,
     ) -> Vec<RunSummary> {
         let mut history = self.history(&manifest.workflow.name).await;
         history

@@ -18,7 +18,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use yunta_core::step::NextStep;
 use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::Bench;
@@ -139,6 +139,6 @@ impl World {
 }
 
 /// The instant the screens stand at: some minutes after the bench made the runs.
-fn stands_at() -> DateTime<Utc> {
-    fixed_now() + Duration::seconds(SECONDS_AFTER_THE_RUNS)
+fn stands_at() -> Timestamp {
+    fixed_now() + SignedDuration::from_secs(SECONDS_AFTER_THE_RUNS)
 }

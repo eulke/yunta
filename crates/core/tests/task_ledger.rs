@@ -78,7 +78,7 @@ fn fold(events: &[TaskEvent]) -> TaskLedger {
     for (seq, event) in events.iter().enumerate() {
         let meta = EventMeta {
             seq: (seq as u64 + 1).into(),
-            at: chrono::DateTime::UNIX_EPOCH,
+            at: jiff::Timestamp::UNIX_EPOCH,
             node: Some(&node),
         };
         ledger.apply(event, &meta).unwrap();

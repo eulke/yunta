@@ -306,15 +306,15 @@ mod tests {
     #[test]
     fn a_line_of_code_wider_than_the_column_goes_on_under_itself_after_a_space() {
         let drawn = drawn(
-            "```rust\n    now.signed_duration_since(created_at) <= chrono::Duration::from_std(window)\n```",
+            "```rust\n    now.duration_since(created_at) <= SignedDuration::try_from(window)?\n```",
             48,
             Glyphs::Unicode,
         );
         assert_eq!(
             drawn,
             [
-                "      now.signed_duration_since(created_at) <=",
-                "        ↪ chrono::Duration::from_std(window)",
+                "      now.duration_since(created_at) <=",
+                "        ↪ SignedDuration::try_from(window)?",
             ]
         );
     }

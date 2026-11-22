@@ -20,7 +20,7 @@ workspace = true
 
 [dependencies]
 # Reads what a run drew as the screen a person sees.
-vt100 = "0.16"
+vt100.workspace = true
 yunta-core = { workspace = true, features = ["testkit"] }
 # The clocks, the id source and the capturing writer live one layer
 # down, with the crates that have no run to build.
@@ -32,7 +32,6 @@ yunta-adapters.workspace = true
 yunta-engine.workspace = true
 # A frame a surface test builds carries the word its run and nodes stand at.
 yunta-surco.workspace = true
-chrono.workspace = true
 tempfile.workspace = true
 # Benches parse workflow/config/fixture YAML literals the tests write.
 # An event a constructor refuses still reaches a reader off disk: the

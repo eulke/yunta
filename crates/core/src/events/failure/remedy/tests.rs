@@ -1,12 +1,10 @@
-use chrono::TimeZone;
-
 use super::*;
 use crate::events::{CriterionResult, LimitSource, RedCheck, SessionRefusal, UnpassableTask};
 use crate::ids::{AdapterId, TaskId};
 
 /// The facts of a failure at `failed_at` with nothing else moved: no
 /// continuation, no grant and an unchanged tree.
-fn facts_at(failed_at: DateTime<Utc>) -> Facts {
+fn facts_at(failed_at: Timestamp) -> Facts {
     Facts {
         failed_at,
         continuable: false,
@@ -69,7 +67,7 @@ fn unpassable_plan() -> Failure {
 
 #[test]
 fn a_failure_offers_only_what_can_change_its_outcome() {
-    let failed_at = Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap();
+    let failed_at = "2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let facts = facts_at(failed_at);
     let red = Failure::Red {
         red: RedCheck::Coverage {
@@ -87,7 +85,7 @@ fn a_failure_offers_only_what_can_change_its_outcome() {
         refused(RefusalCause::Authentication).remedies(&facts),
         retry_waiting_for(Precondition::CredentialFixed)
     );
-    let later = failed_at + chrono::Duration::hours(1);
+    let later = failed_at + jiff::SignedDuration::from_hours(1);
     let waits = Failure::Limit {
         limit: AccountLimit {
             source: LimitSource::Forge,
@@ -139,7 +137,7 @@ fn unrunnable(cmd: &str) -> Surprise {
 
 #[test]
 fn a_pre_check_offers_a_command_fix_for_each_distinct_unrunnable_command() {
-    let failed_at = Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap();
+    let failed_at = "2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let facts = facts_at(failed_at);
     assert_eq!(
         pre_checked(vec![unrunnable("yunta-no-such-tool")]).remedies(&facts),
@@ -173,7 +171,7 @@ fn a_pre_check_offers_a_command_fix_for_each_distinct_unrunnable_command() {
 
 #[test]
 fn a_trivial_criterion_keeps_a_pre_check_stuck_wherever_it_stands() {
-    let failed_at = Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap();
+    let failed_at = "2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let facts = facts_at(failed_at);
     let trivial = Surprise::TrivialCriterion { cmd: "true".into() };
     let missing = unrunnable("yunta-no-such-tool");
@@ -199,7 +197,7 @@ fn a_trivial_criterion_keeps_a_pre_check_stuck_wherever_it_stands() {
 
 #[test]
 fn a_broken_guard_alone_waits_for_the_outside_until_the_tree_moved() {
-    let failed_at = Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap();
+    let failed_at = "2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let guard = |cmd: &str| Surprise::BrokenGuard {
         cmd: cmd.into(),
         proves: None,
@@ -227,7 +225,7 @@ fn a_broken_guard_alone_waits_for_the_outside_until_the_tree_moved() {
 
 #[test]
 fn a_broken_guard_beside_an_unrunnable_command_offers_both_remedies() {
-    let failed_at = Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap();
+    let failed_at = "2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let retry = |precondition: Precondition| Remedy {
         option: ReservedOption::Retry,
         precondition: Some(precondition),
@@ -261,7 +259,7 @@ fn a_broken_guard_beside_an_unrunnable_command_offers_both_remedies() {
 
 #[test]
 fn a_continuation_is_listed_before_the_retry_it_sits_beside() {
-    let failed_at = Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap();
+    let failed_at = "2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let facts = Facts {
         continuable: true,
         tree_moved: true,
@@ -303,7 +301,7 @@ fn a_stop_that_names_no_run_waits_on_the_outside() {
     };
     assert_eq!(
         stop.remedies(&facts_at(
-            Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap()
+            "2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap()
         )),
         retry_waiting_for(Precondition::OutsideTreeChanged)
     );
@@ -311,7 +309,7 @@ fn a_stop_that_names_no_run_waits_on_the_outside() {
 
 #[test]
 fn a_carried_stop_is_stuck_on_the_tree_until_the_tree_moved() {
-    let failed_at = Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap();
+    let failed_at = "2026-10-10T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let carried = Failure::TasksStopped {
         stopped: vec![TaskStop {
             task_id: TaskId::from_static("greet"),

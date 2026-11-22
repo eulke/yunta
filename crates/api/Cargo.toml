@@ -24,7 +24,7 @@ yunta-engine.workspace = true
 yunta-storage.workspace = true
 yunta-replay.workspace = true
 # The instant a reading reads a run's age at.
-chrono.workspace = true
+jiff.workspace = true
 # The agent CLIs this binary builds: what a run can execute its sessions on.
 yunta-adapters.workspace = true
 # What Yunta refuses, said once for every interface: a refusal the API

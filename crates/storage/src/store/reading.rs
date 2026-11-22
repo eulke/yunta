@@ -6,6 +6,7 @@
 //! is one statement: nothing here holds a read transaction open between calls, so
 //! a reader never keeps the writer's log from its checkpoint.
 
+use jiff::Timestamp;
 use rusqlite::{params, Connection, Row};
 use yunta_core::events::{EventBody, EventShapeError, StoredEvent};
 use yunta_core::{NodeId, RunId, Seq};
@@ -99,7 +100,9 @@ impl Storage {
     }
 
     /// Every run with at least one event, oldest first by the timestamp
-    /// of its first event (then by id), for `yunta list --runs`.
+    /// of its first event (then by id), for `yunta list --runs`. The order
+    /// is the stored text's, which the way `append` writes it keeps the
+    /// instants' own.
     pub fn list_runs(&self) -> Result<Vec<RunListing>> {
         let list_err = |error| StorageError::ListRuns {
             source: cause(error),
@@ -120,13 +123,13 @@ impl Storage {
             let (run_id, ts) = row.map_err(list_err)?;
             let run_id =
                 RunId::try_from(run_id).map_err(|source| StorageError::CorruptRunId { source })?;
-            let created_at = chrono::DateTime::parse_from_rfc3339(&ts)
-                .map_err(|source| StorageError::CorruptTimestamp {
-                    run_id: run_id.clone(),
-                    seq: Seq::FIRST,
-                    source,
-                })?
-                .with_timezone(&chrono::Utc);
+            let created_at =
+                ts.parse::<Timestamp>()
+                    .map_err(|source| StorageError::CorruptTimestamp {
+                        run_id: run_id.clone(),
+                        seq: Seq::FIRST,
+                        source,
+                    })?;
             runs.push(RunListing { run_id, created_at });
         }
         Ok(runs)
@@ -185,13 +188,14 @@ fn stored(run_id: &RunId, row: RawRow) -> Result<StoredEvent> {
         Err(source) => return Err(corrupt(EventShapeError::Json { source })),
     };
     let body = EventBody::from_object(object, row.schema_version).map_err(corrupt)?;
-    let timestamp = chrono::DateTime::parse_from_rfc3339(&row.ts)
-        .map_err(|source| StorageError::CorruptTimestamp {
-            run_id: run_id.clone(),
-            seq,
-            source,
-        })?
-        .with_timezone(&chrono::Utc);
+    let timestamp =
+        row.ts
+            .parse::<Timestamp>()
+            .map_err(|source| StorageError::CorruptTimestamp {
+                run_id: run_id.clone(),
+                seq,
+                source,
+            })?;
     let node_id = row
         .node_id
         .map(NodeId::try_from)

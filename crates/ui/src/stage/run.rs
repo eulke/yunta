@@ -19,7 +19,7 @@
 
 mod acts;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::components::{Laid, Note, Region, Screen, Side, Sight};
 use surco::doc::{Block, Depth, Doc};
 use surco::look::Look;
@@ -110,7 +110,7 @@ impl RunStage {
 
     /// The run as a screen at `now`: its ribbon and the rows a person watches it by across
     /// it, its nodes beside its page, its page or the picked node's, and the keys.
-    pub(crate) fn screen(&self, look: &Look, now: DateTime<Utc>) -> Screen {
+    pub(crate) fn screen(&self, look: &Look, now: Timestamp) -> Screen {
         let frame = self.frame(now);
         let page = Region::new(self.read(frame.as_ref(), look)).in_sight(self.scroll.sight());
         let mut screen = Screen::new(page);
@@ -190,7 +190,7 @@ impl RunStage {
     /// What `stroke` asks for here at `now`: moving along the nodes and picking one, an
     /// act the run offers, following it or not, going back, leaving, or scrolling the
     /// page beside.
-    pub(crate) fn pressed(&mut self, stroke: Stroke, now: DateTime<Utc>) -> Vec<Want> {
+    pub(crate) fn pressed(&mut self, stroke: Stroke, now: Timestamp) -> Vec<Want> {
         self.said = None;
         match stroke {
             Stroke::Down | Stroke::Insert('j') => self.moved(1, now),
@@ -233,7 +233,7 @@ impl RunStage {
 
     /// What news of the run's following does at `now`: the run as it reads first, then
     /// each look folded in, by the fold the following itself makes.
-    pub(crate) fn heard(&mut self, news: News, now: DateTime<Utc>) -> Vec<Want> {
+    pub(crate) fn heard(&mut self, news: News, now: Timestamp) -> Vec<Want> {
         let news = match news {
             News::Following(followed) => {
                 self.followed = Some(followed);
@@ -269,7 +269,7 @@ impl RunStage {
 
     /// The run, its moments, what its sessions said and the node pointed at kept to
     /// what was read at `now`.
-    fn read_on(&mut self, now: DateTime<Utc>) {
+    fn read_on(&mut self, now: Timestamp) {
         let Some(followed) = &self.followed else {
             return;
         };
@@ -372,7 +372,7 @@ impl RunStage {
     /// What the run offers at `now`, each with the key that takes it here: every act its
     /// frame offers that a key here takes, answering what it waits on first, then the
     /// page of the node pointed at.
-    pub(crate) fn offered(&self, now: DateTime<Utc>) -> Vec<Act> {
+    pub(crate) fn offered(&self, now: Timestamp) -> Vec<Act> {
         let frame = self.frame(now);
         let node_page = self
             .pointed
@@ -392,7 +392,7 @@ impl RunStage {
     }
 
     /// The run's frame at `now`, once its following has read it.
-    fn frame(&self, now: DateTime<Utc>) -> Option<RunFrame> {
+    fn frame(&self, now: Timestamp) -> Option<RunFrame> {
         self.followed.as_ref().map(|followed| followed.frame(now))
     }
 
@@ -414,7 +414,7 @@ impl RunStage {
 
     /// The pointer moved `by` nodes along the run's nodes at `now`, around at either
     /// end.
-    fn moved(&mut self, by: isize, now: DateTime<Utc>) -> Vec<Want> {
+    fn moved(&mut self, by: isize, now: Timestamp) -> Vec<Want> {
         let Some(frame) = self.frame(now) else {
             return Vec::new();
         };

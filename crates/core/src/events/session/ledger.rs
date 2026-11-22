@@ -4,7 +4,7 @@
 //! degradation the log records. Every surface that counts or lists
 //! degradations reads them here.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use crate::events::meta::EventMeta;
 use crate::events::session::kinds::SessionEvent;
@@ -20,7 +20,7 @@ pub struct Degradation {
     pub adapter: AdapterId,
     pub policy: PolicyApplied,
     pub node: Option<NodeId>,
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
 }
 
 /// Every degradation the run recorded, in log order.

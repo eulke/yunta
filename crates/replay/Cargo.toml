@@ -25,7 +25,7 @@ yunta-core.workspace = true
 # The words a frame calls a run and a node by, and their marks.
 yunta-surco.workspace = true
 # The instant a registry was read, and since when its engine asks.
-chrono.workspace = true
+jiff.workspace = true
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 

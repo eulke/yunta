@@ -11,7 +11,7 @@ fn environment(path: &str) -> ExecutionEnvironment {
 fn at(ledger: &mut RunLedger, seq: u64, event: RunEvent) {
     let meta = EventMeta {
         seq: Seq::from(seq),
-        at: chrono::DateTime::UNIX_EPOCH,
+        at: jiff::Timestamp::UNIX_EPOCH,
         node: None,
     };
     ledger.apply(&event, &meta);
@@ -202,7 +202,7 @@ fn woke(ledger: &mut RunLedger, seq: u64, seconds: i64, tree: Option<&str>) {
     }
     let meta = EventMeta {
         seq: Seq::from(seq),
-        at: DateTime::UNIX_EPOCH + chrono::Duration::seconds(seconds),
+        at: Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(seconds),
         node: None,
     };
     ledger.apply(&RunEvent::Resumed(resumed), &meta);
@@ -222,7 +222,7 @@ fn the_latest_wake_names_the_tree_it_found_with_its_seq_and_time() {
     assert_eq!(ledger.woke_on(), Some((Seq::from(5_u64), &tree)));
     assert_eq!(
         ledger.resumed_at(),
-        Some(DateTime::UNIX_EPOCH + chrono::Duration::seconds(60))
+        Some(Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(60))
     );
 }
 
@@ -236,6 +236,6 @@ fn a_later_wake_that_found_no_tree_names_none_and_still_says_when_it_woke() {
     assert_eq!(ledger.woke_on(), None);
     assert_eq!(
         ledger.resumed_at(),
-        Some(DateTime::UNIX_EPOCH + chrono::Duration::seconds(90))
+        Some(Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(90))
     );
 }

@@ -62,7 +62,7 @@ pub enum StorageError {
         run_id: RunId,
         seq: Seq,
         #[source]
-        source: chrono::ParseError,
+        source: jiff::Error,
     },
 
     #[error("stored node id for run `{run_id}` seq {seq} is not a node id")]

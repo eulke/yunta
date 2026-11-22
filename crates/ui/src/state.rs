@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::components::{Note, Region, Screen};
 use surco::doc::Doc;
 use surco::look::Look;
@@ -55,7 +55,7 @@ pub struct State {
     /// The ticket the next piece of work goes under.
     next: Ticket,
     /// The instant the application stands at.
-    now: DateTime<Utc>,
+    now: Timestamp,
 }
 
 impl State {
@@ -66,7 +66,7 @@ impl State {
     /// The application as it opens at `now`, and what it asks first: the repository it
     /// works in, and whether Yunta was set up there. It stands on nothing until that is
     /// answered.
-    pub fn opened(now: DateTime<Utc>) -> (State, Vec<Request>) {
+    pub fn opened(now: Timestamp) -> (State, Vec<Request>) {
         let mut state = State {
             stage: None,
             under: Vec::new(),
@@ -86,7 +86,7 @@ impl State {
     /// where it stands as [`State::opened`] does and stands there, then opens over it the
     /// run's stage, for a step of a run, and over that the stage `step` opens, as a person
     /// walks there; going back walks the same way. None for a step no stage takes.
-    pub fn opened_on(now: DateTime<Utc>, step: &NextStep) -> Option<(State, Vec<Request>)> {
+    pub fn opened_on(now: Timestamp, step: &NextStep) -> Option<(State, Vec<Request>)> {
         let opens = Stage::opened_by(step)?;
         let (mut state, asked) = State::opened(now);
         let run = step

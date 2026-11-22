@@ -29,7 +29,7 @@ fn said(task: Option<&str>, text: &str) -> Said {
         session_id: SessionId::from_static("session-1"),
         task_id: task.map(TaskId::from),
         seq: yunta_core::Seq::from(7),
-        at: chrono::DateTime::UNIX_EPOCH,
+        at: jiff::Timestamp::UNIX_EPOCH,
         text: text.to_string(),
         cut: false,
     }

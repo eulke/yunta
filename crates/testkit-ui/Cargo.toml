@@ -33,7 +33,7 @@ yunta-testkit-core.workspace = true
 # a few rows lays it out.
 yunta-surco.workspace = true
 # The instant every test of the application stands at.
-chrono.workspace = true
+jiff.workspace = true
 # The channel a performer hands its answers back on, and the files the walk's places are
 # written with while its async work runs.
 tokio = { workspace = true, features = ["fs", "sync"] }

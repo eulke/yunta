@@ -3,7 +3,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use yunta_core::Clock;
 
 /// The instant [`FixedClock`] always reports.
@@ -12,10 +12,10 @@ pub const FIXED_NOW: &str = "2026-01-01T00:00:00Z";
 /// [`FIXED_NOW`] as an instant — the fixed origin a test measures from,
 /// whether it takes it through a [`Clock`] or stamps a log with it
 /// directly.
-pub fn fixed_now() -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(FIXED_NOW)
+pub fn fixed_now() -> Timestamp {
+    FIXED_NOW
+        .parse::<Timestamp>()
         .expect("FIXED_NOW is a valid RFC3339 timestamp")
-        .with_timezone(&Utc)
 }
 
 /// A [`Clock`] frozen at [`FIXED_NOW`] — the default for a test that only
@@ -24,7 +24,7 @@ pub fn fixed_now() -> DateTime<Utc> {
 pub struct FixedClock;
 
 impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         fixed_now()
     }
 }
@@ -32,22 +32,22 @@ impl Clock for FixedClock {
 /// A [`Clock`] frozen at a caller-chosen instant — for a test that asserts
 /// on the exact timestamp an event carries, or that needs two runs stamped
 /// at different times.
-pub struct AtClock(pub DateTime<Utc>);
+pub struct AtClock(pub Timestamp);
 
 impl AtClock {
     /// Builds an [`AtClock`] from an RFC3339 string, panicking if it does
     /// not parse — a test writes a literal it controls.
     pub fn rfc3339(instant: &str) -> Self {
         AtClock(
-            DateTime::parse_from_rfc3339(instant)
-                .expect("a valid RFC3339 timestamp")
-                .with_timezone(&Utc),
+            instant
+                .parse::<Timestamp>()
+                .expect("a valid RFC3339 timestamp"),
         )
     }
 }
 
 impl Clock for AtClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         self.0
     }
 }
@@ -56,7 +56,7 @@ impl Clock for AtClock {
 /// readings stand still until the test moves them, together — the host
 /// working — or the wall alone — the host suspended.
 pub struct HostClock {
-    wall: Mutex<DateTime<Utc>>,
+    wall: Mutex<Timestamp>,
     awake: Mutex<Instant>,
 }
 
@@ -85,7 +85,7 @@ impl HostClock {
 }
 
 impl Clock for HostClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         *self.wall.lock().expect("the wall reading")
     }
 
@@ -114,7 +114,7 @@ impl RushingClock {
 }
 
 impl Clock for RushingClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         fixed_now()
     }
 

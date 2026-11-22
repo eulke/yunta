@@ -3,7 +3,7 @@
 //! whole, before it — a browser has the room a terminal does not — and when
 //! the page was drawn, under it.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use surco::components::Note;
 use surco::doc::Doc;
 use surco::look::Look;
@@ -18,12 +18,12 @@ use crate::page::{Form, Page, Shown};
 /// browser scope.
 pub struct RunInABrowser {
     run: Run,
-    drawn_at: DateTime<Utc>,
+    drawn_at: Timestamp,
 }
 
 impl Run {
     /// The page as a browser reads it, drawn at `drawn_at`.
-    pub fn in_a_browser(mut self, drawn_at: DateTime<Utc>) -> RunInABrowser {
+    pub fn in_a_browser(mut self, drawn_at: Timestamp) -> RunInABrowser {
         self.scope = RunScope::Browser;
         RunInABrowser {
             run: self,
@@ -53,7 +53,7 @@ impl Page for RunInABrowser {
         blocks.push(
             Note(format!(
                 "drawn at {}; `{}` draws it again.",
-                self.drawn_at.format(crate::INSTANT_FORMAT),
+                self.drawn_at.strftime(crate::INSTANT_FORMAT),
                 command::line(&NextStep::Open {
                     run: run.run_id.clone()
                 }),

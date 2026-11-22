@@ -8,9 +8,9 @@ use super::*;
 #[test]
 fn a_draft_is_stamped_by_the_injected_clock_and_gets_the_next_seq() {
     let (_dir, storage) = open_temp();
-    let instant = chrono::DateTime::parse_from_rfc3339("2026-09-02T10:00:00+00:00")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
+    let instant = "2026-09-02T10:00:00+00:00"
+        .parse::<jiff::Timestamp>()
+        .unwrap();
     let clock = yunta_testkit_core::AtClock(instant);
 
     let first = storage.append(&created_draft("run-1"), &clock).unwrap();
@@ -96,13 +96,7 @@ fn a_known_kind_whose_payload_is_not_its_shape_is_corrupt_not_unknown() {
 #[test]
 fn runs_are_listed_by_their_first_timestamp() {
     let (_dir, storage) = open_temp();
-    let at = |text: &str| {
-        yunta_testkit_core::AtClock(
-            chrono::DateTime::parse_from_rfc3339(text)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
-        )
-    };
+    let at = |text: &str| yunta_testkit_core::AtClock(text.parse::<jiff::Timestamp>().unwrap());
     storage
         .append(&created_draft("run-late"), &at("2026-09-02T12:00:00+00:00"))
         .unwrap();

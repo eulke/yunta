@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use super::{NodeLedger, NodeRecord, NodeState, OrphanedSession};
 use crate::events::meta::EventMeta;
@@ -109,7 +109,7 @@ impl NodeRecord {
     /// the node's working time and toward this attempt's. A node that is not
     /// working, because it waits on a person or no attempt is open, has no
     /// stretch to end.
-    fn close_working(&mut self, at: DateTime<Utc>, asleep: &Suspensions) {
+    fn close_working(&mut self, at: Timestamp, asleep: &Suspensions) {
         if let Some(since) = self.working_since.take() {
             let stretch = asleep.awake_between(since, at);
             self.active += stretch;
@@ -150,7 +150,7 @@ impl NodeLedger {
 
     /// The answer or the resolution lands and the node works again from
     /// `at`. A node that is already working keeps the start of its stretch.
-    pub fn resume_working(&mut self, node: &NodeId, at: DateTime<Utc>) {
+    pub fn resume_working(&mut self, node: &NodeId, at: Timestamp) {
         if let Some(record) = self.per_node.get_mut(node) {
             if record.open_since.is_some() {
                 record.working_since = record.working_since.or(Some(at));

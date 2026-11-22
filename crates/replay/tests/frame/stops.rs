@@ -222,7 +222,7 @@ fn a_parked_phase_says_what_it_waits_on_and_a_moving_one_nothing() {
 
 #[test]
 fn a_run_paused_on_a_reset_names_its_node_and_the_moment_it_resumes() {
-    let at = Utc.with_ymd_and_hms(2026, 10, 13, 12, 0, 0).unwrap();
+    let at = "2026-10-13T12:00:00Z".parse::<jiff::Timestamp>().unwrap();
     let phase = RunPhase::Waiting {
         on: WaitingOn::Run {
             reason: PauseReason::AwaitingReset {
