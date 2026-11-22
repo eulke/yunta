@@ -101,10 +101,12 @@ impl Project {
         let mut errors = yunta_engine::check(workflow, config, &facts);
         let mut cautions = yunta_engine::check_warnings(workflow, config, &facts);
         // Composition references (`use:`) resolve against the repo catalog
-        // under the project's directory, then packs: the same catalog a run's
-        // children resolve against at birth.
-        let origin = yunta_engine::origin_of(dir, path);
-        let refs = yunta_engine::check_workflow_refs(workflow, config, dir, &origin, &facts);
+        // under the project's directory, then the project's packs, then the
+        // user's: the same catalog a run's children resolve against at birth.
+        let ambient = Some(&self.workspace.env);
+        let origin = yunta_engine::origin_of(dir, ambient, path);
+        let refs =
+            yunta_engine::check_workflow_refs(workflow, config, dir, ambient, &origin, &facts);
         errors.extend(refs.errors);
         cautions.extend(refs.warnings);
         let (unprovided, missing_programs) = self.environment(workflow, config, &origin);
@@ -182,10 +184,11 @@ impl Project {
     }
 
     /// What the machine a run would use has to provide for `workflow`: what
-    /// the pack it comes from `requires:`, refused when this project or
-    /// machine lacks it, and the programs its literal commands start, a
-    /// caution when they are not on `PATH`, since a node before them may
-    /// install them.
+    /// the pack it comes from `requires:`, read from that pack's own manifest
+    /// in the store it is installed in, refused when this project or machine
+    /// lacks it, and the programs its literal commands start, a caution when
+    /// they are not on `PATH`, since a node before them may install them. A
+    /// pack manifest that does not read is the ceiling check's to name.
     fn environment(
         &self,
         workflow: &Workflow,
@@ -194,20 +197,12 @@ impl Project {
     ) -> (Vec<CheckError>, Vec<Caution>) {
         let env = &self.workspace.env;
         let on_path = |program: &str| env.path.find(program).is_some();
-        let unprovided = match origin {
-            yunta_engine::WorkflowOrigin::Pack {
-                publisher,
-                pack_name,
-            } => yunta_engine::packs_for_publisher(&self.workspace.dir, publisher)
-                .installed
-                .iter()
-                .find(|(_, manifest)| manifest.name == *pack_name)
-                .map(|(_, manifest)| {
-                    yunta_engine::check_pack_requires(manifest, config).unmet(&on_path)
-                })
-                .unwrap_or_default(),
-            yunta_engine::WorkflowOrigin::Repo => Vec::new(),
-        };
+        let unprovided = origin
+            .manifest_file()
+            .and_then(|file| std::fs::read_to_string(file).ok())
+            .and_then(|text| yunta_core::PackManifest::read(&text).ok())
+            .map(|manifest| yunta_engine::check_pack_requires(&manifest, config).unmet(&on_path))
+            .unwrap_or_default();
         let missing_programs = yunta_engine::programs_named(workflow, config)
             .into_iter()
             .filter(|(_, program)| env.path.find(program).is_none())

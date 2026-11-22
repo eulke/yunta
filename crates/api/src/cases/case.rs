@@ -141,9 +141,10 @@ pub(super) async fn run_case(
     let beside = |path: &Path| case_path.parent().unwrap_or(Path::new(".")).join(path);
     // The sandbox is a checkout of its own: the project's `.yunta/` copied
     // in, whatever the case seeds on top, and a git repository around both.
-    // A case then resolves its workflow through the very catalog a run
-    // resolves through, and `check` refuses here exactly what it refuses
-    // there.
+    // A case then resolves its workflow through the project's own files and
+    // packs, as a run does, but never through the user's packs, so it runs
+    // the same on every machine; and `check` refuses here exactly what it
+    // refuses there.
     let sandbox = Sandbox::seeded(root)?;
     if let Some(seed) = &case.worktree {
         sandbox.seed(&beside(seed))?;

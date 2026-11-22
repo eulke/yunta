@@ -24,7 +24,8 @@
 //!   `id_source`, `process`, `disk`, `durable` and `secret`; and `pace`, how
 //!   long a poll over state another process owns waits between looks.
 //! - Values every crate shares: `ids`, `nonempty`, `graph`, `units`, `shell`,
-//!   `commit_message` and `error`.
+//!   `commit_message` and `error`; and `pack_store`, where packs are
+//!   installed and the order a project reads them in.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.
@@ -70,6 +71,7 @@ mod nonempty;
 pub mod pace;
 mod pack;
 mod pack_audit;
+mod pack_store;
 pub mod persisted;
 pub mod policy;
 pub mod port;
@@ -143,6 +145,7 @@ pub use pack::{
     PackManifestError, PackRequires, RequiredRunner,
 };
 pub use pack_audit::{NodeAudit, PackAudit, PromptText, UnreadFile, WorkflowAudit, WorkflowUnread};
+pub use pack_store::{PackScope, PackStore, PackStores};
 pub use policy::{ScopeCeiling, ScopeExpansionMode};
 pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionFault, QuestionsFile};
 pub use run_tool::RunTool;

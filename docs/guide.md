@@ -551,10 +551,14 @@ filename conflict, repo beats user beats org. Omit `layers` to pull every layer.
 The layers are read when the run is created and frozen with it, so a knowledge
 file edited while the run is parked or running reaches no session that follows.
 The `org` layer is knowledge distributed as packs — the union of every installed
-pack whose `pack.yaml` declares `contents.knowledge`, read from the vendored
-`.yunta/packs/`. Between org packs there is no precedence: two installed packs
-shipping the same filename is an error naming both — shadow the file with the
-repo's own copy, or remove one of the packs. A knowledge path that leaves its
+pack whose `pack.yaml` declares `contents.knowledge`, read from the project's
+vendored `.yunta/packs/`, then from the user's packs under `~/.yunta/packs/` (see
+[packs for every project](packs.md#packs-for-every-project)): a user's pack the
+project installs too is read from the project alone, and a file a user's pack
+ships under a name a project pack ships is left out. Between packs of one store
+there is no precedence: two of them shipping the same filename is an error
+naming both — shadow the file with the repo's own copy, or remove one of the
+packs. A knowledge path that leaves its
 pack is refused when the run is created, naming the path. An org layer with no
 knowledge packs installed simply contributes nothing, same as a user layer with
 an empty `~/.yunta/knowledge/`.

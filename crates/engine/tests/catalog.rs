@@ -59,7 +59,7 @@ fn a_repo_workflow_shadows_a_pack_workflow_of_the_same_name() {
         "name: repo-review\nnodes: []\n",
     );
 
-    let resolved = resolve_workflow(root.path(), "acme/review").unwrap();
+    let resolved = resolve_workflow(root.path(), None, "acme/review").unwrap();
     assert_eq!(resolved.origin, WorkflowOrigin::Repo);
     assert!(resolved.path.ends_with(".yunta/workflows/acme/review.yaml"));
 }
@@ -69,7 +69,7 @@ fn a_bare_name_never_falls_through_to_packs() {
     let root = tempfile::tempdir().unwrap();
     // No repo workflow named "review", and no publisher segment at all
     // — there's nothing for a bare name to fall through to.
-    let err = resolve_workflow(root.path(), "review").unwrap_err();
+    let err = resolve_workflow(root.path(), None, "review").unwrap_err();
     assert!(matches!(err, CatalogError::NotFoundNoPacksDir { .. }));
 }
 
@@ -84,11 +84,12 @@ fn a_namespaced_name_resolves_to_the_publishers_pack_when_the_repo_has_nothing_b
         &[("review.yaml", LEAF)],
     );
 
-    let resolved = resolve_workflow(root.path(), "acme/review").unwrap();
+    let resolved = resolve_workflow(root.path(), None, "acme/review").unwrap();
     match resolved.origin {
         WorkflowOrigin::Pack {
             publisher,
             pack_name,
+            ..
         } => {
             assert_eq!(publisher, "acme");
             assert_eq!(pack_name, "review-pack");
@@ -104,7 +105,7 @@ fn two_packs_from_the_same_publisher_declaring_the_same_workflow_basename_is_amb
     write_pack(root.path(), "acme", "pack-a", "", &[("review.yaml", LEAF)]);
     write_pack(root.path(), "acme", "pack-b", "", &[("review.yaml", LEAF)]);
 
-    let err = resolve_workflow(root.path(), "acme/review").unwrap_err();
+    let err = resolve_workflow(root.path(), None, "acme/review").unwrap_err();
     assert!(
         matches!(err, CatalogError::Ambiguous { count: 2, .. }),
         "{err:?}"
@@ -133,11 +134,12 @@ fn intra_pack_composition_is_allowed_in_check() {
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
         yunta_core::yaml::parse(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
-    let origin = origin_of(root.path(), &parent_path);
+    let origin = origin_of(root.path(), None, &parent_path);
     let errors = check_workflow_refs(
         &parent,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &origin,
         &|_| None,
     )
@@ -171,11 +173,12 @@ fn cross_pack_composition_is_rejected_in_check() {
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
         yunta_core::yaml::parse(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
-    let origin = origin_of(root.path(), &parent_path);
+    let origin = origin_of(root.path(), None, &parent_path);
     let errors = check_workflow_refs(
         &parent,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &origin,
         &|_| None,
     )
@@ -210,11 +213,12 @@ fn a_pack_workflow_referencing_back_to_the_repo_is_also_rejected() {
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
         yunta_core::yaml::parse(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
-    let origin = origin_of(root.path(), &parent_path);
+    let origin = origin_of(root.path(), None, &parent_path);
     let errors = check_workflow_refs(
         &parent,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &origin,
         &|_| None,
     )
@@ -223,6 +227,47 @@ fn a_pack_workflow_referencing_back_to_the_repo_is_also_rejected() {
         errors
             .iter()
             .any(|e| matches!(e, CheckError::Composition(Composition::CrossPack { .. }))),
+        "got: {errors:?}"
+    );
+}
+
+/// A user's pack the project also installs is shadowed: a workflow of the
+/// user's copy, checked by its path, that composes its own pack's name
+/// reaches the project's copy, another pack, and is refused as any
+/// composition across packs is.
+#[test]
+fn a_shadowed_user_pack_s_workflow_composing_its_own_pack_reaches_the_project_s_copy_and_is_refused(
+) {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let composes = "name: review\nnodes:\n  - { id: sub, kind: workflow, use: acme/qa }\n";
+    write_pack(root.path(), "acme", "review-pack", "", &[("qa.yaml", LEAF)]);
+    let user_pack = home.path().join("packs/acme/review-pack");
+    write(
+        &user_pack.join("pack.yaml"),
+        "name: review-pack\npublisher: acme\nversion: 1.0.0\ndeclares:\n  permissions: \
+         read-only\ncontents:\n  workflows: [review.yaml, qa.yaml]\n",
+    );
+    write(&user_pack.join("review.yaml"), composes);
+    write(&user_pack.join("qa.yaml"), LEAF);
+    let env = yunta_core::Env {
+        yunta_home: Some(home.path().to_path_buf()),
+        ..yunta_core::Env::default()
+    };
+
+    let parent: Workflow = yunta_core::yaml::parse(composes).unwrap();
+    let origin = origin_of(root.path(), Some(&env), &user_pack.join("review.yaml"));
+    let config = ConfigLayer::default();
+    let errors = check_workflow_refs(&parent, &config, root.path(), Some(&env), &origin, &|_| {
+        None
+    })
+    .errors;
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::Composition(Composition::CrossPack { name, from_pack, .. })
+                if name == "acme/qa" && from_pack == "acme/review-pack"
+        )),
         "got: {errors:?}"
     );
 }
@@ -242,13 +287,13 @@ fn a_reference_that_is_not_a_name_or_publisher_name_is_refused_before_touching_t
         "",
         "acme/",
     ] {
-        let err = resolve_workflow(root.path(), name).unwrap_err();
+        let err = resolve_workflow(root.path(), None, name).unwrap_err();
         assert!(
             matches!(err, CatalogError::InvalidName { name: ref offending } if offending == name),
             "`{name}` must be refused as a reference, got {err:?}"
         );
     }
-    assert!(resolve_workflow(root.path(), "review").is_ok());
+    assert!(resolve_workflow(root.path(), None, "review").is_ok());
 }
 
 #[test]
@@ -262,7 +307,7 @@ fn a_malformed_pack_yaml_is_reported_by_path() {
         "this is not a pack manifest\n",
     );
 
-    let err = resolve_workflow(root.path(), "acme/review").unwrap_err();
+    let err = resolve_workflow(root.path(), None, "acme/review").unwrap_err();
     match err {
         CatalogError::Malformed { path, .. } => assert!(
             path.ends_with(".yunta/packs/acme/review-pack/pack.yaml"),
@@ -280,7 +325,7 @@ fn an_unreadable_pack_yaml_is_reported_by_path() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(root.path().join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap();
 
-    let err = resolve_workflow(root.path(), "acme/review").unwrap_err();
+    let err = resolve_workflow(root.path(), None, "acme/review").unwrap_err();
     match err {
         CatalogError::Unreadable { path, .. } => assert!(
             path.ends_with(".yunta/packs/acme/review-pack/pack.yaml"),
@@ -304,12 +349,14 @@ fn a_malformed_pack_manifest_fails_the_ceiling_check() {
     let origin = WorkflowOrigin::Pack {
         publisher: "acme".parse().unwrap(),
         pack_name: "review-pack".parse().unwrap(),
+        store: yunta_core::PackStore::of_project(root.path()),
     };
 
     let errors = check_workflow_refs(
         &workflow,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &origin,
         &|_| None,
     )

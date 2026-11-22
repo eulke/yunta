@@ -385,12 +385,9 @@ impl Bench {
         workflow: &yunta_core::Workflow,
         config: &yunta_core::ConfigLayer,
     ) -> Result<yunta_engine::FrozenRun, yunta_engine::RunError> {
-        // The user layer is read from the user state root the bench was
-        // given, as the CLI reads it from its environment.
-        let user_knowledge = self
-            .ambient
-            .as_ref()
-            .and_then(yunta_core::user_knowledge_dir);
+        // The user layer, its knowledge and its packs, is read from the
+        // user state root the bench was given, as the CLI reads it from its
+        // environment.
         let built = yunta_engine::build_manifest(
             workflow,
             config,
@@ -398,7 +395,7 @@ impl Bench {
             &self.worktree,
             &self.inputs,
             self.supervision(),
-            user_knowledge.as_deref(),
+            self.ambient.as_ref(),
         )
         .await;
         match built {

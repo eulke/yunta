@@ -1,12 +1,12 @@
 //! See [`super`]. A pack cloned and read, not yet vendored: its audit, what a
-//! person confirms, and its install from that very copy, which never fetches
-//! again. What it is installed as, a pack new to the repository or an update,
-//! is `Installing`.
+//! person confirms, and its install from that very copy, into the store it was
+//! fetched for, which never fetches again. What it is installed as, a pack new
+//! to the store or an update, is `Installing`.
 
 use std::path::Path;
 
 use yunta_core::refusal::{PackRefusal, PackVerb};
-use yunta_core::{PackAudit, PackLock, PackLockEntry, PackManifest, PackRef};
+use yunta_core::{PackAudit, PackLock, PackLockEntry, PackManifest, PackRef, PackStore};
 
 use super::policy::PackPolicy;
 use super::{failed, held, refuse_vendored, refused, vendor, vendor_and_lock, InstalledPack};
@@ -15,10 +15,12 @@ use crate::{Error, Remarks, Stop, Workspace};
 /// A pack cloned and read, not yet vendored: what a person reads before it
 /// is installed.
 ///
-/// Not an installed pack: nothing of it is in the repository until
+/// Not an installed pack: nothing of it is in its store until
 /// [`FetchedPack::install`].
 pub struct FetchedPack {
     workspace: Workspace,
+    /// The store it is installed into.
+    store: PackStore,
     clone: tempfile::TempDir,
     pub manifest: PackManifest,
     policy: PackPolicy,
@@ -28,8 +30,8 @@ pub struct FetchedPack {
 
 /// What a fetched pack is installed as.
 pub(super) enum Installing {
-    /// A pack new to the repository, from `source`, at `reference` when one
-    /// was asked for, else on the branch its clone lands on.
+    /// A pack new to the store, from `source`, at `reference` when one was
+    /// asked for, else on the branch its clone lands on.
     Added {
         source: String,
         reference: Option<String>,
@@ -48,17 +50,23 @@ impl Installing {
         }
     }
 
-    /// Refused when the repository, as `lock` read with the packs held and
-    /// the trees vendored under `dir` have it now, no longer admits this
-    /// install: an add of a pack vendored since, or an update of one no
-    /// longer locked.
-    fn still_admitted(&self, pack: &PackRef, lock: &PackLock, dir: &Path) -> Result<(), Error> {
+    /// Refused when `store`, as `lock` read with its packs held and the trees
+    /// vendored in it have it now, no longer admits this install: an add of a
+    /// pack vendored since, or an update of one no longer locked.
+    fn still_admitted(
+        &self,
+        pack: &PackRef,
+        lock: &PackLock,
+        store: &PackStore,
+    ) -> Result<(), Error> {
         match self {
-            Installing::Added { .. } => refuse_vendored(dir, pack),
+            Installing::Added { .. } => refuse_vendored(store, pack),
             Installing::Updated { .. } if lock.packs.contains_key(pack) => Ok(()),
-            Installing::Updated { .. } => {
-                Err(refused(PackRefusal::NotInstalled { pack: pack.clone() }))
-            }
+            Installing::Updated { .. } => Err(refused(PackRefusal::NotInstalled {
+                pack: pack.clone(),
+                scope: store.scope(),
+                found_in: None,
+            })),
         }
     }
 }
@@ -66,9 +74,10 @@ impl Installing {
 impl FetchedPack {
     /// The pack cloned at `clone`, its manifest read, judged under `policy` with
     /// what it executes `confirmed` ahead or not, to be installed as `installing`
-    /// says, in `workspace`'s repository.
+    /// says, into `store`, by `workspace`.
     pub(super) fn new(
         workspace: Workspace,
+        store: PackStore,
         clone: tempfile::TempDir,
         manifest: PackManifest,
         policy: PackPolicy,
@@ -77,6 +86,7 @@ impl FetchedPack {
     ) -> Self {
         FetchedPack {
             workspace,
+            store,
             clone,
             manifest,
             policy,
@@ -93,7 +103,7 @@ impl FetchedPack {
     }
 
     /// The ref an update moves the pack to; none for a pack new to the
-    /// repository.
+    /// store.
     pub fn updating_to(&self) -> Option<&str> {
         match &self.installing {
             Installing::Updated { reference, .. } => Some(reference),
@@ -149,17 +159,17 @@ impl FetchedPack {
             }
             Installing::Updated { source, reference } => (source.clone(), reference.clone()),
         };
-        let dir = &self.workspace.dir;
+        let store = &self.store;
         // Held from the read of the lock to its write, so an entry another
         // pack command writes meanwhile is read, never written over. Read
         // before anything is written: a lock that cannot be read stops the
         // install before it starts.
-        let _held = held(&self.workspace, stop).await?;
-        let lock = vendor::load_lock(dir).map_err(failed)?;
+        let _held = held(store, &self.workspace, stop).await?;
+        let lock = vendor::load_lock(store).map_err(failed)?;
         let pack = self.manifest.reference();
-        // The fetch judged the repository before the packs were held; another
-        // pack command may have installed or removed this pack since.
-        self.installing.still_admitted(&pack, &lock, dir)?;
+        // The fetch judged the store before its packs were held; another pack
+        // command may have installed or removed this pack since.
+        self.installing.still_admitted(&pack, &lock, store)?;
         let entry = |content_hash| PackLockEntry {
             publisher: pack.publisher().clone(),
             name: pack.name().clone(),
@@ -168,7 +178,7 @@ impl FetchedPack {
             commit: commit.clone(),
             content_hash,
         };
-        let at = vendor_and_lock(dir, clone, &pack, lock, entry, remarks).map_err(failed)?;
+        let at = vendor_and_lock(store, clone, &pack, lock, entry, remarks).map_err(failed)?;
         Ok(InstalledPack {
             workspace: self.workspace,
             pack,

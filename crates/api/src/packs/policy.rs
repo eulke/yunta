@@ -1,17 +1,20 @@
-//! See [`super`]. What the project's config says of packs: the publishers it
-//! allows, and what it does with a pack that ships executors, merged across
-//! its layers with each restriction kept beside the layers that declare it. A
-//! refusal that cannot say which config file to change is not one a person
-//! can act on: a ceiling a higher layer sets may name a file they cannot
-//! even edit.
-
-use std::path::Path;
+//! See [`super`]. What the config says of packs: the publishers it allows,
+//! and what it does with a pack that ships executors, merged across its layers
+//! with each restriction kept beside the layers that declare it. A refusal
+//! that cannot say which config file to change is not one a person can act
+//! on: a ceiling a higher layer sets may name a file they cannot even edit.
+//!
+//! This project's packs are admitted by every layer, its repository's
+//! included. The user's packs, which every project reads, are admitted by the
+//! org and user layers alone: the repository a command happens to run in
+//! speaks for no other project, so its layer neither loosens nor tightens
+//! what reaches them all.
 
 use yunta_core::refusal::{PackRefusal, PackVerb};
-use yunta_core::{ConfigLayer, Env, PackExecutorPolicy, PackManifest, Publisher};
+use yunta_core::{ConfigLayer, PackExecutorPolicy, PackManifest, PackScope, Publisher};
 
 use super::refused;
-use crate::Error;
+use crate::{Error, Failure, Workspace};
 
 /// The merged `permissions.packs`, with the layers that declare each
 /// restriction named.
@@ -27,10 +30,15 @@ pub(super) struct PackPolicy {
 }
 
 impl PackPolicy {
-    /// The policy the config layers of the project at `dir` set, read with
-    /// `env`.
-    pub(super) fn of(dir: &Path, env: &Env) -> Result<Self, Error> {
-        let layers = crate::config_layers(dir, env)?;
+    /// The policy on installing into the store `scope` names, as the config
+    /// layers `workspace` reads set it: every layer of the project it works in
+    /// for this project's packs, the org and user layers for the user's.
+    pub(super) fn of(workspace: &Workspace, scope: PackScope) -> Result<Self, Error> {
+        let layers = match scope {
+            PackScope::Project => crate::config_layers(&workspace.dir, &workspace.env)?,
+            PackScope::User => crate::project::machine_layers(&workspace.env)
+                .map_err(|failed| Error::Failed(Failure::new(failed)))?,
+        };
         let merged = ConfigLayer::merge_layers(layers.iter().map(|(_, layer)| layer.clone()));
         let packs = merged
             .permissions

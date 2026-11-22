@@ -1,12 +1,13 @@
 //! The packs installed, as a person moves through them, in every environment: the
-//! rows `pack list` prints, the pointer on one.
+//! rows `pack list` prints, the pointer on one; and the user's packs, which every
+//! project reads, headed as theirs.
 
 use std::path::{Path, PathBuf};
 
 use surco::golden::{assert_golden, ENVIRONMENTS};
 use surco::look::Look;
 use surco::surface::{Markdown, Surface, Terminal};
-use yunta_core::{PackLockEntry, PackRef};
+use yunta_core::{PackLockEntry, PackRef, PackScope};
 
 use crate::page::pack::{Listed, PointedPacks, VendoredPack, VendoredTree};
 use crate::page::Page;
@@ -32,6 +33,7 @@ fn vendored(reference: &str, name: &str, tree: VendoredTree) -> VendoredPack {
 /// Two packs installed, one as its lock records it and one modified since.
 fn listed() -> Listed {
     Listed::Locked {
+        scope: PackScope::Project,
         packs: vec![
             vendored("acme/lint", "lint", VendoredTree::AsLocked),
             vendored("acme/review", "review", VendoredTree::Modified),
@@ -52,6 +54,22 @@ fn the_packs_pointed_at_match_their_goldens_in_every_environment() {
         let look = Look::of(environment);
         let drawn = Terminal::on(look).draw(&page.document(&look));
         assert_golden(&environment.golden(&goldens(), "pointed"), &drawn);
+    }
+}
+
+/// The user's packs, as `pack list --global` prints them: the headline says whose
+/// they are, and the lock is the one under the state root.
+#[test]
+fn the_users_packs_match_their_goldens_in_every_environment() {
+    let listed = Listed::Locked {
+        scope: PackScope::User,
+        packs: vec![vendored("acme/lint", "lint", VendoredTree::AsLocked)],
+        lock: "~/.yunta/yunta.lock".to_string(),
+    };
+    for environment in &ENVIRONMENTS {
+        let look = Look::of(environment);
+        let drawn = Terminal::on(look).draw(&listed.document(&look));
+        assert_golden(&environment.golden(&goldens(), "user"), &drawn);
     }
 }
 

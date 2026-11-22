@@ -42,7 +42,7 @@ fn kind(step: &NextStep) -> usize {
         NextStep::Graph { .. } => 29,
         NextStep::RunGraph { .. } => 30,
         NextStep::NewWorkflow { .. } => 31,
-        NextStep::PackList => 32,
+        NextStep::PackList { .. } => 32,
         NextStep::PackAudit { .. } => 33,
     }
 }

@@ -1219,6 +1219,7 @@ fn a_missing_composition_reference_is_a_check_error() {
         &wf,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &yunta_engine::WorkflowOrigin::Repo,
         &|_| None,
     )
@@ -1244,6 +1245,7 @@ fn a_composition_cycle_is_a_check_error_naming_the_chain() {
         &wf,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &yunta_engine::WorkflowOrigin::Repo,
         &|_| None,
     )
@@ -1270,6 +1272,7 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
         &wf,
         &config,
         root.path(),
+        None,
         &yunta_engine::WorkflowOrigin::Repo,
         &|_| None,
     )
@@ -1291,6 +1294,7 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
         &wf,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &yunta_engine::WorkflowOrigin::Repo,
         &|_| None
     )
@@ -1306,6 +1310,7 @@ fn a_healthy_composition_graph_passes_check_workflow_refs() {
         &wf,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &yunta_engine::WorkflowOrigin::Repo,
         &|_| None
     )
@@ -1328,6 +1333,7 @@ fn a_suite_nothing_compares_is_a_warning() {
         &wf,
         &config,
         root.path(),
+        None,
         &yunta_engine::WorkflowOrigin::Repo,
         &|_| None,
     )
@@ -1345,6 +1351,7 @@ fn a_suite_nothing_compares_is_a_warning() {
         &wf,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &yunta_engine::WorkflowOrigin::Repo,
         &|_| None
     )
@@ -1369,6 +1376,7 @@ fn a_suite_a_composed_workflow_compares_is_not() {
             &wf,
             &config,
             root.path(),
+            None,
             &yunta_engine::WorkflowOrigin::Repo,
             &|_| None,
         )
@@ -2702,6 +2710,7 @@ fn refs_errors(parent: &str, catalog: &[(&str, &str)], config: &str) -> Vec<Chec
         &wf,
         &config,
         root.path(),
+        None,
         &yunta_engine::WorkflowOrigin::Repo,
         &|_| None,
     )

@@ -13,7 +13,9 @@ use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::look::Look;
 use yunta_core::step::{Arg, NextStep};
-use yunta_core::{Detected, MachineAdapters, ProbedAdapter, RunnerCandidate, RunnerName};
+use yunta_core::{
+    Detected, MachineAdapters, PackScope, ProbedAdapter, RunnerCandidate, RunnerName,
+};
 
 use super::Page;
 use crate::{command, declare};
@@ -66,7 +68,10 @@ impl Page for Initialized<'_> {
             "confirms everything above is usable",
         );
         if self.undeclared.is_empty() {
-            let pack = NextStep::PackAdd { source: Arg::Blank };
+            let pack = NextStep::PackAdd {
+                source: Arg::Blank,
+                scope: PackScope::Project,
+            };
             return doc.with(Next {
                 steps: vec![
                     (command::line(&pack), "installs a pack of workflows to run"),

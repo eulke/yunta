@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::caution::Caution;
 use yunta_core::step::Arg;
-use yunta_core::{InputName, Manifest, ModeName, RunAdapter, Workflow};
+use yunta_core::{Env, InputName, Manifest, ModeName, RunAdapter, Workflow};
 use yunta_engine::FrozenRun;
 use yunta_render::document::PreRunWarnings;
 use yunta_render::refusal::Refused;
@@ -21,7 +21,6 @@ use yunta_replay::history::PriorEstimation;
 
 use crate::{
     Committer, Error, Failure, Judged, Project, Remark, Remarks, Stop, Verdict, VerdictReach,
-    WorkflowFile,
 };
 
 /// What a run is asked for with: its workflow by reference, its inputs by
@@ -37,10 +36,19 @@ pub struct RunRequest {
     /// One adapter this binary builds, by its id, or a mock fixture's text:
     /// every session runs on it. None, and runner resolution picks.
     pub adapter: Option<RunAdapter>,
-    /// Whether the run freezes none of the person's own knowledge, as a test
-    /// case does: its scripted sessions read none, so nothing of the machine
-    /// it runs on reaches it.
+    /// Whether the run freezes none of the person's own knowledge and none of
+    /// the person's own packs, as a test case does: its scripted sessions read
+    /// none, so nothing of the machine it runs on reaches it.
     pub hermetic: bool,
+}
+
+impl RunRequest {
+    /// The environment this run reads the person's own layer from, their
+    /// knowledge and their packs: `env`, or none for a hermetic run, from
+    /// the name its workflow is looked up by to what its birth freezes.
+    fn ambient<'e>(&self, env: &'e Env) -> Option<&'e Env> {
+        (!self.hermetic).then_some(env)
+    }
 }
 
 /// A run admitted and not yet created: its frozen manifest, the mode it
@@ -67,7 +75,7 @@ impl Project {
         remarks: &dyn Remarks,
         stop: &Stop,
     ) -> Result<Admission<'_>, Error> {
-        let (path, workflow) = self.runnable(&request.workflow, remarks, stop).await?;
+        let (path, workflow) = self.runnable(&request, remarks, stop).await?;
         self.refuse_without_committer(stop).await?;
         if !matches!(request.adapter, Some(RunAdapter::Mock { .. })) {
             self.refuse_unreachable_forge(&workflow)?;
@@ -113,16 +121,18 @@ impl Project {
         })
     }
 
-    /// The workflow `reference` names, read and judged as a run asks before it
+    /// The workflow `request` names, read and judged as a run asks before it
     /// is created: each caution said, and refused when the verdict does not
     /// pass.
     async fn runnable(
         &self,
-        reference: &Path,
+        request: &RunRequest,
         remarks: &dyn Remarks,
         stop: &Stop,
     ) -> Result<(PathBuf, Workflow), Error> {
-        let WorkflowFile { path, workflow } = self.workspace.read_workflow(reference)?;
+        let ambient = request.ambient(&self.workspace.env);
+        let path = self.workspace.workflow_file(&request.workflow, ambient)?;
+        let workflow = crate::workflow::read(&self.workspace.dir.join(&path), &path)?;
         let judged = Judged {
             workflow: &workflow,
             path: &path,
@@ -184,11 +194,7 @@ impl Project {
         stop: &Stop,
     ) -> Result<FrozenRun, Error> {
         let workflow_dir = path.parent().unwrap_or(Path::new("."));
-        // The user layer's knowledge, where the environment keeps it.
-        let user_knowledge = match request.hermetic {
-            true => None,
-            false => yunta_core::user_knowledge_dir(&self.workspace.env),
-        };
+        let ambient = request.ambient(&self.workspace.env);
         let mut frozen = yunta_engine::build_manifest(
             workflow,
             &self.config,
@@ -196,7 +202,7 @@ impl Project {
             &self.workspace.dir,
             &request.inputs,
             self.workspace.supervision(stop),
-            user_knowledge.as_deref(),
+            ambient,
         )
         .await?;
         let paths =

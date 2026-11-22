@@ -119,7 +119,9 @@ impl<'a> Source<'a> {
                     })
                 })?
             }
-            Source::Checkout { worktree, .. } => checkout_agent_text(worktree, name).await?,
+            Source::Checkout {
+                worktree, ambient, ..
+            } => checkout_agent_text(worktree, *ambient, name).await?,
         };
         agents::definition(name, &text).map_err(FrozenError::unresolved)
     }
@@ -155,8 +157,12 @@ impl<'a> Source<'a> {
                 Ok(dir)
             }
             Source::Checkout {
-                worktree, config, ..
-            } => match skills::locate(config, worktree, name).map_err(FrozenError::unresolved)? {
+                worktree,
+                config,
+                ambient,
+            } => match skills::locate(config, worktree, *ambient, name)
+                .map_err(FrozenError::unresolved)?
+            {
                 skills::Location::Dir(dir) => Ok(dir),
                 skills::Location::Pack(declared) => Ok(declared.joined()),
             },
@@ -211,8 +217,10 @@ impl<'a> Source<'a> {
                     parent: frozen,
                 })
             }
-            Source::Checkout { worktree, .. } => {
-                let resolved = catalog::resolve_workflow(worktree, use_name)
+            Source::Checkout {
+                worktree, ambient, ..
+            } => {
+                let resolved = catalog::resolve_workflow(worktree, *ambient, use_name)
                     .map_err(FrozenError::unresolved)?;
                 let text = read_file_text(&resolved.path).await?;
                 Ok(ChildWorkflow::Checkout {
@@ -239,8 +247,12 @@ impl<'a> Source<'a> {
 
 /// The checkout's text of `name`'s definition, the project's own file
 /// first, then the one pack file that declares it.
-async fn checkout_agent_text(worktree: &Path, name: &AgentName) -> Result<String, FrozenError> {
-    let path = match agents::locate(worktree, name).map_err(FrozenError::unresolved)? {
+async fn checkout_agent_text(
+    worktree: &Path,
+    ambient: Option<&Env>,
+    name: &AgentName,
+) -> Result<String, FrozenError> {
+    let path = match agents::locate(worktree, ambient, name).map_err(FrozenError::unresolved)? {
         agents::Location::Project(path) => path,
         agents::Location::Pack(declared) => declared.joined(),
     };
@@ -291,13 +303,8 @@ async fn checkout_knowledge(
     ambient: Option<&Env>,
     layer: KnowledgeLayer,
 ) -> Result<Vec<KnowledgeFile>, FrozenError> {
-    let user = ambient.and_then(yunta_core::user_knowledge_dir);
     let mut files = Vec::new();
-    for file in layer_files(layer, worktree, user.as_deref(), |declared| {
-        Ok(declared.joined())
-    })
-    .await?
-    {
+    for file in layer_files(layer, worktree, ambient, |declared| Ok(declared.joined())).await? {
         let bytes = read_file(&file.path).await?;
         files.push(KnowledgeFile {
             pack: file.pack,

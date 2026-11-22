@@ -1,6 +1,7 @@
 //! A step of every kind, with each form one takes: given and blank arguments, each
 //! answer of a decision, each reach of a listing, each shape a new workflow starts
-//! as. What a test of every line a surface writes, or of what each step does, walks.
+//! as, each store a pack command acts on. What a test of every line a surface
+//! writes, or of what each step does, walks.
 //!
 //! A kind added to `NextStep` does not build this module's test until the test
 //! numbers it, and the test then asks for a sample of it.
@@ -9,7 +10,7 @@ use surco::doc::Depth;
 
 use super::{Arg, Choice, NextStep, Reach};
 use crate::ids::{NodeId, OptionId, PackName, PackRef, Publisher, RunId, WorkflowName};
-use crate::WorkflowShape;
+use crate::{PackScope, WorkflowShape};
 
 /// A step of every kind, with each form one takes: given and blank arguments,
 /// each answer of a decision, each reach of a listing.
@@ -20,6 +21,8 @@ pub fn every_step() -> Vec<NextStep> {
         steps_of_a_workflow(),
         steps_that_show_or_write_a_workflow(),
         steps_of_the_machine(),
+        steps_of_a_pack_store(PackScope::Project),
+        steps_of_a_pack_store(PackScope::User),
     ]
     .concat()
 }
@@ -156,14 +159,16 @@ fn steps_that_show_or_write_a_workflow() -> Vec<NextStep> {
     ]
 }
 
-/// The steps about this machine, a project's tests and its packs.
+/// The pack a sample step names.
+fn pack() -> PackRef {
+    PackRef::new(
+        Publisher::from_static("acme"),
+        PackName::from_static("lint"),
+    )
+}
+
+/// The steps about this machine, a project's tests and a new pack.
 fn steps_of_the_machine() -> Vec<NextStep> {
-    let pack = || {
-        PackRef::new(
-            Publisher::from_static("acme"),
-            PackName::from_static("lint"),
-        )
-    };
     vec![
         NextStep::Doctor {
             sessions: false,
@@ -182,27 +187,46 @@ fn steps_of_the_machine() -> Vec<NextStep> {
             dir: Some(".".to_string()),
         },
         NextStep::Init,
-        NextStep::PackAdd {
-            source: Arg::Given("github.com/acme/lint".to_string()),
-        },
-        NextStep::PackAdd { source: Arg::Blank },
-        NextStep::PackUpdate {
-            pack: pack(),
-            reference: Arg::Given("v2".to_string()),
-        },
-        NextStep::PackUpdate {
-            pack: pack(),
-            reference: Arg::Blank,
-        },
-        NextStep::PackRemove { pack: pack() },
         NextStep::PackNew { pack: pack() },
-        NextStep::PackList,
-        NextStep::PackAudit { pack: pack() },
         NextStep::Gc { dry_run: false },
         NextStep::Gc { dry_run: true },
         NextStep::Help,
         NextStep::ShowCommit {
             commit: "4f6c0d3".to_string(),
+        },
+    ]
+}
+
+/// The steps that act on the pack store `scope` names: installing, updating,
+/// removing, listing and auditing its packs.
+fn steps_of_a_pack_store(scope: PackScope) -> Vec<NextStep> {
+    vec![
+        NextStep::PackAdd {
+            source: Arg::Given("github.com/acme/lint".to_string()),
+            scope,
+        },
+        NextStep::PackAdd {
+            source: Arg::Blank,
+            scope,
+        },
+        NextStep::PackUpdate {
+            pack: pack(),
+            reference: Arg::Given("v2".to_string()),
+            scope,
+        },
+        NextStep::PackUpdate {
+            pack: pack(),
+            reference: Arg::Blank,
+            scope,
+        },
+        NextStep::PackRemove {
+            pack: pack(),
+            scope,
+        },
+        NextStep::PackList { scope },
+        NextStep::PackAudit {
+            pack: pack(),
+            scope,
         },
     ]
 }

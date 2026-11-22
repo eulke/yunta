@@ -1,15 +1,17 @@
-//! See [`super`]. The repository's packs held by one pack command from its
-//! read of the lock to its write, through `.yunta/yunta.lock.held` beside the
+//! See [`super`]. A store's packs held by one pack command from its read of
+//! the lock to its write, through the hold file the store names beside its
 //! lock, so another one waits rather than writing over an entry it never
-//! read.
+//! read. Each store is held on its own: a command on this project's packs and
+//! one on the user's never wait on each other.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
+use yunta_core::PackStore;
 use yunta_engine::lock::{self, Acquired, Contention, LockError, LockOwner, SystemProbe};
 
 use super::failed;
-use super::vendor::{self, PackError};
+use super::vendor::PackError;
 use crate::{Error, Failure, Stop, Workspace};
 
 /// How long a pack command waits for another to let go of the packs: the
@@ -22,8 +24,8 @@ const HOLD_PATIENCE: Duration = Duration::from_secs(120);
 /// pause.
 const HOLD_POLL: Duration = Duration::from_millis(50);
 
-/// The repository's packs, held by this process: no other pack command reads
-/// the lock to write it until this is dropped.
+/// A store's packs, held by this process: no other pack command reads the
+/// lock to write it until this is dropped.
 pub(super) struct HeldPacks {
     path: PathBuf,
     owner: LockOwner,
@@ -39,12 +41,15 @@ impl Drop for HeldPacks {
     }
 }
 
-/// Holds the packs of the repository `workspace` works in, through
-/// `.yunta/yunta.lock.held` beside the lock, waiting while another pack
-/// command holds them. A holder that is gone is taken over; the caller's stop
-/// ends the wait.
-pub(super) async fn held(workspace: &Workspace, stop: &Stop) -> Result<HeldPacks, Error> {
-    let path = vendor::hold_path(&workspace.dir);
+/// Holds the packs of `store`, through the hold file beside its lock, waiting
+/// while another pack command holds them, on `workspace`'s clock. A holder
+/// that is gone is taken over; the caller's stop ends the wait.
+pub(super) async fn held(
+    store: &PackStore,
+    workspace: &Workspace,
+    stop: &Stop,
+) -> Result<HeldPacks, Error> {
+    let path = store.hold_file();
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|source| {
             failed(PackError::Write {

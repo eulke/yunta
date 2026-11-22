@@ -166,17 +166,25 @@ pub(crate) fn load_named_layers(
     cwd: &Path,
     env: &yunta_core::Env,
 ) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
+    let mut layers = machine_layers(env)?;
+    if let Some(layer) = load_layer(&repository_layer(cwd), env.home.as_deref())? {
+        layers.push(("repo", layer));
+    }
+    Ok(layers)
+}
+
+/// The config layers present on disk that hold for every project on this
+/// machine, org first, each named: the org's and the user's, without any
+/// repository's. What admits a pack every project reads.
+pub(crate) fn machine_layers(
+    env: &yunta_core::Env,
+) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
     let user_root = user_root(env)?;
     let org = env
         .org_config
         .clone()
         .unwrap_or_else(|| PathBuf::from("/etc/yunta/config.yaml"));
-    let candidates = [
-        ("org", org),
-        ("user", user_root.join("config.yaml")),
-        ("repo", repository_layer(cwd)),
-    ];
-
+    let candidates = [("org", org), ("user", user_root.join("config.yaml"))];
     let mut layers = Vec::new();
     for (name, path) in candidates {
         if let Some(layer) = load_layer(&path, env.home.as_deref())? {

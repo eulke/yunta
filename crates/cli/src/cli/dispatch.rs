@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use surco::doc::Depth;
 use surco::look::Look;
-use yunta_core::{Env, Responder, WorkflowName};
+use yunta_core::{Env, PackScope, Responder, WorkflowName};
 
 use super::{Command, ListArgs, NewArgs, PackAction, ResolveGateArgs, RunArgs};
 use crate::application;
@@ -306,21 +306,39 @@ async fn stats_command(
     }
 }
 
-/// `yunta pack`: each pack subcommand, run by the module that owns it.
+/// `yunta pack`: each pack subcommand, run by the module that owns it, on the
+/// store `--global` names.
 async fn pack_command(shell: &Shell, action: PackAction, look: &Look) -> Result<Outcome, CliError> {
     match action {
         PackAction::Add {
+            global,
             source,
             yes,
             run_tests,
-        } => commands::pack::add(shell, &source, yes, run_tests, look).await,
-        PackAction::Update { pack, r#ref, yes } => {
-            commands::pack::update(shell, &pack, &r#ref, yes, look).await
-        }
+        } => commands::pack::add(shell, scope(global), &source, yes, run_tests, look).await,
+        PackAction::Update {
+            global,
+            pack,
+            r#ref,
+            yes,
+        } => commands::pack::update(shell, scope(global), &pack, &r#ref, yes, look).await,
         PackAction::New { pack } => commands::pack::new_pack(shell, &pack, look).await,
-        PackAction::Remove { pack } => commands::pack::remove(shell, &pack, look).await,
-        PackAction::List => commands::pack::list(shell, look),
-        PackAction::Audit { pack } => commands::pack::audit(shell, &pack, look).await,
+        PackAction::Remove { global, pack } => {
+            commands::pack::remove(shell, scope(global), &pack, look).await
+        }
+        PackAction::List { global } => commands::pack::list(shell, scope(global), look),
+        PackAction::Audit { global, pack } => {
+            commands::pack::audit(shell, scope(global), &pack, look).await
+        }
+    }
+}
+
+/// The store a pack command acts on: the user's, read by every project, with
+/// `--global`; this project's without it.
+fn scope(global: bool) -> PackScope {
+    match global {
+        true => PackScope::User,
+        false => PackScope::Project,
     }
 }
 

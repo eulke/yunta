@@ -1,16 +1,20 @@
-//! See [`super`]. The packs installed, as `yunta pack list` lists them, with one
-//! pointed at and moved through with `j` and `k`. `a` audits the one pointed at, its
-//! own cases run on it, as `yunta pack audit` does; `x` removes it once a person
-//! confirmed, and the packs are read again; `n` asks for a new pack's publisher and
-//! name and writes it as `yunta pack new` does. `i` asks where a pack is and `u` the
-//! ref the one pointed at moves to: the pack is fetched, its copy held under the
-//! fetch's ticket, and its inventory read; Enter installs that copy, never fetched
-//! again, a confirmation naming what it executes first where that waits on a
-//! person, and Escape lets the copy go. An update that ships no executor installs
-//! as soon as it is fetched, as `yunta pack update` does. Each page stands in the
-//! listing's place until Escape takes the person back to it.
+//! See [`super`]. The packs installed in one store, as `yunta pack list` lists
+//! them, with one pointed at and moved through with `j` and `k`: this project's
+//! first, and `g` turns to the user's, which every project reads, and back, as
+//! `--global` does at a shell. What the keys do, they do to the store shown. `a`
+//! audits the one pointed at, its own cases run on it, as `yunta pack audit` does;
+//! `x` removes it once a person confirmed, and the packs are read again; `n` asks
+//! for a new pack's publisher and name and writes it as `yunta pack new` does. `i`
+//! asks where a pack is and `u` the ref the one pointed at moves to: the pack is
+//! fetched, its copy held under the fetch's ticket, and its inventory read; Enter
+//! installs that copy, never fetched again, a confirmation naming what it executes
+//! first where that waits on a person, and Escape lets the copy go. An update that
+//! ships no executor installs as soon as it is fetched, as `yunta pack update`
+//! does. Each page stands in the listing's place until Escape takes the person
+//! back to it. The listing and its keys are `listing`; installing is `install`.
 
 mod install;
+mod listing;
 
 use std::mem::{discriminant, Discriminant};
 use std::sync::Arc;
@@ -19,23 +23,23 @@ use surco::components::{Legend, Note};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::{AuditedPack, Remark};
-use yunta_core::step::{Arg, NextStep};
-use yunta_core::{CommitSha, PackRef};
-use yunta_render::page::pack::{Inventory, Listed, NewPack, PointedPacks, Removed};
+use yunta_core::{CommitSha, PackRef, PackScope};
+use yunta_render::page::pack::{Inventory, Listed, NewPack};
 use yunta_render::page::Page;
 
-use super::super::Act;
 use super::Next;
-use crate::dialog::Confirmation;
 use crate::prompt::{Answerable, LineAsked, Press, Stroke};
 use crate::{
     Operation, PackFetched, PackInstalled, PackOperation, PackOutcome, PackScaffolded, Ticket,
 };
 use install::{installing_screen, PackAsked};
 
-/// The packs installed, one pointed at, and the page standing in their place.
+/// The packs installed in one store, one pointed at, and the page standing in
+/// their place.
 #[derive(Debug, Clone)]
 pub(super) struct PacksView {
+    /// Whose packs the listing shows, and the store what is done here acts on.
+    scope: PackScope,
     /// The packs, once read.
     listed: Option<Arc<Listed>>,
     /// The pack the pointer stands on.
@@ -91,23 +95,29 @@ enum PacksShown {
 }
 
 impl PacksView {
-    /// The packs, being read.
-    pub(super) fn reading() -> Self {
-        PacksView {
+    /// This project's packs, being read, and the work that reads them.
+    pub(super) fn reading() -> (Self, Operation) {
+        let view = PacksView {
+            scope: PackScope::Project,
             listed: None,
             pointed: None,
             shown: PacksShown::Listing,
             removed: None,
             remarked: Vec::new(),
             said: None,
-        }
+        };
+        let read = view.read_again();
+        (view, read)
     }
 
     /// The listing, an audit, a new pack's question or its page, what the work
     /// under way said, and what refused or failed; with the keys.
     pub(super) fn screen(&self, look: &Look) -> (Doc, Legend) {
         let (mut doc, legend) = match &self.shown {
-            PacksShown::Listing => (self.listing(look), yunta_render::screen::packs_legend()),
+            PacksShown::Listing => {
+                let legend = yunta_render::screen::packs_legend(self.scope);
+                (self.listing(look), legend)
+            }
             PacksShown::Auditing { pack } => {
                 let auditing = Note(yunta_render::screen::auditing(&pack.to_string()));
                 (Doc::new().with(auditing), Legend::new())
@@ -142,23 +152,6 @@ impl PacksView {
             doc = doc.with(Note(said.clone()));
         }
         (doc, legend)
-    }
-
-    /// The pack removed last, then the packs pointed at, or that they are read.
-    fn listing(&self, look: &Look) -> Doc {
-        let mut doc = Doc::new();
-        if let Some(pack) = &self.removed {
-            doc = doc.with_all(Removed { pack }.document(look).into_blocks());
-        }
-        let Some(listed) = &self.listed else {
-            let reading = yunta_render::screen::READING_THE_PACKS.to_string();
-            return doc.with(Note(reading));
-        };
-        let page = match &self.pointed {
-            Some(pointed) => PointedPacks { listed, pointed }.document(look),
-            None => listed.document(look),
-        };
-        doc.with_all(page.into_blocks())
     }
 
     /// Where the trail goes on past the packs: the pack an audit is of, or a new
@@ -198,7 +191,8 @@ impl PacksView {
             PacksShown::Listing => self.pressed_on_the_listing(stroke),
             PacksShown::Auditing { pack } => match stroke {
                 Stroke::Decline => {
-                    let audit = PackOperation::Audit { pack: pack.clone() };
+                    let (pack, scope) = (pack.clone(), self.scope);
+                    let audit = PackOperation::Audit { pack, scope };
                     self.shown = PacksShown::Listing;
                     Next::LetGo(Operation::Pack(audit))
                 }
@@ -255,107 +249,6 @@ impl PacksView {
         PacksStanding(discriminant(&self.shown))
     }
 
-    /// What the packs offer on their listing, each with the key that takes it here:
-    /// auditing, removing and updating the one pointed at, and installing one. A new
-    /// pack, whose command needs the name it is given, is offered by its key alone.
-    pub(super) fn offered(&self) -> Vec<Act> {
-        if !matches!(self.shown, PacksShown::Listing) {
-            return Vec::new();
-        }
-        let pointed = self.pointed.iter().flat_map(|pack| {
-            [
-                (
-                    Stroke::Insert('a'),
-                    NextStep::PackAudit { pack: pack.clone() },
-                ),
-                (
-                    Stroke::Insert('x'),
-                    NextStep::PackRemove { pack: pack.clone() },
-                ),
-                (
-                    Stroke::Insert('u'),
-                    NextStep::PackUpdate {
-                        pack: pack.clone(),
-                        reference: Arg::Blank,
-                    },
-                ),
-            ]
-        });
-        let install = (
-            Stroke::Insert('i'),
-            NextStep::PackAdd { source: Arg::Blank },
-        );
-        pointed
-            .chain([install])
-            .map(|(key, step)| Act::by(key, step))
-            .collect()
-    }
-
-    /// What `stroke` asks for on the listing.
-    fn pressed_on_the_listing(&mut self, stroke: Stroke) -> Next {
-        self.removed = None;
-        self.said = None;
-        match stroke {
-            Stroke::Down | Stroke::Tab | Stroke::Insert('j') => self.moved(1),
-            Stroke::Up | Stroke::BackTab | Stroke::Insert('k') => self.moved(-1),
-            Stroke::Insert('a') => match self.pointed.clone() {
-                Some(pack) => {
-                    self.shown = PacksShown::Auditing { pack: pack.clone() };
-                    self.remarked.clear();
-                    Next::Work(Operation::Pack(PackOperation::Audit { pack }))
-                }
-                None => Next::Stays,
-            },
-            Stroke::Insert('x') => match self.pointed.clone() {
-                Some(pack) => {
-                    let asks = yunta_render::screen::removing_pack(&pack.to_string());
-                    let same = vec![NextStep::PackRemove { pack: pack.clone() }];
-                    let removal = Operation::Pack(PackOperation::Remove { pack });
-                    Next::Confirm(Confirmation::new(asks, same, removal))
-                }
-                None => Next::Stays,
-            },
-            Stroke::Insert('n') => {
-                let asks = yunta_render::screen::new_pack_asks();
-                self.shown = PacksShown::Naming(LineAsked::new(asks));
-                Next::Stays
-            }
-            Stroke::Insert('i') => {
-                self.shown = PacksShown::Asking(PackAsked::source());
-                Next::Stays
-            }
-            Stroke::Insert('u') => match self.pointed.clone() {
-                Some(pack) => {
-                    self.shown = PacksShown::Asking(PackAsked::reference(pack));
-                    Next::Stays
-                }
-                None => Next::Stays,
-            },
-            Stroke::Decline => Next::Done,
-            Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
-            _ => Next::Stays,
-        }
-    }
-
-    /// The pointer moved `by` rows, around at either end.
-    fn moved(&mut self, by: isize) -> Next {
-        let Some(listed) = &self.listed else {
-            return Next::Stays;
-        };
-        let packs = listed.packs();
-        if packs.is_empty() {
-            return Next::Stays;
-        }
-        let at = packs
-            .iter()
-            .position(|pack| Some(*pack) == self.pointed.as_ref())
-            .unwrap_or_default();
-        let rows = packs.len() as isize;
-        let to = (at as isize + by).rem_euclid(rows) as usize;
-        self.pointed = packs.get(to).map(|pack| (*pack).clone());
-        Next::Stays
-    }
-
     /// Whether a new pack's name is being typed.
     pub(super) fn typing(&self) -> bool {
         match &self.shown {
@@ -397,32 +290,11 @@ impl PacksView {
         Next::Stays
     }
 
-    /// The packs read: the pointer stays on the one it stood on while it is
-    /// installed, and goes to the first otherwise.
-    fn listed(&mut self, listed: Arc<Listed>) {
-        let packs = listed.packs();
-        let kept = self
-            .pointed
-            .as_ref()
-            .is_some_and(|pointed| packs.contains(&pointed));
-        if !kept {
-            self.pointed = packs.first().map(|pack| (*pack).clone());
-        }
-        self.listed = Some(listed);
-    }
-
     /// `pack`'s audit, where it was being audited.
     fn audited(&mut self, pack: PackRef, audited: Arc<AuditedPack>) {
         if matches!(&self.shown, PacksShown::Auditing { pack: auditing } if *auditing == pack) {
             self.shown = PacksShown::Audited { pack, audited };
         }
-    }
-
-    /// `pack` removed: said over the listing, which is read again.
-    fn removed(&mut self, pack: PackRef) -> Next {
-        self.removed = Some(pack);
-        self.shown = PacksShown::Listing;
-        Next::Work(Operation::Pack(PackOperation::List))
     }
 
     /// What writing a new pack came to, where one was being written.

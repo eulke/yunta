@@ -10,10 +10,9 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
-use yunta_core::{Node, NodeId, NodeKind, PromptSource, Workflow};
+use yunta_core::{Env, Node, NodeId, NodeKind, PackStores, PromptSource, Workflow};
 
 use super::FrozenError;
-use crate::catalog::{self, WorkflowOrigin};
 
 /// The directory a workflow's prompt files are read from, and the pack they
 /// must stay inside when the workflow came from one.
@@ -32,27 +31,30 @@ pub(crate) enum PromptRoot {
 
 impl PromptRoot {
     /// The root for a workflow born in `workflow_dir`: its own directory,
-    /// unless the catalog places that directory inside a pack.
-    pub(crate) async fn of_tree(repo: &Path, workflow_dir: &Path) -> Self {
-        // The repo and the workflow's directory are compared by the place they
+    /// unless that directory is inside a pack of a store the project reads,
+    /// the project's store asked first. `ambient` is the environment the
+    /// user's store is found in.
+    pub(crate) async fn of_tree(repo: &Path, ambient: Option<&Env>, workflow_dir: &Path) -> Self {
+        // A store and the workflow's directory are compared by the place they
         // resolve to: named through a link, a pack's workflow must still be
         // judged as one, and its prompts checked against the same pack root.
         let repo = resolved(repo).await;
         let dir = resolved(&absolute(&repo, workflow_dir)).await;
-        match catalog::origin_of(&repo, &dir) {
-            WorkflowOrigin::Repo => PromptRoot::Repo(dir),
-            WorkflowOrigin::Pack {
-                publisher,
-                pack_name,
-            } => PromptRoot::Pack {
-                pack: format!("{publisher}/{pack_name}"),
-                pack_dir: repo
-                    .join(".yunta/packs")
-                    .join(publisher.as_str())
-                    .join(pack_name.as_str()),
-                dir,
-            },
+        for store in PackStores::of(&repo, ambient).in_order() {
+            let packs = store.packs_dir();
+            let Ok(inside) = dir.strip_prefix(resolved(&packs).await) else {
+                continue;
+            };
+            let dir = packs.join(inside);
+            if let Some(pack) = store.pack_holding(&dir) {
+                return PromptRoot::Pack {
+                    pack: pack.to_string(),
+                    pack_dir: store.pack_dir(&pack),
+                    dir,
+                };
+            }
         }
+        PromptRoot::Repo(dir)
     }
 
     /// The path the prompt file `file`, as the workflow names it, is read
@@ -253,7 +255,7 @@ mod tests {
         tokio::fs::create_dir_all(&workflows).await.unwrap();
         let link = root.path().join("linked");
         std::os::unix::fs::symlink(&workflows, &link).unwrap();
-        let root_of = PromptRoot::of_tree(&repo, &link).await;
+        let root_of = PromptRoot::of_tree(&repo, None, &link).await;
         let refused = root_of.path_of(Path::new("../../../../../secret.txt"));
         assert!(
             matches!(refused, Err(FrozenError::Escapes { .. })),

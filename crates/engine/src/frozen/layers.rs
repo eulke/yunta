@@ -1,11 +1,15 @@
 //! The files each knowledge layer holds, listed one way for the freeze and
 //! for a checkout read. A file is named by its path within its root, so a
 //! pack's file keeps the same name whether the run froze it or reads it live.
+//! The `org` layer holds every file the project's packs ship, then each file
+//! the user's packs ship whose name no project pack ships: the user's store
+//! adds files and never replaces one.
 
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use yunta_core::KnowledgeLayer;
+use yunta_core::{Env, KnowledgeLayer};
 
 use super::listing::{self, SymlinkPolicy};
 use super::FrozenError;
@@ -28,30 +32,47 @@ pub(crate) struct LayerFile {
 }
 
 /// Every file `layer` holds: the repo's knowledge directory, the user's
-/// directory when there is one, or the root each installed pack declares.
+/// directory when `ambient` names one, or the roots the installed packs
+/// declare, the user's packs read only when `ambient` names their store.
 /// `org_root` places a declared root on disk, which is where the freeze
 /// refuses a root that leaves its pack.
 pub(crate) async fn layer_files(
     layer: KnowledgeLayer,
     repo: &Path,
-    user: Option<&Path>,
+    ambient: Option<&Env>,
     org_root: impl Fn(&DeclaredPath) -> Result<PathBuf, FrozenError>,
 ) -> Result<Vec<LayerFile>, FrozenError> {
     match layer {
         KnowledgeLayer::Repo => under_root(&repo.join(REPO_KNOWLEDGE), None).await,
-        KnowledgeLayer::User => match user {
-            Some(dir) => under_root(dir, None).await,
+        KnowledgeLayer::User => match ambient.and_then(yunta_core::user_knowledge_dir) {
+            Some(dir) => under_root(&dir, None).await,
             None => Ok(Vec::new()),
         },
         KnowledgeLayer::Org => {
-            let mut files = Vec::new();
-            for declared in catalog::declared_knowledge(repo) {
-                let root = org_root(&declared)?;
-                files.extend(under_root(&root, Some(declared.pack.as_str())).await?);
-            }
-            Ok(files)
+            let declared = catalog::declared_knowledge(repo, ambient);
+            let project = pack_files(&declared.project, &org_root).await?;
+            let shipped: HashSet<&OsString> = project.iter().map(|file| &file.name).collect();
+            let user = pack_files(&declared.user, &org_root).await?;
+            let added: Vec<LayerFile> = user
+                .into_iter()
+                .filter(|file| !shipped.contains(&file.name))
+                .collect();
+            Ok(project.into_iter().chain(added).collect())
         }
     }
+}
+
+/// The files under each root `declared` names, each named with its pack.
+async fn pack_files(
+    declared: &[DeclaredPath],
+    org_root: &impl Fn(&DeclaredPath) -> Result<PathBuf, FrozenError>,
+) -> Result<Vec<LayerFile>, FrozenError> {
+    let mut files = Vec::new();
+    for declared in declared {
+        let root = org_root(declared)?;
+        files.extend(under_root(&root, Some(declared.pack.as_str())).await?);
+    }
+    Ok(files)
 }
 
 /// The files under one root, each named by its path within the root.

@@ -1,6 +1,6 @@
 //! See [`super`]. The sentences for what Yunta refuses about a run, a
 //! command's inputs and a pack, each in the vocabulary of the command that
-//! meets it.
+//! meets it. A pack command's are in `pack`.
 
 use std::path::Path;
 
@@ -10,12 +10,14 @@ use yunta_core::check::CheckError;
 use yunta_core::events::{Claim, FailureMenu, Refusal};
 use yunta_core::inputs::InputsProblem;
 use yunta_core::refusal::Unservable;
-use yunta_core::refusal::{
-    AnswersRefusal, CasesRefusal, CloseRefusal, GateRefusal, PackRefusal, PackVerb, SetupRefusal,
-};
+use yunta_core::refusal::{AnswersRefusal, CasesRefusal, CloseRefusal, GateRefusal, SetupRefusal};
 use yunta_core::step::{Arg, NextStep, Reach};
-use yunta_core::{AdapterId, OptionId, PackRef, Pid};
+use yunta_core::{AdapterId, OptionId, Pid};
 use yunta_replay::receipt::ReceiptError;
+
+mod pack;
+
+pub(super) use pack::pack;
 
 /// What `last` says where the repository it is asked in has no run, and the
 /// command that lists every run instead.
@@ -300,79 +302,6 @@ pub fn close(refusal: &CloseRefusal) -> String {
     }
 }
 
-/// Why a pack command refuses, in the words of the command refused: what the
-/// pack is or where it stands, the policy that stops it, and the lines that
-/// go on where there are some.
-pub(super) fn pack(refusal: &PackRefusal) -> String {
-    match refusal {
-        PackRefusal::AlreadyInstalled { pack, at } => already_installed(pack, at),
-        PackRefusal::NotInstalled { pack } => not_installed(pack),
-        PackRefusal::NothingToRemove { pack } => format!("`{pack}` isn't installed"),
-        PackRefusal::NotVendored { pack, root } => {
-            format!("`{pack}` isn't installed under {}", root.display())
-        }
-        PackRefusal::SchemaOutside {
-            pack,
-            range,
-            speaks,
-        } => format!(
-            "`{pack}` declares `yunta_schema: \"{range}\"`, and this binary speaks schema \
-             {speaks}. Install a version of yunta inside that range, or a release of the pack \
-             that accepts this one."
-        ),
-        PackRefusal::PublisherNotAllowed {
-            publisher,
-            allowed,
-            declared_by,
-        } => format!(
-            "publisher `{publisher}` is not in `permissions.packs.publishers.allow` \
-             (declared by the {} config {}); allowed: {}. Add the publisher there, or \
-             install a pack from an allowed publisher.",
-            declared_by.join("/"),
-            surco::text::agreeing(declared_by.len(), "layer", "layers"),
-            allowed
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        PackRefusal::ExecutorsDenied {
-            executors,
-            declared_by,
-            verb,
-        } => format!(
-            "this pack declares {} and `permissions.packs.executors` \
-             is `deny` (declared by the {} config {}): `--yes` cannot override a \
-             permissions ceiling. Change the policy there, or {} a pack \
-             without executors.",
-            surco::text::counted(*executors, "executor"),
-            declared_by.join("/"),
-            surco::text::agreeing(declared_by.len(), "layer", "layers"),
-            pack_verb(*verb),
-        ),
-        PackRefusal::ExecutorsUnconfirmed { executors, verb } => format!(
-            "this pack declares {}: executable code, not just \
-             declarative YAML. Review the inventory above, then re-run with `--yes` to \
-             confirm the {}.",
-            surco::text::counted(*executors, "executor"),
-            pack_verb(*verb),
-        ),
-        PackRefusal::AnotherPack {
-            pack,
-            reference,
-            cloned_from,
-            is,
-        } => format!(
-            "`{reference}` of `{cloned_from}` identifies itself as `{is}`, not `{pack}`; \
-             refusing to update a pack into a different one"
-        ),
-        PackRefusal::DirectoryExists { dir } => format!(
-            "{} already exists; choose another name or remove it first",
-            dir.display()
-        ),
-    }
-}
-
 /// Why setting a repository up refuses, in the words of the command refused.
 pub(super) fn setup(refusal: &SetupRefusal) -> String {
     match refusal {
@@ -401,37 +330,4 @@ pub(super) fn cases(refusal: &CasesRefusal) -> String {
         }
         CasesRefusal::NoneFound { dir } => format!("no test cases found under {}", dir.display()),
     }
-}
-
-/// What a pack command does, as its refusal says it.
-fn pack_verb(verb: PackVerb) -> &'static str {
-    match verb {
-        PackVerb::Install => "install",
-        PackVerb::Update => "update",
-    }
-}
-
-/// Why `add` refuses `pack`, installed already at `dest`: the lines that
-/// change its ref, or take it out first.
-fn already_installed(pack: &PackRef, dest: &Path) -> String {
-    let update = NextStep::PackUpdate {
-        pack: pack.clone(),
-        reference: Arg::Blank,
-    };
-    let remove = NextStep::PackRemove { pack: pack.clone() };
-    format!(
-        "`{pack}` is already installed at {}; use `{}` to change its ref, or `{}` first",
-        dest.display(),
-        command::line(&update),
-        command::line(&remove)
-    )
-}
-
-/// Why `update` refuses `pack`, which is not installed: the line that adds it.
-fn not_installed(pack: &PackRef) -> String {
-    let add = NextStep::PackAdd { source: Arg::Blank };
-    format!(
-        "`{pack}` isn't installed; `{}` it first, not update",
-        command::line(&add)
-    )
 }

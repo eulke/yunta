@@ -1,7 +1,8 @@
 //! Two pack commands at once both stand in `.yunta/yunta.lock`: a pack
 //! command holds the repository's packs from its read of the lock to its
 //! write, so another one waits rather than writing over an entry it never
-//! read.
+//! read. The user's packs live under the state root, and an environment that
+//! names none has none to act on.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use yunta_core::pace::Pace;
 use yunta_core::persisted::PersistedDoc;
 use yunta_core::refusal::PackRefusal;
 use yunta_core::{
-    sha256_hex, Env, PackLock, PackLockEntry, PackRef, ProcessSecrets, SystemIdSource,
+    sha256_hex, Env, PackLock, PackLockEntry, PackRef, PackScope, ProcessSecrets, SystemIdSource,
 };
 use yunta_engine::lock::{self, Acquired, Contention, SystemProbe};
 use yunta_render::refusal::Refused;
@@ -40,7 +41,7 @@ async fn an_install_waits_for_the_packs_held_and_keeps_the_entry_written_meanwhi
     init_repo(&repo);
     let workspace = workspace(&repo, root.path());
     let stop = Stop::new();
-    let packs = workspace.packs();
+    let packs = workspace.packs(PackScope::Project).unwrap();
     let fetched = packs
         .fetch(upstream.to_str().unwrap(), false, &stop)
         .await
@@ -84,7 +85,7 @@ async fn the_second_of_two_adds_of_one_pack_is_refused_once_the_first_installed(
     init_repo(&repo);
     let workspace = workspace(&repo, root.path());
     let stop = Stop::new();
-    let packs = workspace.packs();
+    let packs = workspace.packs(PackScope::Project).unwrap();
     let source = upstream.to_str().unwrap();
     let first = packs.fetch(source, false, &stop).await.unwrap();
     let second = packs.fetch(source, false, &stop).await.unwrap();
@@ -118,7 +119,7 @@ async fn an_update_that_finds_its_pack_removed_is_refused_and_writes_nothing() {
     init_repo(&repo);
     let workspace = workspace(&repo, root.path());
     let stop = Stop::new();
-    let packs = workspace.packs();
+    let packs = workspace.packs(PackScope::Project).unwrap();
     let quiet = |_: Remark| {};
     let fetched = packs
         .fetch(upstream.to_str().unwrap(), false, &stop)
@@ -159,13 +160,35 @@ async fn a_relative_source_is_read_from_the_workspace() {
     let stop = Stop::new();
     let quiet = |_: Remark| {};
 
-    let fetched = workspace.packs().fetch("../upstream", false, &stop).await;
+    let packs = workspace.packs(PackScope::Project).unwrap();
+    let fetched = packs.fetch("../upstream", false, &stop).await;
     let installed = fetched.unwrap().install(&quiet, &stop).await.unwrap();
 
     assert_eq!(installed.pack.to_string(), "acme/review-pack");
     assert!(repo
         .join(".yunta/packs/acme/review-pack/pack.yaml")
         .exists());
+}
+
+/// With no home and no `YUNTA_HOME` there is no state root, so there are no
+/// user's packs to list, install or remove: asking for them fails, saying
+/// why, and this project's packs are still there to act on.
+#[test]
+fn the_users_packs_with_no_state_root_are_refused_saying_why() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let mut workspace = workspace(&repo, root.path());
+    workspace.env.home = None;
+    workspace.env.yunta_home = None;
+
+    let refused = workspace.packs(PackScope::User).err();
+
+    assert!(
+        matches!(&refused, Some(Error::Failed(failed)) if failed.to_string().contains("YUNTA_HOME")),
+        "{refused:?}"
+    );
+    assert!(workspace.packs(PackScope::Project).is_ok());
 }
 
 /// The packs held by the test, as another pack command would hold them;

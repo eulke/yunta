@@ -104,7 +104,7 @@ pub use artifacts::{
 };
 pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
-    PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
+    PublisherPacks, ResolvedWorkflow, StoredPack, WorkflowOrigin,
 };
 pub use check::{
     check, check_context_files, check_mode_start, check_mounted, check_warnings,

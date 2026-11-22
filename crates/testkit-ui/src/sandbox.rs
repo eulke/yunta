@@ -9,7 +9,7 @@ use std::sync::Arc;
 use jiff::Timestamp;
 use yunta_api::{Remark, Stop, Workspace};
 use yunta_core::process::SearchPath;
-use yunta_core::{Env, ProcessSecrets, SystemIdSource};
+use yunta_core::{Env, PackScope, ProcessSecrets, SystemIdSource};
 use yunta_testkit_core::FixedClock;
 
 /// A workspace working in `dir`, its state kept in `root` and its org layer there too,
@@ -93,7 +93,8 @@ pub async fn with_a_pack_installed(root: &Path) -> PathBuf {
     let remarks = |_: Remark| {};
     let installing = workspace(&repo, root);
     let fetched = installing
-        .packs()
+        .packs(PackScope::Project)
+        .expect("the project's packs")
         .fetch(source, false, &stop)
         .await
         .expect("the pack fetched");

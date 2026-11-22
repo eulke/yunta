@@ -1,7 +1,8 @@
 //! The packs in the application: listed from the catalog, a pack audited as
 //! `yunta pack audit` prints it, one removed once a person confirmed it, the listing
 //! read again; and a pack installed from the very copy its audit read, its executors
-//! confirmed first, or left unconfirmed with no copy behind.
+//! confirmed first, or left unconfirmed with no copy behind. `g` turns the listing to
+//! the user's packs, and what is done there is done to them.
 
 mod support;
 
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use surco::surface::{Markdown, Surface};
 use tokio::sync::mpsc;
 use yunta_api::{Remark, Stop};
-use yunta_core::PackRef;
+use yunta_core::{PackRef, PackScope};
 use yunta_render::page::pack::Inventory;
 use yunta_render::page::Page;
 use yunta_testkit_ui::driving::drive;
@@ -63,8 +64,8 @@ async fn a_pack_removed_after_its_confirmation_leaves_the_listing_read_again() {
         "the listing is read again: {shown}"
     );
     let listed = workspace(&repo, root.path())
-        .packs()
-        .list()
+        .packs(PackScope::Project)
+        .and_then(|packs| packs.list())
         .expect("the packs listed");
     assert!(listed.packs().is_empty());
 }
@@ -85,8 +86,11 @@ async fn a_pack_audited_shows_the_page_pack_audit_prints() {
     let (state, _) = drive(field, Vec::new(), &performer, &strokes).await;
     let pack = "acme/demo".parse::<PackRef>().expect("a pack reference");
     let remarks = |_: Remark| {};
-    let audited = workspace(&repo, root.path())
-        .packs()
+    let working = workspace(&repo, root.path());
+    let packs = working
+        .packs(PackScope::Project)
+        .expect("this project's packs");
+    let audited = packs
         .audit(&pack, &remarks, &Stop::new())
         .await
         .expect("the audit `yunta pack audit acme/demo` prints");
@@ -160,8 +164,8 @@ async fn a_pack_with_an_executor_installs_the_commit_its_audit_read() {
         main_region(&state)
     );
     let listed = workspace(&repo, root.path())
-        .packs()
-        .list()
+        .packs(PackScope::Project)
+        .and_then(|packs| packs.list())
         .expect("the packs listed");
     let yunta_render::page::pack::Listed::Locked { packs, .. } = listed else {
         panic!("the pack is installed: {listed:?}");
@@ -170,6 +174,49 @@ async fn a_pack_with_an_executor_installs_the_commit_its_audit_read() {
         panic!("{packs:?}");
     };
     assert_eq!(installed.locked.commit.to_string(), audited);
+}
+
+/// `g` on the listing shows the user's packs, which every project reads, and a pack
+/// installed while they are shown is installed among them: under the state root, with
+/// nothing written to the project's packs, and listed there once it is in.
+#[tokio::test]
+async fn g_lists_the_users_packs_and_an_install_made_there_lands_among_them() {
+    let root = tempfile::tempdir().expect("a temporary root");
+    let (upstream, _) = pack_with_an_executor(root.path());
+    let repo = set_up(root.path());
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path())));
+    let field = on_the_field(vec![stopped(&yunta_core::RunId::from(
+        "01M7PACKS00000000000000004",
+    ))]);
+    let to_the_users = [
+        Stroke::Insert('w'),
+        Stroke::Insert('p'),
+        Stroke::Insert('g'),
+    ];
+    let (state, _) = drive(field, Vec::new(), &performer, &to_the_users).await;
+    let shown = main_region(&state);
+    assert!(
+        shown.contains("the user's packs") && shown.contains("none installed"),
+        "{shown}"
+    );
+    let mut strokes = vec![Stroke::Insert('i')];
+    strokes.extend(typed(upstream.to_str().expect("a path that reads")));
+    // The inventory read, Enter asks to install it, and its executor is confirmed.
+    strokes.extend([Stroke::Enter, Stroke::Enter]);
+    let (state, _) = drive(state, Vec::new(), &performer, &strokes).await;
+    assert!(
+        main_region(&state).contains("installed"),
+        "{}",
+        main_region(&state)
+    );
+    assert!(root.path().join("packs/acme/tools/pack.yaml").is_file());
+    assert!(!repo.join(".yunta/packs").exists());
+    let (state, _) = drive(state, Vec::new(), &performer, &[Stroke::Enter]).await;
+    let shown = main_region(&state);
+    assert!(
+        shown.contains("the user's packs") && shown.contains("acme/tools"),
+        "the user's packs are read again: {shown}"
+    );
 }
 
 #[tokio::test]

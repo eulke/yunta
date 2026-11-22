@@ -11,7 +11,9 @@
 use std::mem::{discriminant, Discriminant};
 
 use yunta_api::{FieldReach, ProjectSetup, RunRequest};
-use yunta_core::{Answer, NodeId, OptionId, PackRef, RunId, WorkflowName, WorkflowShape};
+use yunta_core::{
+    Answer, NodeId, OptionId, PackRef, PackScope, RunId, WorkflowName, WorkflowShape,
+};
 
 use crate::Ticket;
 
@@ -34,7 +36,7 @@ pub enum Operation {
     ReadCatalog,
     /// What is done to a workflow the catalog offers, or to the repository's cases.
     Workflow(WorkflowOperation),
-    /// What is done to the packs a project installs.
+    /// What is done to the packs of a store, or a new pack.
     Pack(PackOperation),
     /// What a run leaves: its receipt, its verification, its page for a browser.
     Evidence(EvidenceOperation),
@@ -199,29 +201,34 @@ impl WorkflowOperation {
     }
 }
 
-/// What is done to the packs a project installs.
+/// What is done to the packs of a store: this project's, or the user's, which every
+/// project reads, as `scope` names it where the work is on installed packs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackOperation {
-    /// The packs installed, as `yunta pack list` reads them.
-    List,
+    /// The packs installed in the store, as `yunta pack list` reads them.
+    List { scope: PackScope },
     /// The installed `pack` audited, its own cases run on it, as `yunta pack
     /// audit` does.
-    Audit { pack: PackRef },
+    Audit { pack: PackRef, scope: PackScope },
     /// The installed `pack` removed, as `yunta pack remove` removes it.
-    Remove { pack: PackRef },
+    Remove { pack: PackRef, scope: PackScope },
     /// A new pack `pack` (a publisher and a name, as typed) written and checked,
-    /// as `yunta pack new` does.
+    /// as `yunta pack new` does, beside the working directory, in no store.
     Scaffold { pack: String },
-    /// The pack `source` names (`<source>[@<ref>]`) fetched to install it, as
-    /// `yunta pack add` fetches it: the performer holds the copy its audit reads
-    /// under this work's ticket, for its install to vendor.
-    Fetch { source: String },
+    /// The pack `source` names (`<source>[@<ref>]`) fetched to install it in the
+    /// store, as `yunta pack add` fetches it: the performer holds the copy its audit
+    /// reads under this work's ticket, for its install to vendor.
+    Fetch { source: String, scope: PackScope },
     /// `reference` of the installed `pack` fetched to update it to, as `yunta pack
     /// update` fetches it, its copy held as a fetch's is.
-    FetchUpdate { pack: PackRef, reference: String },
+    FetchUpdate {
+        pack: PackRef,
+        reference: String,
+        scope: PackScope,
+    },
     /// The pack held under `held`, the ticket that fetched it, installed from the
-    /// copy its audit read, never fetched again; with what it executes `confirmed`
-    /// by the person who read that audit.
+    /// copy its audit read, never fetched again, into the store it was fetched for;
+    /// with what it executes `confirmed` by the person who read that audit.
     Install { held: Ticket, confirmed: bool },
 }
 
@@ -230,7 +237,7 @@ impl PackOperation {
     /// nothing of the project's.
     fn reads(&self) -> bool {
         match self {
-            PackOperation::List
+            PackOperation::List { .. }
             | PackOperation::Audit { .. }
             | PackOperation::Fetch { .. }
             | PackOperation::FetchUpdate { .. } => true,

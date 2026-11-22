@@ -137,8 +137,8 @@ const fn is_token(bytes: &[u8]) -> bool {
     true
 }
 
-/// What a value must be to serve as one directory name: under
-/// `.yunta/packs/<publisher>/<name>/`, under `runs/<run id>/`.
+/// What a value must be to serve as one directory name: under a store's
+/// `packs/<publisher>/<name>/`, under `runs/<run id>/`.
 const SEGMENT_RULE: &str =
     "one path segment: printable ASCII without whitespace, `/` or `\\`, and not `.` or `..`";
 

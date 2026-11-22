@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use surco::surface::{Markdown, Surface};
 use yunta_core::step::{Arg, NextStep};
-use yunta_core::{PackRef, RunId};
+use yunta_core::{PackRef, PackScope, RunId};
 use yunta_render::command;
 use yunta_render::page::Collected;
 use yunta_testkit_ui::driving::drive;
@@ -103,7 +103,8 @@ async fn removing_a_pack_and_running_its_executors_ask_first() {
     let to_the_packs = [Stroke::Insert('w'), Stroke::Insert('p')];
     let (packs, _) = drive(field.clone(), Vec::new(), &performer, &to_the_packs).await;
     let demo: PackRef = "acme/demo".parse().expect("a pack's reference");
-    asks_first(packs, 'x', &NextStep::PackRemove { pack: demo });
+    let scope = PackScope::Project;
+    asks_first(packs, 'x', &NextStep::PackRemove { pack: demo, scope });
     // A pack that ships an executor, fetched and its inventory read, asks first too.
     let (upstream, _) = pack_with_an_executor(root.path());
     let fresh = set_up(&root.path().join("fresh"));
@@ -119,6 +120,7 @@ async fn removing_a_pack_and_running_its_executors_ask_first() {
     let (installing, _) = drive(field, Vec::new(), &performer, &strokes).await;
     let added = NextStep::PackAdd {
         source: Arg::Given(source),
+        scope,
     };
     confirmed_first(installing, &added);
 }

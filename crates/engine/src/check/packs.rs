@@ -24,26 +24,25 @@ pub(crate) fn permission_rank(permissions: yunta_core::NodePermissions) -> u8 {
 /// default otherwise (a pack declaring `read-only` can't rely on a node
 /// silently defaulting past it). `declares.network` is a ceiling on the
 /// network every node of the pack may ask for: a node asking for
-/// `network: true` is refused where the pack declares it closed. A no-op
-/// for a repo-origin workflow: there is no pack manifest to hold a ceiling
-/// against.
+/// `network: true` is refused where the pack declares it closed. The
+/// manifest read is the one of the pack the origin names, in the store it
+/// names, whatever another store holds. A no-op for a repo-origin workflow:
+/// there is no pack manifest to hold a ceiling against.
 pub(crate) fn check_declares_ceiling(
     workflow: &Workflow,
     origin: &crate::catalog::WorkflowOrigin,
-    repo_root: &std::path::Path,
 ) -> Vec<CheckError> {
-    let crate::catalog::WorkflowOrigin::Pack {
-        publisher,
-        pack_name,
-    } = origin
+    let (
+        crate::catalog::WorkflowOrigin::Pack {
+            publisher,
+            pack_name,
+            ..
+        },
+        Some(manifest_path),
+    ) = (origin, origin.manifest_file())
     else {
         return Vec::new();
     };
-    let manifest_path = repo_root
-        .join(".yunta/packs")
-        .join(publisher.as_str())
-        .join(pack_name.as_str())
-        .join("pack.yaml");
     let manifest = match read_manifest(manifest_path) {
         Ok(manifest) => manifest,
         Err(error) => return vec![*error],

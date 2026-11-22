@@ -1,0 +1,6 @@
+␛[32m✓␛[0m ␛[1mthe user's packs␛[0m␛[2m ·␛[0m␛[32m 1 installed␛[0m
+␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+
+  ␛[32m✓␛[0m ␛[1macme/lint␛[0m  v1.0.0 (3f9c2e1a0b4d), as its lock records it
+
+  ␛[2mlock        ␛[0m ~/.yunta/yunta.lock

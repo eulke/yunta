@@ -21,9 +21,9 @@ use yunta_core::Workflow;
 use super::Page;
 use crate::command;
 
-/// The repo catalog — the repo's own `.yunta/workflows/` plus every
-/// installed pack's, a pack entry hidden behind a repo file of the same
-/// `publisher/name` — as one page: `yunta list` draws it on the terminal and
+/// The repo catalog — the repo's own `.yunta/workflows/` plus every pack's
+/// the project reads, its own and the user's, a pack entry hidden behind a
+/// repo file of the same `publisher/name` — as one page: `yunta list` draws it on the terminal and
 /// the `list_workflows` control-plane tool answers with it as Markdown, so
 /// the two never drift. Given a project's storage, each workflow carries its
 /// prior estimation; a broken pack is named, never silently dropped.
@@ -35,6 +35,9 @@ pub struct Catalog {
     pub workflows_dir: PathBuf,
     /// Where it looked for the packs installed in it.
     pub packs_dir: PathBuf,
+    /// Where it looked for the user's packs, which every project reads, when
+    /// the environment names a state root.
+    pub user_packs_dir: Option<PathBuf>,
     pub offered: Vec<OfferedWorkflow>,
 }
 
@@ -106,17 +109,26 @@ impl Catalog {
         }
         if self.offered.is_empty() {
             if self.broken_packs.is_empty() {
-                doc = doc.with(Prose(format!(
-                    "no workflows under {} or {}",
-                    self.workflows_dir.display(),
-                    self.packs_dir.display()
-                )));
+                doc = doc.with(Prose(self.looked_in()));
             }
             return doc;
         }
         self.offered.iter().fold(doc, |doc, offered| {
             doc.with(offered.section(lead(&offered.name), look.glyphs))
         })
+    }
+
+    /// Where the catalog looked and found no workflow: the repository's own,
+    /// its packs, and the user's packs where there are any to look in.
+    fn looked_in(&self) -> String {
+        let (workflows, packs) = (self.workflows_dir.display(), self.packs_dir.display());
+        match &self.user_packs_dir {
+            Some(users) => format!(
+                "no workflows under {workflows}, {packs} or {}",
+                users.display()
+            ),
+            None => format!("no workflows under {workflows} or {packs}"),
+        }
     }
 
     /// The names of the workflows it offers, in its order: what a pointer

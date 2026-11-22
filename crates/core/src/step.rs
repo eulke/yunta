@@ -8,7 +8,7 @@
 use surco::doc::Depth;
 
 use crate::ids::{NodeId, OptionId, PackRef, RunId, WorkflowName};
-use crate::WorkflowShape;
+use crate::{PackScope, WorkflowShape};
 
 /// A command line a person or an agent types, as data: every one Yunta tells a
 /// reader to type, and the git command it points a reader to. Not the CLI's
@@ -77,21 +77,29 @@ pub enum NextStep {
         name: Arg<String>,
         shape: Option<WorkflowShape>,
     },
-    /// `yunta pack add <source>`.
-    PackAdd { source: Arg<String> },
-    /// `yunta pack update <pack> <ref>`.
+    /// `yunta pack add <source>`, into the store `scope` names: this project's,
+    /// or with `--global` the user's, which every project reads.
+    PackAdd {
+        source: Arg<String>,
+        scope: PackScope,
+    },
+    /// `yunta pack update <pack> <ref>`, of the pack in the store `scope` names.
     PackUpdate {
         pack: PackRef,
         reference: Arg<String>,
+        scope: PackScope,
     },
-    /// `yunta pack remove <pack>`.
-    PackRemove { pack: PackRef },
-    /// `yunta pack new <pack>`: the skeleton a new pack starts from.
+    /// `yunta pack remove <pack>`, from the store `scope` names.
+    PackRemove { pack: PackRef, scope: PackScope },
+    /// `yunta pack new <pack>`: the skeleton a new pack starts from, beside the
+    /// working directory, in no store.
     PackNew { pack: PackRef },
-    /// `yunta pack list`: every installed pack, its content checked against the lock.
-    PackList,
-    /// `yunta pack audit <pack>`: everything an installed pack holds and asks for.
-    PackAudit { pack: PackRef },
+    /// `yunta pack list`: every pack the store `scope` names installs, its content
+    /// checked against the lock.
+    PackList { scope: PackScope },
+    /// `yunta pack audit <pack>`: everything a pack installed in the store `scope`
+    /// names holds and asks for.
+    PackAudit { pack: PackRef, scope: PackScope },
     /// `yunta gc`: the disk of runs past their retention, reclaimed; with
     /// `dry_run`, what would be, said and left alone.
     Gc { dry_run: bool },
@@ -147,7 +155,7 @@ impl NextStep {
             | NextStep::PackUpdate { .. }
             | NextStep::PackRemove { .. }
             | NextStep::PackNew { .. }
-            | NextStep::PackList
+            | NextStep::PackList { .. }
             | NextStep::PackAudit { .. }
             | NextStep::Gc { .. }
             | NextStep::Help

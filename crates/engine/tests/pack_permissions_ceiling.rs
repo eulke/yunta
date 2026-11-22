@@ -51,8 +51,16 @@ fn check(root: &Path, publisher: &str, pack_name: &str, workflow_yaml: &str) -> 
     let path = pack_dir(root, publisher, pack_name).join("review.yaml");
     write(&path, workflow_yaml);
     let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).unwrap();
-    let origin = origin_of(root, &path);
-    check_workflow_refs(&workflow, &ConfigLayer::default(), root, &origin, &|_| None).errors
+    let origin = origin_of(root, None, &path);
+    check_workflow_refs(
+        &workflow,
+        &ConfigLayer::default(),
+        root,
+        None,
+        &origin,
+        &|_| None,
+    )
+    .errors
 }
 
 #[test]
@@ -138,12 +146,13 @@ fn a_repo_origin_workflow_has_no_ceiling_to_enforce() {
         "name: review\nnodes:\n  - { id: draft, kind: prompt, prompt: hi, permissions: full }\n";
     write(&path, text);
     let workflow: Workflow = yunta_core::yaml::parse(text).unwrap();
-    let origin = origin_of(root.path(), &path);
+    let origin = origin_of(root.path(), None, &path);
 
     let errors = check_workflow_refs(
         &workflow,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &origin,
         &|_| None,
     )
@@ -169,12 +178,13 @@ fn a_node_exceeding_the_ceiling_inside_a_composed_child_is_also_caught() {
     let parent_path = dir.join("review.yaml");
     write(&parent_path, parent_text);
     let parent: Workflow = yunta_core::yaml::parse(parent_text).unwrap();
-    let origin = origin_of(root.path(), &parent_path);
+    let origin = origin_of(root.path(), None, &parent_path);
 
     let errors = check_workflow_refs(
         &parent,
         &ConfigLayer::default(),
         root.path(),
+        None,
         &origin,
         &|_| None,
     )

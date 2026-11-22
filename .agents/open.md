@@ -96,3 +96,9 @@ counters and Surco's lexer, where a release build spends 3. An `opt-level` of 2 
 the check and adds 7 s to each rebuild; measured beside other builds, so the gain is not settled. Not decided:
 one read and one mask of each file for every counter, an optimized profile for the tool, or the lookup in a
 package of its own.
+
+### A pack's skill cannot be named
+Paths: `crates/engine/src/skills.rs`, `crates/core/src/ids.rs`
+A pack declares `contents.skills` and `skills.rs` looks them up by `publisher/skill`, but a `SkillName` takes no
+`/`, so no name reaches the lookup and a pack's skill mounts in no session. Not decided: how a workflow names
+one, a `publisher/skill` form of `SkillName` or a key of its own.

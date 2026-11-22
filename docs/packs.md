@@ -46,10 +46,10 @@ started at once take turns and both of their entries stand. The file exists
 only while one of them runs; one a crashed command left behind is taken over
 by the next.
 
-Once installed, a pack's workflows and skills are addressable by
-`publisher/name` — the name after the slash is the workflow or skill's own
-file basename (as declared in `pack.yaml`'s `contents:`), not the pack's own
-`name` field, so a publisher's installed packs share one flat namespace:
+Once installed, a pack's workflows are addressable by `publisher/name` — the
+name after the slash is the workflow's own file basename (as declared in
+`pack.yaml`'s `contents:`), not the pack's own `name` field, so a publisher's
+installed packs share one flat namespace:
 
 ```bash
 yunta run acme/review
@@ -135,6 +135,68 @@ created. `yunta pack update` afterward changes nothing about a run already in
 flight: `resume` only ever re-reads that manifest, never the vendored pack on
 disk again, the same immutability every other frozen field (`workflow`,
 prompts, config) already has.
+
+## Packs for every project
+
+A pack you want in every project installs once, among the user's packs:
+
+```bash
+yunta pack add --global github.com/acme/review-pack@v1.2.0
+yunta pack list --global
+yunta pack update --global acme/review-pack v1.3.0
+yunta pack audit --global acme/review-pack
+yunta pack remove --global acme/review-pack
+```
+
+The user's packs live under the state root (`$YUNTA_HOME`, else `~/.yunta`)
+in the layout a project's own packs have: each pack under
+`~/.yunta/packs/<publisher>/<name>/`, recorded in `~/.yunta/yunta.lock`, and
+held through `~/.yunta/yunta.lock.held` while a command changes them. The two
+stores keep two locks, and a pack command acts on one: with `--global` the
+user's, without it this project's alone. `pack add --global` writes nothing
+under the project's `.yunta/`, and runs from any directory, a repository or
+not. `pack new` takes no `--global`: it writes a new pack beside the directory
+it runs in, in neither store.
+
+Every project reads its own packs first, then the user's:
+
+- A project that installs a pack of the same `publisher/name` shadows the
+  user's copy whole: nothing of that copy is read there, not even a workflow
+  only it ships.
+- A name (`publisher/workflow` in `yunta run`, `use:` and `yunta list`,
+  `publisher/agent` in `agent:`) is answered by the repository's own files
+  first, then by the project's packs, then by the user's. The first that
+  declares it answers. Two packs of one store that declare it are ambiguous,
+  as two of a project's packs are.
+- So the user's packs never change what a name the project already resolves
+  means: they only answer what the project leaves unanswered. A machine with
+  no user's pack, or with no state root, behaves as it would without them.
+
+A pack is judged by its own manifest wherever it is installed. `yunta check`
+holds a user's pack's workflows to the ceiling its own `declares:` sets and to
+its own `requires:`, a prompt file that leaves the pack is refused, and a run
+born from one of its workflows freezes the pack's version from its manifest and
+its commit from the user's lock. `yunta doctor` checks the `requires:` of every
+pack the project reads, its own and the user's.
+
+The `org` [knowledge layer](guide.md#knowledge-layers) holds every file the
+project's packs ship, then each file a user's pack ships whose name no project
+pack ships.
+
+A test case reads none of the user's packs: `yunta test`, and the cases
+`pack audit` and `pack add --run-tests` run, see the project's packs alone, so
+a case runs the same on every machine.
+
+`permissions.packs` gates `add --global` and `update --global` as it gates a
+project's install, read from the org and user config layers alone: the
+repository a command happens to run in speaks for no other project, so its
+`.yunta/config.yaml` neither allows nor refuses a pack every project reads.
+Reading an installed pack applies no policy, in either store.
+
+A repository workflow that `use:`s a user's pack resolves only where that pack
+is installed: on a teammate's machine or in CI it is not found. Install a pack
+the repository depends on in the project itself, where it is vendored and
+versioned with the code.
 
 ## Creating a pack
 

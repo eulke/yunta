@@ -373,7 +373,6 @@ async fn birth_child(
             .await
         }
         ChildWorkflow::Checkout { dir, .. } => {
-            let user_knowledge = ctx.ambient.and_then(yunta_core::user_knowledge_dir);
             crate::manifest::build_manifest(
                 workflow,
                 config,
@@ -381,7 +380,7 @@ async fn birth_child(
                 ctx.worktree,
                 provided,
                 ctx.supervision(cancel),
-                user_knowledge.as_deref(),
+                ctx.ambient,
             )
             .await
         }

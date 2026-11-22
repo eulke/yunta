@@ -38,6 +38,7 @@ fn catalog() -> Catalog {
         broken_packs: Vec::new(),
         workflows_dir: PathBuf::from(".yunta/workflows"),
         packs_dir: PathBuf::from(".yunta/packs"),
+        user_packs_dir: None,
         offered: vec![
             readable("greet", "says hello"),
             readable("lint-fix", "a check, and an agent that fixes what it finds"),

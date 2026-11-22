@@ -1,12 +1,13 @@
-//! See [`super`]. How a pack reaches a project: cloned, its manifest read,
-//! its tree hashed and vendored through a staging directory beside its place,
-//! and the `yunta.lock` it is recorded in read and written whole. What fails
+//! See [`super`]. How a pack reaches a store: cloned, its manifest read, its
+//! tree hashed and vendored through a staging directory beside its place, and
+//! the store's lock it is recorded in read and written whole. Every path is
+//! the store's to name; nothing here joins one onto a repository. What fails
 //! here is a [`PackError`], said in its own words.
 
 use std::path::{Path, PathBuf};
 
 use yunta_core::durable::{self, Durability};
-use yunta_core::{sha256_hex, CommitSha, ContentHash, PackLock, PackManifest, PackRef};
+use yunta_core::{sha256_hex, CommitSha, ContentHash, PackLock, PackManifest, PackRef, PackStore};
 use yunta_engine::process::Supervision;
 use yunta_engine::GitError;
 
@@ -280,25 +281,17 @@ fn vendor_tree(src: &Path, dest: &Path) -> Result<(), PackError> {
     Ok(())
 }
 
-pub(super) fn packs_root(cwd: &Path) -> PathBuf {
-    cwd.join(".yunta/packs")
-}
-
-pub(super) fn vendor_dir(cwd: &Path, pack: &PackRef) -> PathBuf {
-    packs_root(cwd)
-        .join(pack.publisher().as_str())
-        .join(pack.name().as_str())
-}
-
-/// Where a pack is vendored before it is moved into place: a sibling of
-/// its final directory, so the final move is a rename on one
+/// Where a pack is vendored in `store` before it is moved into place: a
+/// sibling of its final directory, so the final move is a rename on one
 /// filesystem, and a name no pack can have (`.staging-` is not a path
 /// segment a pack name can start with — it would begin with a dot the
 /// catalog never lists).
-pub(super) fn staging_dir(cwd: &Path, pack: &PackRef) -> PathBuf {
-    packs_root(cwd)
-        .join(pack.publisher().as_str())
-        .join(format!(".staging-{}-{}", pack.name(), std::process::id()))
+pub(super) fn staging_dir(store: &PackStore, pack: &PackRef) -> PathBuf {
+    store.publisher_dir(pack.publisher()).join(format!(
+        ".staging-{}-{}",
+        pack.name(),
+        std::process::id()
+    ))
 }
 
 /// A tree moved into place. The tree it replaced stays on disk until the
@@ -441,18 +434,9 @@ fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<Swap, PackE
     }
 }
 
-pub(super) fn lock_path(cwd: &Path) -> PathBuf {
-    cwd.join(".yunta/yunta.lock")
-}
-
-/// The file a pack command holds the repository's packs through, beside the
-/// lock it reads and writes: it exists only while one does.
-pub(super) fn hold_path(cwd: &Path) -> PathBuf {
-    cwd.join(".yunta/yunta.lock.held")
-}
-
-pub(super) fn load_lock(cwd: &Path) -> Result<PackLock, PackError> {
-    let path = lock_path(cwd);
+/// The lock of `store`, read; an empty one where none is written yet.
+pub(super) fn load_lock(store: &PackStore) -> Result<PackLock, PackError> {
+    let path = store.lock_file();
     match std::fs::read(&path) {
         Ok(bytes) => {
             PackLock::read(&bytes)
@@ -467,8 +451,9 @@ pub(super) fn load_lock(cwd: &Path) -> Result<PackLock, PackError> {
     }
 }
 
-pub(super) fn save_lock(cwd: &Path, lock: &PackLock) -> Result<(), PackError> {
-    let path = lock_path(cwd);
+/// `lock` written as the lock of `store`, whole.
+pub(super) fn save_lock(store: &PackStore, lock: &PackLock) -> Result<(), PackError> {
+    let path = store.lock_file();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|source| PackError::Write {
             path: parent.to_path_buf(),

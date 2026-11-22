@@ -4,6 +4,7 @@
 //! reads; on the packs, what they offer; on a page standing in their place, nothing.
 
 use yunta_core::step::{Arg, NextStep};
+use yunta_core::PackScope;
 
 use super::{CatalogStage, Shown};
 use crate::prompt::Stroke;
@@ -46,7 +47,12 @@ impl CatalogStage {
                 },
             ),
             (Stroke::Insert('t'), NextStep::Test { dir: None }),
-            (Stroke::Insert('p'), NextStep::PackList),
+            (
+                Stroke::Insert('p'),
+                NextStep::PackList {
+                    scope: PackScope::Project,
+                },
+            ),
             (Stroke::Insert('s'), NextStep::Schemas),
         ];
         pointed

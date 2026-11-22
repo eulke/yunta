@@ -20,8 +20,8 @@ pub use catalog::{
     auditing, cases_legend, catalog_legend, checking, executing, fetched_legend, fetching,
     installing_pack, naming_legend, new_pack_asks, new_workflow_asks, over_the_workflows_legend,
     pack_naming_legend, pack_page_legend, pack_reference_asks, pack_source_asks, packs_legend,
-    removing_pack, scaffolding, writing_workflow, CASES, CASES_STOPPED, INSTALL, NEW, PACKS,
-    PACK_LET_GO, READING_THE_PACKS, READING_THE_WORKFLOWS, RUNNING_THE_CASES, WORKFLOWS,
+    reading_the_packs, removing_pack, scaffolding, writing_workflow, CASES, CASES_STOPPED, INSTALL,
+    NEW, PACKS, PACK_LET_GO, READING_THE_WORKFLOWS, RUNNING_THE_CASES, WORKFLOWS,
 };
 pub use field::{cancelling, closing, field_legend, READING_THE_RUNS};
 pub use machine::{
