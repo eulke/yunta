@@ -56,7 +56,7 @@ async fn worked_again() -> WorkedAgain {
         panic!("the check works, fails, and works again: {started:?} {failed:?}");
     };
     let said = Said {
-        run_id: whole.run.clone(),
+        run_id: whole.run().clone(),
         node_id: check,
         session_id: SessionId::from_static("session-1"),
         task_id: None,
@@ -66,10 +66,10 @@ async fn worked_again() -> WorkedAgain {
         cut: false,
     };
     let of_the_run = |news| FollowNews::Run {
-        run: whole.run.clone(),
+        run: whole.run().clone(),
         news,
     };
-    let (mut state, _) = on_the_field(&[&whole.run]).await;
+    let (mut state, _) = on_the_field(&[whole.run()]).await;
     state.update(Input::Stroke(Stroke::Enter));
     WorkedAgain {
         state,
@@ -90,8 +90,8 @@ fn check_heard(state: &State) -> (Option<String>, bool) {
     let in_view = state.followed_runs().in_view.as_deref();
     let in_view = in_view.expect("the run is in view");
     let check = NodeId::from("check");
-    let said = in_view.heard.of(&in_view.run.run, &check);
-    let record = in_view.run.state.nodes.get(&check);
+    let said = in_view.heard.of(in_view.run.run(), &check);
+    let record = in_view.run.state().nodes.get(&check);
     let works = record.and_then(|record| record.state.as_ref());
     let works = matches!(works, Some(NodeState::Running { .. }));
     (said.map(|said| said.text.clone()), works)

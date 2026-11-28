@@ -7,11 +7,13 @@
 //! commit, every run of it by its first event, so a successor already in the log, or one
 //! made between two looks, is handed as one that comes, right after the look that read the
 //! close; a successor found closed promoted in turn is asked after at once, along the chain
-//! to its end. The wait runs from the close, by the instant its event carries, whoever
-//! reads it and whenever: a run that closed longer ago than a successor takes to be
-//! created, with none in the log, is handed at once as having none, and one that closed a
-//! moment ago is awaited for what is left. That none came is handed once and is final:
-//! the run is asked after no more, at no later commit.
+//! to its end. The chain keeps the runs it held, and a run of them the log names as a
+//! successor again, as a run whose birth names itself or a cycle would, is none: the chain
+//! stops there, so a look ends and holds each run once. The wait runs from the close, by
+//! the instant its event carries, whoever reads it and whenever: a run that closed longer
+//! ago than a successor takes to be created, with none in the log, is handed at once as
+//! having none, and one that closed a moment ago is awaited for what is left. That none
+//! came is handed once and is final: the run is asked after no more, at no later commit.
 
 use std::time::Duration;
 
@@ -79,17 +81,18 @@ impl Following {
             let Some(held) = self.held.as_mut() else {
                 return Ok(());
             };
-            if !closed_promoted(&held.run.frame(now)) {
+            if !closed_promoted(held.run.frame()) {
                 return Ok(());
             }
-            let closed_at = held.run.state.run.finished().map(|finished| finished.at);
+            let closed_at = held.run.state().run.finished().map(|finished| finished.at);
             let began = held.successor.begin(wait_left(closed_at, now));
             // That none came is final: a run handed as having none is asked after no more.
             let awaited = matches!(held.successor, SuccessorWait::Awaited { .. });
             if !awaited || !(began || self.commit_unread) {
                 break;
             }
-            let Some(successor) = successor_of(&self.reader, &held.run.run).await? else {
+            let successor = successor_of(&self.reader, held.run.run(), &held.chain).await?;
+            let Some(successor) = successor else {
                 break;
             };
             self.go_on_with(successor).await?;
@@ -105,7 +108,9 @@ impl Following {
         let Some(held) = &self.held else {
             return Ok(());
         };
-        let predecessor = held.run.run.clone();
+        let predecessor = held.run.run().clone();
+        let mut chain = held.chain.clone();
+        chain.insert(successor.clone());
         let (read, registry, events) = match self.whole_from_the_field(&successor).await? {
             Some(whole) => whole,
             None => {
@@ -122,6 +127,7 @@ impl Following {
             run: read.clone(),
             registry,
             successor: SuccessorWait::NotPromoted,
+            chain,
         });
         if self.followed.run.as_ref() == Some(&predecessor) {
             self.followed.run = Some(successor);

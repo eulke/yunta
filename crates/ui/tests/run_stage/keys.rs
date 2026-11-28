@@ -86,6 +86,7 @@ fn legend_keys(state: &State) -> Vec<String> {
         .map(|binding| match &binding.keys {
             Keys::Typed(keys) => keys.clone(),
             Keys::UpDown => "↑↓".to_string(),
+            Keys::LeftRight => "←→".to_string(),
             Keys::Typing => "type".to_string(),
         })
         .collect()
@@ -227,10 +228,16 @@ async fn a_goes_to_the_run_the_attention_row_names_in_place_of_this_one() {
     );
     let mut back = went.clone();
     back.update(Input::Stroke(Stroke::Decline));
+    let repository = back
+        .followed_runs()
+        .repository
+        .as_ref()
+        .and_then(yunta_api::Repository::dir);
+    let field = repository.map(|place| place.display().to_string());
     assert_eq!(
-        back.screen(&Look::plain()).trail,
-        ["yunta"],
-        "the stage under it is the one this run's stood over"
+        back.screen(&Look::plain()).trail.get(1),
+        field.as_ref(),
+        "the stage under it is the field this run's stood over"
     );
 }
 
@@ -266,7 +273,7 @@ async fn a_on_the_runs_own_decision_goes_to_its_prompt() {
 async fn n_starts_a_new_run_where_no_prompt_stands() {
     let mut work = run::opened("work").await;
     work.pressed(&[Stroke::Insert('n')]).await;
-    assert_eq!(stands_at(work.state()), yunta_render::screen::START);
+    assert_eq!(stands_at(work.state()), yunta_render::screen::NEW_RUN);
     // A card stands in place: `n` adds a note to its answer, and no new run starts from it.
     let failure = run::opened("failure").await;
     let (noting, asked) = pressed_on(&failure, Stroke::Insert('n'));
@@ -286,9 +293,9 @@ async fn s_and_g_open_its_numbers_and_its_graph_over_it() {
     let in_view = work.state().followed_runs().in_view.as_deref();
     let run = &in_view.expect("the run in view").run;
     let (stats, _) = pressed_on(&work, Stroke::Insert('s'));
-    assert_eq!(stands_at(&stats), place_of(run.run.handle(), STATS));
+    assert_eq!(stands_at(&stats), place_of(run.run().handle(), STATS));
     let (graph, _) = pressed_on(&work, Stroke::Insert('g'));
-    let workflow = run.manifest.workflow.name.to_string();
+    let workflow = run.manifest().workflow.name.to_string();
     assert_eq!(stands_at(&graph), place_of(&workflow, GRAPH));
 }
 
@@ -302,7 +309,7 @@ async fn r_and_x_act_where_the_scene_offers_them() {
     let (closing, asked) = pressed_on(&stopped, Stroke::Insert('x'));
     assert!(asked.is_empty(), "{asked:?}");
     let overlay = closing.screen(&Look::plain()).overlay;
-    let confirming = overlay.is_some_and(|overlay| overlay.title == yunta_render::screen::CONFIRM);
+    let confirming = overlay.is_some_and(|overlay| overlay.confirms);
     assert!(confirming, "`x` closes it once confirmed");
     // A run at work offers neither.
     let work = run::opened("work").await;
@@ -349,7 +356,7 @@ async fn on_a_nodes_own_scene_going_on_and_closing_are_the_palettes() {
     let (closing, asked) = taken(row_of(NextStep::Close { run }));
     assert!(asked.is_empty(), "{asked:?}");
     let overlay = closing.screen(&Look::plain()).overlay;
-    let confirming = overlay.is_some_and(|overlay| overlay.title == yunta_render::screen::CONFIRM);
+    let confirming = overlay.is_some_and(|overlay| overlay.confirms);
     assert!(confirming, "its row closes it once confirmed");
 }
 
@@ -480,8 +487,13 @@ async fn the_legend_names_the_scenes_keys_and_leaves_c_e_v_o_to_the_palette() {
     assert_eq!(legend_keys(receipt.state()), ["j k", "s", "g", "n", "q"]);
     let run = receipt.state().followed().run.expect("the run followed");
     let offered = palette_offers(receipt.state());
-    let receipt_line = yunta_render::command::line(&NextStep::Receipt { run });
+    let receipt_line = yunta_render::command::line(&NextStep::Receipt { run: run.clone() });
     assert!(offered.contains(&receipt_line), "{offered:?}");
+    let handle = run.handle();
     let (writing, _) = pressed_on(&receipt, Stroke::Insert('e'));
-    assert_eq!(stands_at(&writing), yunta_render::screen::RECEIPT);
+    assert_eq!(
+        stands_at(&writing),
+        format!("{handle} {}", yunta_render::screen::RECEIPT),
+        "a page over a run takes the run's handle and its word"
+    );
 }

@@ -12,7 +12,7 @@
    . approve-plan |* stop it and everything under it         c     yunta cancel Q78GRR               |
    . implement    |  start a new run                         n     yunta run <workflow>              |
    . review@review|  what it cost, and where its time went   s     yunta stats Q78GRR                |
-   . review@review|  every run of this repository                  yunta list --runs                 |
+   . review@review|  this repository's runs                        yunta list --runs                 |
    . conform      |  check adapters, git, forge, packs             yunta doctor                      |
    . fix-findings |  the shape of every document yunta reads       yunta schema                      |
    . lint         '----------------------------------------------------------------------------------'

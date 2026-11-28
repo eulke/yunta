@@ -4,8 +4,9 @@
 //!
 //! The stage keeps none of the run: what stands across, its nodes, its meter and its
 //! chronicle are the run in view's, which the state keeps of what it follows, drawn where it
-//! is the stage's run and framed at the instant of each draw. They move as the run's news
-//! come, a node pointed at or not, and its ages move with the clock. The moments are the ones
+//! is the stage's run from the frame the run in view keeps for its head, what the clock adds
+//! to it worked out at the instant of each draw. They move as the run's news come, a node
+//! pointed at or not, and its ages move with the clock. The moments are the ones
 //! the state's fold tells, so the chronicle and the ribbon are the ones `status --follow`
 //! draws from the same log; whether the run offers a menu is the run in view's, worked out
 //! once for its head, and so is the decision its acts are chosen by: what the run in view
@@ -80,7 +81,7 @@ use yunta_api::{PullRequestPolled, Remark};
 use yunta_core::receipt::EventChainStatus;
 use yunta_core::{FindingId, NodeId, RunId, Seq};
 use yunta_render::screen::Along;
-use yunta_replay::frame::RunFrame;
+use yunta_replay::frame::{RunFrame, RunTimes};
 
 use super::{Act, Want};
 use crate::followed_runs::Attended;
@@ -141,7 +142,10 @@ pub struct RunStage {
 /// The run in view, framed at an instant: what the stage draws and acts on.
 struct Framed<'a> {
     in_view: &'a RunInView,
-    frame: RunFrame,
+    /// Its frame as the run in view keeps it, derived once for its head.
+    frame: &'a RunFrame,
+    /// What the clock adds to its frame at `now`.
+    times: RunTimes,
     /// The instant it is framed at, which what is read beside it is framed at too.
     now: DateTime<Utc>,
     /// Whether this window handed the run to a detached engine whose registry no reading
@@ -173,13 +177,13 @@ impl RunStage {
     /// stands, where it leads, and the run it shows where that moved; the prompt held for
     /// the pause the run stands at, where it stands in place; a remark the run came to
     /// meanwhile, noted; what its scene reads beyond the log, where it stands for what it was
-    /// not read for.
+    /// not read for: a reading under way as the person left stays its own, answered under the
+    /// stage over it.
     pub(crate) fn returned(&mut self, followed: &FollowedRuns) -> Vec<Want> {
         self.placed(followed);
         let framed = self.framed_at_its_head(followed);
         self.prompt_placed(framed.as_ref());
         self.remark_taken(followed);
-        self.unanswered_readings_forgotten();
         self.read_once(framed.as_ref())
     }
 
@@ -210,11 +214,13 @@ impl RunStage {
     }
 
     /// The run in view `followed` keeps, framed at `now`, where it is this stage's run:
-    /// none until it is read.
+    /// none until it is read. Its frame is the one the run in view keeps; only what the clock
+    /// adds is worked out here.
     fn framed<'a>(&self, followed: &'a FollowedRuns, now: DateTime<Utc>) -> Option<Framed<'a>> {
         let in_view = followed.in_view.as_deref()?;
-        (in_view.run.run == self.run).then(|| Framed {
-            frame: in_view.run.frame(now),
+        (*in_view.run.run() == self.run).then(|| Framed {
+            frame: in_view.run.frame(),
+            times: in_view.run.times(now),
             now,
             in_view,
             handed_on: followed.handed_on_unread(&self.run),
@@ -225,7 +231,7 @@ impl RunStage {
     /// this stage's run: where the run stands, which its pointers follow, reads no clock.
     fn framed_at_its_head<'a>(&self, followed: &'a FollowedRuns) -> Option<Framed<'a>> {
         let in_view = followed.in_view.as_deref()?;
-        let head = in_view.run.state.clock().last_at()?;
+        let head = in_view.run.state().clock().last_at()?;
         self.framed(followed, head)
     }
 
@@ -242,8 +248,8 @@ impl RunStage {
         if !self.leads() {
             return;
         }
-        let state = &framed.in_view.run.state;
-        let node = lead::node_led(&framed.frame, state, self.node.on());
+        let state = framed.in_view.run.state();
+        let node = lead::node_led(framed.frame, state, self.node.on());
         self.node = PointedBy::TheRun(node);
         self.finding = PointedBy::TheRun(lead::finding_led(&state.findings));
     }
@@ -252,10 +258,10 @@ impl RunStage {
     /// the run holds it, where the run would put it before it put it anywhere, its first
     /// node otherwise.
     fn pointed_in(&self, framed: &Framed<'_>) -> Option<NodeId> {
-        let frame = &framed.frame;
+        let frame = framed.frame;
         let held = |node: &NodeId| frame.nodes.iter().any(|framed| framed.id == *node);
         let pointed = match &self.node {
-            PointedBy::TheRun(None) => lead::node_led(frame, &framed.in_view.run.state, None),
+            PointedBy::TheRun(None) => lead::node_led(frame, framed.in_view.run.state(), None),
             PointedBy::TheRun(Some(node)) | PointedBy::ThePerson(node) => Some(node.clone()),
         };
         pointed
@@ -312,7 +318,7 @@ impl RunStage {
             Stroke::Interrupt => vec![Want::Leave],
             Stroke::Insert(key) => {
                 let act = self
-                    .offered_in(framed)
+                    .offered_in(framed, followed.can_ask_for_a_run())
                     .into_iter()
                     .find(|act| act.key == Some(key));
                 match act {
@@ -360,7 +366,7 @@ impl RunStage {
         let answering = self.answering(framed.as_ref()).filter(|_| its_own);
         let answering = answering.map(|step| Act::by(Stroke::Insert('a'), step));
         let acts = self
-            .offered_in(framed.as_ref())
+            .offered_in(framed.as_ref(), followed.can_ask_for_a_run())
             .into_iter()
             .filter_map(|act| {
                 let acts::Takes::Step(step) = act.takes else {
@@ -381,16 +387,17 @@ impl RunStage {
     /// Each act the run `framed` offers that a key here takes, by the scene it stands as:
     /// making room where it stands still for want of it, what it offers by its standing and
     /// the decision it waits on, once the state read it for the pause the run stands at, and
-    /// a new run where no prompt stands in its scene.
-    fn offered_in(&self, framed: Option<&Framed<'_>>) -> Vec<acts::Offered> {
+    /// a new run where no prompt stands in its scene; before the run is read, where no prompt
+    /// stands yet, a new run alone; a new run only where one `asks_for_a_run` here.
+    fn offered_in(&self, framed: Option<&Framed<'_>>, asks_for_a_run: bool) -> Vec<acts::Offered> {
         let Some(framed) = framed else {
-            return Vec::new();
+            return asks_for_a_run.then(acts::a_new_run).into_iter().collect();
         };
         let decision = framed
             .in_view
             .awaited_decision()
             .map(|decision| &decision.escalation);
         let scene = self.scene_of(framed);
-        acts::offered(framed, decision, scene.as_ref())
+        acts::offered(framed, decision, scene.as_ref(), asks_for_a_run)
     }
 }

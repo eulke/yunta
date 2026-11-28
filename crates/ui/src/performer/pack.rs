@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use yunta_api::{Error, FetchedPack, Project, Remarks, Stop};
+use yunta_api::{Error, FetchedPack, InstalledPack, Project, Remarks, Stop};
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::PackRef;
 use yunta_render::refusal::Refused;
@@ -102,17 +102,29 @@ async fn installed(
         let (pack, commit) = (installed.pack, installed.commit);
         return Ok(PackOutcome::Updated { pack, to, commit });
     }
+    let said = said_installed(project, installed, stop).await;
+    Ok(PackOutcome::Installed(Arc::new(said)))
+}
+
+/// `installed`, a pack new to the repository `project` works in, as `yunta pack add` says
+/// it: where it was vendored, its cases counted, and what its workflows need of `project`'s
+/// configuration, or what stopped reading that.
+pub(super) async fn said_installed(
+    project: &Project,
+    installed: InstalledPack,
+    stop: &Stop,
+) -> PackInstalled {
     let needs = installed
         .needs(project, stop)
         .await
         .map_err(|unread| unread.to_string());
-    Ok(PackOutcome::Installed(Arc::new(PackInstalled {
+    PackInstalled {
         at: project.workspace.shown(&installed.dir),
         cases: installed.shipped_cases(),
         needs,
         manifest: installed.manifest,
         commit: installed.commit,
-    })))
+    }
 }
 
 /// What the rest of the packs' work comes to: the listing, an audit, a removal and

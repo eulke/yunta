@@ -1,6 +1,7 @@
 //! The receipt as a person reads it — in a file, a pull request or a
 //! terminal — and the rows a run's screen says it in: the same rows, a
-//! printed receipt keeping after each what only a page has room for.
+//! printed receipt keeping after each what only a page has room for, as
+//! the page a screen opens over the run keeps it too.
 //!
 //! Every number here is already on the run's receipt — this page chooses
 //! wording and order, never derives a fact. Keeping it apart from the
@@ -38,18 +39,20 @@ pub struct Receipt<'a> {
 /// Where a receipt's rows are read, in the glyphs it draws with, which says how much each
 /// tells: a run's screen says what each found in the words its pane has room for, and a
 /// printed receipt keeps after them, past the separator, the detail only a page has room
-/// for.
+/// for, setting a command as a printed page sets one; a page a screen opens over the run
+/// says the screen's words and keeps the detail after them.
 #[derive(Debug, Clone, Copy)]
 pub enum Told {
     OnScreen(Glyphs),
     Printed(Glyphs),
+    OnAPage(Glyphs),
 }
 
 impl Told {
     /// The glyphs the rows are drawn with.
     fn glyphs(self) -> Glyphs {
         match self {
-            Told::OnScreen(glyphs) | Told::Printed(glyphs) => glyphs,
+            Told::OnScreen(glyphs) | Told::Printed(glyphs) | Told::OnAPage(glyphs) => glyphs,
         }
     }
 }
@@ -59,7 +62,7 @@ impl Page for Receipt<'_> {
     /// it as Markdown, a terminal lays it out. `look`'s glyphs draw the
     /// separators between the facts a line states.
     fn document(&self, look: &Look) -> Doc {
-        document(self.receipt, look.glyphs)
+        document(self.receipt, Told::Printed(look.glyphs))
     }
 }
 
@@ -93,6 +96,15 @@ impl Receipt<'_> {
         review_checks(&mut checks, receipt, told);
         event_chain_check(&mut checks, receipt, told);
         checks
+    }
+
+    /// The receipt as a page a screen opens over its run shows it, in `glyphs`: its rows in
+    /// the words the run's screen says them, the detail a printed receipt keeps after each,
+    /// each criterion's command on its row, cut where it is wider, and no next step, which
+    /// the screen's palette offers. Not [`Receipt::document`](Page::document), the receipt
+    /// a file, a pull request or a terminal prints.
+    pub fn on_screen(&self, glyphs: Glyphs) -> Doc {
+        document(self.receipt, Told::OnAPage(glyphs))
     }
 
     /// What the run spent, what it changed and the pull request it opened, under its
@@ -163,11 +175,11 @@ fn criteria_counted(count: usize) -> String {
 /// The run's word heads it, then what it is a receipt of and the run, then
 /// one check per thing the run held its work to — a cross only for what
 /// failed, a `·` for what was never asked for — then what it spent, changed
-/// and opened, then each criterion and each path outside the scope, and the
-/// command that checks it all again. Each row says what a run's screen says,
-/// then what only a page keeps. `glyphs` draws the separators between the
-/// facts a line states.
-fn document(receipt: &receipt::Receipt, glyphs: Glyphs) -> Doc {
+/// and opened, then each criterion and each path outside the scope, and, on
+/// a printed receipt, the command that checks it all again. Each row says
+/// what a run's screen says, then what only a page keeps, as `told` says it;
+/// its glyphs draw the separators between the facts a line states.
+fn document(receipt: &receipt::Receipt, told: Told) -> Doc {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
@@ -185,7 +197,6 @@ fn document(receipt: &receipt::Receipt, glyphs: Glyphs) -> Doc {
         doc = doc.with(Gist::new("the run is still open: this is its last step"));
     }
     let page = Receipt { receipt };
-    let told = Told::Printed(glyphs);
     let mut doc = doc
         .with(Fields::new().push_if("run", receipt.run_id.to_string()))
         .with(page.checks(told))
@@ -193,7 +204,7 @@ fn document(receipt: &receipt::Receipt, glyphs: Glyphs) -> Doc {
     for failed in &receipt.failed {
         doc = doc.with(failed_node(failed, &receipt.run_id));
     }
-    if let Some(criteria) = criteria(receipt) {
+    if let Some(criteria) = criteria(receipt, told) {
         doc = doc
             .with(Block::Heading("criteria".to_string()))
             .with(criteria);
@@ -203,6 +214,9 @@ fn document(receipt: &receipt::Receipt, glyphs: Glyphs) -> Doc {
             .with(Block::Heading("outside the scope".to_string()))
             .with(outside);
     }
+    let Told::Printed(_) = told else {
+        return doc;
+    };
     let verify = NextStep::Verify {
         run: receipt.run_id.clone(),
     };
@@ -233,12 +247,17 @@ fn failed_node(failed: &FailedNode, run: &RunId) -> Section {
     }
 }
 
-/// Each criterion the run ran, by the task it judged, when it ran any.
-fn criteria(receipt: &receipt::Receipt) -> Option<Checklist> {
+/// Each criterion the run ran, by the task it judged, when it ran any: on a page a screen
+/// opens, each command on its row, cut where it is wider, as a cut command still names
+/// itself.
+fn criteria(receipt: &receipt::Receipt, told: Told) -> Option<Checklist> {
     if receipt.criteria.entries.is_empty() {
         return None;
     }
-    let mut criteria = Checklist::default();
+    let mut criteria = match told {
+        Told::OnAPage(_) => Checklist::default().on_their_rows(),
+        Told::OnScreen(_) | Told::Printed(_) => Checklist::default(),
+    };
     for entry in &receipt.criteria.entries {
         let found = match entry.exit_code {
             0 => Found::Holds,

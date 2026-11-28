@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use super::{Form, Page, Shown};
 use crate::blocks::{runner_on, FailureDetail, HandsOver, HowItStands, TaskProof, TaskScope};
 use crate::chronicle::{feed, feed_heading, in_feed, open_attempt_calls};
-use crate::command;
+use crate::command::{self, SaidStep};
 use crate::watched::listed_as;
 use surco::components::{Fields, Headline, Next, Whole};
 use surco::doc::{Block, Doc};
@@ -30,7 +30,7 @@ use surco::paths;
 use yunta_core::events::{ArtifactId, NodeState, ResolvedRunner};
 use yunta_core::step::NextStep;
 use yunta_core::{ArtifactSpec, RunId, TaskId};
-use yunta_replay::frame::{Moment, NodeFrame, NodeStanding};
+use yunta_replay::frame::{Moment, NodeFrame, NodeStanding, NodeTimes};
 use yunta_replay::RunState;
 
 /// How many of a node's newest feed rows its page prints: what reads at once under
@@ -46,6 +46,8 @@ pub struct Node {
     pub run_id: RunId,
     /// The node the page is about, as the run's frame derives it.
     pub node: NodeFrame,
+    /// What the clock adds to the node at the instant the page is read at.
+    pub times: NodeTimes,
     /// Who works it, as its pane's title names them
     /// ([`runner_of`](crate::blocks::runner_of)): the runner it resolved,
     /// or the one its run resolved for the role it names. Not
@@ -110,7 +112,7 @@ impl Node {
     /// How the node stands, as its own scene says it: a page waits on no
     /// person, so what a decision holds it on is its failure's own words.
     fn stands(&self) -> HowItStands {
-        HowItStands::of(&self.node, self.state.run.mode(), false)
+        HowItStands::of(&self.node, &self.times, self.state.run.mode(), false)
     }
 
     /// The whole of what the node's state says, as its own scene says it:
@@ -142,7 +144,11 @@ impl Node {
     /// kept after them), then what it is, in `look`'s glyphs.
     fn fields(&self, look: &Look) -> Fields {
         let node = &self.node;
-        let runner = self.runner.as_ref().map(runner_on).unwrap_or_default();
+        let runner = self
+            .runner
+            .as_ref()
+            .map(|runner| runner_on(runner, &node.id, &self.state))
+            .unwrap_or_default();
         let produced: Vec<String> = node
             .artifacts
             .iter()
@@ -216,12 +222,7 @@ impl Node {
 
     /// Where to read the rest of the run.
     fn next(&self) -> Next {
-        Next {
-            steps: vec![(
-                command::line(&NextStep::status(&self.run_id)),
-                "shows the whole run",
-            )],
-        }
+        command::next([SaidStep::of(&NextStep::status(&self.run_id))])
     }
 }
 

@@ -6,10 +6,13 @@
 use surco::components::{KeyList, Legend};
 use surco::doc::Block;
 use surco::glyphs::Glyphs;
+use yunta_core::step::{NextStep, Reach};
 
 use crate::prompt::card::{self, ChosenWith};
 use crate::prompt::{desk, round, PromptAct};
-use crate::screen::{help, help_over_a_run, Along, Leaving, PromptKeys};
+use crate::screen::{
+    help, help_over_a_run, help_over_the_field, Along, GoingDown, Leaving, PromptKeys, StageKeys,
+};
 
 /// The keys `doc` lists, the sentence above them first, each key beside what it does.
 fn listed(doc: &surco::doc::Doc) -> (Option<String>, Vec<(String, String)>) {
@@ -23,14 +26,71 @@ fn listed(doc: &surco::doc::Doc) -> (Option<String>, Vec<(String, String)>) {
     (said.clone(), keys.collect())
 }
 
+/// The keys of a page whose legend is `legend`, taking nothing beyond it nor anything every
+/// stage answers to but the palette and Ctrl-C.
+fn bare(legend: &Legend) -> StageKeys<'_> {
+    StageKeys {
+        legend,
+        beyond: Legend::new(),
+        new_run: false,
+        attends: false,
+        scrolls: false,
+        down: None,
+    }
+}
+
 /// Help opens on the sentence that says it holds every key there is.
 #[test]
 fn helps_first_row_is_the_tagline() {
-    let (said, _) = listed(&help(&Legend::new().key("j k", "move")));
+    let legend = Legend::new().key("j k", "move");
+    let (said, _) = listed(&help(bare(&legend)));
     assert_eq!(
         said.as_deref(),
         Some("You never have to remember more than this.")
     );
+}
+
+/// Help over a page says the keys every stage answers to wherever each acts there, its
+/// legend's keys and those it takes beyond them, each key once, where it is first named: a
+/// page over the field that scrolls, where a run can be asked for, its legend naming a new
+/// run as help does first.
+#[test]
+fn help_over_a_page_says_each_key_it_takes_once() {
+    let legend = Legend::new().key("esc", "back").key("n", "new run");
+    let keys = StageKeys {
+        beyond: Legend::new().key("u", "what collecting would reclaim"),
+        new_run: true,
+        attends: true,
+        scrolls: true,
+        down: Some(GoingDown::ToTheField),
+        ..bare(&legend)
+    };
+    let (_, rows) = listed(&help(keys));
+    let rows: Vec<String> = rows
+        .into_iter()
+        .map(|(key, does)| format!("{key} {does}"))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            "/ anything: only what can be done here, with its command",
+            "n start a new run, wherever no prompt stands",
+            "esc back",
+            "u what collecting would reclaim",
+            "↑↓ scroll",
+            "pgup pgdn by the page",
+            "a go to what needs you",
+            "q go to the field",
+            "ctrl-c leave: every run keeps going without this window",
+        ]
+    );
+    let bottom = StageKeys {
+        down: Some(GoingDown::ToWhereItOpened),
+        ..bare(&legend)
+    };
+    let (_, rows) = listed(&help(bottom));
+    let q = ("q".to_string(), "go back to where yunta opened".to_string());
+    assert!(rows.contains(&q), "{rows:#?}");
 }
 
 /// Help over a run lists the keys every screen answers to in the design's words, the
@@ -72,6 +132,51 @@ fn help_over_a_run_lists_the_designs_rows() {
         "ctrl-c leave: every run keeps going without this window",
     ];
     assert_eq!(keys, rows);
+}
+
+/// Help over the field lists the keys every screen answers to, then the field's own, those
+/// its legend leaves out among them, in the design's words, as the target `field-help` lists
+/// them; `d` and `e` say what they do from where the field stands, the closed shown or the
+/// machine's runs listed; outside a repository no row names `e`.
+#[test]
+fn help_over_the_field_lists_the_designs_rows() {
+    let rows = |closed: bool, farther: Option<Reach>| -> Vec<String> {
+        let farther = farther.map(|reach| NextStep::ListRuns { reach });
+        let (said, keys) = listed(&help_over_the_field(closed, true, farther.as_ref()));
+        assert!(said.is_some());
+        keys.into_iter()
+            .map(|(key, does)| format!("{key} {does}"))
+            .collect()
+    };
+    let designed = [
+        "/ anything: only what can be done here, with its command",
+        "n start a new run, wherever no prompt stands",
+        "j k move; the footer always says what they move",
+        "enter open, answer, confirm",
+        "space mark it",
+        "x close the marked, or the pointed, once confirmed",
+        "r resume it",
+        "c stop it and everything under it",
+        "s what it cost",
+        "a go to what needs you",
+        "d the closed too",
+        "e the runs on this machine",
+        "w the workflows you can run",
+        "m check adapters, git, forge, packs",
+        "q leave: every run keeps going without this window",
+        "ctrl-c leave: every run keeps going without this window",
+    ];
+    assert_eq!(rows(false, Some(Reach::Machine)), designed);
+    let turned = rows(true, Some(Reach::WithClosed));
+    for said in [
+        "d hides the closed",
+        "e this repository's runs, the closed too",
+    ] {
+        assert!(turned.contains(&said.to_string()), "{}", turned.join("\n"));
+    }
+    let outside = rows(false, None);
+    let names_e = outside.iter().any(|row| row.starts_with("e "));
+    assert!(!names_e, "{outside:#?}");
 }
 
 /// Each row help over a run lists under `prompt`, standing in place: its keys, then what

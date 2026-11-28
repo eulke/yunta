@@ -31,6 +31,12 @@ impl Furrow {
 /// it, which is when two strokes stand apart.
 pub(super) const CELLS_A_NODE: usize = 2;
 
+/// The cells a furrow of `count` nodes takes in at most `room`: two a node, no more than the
+/// room holds.
+pub(super) fn furrow_cells(count: usize, room: usize) -> usize {
+    room.min(count * CELLS_A_NODE)
+}
+
 /// Whether `count` strokes in `cells` cells stand apart: a gap between two
 /// strokes when there are two cells a node.
 pub(super) fn spaced(count: usize, cells: usize) -> bool {
@@ -88,20 +94,72 @@ pub(super) fn stroke(line: Line, standing: Standing, takes: usize, look: &Look) 
 }
 
 impl Gist {
-    /// The sentence wrapped one step in, whole.
+    /// The sentence wrapped one step in, whole: a path wider than the room parted after the
+    /// last `/` that leaves its part within it, each part on a row of its own under the
+    /// sentence's first column, as a reader reads a path parted at a directory. On its one
+    /// row, it is cut where the row ends, by the one cut rule.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let room = look.width.cells().saturating_sub(cell_width(INDENT));
-        wrap_unbroken(&self.0, room)
+        if self.on_one_row {
+            let row = Line::new().plain(INDENT).plain(self.said.as_str());
+            return vec![row.cut(look.width.cells(), look.glyphs)];
+        }
+        wrap_unbroken(&self.said, room)
             .into_iter()
+            .flat_map(|part| parted_after_a_slash(part, room))
             .map(|part| Line::new().plain(INDENT).plain(part))
             .collect()
     }
+}
+
+/// `row` in rows of at most `room` cells, each but the last ending in the last `/` that leaves
+/// it within them; a row no `/` parts so stays whole, for its pane to fold.
+fn parted_after_a_slash(mut row: String, room: usize) -> Vec<String> {
+    let mut parts = Vec::new();
+    while cell_width(&row) > room {
+        let within = row
+            .char_indices()
+            .rev()
+            .find(|(at, slash)| *slash == '/' && cell_width(&row[..=*at]) <= room)
+            .map(|(at, _)| at);
+        let Some(at) = within.filter(|at| at + 1 < row.len()) else {
+            break;
+        };
+        let rest = row.split_off(at + 1);
+        parts.push(std::mem::replace(&mut row, rest));
+    }
+    parts.push(row);
+    parts
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::glyphs::Mark;
+    use crate::look::Width;
+
+    /// A path wider than the gist's room is parted after the last `/` that leaves its part
+    /// within it, each part under the sentence's first column, as the field's glance says why
+    /// a run cannot be read.
+    #[test]
+    fn a_gist_parts_a_path_wider_than_its_room_after_a_slash() {
+        let gist = Gist::new(
+            "manifest missing or unreadable at /cut/runs/01M7SMA11RVN000000000RPHAN/manifest.yaml.",
+        );
+        let look = Look {
+            width: Width::exact(39),
+            ..Look::plain()
+        };
+        let rows: Vec<String> = gist.lines(&look).iter().map(Line::text).collect();
+        assert_eq!(
+            rows,
+            [
+                "  manifest missing or unreadable at",
+                "  /cut/runs/01M7SMA11RVN000000000RPHAN/",
+                "  manifest.yaml.",
+            ]
+        );
+    }
 
     /// With more nodes than cells, each cell takes the most urgent word of
     /// the nodes it covers, so the node that needs a person and the one that

@@ -1,62 +1,63 @@
-//! See [`super`]. A run started, and the first one: what each asks, what stands
-//! while a run is admitted and started, and their keys.
+//! See [`super`]. A run started, and the first one: their keys, a new run's by the row in
+//! focus, each row's own key first. What the first request asks is its page's
+//! (`page::FirstRequest`), and what a new run's rows say is theirs (`page::NewRun`); a new
+//! run stands on the trail as `n` names it ([`super::NEW_RUN`]).
 
 use surco::components::Legend;
-use surco::line::{Line, Tone};
 use yunta_core::{InputName, InputSpec};
 
-use crate::prompt::ESC;
+use super::{BACK, FIELD, NEW_RUN};
+use crate::page::NewRun;
+use crate::prompt::{ENTER, ESC};
 
-/// Where starting a run stands on the trail.
-pub const START: &str = "start";
-
-/// What starting a run asks first: the workflow that builds what was asked for.
-pub const WHICH_WORKFLOW: &str = "Which workflow builds it?";
-
-/// What starting a run asks of a workflow that declares modes.
-pub const WHICH_MODE: &str = "Which mode does it start in?";
-
-/// What starting a run asks last: the adapter its sessions are pinned to.
-pub const WHICH_ADAPTER: &str = "Which adapter runs its sessions?";
-
-/// The adapter a run is started on when none is pinned: the one its runners name.
-pub const AS_THE_RUNNERS_SAY: &str = "as the runners in config.yaml say";
-
-/// What stands while a run is admitted, created and started.
-pub const STARTING: &str = "admitting and starting the run";
-
-/// What the first run asks: what the person wants built.
-pub fn first_run_asks() -> Line {
-    Line::new().push(Tone::Strong, "What do you want to build?")
-}
-
-/// The keys of the first run.
-pub fn first_run_legend() -> Legend {
+/// The keys of the first request, where a line is typed: what typing does, then the keys
+/// that act and do not type, going on to a new run with what is typed, and `esc`, which goes
+/// to the field, whatever it holds. No far pair, since `/` and `?` type there too.
+pub fn first_request_legend() -> Legend {
     Legend::new()
-        .key("enter", "picks the workflow for it")
-        .key(ESC, "leaves yunta")
+        .typing("what you want to build")
+        .key(ENTER, NEW_RUN)
+        .key(ESC, FIELD)
 }
 
-/// What a run being started was asked for, over the questions that start it.
-pub fn asked_for(request: &str) -> String {
-    format!("asked: {request}")
+/// A row of a new run a person sets, as its keys act on it: the request and each other input
+/// typed, the workflow moved along, the mode and the adapter chosen among their words.
+pub enum NewRunRow<'a> {
+    /// The request, which the workflow reads from the input that takes it.
+    Request,
+    /// An input other than the request, named `name`, as the workflow declares it.
+    Input {
+        name: &'a InputName,
+        spec: &'a InputSpec,
+    },
+    Workflow,
+    Mode,
+    Adapter,
 }
 
-/// What starting a run asks of input `name`: what it is, whether it is required, and
-/// what the workflow says of it.
-pub fn input_asks(name: &InputName, spec: &InputSpec) -> Line {
-    let optionality = match spec.is_required() {
-        true => "required",
-        false => "optional",
+/// The keys of a new run, where every printable key types on a typed row: the key of the row
+/// in focus first (typing it, moving along the workflows, changing the mode or the adapter),
+/// then going to the next row, starting the run, and going back. No far pair, since a line is
+/// typed there.
+pub fn new_run_legend(row: NewRunRow) -> Legend {
+    let first = match row {
+        NewRunRow::Request => Legend::new().typing("the request"),
+        NewRunRow::Input { name, spec } => Legend::new().typing(typed_on(name, spec)),
+        NewRunRow::Workflow => Legend::new().arrows(NewRun::WORKFLOW),
+        NewRunRow::Mode => Legend::new().left_right(NewRun::MODE),
+        NewRunRow::Adapter => Legend::new().left_right(NewRun::ADAPTER),
     };
-    let description = spec
-        .description()
-        .map(|description| format!(": {description}"))
-        .unwrap_or_default();
-    Line::new()
-        .push(Tone::Strong, name.to_string())
-        .plain(format!(
-            " ({}, {optionality}){description}",
-            crate::inputs::type_label(spec)
-        ))
+    first
+        .key("tab", "next row")
+        .key(ENTER, "start")
+        .key(ESC, BACK)
+}
+
+/// What a person types on input `name`'s row, as its legend says it: the input by its name,
+/// then the kind of value it takes where that is more than words: `the tasks document`.
+fn typed_on(name: &InputName, spec: &InputSpec) -> String {
+    match spec {
+        InputSpec::String { .. } => format!("the {name}"),
+        _ => format!("the {name} {}", crate::inputs::type_label(spec)),
+    }
 }

@@ -95,7 +95,7 @@ impl RunStage {
         let typed = typed || screen.typed;
         let at = self.standpoint(framed, typed);
         (screen.tally, screen.attention) = followed.framing(at, now);
-        screen.legend = self.legend(framed);
+        screen.legend = self.legend(framed, followed.can_ask_for_a_run());
         screen.anywhere = match typed {
             true => Legend::new(),
             false => yunta_render::screen::anywhere(),
@@ -129,12 +129,13 @@ impl RunStage {
 
     /// The keys of the run `framed`'s scene in render's words: the prompt's where one stands
     /// in place; else what `j k` move, the acts of its own the legend names among them, those
-    /// the scene names (`acts`), a new run where the scene ends in one, and the field, saying
+    /// the scene names (`acts`), a new run where the scene ends in one and one `asks_for_a_run`
+    /// here, and the field, saying
     /// whether the run keeps going; before the run is read, with no node to move along and
     /// no act to take, the field alone. The acts the palette lists stand out of it, and so do
     /// the keys that move through the pane, which a run's screen shares with every page and
     /// so does not spend its keys' row on.
-    fn legend(&self, framed: Option<&Framed<'_>>) -> Legend {
+    fn legend(&self, framed: Option<&Framed<'_>>, asks_for_a_run: bool) -> Legend {
         let Some(framed) = framed else {
             return yunta_render::screen::unread_run_legend();
         };
@@ -142,7 +143,7 @@ impl RunStage {
             return held.legend();
         }
         let scene = self.scene_of(framed);
-        let offered = self.offered_in(Some(framed));
+        let offered = self.offered_in(Some(framed), asks_for_a_run);
         let acts: Vec<(char, &str)> = offered
             .iter()
             .filter_map(|act| Some((act.key?, act.named?)))
@@ -150,7 +151,7 @@ impl RunStage {
         let keys = RunKeys {
             along: self.j_and_k_move(Some(framed)),
             acts: &acts,
-            new_run: scene.is_some_and(|scene| scene.names_a_new_run()),
+            new_run: asks_for_a_run && scene.is_some_and(|scene| scene.names_a_new_run()),
             leaving: framed.leaving(),
         };
         yunta_render::screen::run_legend(&keys, self.leads())
@@ -162,12 +163,14 @@ impl RunStage {
     /// where it names it and the palette's elsewhere, and where `q` leaves the run; under a
     /// prompt in place, every key it takes first in its words, those its legend names and
     /// those it leaves to help, no row of the run's for them, and none a line typed there
-    /// swallows; before the run is read, the keys of its legend.
+    /// swallows; before the run is read, the keys of its legend, `esc` beside `q`, a new run
+    /// where one can be asked for, and what needs the person.
     pub(crate) fn help(&self, legend: &Legend, followed: &FollowedRuns, now: DateTime<Utc>) -> Doc {
         let Some(framed) = self.framed(followed, now) else {
-            return yunta_render::screen::help(legend);
+            let new_run = followed.can_ask_for_a_run();
+            return yunta_render::screen::help_over_an_unread_run(legend, new_run);
         };
-        let offered = self.offered_in(Some(&framed));
+        let offered = self.offered_in(Some(&framed), followed.can_ask_for_a_run());
         let acts: Vec<(char, &str)> = offered
             .iter()
             .filter_map(|act| Some((act.key?, act.said())))
@@ -196,7 +199,7 @@ impl RunStage {
             return;
         }
         let in_view = followed.in_view.as_deref();
-        let in_view = in_view.filter(|in_view| in_view.run.run == self.run);
+        let in_view = in_view.filter(|in_view| *in_view.run.run() == self.run);
         let mut remarks = in_view.into_iter().flat_map(|in_view| &in_view.remarks);
         let unsaid = remarks.find(|remark| !self.remarked.contains(remark));
         let Some(unsaid) = unsaid.cloned() else {

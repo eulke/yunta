@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use surco::surface::Markdown;
 use yunta_api::Workspace;
+use yunta_core::disk::SystemDisk;
 use yunta_core::events::Channel;
 use yunta_core::process::SearchPath;
 use yunta_core::{Env, ProcessSecrets, SystemIdSource};
@@ -47,6 +48,7 @@ fn workspace(dir: &Path, home: &Path) -> Workspace {
         secrets: Arc::new(ProcessSecrets),
         forges: Arc::new(yunta_api::DeclaredForge),
         binary: PathBuf::from(env!("CARGO_BIN_EXE_yunta")),
+        disk: Arc::new(SystemDisk),
     }
 }
 

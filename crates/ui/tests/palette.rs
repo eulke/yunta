@@ -2,8 +2,8 @@
 //! parked run among it, then what every stage offers, each row what it does, the key the
 //! stage takes it by where one does, and the command that does the same, spelled by render.
 //! Typed words narrow it by what a row does; a row chosen does what its key does on the
-//! stage, or what taking its step does; Escape closes it with nothing done. Help over a run
-//! lists the keys its legend leaves out.
+//! stage, or what taking its step does; Escape closes it with nothing done. Help over a run,
+//! and over the field, lists the keys its legend leaves out.
 
 mod support;
 
@@ -132,7 +132,7 @@ async fn a_parked_runs_palette_offers_answering_first_and_every_stages_steps_las
     });
     let screen = state.screen(&Markdown.look());
     assert!(screen.overlay.is_none(), "chosen, the palette closes");
-    assert_eq!(screen.trail, ["yunta", "doctor"]);
+    assert_eq!(screen.trail, ["yunta", "machine"]);
 }
 
 #[tokio::test]
@@ -241,6 +241,42 @@ async fn the_fields_close_row_names_the_run_x_closes() {
     );
 }
 
+/// The field's `d` and `e` rows name the command that lists what each key shows from where
+/// the field stands: at the machine's reach, `d` every run on this machine with the closed;
+/// with the closed shown there, `d` every run on this machine and `e` this repository's runs
+/// with the closed.
+#[tokio::test]
+async fn the_fields_d_and_e_rows_name_the_command_that_lists_the_same() {
+    let run: RunId = "01M7PALETTE000000000DDDDDD".parse().expect("a run's id");
+    let (mut state, _) = on_the_field(&[&run]).await;
+    let row_of = |state: &State, key: &str| -> Option<String> {
+        let rows = choices(state);
+        let row = rows.iter().find(|row| row.key.as_deref() == Some(key))?;
+        row.said.clone()
+    };
+    for stroke in [Stroke::Insert('e'), Stroke::Insert('/')] {
+        state.update(Input::Stroke(stroke));
+    }
+    assert_eq!(
+        row_of(&state, "d").as_deref(),
+        Some("yunta list --runs --all --full"),
+        "at the machine's reach"
+    );
+    for stroke in [Stroke::Decline, Stroke::Insert('d'), Stroke::Insert('/')] {
+        state.update(Input::Stroke(stroke));
+    }
+    assert_eq!(
+        row_of(&state, "d").as_deref(),
+        Some("yunta list --runs --all"),
+        "at the machine's reach, the closed shown"
+    );
+    assert_eq!(
+        row_of(&state, "e").as_deref(),
+        Some("yunta list --runs --full"),
+        "at the machine's reach, the closed shown"
+    );
+}
+
 /// The rows of the palette standing over `state` as its list holds them: each what it does,
 /// the key the stage under it takes it by, and the command that does the same.
 fn choices(state: &State) -> Vec<ChoiceRow> {
@@ -333,17 +369,14 @@ async fn words_typed_narrow_the_rows_by_what_each_does_and_stand_where_typing_wa
     }
 }
 
-#[tokio::test]
-async fn help_over_a_run_lists_each_key_its_legend_leaves_out_with_what_it_does() {
-    let screen = run::opened("help").await;
-    let run = shown_run(screen.state());
-    let overlay = screen
-        .state()
+/// The keys help standing over `state` lists, each with what it does.
+fn helped(state: &State) -> Vec<(String, String)> {
+    let overlay = state
         .screen(&Markdown.look())
         .overlay
         .filter(|overlay| overlay.title == yunta_render::screen::HELP)
         .expect("help stands");
-    let keys: Vec<(String, String)> = overlay
+    overlay
         .doc
         .blocks()
         .iter()
@@ -354,10 +387,39 @@ async fn help_over_a_run_lists_each_key_its_legend_leaves_out_with_what_it_does(
         .expect("help lists its keys")
         .iter()
         .map(|binding| (binding.keys.named().to_string(), binding.does.clone()))
-        .collect();
+        .collect()
+}
+
+#[tokio::test]
+async fn help_over_a_run_lists_each_key_its_legend_leaves_out_with_what_it_does() {
+    let screen = run::opened("help").await;
+    let run = shown_run(screen.state());
+    let keys = helped(screen.state());
     for (key, step) in [
         ('c', NextStep::Cancel { run: run.clone() }),
         ('o', NextStep::Open { run }),
+    ] {
+        let listed = (key.to_string(), command::does(&step).to_string());
+        assert!(keys.contains(&listed), "{listed:?} in {keys:#?}");
+    }
+}
+
+/// Help over the field lists the keys its legend leaves out, each with what it does: stopping
+/// a run, the workflows and the machine's checks among them.
+#[tokio::test]
+async fn help_over_the_field_lists_the_keys_its_legend_leaves_out() {
+    let run: RunId = "01M7PALETTE000000000AAAAAA".parse().expect("a run's id");
+    let (mut state, _) = on_the_field(&[&run]).await;
+    state.update(Input::Stroke(Stroke::Insert('?')));
+    let keys = helped(&state);
+    let doctor = NextStep::Doctor {
+        sessions: false,
+        full: false,
+    };
+    for (key, step) in [
+        ('c', NextStep::Cancel { run }),
+        ('w', NextStep::List),
+        ('m', doctor),
     ] {
         let listed = (key.to_string(), command::does(&step).to_string());
         assert!(keys.contains(&listed), "{listed:?} in {keys:#?}");

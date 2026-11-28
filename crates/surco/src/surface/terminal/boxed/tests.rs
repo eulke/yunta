@@ -1,10 +1,13 @@
 //! What is open over a screen, boxed: round corners, its title in the top edge, its lines
 //! inside the uprights, as tall as what it holds, and scrolled inside the box when it holds
-//! more; a palette's rows in their three columns where its box holds them, and help's keys.
+//! more; a palette's rows in their three columns where its box holds them, help's keys, and
+//! a confirmation's sentence and commands a cell inside each upright.
 
 use std::path::{Path, PathBuf};
 
-use crate::components::{ChoiceList, ChoiceRow, Choices, KeyList, Legend, Overlay, Sight};
+use crate::components::{
+    ChoiceList, ChoiceRow, Choices, KeyList, Legend, Overlay, SameAtAShell, Sight,
+};
 use crate::doc::Doc;
 use crate::golden::{assert_golden, Environment, ENVIRONMENTS};
 use crate::line::{Fill, Line};
@@ -17,7 +20,7 @@ fn goldens() -> PathBuf {
 
 /// A screen `cells` wide inside its margins, a box stands over, in `environment`'s glyphs
 /// and paint.
-fn over(environment: &Environment, cells: usize) -> Terminal {
+pub(super) fn over(environment: &Environment, cells: usize) -> Terminal {
     Terminal::on(Look {
         width: Width::exact(cells),
         ..Look::of(environment)
@@ -25,7 +28,7 @@ fn over(environment: &Environment, cells: usize) -> Terminal {
 }
 
 /// What help lists over a run: four keys, each with what it does.
-fn keys() -> Overlay {
+pub(super) fn keys() -> Overlay {
     let lines = [
         "/      anything: only what can be done here",
         "n      start a new run, from anywhere",
@@ -38,11 +41,12 @@ fn keys() -> Overlay {
         doc: Doc::new().with(lines.to_vec()),
         legend: Legend::new().key("esc", "back"),
         sight: Sight::default(),
+        confirms: false,
     }
 }
 
 /// `count` lines to read, `line 1` to `line <count>`, from the line `top`.
-fn many(count: usize, top: usize) -> Overlay {
+pub(super) fn many(count: usize, top: usize) -> Overlay {
     let lines: Vec<Line> = (1..=count)
         .map(|at| Line::new().plain(format!("line {at}")))
         .collect();
@@ -51,6 +55,7 @@ fn many(count: usize, top: usize) -> Overlay {
         doc: Doc::new().with(lines),
         legend: Legend::new().key("esc", "back"),
         sight: Sight::from_line(top),
+        confirms: false,
     }
 }
 
@@ -106,7 +111,7 @@ fn what_holds_more_than_the_box_scrolls_inside_it() {
 /// The palette over a run at work: what each act does, its key where the run's screen takes
 /// one, and the command that does the same, the first pointed at; nothing typed yet, and no
 /// keys of its own, which the screen's legend holds while it is open.
-fn palette() -> Overlay {
+pub(super) fn palette() -> Overlay {
     // What each act does, its key, and its command, past `yunta ` and before the run's handle.
     let acts = [
         ("stop it and everything under it", "c", "cancel"),
@@ -147,6 +152,7 @@ fn palette() -> Overlay {
             .key("enter", "do it")
             .key("esc", "back"),
         sight: Sight::following_pointer(),
+        confirms: false,
     }
 }
 
@@ -178,6 +184,7 @@ fn help() -> Overlay {
         doc: Doc::new().with(keys),
         legend: Legend::new().key("esc", "back"),
         sight: Sight::default(),
+        confirms: false,
     }
 }
 
@@ -201,20 +208,24 @@ fn a_palette_row_holds_its_key_and_its_command_from_a_terminal_of_100_columns() 
         .all(|line| !line.text().contains("Q78GRR")));
 }
 
-/// A palette's box as wide as on the design's wide screen, 84 cells, over a terminal of 96
-/// columns holds what each act does alone: its keys and commands stand from 100 columns, as
-/// the legend's far keys do, whatever room the box has.
+/// Whether a palette's rows hold their keys and commands is the screen's alone, as the
+/// legend's far keys: a box as wide as on the design's wide screen, 84 cells, over a terminal
+/// of 96 columns, and a list of acts across a pane of 90 cells, hold what each act does alone;
+/// a box narrower than the palette's over the wide screen holds them, cut at its edge.
 #[test]
-fn a_palette_row_holds_what_it_does_alone_under_a_terminal_of_100_columns() {
+fn a_palettes_keys_and_commands_stand_by_the_screen_alone() {
     let boxed = over(&ENVIRONMENTS[2], 94).boxed(&palette(), 84, 15);
     assert_eq!(
         boxed.lines[3].text(),
         format!("│▸ stop it and everything under it{}│", " ".repeat(49))
     );
-    assert!(boxed
-        .lines
-        .iter()
-        .all(|line| !line.text().contains("Q78GRR")));
+    let region = crate::components::Region::new(palette().doc);
+    let pane = over(&ENVIRONMENTS[2], 90).pane(&region, 15);
+    for lines in [&boxed.lines, &pane.lines] {
+        assert!(lines.iter().all(|line| !line.text().contains("Q78GRR")));
+    }
+    let narrow = over(&ENVIRONMENTS[2], 98).boxed(&palette(), 70, 15);
+    assert!(narrow.lines[3].text().contains("c     yunta cancel"));
 }
 
 /// The pointed row stands on the selection from one upright to the other.
@@ -234,6 +245,181 @@ fn the_pointed_row_is_filled_to_the_box_s_edges() {
         .all(|span| span.fill.is_none()));
 }
 
+/// A confirmation under `title`: what the act does, `does`, a sentence a line each, then the
+/// commands that do the same at a shell.
+fn confirmation(title: &str, does: &[&str], same: &[&str]) -> Overlay {
+    let does: Vec<Line> = does.iter().map(|said| Line::new().plain(*said)).collect();
+    let same = SameAtAShell(same.iter().map(|command| command.to_string()).collect());
+    Overlay::new(title, Doc::new().with(does).with(same))
+        .legend(Legend::new().key("enter", "close it").key("esc", "keep it"))
+        .confirming()
+}
+
+/// Closing a stopped run, as the targets word it.
+pub(super) fn closing() -> Overlay {
+    confirmation(
+        "close ST0PPD?",
+        &["It closes as cancelled, by you, and stops waiting on a person. Its branch stays; its checkouts go back to the project."],
+        &["yunta close ST0PPD"],
+    )
+}
+
+/// Stopping a run at work, as the targets word it: its sentence one cell past sixty.
+fn stopping() -> Overlay {
+    confirmation(
+        "stop Q78GRR?",
+        &["It stops now, with every session under it, and waits where it stopped until you continue it or close it."],
+        &["yunta cancel Q78GRR"],
+    )
+}
+
+/// Installing the setup's pack, as the targets word it: a command broken where a shell reads
+/// it as one.
+fn installing() -> Overlay {
+    confirmation(
+        "install yunta/fragua?",
+        &["It writes .yunta/config.yaml and installs yunta/fragua. Nothing else is touched."],
+        &[
+            "yunta pack add https://github.com/eulke/yunta//packs/fragua@v0.0.5",
+            "yunta init",
+        ],
+    )
+}
+
+/// `overlay` boxed `cells` wide in Unicode over a screen `screen` cells wide, with the rows it
+/// needs: each row's text.
+fn confirmed(overlay: Overlay, cells: usize, screen: usize) -> Vec<String> {
+    texts(
+        &over(&ENVIRONMENTS[2], screen)
+            .boxed(&overlay, cells, 20)
+            .lines,
+    )
+}
+
+/// A confirmation's box holds its words a cell inside each upright, so its sentence wraps at
+/// sixty cells in a box of 64 and at fifty-two in one of 56; a blank row parts the sentence
+/// from the commands, and a blank row stands at its foot. Its rows are the targets' boxes
+/// (`close-run` at 120 and at 60 columns).
+#[test]
+fn a_confirmation_s_box_holds_its_sentence_a_cell_inside_each_upright() {
+    assert_eq!(
+        confirmed(closing(), 64, 118),
+        [
+            "╭ close ST0PPD? ───────────────────────────────────────────────╮",
+            "│ It closes as cancelled, by you, and stops waiting on a       │",
+            "│ person. Its branch stays; its checkouts go back to the       │",
+            "│ project.                                                     │",
+            "│                                                              │",
+            "│ yunta close ST0PPD                                           │",
+            "│                                                              │",
+            "╰──────────────────────────────────────────────────────────────╯",
+        ]
+    );
+    assert_eq!(
+        confirmed(closing(), 56, 58),
+        [
+            "╭ close ST0PPD? ───────────────────────────────────────╮",
+            "│ It closes as cancelled, by you, and stops waiting on │",
+            "│ a person. Its branch stays; its checkouts go back to │",
+            "│ the project.                                         │",
+            "│                                                      │",
+            "│ yunta close ST0PPD                                   │",
+            "│                                                      │",
+            "╰──────────────────────────────────────────────────────╯",
+        ]
+    );
+}
+
+/// A sentence one cell past sixty wraps before its last word in a box of 64, the far cell
+/// kept blank (`cancel-run` at 120 columns).
+#[test]
+fn a_sentence_a_cell_past_the_measure_wraps_before_its_last_word() {
+    assert_eq!(
+        confirmed(stopping(), 64, 118),
+        [
+            "╭ stop Q78GRR? ────────────────────────────────────────────────╮",
+            "│ It stops now, with every session under it, and waits where   │",
+            "│ it stopped until you continue it or close it.                │",
+            "│                                                              │",
+            "│ yunta cancel Q78GRR                                          │",
+            "│                                                              │",
+            "╰──────────────────────────────────────────────────────────────╯",
+        ]
+    );
+}
+
+/// A command wider than the box's words goes on in the rows under it, broken where a shell
+/// reads it as one command (`setup-confirm` at 120 columns).
+#[test]
+fn a_command_wider_than_the_box_is_broken_as_a_shell_reads_it() {
+    assert_eq!(
+        confirmed(installing(), 64, 118),
+        [
+            "╭ install yunta/fragua? ───────────────────────────────────────╮",
+            "│ It writes .yunta/config.yaml and installs yunta/fragua.      │",
+            "│ Nothing else is touched.                                     │",
+            "│                                                              │",
+            "│ yunta pack add \\                                             │",
+            "│   https://github.com/eulke/yunta//packs/fragua@v0.0.5        │",
+            "│ yunta init                                                   │",
+            "│                                                              │",
+            "╰──────────────────────────────────────────────────────────────╯",
+        ]
+    );
+}
+
+/// A word of a command wider than the box's words takes the cell before the far upright,
+/// whole: the box at 56 cells is the target's (`setup-confirm` at 60 columns, rows 3 to 11),
+/// its link on row 8 touching the upright.
+#[test]
+fn a_command_s_word_wider_than_the_words_takes_the_cell_before_the_upright() {
+    assert_eq!(
+        confirmed(installing(), 56, 58),
+        [
+            "╭ install yunta/fragua? ───────────────────────────────╮",
+            "│ It writes .yunta/config.yaml and installs            │",
+            "│ yunta/fragua. Nothing else is touched.               │",
+            "│                                                      │",
+            "│ yunta pack add \\                                     │",
+            "│   https://github.com/eulke/yunta//packs/fragua@v0.0.5│",
+            "│ yunta init                                           │",
+            "│                                                      │",
+            "╰──────────────────────────────────────────────────────╯",
+        ]
+    );
+}
+
+/// In ASCII a confirmation's box is drawn in its marks, its rows as in Unicode (`close-run`
+/// at 120 columns).
+#[test]
+fn in_ascii_a_confirmation_s_box_is_drawn_in_its_marks() {
+    let boxed = over(&ENVIRONMENTS[1], 118).boxed(&closing(), 64, 20);
+    assert_eq!(
+        texts(&boxed.lines),
+        [
+            ". close ST0PPD? -----------------------------------------------.",
+            "| It closes as cancelled, by you, and stops waiting on a       |",
+            "| person. Its branch stays; its checkouts go back to the       |",
+            "| project.                                                     |",
+            "|                                                              |",
+            "| yunta close ST0PPD                                           |",
+            "|                                                              |",
+            "'--------------------------------------------------------------'",
+        ]
+    );
+}
+
+/// Short of rows, the blank row at a confirmation's foot gives way before what it says.
+#[test]
+fn short_of_rows_a_confirmation_s_foot_gives_way_first() {
+    let boxed = over(&ENVIRONMENTS[2], 118).boxed(&closing(), 64, 7);
+    assert_eq!(
+        texts(&boxed.lines)[5],
+        "│ yunta close ST0PPD                                           │"
+    );
+    assert_eq!(boxed.lines.len(), 7);
+}
+
 /// A box a case draws: what is open, and the cells and rows a terminal of 120, 80 and 60
 /// columns gives it, as the targets draw it.
 struct Case {
@@ -246,8 +432,8 @@ struct Case {
 /// case's boxes stand over.
 const SCREENS: [usize; 3] = [118, 78, 58];
 
-/// The palette's box and help's, at the sizes a terminal of 120, 80 and 60 columns gives
-/// them, and a box scrolled inside, in every environment.
+/// The palette's box, help's and a confirmation's, at the sizes a terminal of 120, 80 and 60
+/// columns gives them, and a box scrolled inside, in every environment.
 #[test]
 fn a_box_matches_its_goldens_in_every_environment() {
     let cases = [
@@ -260,6 +446,11 @@ fn a_box_matches_its_goldens_in_every_environment() {
             name: "help",
             overlay: help,
             sizes: [(70, 19), (70, 19), (56, 9)],
+        },
+        Case {
+            name: "confirmation",
+            overlay: closing,
+            sizes: [(64, 8), (64, 8), (56, 8)],
         },
     ];
     for environment in &ENVIRONMENTS {

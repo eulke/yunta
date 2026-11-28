@@ -23,7 +23,7 @@ use yunta_core::shown::ShownDocument;
 use yunta_core::{RunId, Workflow};
 use yunta_render::escalation::Decision;
 use yunta_render::page::{Places, Run, RunScope};
-use yunta_replay::frame::RunFrame;
+use yunta_replay::frame::{RunFrame, RunTimes};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::RunState;
 
@@ -60,14 +60,9 @@ impl Closing {
     /// from whatever the surface managed to see.
     pub(crate) fn of(env: ClosingEnv<'_>) -> Self {
         // The block is drawn by the process that drove the run.
-        let frame = RunFrame::of(
-            env.run_id,
-            env.workflow,
-            &env.state,
-            env.prior,
-            &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
-            env.now,
-        );
+        let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
+        let frame = RunFrame::of(env.run_id, env.workflow, &env.state, env.prior, &engine);
+        let times = RunTimes::of(&env.state, &engine, env.now);
         let exit_code = crate::output::exit(frame.standing).code();
         let decision = env.decision.map(|(on, escalation)| Decision {
             on,
@@ -81,6 +76,7 @@ impl Closing {
                 depth: Depth::Glance,
                 run_id: env.run_id.clone(),
                 frame,
+                times,
                 state: env.state,
                 places: env.places,
                 decision,

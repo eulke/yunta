@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::Feed;
+use super::{Feed, FeedRow};
 use crate::doc::Doc;
 use crate::glyphs::Glyphs;
 use crate::golden::{assert_golden, ENVIRONMENTS};
@@ -30,8 +30,11 @@ pub(crate) fn scrolled_back() -> Feed {
         "edit    crates/cli/src/cli/dispatch.rs",
     ];
     Feed {
-        rows: rows.into_iter().map(|row| Line::new().plain(row)).collect(),
-        subjects: Vec::new(),
+        rows: rows
+            .into_iter()
+            .map(|row| Line::new().plain(row))
+            .map(FeedRow::of)
+            .collect(),
         before: 4,
         after: 4,
     }
@@ -53,8 +56,8 @@ fn at_its_end(glyphs: Glyphs) -> Feed {
             .into_iter()
             .map(|row| Line::new().plain(row))
             .chain([Line::new().push(Tone::Strong, "edit    crates/cli/src/pack.rs")])
+            .map(FeedRow::of)
             .collect(),
-        subjects: Vec::new(),
         before: 3,
         after: 0,
     }
@@ -104,8 +107,7 @@ fn a_row_past_the_edge_ends_in_the_ellipsis_and_cuts_no_number() {
             motion: Motion::Moves,
         };
         let feed = Feed {
-            rows: vec![Line::new().plain(row)],
-            subjects: Vec::new(),
+            rows: vec![FeedRow::of(Line::new().plain(row))],
             before: 0,
             after: 0,
         };
@@ -130,11 +132,7 @@ fn each_row_opens_with_its_subject_in_a_column_as_wide_as_the_widest_in_sight() 
     let feed = Feed {
         rows: said
             .iter()
-            .map(|(_, words)| Line::new().plain(*words))
-            .collect(),
-        subjects: said
-            .iter()
-            .map(|(subject, _)| subject.to_string())
+            .map(|(subject, words)| FeedRow::about(*subject, Line::new().plain(*words)))
             .collect(),
         before: 0,
         after: 0,

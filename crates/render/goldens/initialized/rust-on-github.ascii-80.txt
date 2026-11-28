@@ -1,0 +1,22 @@
++ yunta init ; done ; in /home/me/project
+................................................................................
+
+  wrote        .yunta/config.yaml
+  language     rust: wrote 3 project commands and the suite a run measures
+  tip          share a build cache across worktrees
+  forge        github eulke/yunta, from origin; its token is read from
+               `GITHUB_TOKEN`
+
+  + claude-code  healthy (2.1.0)
+  ^ codex        unavailable (not on PATH)
+
+  runners      implementer (the default) on claude-code/opus
+
+for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file
+  This repo uses Yunta for verified workflows. Before implementing
+  something ad hoc, check `yunta list` (or the `list_workflows` MCP
+  tool) for an existing verified workflow that already covers it.
+
+next
+  yunta pack add <source>   install a pack
+  yunta doctor              check adapters, git, forge, packs

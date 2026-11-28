@@ -1,14 +1,26 @@
 //! [`RunFrame`] — one derived snapshot of a run, ready for any surface
-//! to present.
+//! to present, and [`RunTimes`], what the clock adds to it at an instant.
 //!
 //! The same family as [`RunState::replay`] and
 //! [`RunStats::at`](crate::stats::RunStats::at): a pure
 //! function of the run's own event log, the workflow its manifest
-//! froze, and one instant the caller supplies. Nothing here reads a
-//! clock, touches storage, or knows what the answer gets drawn with — a
-//! terminal region, a `--json` document and a control-plane tool read
-//! the same frame, so no two of them can disagree about what a run's
-//! progress means.
+//! froze, the history its caller read and what the registry says of the
+//! process driving it. Nothing here reads a clock, touches storage, or
+//! knows what the answer gets drawn with — a terminal region, a `--json`
+//! document and a control-plane tool read the same frame, so no two of
+//! them can disagree about what a run's progress means.
+//!
+//! **The frame is what the log says at its head; the times are what the
+//! clock adds.** No field of a frame moves between two events while the
+//! process driving the run reads the same: a reader that follows a run
+//! derives its frame once for each head and each reading of that process,
+//! and keeps it. What moves with the clock — how long the run has gone and
+//! where its time went, how long it has stood, how long a node has worked,
+//! gone quiet or kept a person — is [`RunTimes`]'s, worked out from the same
+//! state at each instant a surface draws (`times`). Not one frame read at an
+//! instant: kept whole, a frame read at one instant would go stale at the
+//! next, and derived at every instant it would fold the reading of every
+//! node, its calls among them, at every draw.
 //!
 //! **Composition is a tree, never an average**: a child run's events live
 //! under their own `run_id`, in a log this frame never opens. A parent
@@ -21,18 +33,15 @@ mod node;
 mod phase;
 #[cfg(feature = "testkit")]
 mod sample;
+mod times;
 
 use std::collections::{BTreeMap, HashSet};
-use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use surco::words::Standing;
 
-use crate::clock::TimeSpent;
 use crate::history::PriorEstimation;
 use crate::modes;
-use crate::registry::{Asking, Engine};
-use crate::stats::RunStats;
+use crate::registry::Engine;
 use crate::RunState;
 use yunta_core::caution::Caution;
 use yunta_core::events::{
@@ -48,6 +57,7 @@ pub use chronicle::{chronicle, Happening, Moment};
 pub use node::{node_word, Declares, GateAsks, NodeFrame, NodeStanding, RunningTask};
 
 pub use phase::{RunPhase, WaitingOn};
+pub use times::{NodeTimes, RunTimes};
 
 /// The DAG's nodes split by where each stands: the word its row says.
 ///
@@ -107,9 +117,10 @@ pub struct TaskCounter {
     pub total: usize,
 }
 
-/// A run as it stands at one instant: every field a pure function of
-/// that run's log, the workflow frozen in its manifest, and the `now`
-/// the caller supplies.
+/// A run as its log stands at its head: every field a pure function of
+/// that run's log, the workflow frozen in its manifest, the history its
+/// caller read and what its registry says of the process driving it. No
+/// field moves with the clock: what does is [`RunTimes`]'s.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunFrame {
     pub run_id: RunId,
@@ -123,20 +134,6 @@ pub struct RunFrame {
     pub standing: Standing,
     /// What stands behind that word: the close, the pause, the movement.
     pub phase: RunPhase,
-    /// The run's wall-clock: to `now` while it has not finished, to its
-    /// last event once it has. `None` for an empty log.
-    pub elapsed: Option<Duration>,
-    /// Where the run's wall-clock went: to `now` while the run is open, to
-    /// its last event once it has ended.
-    pub time: TimeSpent,
-    /// From the log's last event to `now`: how long the run has stood where
-    /// it is. Zero for an event stamped after `now`, `None` for a log with
-    /// none.
-    pub since_last_event: Option<Duration>,
-    /// The person the process driving the run is asking at its terminal,
-    /// measured at `now`. A question asked live is on no log until it is
-    /// answered, so this is the one place a surface finds it.
-    pub asking: Option<Asking>,
     /// The DAG's nodes.
     pub flow: Counter,
     /// The run's tasks — `None` until a `task_registered` arrives, so
@@ -177,41 +174,34 @@ pub struct RunFrame {
 ///
 impl RunFrame {
     /// One run's frame: from its replayed state, the workflow its manifest
-    /// froze, the history the caller read, what its registry says about the
-    /// process driving it, and the instant it is looked at.
+    /// froze, the history the caller read, and what its registry says about
+    /// the process driving it.
     ///
-    /// Pure: same inputs, same frame, always. `now` is the caller's own
-    /// clock, injected — nothing in this module reads one — so a frame
-    /// rendered at a chosen instant is reproducible in a test; `engine` is
-    /// read by the caller the same way, and `now` is the one instant every
-    /// duration on the frame is measured to.
+    /// Pure: same inputs, same frame, always. `engine` is read by the
+    /// caller, as the instant [`RunTimes::of`] measures to is: nothing in
+    /// this module reads a process or a clock, so a frame is reproducible in
+    /// a test.
     ///
     /// **What it costs.** The log is folded once, by [`RunState::replay`],
     /// before this is called; the frame is then read off that state, so
     /// each figure is a read of a ledger, never another pass over the log.
-    /// A caller that reads other things off the same state folds once.
+    /// It reads every node's record, the calls of the attempt a node runs
+    /// among them, so a reader that draws a run again and again derives its
+    /// frame once for each head and each reading of `engine`, and works out
+    /// only its [`RunTimes`] at each draw.
     pub fn of(
         run_id: &RunId,
         workflow: &Workflow,
         state: &RunState,
         prior: Option<&PriorEstimation>,
         engine: &Engine,
-        now: DateTime<Utc>,
     ) -> RunFrame {
-        let stats = RunStats::at(state, workflow, now);
         let mode = state.run.mode().clone();
         let phase = phase::phase(workflow, state);
         let reading = Reading {
-            stats: stats
-                .nodes
-                .iter()
-                .map(|stat| (&stat.node_id, stat))
-                .collect(),
-            people: &stats.people_by_node,
             included: modes::included(workflow, &mode),
             left_out: state.run.left_out(),
             state,
-            now,
             open: matches!(
                 phase,
                 RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
@@ -230,10 +220,6 @@ impl RunFrame {
             mode: mode.clone(),
             standing: run_standing(&phase, &nodes, blocking_findings, engine),
             phase,
-            elapsed: stats.wall_clock,
-            time: stats.time,
-            since_last_event: state.clock().since_last(now),
-            asking: engine.asking(now),
             flow: flow_counter(&nodes, &mode),
             tasks: task_counter(state),
             reroutes: state.nodes.reroutes(),

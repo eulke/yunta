@@ -16,7 +16,9 @@
 //! reads the log past what it holds and hands each event over itself
 //! ([`Surface::deliver`]), with the process driving it read from the run's
 //! registry ([`EngineReading`]). The log stays the truth: what the surface holds is the
-//! cache of one invocation, and every hole in it is closed by reading the log.
+//! run folded as its follower keeps it ([`FollowedRun`](yunta_api::FollowedRun)), the
+//! cache of one invocation, and every hole in what reached it is closed by reading the
+//! log past what it folded.
 //! What a session says is on no log: the driving process gets it from the
 //! observer, a follower off the run's socket, and only the region draws it.
 
@@ -45,7 +47,6 @@ use yunta_core::events::StoredEvent;
 use yunta_core::port::RunObserver;
 use yunta_core::Pid;
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_replay::history::PriorEstimation;
 use yunta_replay::registry::Engine;
 
 use surco::glyphs::Glyphs;
@@ -166,9 +167,6 @@ pub(crate) struct SurfaceEnv<'a> {
     /// The manifest this run froze — the workflow whose nodes it draws,
     /// and what rebuilds the menu a parked run stopped on.
     pub(crate) manifest: &'a Manifest,
-    /// What this workflow's past runs cost, for the closing block's own
-    /// comparison. `None` below the history floor.
-    pub(crate) prior: Option<&'a PriorEstimation>,
     /// Where a hole in the delivered stream is closed.
     pub(crate) log: &'a EventLog,
     pub(crate) clock: Arc<dyn Clock>,
@@ -362,6 +360,33 @@ impl Watched {
         }
         let mut written = self.written.clone();
         drop(written.write_all(text.as_bytes()));
+    }
+}
+
+/// The manifest a run frozen from `workflow` carries, for a test that
+/// draws one: what the surface reads of it is the workflow.
+#[cfg(test)]
+pub(crate) fn frozen(workflow: &str) -> Manifest {
+    Manifest {
+        schema_version: 1,
+        yunta_version: "0.0.0".to_string(),
+        workflow: yunta_core::yaml::parse(workflow).expect("the test's workflow parses"),
+        config: yunta_core::ConfigLayer::default(),
+        inputs: std::collections::BTreeMap::new(),
+        prompts: std::collections::BTreeMap::new(),
+        base_branch: "main".to_string(),
+        base_commit: yunta_core::CommitSha::from_static("0123456789abcdef0123456789abcdef01234567"),
+        isolation: yunta_core::Isolation::None,
+        max_parallel_nodes: 1,
+        workflow_hash: yunta_core::ContentHash::sha256(b"workflow"),
+        config_hash: yunta_core::ContentHash::sha256(b"config"),
+        paths: None,
+        pack: None,
+        project: None,
+        adapter: None,
+        frozen: None,
+        provenance_gaps: Vec::new(),
+        loaded_links: Vec::new(),
     }
 }
 

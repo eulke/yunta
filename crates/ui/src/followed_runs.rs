@@ -5,13 +5,19 @@
 //! reading it remarks on. It is kept for every stage to read, so a stage opened over a
 //! run's sees the run move under it.
 //!
-//! Beside it stand where the project keeps its runs and what it prices tokens at, as the
-//! repository's reading said them: neither is followed, and a stage reads them from the
-//! same value as what is.
+//! Beside it stand where the project keeps its runs, what it prices tokens at, the repository
+//! the application opened in and the person's home, as the repository's reading said them:
+//! none is followed, and a stage reads them from the same value as what is. The repository
+//! says whether a run can be asked for where the application stands
+//! ([`FollowedRuns::can_ask_for_a_run`]), which every stage that offers a new run reads.
 //!
 //! What it keeps sits behind `Arc`, each run of the field and the run in view, and is
 //! changed by `Arc::make_mut`: the clone of a state a walk makes for each input shares
 //! them until one of the two changes them.
+//!
+//! Each run kept keeps its frame, derived by the fold where its head or its engine moves
+//! (`yunta-api`'s `FollowedRun`): a stage and a row of the field read that frame, with what
+//! the clock adds to it worked out at the instant they draw, and derive none of their own.
 //!
 //! The fold takes an event once, as replay's fold does: an event at or below a run's head
 //! moves nothing, a run handed whole again where it is held at that head or past it
@@ -47,10 +53,7 @@
 //! kept until the next news, so what was read before is said to be as old as the last
 //! look that read.
 //!
-//! A run this window handed to a detached engine itself is kept as handed on, from the
-//! result of the work that handed it on (a start, a resume, a decision or a round's answers
-//! recorded) until a reading of its engine says anything but that its registry is not
-//! written: until then the engine it was handed to is about to write it.
+//! What it keeps of the runs this window handed on itself is `from_this_window`'s.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -59,18 +62,18 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use yunta_api::{
     AnswerablePause, Awaited, Document, FieldReach, FieldReading, FollowNews, Followed,
-    FollowedField, FollowedRun, Remark, RunNews,
+    FollowedField, FollowedRun, Remark, Repository, RunNews,
 };
-use yunta_core::events::StoredEvent;
 use yunta_core::{NodeId, PricingEntry, RunId, Seq};
+use yunta_render::chronicle::OpenAttemptCalls;
 use yunta_render::page::{FieldRow, UnreadableRun};
 use yunta_render::watched::Heard;
 use yunta_replay::frame::Moment;
-use yunta_replay::registry::Engine;
 
 use crate::Request;
 
 mod framing;
+mod from_this_window;
 mod in_view;
 
 pub(crate) use framing::{waiting_longest, Attended, ItsDecision, Standpoint};
@@ -84,6 +87,9 @@ pub struct FollowedRuns {
     pub field: Option<FieldInView>,
     /// The run followed, once read whole, or the one a promotion handed its work to.
     pub in_view: Option<Arc<RunInView>>,
+    /// The run followed where it could not be read whole, with why: none once it is read,
+    /// and none for a run no longer followed.
+    pub in_view_unreadable: Option<UnreadableRun>,
     /// What the last look said where it failed whole: what is kept stands as old as the
     /// last look that read. None once news comes again.
     pub look_failed: Option<String>,
@@ -92,6 +98,13 @@ pub struct FollowedRuns {
     /// What the project prices each model's tokens at, where its configuration says,
     /// once the repository is read.
     pub prices: Option<BTreeMap<String, PricingEntry>>,
+    /// The repository the application opened in, as far as Yunta went there, once it is
+    /// read: none, never set up or set up, where the field of its runs stands. A setup
+    /// written there makes it one set up.
+    pub repository: Option<Repository>,
+    /// The person's home, where the environment names one, once the repository is read: a
+    /// path under it is shown from it.
+    pub home: Option<PathBuf>,
     /// What the state last asked to follow.
     asked: Followed,
     /// The runs this window handed to a detached engine itself, each from the result of the
@@ -99,6 +112,10 @@ pub struct FollowedRuns {
     /// `Engine::Unrecorded`: until then the engine it was handed to is about to write its
     /// registry. Not a run's engine as read, which the run in view and the field keep.
     handed_on: BTreeSet<RunId>,
+    /// The runs this window started, each from the start's result until the field kept holds
+    /// it, read or not: on its way, so a field that lists no run in sight meanwhile is not yet
+    /// one with none. Not `handed_on`, which keeps a run until its engine is read.
+    coming: BTreeSet<RunId>,
 }
 
 /// The field as the state keeps it: each run of it by id, at its head. Not `yunta-api`'s
@@ -128,6 +145,12 @@ pub struct RunInView {
     pub moments: Vec<Moment>,
     /// Where in `moments` each node's moments stand, in order.
     pub by_node: BTreeMap<NodeId, Vec<usize>>,
+    /// Where in `moments` the moments each node's feed lists stand, in order: kept as they
+    /// come, so a drawing hands render the ones in sight and walks no other.
+    pub fed: BTreeMap<NodeId, Vec<usize>>,
+    /// How many calls each node's open attempt made, counted over the moments its feed
+    /// lists as they come: what its feed's heading says.
+    pub calls: BTreeMap<NodeId, OpenAttemptCalls>,
     /// What each node handed over, as the follower read it: read, or unread with why.
     pub handed_over: BTreeMap<NodeId, Vec<Document>>,
     /// What its sessions said last, a frame to each node.
@@ -177,46 +200,46 @@ impl FollowedRuns {
         FollowedRuns {
             field: None,
             in_view: None,
+            in_view_unreadable: None,
             look_failed: None,
             storage: None,
             prices: None,
+            repository: None,
+            home: None,
             asked: Followed {
                 field: None,
                 run: None,
             },
             handed_on: BTreeSet::new(),
+            coming: BTreeSet::new(),
         }
     }
 
-    /// `run`, handed from this window to a detached engine, started, resumed or answered,
-    /// kept as handed on until a reading of its engine names more than an unwritten registry.
-    pub(crate) fn handed_on(&mut self, run: RunId) {
-        self.handed_on.insert(run);
-        self.engines_read();
+    /// Whether a run can be asked for where the application stands: in a repository Yunta is
+    /// set up in. Outside a repository, and in one never set up, a run has no setup to run
+    /// under, so nothing offers one there: no key, no legend, no help or palette row, nor
+    /// the field's first row. The one owner every stage that offers a new run reads.
+    pub fn can_ask_for_a_run(&self) -> bool {
+        matches!(self.repository, Some(Repository::SetUp { .. }))
     }
 
-    /// Whether this window handed `run` to a detached engine whose registry no reading has
-    /// shown written yet: such a run's unrecorded engine is one about to write it.
-    pub(crate) fn handed_on_unread(&self, run: &RunId) -> bool {
-        self.handed_on.contains(run)
+    /// Whether the application stands in a repository, set up or not, once its reading says
+    /// so: where the field can list this repository's runs as well as every run on this
+    /// machine. Outside one the field stands at the machine's reach alone.
+    pub fn in_a_repository(&self) -> bool {
+        matches!(
+            self.repository,
+            Some(Repository::SetUp { .. } | Repository::NeverSetUp { .. })
+        )
     }
 
-    /// The runs handed on here whose engine a reading kept here names, alive, dead or
-    /// unknown, let go: from then on the reading alone says whether an engine drives it.
-    fn engines_read(&mut self) {
-        let read = |run: &RunId| {
-            let in_view = self.in_view.as_deref();
-            let in_view = in_view.filter(|in_view| in_view.run.run == *run);
-            let in_field = self.field.as_ref().and_then(|field| field.runs.get(run));
-            let engines = in_view.map(|in_view| &in_view.run.engine);
-            let engines = engines.into_iter().chain(in_field.map(|run| &run.engine));
-            engines
-                .into_iter()
-                .any(|engine| *engine != Engine::Unrecorded)
-        };
-        let handed_on = std::mem::take(&mut self.handed_on);
-        let unread = handed_on.into_iter().filter(|run| !read(run)).collect();
-        self.handed_on = unread;
+    /// The repository the application opened in written set up, where it was never set up:
+    /// a run can be asked for there from then on.
+    pub(crate) fn set_up(&mut self) {
+        if let Some(Repository::NeverSetUp { dir }) = &self.repository {
+            let dir = dir.clone();
+            self.repository = Some(Repository::SetUp { dir });
+        }
     }
 
     /// The request to follow `followed`, where it is not what was last asked; what is no
@@ -233,6 +256,7 @@ impl FollowedRuns {
         if followed.run != self.asked.run {
             let kept = self.in_view.take();
             self.in_view = kept.and_then(|kept| in_place_of(kept, followed.run.as_ref()));
+            self.in_view_unreadable = None;
         }
         self.asked = followed.clone();
         Some(Request::Follow(followed))
@@ -244,6 +268,7 @@ impl FollowedRuns {
     pub(crate) fn took(&mut self, news: FollowNews) -> Option<(RunId, RunId)> {
         let turned = self.folded(news);
         self.engines_read();
+        self.arrived();
         turned
     }
 
@@ -265,22 +290,18 @@ impl FollowedRuns {
                 self.in_the_field(|field| field.elsewhere = elsewhere);
             }
             FollowNews::Whole { run, events } => self.read_whole(*run, &events),
+            FollowNews::WholeUnreadable(why) => self.unreadable_whole(why),
         }
         None
     }
 
-    /// Whether what `followed` names is read at `heads`, each run's last seq in the log,
-    /// at `now`: the field read whole at its reach, with every run of the log in it and
-    /// each run it reads at its head; the run read whole at its head, what its nodes handed
-    /// over by then kept, where it stands
-    /// parked on a person with a menu or a round, what it waits for read for that pause,
-    /// and where it closed promoted, its successor in its place or none come.
-    pub(crate) fn caught_up(
-        &self,
-        followed: &Followed,
-        heads: &BTreeMap<RunId, Seq>,
-        now: DateTime<Utc>,
-    ) -> bool {
+    /// Whether what `followed` names is read at `heads`, each run's last seq in the log:
+    /// the field read whole at its reach, with every run of the log in it and each run it
+    /// reads at its head; the run read whole at its head, what its nodes handed over by
+    /// then kept, where it stands parked on a person with a menu or a round, what it waits
+    /// for read for that pause, and where it closed promoted, its successor in its place or
+    /// none come.
+    pub(crate) fn caught_up(&self, followed: &Followed, heads: &BTreeMap<RunId, Seq>) -> bool {
         let field = match (followed.field, &self.field) {
             (None, _) => true,
             (Some(reach), Some(field)) => field.reach == reach && field.caught_up(heads),
@@ -288,7 +309,7 @@ impl FollowedRuns {
         };
         let run = match (&followed.run, &self.in_view) {
             (None, _) => true,
-            (Some(run), Some(in_view)) => in_view.run.run == *run && in_view.caught_up(heads, now),
+            (Some(run), Some(in_view)) => in_view.run.run() == run && in_view.caught_up(heads),
             (Some(_), None) => false,
         };
         field && run
@@ -301,19 +322,6 @@ impl FollowedRuns {
         }
     }
 
-    /// `run`, read whole with `events`, made the run in view where it is the run
-    /// followed: one held at that head or past it already changes nothing.
-    fn read_whole(&mut self, run: FollowedRun, events: &[StoredEvent]) {
-        if self.asked.run.as_ref() != Some(&run.run) {
-            return;
-        }
-        let held = self.in_view.as_ref().filter(|held| held.run.run == run.run);
-        if held.is_some_and(|held| held.run.state.head() >= run.state.head()) {
-            return;
-        }
-        self.in_view = Some(Arc::new(RunInView::read_whole(run, events)));
-    }
-
     /// `news` of `run` folded into each copy kept under that id: its row in the field, and
     /// the run in view or the successor kept beside it. Where a successor of the run in view
     /// came, `run` and that successor.
@@ -323,16 +331,16 @@ impl FollowedRuns {
         }
         let in_view = Arc::make_mut(self.in_view.as_mut()?);
         let succeeded = matches!(news, RunNews::Successor { .. });
-        let taken = match in_view.run.run == *run {
+        let taken = match in_view.run.run() == run {
             true => in_view,
             false => in_view
                 .successor
                 .as_deref_mut()
-                .filter(|successor| successor.run.run == *run)?,
+                .filter(|successor| successor.run.run() == run)?,
         };
         taken.took(news);
         let by = taken.successor.as_ref().filter(|_| succeeded)?;
-        Some((run.clone(), by.run.run.clone()))
+        Some((run.clone(), by.run.run().clone()))
     }
 }
 
@@ -341,11 +349,11 @@ impl FollowedRuns {
 /// `followed`. None where it is neither.
 fn in_place_of(kept: Arc<RunInView>, followed: Option<&RunId>) -> Option<Arc<RunInView>> {
     let followed = followed?;
-    if kept.run.run == *followed {
+    if kept.run.run() == followed {
         return Some(kept);
     }
     let successor = kept.successor.as_deref()?;
-    (successor.run.run == *followed).then(|| Arc::new(successor.clone()))
+    (successor.run.run() == followed).then(|| Arc::new(successor.clone()))
 }
 
 impl FieldInView {
@@ -354,7 +362,7 @@ impl FieldInView {
         let runs = field.runs.into_iter();
         FieldInView {
             reach,
-            runs: runs.map(|run| (run.run.clone(), Arc::new(run))).collect(),
+            runs: runs.map(|run| (run.run().clone(), Arc::new(run))).collect(),
             unreadable: field.unreadable,
             elsewhere: field.elsewhere,
             here: field.here,
@@ -372,6 +380,11 @@ impl FieldInView {
         !self.runs.is_empty() || !self.unreadable.is_empty()
     }
 
+    /// Whether it holds `run`, read or not.
+    fn holds(&self, run: &RunId) -> bool {
+        self.runs.contains_key(run) || self.unreadable.iter().any(|unread| unread.run_id == *run)
+    }
+
     /// It as the field's stage reads a field at `now`: its rows, the runs it cannot read,
     /// how many it leaves elsewhere and whether it is here.
     pub(crate) fn reading(&self, now: DateTime<Utc>) -> FieldReading {
@@ -386,12 +399,12 @@ impl FieldInView {
     /// `run` joined the field at its head, out of those it cannot read: one it holds at
     /// that head or past it already changes nothing.
     fn joined(&mut self, run: FollowedRun) {
-        self.unreadable.retain(|unread| unread.run_id != run.run);
-        let held = self.runs.get(&run.run);
-        if held.is_some_and(|held| held.state.head() >= run.state.head()) {
+        self.unreadable.retain(|unread| unread.run_id != *run.run());
+        let held = self.runs.get(run.run());
+        if held.is_some_and(|held| held.state().head() >= run.state().head()) {
             return;
         }
-        self.runs.insert(run.run.clone(), Arc::new(run));
+        self.runs.insert(run.run().clone(), Arc::new(run));
     }
 
     /// A run of the field unreadable for `why`, in place of what was held of it.
@@ -441,7 +454,7 @@ impl FieldInView {
         let at_heads = self
             .runs
             .iter()
-            .all(|(id, run)| run.state.head() == heads.get(id).copied());
+            .all(|(id, run)| run.state().head() == heads.get(id).copied());
         every && at_heads
     }
 }

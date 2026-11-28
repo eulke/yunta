@@ -45,7 +45,6 @@ fn a_node_asked_about_at_a_terminal_needs_you_in_its_row_and_in_its_count() {
         &RunState::replay(&events),
         None,
         &asking("build"),
-        at(10),
     );
     assert_eq!(node(&frame, "build").standing, Standing::NeedsYou);
     assert_eq!(frame.flow.of(Standing::NeedsYou), 1);
@@ -66,7 +65,6 @@ fn a_node_asked_about_before_its_log_starts_it_needs_you() {
         &RunState::replay(&events),
         None,
         &asking("build"),
-        at(10),
     );
     assert_eq!(node(&frame, "build").standing, Standing::NeedsYou);
     assert_eq!(frame.flow.of(Standing::NeverRan), 1, "fix never ran");
@@ -79,7 +77,7 @@ fn a_run_a_person_stopped_and_the_attempt_it_held_open_read_stopped() {
         (1, Some("plan"), started(1)),
         (2, None, paused(PauseReason::Cancelled)),
     ]);
-    let frame = frame(&chain(), &events, 10);
+    let frame = frame(&chain(), &events);
     assert_eq!(node(&frame, "plan").standing, Standing::Stopped);
     assert_eq!(frame.standing, Standing::Stopped);
     assert_eq!(buckets(&frame.flow), [0, 0, 0, 0, 1, 0, 2]);
@@ -100,7 +98,7 @@ fn a_run_held_by_a_reset_alone_waits_and_so_does_the_node_it_holds() {
             }),
         ),
     ]);
-    let frame = frame(&chain(), &events, 10);
+    let frame = frame(&chain(), &events);
     assert_eq!(node(&frame, "plan").standing, Standing::Waiting);
     assert_eq!(frame.standing, Standing::Waiting);
 }
@@ -130,7 +128,7 @@ nodes:
             }),
         ),
     ]);
-    let frame = frame(&workflow, &events, 10);
+    let frame = frame(&workflow, &events);
     assert_eq!(node(&frame, "approve").standing, Standing::NeedsYou);
     assert_eq!(node(&frame, "build").standing, Standing::Waiting);
     assert_eq!(
@@ -153,7 +151,6 @@ fn a_moving_run_whose_engine_is_gone_is_stalled() {
         &RunState::replay(&events),
         None,
         &gone,
-        at(10),
     );
     assert_eq!(frame.standing, Standing::Stalled);
     assert_eq!(node(&frame, "plan").standing, Standing::Running);
@@ -181,7 +178,7 @@ fn the_gate_a_run_is_parked_on_needs_you_before_it_writes_anything() {
         (2, Some("plan"), finished()),
         (3, None, parked_on_gate("build")),
     ]);
-    let frame = frame(&chain(), &events, 10);
+    let frame = frame(&chain(), &events);
     assert_eq!(node(&frame, "build").standing, Standing::NeedsYou);
     assert!(
         matches!(
@@ -204,7 +201,7 @@ fn a_gate_a_run_left_reads_as_never_run_again_once_the_run_closes() {
         (3, None, parked_on_gate("build")),
         (4, None, run_finished(TerminalState::Cancelled)),
     ]);
-    let frame = frame(&chain(), &events, 10);
+    let frame = frame(&chain(), &events);
     assert_eq!(node(&frame, "build").standing, Standing::NeverRan);
 }
 
@@ -216,7 +213,7 @@ fn every_node_this_run_will_do_is_counted_once_under_its_word() {
         (2, Some("plan"), finished()),
         (3, Some("build"), started(1)),
     ]);
-    let frame = frame(&chain(), &events, 10);
+    let frame = frame(&chain(), &events);
     let counted: usize = frame.flow.by.iter().map(|(_, count)| count).sum();
     assert_eq!(counted, frame.flow.total);
     for node in &frame.nodes {

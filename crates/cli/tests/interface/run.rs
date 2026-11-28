@@ -33,10 +33,12 @@ fn chronicle(state: &State) -> (Vec<(String, String)>, usize) {
     };
     assert_eq!(feed.after, 0, "it opens at its end");
     let rows = feed
-        .subjects
+        .rows
         .iter()
-        .zip(&feed.rows)
-        .map(|(subject, row)| (subject.clone(), Paint::Plain.line(row)))
+        .map(|row| {
+            let subject = row.subject.clone().unwrap_or_default();
+            (subject, Paint::Plain.line(&row.line))
+        })
         .collect();
     (rows, feed.before + feed.rows.len())
 }
@@ -84,7 +86,7 @@ fn feed_rows(state: &State) -> Vec<String> {
         Some(Block::Feed(feed)) => feed
             .rows
             .iter()
-            .map(|line| Paint::Plain.line(line))
+            .map(|row| Paint::Plain.line(&row.line))
             .collect(),
         _ => Vec::new(),
     }
@@ -114,7 +116,7 @@ async fn followed_through(
             performer.take(request, &inputs);
         }
         let in_view = state.followed_runs().in_view.as_ref();
-        let moves = in_view.is_some_and(|in_view| in_view.run.frame(now()).moves());
+        let moves = in_view.is_some_and(|in_view| in_view.run.frame().moves());
         let at_rest = state.waiting_on().is_empty() && !moves;
         if at_rest && state.caught_up(&yunta_testkit::heads(&store)) {
             return;

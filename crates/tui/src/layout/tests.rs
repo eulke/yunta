@@ -21,6 +21,7 @@ fn a_run(about: u16) -> Holds {
         about,
         side: Some(Beside {
             at: SideAt::Left,
+            cells: None,
             edge: EDGE,
             titled: false,
         }),
@@ -37,6 +38,7 @@ fn a_field() -> Holds {
         about: 0,
         side: Some(Beside {
             at: SideAt::Right,
+            cells: None,
             edge: EDGE,
             titled: false,
         }),
@@ -131,6 +133,7 @@ fn a_title_takes_the_first_row_of_its_column() {
     let titled = |at| Holds {
         side: Some(Beside {
             at,
+            cells: None,
             edge: EDGE,
             titled: true,
         }),
@@ -251,6 +254,7 @@ fn a_side_title_goes_with_its_region() {
     let titled = Holds {
         side: Some(Beside {
             at: SideAt::Left,
+            cells: None,
             edge: EDGE,
             titled: true,
         }),

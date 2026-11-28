@@ -22,6 +22,9 @@ pub struct Binding {
 #[derive(Clone)]
 pub enum Keys {
     UpDown,
+    /// The arrows that change which word of a row is chosen. Not `UpDown`, which move
+    /// along a list.
+    LeftRight,
     Typed(String),
     /// Whatever the person types, which filters a list or fills a name:
     /// spelled `type`. Not `Typed`, which names the keys a person presses.
@@ -38,6 +41,15 @@ impl Legend {
     pub fn arrows(mut self, does: impl Into<String>) -> Self {
         self.0.push(Binding {
             keys: Keys::UpDown,
+            does: does.into(),
+        });
+        self
+    }
+
+    /// This legend with the arrows that change the word chosen doing `does`: `←→ mode`.
+    pub fn left_right(mut self, does: impl Into<String>) -> Self {
+        self.0.push(Binding {
+            keys: Keys::LeftRight,
             does: does.into(),
         });
         self
@@ -62,18 +74,6 @@ impl Legend {
         self
     }
 
-    /// The legend as one run of words, each key beside what it does and the
-    /// separator `glyphs` draws between two: `↑↓ choose · enter answer`. What
-    /// a card's or a desk's foot says, in one tone.
-    pub fn spelled(&self, glyphs: Glyphs) -> String {
-        let sep = format!(" {} ", glyphs.sep());
-        self.0
-            .iter()
-            .map(|binding| format!("{} {}", binding.keys.spelled(glyphs), binding.does))
-            .collect::<Vec<_>>()
-            .join(&sep)
-    }
-
     /// Whether it holds no key, and so says nothing.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -86,6 +86,7 @@ impl Keys {
     pub fn spelled(&self, glyphs: Glyphs) -> &str {
         match self {
             Keys::UpDown => glyphs.up_down(),
+            Keys::LeftRight => glyphs.left_right(),
             Keys::Typed(keys) => keys,
             Keys::Typing => "type",
         }
@@ -96,6 +97,7 @@ impl Keys {
     pub fn named(&self) -> &str {
         match self {
             Keys::UpDown => "up-down",
+            Keys::LeftRight => "left-right",
             Keys::Typed(keys) => keys,
             Keys::Typing => "typing",
         }

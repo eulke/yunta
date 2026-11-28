@@ -4,8 +4,9 @@
 //! on news of the same pause, or as the person moves away and back, and polled again only at
 //! another pause, or where a stage opened over the run let the poll go before the forge
 //! answered. Its link is the log's, which `o` hands the surface to show whether the forge
-//! answered or not (`acts`); a link the surface could not show is noted as a failed act,
-//! with the link, until the next key.
+//! answered or not (`acts`), where it is `https://`: one the log links otherwise is said in
+//! the pane and never handed to an opener. A link the surface could not show is noted as a
+//! failed act, with the link, until the next key.
 //!
 //! What the forge answered is drawn in the scene's pane once it came, for the pause it was
 //! asked for (`pane`).
@@ -19,7 +20,7 @@ use super::frame::Notice;
 use super::scene::ComposedPane;
 use super::{Framed, RunStage};
 use crate::stage::Want;
-use crate::{Address, Operation};
+use crate::{Address, Operation, WebLink};
 
 impl RunStage {
     /// The reading of the pull request the run `framed` waits on, asked where its scene
@@ -55,7 +56,8 @@ impl RunStage {
     /// from the screen.
     pub(crate) fn unshown(&mut self, address: &Address) {
         if let Address::Link(link) = address {
-            self.notice = Some(Notice::Failed(yunta_render::page::unopened(link)));
+            let unopened = yunta_render::page::unopened(link.as_str());
+            self.notice = Some(Notice::Failed(unopened));
         }
     }
 
@@ -69,22 +71,25 @@ impl RunStage {
 
 /// The pause the run `framed` stands at, by where its log holds it.
 fn paused_at(framed: &Framed<'_>) -> Option<Seq> {
-    framed.in_view.run.state.run.paused().map(|(_, at)| at)
+    framed.in_view.run.state().run.paused().map(|(_, at)| at)
 }
 
-/// The link of the pull request the run framed as `frame` waits on, as its log holds it: of
-/// the pull request a forge reviews or a person closed, or the one a gate's escalation asks
-/// on. None where it waits on no pull request.
-pub(super) fn link(frame: &RunFrame) -> Option<String> {
+/// The link of the pull request the run framed as `frame` waits on, as its log holds it, to
+/// show it by: of the pull request a forge reviews or a person closed, or the one a gate's
+/// escalation asks on, where it is `https://`. None where it waits on no pull request, or
+/// its log links it otherwise, which its pane says and nothing opens.
+pub(super) fn link(frame: &RunFrame) -> Option<WebLink> {
     let pause = frame.phase.waiting_on().and_then(WaitingOn::reason)?;
-    match pause {
-        PauseReason::ExternalGate { url } | PauseReason::PullRequestClosed { url, .. } => {
-            Some(url.clone())
-        }
+    let linked = match pause {
+        PauseReason::ExternalGate { url } | PauseReason::PullRequestClosed { url, .. } => url,
         PauseReason::Escalation(escalation) => match escalation.menu() {
-            Some(Menu::Published(published)) => Some(published.url.clone()),
-            _ => None,
+            Some(Menu::Published(published)) => &published.url,
+            _ => return None,
         },
-        _ => None,
-    }
+        _ => return None,
+    };
+    WebLink::https(linked)
 }
+
+#[cfg(test)]
+mod tests;

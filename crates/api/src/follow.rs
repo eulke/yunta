@@ -21,12 +21,15 @@
 //! closed promoted is asked of the same reader for its successor: each run's first event,
 //! in one statement, as its close is read and again only after a commit, until a successor
 //! or that none came is handed. Every pace runs on tokio's monotonic time; the workspace
-//! clock stamps the frames, and says how long ago a run closed promoted, which the wait
-//! for its successor runs from.
+//! clock says how long ago a run closed promoted, which the wait for its successor runs
+//! from. A run's frame reads no clock: it is derived as the run's head or its engine moves,
+//! and whoever draws it measures what the clock adds at its own instant.
 //!
 //! One fold. The run followed is handed read whole once, with every event of its log
 //! from its first ([`FollowNews::Whole`]), then each batch as it comes, and a successor
-//! read whole the same way. Whoever follows folds them with replay's own fold: the
+//! read whole the same way. It is read through the following's one reader, as the field
+//! reads each of its runs; one that cannot be read is said so, as news of that run
+//! ([`FollowNews::WholeUnreadable`]), and the look goes on. Whoever follows folds them with replay's own fold: the
 //! moments of `chronicle` over the events read whole, then those [`FollowedRun::took`]
 //! hands back for each batch, so every interface tells the run as `yunta status` reads
 //! it, and nobody folds its whole log again on each piece of news.
@@ -101,14 +104,21 @@ pub enum FollowNews {
         run: Box<FollowedRun>,
         events: Vec<StoredEvent>,
     },
+    /// The run followed could not be read whole, with why, in its `Whole`'s place: its
+    /// directory, its manifest or its log failed a read. It is read whole again after
+    /// each commit to the log, said again only where why changed, and handed `Whole` once
+    /// it reads; the rest of what is followed goes on meanwhile. Not `Unreadable`, a run
+    /// of the field.
+    WholeUnreadable(UnreadableRun),
     /// What came to the run `run`, past what was handed of it before: once for the run
     /// read whole and its place in the field alike, so whoever keeps both folds it into
     /// both, and the two never disagree.
     Run { run: RunId, news: RunNews },
 }
 
-/// What a look at a followed run found. Not what a run's observer is handed in the
-/// process that drives it, which sees each step as it is taken.
+/// What came to a followed run: what a look at it found, or what its engine handed the
+/// surface drawing it in the process that drives it, batched as a look batches it. Not what
+/// a run's observer is handed, which sees each step as it is taken.
 #[derive(Debug, Clone)]
 pub enum RunNews {
     /// What came past the last event read, in the log's order.

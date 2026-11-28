@@ -32,8 +32,8 @@ use yunta_testkit::{
     Checkout, Terminal,
 };
 
-/// What the field says of a repository with runs.
-const THE_FIELD: &str = "runs of this repository";
+/// What the field's first row says, over its runs: where a new run starts, and its key.
+const THE_FIELD: &str = "what do you want to build?  · n";
 
 /// Bare `yunta` at a terminal of the harness's size, in `checkout`'s repository, open on the
 /// field.

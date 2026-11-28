@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use surco::components::{Fields, Furrow, Headline, Next};
+use surco::components::{Fields, Furrow, Headline};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
@@ -11,7 +11,7 @@ use yunta_core::step::{Arg, NextStep};
 
 use super::checked::{check_again, file_named};
 use super::{Diagnosis, Page};
-use crate::command;
+use crate::command::{self, SaidStep};
 
 /// What `new` answers with: the file it wrote, and the verdict `yunta check`
 /// reaches on it, said under it; the file alone where something stopped the
@@ -36,25 +36,24 @@ impl Page for NewWorkflow<'_> {
                 .with(Furrow(Vec::new()))
                 .with(Fields::new().push_if("at", self.at));
         };
-        let (mark, steps) = match diagnosis.errors() {
-            0 => (Mark::Done, vec![self.runs_it()]),
-            _ => (Mark::Caution, vec![check_again(self.at)]),
+        let (mark, step) = match diagnosis.errors() {
+            0 => (Mark::Done, self.runs_it()),
+            _ => (Mark::Caution, check_again(self.at)),
         };
         Doc::new()
             .with(written(mark).fact(diagnosis.said()))
             .with(Furrow(Vec::new()))
             .with(Fields::new().push_if("at", self.at))
             .with_all(diagnosis.blocks())
-            .with(Next { steps })
+            .with(command::next([step]))
     }
 }
 
 impl NewWorkflow<'_> {
     /// The step that starts a run of the workflow just written.
-    fn runs_it(&self) -> (String, &'static str) {
-        let run = NextStep::Run {
+    fn runs_it(&self) -> SaidStep {
+        SaidStep::of(&NextStep::Run {
             workflow: Arg::Given(self.name.to_string()),
-        };
-        (command::line(&run), command::does(&run))
+        })
     }
 }

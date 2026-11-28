@@ -13,7 +13,7 @@
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use surco::components::Feed;
+use surco::components::{Feed, FeedRow};
 use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::look::Look;
@@ -112,15 +112,14 @@ pub fn feed(
         .enumerate()
         .map(|(at, moment)| {
             let row = row(moment, task_of(moment), column, look.glyphs);
-            match Some(at) == newest {
+            FeedRow::of(match Some(at) == newest {
                 true => Line::new().push(Tone::Strong, row),
                 false => Line::new().plain(row),
-            }
+            })
         })
         .collect();
     Feed {
         rows,
-        subjects: Vec::new(),
         before,
         after,
     }
@@ -139,14 +138,13 @@ pub fn whole(
     after: usize,
     look: &Look,
 ) -> Feed {
-    let subjects = moments
+    let fed = feed(moments, tasks, before, after, look);
+    let rows = moments
         .iter()
-        .map(|moment| super::phrased(moment, look.glyphs).subject)
+        .zip(fed.rows)
+        .map(|(moment, row)| FeedRow::about(super::phrased(moment, look.glyphs).subject, row.line))
         .collect();
-    Feed {
-        subjects,
-        ..feed(moments, tasks, before, after, look)
-    }
+    Feed { rows, ..fed }
 }
 
 /// What the run's whole chronicle stands under: how many moments it holds.
@@ -172,25 +170,37 @@ pub fn feed_heading(calls: usize, glyphs: Glyphs) -> String {
 /// made: those after the moment its latest attempt started, open or closed since. What a
 /// feed's heading counts, wherever a node's feed is said.
 pub fn open_attempt_calls<M: Borrow<Moment>>(moments: &[M]) -> usize {
-    let moments: Vec<&Moment> = moments.iter().map(Borrow::borrow).collect();
-    let started = moments.iter().rposition(|moment| {
-        matches!(
-            moment.happening,
+    let mut calls = OpenAttemptCalls::default();
+    moments
+        .iter()
+        .for_each(|moment| calls.took(moment.borrow()));
+    calls.count()
+}
+
+/// The calls a node's open attempt made, counted one moment at a time in the log's order, as
+/// [`open_attempt_calls`] counts them over a node's moments whole: for a reader that keeps the
+/// count as the moments come, so that what a feed's heading says walks no call again. Not the
+/// calls of every attempt, which a node's feed lists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OpenAttemptCalls(usize);
+
+impl OpenAttemptCalls {
+    /// `moment` counted: the moment an attempt starts counts from none, and a call one more.
+    pub fn took(&mut self, moment: &Moment) {
+        match &moment.happening {
             Happening::Node(node::happening::Happening::Reached {
                 state: NodeState::Running { .. },
                 ..
-            })
-        )
-    });
-    moments[started.map_or(0, |at| at + 1)..]
-        .iter()
-        .filter(|moment| {
-            matches!(
-                moment.happening,
-                Happening::Session(session::happening::Happening::Called { .. })
-            )
-        })
-        .count()
+            }) => self.0 = 0,
+            Happening::Session(session::happening::Happening::Called { .. }) => self.0 += 1,
+            _ => {}
+        }
+    }
+
+    /// How many calls the open attempt made, by the moments counted so far.
+    pub fn count(self) -> usize {
+        self.0
+    }
 }
 
 /// One moment's row: a call's verb in its column, then its task in a `column` as wide as the

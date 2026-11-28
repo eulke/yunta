@@ -87,12 +87,11 @@ async fn a_round_let_go_as_the_screen_moves_onto_another_run_says_nothing_of_tha
     let in_view = went_on.state().followed_runs().in_view.clone();
     let went_on_run = in_view.expect("the run in view").run.clone();
     let storage = Storage::open(&went_on.store()).expect("the cut's log");
-    let events = storage.events_for_run(&went_on_run.run).expect("its log");
+    let events = storage.events_for_run(went_on_run.run()).expect("its log");
     let successor: RunId = SUCCESSOR.parse().expect("a run's id");
-    let another = yunta_api::FollowedRun {
-        run: successor.clone(),
-        ..went_on_run
-    };
+    let (manifest, engine) = (went_on_run.manifest(), went_on_run.engine());
+    let another =
+        yunta_api::FollowedRun::read(successor.clone(), manifest.clone(), &events, engine.clone());
 
     let mut state = screen.state().clone();
     let run = state

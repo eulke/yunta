@@ -32,7 +32,6 @@ use super::{closed_up, parted, Paned, Side, Spacing, Terminal};
 use crate::components::{Card, CardBody, Laid, Sight};
 use crate::doc::Block;
 use crate::line::Line;
-use crate::look::Look;
 
 /// The most cells a round of questions spans in a pane, however wide the pane: a question
 /// with the answer beside it, and the run's handle at the card's far edge, read in one sweep
@@ -50,12 +49,41 @@ pub(super) struct Room {
     pub(super) shortest: bool,
 }
 
+impl Room {
+    /// The room of a card's pane `rows` high, under its title where it stands `titled`, spaced
+    /// as `spacing` says, on a screen standing `short_of_rows` where its layout says so: a blank
+    /// row is owed under the title where an aired pane stands under one, and the card keeps its
+    /// least where the screen stands short of rows.
+    pub(super) fn under_the_title(
+        rows: usize,
+        titled: bool,
+        spacing: Spacing,
+        short_of_rows: bool,
+    ) -> Room {
+        Room {
+            rows,
+            under_a_title: titled && spacing == Spacing::Aired,
+            shortest: short_of_rows,
+        }
+    }
+}
+
 /// What stands above a card as the pane draws it: whether the blank row under the region's
 /// title stands, the lines of what stands above, and the rows of them that stand.
 struct Above {
     title_blank: bool,
     lines: Vec<Line>,
     page: usize,
+}
+
+/// A card's pane laid out by the rule this module states, before it is drawn: the terminal
+/// measured for the card, what stands under it, what stands above it, and the rows the card
+/// takes between them. What the pane draws and whether the card's least stands, read once.
+struct Footing {
+    on: Terminal,
+    below: Vec<Line>,
+    above: Above,
+    card_rows: usize,
 }
 
 impl Terminal {
@@ -70,22 +98,15 @@ impl Terminal {
         room: Room,
         spacing: Spacing,
     ) -> Paned {
-        let on = self.measured_for(card);
-        let below = on.under_a_card(&blocks[at + 1..], spacing);
-        let left = room.rows.saturating_sub(below.len());
-        let forms = on.above_a_card((&blocks[..at], abridged), spacing);
-        let parting = |lines: &[Line]| match spacing {
-            Spacing::Aired => parted(lines.to_vec(), Side::Above),
-            Spacing::Close => lines.to_vec(),
-        };
-        let above = match room.shortest {
-            true => on.over_its_least(card, &forms, parting, (left, room.under_a_title)),
-            false => on.over_it_whole(card, &forms, parting, (left, room.under_a_title)),
-        };
+        let Footing {
+            on,
+            below,
+            above,
+            card_rows,
+        } = self.footing((blocks, abridged), (at, card), room, spacing);
         let title_blank = usize::from(above.title_blank);
         let most = above.lines.len() - above.page;
         let top = sight.top.min(most);
-        let card_rows = left.saturating_sub(title_blank + above.page);
         let held = on.held_in(&blocks[at], on.look.width.cells(), card_rows);
         let unheld = card_rows.saturating_sub(held.lines.len());
         // A decision's card stands at the pane's foot, a round under what it is about.
@@ -116,6 +137,50 @@ impl Terminal {
         }
     }
 
+    /// Whether `card`'s fewest rows ([`Card::least`]) stand in the pane `room` says, `blocks`
+    /// and `abridged` laid out around it as [`Terminal::card_at_the_foot`] lays them out: what
+    /// decides whether a region's title gives way to its card.
+    pub(super) fn keeps_the_cards_least(
+        &self,
+        (blocks, abridged): (&[Block], &[Vec<Block>]),
+        (at, card): (usize, &Card),
+        room: Room,
+        spacing: Spacing,
+    ) -> bool {
+        let footing = self.footing((blocks, abridged), (at, card), room, spacing);
+        footing.card_rows >= card.least(&footing.on.look)
+    }
+
+    /// `blocks` around `card`, at `at` among them, and `abridged`, laid out in the pane `room`
+    /// says, spaced as `spacing` says, by the rule this module states.
+    fn footing(
+        &self,
+        (blocks, abridged): (&[Block], &[Vec<Block>]),
+        (at, card): (usize, &Card),
+        room: Room,
+        spacing: Spacing,
+    ) -> Footing {
+        let on = self.measured_for(card);
+        let below = on.under_a_card(&blocks[at + 1..], spacing);
+        let left = room.rows.saturating_sub(below.len());
+        let forms = on.above_a_card((&blocks[..at], abridged), spacing);
+        let parting = |lines: &[Line]| match spacing {
+            Spacing::Aired => parted(lines.to_vec(), Side::Above),
+            Spacing::Close => lines.to_vec(),
+        };
+        let above = match room.shortest {
+            true => on.over_its_least(card, &forms, parting, (left, room.under_a_title)),
+            false => on.over_it_whole(card, &forms, parting, (left, room.under_a_title)),
+        };
+        let card_rows = left.saturating_sub(usize::from(above.title_blank) + above.page);
+        Footing {
+            on,
+            below,
+            above,
+            card_rows,
+        }
+    }
+
     /// This terminal measured for `card` and what stands around it: a round spans at most
     /// [`ROUND_MOST`] cells, a decision's card the pane's width.
     fn measured_for(&self, card: &Card) -> Terminal {
@@ -123,7 +188,7 @@ impl Terminal {
             CardBody::Round(_) => self.look.width.within(ROUND_MOST),
             CardBody::Choosing { .. } | CardBody::Saying { .. } => self.look.width,
         };
-        Terminal::on(Look { width, ..self.look })
+        self.at_width(width)
     }
 
     /// The lines of `blocks`, what stands under a card, spaced as `spacing` says, a blank row

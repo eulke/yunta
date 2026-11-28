@@ -28,7 +28,7 @@ fn kind(step: &NextStep) -> usize {
         NextStep::Schema { .. } => 15,
         NextStep::Doctor { .. } => 16,
         NextStep::Test { .. } => 17,
-        NextStep::Init => 18,
+        NextStep::Init { .. } => 18,
         NextStep::PackAdd { .. } => 19,
         NextStep::PackUpdate { .. } => 20,
         NextStep::PackRemove { .. } => 21,

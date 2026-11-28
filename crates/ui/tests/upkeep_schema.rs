@@ -2,21 +2,21 @@
 //! what collecting would reclaim, as `yunta gc --dry-run` prints it, then, once the
 //! person confirms it, the collection, as `yunta gc` prints it, what it remarks shown as
 //! it comes; doctor checks again on the way back. The shapes, opened from the
-//! workflows: every document Yunta reads, one picked by typing, shown as `yunta schema
-//! <name>` prints it.
+//! workflows and standing under them on the trail: every document Yunta reads, one picked by
+//! typing, shown as `yunta schema <name>` prints it.
 
 mod support;
 
 use std::path::Path;
 use std::sync::Arc;
 
-use surco::components::Note;
+use surco::components::{Note, Region};
 use surco::doc::Doc;
 use surco::surface::{Markdown, Surface};
 use yunta_api::Remark;
 use yunta_core::events::Channel;
 use yunta_core::DocumentKind;
-use yunta_render::page::doctor::{CheckoutsKeep, Finding};
+use yunta_render::page::doctor::{CheckoutsKeep, Finding, PoolKept};
 use yunta_render::page::{Collected, Page, Schema};
 use yunta_testkit::Bench;
 use yunta_testkit_ui::driving::drive;
@@ -36,6 +36,11 @@ fn main_region(state: &State) -> String {
 fn drawn(page: &impl Page) -> String {
     let look = Markdown.look();
     Markdown.draw(&page.document(&look))
+}
+
+/// `page`, a page a screen stands on, as Markdown writes it.
+fn on_screen(page: Doc) -> String {
+    Markdown.draw(&Region::of_a_page(page).doc)
 }
 
 /// Where the person is.
@@ -60,13 +65,33 @@ fn root_of(bench: &Bench) -> &Path {
 /// Upkeep opened from doctor, its checkouts over their budget, standing on what
 /// collecting would reclaim in `bench`: the state, and that dry run's page.
 async fn at_upkeep(bench: &Bench) -> (State, Box<Collected>) {
+    let (mut state, dry) = upkeep_reading().await;
+    let (_, outcome) = performed(bench, Operation::Collect { dry_run: true }).await;
+    let Outcome::Collected(would) = &outcome else {
+        panic!("a dry run comes to what it would reclaim: {outcome:?}");
+    };
+    let would = would.clone();
+    state.update(Input::Outcome(dry, outcome));
+    (state, would)
+}
+
+/// Upkeep opened from doctor, its checkouts over their budget, its dry run asked and not
+/// yet answered: the state, and the ticket the dry run runs under.
+async fn upkeep_reading() -> (State, Ticket) {
     let mut state = on_a_field().await;
     let asked = state.update(Input::Stroke(Stroke::Insert('m')));
     let [Request::Perform(checks, Operation::Doctor { sessions: false })] = asked.as_slice() else {
         panic!("doctor checks the machine as it opens: {asked:?}");
     };
     let over = vec![Finding::Checkouts {
-        kept: "4 checkouts".to_string(),
+        kept: PoolKept {
+            checkouts: 4,
+            builds: 120_000_000_000,
+            uncounted: 0,
+            budget: 98_900_000_000,
+            available: 300_000_000_000,
+            keep_free: 24_700_000_000,
+        },
         keep: CheckoutsKeep::BuildsOverBudget,
     }];
     state.update(Input::Outcome(*checks, Outcome::Doctor(over)));
@@ -74,13 +99,7 @@ async fn at_upkeep(bench: &Bench) -> (State, Box<Collected>) {
     let [Request::Perform(dry, Operation::Collect { dry_run: true })] = asked.as_slice() else {
         panic!("upkeep opens on a dry run: {asked:?}");
     };
-    let (_, outcome) = performed(bench, Operation::Collect { dry_run: true }).await;
-    let Outcome::Collected(would) = &outcome else {
-        panic!("a dry run comes to what it would reclaim: {outcome:?}");
-    };
-    let would = would.clone();
-    state.update(Input::Outcome(*dry, outcome));
-    (state, would)
+    (state, *dry)
 }
 
 /// `state`, at upkeep, asked to collect and confirmed: the ticket the collection runs
@@ -102,8 +121,39 @@ fn collecting(state: &mut State) -> Ticket {
 async fn upkeep_opens_from_doctor_on_what_collecting_would_reclaim() {
     let bench = Bench::new();
     let (state, would) = at_upkeep(&bench).await;
-    assert_eq!(main_region(&state), drawn(&*would));
-    assert_eq!(trail(&state), ["yunta", "upkeep"]);
+    assert_eq!(main_region(&state), on_screen(would.on_screen()));
+    assert_eq!(trail(&state), ["yunta", "machine", "upkeep"]);
+}
+
+/// A stage opened over upkeep before its dry run lands leaves upkeep waiting on it: its answer
+/// lands on upkeep under the stage over it, and coming back finds it there, nothing asked
+/// again.
+#[tokio::test]
+async fn a_dry_run_answered_under_a_stage_over_upkeep_is_found_coming_back() {
+    let bench = Bench::new();
+    let (mut state, dry) = upkeep_reading().await;
+    let asked = state.update(Input::Stroke(Stroke::Insert('n')));
+    assert!(
+        !asked.contains(&Request::LetGo(dry)),
+        "a new run opened over upkeep leaves its dry run going: {asked:?}"
+    );
+    let (_, outcome) = performed(&bench, Operation::Collect { dry_run: true }).await;
+    let Outcome::Collected(would) = &outcome else {
+        panic!("a dry run comes to what it would reclaim: {outcome:?}");
+    };
+    let would = would.clone();
+    let answered = state.update(Input::Outcome(dry, outcome));
+    assert!(answered.is_empty(), "{answered:?}");
+    let asked = state.update(Input::Stroke(Stroke::Decline));
+    let again = asked.iter().any(|request| {
+        matches!(
+            request,
+            Request::Perform(_, Operation::Collect { dry_run: true })
+        )
+    });
+    assert!(!again, "back on upkeep, nothing is asked again: {asked:?}");
+    assert_eq!(main_region(&state), on_screen(would.on_screen()));
+    assert_eq!(trail(&state), ["yunta", "machine", "upkeep"]);
 }
 
 #[tokio::test]
@@ -131,9 +181,9 @@ async fn what_runs_left_is_collected_once_confirmed_its_remarks_above_its_page()
     };
     state.update(Input::Outcome(pass, outcome.clone()));
     // What it said as it went stands above the page, as `yunta gc` says it before it.
-    let page = collected.document(&Markdown.look()).into_blocks();
+    let page = collected.on_screen().into_blocks();
     let shown = Doc::new().with(Note(said)).with_all(page);
-    assert_eq!(main_region(&state), Markdown.draw(&shown));
+    assert_eq!(main_region(&state), on_screen(shown));
 }
 
 #[tokio::test]
@@ -169,7 +219,7 @@ async fn escape_stops_a_collection_and_doctor_checks_again_on_the_way_back() {
         )),
         "{asked:?}"
     );
-    assert_eq!(trail(&state), ["yunta", "doctor"]);
+    assert_eq!(trail(&state), ["yunta", "machine"]);
 }
 
 #[tokio::test]
@@ -181,18 +231,18 @@ async fn a_documents_shape_is_picked_by_typing_and_shown_as_schema_prints_it() {
     ));
     let strokes = [Stroke::Insert('w'), Stroke::Insert('s')];
     let (mut state, _) = drive(on_a_field().await, Vec::new(), &performer, &strokes).await;
-    assert_eq!(trail(&state), ["yunta", "schema"]);
+    assert_eq!(trail(&state), ["yunta", "workflows", "schema"]);
     for stroke in ["t", "a", "s"].map(|typed| Stroke::Insert(typed.chars().next().unwrap())) {
         state.update(Input::Stroke(stroke));
     }
     state.update(Input::Stroke(Stroke::Enter));
     let tasks: DocumentKind = "tasks".parse().expect("a document Yunta reads");
     assert_eq!(main_region(&state), drawn(&Schema::of(tasks)));
-    assert_eq!(trail(&state), ["yunta", "schema", "tasks"]);
+    assert_eq!(trail(&state), ["yunta", "workflows", "schema", "tasks"]);
     // Escape goes back to the documents, the one picked among them still, then to the
     // workflows.
     state.update(Input::Stroke(Stroke::Decline));
-    assert_eq!(trail(&state), ["yunta", "schema"]);
+    assert_eq!(trail(&state), ["yunta", "workflows", "schema"]);
     assert!(
         main_region(&state).contains("tasks"),
         "{}",

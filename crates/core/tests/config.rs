@@ -22,7 +22,7 @@ mod network;
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
     RunnerCandidate {
         adapter: adapter.into(),
-        model: model.into(),
+        model: Some(model.into()),
         agent: None,
         effort: None,
     }
@@ -235,6 +235,28 @@ fn a_runner_s_effort_is_a_level_every_cli_accepts() {
     for only_one_cli in ["max", "minimal", "none"] {
         assert!(runner(only_one_cli).is_err(), "`{only_one_cli}` is refused");
     }
+}
+
+/// A candidate that names its adapter and no model reads, and is written
+/// back without one: the model is left to that adapter's CLI, as an absent
+/// effort is.
+#[test]
+fn a_candidate_that_names_no_model_reads_and_is_written_back_without_one() {
+    let text = "runners:\n  planner:\n    - adapter: claude-code\n";
+    let layer = ConfigLayer::read(text).expect("a candidate with no model reads");
+    let planner = &layer.runners.as_ref().expect("the runners read")["planner"];
+    assert_eq!(planner.len(), 1);
+    assert_eq!(planner[0].adapter.as_str(), "claude-code");
+
+    let written = yunta_core::yaml::to_string(&layer).expect("the layer is written");
+    assert!(
+        !written.contains("model"),
+        "no model is written where none was named:\n{written}"
+    );
+    assert_eq!(
+        ConfigLayer::read(&written).expect("what is written reads"),
+        layer
+    );
 }
 
 /// `format:` is read in order, and a more specific layer's rules replace

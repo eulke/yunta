@@ -2,20 +2,29 @@
 //! in offers. It is two layers: the repository's own `.yunta/workflows/`, then
 //! every installed pack's declared `contents.workflows`, addressed
 //! `publisher/name`. A repository's own entry shadows a pack's of the same
-//! name, so a bare repository name never collides with a pack entry.
+//! name, so a bare repository name never collides with a pack entry. A setup
+//! reads the workflows the catalog would offer once a pack it fetched is
+//! installed, the fetched copy's among the installed packs' in the same order,
+//! so what it proposes is what `init` proposes after the install; the fetched
+//! copy's are read through the tree its fetch walked, never through a link.
 //!
-//! What the catalog offers is read off the repository alone; how each
-//! workflow's past runs usually went is read off the project's history when
-//! the project resolves, and a project with no state root yet, like one with
-//! fewer runs than an estimate needs, simply shows none.
+//! What the catalog offers is read off the repository alone; each workflow's
+//! past runs are read off the project's history when the project resolves,
+//! once a workflow, and kept with it: how often it ran here, how its runs
+//! usually went and what each spent are all worked out from that one reading,
+//! so no reader of the catalog reads a history again. A project that does not
+//! resolve reads no history and shows none; one with fewer runs than an
+//! estimate needs shows how many it holds and no estimate. The same
+//! resolution's config says which adapters a run here can be pinned to, so a
+//! new run offers what admission would take without reading the config again.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use yunta_core::Workflow;
+use yunta_core::{PackManifest, Publisher, Workflow};
 use yunta_render::page::{Catalog, OfferedWorkflow, ReadableWorkflow, UnreadableWorkflow};
 
-use crate::{Project, Workspace};
+use crate::{FetchedPack, Project, Workspace};
 
 /// One workflow the catalog names, before its file is read: the name a person
 /// runs it with — `publisher/` first for a pack's — and where it is.
@@ -27,7 +36,9 @@ struct CatalogEntry {
 impl Workspace {
     /// What the catalog offers here: each workflow with how its past runs
     /// usually went, or why its file does not read; the packs that do not
-    /// read; and where workflows and packs are declared.
+    /// read; where workflows and packs are declared; and the adapters a run
+    /// of them can be pinned to, from the config the project resolved with,
+    /// the one admission freezes.
     pub async fn catalog(&self) -> Catalog {
         let project = self.project().ok();
         let mut entries = repository_entries(&self.dir);
@@ -47,6 +58,9 @@ impl Workspace {
             workflows_dir: self.dir.join(".yunta/workflows"),
             packs_dir: self.dir.join(".yunta/packs"),
             offered,
+            pinnable: project
+                .map(|project| crate::machine::pinnable_adapter_ids(&project.config))
+                .unwrap_or_default(),
         }
     }
 
@@ -54,31 +68,65 @@ impl Workspace {
     /// own, then every installed pack's — by the name a person runs it with.
     /// What does not read is left to `list` and `check` to name.
     pub fn catalog_workflows(&self) -> Vec<(String, Workflow)> {
-        repository_entries(&self.dir)
-            .into_iter()
-            .chain(pack_entries(&self.dir).0)
-            .filter_map(|entry| {
-                let contents = std::fs::read_to_string(&entry.path).ok()?;
-                let workflow = yunta_core::workflow::read::read(&contents, &entry.path).ok()?;
-                Some((entry.name, workflow))
-            })
-            .collect()
+        let repository = repository_entries(&self.dir).into_iter().map(on_disk);
+        let packs = pack_entries(&self.dir).0.into_iter().map(on_disk);
+        read_back(repository.chain(packs))
+    }
+
+    /// Every workflow the catalog would offer that reads back once `pack`, fetched,
+    /// is installed: the repository's own, then every pack's, the fetched one's
+    /// among the installed ones' in the order the catalog lists them, each read from
+    /// the copy fetched, through the tree its fetch walked. Nothing of the pack is
+    /// written to list it, nor read from outside its tree.
+    pub(crate) fn catalog_workflows_installing(
+        &self,
+        pack: &FetchedPack,
+    ) -> Vec<(String, Workflow)> {
+        let (installed, _) = pack_entries(&self.dir);
+        let mut packs: Vec<Text> = installed.into_iter().map(on_disk).collect();
+        let (manifest, tree) = (&pack.manifest, pack.tree());
+        let fetched = declared_entries(&manifest.publisher, tree.root(), manifest);
+        packs.extend(fetched.into_iter().map(|entry| {
+            let in_the_pack = entry.path.strip_prefix(tree.root()).unwrap_or(&entry.path);
+            let text = tree.read(in_the_pack).ok();
+            (entry, text)
+        }));
+        packs.sort_by(|(a, _), (b, _)| a.name.cmp(&b.name));
+        let repository = repository_entries(&self.dir).into_iter().map(on_disk);
+        read_back(repository.chain(packs))
     }
 }
 
-/// `entry` as the catalog offers it: its workflow and how its past runs
-/// usually went in `project`, or why its file does not read.
+/// A workflow the catalog names, and its file's text, none where it does not read.
+type Text = (CatalogEntry, Option<String>);
+
+/// `entry` with its file's text, read from the disk.
+fn on_disk(entry: CatalogEntry) -> Text {
+    let text = std::fs::read_to_string(&entry.path).ok();
+    (entry, text)
+}
+
+/// The workflows of `entries` that read back, in their order, by the name a person
+/// runs each with.
+fn read_back(entries: impl Iterator<Item = Text>) -> Vec<(String, Workflow)> {
+    entries
+        .filter_map(|(entry, text)| {
+            let workflow = yunta_core::workflow::read::read(&text?, &entry.path).ok()?;
+            Some((entry.name, workflow))
+        })
+        .collect()
+}
+
+/// `entry` as the catalog offers it: its workflow and its past runs in
+/// `project`, or why its file does not read.
 async fn offer(entry: CatalogEntry, project: Option<&Project>) -> OfferedWorkflow {
     let workflow = match read(&entry).await {
         Ok(workflow) => {
-            let usually = match project {
-                Some(project) => {
-                    let history = project.history(&workflow.name).await;
-                    yunta_replay::history::PriorEstimation::of(&history.summaries())
-                }
+            let past = match project {
+                Some(project) => Some(project.history(&workflow.name).await.summaries()),
                 None => None,
             };
-            Ok(ReadableWorkflow { workflow, usually })
+            Ok(ReadableWorkflow { workflow, past })
         }
         Err(why) => Err(why),
     };
@@ -154,18 +202,32 @@ fn pack_entries(dir: &Path) -> (Vec<CatalogEntry>, Vec<yunta_engine::CatalogErro
     for publisher in yunta_engine::installed_publishers(dir) {
         let packs = yunta_engine::packs_for_publisher(dir, &publisher);
         for (pack_dir, manifest) in packs.installed {
-            for declared in &manifest.contents.workflows {
-                let Some(stem) = Path::new(declared).file_stem().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                entries.push(CatalogEntry {
-                    name: format!("{publisher}/{stem}"),
-                    path: pack_dir.join(declared),
-                });
-            }
+            entries.extend(declared_entries(&publisher, &pack_dir, &manifest));
         }
         broken.extend(packs.broken);
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     (entries, broken)
+}
+
+/// Every workflow `manifest` declares, its pack's files standing at `pack_dir`, by
+/// `publisher/name`.
+fn declared_entries(
+    publisher: &Publisher,
+    pack_dir: &Path,
+    manifest: &PackManifest,
+) -> Vec<CatalogEntry> {
+    let named = |declared: &String| {
+        let stem = Path::new(declared).file_stem()?.to_str()?;
+        Some(CatalogEntry {
+            name: format!("{publisher}/{stem}"),
+            path: pack_dir.join(declared),
+        })
+    };
+    manifest
+        .contents
+        .workflows
+        .iter()
+        .filter_map(named)
+        .collect()
 }

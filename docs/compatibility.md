@@ -418,9 +418,9 @@ between two processes. A run needs someone, too, when its log says it is moving
 and its live engine is asking a person at its terminal: the registry records
 `asking: {node?, since}` while the question is open, and the row says which node
 is asking, at which process's terminal, and for how long. Each row says what the run is called, its handle, its
-workflow and mode, and how long it has been where it is; a run that needs
-someone, or stalled, carries what holds it and the command that moves it under
-its row. The groups before the closed one are ordered by how long a run has been where
+workflow and mode, what holds it, and at its edge how long it has been where it
+is; the commands that move the runs on stand under the groups, in `next`. The
+groups before the closed one are ordered by how long a run has been where
 it is, longest first; two runs that have been there equally long are ordered by run
 id, which for a minted one is the order they were created in. `--full` lists closed
 runs newest first; a glance says how long ago the newest closed. A run in the last group
@@ -528,6 +528,24 @@ the whole output of a failed command — when its terminal announces it opens th
 later, `KITTY_WINDOW_ID` or `WT_SESSION` set. `YUNTA_HYPERLINKS=1` turns them on
 wherever there is color, and `YUNTA_HYPERLINKS=0` off. A link is an OSC 8 sequence
 around the path's own text, which a terminal without links shows as that text.
+
+## Glyphs
+
+Yunta draws its marks, bars and rules in one of two sets of glyphs: Unicode, or
+ASCII. `YUNTA_GLYPHS=unicode` or `YUNTA_GLYPHS=ascii` names the set; otherwise a
+locale that names no UTF-8 (`LC_ALL`, else `LC_CTYPE`, else `LANG`, none set
+reading as `C`) takes ASCII, and so does `TERM=dumb`. Anything else takes Unicode.
+Nothing is asked of the terminal.
+
+Under ASCII the application at a terminal shows ASCII alone: every text a screen
+shows, what a session said, what a pack wrote, a path, takes its ASCII form before
+its row is laid out, so each row ends at the screen's edge. A character Yunta draws
+a glyph with takes what Yunta draws in its place (`·` `;`, `…` `...`, `›` `::`,
+`→` `->`, `—` `--`), an en dash `-` and a curved quote a straight one; a Latin
+letter with a mark takes its letter (`ñ` `n`) and a ligature its two (`ß` `ss`,
+`æ` `ae`); any other character is `?`, one cell whatever it took. A page a command
+prints is never folded, nor are Markdown and HTML: they keep every character of
+what was recorded, since a log or a pipe is often read later where UTF-8 shows.
 
 ## Line width
 

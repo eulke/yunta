@@ -99,19 +99,35 @@ fn by_word(printed: &[u8], commit: &str) -> BTreeMap<String, BTreeSet<String>> {
     named
 }
 
-/// Who a commit made in `repo` is by — `Name <email>`, as git resolves its
-/// author and committer from config and environment. Both identities are
-/// read, so a repository that cannot name its author is an error too.
-pub async fn committer(repo: &Path, sup: Supervision<'_>) -> Result<String, GitError> {
+/// Who a commit is by, as git resolves them from config and environment:
+/// the name, and the address git writes after it. The words that say them
+/// are the reader's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    pub name: String,
+    /// The address, without the brackets git writes around it; empty where
+    /// git was given none.
+    pub address: String,
+}
+
+/// Who a commit made in `repo` is by, as git resolves its author and
+/// committer from config and environment. Both identities are read, so a
+/// repository that cannot name its author is an error too.
+pub async fn committer(repo: &Path, sup: Supervision<'_>) -> Result<Identity, GitError> {
     read(repo, &["var", "GIT_AUTHOR_IDENT"], sup).await?;
     let ident = read(repo, &["var", "GIT_COMMITTER_IDENT"], sup).await?;
-    // `Name <email> <epoch> <zone>`: who, without when.
-    Ok(ident
-        .trim()
-        .rsplitn(3, ' ')
-        .last()
-        .unwrap_or_default()
-        .to_string())
+    Ok(identity(&ident))
+}
+
+/// The identity in git's `Name <address> <epoch> <zone>`: who, without when,
+/// the address taken from the last brackets.
+fn identity(ident: &str) -> Identity {
+    let who = ident.trim().rsplitn(3, ' ').last().unwrap_or_default();
+    let (name, address) = who.rsplit_once(" <").unwrap_or((who, ""));
+    Identity {
+        name: name.to_string(),
+        address: address.trim_end_matches('>').to_string(),
+    }
 }
 
 /// Pushes what `repo` has checked out to `branch` on `remote`, and sets it as

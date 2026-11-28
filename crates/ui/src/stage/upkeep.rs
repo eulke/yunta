@@ -1,24 +1,28 @@
-//! See [`super`]. Upkeep, opened from doctor with `u`: what collecting what runs left
-//! would reclaim, as `yunta gc --dry-run` prints it, and, with `c` once a person
-//! confirms it removes what it lists, the collection, as `yunta gc` prints it. What the
-//! collection remarks stands as it comes, above the page, as `yunta gc` says it before
-//! its page. Escape stops it, and what collecting would reclaim is found again, since
-//! part of what the dry run listed may be gone. A page taller than what
-//! shows of it scrolls. Escape goes back to doctor.
+//! See [`super`]. Upkeep, under the machine, opened from it with `u`: what collecting what
+//! runs left would reclaim, as `yunta gc --dry-run` prints it, and, with `c` once a person
+//! confirms it removes what it lists, the collection, as `yunta gc` prints it, under a
+//! headline that names upkeep. What the collection remarks stands as it comes, above the
+//! page, as `yunta gc` says it before its page. Escape stops it, and what collecting would
+//! reclaim is found again, since part of what the dry run listed may be gone. A page taller
+//! than what shows of it scrolls. It stands in the frame of the field it was opened over
+//! (`over_the_field`), where `a` goes where its attention row names. `n` opens a new run over
+//! it, Escape goes back to the machine and `q` goes down to the field.
 
+use chrono::{DateTime, Utc};
 use surco::components::{Laid, Note, Region, Screen};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::Remark;
-use yunta_core::step::NextStep;
-use yunta_render::page::{Collected, Page};
+use yunta_core::step::{Arg, NextStep};
+use yunta_render::page::Collected;
 use yunta_render::screen;
 
+use super::over_the_field::{attending_over_the_field, in_the_fields_frame, KeyA};
 use super::{Act, Want};
 use crate::dialog::Confirmation;
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
-use crate::{Operation, Outcome};
+use crate::{FollowedRuns, Operation, Outcome};
 
 /// What collecting what runs left would reclaim, then what it reclaimed.
 #[derive(Debug, Clone)]
@@ -61,15 +65,22 @@ impl UpkeepStage {
         vec![Want::Work(Operation::Collect { dry_run: true })]
     }
 
-    /// What the pass remarked, then what the last one reclaimed or would, as `yunta gc`
-    /// prints it, or that a pass runs; what refused, failed or was stopped; with the
-    /// keys.
-    pub(crate) fn screen(&self, look: &Look) -> Screen {
+    /// What the pass remarked, then what the last one reclaimed or would, as the screen
+    /// tells `yunta gc`'s page, or that a pass runs; what refused, failed or was stopped; in
+    /// the frame of the field `followed` keeps at `now`, a line typed in what stands over it
+    /// where `typed`; with the keys.
+    pub(crate) fn screen(
+        &self,
+        look: &Look,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+        typed: bool,
+    ) -> Screen {
         let mut doc = self.remarked.iter().fold(Doc::new(), |doc, remark| {
             doc.with(Note(crate::remark::said(remark, look.glyphs).words))
         });
         if let Some(collected) = &self.collected {
-            doc = doc.with_all(collected.document(look).into_blocks());
+            doc = doc.with_all(collected.on_screen().into_blocks());
         }
         let running = match self.running {
             Some(Pass::DryRun) => Some(screen::FINDING_WHAT_IT_RECLAIMS),
@@ -82,14 +93,21 @@ impl UpkeepStage {
         if let Some(said) = &self.said {
             doc = doc.with(Note(said.clone()));
         }
-        let mut shown = Screen::new(Region::new(doc).in_sight(self.scroll.sight()));
-        shown.trail = vec![screen::YUNTA.to_string(), screen::UPKEEP.to_string()];
-        let legend = screen::upkeep_legend(self.would(), self.collecting());
-        shown.legend = match self.scroll.scrolls() {
-            true => screen::scrolling(legend),
-            false => legend,
-        };
+        let mut shown = Screen::new(Region::of_a_page(doc).in_sight(self.scroll.sight()));
+        shown.trail = [screen::YUNTA, screen::MACHINE, screen::UPKEEP]
+            .map(String::from)
+            .to_vec();
+        shown.legend = screen::upkeep_legend(self.would(), self.collecting());
+        in_the_fields_frame(&mut shown, followed, now, typed, KeyA::Attends);
         shown
+    }
+
+    /// The work its screen says is under way: what collecting would reclaim found, or what
+    /// runs left collected.
+    pub(crate) fn shown_under_way(&self) -> Option<Operation> {
+        (self.running).map(|pass| Operation::Collect {
+            dry_run: pass == Pass::DryRun,
+        })
     }
 
     /// Whether what stands is a dry run's, which `c` collects.
@@ -102,11 +120,17 @@ impl UpkeepStage {
         self.running == Some(Pass::Collecting)
     }
 
-    /// What `stroke` asks for here. While it collects, Escape stops it and finds what
-    /// collecting would reclaim again. Otherwise `c`
-    /// asks to confirm collecting what a dry run found, and Escape goes back. `q` or
+    /// What `stroke` asks for here, over what `followed` keeps at `now`. While it collects,
+    /// Escape stops it and finds what collecting would reclaim again. Otherwise `c` asks to
+    /// confirm collecting what a dry run found, and Escape goes back. `a` goes where the
+    /// attention row names, `n` opens a new run over the page, `q` goes down to the field,
     /// Ctrl-C leaves, and the keys that scroll scroll the page.
-    pub(crate) fn pressed(&mut self, stroke: Stroke) -> Vec<Want> {
+    pub(crate) fn pressed(
+        &mut self,
+        stroke: Stroke,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Vec<Want> {
         match stroke {
             Stroke::Decline if self.collecting() => {
                 self.running = Some(Pass::DryRun);
@@ -117,13 +141,18 @@ impl UpkeepStage {
                 ]
             }
             Stroke::Decline => vec![Want::Back],
-            Stroke::Insert('q') | Stroke::Interrupt => vec![Want::Leave],
+            Stroke::Insert('q') => vec![Want::ToTheField(None)],
+            Stroke::Interrupt => vec![Want::Leave],
             Stroke::Insert('c') if self.would() => {
                 let collect = Operation::Collect { dry_run: false };
-                let asks = screen::COLLECTING_ASKS.to_string();
+                let asks = screen::Confirming::Collect;
                 let same = NextStep::Gc { dry_run: false };
                 vec![Want::Confirm(Confirmation::new(asks, vec![same], collect))]
             }
+            Stroke::Insert('a') => attending_over_the_field(followed, now),
+            Stroke::Insert('n') if followed.can_ask_for_a_run() => Want::taking(&NextStep::Run {
+                workflow: Arg::Blank,
+            }),
             other => {
                 self.scroll.pressed(other);
                 Vec::new()
@@ -159,6 +188,12 @@ impl UpkeepStage {
         self.remarked.push(remark);
     }
 
+    /// Where its page stands, which no row of its screen says, its legend the same whether
+    /// it scrolls or not.
+    pub(crate) fn page(&self) -> Scroll {
+        self.scroll
+    }
+
     /// What a surface laid out of the page, which the keys that scroll move from.
     pub(crate) fn laid(&mut self, laid: Laid) {
         self.scroll.laid(laid);
@@ -183,7 +218,8 @@ impl UpkeepStage {
             }
             Outcome::Repository(_)
             | Outcome::Detected { .. }
-            | Outcome::Initialized(_)
+            | Outcome::SetupPack { .. }
+            | Outcome::Initialized { .. }
             | Outcome::Catalog(_)
             | Outcome::Workflow(_)
             | Outcome::Pack(_)

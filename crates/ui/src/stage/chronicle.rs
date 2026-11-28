@@ -14,24 +14,25 @@
 //! (`succeeded`), whose chronicle opens at its end.
 //!
 //! The arrows, the page keys and the space bar scroll it; `esc` goes back to the run; `a` goes
-//! where its attention row names (`over_the_run`); `n` starts a new run once the workflows
-//! are read, which open over it; `q` and Ctrl-C leave, as from every page over a run.
+//! where its attention row names (`over_the_run`); `n` opens a new run over it; `q` goes down
+//! to the field, as from every page; Ctrl-C leaves.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use surco::components::{Laid, Note, Region, Screen};
+use surco::components::{Laid, Legend, Note, Region, Screen};
 use surco::doc::{Block, Doc};
 use surco::look::Look;
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::{RunId, SessionId, TaskId};
 use yunta_render::{chronicle, screen, watched};
 use yunta_replay::frame::Moment;
 
 use super::over_the_run::{attending, in_the_runs_frame};
-use super::{ItsRun, Stage, StartStage, Want};
+use super::{ItsRun, Want};
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
-use crate::{FollowedRuns, Operation, Outcome, RunInView};
+use crate::{FollowedRuns, Outcome, RunInView};
 
 /// A run's whole chronicle, a feed of its own over the run: where the person stands in it.
 /// Not the feed a run's pane ends with, one node's.
@@ -72,7 +73,7 @@ impl ChronicleStage {
         typed: bool,
     ) -> Screen {
         let in_view = followed.in_view.as_deref();
-        let in_view = in_view.filter(|in_view| in_view.run.run == self.run);
+        let in_view = in_view.filter(|in_view| *in_view.run.run() == self.run);
         let mut doc = match in_view {
             Some(in_view) => self.told(in_view, look),
             None => Doc::new().with(Note(screen::READING_THE_CHRONICLE.to_string())),
@@ -82,13 +83,17 @@ impl ChronicleStage {
         }
         let mut shown = Screen::new(Region::new(doc).in_sight(self.scroll.sight()));
         if let Some(in_view) = in_view {
-            let frame = in_view.run.frame(now);
-            shown.about = Some(super::run::screen::across(&frame, None, look));
-            shown.meter = Some(watched::spent(&frame));
+            let (frame, times) = (in_view.run.frame(), in_view.run.times(now));
+            shown.about = Some(super::run::screen::across(frame, &times, None, look));
+            shown.meter = Some(watched::spent(frame, &times));
         }
         let place = screen::place_of(self.run.handle(), screen::CHRONICLE);
         shown.trail = vec![screen::YUNTA.to_string(), place];
-        shown.legend = screen::in_the_runs_frame_legend(true);
+        shown.legend = screen::page_legend(
+            screen::PageRead::Scrolled,
+            Legend::new(),
+            followed.can_ask_for_a_run(),
+        );
         in_the_runs_frame(&mut shown, &self.run, followed, now, typed);
         shown
     }
@@ -104,7 +109,7 @@ impl ChronicleStage {
             .collect();
         let tasks: BTreeMap<SessionId, TaskId> = in_view
             .run
-            .state
+            .state()
             .nodes
             .values()
             .flat_map(|record| record.session_tasks.clone())
@@ -128,8 +133,8 @@ impl ChronicleStage {
     }
 
     /// What `stroke` asks for here, over what `followed` keeps at `now`: Escape goes back to
-    /// the run, `a` where the attention row names, `n` reads the workflows a new run can be
-    /// of, `q` or Ctrl-C leaves, and the keys that scroll scroll the feed.
+    /// the run, `a` where the attention row names, `n` opens a new run over it, `q` goes down
+    /// to the field, Ctrl-C leaves, and the keys that scroll scroll the feed.
     pub(crate) fn pressed(
         &mut self,
         stroke: Stroke,
@@ -139,8 +144,11 @@ impl ChronicleStage {
         match stroke {
             Stroke::Decline => vec![Want::Back],
             Stroke::Insert('a') => attending(&self.run, followed, now),
-            Stroke::Insert('n') => vec![Want::Work(Operation::ReadCatalog)],
-            Stroke::Insert('q') | Stroke::Interrupt => vec![Want::Leave],
+            Stroke::Insert('n') if followed.can_ask_for_a_run() => Want::taking(&NextStep::Run {
+                workflow: Arg::Blank,
+            }),
+            Stroke::Insert('q') => vec![Want::ToTheField(None)],
+            Stroke::Interrupt => vec![Want::Leave],
             other => {
                 self.scroll.pressed(other);
                 Vec::new()
@@ -153,13 +161,9 @@ impl ChronicleStage {
         self.scroll.laid(laid);
     }
 
-    /// What an answer to the work the stage asked for does: the workflows read open a new
-    /// run's start over it; what refused or failed is said.
+    /// What an answer to the work the stage asked for does: what refused or failed is said.
     pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
         match outcome {
-            Outcome::Catalog(catalog) => {
-                return vec![Want::Open(Stage::Start(StartStage::new(catalog)))]
-            }
             Outcome::Refused(refused) => self.said = Some(refused.to_string()),
             Outcome::Failed(said) => self.said = Some(said),
             Outcome::History(_)
@@ -167,6 +171,7 @@ impl ChronicleStage {
             | Outcome::Doctor(_)
             | Outcome::Collected(_)
             | Outcome::Repository(_)
+            | Outcome::Catalog(_)
             | Outcome::Workflow(_)
             | Outcome::Pack(_)
             | Outcome::Evidence(_)
@@ -178,7 +183,8 @@ impl ChronicleStage {
             | Outcome::Cancelled { .. }
             | Outcome::Closed { .. }
             | Outcome::Detected { .. }
-            | Outcome::Initialized(_)
+            | Outcome::SetupPack { .. }
+            | Outcome::Initialized { .. }
             | Outcome::Stopped => {}
         }
         Vec::new()

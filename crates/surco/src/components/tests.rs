@@ -415,7 +415,7 @@ fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
     list.push(Found::Caution, "forge", "github acme/web, reachable");
     list.push(
         Found::Problem,
-        "codex/codex-model (executor, planner fallback, reviewer)",
+        "codex/codex-model (executor, planner's 2nd candidate, reviewer)",
         "session died",
     );
     let holds = list.holds();
@@ -424,7 +424,7 @@ fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
         [
             "  + git    commits as Ada <ada@example.com>",
             "  ^ forge  github acme/web, reachable",
-            "  ! codex/codex-model (executor, planner fallback, reviewer)",
+            "  ! codex/codex-model (executor, planner's 2nd candidate, reviewer)",
             "           session died",
         ]
     );

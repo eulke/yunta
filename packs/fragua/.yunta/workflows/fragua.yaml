@@ -28,14 +28,14 @@
 # reads `docs/architecture.md` as optional, since the planner can explore
 # the code without it.
 name: fragua
-description: Full feature cycle — grill, verified tasks document, multi-runner review and the work held to its plan, one fix round, lint/fix, baseline, PR
+description: "the full cycle: questions, plan, tests, work, review, PR"
 yunta_schema: ">=1 <2"
 inputs:
   idea:
     type: string
     request: true
     required: true
-    description: "What to build — becomes the brief"
+    description: "this becomes the brief"
 
 modes:
   quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, conform, ship, pr], ask: required }

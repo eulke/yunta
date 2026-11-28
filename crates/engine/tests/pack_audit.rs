@@ -6,7 +6,12 @@
 use std::path::Path;
 
 use yunta_core::PackManifest;
-use yunta_engine::audit_pack;
+use yunta_engine::{audit_pack, PackTree};
+
+/// The pack at `pack_dir`, its tree walked as an audit reads it.
+fn walked(pack_dir: &Path) -> PackTree {
+    PackTree::walk(pack_dir).unwrap()
+}
 
 fn write(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {
@@ -70,7 +75,7 @@ fn the_inventory_is_exhaustive_against_the_packs_own_content() {
     let root = tempfile::tempdir().unwrap();
     write_full_pack(root.path());
 
-    let audit = audit_pack(root.path(), manifest(root.path()));
+    let audit = audit_pack(&walked(root.path()), manifest(root.path()));
 
     assert_eq!(audit.workflows.len(), 1);
     let workflow = &audit.workflows[0];
@@ -127,7 +132,7 @@ fn a_file_prompt_is_resolved_to_its_full_untrimmed_text() {
     let root = tempfile::tempdir().unwrap();
     write_full_pack(root.path());
 
-    let audit = audit_pack(root.path(), manifest(root.path()));
+    let audit = audit_pack(&walked(root.path()), manifest(root.path()));
     let draft = &audit.workflows[0].nodes[2];
     let prompt = draft.prompt.as_ref().expect("draft is a prompt node");
     let text = prompt.as_ref().expect("prompts/draft.md exists");
@@ -152,7 +157,7 @@ fn a_missing_file_prompt_is_reported_not_silently_dropped() {
         "name: review\nnodes:\n  - id: draft\n    kind: prompt\n    prompt: { file: missing.md }\n",
     );
 
-    let audit = audit_pack(root.path(), manifest(root.path()));
+    let audit = audit_pack(&walked(root.path()), manifest(root.path()));
     let draft = &audit.workflows[0].nodes[0];
     let prompt = draft.prompt.as_ref().unwrap();
     assert!(prompt.is_err(), "{prompt:?}");
@@ -168,7 +173,7 @@ fn a_workflow_the_manifest_declares_but_doesnt_ship_is_still_in_the_report() {
          contents:\n  workflows: [nowhere.yaml]\n",
     );
 
-    let audit = audit_pack(root.path(), manifest(root.path()));
+    let audit = audit_pack(&walked(root.path()), manifest(root.path()));
     assert_eq!(audit.workflows.len(), 1);
     assert_eq!(audit.workflows[0].declared_path, "nowhere.yaml");
     assert!(audit.workflows[0].error.is_some());
@@ -188,7 +193,7 @@ fn a_missing_prompt_file_is_reported_with_its_path_and_cause() {
         "name: draft\nnodes:\n  - id: draft\n    kind: prompt\n    prompt: { file: prompts/missing.md }\n",
     );
 
-    let audit = audit_pack(root.path(), manifest(root.path()));
+    let audit = audit_pack(&walked(root.path()), manifest(root.path()));
     let prompt = audit.workflows[0].nodes[0]
         .prompt
         .as_ref()
@@ -231,7 +236,7 @@ fn the_inventory_lists_the_repository_paths_a_node_names() {
          \x20 - { id: polish, kind: prompt, depends_on: [fix], prompt: \"p\", scope: run }\n",
     );
 
-    let audit = audit_pack(root.path(), manifest(root.path()));
+    let audit = audit_pack(&walked(root.path()), manifest(root.path()));
 
     let workflow = &audit.workflows[0];
     assert!(workflow.error.is_none(), "{:?}", workflow.error);
@@ -253,5 +258,41 @@ fn the_inventory_lists_the_repository_paths_a_node_names() {
             ("fix", vec!["**/*.rs", "docs/**"]),
             ("polish", vec![]),
         ]
+    );
+}
+
+/// A prompt file named by a path that climbs out of the pack is read from nowhere: its
+/// node says it cannot be read, and the text of the file beside the pack never reaches the
+/// inventory.
+#[test]
+fn a_prompt_file_outside_the_pack_is_never_read() {
+    let root = tempfile::tempdir().unwrap();
+    let pack = root.path().join("pack");
+    write(
+        &root.path().join("outside.md"),
+        "the text beside the pack\n",
+    );
+    write(
+        &pack.join("pack.yaml"),
+        "name: climbing\npublisher: acme\nversion: 1.0.0\n\
+         declares:\n  permissions: edit\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [draft.yaml]\n",
+    );
+    write(
+        &pack.join("draft.yaml"),
+        "name: draft\nnodes:\n  - id: draft\n    kind: prompt\n    prompt: { file: ../outside.md }\n",
+    );
+
+    let audit = audit_pack(&walked(&pack), manifest(&pack));
+    let prompt = audit.workflows[0].nodes[0]
+        .prompt
+        .as_ref()
+        .expect("draft is a prompt node");
+    let error = prompt
+        .as_ref()
+        .expect_err("the file beside the pack is not read");
+    assert!(
+        error.to_string().contains("outside.md"),
+        "it names the file it would not read: {error}"
     );
 }

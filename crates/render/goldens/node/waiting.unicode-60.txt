@@ -22,4 +22,4 @@ submit  questions
 needs you: asked 3 questions: `where-global-lives`, `how-re…
 
 next
-  yunta status Q78GRR   shows the whole run
+  yunta status Q78GRR   where the run stands

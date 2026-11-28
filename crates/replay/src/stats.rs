@@ -45,7 +45,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use crate::{FindingActivity, RunState, Submissions, TimeSpent};
-use yunta_core::events::{Spend, Suspensions, TokenUsage, UnknownKindCount};
+use yunta_core::events::{NodeRecord, Spend, Suspensions, TokenUsage, UnknownKindCount};
 use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
 use yunta_core::{ModelName, Node, NodeId, RunnerName, Workflow};
@@ -225,18 +225,12 @@ impl RunStats {
 /// it as of its own last event.
 ///
 /// `state` is the log already replayed. A caller that reads several
-/// things off one log — a frame reads its stats, its phase and its
-/// tokens — replays it once and hands the answer down, rather than
-/// paying for the same fold again per reader.
+/// things off one log — a page reads its stats, its frame and what the
+/// clock adds to it — replays it once and hands the answer down, rather
+/// than paying for the same fold again per reader.
 fn observed(state: &RunState, workflow: &Workflow, observed_at: Option<DateTime<Utc>>) -> RunStats {
     let asleep = state.run.suspensions();
-    // The clock is read to the observation while the run is still going,
-    // and to its last applied event once it has finished or broken: a
-    // finished run's clock stops with its close, a broken one at the break.
-    let until = match observed_at {
-        Some(now) if !state.ended() => Some(now),
-        _ => state.clock().last_at(),
-    };
+    let until = clock_read_to(state, observed_at);
     // An open attempt is measured to the instant the clock is read to, so a
     // run that has stopped stops its attempts with it. A read with no instant
     // names none, and its attempts stay unmeasured.
@@ -298,6 +292,34 @@ fn findings_settled(state: &RunState) -> u64 {
     (state.findings.effective().len() - state.findings.unsettled().len()) as u64
 }
 
+/// The instant the clock of the run `state` derives is read to when it is
+/// looked at `observed_at`: the observation while the run is still going,
+/// and its last applied event once it has finished or broken, or when it is
+/// looked at with no instant. A finished run's clock stops with its close, a
+/// broken one at the break. What every reading of a run's times measures
+/// to, its stats and what the clock adds to its frame alike.
+pub(crate) fn clock_read_to(
+    state: &RunState,
+    observed_at: Option<DateTime<Utc>>,
+) -> Option<DateTime<Utc>> {
+    match observed_at {
+        Some(now) if !state.ended() => Some(now),
+        _ => state.clock().last_at(),
+    }
+}
+
+/// How long the stretch of work `record` has open has run at `open_at`,
+/// the host's sleep left out: `None` with no instant, or no stretch open.
+pub(crate) fn open_attempt(
+    record: &NodeRecord,
+    asleep: &Suspensions,
+    open_at: Option<DateTime<Utc>>,
+) -> Option<Duration> {
+    open_at
+        .zip(record.working_since)
+        .map(|(at, since)| asleep.awake_between(since, at))
+}
+
 /// Every node that reached at least one `node_started`, in the
 /// workflow's own declaration order, each read off its own record.
 fn node_stats(
@@ -341,9 +363,7 @@ fn node_stat(
         tokens: record.spend.so_far(),
         attempts: record.attempts,
         active: record.active,
-        open_attempt: open_at
-            .zip(record.working_since)
-            .map(|(at, since)| asleep.awake_between(since, at)),
+        open_attempt: open_attempt(record, asleep, open_at),
         blocked: ready.map_or(Duration::ZERO, |ready| asleep.awake_between(ready, started)),
         models: record.models.clone(),
     })

@@ -2,8 +2,9 @@
 //! it says in fewer rows that fits, else all of it, scrolled; a page on a screen short of
 //! rows, its blank rows given way.
 
-use crate::components::{Region, Sight};
+use crate::components::{Check, Checklist, Fields, Fix, Found, Region, Section, Sight};
 use crate::doc::{Block, Doc};
+use crate::glyphs::Glyphs;
 use crate::golden::ENVIRONMENTS;
 use crate::line::Line;
 use crate::look::{Look, Width};
@@ -78,4 +79,115 @@ fn a_page_on_a_screen_short_of_rows_gives_its_blank_rows_way() {
     let close = texts(&terminal.pane_short_of_rows(&page, 10).lines);
     assert_eq!(close[6], "line 7", "its blank row given way");
     assert_eq!(close[9], "... 3 more lines");
+}
+
+/// A page on a screen standing short of rows says each labelled value and each checklist row
+/// on its own row, cut at the pane's edge, where a taller screen wraps them under their first
+/// column; what a person pastes stands as written, where a taller screen sets it.
+#[test]
+fn a_page_on_a_screen_short_of_rows_cuts_each_value_to_its_row() {
+    let cells = 40;
+    let terminal = Terminal::on(Look {
+        width: Width::exact(cells),
+        glyphs: Glyphs::Unicode,
+        ..pane_look()
+    });
+    let page = || {
+        let found = "none declared: a workflow's agent nodes cannot run";
+        let fix = Fix {
+            said: "declare a runner in .yunta/config.yaml".to_string(),
+            paste: vec!["runners:".to_string()],
+        };
+        let mut checks = Checklist::default();
+        checks.push_check(Check::new(Found::Caution, "runners", found).fix(fix));
+        let now = "0 checkouts, builds 0 B of a 98.9 GB budget";
+        let fields = Fields::new().push_if("now", now);
+        Region::new(Doc::new().with(fields).with(checks))
+    };
+    let aired = texts(&terminal.pane(&page(), 20).lines);
+    assert_eq!(aired.len(), 8, "a taller screen wraps them: {aired:#?}");
+    let close = texts(&terminal.pane_short_of_rows(&page(), 20).lines);
+    assert_eq!(close.len(), 4, "a row each: {close:#?}");
+    for row in &close[..3] {
+        assert!(
+            row.ends_with('…') && crate::width::cell_width(row) <= cells,
+            "{close:#?}"
+        );
+    }
+    assert!(
+        close[0].starts_with("  now          0 checkouts"),
+        "{close:#?}"
+    );
+    assert!(
+        close[1].starts_with("  ▲ runners  none declared"),
+        "{close:#?}"
+    );
+    assert!(
+        close[2].starts_with("    fix      declare a runner"),
+        "{close:#?}"
+    );
+    assert_eq!(
+        close.last(),
+        aired.last(),
+        "what is pasted stands where it stood"
+    );
+}
+
+/// A page that keeps its values and its checks inside sections, as a workflow checked in the
+/// catalog's place does, says each on its own row on a screen standing short of rows too: a
+/// section's blocks are drawn one step in by the same rule as the page's own.
+#[test]
+fn a_page_on_a_screen_short_of_rows_cuts_each_value_in_a_section_to_its_row() {
+    let cells = 40;
+    let terminal = Terminal::on(Look {
+        width: Width::exact(cells),
+        glyphs: Glyphs::Unicode,
+        ..pane_look()
+    });
+    let page = || {
+        let mut checks = Checklist::default();
+        checks.push(
+            Found::Caution,
+            "runners",
+            "none declared: a workflow's agent nodes cannot run",
+        );
+        let fields = Fields::new().push_if("now", "0 checkouts, builds 0 B of a 98.9 GB budget");
+        let section = Section {
+            lead: None,
+            title: Line::new().plain("lint-fix"),
+            blocks: vec![fields.into(), checks.into()],
+        };
+        Region::new(Doc::new().with(section))
+    };
+    let aired = texts(&terminal.pane(&page(), 20).lines);
+    assert!(aired.len() > 4, "a taller screen wraps them: {aired:#?}");
+    let close = texts(&terminal.pane_short_of_rows(&page(), 20).lines);
+    assert_eq!(close.len(), 3, "the title and a row each: {close:#?}");
+    for row in &close[1..] {
+        assert!(
+            row.ends_with('…') && crate::width::cell_width(row) <= cells,
+            "{close:#?}"
+        );
+    }
+}
+
+/// A page read along a pointer through its rows, as the packs installed are, stands close on
+/// a screen standing short of rows as a page read from its top does, its pointed row kept; a
+/// taller screen keeps its blank rows.
+#[test]
+fn a_page_along_a_pointer_stands_close_on_a_screen_short_of_rows() {
+    let terminal = Terminal::on(pane_look());
+    let page = || {
+        let mut packs = Checklist::default().pointing_at("acme/demo".to_string());
+        packs.push(Found::Holds, "acme/demo", "main, as its lock records it");
+        let lock = Fields::new().push_if("lock", ".yunta/yunta.lock");
+        let doc = Doc::new().with(packs).with(lock);
+        Region::new(doc).in_sight(Sight::following_pointer())
+    };
+    let aired = texts(&terminal.pane(&page(), 10).lines);
+    assert_eq!(aired.len(), 3, "a blank row between the two: {aired:#?}");
+    let close = texts(&terminal.pane_short_of_rows(&page(), 10).lines);
+    assert_eq!(close.len(), 2, "a row each: {close:#?}");
+    assert!(close[0].starts_with("* + acme/demo"), "{close:#?}");
+    assert!(close[1].starts_with("  lock"), "{close:#?}");
 }

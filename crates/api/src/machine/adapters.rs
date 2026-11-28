@@ -106,6 +106,27 @@ pub fn first_built_adapter() -> AdapterId {
 /// each with that adapter's own settings (a `binary` override, if
 /// declared).
 pub fn real_adapters(config: &ConfigLayer) -> Adapters {
+    offered(config)
+        .into_iter()
+        .map(|adapter| (adapter.id().clone(), adapter))
+        .collect()
+}
+
+/// The adapters a run under `config` can be pinned to, by id, in the order
+/// the composition root declares them: those [`real_adapters`] offers. A pin
+/// outside them is refused before the run exists, so a surface that offers a
+/// pin offers these and no other.
+pub(crate) fn pinnable_adapter_ids(config: &ConfigLayer) -> Vec<AdapterId> {
+    offered(config)
+        .iter()
+        .map(|adapter| adapter.id().clone())
+        .collect()
+}
+
+/// Each adapter of [`built_adapters`] that `runners:` names as a candidate
+/// somewhere in `config`, under that adapter's own settings, in the order
+/// the composition root declares them.
+fn offered(config: &ConfigLayer) -> Vec<Arc<dyn Adapter>> {
     let named: Vec<&AdapterId> = config
         .runners
         .iter()
@@ -124,13 +145,30 @@ pub fn real_adapters(config: &ConfigLayer) -> Adapters {
     })
     .into_iter()
     .filter(|adapter| named.contains(&adapter.id()))
-    .map(|adapter| (adapter.id().clone(), adapter))
     .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A run can be pinned to the adapters the runners name that this
+    /// binary builds, in the order it builds them, whatever order the
+    /// runners name them in; one no runner names is offered by none.
+    #[test]
+    fn a_run_is_pinned_only_to_what_the_runners_name_in_the_order_built() {
+        let built = built_adapter_ids();
+        let candidates: String = built
+            .iter()
+            .rev()
+            .map(|adapter| format!("    - {{ adapter: {adapter}, model: any }}\n"))
+            .collect();
+        let named = ConfigLayer::read(&format!("runners:\n  executor:\n{candidates}"))
+            .expect("a config naming every built adapter");
+        assert_eq!(pinnable_adapter_ids(&named), built);
+        let none = ConfigLayer::read("defaults:\n  isolation: none\n").expect("a config");
+        assert_eq!(pinnable_adapter_ids(&none), Vec::<AdapterId>::new());
+    }
 
     /// The example a surface offers is an adapter that exists, so
     /// copying the line it prints produces a config this binary can run.

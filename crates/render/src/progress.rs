@@ -14,7 +14,7 @@ use surco::glyphs::Glyphs;
 use surco::text::counted;
 use surco::words::Standing;
 use yunta_core::events::{TaskLedger, TaskStatus};
-use yunta_replay::frame::{Counter, RunFrame, RunPhase, TaskCounter};
+use yunta_replay::frame::{Counter, RunFrame, RunPhase, RunTimes, TaskCounter};
 
 use crate::{engine, pause};
 
@@ -23,18 +23,18 @@ use crate::{engine, pause};
 /// name is in the table `--full` draws.
 const NAMES: usize = 3;
 
-/// How far a run has come, as its page's `progress` row says it: the
-/// nodes done of the ones this run will do, what narrowed that total, and
-/// the reroutes that grew it. Where each other node stands is said by
-/// [`places`], with its name.
-pub fn row(frame: &RunFrame, glyphs: Glyphs) -> String {
-    let sep = glyphs.sep();
+/// How far a run has come, as its page's `progress` row and the glance at it say it, a
+/// comma between two clauses: the nodes done of the ones this run will do, what narrowed that
+/// total, and the reroutes that grew it. Where each other node stands is said by [`places`],
+/// with its name.
+pub fn row(frame: &RunFrame) -> String {
     let flow = &frame.flow;
-    let mut text = format!("{}{}", done(flow), narrowed(flow, sep));
+    let mut clauses = vec![done(flow)];
+    clauses.extend(narrowed(flow));
     if frame.reroutes > 0 {
-        text.push_str(&format!(" {sep} {}", counted(frame.reroutes, "reroute")));
+        clauses.push(counted(frame.reroutes, "reroute"));
     }
-    text
+    clauses.join(", ")
 }
 
 /// Every place the run's nodes stand in, as a page's `nodes` rows say
@@ -132,17 +132,17 @@ fn done(counter: &Counter) -> String {
     )
 }
 
-/// What narrowed the nodes this run will do: the ones its mode skips and
-/// the ones its project leaves out, each after `sep`.
-fn narrowed(counter: &Counter, sep: char) -> String {
-    let mut text = String::new();
+/// What narrowed the nodes this run will do, a clause each: the ones its mode skips and the
+/// ones its project leaves out.
+fn narrowed(counter: &Counter) -> Vec<String> {
+    let mut clauses = Vec::new();
     if let Some(mode) = &counter.skipped_by {
-        text.push_str(&format!(" {sep} {} skipped by `{mode}`", counter.skipped));
+        clauses.push(format!("{} skipped by `{mode}`", counter.skipped));
     }
     if counter.left_out > 0 {
-        text.push_str(&format!(" {sep} {} left out", counter.left_out));
+        clauses.push(format!("{} left out", counter.left_out));
     }
-    text
+    clauses
 }
 
 /// The counters, at both levels the run has: the DAG's nodes and the
@@ -173,9 +173,13 @@ pub fn line(frame: &RunFrame, glyphs: Glyphs) -> String {
 /// `yunta status` prints it for one run and `yunta list --runs` under every
 /// row, from the same [`RunFrame`]: a listing whose row said one thing while
 /// the run's own page said another would be a listing nobody could act on.
-pub fn summary(frame: &RunFrame, glyphs: Glyphs) -> String {
+pub fn summary(frame: &RunFrame, times: &RunTimes, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
-    let mut summary = format!("{} {sep} {}", line(frame, glyphs), phase_label(frame));
+    let mut summary = format!(
+        "{} {sep} {}",
+        line(frame, glyphs),
+        phase_label(frame, times)
+    );
     if let Some(note) = crate::state::unknown_kinds(&frame.unknown_kinds) {
         summary.push_str(&format!(" {sep} {note}"));
     }
@@ -183,13 +187,14 @@ pub fn summary(frame: &RunFrame, glyphs: Glyphs) -> String {
 }
 
 /// The phase on one line, for the end of a summary: the word every
-/// surface calls it by, and what qualifies it when something does.
-fn phase_label(frame: &RunFrame) -> String {
+/// surface calls it by, and what qualifies it when something does, how long
+/// its engine has asked at its terminal as `times` measures it.
+fn phase_label(frame: &RunFrame, times: &RunTimes) -> String {
     let word = frame.standing;
     if word == Standing::Stalled {
         return format!("{word}: {}", engine::NOT_DRIVEN);
     }
-    if let (Standing::NeedsYou, Some(asking)) = (word, &frame.asking) {
+    if let (Standing::NeedsYou, Some(asking)) = (word, &times.asking) {
         return format!("{word}: {}", engine::asking_in_full(asking));
     }
     match &frame.phase {
@@ -231,7 +236,9 @@ fn nodes(counter: &Counter, sep: char) -> String {
             text.push_str(&format!(" {sep} {count} {standing}"));
         }
     }
-    text.push_str(&narrowed(counter, sep));
+    for clause in narrowed(counter) {
+        text.push_str(&format!(" {sep} {clause}"));
+    }
     text
 }
 

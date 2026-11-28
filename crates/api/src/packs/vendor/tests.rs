@@ -1,28 +1,16 @@
-use super::split_source_and_ref;
+use std::path::PathBuf;
 
-/// A pin follows the source's path, after its last `@`.
-#[test]
-fn a_pin_after_the_path_is_the_ref() {
-    assert_eq!(
-        split_source_and_ref("github.com/acme/review-pack@v1.2.0"),
-        ("github.com/acme/review-pack", Some("v1.2.0"))
-    );
-    assert_eq!(
-        split_source_and_ref("git@github.com:acme/review-pack.git@v1"),
-        ("git@github.com:acme/review-pack.git", Some("v1"))
-    );
-}
+use super::PackError;
 
-/// The `@` of an SSH shorthand is the user's, never a pin: before the path,
-/// or, with no `/` at all, followed by the `host:` git never takes in a ref.
+/// A symbolic link found in a pack's own tree, read at its audit or against its lock, is said
+/// as what was found there, a link a pack never ships, and not as what vendoring does.
 #[test]
-fn the_at_of_an_ssh_shorthand_is_never_a_pin() {
+fn a_link_in_a_pack_s_tree_is_said_as_found() {
+    let link = PathBuf::from(".yunta/packs/yunta/fragua/workflows/link.yaml");
+    let said = PackError::Symlink { path: link }.to_string();
     assert_eq!(
-        split_source_and_ref("git@github.com:acme/review-pack.git"),
-        ("git@github.com:acme/review-pack.git", None)
-    );
-    assert_eq!(
-        split_source_and_ref("git@host:review-pack.git"),
-        ("git@host:review-pack.git", None)
+        said,
+        "`.yunta/packs/yunta/fragua/workflows/link.yaml` is a symbolic link in the pack's tree, \
+         which a pack never ships"
     );
 }

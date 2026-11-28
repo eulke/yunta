@@ -49,9 +49,9 @@ impl RunStage {
         let run = &framed.in_view.run;
         match self.chain.answer(&self.run)? {
             Ok(chain) => yunta_replay::receipt::closed_as_kept(
-                &run.run,
-                &run.manifest,
-                &run.state,
+                run.run(),
+                run.manifest(),
+                run.state(),
                 chain.clone(),
             )
             .ok()

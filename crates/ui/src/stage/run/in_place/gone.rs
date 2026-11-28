@@ -24,10 +24,10 @@ impl InPlace {
     /// its pause, the answer given here was noted already, or `run` is not the run its pause
     /// is of, as when the stage moved onto a child, a parent or a successor.
     pub(super) fn noted_as_it_goes(&self, run: &FollowedRun) -> Option<Notice> {
-        if *self.pause.run() != run.run {
+        if self.pause.run() != run.run() {
             return None;
         }
-        let answered_elsewhere = self.answered_as_logged(&run.state)?;
+        let answered_elsewhere = self.answered_as_logged(run.state())?;
         match &self.answer {
             Answer::Open => Some(Notice::AnsweredElsewhere(answered_elsewhere)),
             Answer::UnderWay(said) => Some(Notice::Recorded(said.clone())),

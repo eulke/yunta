@@ -146,9 +146,13 @@ pub struct PackContents {
 pub struct PackLockEntry {
     pub publisher: Publisher,
     pub name: PackName,
-    /// The clone URL `add` was given — remembered so `update
-    /// publisher/name@newref` never needs the URL
-    /// repeated; only the ref changes.
+    /// Where the pack was fetched from, without its ref:
+    /// `<repository>[//<directory>]`, the repository as git cloned it (a
+    /// bare `host/path` with `https://` put before it), then the directory
+    /// the pack stands at inside it, where that is not its root. An update
+    /// clones from it again, so only the ref changes. The file is committed
+    /// and a pull request can edit it, so an update reads it as it reads a
+    /// source a person names, refusing one that is no place to fetch from.
     pub source: String,
     /// The ref `add`/`update` was told to install (a tag, branch or
     /// commit-ish) — what a human reads to know what was asked for.

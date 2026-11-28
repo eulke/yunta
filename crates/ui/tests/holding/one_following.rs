@@ -102,7 +102,7 @@ impl OneChannel {
                 .expect("the application catches up")
                 .expect("an input");
             if let Input::FollowNews(FollowNews::Whole { run, .. }) = &input {
-                self.wholes += usize::from(run.run == *self.run());
+                self.wholes += usize::from(run.run() == self.run());
             }
             asked = self.state.update(input);
         }

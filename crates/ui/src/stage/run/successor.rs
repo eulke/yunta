@@ -17,7 +17,7 @@ impl RunStage {
         let Some(successor) = successor.filter(|_| self.leads()) else {
             return;
         };
-        let (run, by) = (self.run.clone(), successor.run.run.clone());
+        let (run, by) = (self.run.clone(), successor.run.run().clone());
         self.succeeded(&run, &by);
     }
 }

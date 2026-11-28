@@ -19,3 +19,15 @@ pub use listed::{Listed, PointedPacks, VendoredPack, VendoredTree};
 pub use new_pack::{NewPack, NewPackCheck};
 pub use removed::Removed;
 pub use updated::Updated;
+
+use std::path::Path;
+
+/// What a symbolic link found in a pack's own tree is, wherever the tree is read, at its audit
+/// or against its lock: something a pack never ships. Not a link a pack's source holds as it is
+/// fetched, which an add refuses before anything of it is read.
+pub fn link_in_its_tree(link: &Path) -> String {
+    format!(
+        "`{}` is a symbolic link in the pack's tree, which a pack never ships",
+        link.display()
+    )
+}

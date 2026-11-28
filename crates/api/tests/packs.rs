@@ -9,9 +9,10 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use yunta_api::{Error, Remark, Stop, Workspace};
+use yunta_core::disk::SystemDisk;
 use yunta_core::pace::Pace;
 use yunta_core::persisted::PersistedDoc;
-use yunta_core::refusal::PackRefusal;
+use yunta_core::refusal::{PackRefusal, SourceDirectoryFault};
 use yunta_core::{
     sha256_hex, Env, PackLock, PackLockEntry, PackRef, ProcessSecrets, SystemIdSource,
 };
@@ -19,6 +20,9 @@ use yunta_engine::lock::{self, Acquired, Contention, SystemProbe};
 use yunta_render::refusal::Refused;
 use yunta_testkit::{git, init_repo};
 use yunta_testkit_core::FixedClock;
+
+#[path = "packs/reaching_past.rs"]
+mod reaching_past;
 
 /// How long the test gives the install to write before it looks: many polls
 /// of a waiting pack command, and far longer than a local clone, vendor and
@@ -168,6 +172,205 @@ async fn a_relative_source_is_read_from_the_workspace() {
         .exists());
 }
 
+/// A pack standing at a directory of a larger repository, named
+/// `<repository>//<directory>`, installs as the same pack at a repository's
+/// root does: the same manifest, the same audit, the same vendored tree and
+/// content hash. Nothing of the repository outside that directory reaches the
+/// project, and the lock records the source with its directory.
+#[tokio::test]
+async fn a_pack_at_a_directory_of_its_repository_installs_as_one_at_a_root_does() {
+    let root = tempfile::tempdir().unwrap();
+    let alone = root.path().join("alone");
+    pack_repo(&alone);
+    let monorepo = root.path().join("monorepo");
+    monorepo_holding_the_pack(&monorepo, &root.path().join("elsewhere"));
+    let stop = Stop::new();
+    let quiet = |_: Remark| {};
+
+    let from_root = project(&root.path().join("from-root"), root.path());
+    let fetched = from_root
+        .packs()
+        .fetch(alone.to_str().unwrap(), false, &stop)
+        .await
+        .unwrap();
+    let audit_at_root = format!("{:#?}", fetched.audit());
+    let at_root = fetched.install(&quiet, &stop).await.unwrap();
+
+    let from_directory = project(&root.path().join("from-directory"), root.path());
+    let source = format!("{}//packs/demo", monorepo.display());
+    let fetched = from_directory
+        .packs()
+        .fetch(&source, false, &stop)
+        .await
+        .unwrap();
+    let audit_at_directory = format!("{:#?}", fetched.audit());
+    let at_directory = fetched.install(&quiet, &stop).await.unwrap();
+
+    assert_eq!(at_directory.pack, at_root.pack);
+    assert_eq!(at_directory.manifest, at_root.manifest);
+    assert_eq!(audit_at_directory, audit_at_root);
+    assert_eq!(files_under(&at_directory.dir), files_under(&at_root.dir));
+    assert_eq!(
+        files_under(&at_directory.dir),
+        [".gitkeep", "pack.yaml", "workflows/review.yaml"]
+    );
+    let pack = at_root.pack;
+    let locked_at_root = read_lock(&from_root.dir).packs[&pack].clone();
+    let locked_at_directory = read_lock(&from_directory.dir).packs[&pack].clone();
+    assert_eq!(
+        locked_at_directory.content_hash,
+        locked_at_root.content_hash
+    );
+    assert_eq!(locked_at_directory.source, source);
+}
+
+/// A directory written to climb out with `..` is refused before anything is
+/// cloned: the repository it names does not exist, so a clone would fail.
+#[tokio::test]
+async fn a_directory_that_climbs_out_of_its_repository_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = project(&root.path().join("repo"), root.path());
+    let source = format!("{}//packs/../../etc", root.path().join("absent").display());
+
+    let refused = workspace.packs().fetch(&source, false, &Stop::new()).await;
+
+    assert_eq!(
+        source_directory_refusal(refused),
+        (
+            source,
+            "packs/../../etc".to_string(),
+            SourceDirectoryFault::Climbs
+        )
+    );
+}
+
+/// A directory written from a filesystem's root is refused before anything is
+/// cloned.
+#[tokio::test]
+async fn an_absolute_directory_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = project(&root.path().join("repo"), root.path());
+    let source = format!("{}///etc", root.path().join("absent").display());
+
+    let refused = workspace.packs().fetch(&source, false, &Stop::new()).await;
+
+    assert_eq!(
+        source_directory_refusal(refused),
+        (source, "/etc".to_string(), SourceDirectoryFault::Absolute)
+    );
+}
+
+/// A directory the repository reaches through a symbolic link is refused,
+/// though the link leads to a pack that would install: the pack is fetched
+/// from the repository's own directories only, and nothing is vendored.
+#[tokio::test]
+async fn a_directory_reached_through_a_symbolic_link_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let elsewhere = root.path().join("elsewhere");
+    let monorepo = root.path().join("monorepo");
+    monorepo_holding_the_pack(&monorepo, &elsewhere);
+    let repo = root.path().join("repo");
+    let workspace = project(&repo, root.path());
+    let source = format!("{}//packs/linked", monorepo.display());
+
+    let refused = workspace.packs().fetch(&source, false, &Stop::new()).await;
+
+    let link = "packs/linked".to_string();
+    assert_eq!(
+        source_directory_refusal(refused),
+        (
+            source,
+            "packs/linked".to_string(),
+            SourceDirectoryFault::Linked { link }
+        )
+    );
+    assert!(!repo.join(".yunta/packs").exists());
+}
+
+/// A directory the repository does not hold is refused, naming it.
+#[tokio::test]
+async fn a_directory_its_repository_does_not_hold_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let monorepo = root.path().join("monorepo");
+    monorepo_holding_the_pack(&monorepo, &root.path().join("elsewhere"));
+    let workspace = project(&root.path().join("repo"), root.path());
+    let source = format!("{}//packs/absent", monorepo.display());
+
+    let refused = workspace.packs().fetch(&source, false, &Stop::new()).await;
+
+    assert_eq!(
+        source_directory_refusal(refused),
+        (
+            source,
+            "packs/absent".to_string(),
+            SourceDirectoryFault::Missing
+        )
+    );
+}
+
+/// The source, the directory and the fault of a fetch refused for the
+/// directory its source names, or a panic naming what it was instead.
+fn source_directory_refusal(
+    fetched: Result<yunta_api::FetchedPack, Error>,
+) -> (String, String, SourceDirectoryFault) {
+    match fetched {
+        Err(Error::Refused(Refused::Pack(refusal))) => match *refusal {
+            PackRefusal::SourceDirectory {
+                named,
+                directory,
+                why,
+            } => (named, directory, why),
+            other => panic!("refused for another reason: {other:?}"),
+        },
+        Err(other) => panic!("not refused: {other:?}"),
+        Ok(_) => panic!("fetched"),
+    }
+}
+
+/// A repository at `repo` with `.yunta/`, and a workspace working in it.
+fn project(repo: &Path, root: &Path) -> Workspace {
+    std::fs::create_dir_all(repo.join(".yunta")).unwrap();
+    init_repo(repo);
+    workspace(repo, root)
+}
+
+/// A repository at `dir` holding, at `packs/demo`, the tree `pack_repo`
+/// commits at a repository's root (the `.gitkeep` it begins with included),
+/// beside files of its own outside it: a README at its root, another
+/// directory under `packs/`, and `packs/linked`, a symbolic link to
+/// `elsewhere`, a directory outside the repository holding the same pack.
+fn monorepo_holding_the_pack(dir: &Path, elsewhere: &Path) {
+    let pack = dir.join("packs/demo");
+    std::fs::create_dir_all(&pack).unwrap();
+    init_repo(dir);
+    write_pack(&pack);
+    std::fs::write(pack.join(".gitkeep"), "").unwrap();
+    std::fs::write(dir.join("README.md"), "a repository of many things\n").unwrap();
+    std::fs::create_dir_all(dir.join("packs/other")).unwrap();
+    std::fs::write(dir.join("packs/other/notes.md"), "not the pack\n").unwrap();
+    write_pack(elsewhere);
+    std::os::unix::fs::symlink(elsewhere, dir.join("packs/linked")).unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", "a pack among other things"]);
+}
+
+/// Every file under `dir`, relative to it, sorted.
+fn files_under(dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            match path.is_dir() {
+                true => walk(root, &path, out),
+                false => out.push(path.strip_prefix(root).unwrap().display().to_string()),
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(dir, dir, &mut files);
+    files.sort();
+    files
+}
+
 /// The packs held by the test, as another pack command would hold them;
 /// dropped, they are let go.
 struct Held {
@@ -221,14 +424,24 @@ fn workspace(repo: &Path, root: &Path) -> Workspace {
         secrets: Arc::new(ProcessSecrets),
         forges: Arc::new(yunta_api::DeclaredForge),
         binary: "yunta".into(),
+        disk: Arc::new(SystemDisk),
     }
 }
 
 /// A pack repository at `dir`, `acme/review-pack`, with one workflow and no
 /// executors, committed.
 fn pack_repo(dir: &Path) {
-    std::fs::create_dir_all(dir.join("workflows")).unwrap();
+    std::fs::create_dir_all(dir).unwrap();
     init_repo(dir);
+    write_pack(dir);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", "v1"]);
+}
+
+/// The files of `acme/review-pack` written at `dir`: its manifest and its one
+/// workflow.
+fn write_pack(dir: &Path) {
+    std::fs::create_dir_all(dir.join("workflows")).unwrap();
     std::fs::write(
         dir.join("pack.yaml"),
         "name: review-pack\n\
@@ -244,8 +457,6 @@ fn pack_repo(dir: &Path) {
         "name: review\nnodes:\n  - id: noop\n    kind: bash\n    run: \"true\"\n",
     )
     .unwrap();
-    git(dir, &["add", "."]);
-    git(dir, &["commit", "-q", "-m", "v1"]);
 }
 
 /// The entry another pack command writes while the test holds the packs.

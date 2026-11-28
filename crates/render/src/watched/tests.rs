@@ -3,6 +3,7 @@ use surco::paint::Paint;
 use yunta_core::NodeId;
 use yunta_replay::frame::RunFrame;
 use yunta_replay::frame::RunPhase;
+use yunta_replay::frame::{NodeTimes, RunTimes};
 
 use super::*;
 
@@ -42,8 +43,9 @@ fn the_live_view_indents_a_groups_children_under_it() {
         yunta_replay::frame::NodeFrame::sample(&NodeId::from("review-a"), NodeStanding::ToGo);
     child.group = Some(group.id.clone());
 
-    let top = drawn(node_rows(&frame, &group, None, &look(120)));
-    let under = drawn(node_rows(&frame, &child, None, &look(120)));
+    let times = NodeTimes::sample();
+    let top = drawn(node_rows(&frame, &group, &times, None, &look(120)));
+    let under = drawn(node_rows(&frame, &child, &times, None, &look(120)));
     assert!(
         !top[0].starts_with(' '),
         "a top-level node starts at the margin: {top:?}"
@@ -70,7 +72,8 @@ fn a_running_task_no_session_works_is_said_to_be_checking_its_criteria() {
         },
     ];
 
-    let rows = drawn(node_rows(&frame, &node, None, &look(120)));
+    let times = NodeTimes::sample();
+    let rows = drawn(node_rows(&frame, &node, &times, None, &look(120)));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "tasks running: T001 (checking criteria), T002"),
@@ -78,30 +81,37 @@ fn a_running_task_no_session_works_is_said_to_be_checking_its_criteria() {
     );
 }
 
-/// A node at work, `events` events into its attempt, `age` seconds past the last.
-fn at_work(events: u64, age: u64) -> NodeFrame {
+/// A node at work, `events` events into its attempt.
+fn at_work(events: u64) -> NodeFrame {
     let mut node =
         yunta_replay::frame::NodeFrame::sample(&NodeId::from("implement"), NodeStanding::ToGo);
     node.standing = Standing::Running;
-    node.elapsed = Some(Duration::from_secs(40));
-    node.last_event_age = Some(Duration::from_secs(age));
     node.events = events;
     node
 }
 
-/// The first row of `node`, as a reader sees it.
-fn first_row(node: &NodeFrame, motion: Motion) -> String {
+/// What the clock adds to a node at work forty seconds, `age` seconds past its last event.
+fn worked(age: u64) -> NodeTimes {
+    NodeTimes {
+        elapsed: Some(Duration::from_secs(40)),
+        last_event_age: Some(Duration::from_secs(age)),
+        people: Duration::ZERO,
+    }
+}
+
+/// The first row of `node`, `age` seconds past its last event, as a reader sees it.
+fn first_row(node: &NodeFrame, age: u64, motion: Motion) -> String {
     let frame = RunFrame::sample(&RUN);
     let look = Look {
         motion,
         ..look(120)
     };
-    drawn(node_rows(&frame, node, None, &look)).remove(0)
+    drawn(node_rows(&frame, node, &worked(age), None, &look)).remove(0)
 }
 
 #[test]
 fn a_running_node_turns_a_frame_per_event_and_says_how_long_it_has_run() {
-    let row = |events| first_row(&at_work(events, 1), Motion::Moves);
+    let row = |events| first_row(&at_work(events), 1, Motion::Moves);
     assert_eq!(row(3), "⠸ implement running for 40s");
     assert_eq!(row(4), "⠼ implement running for 40s");
     assert_eq!(row(13), row(3), "ten frames make a turn");
@@ -109,14 +119,14 @@ fn a_running_node_turns_a_frame_per_event_and_says_how_long_it_has_run() {
 
 #[test]
 fn a_node_that_falls_quiet_says_for_how_long_and_its_spin_goes_out() {
-    let row = |age| first_row(&at_work(3, age), Motion::Moves);
+    let row = |age| first_row(&at_work(3), age, Motion::Moves);
     assert_eq!(row(9), "⠸ implement running for 40s");
     assert_eq!(row(10), "⠸ implement running for 40s · quiet 10s");
     assert_eq!(row(11), "⠸ implement running for 40s · quiet 11s");
 
     let frame = RunFrame::sample(&RUN);
     let tone = |age| {
-        let rows = node_rows(&frame, &at_work(3, age), None, &look(120));
+        let rows = node_rows(&frame, &at_work(3), &worked(age), None, &look(120));
         rows.first()
             .and_then(|row| row.spans().first())
             .map(|span| span.tone)
@@ -127,7 +137,7 @@ fn a_node_that_falls_quiet_says_for_how_long_and_its_spin_goes_out() {
 
 #[test]
 fn a_still_view_keeps_the_mark_and_every_word() {
-    let row = |age| first_row(&at_work(3, age), Motion::Still);
+    let row = |age| first_row(&at_work(3), age, Motion::Still);
     assert_eq!(row(1), "● implement running for 40s");
     assert_eq!(row(11), "● implement running for 40s · quiet 11s");
 }
@@ -136,27 +146,30 @@ fn a_still_view_keeps_the_mark_and_every_word() {
 /// waited, and silence is what waiting is.
 #[test]
 fn only_a_node_that_runs_turns_or_is_called_quiet() {
-    let mut node = at_work(3, 180);
+    let mut node = at_work(3);
     node.standing = Standing::Waiting;
-    assert_eq!(first_row(&node, Motion::Moves), "● implement waiting · 40s");
+    assert_eq!(
+        first_row(&node, 180, Motion::Moves),
+        "● implement waiting · 40s"
+    );
 }
 
 /// The runner a node resolved through stands after what the row says of its time.
 #[test]
 fn a_row_ends_on_what_it_runs_on() {
-    let mut node = at_work(3, 11);
+    let mut node = at_work(3);
     node.runner = Some(yunta_core::events::ResolvedRunner {
         runner: "planner".into(),
         chosen: yunta_core::RunnerCandidate {
             adapter: "mock".into(),
-            model: "mock-model".into(),
+            model: Some("mock-model".into()),
             agent: None,
             effort: None,
         },
         discarded: Vec::new(),
     });
     assert_eq!(
-        first_row(&node, Motion::Moves),
+        first_row(&node, 11, Motion::Moves),
         "⠸ implement running for 40s · quiet 11s · planner mock/mock-model"
     );
 }
@@ -190,7 +203,8 @@ fn a_node_row_says_what_its_calls_came_to() {
         yunta_replay::frame::NodeFrame::sample(&NodeId::from("implement"), NodeStanding::ToGo);
     node.activity = activity();
 
-    let rows = drawn(node_rows(&frame, &node, None, &look(120)));
+    let times = NodeTimes::sample();
+    let rows = drawn(node_rows(&frame, &node, &times, None, &look(120)));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "read ×4 · edit crates/cli/src/pack.rs · run cargo test"),
@@ -205,13 +219,14 @@ fn a_row_with_no_room_lets_its_oldest_calls_go() {
         yunta_replay::frame::NodeFrame::sample(&NodeId::from("implement"), NodeStanding::ToGo);
     node.activity = activity();
 
-    let rows = drawn(node_rows(&frame, &node, None, &look(50)));
+    let times = NodeTimes::sample();
+    let rows = drawn(node_rows(&frame, &node, &times, None, &look(50)));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "edit crates/cli/src/pack.rs · run cargo test"),
         "{rows:?}"
     );
-    let rows = drawn(node_rows(&frame, &node, None, &look(20)));
+    let rows = drawn(node_rows(&frame, &node, &times, None, &look(20)));
     assert!(
         rows.iter().any(|row| row.trim() == "run cargo test"),
         "what it does now is what stays: {rows:?}"
@@ -223,7 +238,7 @@ fn a_row_with_no_room_lets_its_oldest_calls_go() {
 #[test]
 fn the_ribbon_plows_the_running_node_only_where_the_view_moves() {
     let frame = RunFrame {
-        nodes: vec![at_work(7, 0)],
+        nodes: vec![at_work(7)],
         ..RunFrame::sample(&RUN)
     };
     let moving = ribbon(&frame, Motion::Moves);
@@ -247,7 +262,6 @@ fn standing(phase: RunPhase) -> RunFrame {
             &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
         ),
         phase,
-        elapsed: Some(Duration::from_secs(3)),
         ..RunFrame::sample(&RUN)
     }
 }
@@ -348,7 +362,14 @@ pub(super) fn fragua() -> yunta_core::Workflow {
 
 /// The design's run cut at `seq`, as a person watches it while an engine drives it: its
 /// frame read at its last event, its workflow and its state.
-pub(super) fn designed_at(seq: u64) -> (RunFrame, yunta_core::Workflow, yunta_replay::RunState) {
+pub(super) fn designed_at(
+    seq: u64,
+) -> (
+    RunFrame,
+    RunTimes,
+    yunta_core::Workflow,
+    yunta_replay::RunState,
+) {
     let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
     designed_under(seq, &engine)
 }
@@ -357,7 +378,12 @@ pub(super) fn designed_at(seq: u64) -> (RunFrame, yunta_core::Workflow, yunta_re
 /// stands: its frame read at its last event, its workflow and its state.
 pub(super) fn designed_parked(
     seq: u64,
-) -> (RunFrame, yunta_core::Workflow, yunta_replay::RunState) {
+) -> (
+    RunFrame,
+    RunTimes,
+    yunta_core::Workflow,
+    yunta_replay::RunState,
+) {
     designed_under(seq, &yunta_replay::registry::Engine::Unrecorded)
 }
 
@@ -365,7 +391,12 @@ pub(super) fn designed_parked(
 fn designed_under(
     seq: u64,
     engine: &yunta_replay::registry::Engine,
-) -> (RunFrame, yunta_core::Workflow, yunta_replay::RunState) {
+) -> (
+    RunFrame,
+    RunTimes,
+    yunta_core::Workflow,
+    yunta_replay::RunState,
+) {
     let events: Vec<yunta_core::events::StoredEvent> =
         std::fs::read_to_string(designed().join("log.jsonl"))
             .expect("the design's run is kept")
@@ -376,8 +407,9 @@ fn designed_under(
     let state = yunta_replay::RunState::replay(&events);
     let now = state.clock().last_at().expect("a run with events");
     let workflow = fragua();
-    let frame = RunFrame::of(&events[0].run_id, &workflow, &state, None, engine, now);
-    (frame, workflow, state)
+    let frame = RunFrame::of(&events[0].run_id, &workflow, &state, None, engine);
+    let times = RunTimes::of(&state, engine, now);
+    (frame, times, workflow, state)
 }
 
 /// Fragua's stretches by the ribbon's rule, in the order its workflow declares its nodes.
@@ -407,7 +439,7 @@ fn fraguas_stretches_are_named_by_the_rule_with_or_without_a_run() {
     let workflow = fragua();
     let ids: Vec<&str> = workflow.iter_nodes().map(|node| node.id.as_str()).collect();
     assert_eq!(stretch_names(&ids), FRAGUA_NAMES);
-    let (frame, _, _) = designed_at(42);
+    let (frame, _, _, _) = designed_at(42);
     let ribbon = ribbon(&frame, Motion::Still);
     let named: Vec<&str> = ribbon
         .stretches
@@ -428,8 +460,8 @@ fn headline_drawn(headline: Headline, cells: usize) -> String {
 /// as long, said as any open run's.
 #[test]
 fn the_headline_says_how_long_an_open_run_stood_and_how_long_a_closed_one_took() {
-    let (at_work, _, _) = designed_at(42);
-    let open = headline_drawn(headline(&at_work), 118);
+    let (at_work, times, _, _) = designed_at(42);
+    let open = headline_drawn(headline(&at_work, &times), 118);
     assert!(
         open.starts_with("● fragua (standard) · running · for 7m34s "),
         "{open}"
@@ -438,8 +470,8 @@ fn the_headline_says_how_long_an_open_run_stood_and_how_long_a_closed_one_took()
         open.ends_with(" Q78GRR") && open.chars().count() == 118,
         "{open}"
     );
-    let (finished, _, _) = designed_at(276);
-    let closed = headline_drawn(headline(&finished), 118);
+    let (finished, times, _, _) = designed_at(276);
+    let closed = headline_drawn(headline(&finished, &times), 118);
     assert!(
         closed.starts_with("✓ fragua (standard) · finished · in 1h52m "),
         "{closed}"
@@ -447,10 +479,13 @@ fn the_headline_says_how_long_an_open_run_stood_and_how_long_a_closed_one_took()
     let stalled = RunFrame {
         standing: Standing::Stalled,
         phase: RunPhase::Running,
-        elapsed: Some(Duration::from_secs(60)),
-        since_last_event: Some(Duration::from_secs(9)),
         ..RunFrame::sample(&RUN)
     };
-    let stalled = headline_drawn(headline(&stalled), 118);
+    let quiet = RunTimes {
+        elapsed: Some(Duration::from_secs(60)),
+        since_last_event: Some(Duration::from_secs(9)),
+        ..RunTimes::sample(&stalled)
+    };
+    let stalled = headline_drawn(headline(&stalled, &quiet), 118);
     assert!(stalled.contains(" · stalled · for 9s "), "{stalled}");
 }

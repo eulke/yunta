@@ -140,14 +140,12 @@ async fn an_answered_blocking_finding_still_keeps_the_run_from_success() {
 
     let workflow: yunta_core::Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
     let events = bench.events();
-    let at = events.last().unwrap().timestamp;
     let frame = yunta_replay::frame::RunFrame::of(
         &bench.run_id,
         &workflow,
         &yunta_replay::RunState::replay(&events),
         None,
         &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
-        at,
     );
     assert_eq!(
         frame.blocking_findings, 1,

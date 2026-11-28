@@ -1,11 +1,12 @@
 //! What `yunta test` says as its cases run: each case's row as it ends, in
-//! the column every case's name lines up in, and the tally under them; and
-//! how one case's run ended, which the pages about a pack say of its own
-//! cases too. Running a case is its caller's.
+//! the column every case's name lines up in, and the tally under them; the
+//! same cases as a screen shows them, the tally heading their rows once they
+//! ran; and how one case's run ended, which the pages about a pack say of its
+//! own cases too. Running a case is its caller's.
 
 use std::path::PathBuf;
 
-use surco::components::{Check, Checklist, Found, Headline};
+use surco::components::{Check, Checklist, Found, Furrow, Headline};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
@@ -232,8 +233,10 @@ pub struct Tested {
     pub failures: usize,
 }
 
-impl Page for Tested {
-    fn document(&self, _look: &Look) -> Doc {
+impl Tested {
+    /// The tally as a headline about `subject`: how many cases ran and how many failed, marked
+    /// done where none failed.
+    fn headline(&self, subject: impl Into<String>) -> Headline {
         let tally = format!(
             "{}, {} failed",
             surco::text::counted(self.cases, "case"),
@@ -243,11 +246,46 @@ impl Page for Tested {
             0 => Mark::Done,
             _ => Mark::Failed,
         };
-        Doc::new().with(Headline::new(
-            mark,
-            command::line(&NextStep::Test { dir: None }),
-            tally,
-        ))
+        Headline::new(mark, subject, tally)
+    }
+}
+
+impl Page for Tested {
+    fn document(&self, _look: &Look) -> Doc {
+        let command = command::line(&NextStep::Test { dir: None });
+        Doc::new().with(self.headline(command))
+    }
+}
+
+/// The cases as a screen shows them while they run and once they ran: the tally as the page's
+/// headline once every case ran, `cases` its subject where the printed tally names the command
+/// that ran them, then every case that ended in one list, in the column every case's name lines
+/// up in, with what went wrong under each. Not [`TestedCase`] and [`Tested`] as `yunta test`
+/// prints them, each case as it ends and the tally under them.
+pub struct CasesOnScreen<'a> {
+    /// Every case's name, which sets the column the rows share.
+    pub names: &'a [String],
+    /// The cases that ended, in the order they did.
+    pub ended: &'a [RanCase],
+    /// The tally, once every case ran.
+    pub tested: Option<&'a Tested>,
+}
+
+impl Page for CasesOnScreen<'_> {
+    fn document(&self, _look: &Look) -> Doc {
+        let mut doc = Doc::new();
+        if let Some(tested) = self.tested {
+            let headline = tested.headline(crate::screen::CASES);
+            doc = doc.with(headline).with(Furrow(Vec::new()));
+        }
+        if self.ended.is_empty() {
+            return doc;
+        }
+        let mut rows = Checklist::aligned(self.names.to_vec());
+        for case in self.ended {
+            rows.push_check(case.check());
+        }
+        doc.with(rows)
     }
 }
 

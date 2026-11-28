@@ -109,3 +109,24 @@ fn a_decision_offers_a_browser_beside_what_else_moves_the_run() {
     assert!(!said(case.closing(), Depth::Glance).contains(&open));
     assert!(!said(RunScope::Browser, Depth::Full).contains(&open));
 }
+
+/// A closed run's span is said one way wherever it is read: `in` the time it took, on its
+/// printed page and its closing as on its screen's headline, failed or finished alike.
+#[test]
+fn a_closed_run_s_span_reads_as_on_its_screen() {
+    for case in cases()
+        .iter()
+        .filter(|case| ["failed", "finished"].contains(&case.name))
+    {
+        let screen = crate::watched::stood(&case.frame, &case.times).expect("a span");
+        for scope in [RunScope::Status, case.closing()] {
+            let drawn = draw(&case.page(scope, Depth::Glance), &Look::plain());
+            let headline = drawn.lines().next().unwrap_or_default();
+            assert!(
+                headline.contains(&format!("; {screen} ;")),
+                "{}: {headline}",
+                case.name
+            );
+        }
+    }
+}

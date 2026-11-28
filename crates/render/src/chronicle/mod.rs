@@ -44,7 +44,9 @@ use yunta_replay::frame::{Happening, Moment};
 
 use crate::blocks::FailureDetail;
 use crate::command;
-pub use feed::{feed, feed_heading, in_feed, open_attempt_calls, whole, whole_heading};
+pub use feed::{
+    feed, feed_heading, in_feed, open_attempt_calls, whole, whole_heading, OpenAttemptCalls,
+};
 use words::carried;
 pub(crate) use words::{resolution, who_answered};
 

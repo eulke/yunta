@@ -47,5 +47,5 @@ async fn a_run_promoted_before_it_is_followed_is_caught_up_on_its_successor() {
         news.iter().any(handed_on),
         "caught up on {folded} pieces, none a successor"
     );
-    assert_eq!(in_view(&state).run.run, successor);
+    assert_eq!(*in_view(&state).run.run(), successor);
 }

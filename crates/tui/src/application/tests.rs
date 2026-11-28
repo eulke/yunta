@@ -16,6 +16,7 @@ use yunta_core::events::Channel;
 use yunta_testkit::Terminal;
 use yunta_testkit_core::{fixed_now, FixedClock};
 use yunta_testkit_ui::sandbox::workspace;
+use yunta_ui::prompt::Stroke;
 use yunta_ui::{Address, Performer, State};
 
 use super::{Application, Synchronized};
@@ -27,6 +28,9 @@ const SIGNPOST: &str = "not in a repository";
 /// A word of the signpost, which a drawing writes whole: it moves the cursor over the
 /// spaces between words rather than write them.
 const SIGNPOST_WORD: &str = "repository";
+
+/// A word of the signpost's legend, on the screen's last row.
+const SIGNPOST_KEY_WORD: &str = "machine";
 
 /// The application run again in a pseudo-terminal, at `columns` by `rows`.
 fn running(columns: u16, rows: u16) -> Terminal {
@@ -100,7 +104,7 @@ fn a_resize_lays_the_screen_out_at_the_new_size() {
     yunta_testkit::wait_until(
         || {
             let screen = terminal.screen();
-            screen.rows.len() == 30 && screen.rows[29].contains("leaves")
+            screen.rows.len() == 30 && screen.rows[29].contains(SIGNPOST_KEY_WORD)
         },
         || format!("never laid out at 100 by 30\n{:#?}", terminal.screen().rows),
     );
@@ -164,6 +168,7 @@ fn a_drawing_that_changes_no_cell_writes_nothing() {
         application: &application,
         inputs,
         drawing,
+        room: yunta_ui::Room::Enough,
         laid: None,
         on_screen: None,
         title: WindowTitle::default(),
@@ -185,6 +190,57 @@ fn a_drawing_that_changes_no_cell_writes_nothing() {
         .draw(&mut terminal, &mut state, &mut again)
         .expect("a drawing");
     assert!(again.is_empty(), "{:?}", String::from_utf8_lossy(&again));
+}
+
+/// A drawing on a terminal under the least the application lays out in tells the state it is
+/// short of room, so `q` leaves from the room it needs, as that screen says; one with the
+/// room tells it so again.
+#[test]
+fn a_drawing_under_the_least_terminal_tells_the_state_only_leaving_answers() {
+    let root = tempfile::tempdir().expect("a directory for the run");
+    let performer = Arc::new(Performer::new(
+        workspace(root.path(), root.path()),
+        Channel::Tty,
+    ));
+    let look = Look {
+        glyphs: Glyphs::Unicode,
+        paint: Paint::Plain,
+        width: Width::exact(57),
+        motion: Motion::Still,
+    };
+    let application = Application::new(performer, look, Arc::new(FixedClock), recorded, false);
+    let drawn_on = |columns: u16| {
+        let options = TerminalOptions {
+            viewport: Viewport::Fixed(Rect::new(0, 0, columns, 14)),
+        };
+        Drawing::with_options(CrosstermBackend::new(Synchronized::default()), options)
+            .expect("a terminal of fixed size")
+    };
+    let (inputs, _answered) = tokio::sync::mpsc::unbounded_channel();
+    let mut running = super::Running {
+        application: &application,
+        inputs,
+        drawing: Synchronized::default(),
+        room: yunta_ui::Room::Enough,
+        laid: None,
+        on_screen: None,
+        title: WindowTitle::default(),
+        ringing: false,
+    };
+    let q = || yunta_ui::Input::Stroke(Stroke::Insert('q'));
+    let (mut state, _) = State::opened(fixed_now());
+    let _: Option<super::Exit<()>> = running
+        .draw(&mut drawn_on(59), &mut state, &mut Vec::new())
+        .expect("a drawing");
+    assert_eq!(state.update(q()), [yunta_ui::Request::Leave]);
+    let _: Option<super::Exit<()>> = running
+        .draw(&mut drawn_on(60), &mut state, &mut Vec::new())
+        .expect("a drawing");
+    assert_eq!(
+        state.update(q()),
+        [],
+        "before it stands anywhere, `q` answers nothing"
+    );
 }
 
 /// What a test's surface was handed to show, in the order it was handed it.
@@ -220,6 +276,7 @@ fn what_the_state_asks_is_carried_out_in_order_leaving_last() {
         application: &application,
         inputs,
         drawing: Synchronized::default(),
+        room: yunta_ui::Room::Enough,
         laid: None,
         on_screen: None,
         title: WindowTitle::default(),

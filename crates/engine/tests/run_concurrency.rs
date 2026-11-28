@@ -992,6 +992,45 @@ nodes:
 }
 
 #[tokio::test]
+async fn a_session_whose_runner_names_no_model_opens_with_none_and_runs_on_the_one_it_reports() {
+    let bench = Bench::new();
+
+    // The candidate leaves its model to the adapter's CLI; the mock's
+    // session says the model it ran on, as a CLI does.
+    let config = r#"
+runners:
+  planner:
+    - { adapter: mock }
+"#;
+    let workflow = r#"
+name: model-left-to-the-adapter
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Say what you would do."
+"#;
+    let fixture = "dialect: claude-code\nsessions:\n  - model: cli-model\n    \
+                   outcome: { type: completed, summary: \"said\" }\n";
+
+    let RunReport { terminal, state } = bench.run_with_config(workflow, fixture, config).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        bench.mock().models_seen(),
+        vec![None],
+        "the session is opened with no model named",
+    );
+    let plan = state.nodes.get("plan").expect("the node ran");
+    let models: Vec<String> = plan.models.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        models,
+        ["cli-model"],
+        "the node ran on the model its session reported"
+    );
+}
+
+#[tokio::test]
 async fn a_loop_node_declaring_an_interpreted_artifact_is_refused_without_run_tools() {
     // The adapter declares no capabilities at all, so no run tools either.
     let bench = Bench::new().with_capabilities(Capabilities::default());

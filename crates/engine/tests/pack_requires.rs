@@ -87,7 +87,7 @@ fn a_role_with_at_least_one_candidate_resolves() {
             "reviewer".into(),
             vec![RunnerCandidate {
                 adapter: "claude-code".into(),
-                model: "sonnet".into(),
+                model: Some("sonnet".into()),
                 agent: None,
                 effort: None,
             }],
@@ -216,7 +216,7 @@ declares:
             "reviewer".into(),
             vec![RunnerCandidate {
                 adapter: "claude-code".into(),
-                model: "sonnet".into(),
+                model: Some("sonnet".into()),
                 agent: None,
                 effort: None,
             }],

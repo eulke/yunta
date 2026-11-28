@@ -332,7 +332,7 @@ fn framed_node(workflow: &Workflow, node: &str, runner: Option<&'static str>) ->
         runner: RunnerName::from_static(runner),
         chosen: RunnerCandidate {
             adapter: AdapterId::from_static("mock"),
-            model: "gpt-6-luna".parse::<ModelName>().expect("a model name"),
+            model: Some("gpt-6-luna".parse::<ModelName>().expect("a model name")),
             agent: None,
             effort: None,
         },
@@ -405,6 +405,28 @@ fn a_node_not_run_yet_is_worked_by_the_runner_its_run_resolved_for_its_role() {
         let title = NodeTitle::of(&frame, Some(&declared), &state, &config);
         let region = title.titled(Region::new(Doc::new()));
         assert_eq!(region.edge.as_deref(), works_it, "{node}");
+    }
+}
+
+/// A runner whose candidate names no model is worked on its adapter alone until the node's
+/// session reports the model its CLI ran, and on that model once it has.
+#[test]
+fn a_runner_that_names_no_model_works_on_its_adapter_then_on_the_model_its_session_reported() {
+    let workflow = Workflow::parse(SHARED_RUNNER).expect("the workflow parses");
+    let resolved = json!({"kind": "runner_resolved", "node_id": "brief", "runner": "planner",
+        "chosen": {"adapter": "claude-code"}, "discarded": []});
+    let opened = json!({"kind": "agent_session_opened", "node_id": "brief",
+        "session_id": "sess-1", "model": "cli-model", "capabilities": {}});
+    let (frame, declared) = framed_node(&workflow, "brief", None);
+    let config = ConfigLayer::default();
+    let heard = [
+        (vec![resolved.clone()], "claude-code"),
+        (vec![resolved, opened], "claude-code/cli-model"),
+    ];
+    for (lines, candidate) in heard {
+        let title = NodeTitle::of(&frame, Some(&declared), &folded(lines), &config);
+        let works_it = title.titled(Region::new(Doc::new())).edge;
+        assert_eq!(works_it, Some(format!("planner on {candidate}")));
     }
 }
 

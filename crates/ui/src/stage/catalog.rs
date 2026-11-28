@@ -1,35 +1,43 @@
-//! See [`super`]. The workflows the repository can run, as `yunta list` lists them,
-//! with one pointed at and moved through with `j` and `k`. Enter starts a run of the
-//! one pointed at, in the start stage with it picked; `c` checks it as `yunta check`
-//! does, its page and what its past runs say standing in the catalog's place until
-//! Escape takes the person back to it; `g` draws it and `h` reads its past runs, each
-//! in a stage of its own opened over the catalog. `n` asks for a new workflow as `yunta new -i`
-//! does (`new_workflow`), `t` runs the repository's cases as `yunta test` does,
-//! each shown as it ends (`cases`), and `p` opens the packs installed, audited,
-//! removed and written as `yunta pack` does (`packs`); `s` opens the shapes of the
-//! documents Yunta reads, as `yunta schema` shows them. What it offers the palette, each
-//! act with its key, is `acts`'. A person who comes back to
-//! the catalog, from a start or a workflow written, finds it read again.
+//! See [`super`]. The workflows the repository can run, as `yunta list` lists them, a row
+//! each in the order a screen lists them, with one pointed at and moved through with `j` and
+//! `k`, and beside them, at the right, what `yunta list` says of the one pointed at and what
+//! can be done with it, which stands under them where the screen gives it no room. Enter
+//! starts a run of the one pointed at, in a new run with it chosen, as the step that runs it
+//! opens one; `c` checks it as `yunta check` does, its page and what its past runs say
+//! standing in the catalog's place until Escape takes the person back to it; `g` draws it and
+//! `h` reads its past runs, each in a stage of its own opened over the catalog. `n` asks for
+//! a new workflow as `yunta new -i` does (`new_workflow`), `t` runs the repository's cases as
+//! `yunta test` does, each shown as it ends (`cases`), and `p` opens the packs installed,
+//! audited, removed and written as `yunta pack` does (`packs`); `s` opens the shapes of the
+//! documents Yunta reads, as `yunta schema` shows them. What it offers the palette, each act
+//! with its key, and the keys help lists over it are `acts`'. A person who comes back to the catalog, from a start or a
+//! workflow written, finds it read again. It stands in the
+//! frame of the field it was opened over (`over_the_field`). Where nothing is typed, as on
+//! every page, `a` goes where its attention row names, `n` opens a new run over it and `q`
+//! goes down to the field, but where what stands takes the key for an act of its own: the
+//! workflows `n` for a new workflow, the packs' listing `a` for an audit and `n` for a new
+//! pack.
 
 mod acts;
+mod answered;
 mod cases;
 mod new_workflow;
 mod packs;
 mod page;
+mod screen;
 
-use surco::components::{Legend, Note, Region, Screen};
-use surco::doc::Doc;
-use surco::look::Look;
+use chrono::{DateTime, Utc};
 use yunta_api::{Remark, WorkflowCheck};
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::WorkflowName;
-use yunta_render::page::{Catalog, Page, PointedCatalog};
+use yunta_render::page::Catalog;
 
-use super::{Stage, StartStage, Want};
+use super::over_the_field::attending_over_the_field;
+use super::{Stage, StatsStage, Want};
 use crate::dialog::Confirmation;
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
-use crate::{News, Operation, Outcome, PackOperation, WorkflowOperation, WorkflowOutcome};
+use crate::{FollowedRuns, News, Operation, PackOperation, WorkflowOperation};
 use cases::CasesRun;
 use new_workflow::NewWorkflowAsked;
 use packs::PacksView;
@@ -39,6 +47,9 @@ use packs::PacksView;
 pub struct CatalogStage {
     /// The workflows, once read.
     catalog: Option<Box<Catalog>>,
+    /// Whether the workflows are being read: as the stage opens, as a person comes back to it
+    /// and once what it changed is written, until what reading them came to lands.
+    reading: bool,
     /// The name of the workflow the pointer stands on.
     pointed: Option<String>,
     /// What stands on the screen.
@@ -92,6 +103,7 @@ impl CatalogStage {
     pub(crate) fn new() -> Self {
         CatalogStage {
             catalog: None,
+            reading: true,
             pointed: None,
             shown: Shown::Catalog,
             scroll: Scroll::default(),
@@ -99,93 +111,78 @@ impl CatalogStage {
         }
     }
 
-    /// What the stage asks for as it opens, and as a person comes back to it: the
-    /// workflows, read again.
+    /// What the stage asks for as it opens: the workflows.
     pub(crate) fn opening(&self) -> Vec<Want> {
         vec![Want::Work(Operation::ReadCatalog)]
     }
 
-    /// The catalog pointed at, or the page standing in its place; what refused or
-    /// failed under it; and the keys.
-    pub(crate) fn screen(&self, look: &Look) -> Screen {
-        let mut trail = vec![
-            yunta_render::screen::YUNTA.to_string(),
-            yunta_render::screen::WORKFLOWS.to_string(),
-        ];
-        let (mut doc, legend) = match &self.shown {
-            Shown::Catalog => (self.listed(look), yunta_render::screen::catalog_legend()),
-            Shown::Checking { name } => {
-                trail.push(name.clone());
-                let checking = Note(yunta_render::screen::checking(name));
-                (Doc::new().with(checking), Legend::new())
-            }
-            Shown::Checked { name, check } => {
-                trail.push(name.clone());
-                checked(check, look)
-            }
-            Shown::New(asked) => {
-                trail.push(yunta_render::screen::NEW.to_string());
-                asked.screen(look)
-            }
-            Shown::Cases(cases) => {
-                trail.push(yunta_render::screen::CASES.to_string());
-                cases.screen(look)
-            }
-            Shown::Packs(packs) => {
-                trail.push(yunta_render::screen::PACKS.to_string());
-                trail.extend(packs.trail());
-                packs.screen(look)
-            }
-        };
-        if let Some(said) = &self.said {
-            doc = doc.with(Note(said.clone()));
+    /// What the stage asks for as a person comes back to it: the workflows, read again.
+    pub(crate) fn returned(&mut self) -> Vec<Want> {
+        self.reading = true;
+        self.opening()
+    }
+
+    /// Whether what stands takes `key` for an act of its own, where every other page takes it
+    /// for what it does everywhere nothing is typed: the workflows `n` for a new workflow, and
+    /// the packs' listing `a` for an audit and `n` for a new pack.
+    pub(super) fn takes_itself(&self, key: char) -> bool {
+        match (&self.shown, key) {
+            (Shown::Catalog, 'n') => true,
+            (Shown::Packs(packs), 'a' | 'n') => packs.on_the_listing(),
+            _ => false,
         }
-        let mut screen = Screen::new(Region::new(doc).in_sight(self.sight()));
-        screen.trail = trail;
-        screen.legend = self.scrolled(legend);
-        screen
     }
 
-    /// The catalog as a person moves through it, or that it is being read.
-    fn listed(&self, look: &Look) -> Doc {
-        let Some(catalog) = &self.catalog else {
-            let reading = yunta_render::screen::READING_THE_WORKFLOWS.to_string();
-            return Doc::new().with(Note(reading));
-        };
-        let page = PointedCatalog {
-            catalog,
-            pointed: self.pointed.as_deref().unwrap_or_default(),
-        };
-        page.document(look)
-    }
-
-    /// What `stroke` asks for here: on the catalog, its keys; on a page shown in its
-    /// place, the keys that scroll scroll it, and the rest is what that page makes of it.
-    pub(crate) fn pressed(&mut self, stroke: Stroke) -> Vec<Want> {
+    /// What `stroke` asks for here, over what `followed` keeps at `now`: on the catalog, its
+    /// keys; on a page shown in its place, the keys that scroll scroll it, and the rest is
+    /// what that page makes of it. Where nothing is typed, `a` goes where the attention row
+    /// names, `n` opens a new run over the stage and `q` goes down to the field, but where
+    /// what stands takes `a` or `n` itself.
+    pub(crate) fn pressed(
+        &mut self,
+        stroke: Stroke,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Vec<Want> {
         if self.shows_a_page() && Scroll::moves_by(stroke) {
             self.scroll.pressed(stroke);
             return Vec::new();
         }
+        if !self.typing() {
+            match stroke {
+                Stroke::Insert('a') if !self.takes_itself('a') => {
+                    return attending_over_the_field(followed, now);
+                }
+                Stroke::Insert('n') if !self.takes_itself('n') && followed.can_ask_for_a_run() => {
+                    return Want::taking(&NextStep::Run {
+                        workflow: Arg::Blank,
+                    });
+                }
+                Stroke::Insert('q') => return vec![Want::ToTheField(None)],
+                _ => {}
+            }
+        }
         let standing = self.standing();
-        let wants = self.pressed_where_it_stands(stroke);
+        let wants = self.pressed_where_it_stands(stroke, followed.can_ask_for_a_run());
         self.rewound_unless(standing);
         wants
     }
 
-    /// What `stroke` asks for where the catalog stands.
-    fn pressed_where_it_stands(&mut self, stroke: Stroke) -> Vec<Want> {
+    /// What `stroke` asks for where the catalog stands, a run asked for only where one
+    /// `asks_for_a_run` here.
+    fn pressed_where_it_stands(&mut self, stroke: Stroke, asks_for_a_run: bool) -> Vec<Want> {
         let next = match &mut self.shown {
-            Shown::Catalog => return self.pressed_on_the_catalog(stroke),
+            Shown::Catalog => return self.pressed_on_the_catalog(stroke, asks_for_a_run),
             Shown::Checking { name } => match stroke {
                 Stroke::Decline => Next::LetGo(Operation::Workflow(WorkflowOperation::Check {
                     workflow: name.clone(),
                 })),
-                Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
+                Stroke::Interrupt => Next::Leave,
                 _ => Next::Stays,
             },
             Shown::Checked { .. } => match stroke {
                 Stroke::Decline | Stroke::Enter => Next::Done,
-                Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
+                Stroke::Interrupt => Next::Leave,
                 _ => Next::Stays,
             },
             Shown::New(asked) => asked.pressed(stroke),
@@ -224,7 +221,7 @@ impl CatalogStage {
                     self.pointed = Some(name);
                 }
                 match read_again {
-                    true => vec![Want::Work(Operation::ReadCatalog)],
+                    true => self.returned(),
                     false => Vec::new(),
                 }
             }
@@ -232,13 +229,14 @@ impl CatalogStage {
         }
     }
 
-    /// What `stroke` asks for on the catalog.
-    fn pressed_on_the_catalog(&mut self, stroke: Stroke) -> Vec<Want> {
+    /// What `stroke` asks for on the catalog: Enter a new run of the workflow pointed at, where
+    /// one `asks_for_a_run` here.
+    fn pressed_on_the_catalog(&mut self, stroke: Stroke, asks_for_a_run: bool) -> Vec<Want> {
         self.said = None;
         match stroke {
             Stroke::Down | Stroke::Tab | Stroke::Insert('j') => self.moved(1),
             Stroke::Up | Stroke::BackTab | Stroke::Insert('k') => self.moved(-1),
-            Stroke::Enter => self.started(),
+            Stroke::Enter if asks_for_a_run => self.started(),
             Stroke::Insert('c') => self.checked_asked(),
             Stroke::Insert('g') => self.drawn(),
             Stroke::Insert('h') => self.past_runs(),
@@ -256,7 +254,7 @@ impl CatalogStage {
                 vec![Want::Work(Operation::Pack(PackOperation::List))]
             }
             Stroke::Decline => vec![Want::Back],
-            Stroke::Insert('q') | Stroke::Interrupt => vec![Want::Leave],
+            Stroke::Interrupt => vec![Want::Leave],
             _ => Vec::new(),
         }
     }
@@ -280,15 +278,22 @@ impl CatalogStage {
         Vec::new()
     }
 
-    /// A run of the workflow pointed at, started in the start stage with it picked;
-    /// nothing where it does not read.
+    /// A run of the workflow pointed at, started in a new run with it chosen, as its step
+    /// opens one; nothing where it does not read.
     fn started(&self) -> Vec<Want> {
         let (Some(catalog), Some(name)) = (&self.catalog, &self.pointed) else {
             return Vec::new();
         };
-        match StartStage::picked(catalog.clone(), name) {
-            Some(start) => vec![Want::Open(Stage::Start(start))],
-            None => Vec::new(),
+        let reads = catalog
+            .offered
+            .iter()
+            .any(|offered| offered.name == *name && offered.workflow.is_ok());
+        let run = NextStep::Run {
+            workflow: Arg::Given(name.clone()),
+        };
+        match reads {
+            true => Want::taking(&run),
+            false => Vec::new(),
         }
     }
 
@@ -303,13 +308,15 @@ impl CatalogStage {
     }
 
     /// The past runs of the workflow pointed at, opened over the catalog, by the name
-    /// its file gives it, which its runs are kept under; nothing where it does not
-    /// read.
+    /// its file gives it, which its runs are kept under, its trail naming it as the catalog
+    /// offers it; nothing where it does not read.
     fn past_runs(&self) -> Vec<Want> {
-        match self.pointed_runs_kept_as() {
-            Some(workflow) => Want::taking(&NextStep::History { workflow }),
-            None => Vec::new(),
-        }
+        let (Some(workflow), Some(name)) = (self.pointed_runs_kept_as(), self.pointed.clone())
+        else {
+            return Vec::new();
+        };
+        let past = StatsStage::of_workflow(workflow).offered_as(name);
+        vec![Want::Open(Stage::Stats(past))]
     }
 
     /// The name the workflow pointed at keeps its runs under, the one its file gives
@@ -334,6 +341,32 @@ impl CatalogStage {
         vec![Want::Work(Operation::Workflow(check))]
     }
 
+    /// The work its screen says is under way: the workflows read, a workflow checked, a new
+    /// one written, the cases run, or the packs' work, until it ends.
+    pub(crate) fn shown_under_way(&self) -> Option<Operation> {
+        match &self.shown {
+            Shown::Catalog => {
+                (self.catalog.is_none() && self.reading).then_some(Operation::ReadCatalog)
+            }
+            Shown::Checking { name } => Some(Operation::Workflow(WorkflowOperation::Check {
+                workflow: name.clone(),
+            })),
+            Shown::Checked { .. } => None,
+            Shown::New(asked) => asked.shown_under_way(),
+            Shown::Cases(cases) => cases.shown_under_way(),
+            Shown::Packs(packs) => packs.shown_under_way(),
+        }
+    }
+
+    /// What an act the catalog asked to be confirmed does once it is: its work, and on the
+    /// packs, a pack installed from its copy shows that it is installing.
+    pub(crate) fn confirmed(&mut self, operation: Operation) -> Vec<Want> {
+        if let Shown::Packs(packs) = &mut self.shown {
+            packs.confirmed(&operation);
+        }
+        vec![Want::Work(operation)]
+    }
+
     /// The ticket the performer holds a fetched pack's copy under, while its install
     /// is asked: what leaving the stage lets go.
     pub(crate) fn held(&self) -> Option<crate::Ticket> {
@@ -347,7 +380,8 @@ impl CatalogStage {
         }
     }
 
-    /// Whether words are being typed: a new workflow's name.
+    /// Whether every printable key types where the catalog stands: a new workflow's name or
+    /// its shapes narrowed, a new pack's name, where a pack is or the ref it moves to.
     pub(crate) fn typing(&self) -> bool {
         match &self.shown {
             Shown::New(asked) => asked.typing(),
@@ -375,112 +409,4 @@ impl CatalogStage {
             Shown::Catalog | Shown::Checking { .. } | Shown::Checked { .. } | Shown::New(_) => {}
         }
     }
-
-    /// What an answer to the stage's work does: the workflows read, the pointer
-    /// kept on the one it stood on while it is still offered; a check, a workflow
-    /// written or the cases' tally, on the page that waited on it; what refused or
-    /// failed, said over the catalog.
-    pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
-        let standing = self.standing();
-        let wants = self.answered_where_it_stands(outcome);
-        self.rewound_unless(standing);
-        wants
-    }
-
-    /// What an answer does where the catalog stands.
-    fn answered_where_it_stands(&mut self, outcome: Outcome) -> Vec<Want> {
-        match outcome {
-            Outcome::Catalog(catalog) => {
-                self.read(catalog);
-                Vec::new()
-            }
-            Outcome::Workflow(outcome) => {
-                self.workflow_answered(outcome);
-                Vec::new()
-            }
-            Outcome::Pack(outcome) => match &mut self.shown {
-                Shown::Packs(packs) => {
-                    let next = packs.answered(outcome);
-                    self.went(next)
-                }
-                _ => Vec::new(),
-            },
-            Outcome::Refused(refused) => self.unanswered(refused.to_string()),
-            Outcome::Failed(said) => self.unanswered(said),
-            Outcome::Repository(_)
-            | Outcome::PullRequest(_)
-            | Outcome::History(_)
-            | Outcome::Graph(_)
-            | Outcome::Doctor(_)
-            | Outcome::Collected(_)
-            | Outcome::Decided { .. }
-            | Outcome::Answered { .. }
-            | Outcome::Started { .. }
-            | Outcome::Resumed { .. }
-            | Outcome::Cancelled { .. }
-            | Outcome::Closed { .. }
-            | Outcome::Evidence(_)
-            | Outcome::Detected { .. }
-            | Outcome::Initialized(_)
-            | Outcome::Stopped => Vec::new(),
-        }
-    }
-
-    /// What work on a workflow came to, on the page that waited on it: a check, a
-    /// new workflow written, or the cases' tally.
-    fn workflow_answered(&mut self, outcome: WorkflowOutcome) {
-        match (outcome, &mut self.shown) {
-            (WorkflowOutcome::Checked(check), Shown::Checking { name }) => {
-                let name = name.clone();
-                self.shown = Shown::Checked { name, check };
-            }
-            (WorkflowOutcome::Written(written), Shown::New(asked)) => asked.answered(written),
-            (WorkflowOutcome::Tested(tested), Shown::Cases(cases)) => cases.answered(tested),
-            (WorkflowOutcome::Checked(_), _)
-            | (WorkflowOutcome::Written(_), _)
-            | (WorkflowOutcome::Tested(_), _) => {}
-        }
-    }
-
-    /// The workflows `catalog` offers, read: the pointer stays on the one it stood
-    /// on while it is offered, and goes to the first otherwise.
-    fn read(&mut self, catalog: Box<Catalog>) {
-        let names = catalog.names();
-        let kept = self
-            .pointed
-            .as_deref()
-            .is_some_and(|pointed| names.contains(&pointed));
-        if !kept {
-            self.pointed = names.first().map(|name| name.to_string());
-        }
-        self.catalog = Some(catalog);
-    }
-
-    /// `said` said: over the packs where they stand, and over the catalog
-    /// otherwise.
-    fn unanswered(&mut self, said: String) -> Vec<Want> {
-        match &mut self.shown {
-            Shown::Packs(packs) => packs.unanswered(said),
-            Shown::Catalog
-            | Shown::Checking { .. }
-            | Shown::Checked { .. }
-            | Shown::New(_)
-            | Shown::Cases(_) => {
-                self.said = Some(said);
-                self.shown = Shown::Catalog;
-            }
-        }
-        Vec::new()
-    }
-}
-
-/// What checking a workflow came to, as `yunta check` prints it: the verdict's page,
-/// then what its past runs say, where they say anything.
-fn checked(check: &WorkflowCheck, look: &Look) -> (Doc, Legend) {
-    let doc = check.checked.document(look);
-    let doc = match check.findings.is_empty() {
-        true => doc,
-        false => doc.with_all(check.findings.document(look).into_blocks()),
-    };
-    (doc, yunta_render::screen::over_the_workflows_legend())
 }

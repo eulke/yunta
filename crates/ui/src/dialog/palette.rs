@@ -16,7 +16,7 @@ use yunta_render::command;
 use yunta_render::prompt::{Escape, ENTER};
 
 use crate::prompt::{Alternative, Answerable, Picker, Press, Stroke};
-use crate::stage::{Act, Stage, Want};
+use crate::stage::{Act, Want};
 
 /// The key that opens the palette over a stage where nothing is being typed.
 pub(crate) const OPENS: Stroke = Stroke::Insert('/');
@@ -52,10 +52,11 @@ pub(crate) enum Chosen {
 }
 
 impl Palette {
-    /// The palette over a stage that offers `acts`, then every step every stage offers
-    /// that the stage neither offers nor is (`showing`).
-    pub(crate) fn over(acts: Vec<Act>, showing: Option<NextStep>) -> Self {
-        let always: Vec<NextStep> = Stage::always()
+    /// The palette over a stage that offers `acts`, then each step of `always`, what every
+    /// stage offers where the application stands, that the stage neither offers nor is
+    /// (`showing`).
+    pub(crate) fn over(acts: Vec<Act>, always: Vec<NextStep>, showing: Option<NextStep>) -> Self {
+        let always: Vec<NextStep> = always
             .into_iter()
             .filter(|step| {
                 Some(step) != showing.as_ref() && !acts.iter().any(|act| act.step == *step)
@@ -119,7 +120,7 @@ fn row(step: &NextStep, does: &str, key: Option<Stroke>, taken: Taken) -> Altern
 
 /// `key` as a legend spells it in a row's key column: a character as it is typed, Enter by
 /// its name. None for a stroke no act is bound to.
-fn spelled(key: Stroke) -> Option<String> {
+pub(crate) fn spelled(key: Stroke) -> Option<String> {
     match key {
         Stroke::Insert(character) => Some(character.to_string()),
         Stroke::Enter => Some(ENTER.to_string()),

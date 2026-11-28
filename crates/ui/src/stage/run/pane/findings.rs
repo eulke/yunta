@@ -27,7 +27,7 @@ impl RunStage {
         look_failed: Option<&String>,
         look: &Look,
     ) -> Region {
-        let view = framed.in_view.run.state.findings.standing();
+        let view = framed.in_view.run.state().findings.standing();
         let at = self.finding_pointed_in(framed);
         let at = at.as_ref().map(|(node, id)| (node.as_ref(), id));
         let findings = FindingsAt::of(&view, at);

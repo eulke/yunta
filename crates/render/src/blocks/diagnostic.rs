@@ -26,6 +26,7 @@ pub fn located(said: String, at: Option<Location>, path: &str, text: Option<&str
                 .and_then(|text| text.lines().nth(at.line.saturating_sub(1)))
                 .map(str::to_string),
             len: at.len,
+            marked: None,
         }),
     )
 }

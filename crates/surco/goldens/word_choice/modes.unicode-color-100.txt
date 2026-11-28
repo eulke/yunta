@@ -1,0 +1,1 @@
+   ␛[2mquick␛[0m ␛[1;35m▸␛[0m ␛[1mstandard␛[0m   ␛[2mfull␛[0m

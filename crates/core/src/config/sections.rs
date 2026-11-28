@@ -11,8 +11,8 @@ use crate::ids::{
 };
 use crate::workflow::{Effort, OnInterrupt};
 
-/// One candidate of a runner in `runners:`: the adapter, the model it asks
-/// that adapter's CLI for, and optionally an agent and an effort.
+/// One candidate of a runner in `runners:`: the adapter, and optionally the
+/// model it asks that adapter's CLI for, an agent and an effort.
 ///
 /// Three words, three things. An adapter is the integration with one agent
 /// CLI (`claude-code`, `codex`, `mock`); a runner is the binding a node asks
@@ -23,7 +23,11 @@ use crate::workflow::{Effort, OnInterrupt};
 #[serde(deny_unknown_fields)]
 pub struct RunnerCandidate {
     pub adapter: AdapterId,
-    pub model: ModelName,
+    /// The model its sessions are opened on; absent leaves it to the CLI,
+    /// which runs its own default. Not the model a session reported, which
+    /// the log keeps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelName>,
     /// The agent this candidate's sessions work under; a node's own
     /// `agent:` wins over it, so the candidates of one runner may each
     /// pair their adapter with an agent of its own.

@@ -32,10 +32,9 @@ pub(super) fn unclaimed_problems(
 /// one place that tells a node the run's mode leaves out from one it
 /// has not reached and a run that finished from one findings
 /// block — so a case says what `status` says. The report's state is
-/// the log as the run left it, read at its last event.
+/// the log as the run left it.
 pub(super) fn standing_problems(case: &TestCase, played: &Played) -> Vec<CaseProblem> {
     let state = &played.report.state;
-    let read_at = state.clock().last_at().unwrap_or_default();
     // The case's run ended in this process, which drove it.
     let frame = yunta_replay::frame::RunFrame::of(
         &played.run_id,
@@ -43,7 +42,6 @@ pub(super) fn standing_problems(case: &TestCase, played: &Played) -> Vec<CasePro
         state,
         None,
         &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
-        read_at,
     );
     let mut problems = Vec::new();
     let expected = case.expect.final_state.word();

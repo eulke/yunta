@@ -12,8 +12,8 @@ use crate::line::{Fill, Line, Tone};
 use crate::text::counted;
 
 impl Terminal {
-    /// `doc` in at most `rows` rows, from the line `sight` asks for, each cut to this
-    /// stream's cells, and what was laid out of it. When lines lie below the last one
+    /// `doc` in at most `rows` rows, from the line `sight` asks for, each cut to the cells
+    /// this stream's rows reach, and what was laid out of it. When lines lie below the last one
     /// shown, the row that counts them takes the last row.
     pub fn scrolled(&self, doc: &Doc, sight: Sight, rows: usize) -> (Vec<Line>, Laid) {
         self.scrolled_lines(&self.lines(doc), sight, rows)
@@ -38,13 +38,14 @@ impl Terminal {
             page: rows,
             most,
         };
-        (shown(lines, laid, self.look.width.cells(), glyphs), laid)
+        (shown(lines, laid, self.look.width.reach(), glyphs), laid)
     }
 }
 
-/// The line a pointer stands on: the one set on the selection, as every row a pointer moves
-/// along through [`Line::pointed`] stands; or where no line is, the first that opens with the
-/// pointer. A pointer that only leads a row, as a list's row it is narrowed on, is not one.
+/// The line a pointer stands on: the one set on the selection, as a row a person picks from
+/// stands ([`Line::pointed`]); or where no line is, the first that opens with the pointer, as a
+/// row read along a pointer does ([`Line::read_along`]). A pointer that only leads a row, as a
+/// list's row it is narrowed on, is not one.
 fn pointed_line(lines: &[Line], glyphs: Glyphs) -> Option<usize> {
     lines
         .iter()

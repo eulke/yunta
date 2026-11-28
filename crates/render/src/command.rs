@@ -7,16 +7,20 @@
 //! one surface is the phrase met on the next, and renaming a subcommand is a
 //! change to this file. The CLI's clap declaration is what accepts each line.
 //!
-//! An act the palette offers is said in the palette's words, as a person would ask
-//! for it (`stop it and everything under it`), and every page that offers the same
-//! act says those words beside its line: one act, one phrase. An act no palette
-//! offers keeps the words that say what it does.
+//! Every act is said in one register, as a person would ask for it, on every
+//! surface: an order for an act that changes something (`stop it and everything
+//! under it`), a noun phrase for one that shows something (`the whole page, in a
+//! browser`). An act the palette offers is said in the palette's words, and every
+//! page that offers the same act says those words beside its line: one act, one
+//! phrase. A page's next steps are made of [`SaidStep`]s, which a step or an action
+//! makes, never words a page brings.
 //!
 //! A line carries what the run is called by — its handle on a line a person
 //! reads, its whole id on one an agent copies — and nothing else a reader
 //! would have to invent: an option a reader picks stays `<option>`, because an
 //! option id printed as an example gets pasted.
 
+use surco::components::Next;
 use surco::doc::Depth;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::step::{Arg, Choice, NextStep, Reach};
@@ -76,7 +80,7 @@ pub fn line_for(step: &NextStep, reader: Reader) -> String {
         NextStep::Doctor { sessions, full } => doctor(*sessions, *full),
         NextStep::Test { dir: None } => "yunta test".to_string(),
         NextStep::Test { dir: Some(dir) } => format!("yunta test --dir {dir}"),
-        NextStep::Init => "yunta init".to_string(),
+        NextStep::Init { interactive } => format!("yunta init{}", flag(*interactive, " -i")),
         NextStep::NewWorkflow { name, shape } => new_workflow(name, *shape),
         NextStep::PackAdd { source } => format!("yunta pack add {}", given(source, "<source>")),
         NextStep::PackUpdate { pack, reference } => {
@@ -102,6 +106,14 @@ const CLOSE: &str = "close it for good";
 /// it.
 const CONTINUE: &str = "continue it from its log";
 
+/// What resuming a run a person stopped does, as the glance at it and every page that offers
+/// it say it.
+const CONTINUE_WHERE_STOPPED: &str = "continue it where it stopped";
+
+/// What answering a question a run asks does, as the palette over the run and the glance at it
+/// say it.
+pub(crate) const ANSWER_WHAT_IT_ASKS: &str = "answer what it asks";
+
 /// What the receipt of a run that ended does, as the palette and every page that
 /// offers it say it.
 const WRITE_THE_RECEIPT: &str = "write the receipt";
@@ -109,9 +121,19 @@ const WRITE_THE_RECEIPT: &str = "write the receipt";
 /// What verifying a run does, as the palette and every page that offers it say it.
 const VERIFY: &str = "verify its evidence";
 
+/// What reviewing the plan a run waits on does, as every page that offers it says it: the
+/// `review` step and the action a parked run offers are one command, `yunta review <run>`,
+/// so they say one phrase.
+const REVIEW_THE_PLAN: &str = "read the plan it waits on, and answer it there";
+
 /// What following a run does, as the field's palette and every page that offers it say
 /// it.
 const FOLLOW: &str = "follow it as it moves";
+
+/// What drawing a graph does, as an order: the palette over a run says it of the run's graph,
+/// and the workflows' panel of the workflow pointed at. Not what a printed page's next step
+/// says of `yunta graph`, which [`does`] says of [`NextStep::Graph`].
+pub(crate) const DRAW_ITS_GRAPH: &str = "draw its graph";
 
 /// What opening a run's whole chronicle does, as a run's palette says it: an act of its own
 /// whose command, `yunta status <run> --follow`, following the run shares, so its row says
@@ -119,89 +141,93 @@ const FOLLOW: &str = "follow it as it moves";
 /// takes.
 pub const WHOLE_CHRONICLE: &str = "the run's whole chronicle";
 
-/// What `step` does, in the palette's words where a palette offers it, which every
-/// page that offers the step says beside its line too, as help does. Not what an
-/// action does to the run it names ([`effect`]), which a run's page says, in these
-/// words where the palette words the act.
+/// What `step` does, as an order where it changes something and as what it shows where
+/// it shows something, in the palette's words where a palette offers it; every page that
+/// offers the step says the same beside its line, as help does. Not what an action does
+/// to the run it names ([`effect`]), which a run's page says, in these words where the
+/// palette words the act.
 pub fn does(step: &NextStep) -> &'static str {
     match step {
         NextStep::Status { node, depth, .. } => status_does(node.is_some(), *depth),
-        NextStep::Needs => "shows the run waiting on you, and how to answer it",
+        NextStep::Needs => surco::words::TO_WHAT_NEEDS_YOU,
         NextStep::Follow { .. } => FOLLOW,
         NextStep::Resume { .. } => CONTINUE,
         NextStep::Cancel { .. } => STOP,
         NextStep::Close { .. } => CLOSE,
-        NextStep::Review { .. } => "reads the plan the run waits on, and answers it there",
+        NextStep::Review { .. } => REVIEW_THE_PLAN,
         NextStep::Open { .. } => "the whole page, in a browser",
         NextStep::Receipt { .. } => WRITE_THE_RECEIPT,
         NextStep::Verify { .. } => VERIFY,
         NextStep::Stats { .. } => "what it cost, and where its time went",
-        NextStep::History { .. } => "shows what the workflow's past runs cost",
-        NextStep::Graph { .. } => "draws the workflow's graph",
-        NextStep::RunGraph { .. } => "draw its graph",
+        NextStep::History { .. } => "what the workflow's past runs cost",
+        NextStep::Graph { .. } => "draw the workflow's graph",
+        NextStep::RunGraph { .. } => DRAW_ITS_GRAPH,
         NextStep::ResolveGate { choice, .. } => resolve_gate_does(choice),
         NextStep::Run { .. } => "start a new run",
-        NextStep::Check { .. } => "checks the workflow, naming each rule it breaks",
-        NextStep::List => "the workflows you can run",
+        NextStep::Check { .. } => "check the workflow, each broken rule named",
+        NextStep::List => crate::screen::WORKFLOWS_YOU_CAN_RUN,
         NextStep::ListRuns { reach } => list_runs_does(*reach),
         NextStep::Schemas => "the shape of every document yunta reads",
         NextStep::Schema { json, .. } => schema_does(*json),
         NextStep::Doctor { sessions, full } => doctor_does(*sessions, *full),
-        NextStep::Test { .. } => "runs the project's workflow test cases",
-        NextStep::Init => "prepares the repository for yunta",
-        NextStep::NewWorkflow { .. } => "writes a new workflow from a skeleton",
-        NextStep::PackAdd { .. } => "installs a pack",
-        NextStep::PackUpdate { .. } => "updates a pack to another reference",
-        NextStep::PackRemove { .. } => "removes a pack",
-        NextStep::PackNew { .. } => "writes the skeleton a new pack starts from",
-        NextStep::PackList => "lists the installed packs, each checked against the lock",
-        NextStep::PackAudit { .. } => "audits everything a pack holds and asks for",
+        NextStep::Test { .. } => "run the project's workflow test cases",
+        NextStep::Init { .. } => "prepare the repository for yunta",
+        NextStep::NewWorkflow { .. } => "write a new workflow from a skeleton",
+        NextStep::PackAdd { .. } => "install a pack",
+        NextStep::PackUpdate { .. } => "update a pack to another reference",
+        NextStep::PackRemove { .. } => "remove a pack",
+        NextStep::PackNew { .. } => "write the skeleton a new pack starts from",
+        NextStep::PackList => "the installed packs, each checked against the lock",
+        NextStep::PackAudit { .. } => "audit everything a pack holds and asks for",
         NextStep::Gc { dry_run } => gc_does(*dry_run),
-        NextStep::Help => "says what yunta does, and every command it takes",
-        NextStep::ShowCommit { .. } => "shows the commit the run's work is held in",
+        NextStep::Help => "what yunta does, and every command it takes",
+        NextStep::ShowCommit { .. } => "the commit the run's work is held in",
     }
 }
 
 /// What a `status` step does: one node whole, or the run at `depth`.
 fn status_does(one_node: bool, depth: Depth) -> &'static str {
     match (one_node, depth) {
-        (true, _) => "shows one node of the run whole",
-        (false, Depth::Glance) => "says where the run stands",
-        (false, Depth::Full) => "tells the run's whole story",
-        (false, Depth::Dig) => "tells the run's story with every trace it keeps",
+        (true, _) => "one node of the run, whole",
+        (false, Depth::Glance) => "where the run stands",
+        (false, Depth::Full) => "the run's whole story",
+        (false, Depth::Dig) => "its story, with every trace it keeps",
     }
 }
 
 /// What a `resolve-gate` step does, as it chooses.
 fn resolve_gate_does(choice: &Choice) -> &'static str {
     match choice {
-        Choice::Asked => "answer what it asks",
-        Choice::Blank | Choice::Picked { .. } => "answers the decision the run waits on",
+        Choice::Asked => ANSWER_WHAT_IT_ASKS,
+        Choice::Blank | Choice::Picked { .. } => "answer the decision it waits on",
     }
 }
 
-/// What listing the runs as far as `reach` does.
+/// What listing the runs as far as `reach` does, in the field's palette's words, worded for
+/// what it lists: a reach that leaves the closed runs out says the runs, and one with them
+/// says every run or the closed too.
 fn list_runs_does(reach: Reach) -> &'static str {
     match reach {
-        Reach::Repository => "every run of this repository",
-        Reach::WithClosed => "lists this repository's runs, the closed ones too",
-        Reach::Machine => "lists every run on this machine",
+        Reach::Repository => "this repository's runs",
+        Reach::WithClosed => "this repository's runs, the closed too",
+        Reach::Machine => "the runs on this machine",
+        Reach::MachineWithClosed => "every run on this machine, the closed too",
     }
 }
 
-/// What a `schema` step does: shows the document, or prints its JSON Schema.
+/// What a `schema` step shows: the document's shape, or its JSON Schema.
 fn schema_does(json: bool) -> &'static str {
     match json {
-        true => "prints the JSON Schema an editor validates against",
-        false => "shows a document's shape",
+        true => "the JSON Schema an editor validates against",
+        false => "a document's shape",
     }
 }
 
 /// What a `doctor` step does, as far as its flags reach.
 fn doctor_does(sessions: bool, full: bool) -> &'static str {
     match (sessions, full) {
-        (true, _) => "opens a session on each agent binding",
-        (false, true) => "checks this machine, every check unfolded",
+        (true, _) => "open a session on each agent binding",
+        (false, true) => "check this machine, every check unfolded",
         (false, false) => "check adapters, git, forge, packs",
     }
 }
@@ -209,7 +235,7 @@ fn doctor_does(sessions: bool, full: bool) -> &'static str {
 /// What a `gc` step does, or would.
 fn gc_does(dry_run: bool) -> &'static str {
     match dry_run {
-        true => "says what reclaiming would remove, and removes nothing",
+        true => "what reclaiming would remove; nothing is removed",
         false => "remove orphaned checkouts",
     }
 }
@@ -272,6 +298,7 @@ fn list_runs(reach: Reach) -> String {
         Reach::Repository => "yunta list --runs".to_string(),
         Reach::WithClosed => "yunta list --runs --full".to_string(),
         Reach::Machine => "yunta list --runs --all".to_string(),
+        Reach::MachineWithClosed => "yunta list --runs --all --full".to_string(),
     }
 }
 
@@ -284,17 +311,20 @@ fn flag(on: bool, words: &str) -> &str {
     }
 }
 
-/// What `effect` does to the run its action names, in the words beside its line: the
-/// palette's where the palette offers the act, its own where it does not.
+/// What `effect` does to the run its action names, in the words beside its line and in the
+/// register [`does`] says a step in: an order where it changes something, what it shows
+/// where it shows something. The palette's words where the palette offers the act, the
+/// glance's where only the glance at a run does, the step's where the action takes a
+/// command [`does`] already words (reviewing a plan), and its own where none does.
 pub fn effect(effect: Effect) -> &'static str {
     match effect {
         Effect::ContinuesFromLog => CONTINUE,
-        Effect::ContinuesWhereStopped => "continues it where it stopped",
-        Effect::WaitsForReset => "waits for the reset, then drives on",
-        Effect::HandsBackOnceSettled => "hands it back once that is settled",
-        Effect::RetriesOnceTreeChanged => "offers a retry once the run's tree changed",
-        Effect::ReadsPlan => "reads its plan, and answers it there",
-        Effect::ShowsWhatItWaitsOn => "shows what it is waiting on",
+        Effect::ContinuesWhereStopped => CONTINUE_WHERE_STOPPED,
+        Effect::WaitsForReset => "wait for the reset, then drive on",
+        Effect::HandsBackOnceSettled => "hand it back once that is settled",
+        Effect::RetriesOnceTreeChanged => "retry it once the run's tree changed",
+        Effect::ReadsPlan => REVIEW_THE_PLAN,
+        Effect::ShowsWhatItWaitsOn => "what it is waiting on",
         Effect::Stops => STOP,
         Effect::Closes => CLOSE,
         Effect::Certifies => WRITE_THE_RECEIPT,
@@ -305,7 +335,52 @@ pub fn effect(effect: Effect) -> &'static str {
 /// An action as a reader meets it beside a run: its line, as `reader` types
 /// it, and what it does.
 pub fn said(action: &Action, reader: Reader) -> (String, &'static str) {
-    (line_for(&action.step, reader), effect(action.effect))
+    SaidStep::of_action(action, reader).pair()
+}
+
+/// A command a reader is told to type, beside what it does in this module's words: a step
+/// in [`does`]'s, an action a run offers in what it does to the run ([`effect`]). Made only
+/// from a step or an action, so a page that tells a reader what to type next says it in the
+/// words every other page does; [`next`] makes a page's next steps of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaidStep {
+    line: String,
+    does: &'static str,
+}
+
+impl SaidStep {
+    /// `step`, as a person types it, beside what it does.
+    pub fn of(step: &NextStep) -> Self {
+        Self::for_reader(step, Reader::Person)
+    }
+
+    /// `step`, as `reader` types it, beside what it does.
+    pub fn for_reader(step: &NextStep, reader: Reader) -> Self {
+        SaidStep {
+            line: line_for(step, reader),
+            does: does(step),
+        }
+    }
+
+    /// The step `action` takes, as `reader` types it, beside what it does to its run.
+    pub fn of_action(action: &Action, reader: Reader) -> Self {
+        SaidStep {
+            line: line_for(&action.step, reader),
+            does: effect(action.effect),
+        }
+    }
+
+    /// The line and what it does, as a block or a document carries them.
+    pub fn pair(self) -> (String, &'static str) {
+        (self.line, self.does)
+    }
+}
+
+/// The next steps a page ends on: each of `steps`, in order, a line beside what it does.
+pub fn next(steps: impl IntoIterator<Item = SaidStep>) -> Next {
+    Next {
+        steps: steps.into_iter().map(SaidStep::pair).collect(),
+    }
 }
 
 /// An argument as a line writes it: the value given, or the blank `name` a

@@ -10,13 +10,14 @@ use surco::components::{Legend, Note};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_core::PackRef;
-use yunta_render::page::pack::{Installed, Inventory, Needs, Updated};
+use yunta_render::page::pack::{Inventory, Updated};
 use yunta_render::page::Page;
+use yunta_render::screen::Confirming;
 
 use super::{Next, PacksShown, PacksView};
 use crate::dialog::Confirmation;
 use crate::prompt::{Answerable, LineAsked, Press, Stroke};
-use crate::{Operation, PackFetched, PackInstalled, PackOperation};
+use crate::{Operation, PackFetched, PackOperation};
 
 /// Where a pack to install is, or the ref an installed one moves to, being typed.
 #[derive(Debug, Clone)]
@@ -121,7 +122,7 @@ impl PacksView {
                     self.shown = PacksShown::Listing;
                     Next::Release(held)
                 }
-                Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
+                Stroke::Interrupt => Next::Leave,
                 _ => Next::Stays,
             },
             PacksShown::Installing { .. } => match stroke {
@@ -134,7 +135,7 @@ impl PacksView {
                     self.remarked.clear();
                     Next::Work(Operation::Pack(PackOperation::List))
                 }
-                Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
+                Stroke::Interrupt => Next::Leave,
                 _ => Next::Stays,
             },
             PacksShown::Listing
@@ -172,8 +173,10 @@ impl PacksView {
     fn install(&mut self, fetched: &PackFetched) -> Next {
         let pack = fetched.pack.clone();
         if fetched.waits_on_yes {
-            let executors = &fetched.audit.manifest.declares.executors;
-            let asks = yunta_render::screen::executing(&pack.to_string(), executors);
+            let asks = Confirming::InstallPack {
+                pack: pack.to_string(),
+                executors: fetched.audit.manifest.declares.executors.clone(),
+            };
             let held = fetched.held;
             let install = PackOperation::Install {
                 held,
@@ -182,13 +185,33 @@ impl PacksView {
             let same = vec![fetched.installs_as.clone()];
             return Next::Confirm(Confirmation::new(asks, same, Operation::Pack(install)));
         }
-        self.shown = PacksShown::Installing { pack };
         let held = fetched.held;
         let install = PackOperation::Install {
             held,
             confirmed: false,
         };
+        self.shown = PacksShown::Installing {
+            pack,
+            install: install.clone(),
+        };
         Next::Work(Operation::Pack(install))
+    }
+
+    /// An act the packs asked to be confirmed, `operation`, confirmed: a pack fetched and
+    /// installed from its copy, its executors confirmed, stands as installing until it is,
+    /// as one with none to confirm does at once.
+    pub(in crate::stage::catalog) fn confirmed(&mut self, operation: &Operation) {
+        let PacksShown::Fetched(fetched) = &self.shown else {
+            return;
+        };
+        let install = PackOperation::Install {
+            held: fetched.held,
+            confirmed: true,
+        };
+        if *operation == Operation::Pack(install.clone()) {
+            let pack = fetched.pack.clone();
+            self.shown = PacksShown::Installing { pack, install };
+        }
     }
 
     /// A pack fetched, where one was being fetched: its inventory read, or, for an
@@ -218,9 +241,17 @@ impl PacksView {
 
 /// The screen while a pack is asked for, fetched or installed: the question, what is
 /// under way, the inventory a person confirms against, or what installing came to;
-/// with the keys.
-pub(super) fn installing_screen(shown: &PacksShown, look: &Look) -> (Doc, Legend) {
-    let page = yunta_render::screen::pack_page_legend();
+/// with the keys, a new run among them where one `asks_for_a_run` here.
+pub(super) fn installing_screen(
+    shown: &PacksShown,
+    look: &Look,
+    asks_for_a_run: bool,
+) -> (Doc, Legend) {
+    let page = yunta_render::screen::page_legend(
+        yunta_render::screen::PageRead::Whole,
+        Legend::new(),
+        asks_for_a_run,
+    );
     match shown {
         PacksShown::Asking(asked) => (
             Doc::new().with(asked.line().block(look)),
@@ -228,17 +259,20 @@ pub(super) fn installing_screen(shown: &PacksShown, look: &Look) -> (Doc, Legend
         ),
         PacksShown::Fetching { what, .. } => {
             let fetching = Note(yunta_render::screen::fetching(what));
-            (Doc::new().with(fetching), Legend::new())
+            (
+                Doc::new().with(fetching),
+                super::super::screen::working_legend(),
+            )
         }
         PacksShown::Fetched(fetched) => (
             inventory(fetched).document(look),
             yunta_render::screen::fetched_legend(),
         ),
-        PacksShown::Installing { pack } => {
+        PacksShown::Installing { pack, .. } => {
             let installing = Note(yunta_render::screen::installing_pack(&pack.to_string()));
             (Doc::new().with(installing), Legend::new())
         }
-        PacksShown::Installed(installed) => (installed_page(installed, look), page),
+        PacksShown::Installed(installed) => (installed.page(look), page),
         PacksShown::Updated { pack, to, commit } => {
             let updated = Updated { pack, to, commit };
             (updated.document(look), page)
@@ -265,24 +299,5 @@ fn inventory(fetched: &PackFetched) -> Inventory<'_> {
             audit,
             waits_on_yes,
         },
-    }
-}
-
-/// The page `yunta pack add` ends with, and what stopped reading what the pack's
-/// workflows need where something did.
-fn installed_page(installed: &PackInstalled, look: &Look) -> Doc {
-    let unread = Needs::default();
-    let needs = installed.needs.as_ref().unwrap_or(&unread);
-    let page = Installed {
-        manifest: &installed.manifest,
-        commit: &installed.commit,
-        at: &installed.at,
-        cases: &installed.cases,
-        needs,
-    };
-    let doc = page.document(look);
-    match &installed.needs {
-        Ok(_) => doc,
-        Err(unread) => doc.with(Note(unread.clone())),
     }
 }

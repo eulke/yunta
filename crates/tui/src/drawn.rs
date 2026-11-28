@@ -1,17 +1,28 @@
 //! A Yunta screen drawn into a Ratatui frame: where each part stands is `layout`'s, what
 //! each draws is Surco's, at its area's exact width, and its lines are written into the
 //! frame's cells by `cells`. The main region's title row is the region's where Surco says
-//! a card there cannot stand under it. What the screen is about is drawn as a band in the rows the
+//! a card there cannot stand under it, and holds what a person acts on from a side region that
+//! gave way. A region beside the main one stands level with it: a row lower where an untitled
+//! main region opens on a blank row, as a new run's rows do. What the screen is about is drawn as a band in the rows the
 //! layout leaves it, Surco letting go what gives way first. The row over the legend holds
 //! the note where one stands, the attention otherwise, and stays blank with neither. A box
-//! stands as wide as the widest row Surco draws in it at the most a box stands and two cells
-//! past it, a row on the selection reaching its far edge. The cursor stands where a held prompt puts it, the box's
+//! stands as wide and as tall as Surco says it needs at the most a box stands
+//! ([`Terminal::box_size`]); a confirmation, read as a sentence, as wide as the layout gives
+//! one. The cursor stands where a held prompt puts it, the box's
 //! over a region's, and nowhere else. Under the least terminal the screen is the room it
 //! needs, centred as a block.
+//!
+//! In the ASCII glyphs every text the screen holds is drawn in its ASCII form, recorded words
+//! included, taken before anything is measured ([`Screen::in_ascii`]): such a terminal names
+//! no UTF-8 locale and draws any other character as several cells, and a row must end at its
+//! width. This is the one place a screen is taken to be laid out, so the application and every
+//! test that draws through here hold ASCII alone; a page a command prints is drawn by Surco's
+//! stream and keeps every character it recorded.
 
 use ratatui::layout::{Position, Rect};
 use ratatui::Frame;
-use surco::components::{Legend, Screen, ScreenLaid};
+use surco::components::{Legend, Region, Screen, ScreenLaid};
+use surco::glyphs::Glyphs;
 use surco::line::Line;
 use surco::look::{Look, Width};
 use surco::surface::{Paned, Terminal};
@@ -21,9 +32,17 @@ use crate::cells;
 use crate::layout::{self, Areas, Beside, Boxed, Holds, LEAST_COLUMNS, LEAST_ROWS};
 
 /// `screen` drawn into `frame` in `look`'s glyphs, paint and motion, each part at the
-/// width of the area it stands in; what was laid out of each region and of what is open
-/// over them, for the next key to scroll from.
+/// width of the area it stands in, every text in ASCII where the glyphs are; what was laid
+/// out of each region and of what is open over them, for the next key to scroll from.
 pub fn drawn(frame: &mut Frame, screen: &Screen, look: &Look) -> ScreenLaid {
+    match look.glyphs {
+        Glyphs::Ascii => laid_out(frame, &screen.in_ascii(), look),
+        Glyphs::Unicode => laid_out(frame, screen, look),
+    }
+}
+
+/// `screen`, its texts as the glyphs draw them, laid out into `frame` as [`drawn`] lays it.
+fn laid_out(frame: &mut Frame, screen: &Screen, look: &Look) -> ScreenLaid {
     let Some(mut areas) = layout::areas(frame.area(), holds(screen, look, frame.area())) else {
         room_needed(frame, look);
         return ScreenLaid::default();
@@ -32,19 +51,26 @@ pub fn drawn(frame: &mut Frame, screen: &Screen, look: &Look) -> ScreenLaid {
     let title_given_way = title_given_way(screen, &on_main, &mut areas);
     around(frame, screen, look, &areas);
     let main_rows = usize::from(areas.main.height);
+    // What a person acts on from a side region that gave way stands in the main region.
+    let instead = screen
+        .side
+        .as_ref()
+        .filter(|_| areas.side.is_none())
+        .map_or(&[][..], |side| side.instead.as_slice());
     let main = match (title_given_way, areas.short_of_rows) {
         (Some(_), short_of_rows) => {
             on_main.pane_in_place_of_its_title(&screen.main, main_rows, short_of_rows)
         }
-        (None, true) => on_main.pane_short_of_rows(&screen.main, main_rows),
-        (None, false) => on_main.pane(&screen.main, main_rows),
+        (None, short_of_rows) => {
+            on_main.pane_holding(&screen.main, instead, main_rows, short_of_rows)
+        }
     };
     write(frame, &main.lines, areas.main, look);
-    let side = screen.side.as_ref().zip(areas.side).map(|(side, at)| {
-        let paned = terminal(look, at.width).pane(&side.region, usize::from(at.height));
-        write(frame, &paned.lines, at, look);
-        (paned, at)
-    });
+    let level = level_with(screen, &main.lines);
+    let side =
+        screen.side.as_ref().zip(areas.side).map(|(side, at)| {
+            side_drawn(frame, &side.region, level(at), look, areas.short_of_rows)
+        });
     let over = terminal(look, areas.legend.width);
     let boxed = screen
         .overlay
@@ -67,6 +93,40 @@ pub fn drawn(frame: &mut Frame, screen: &Screen, look: &Look) -> ScreenLaid {
     }
 }
 
+/// `region`, the one beside the main region, drawn into `frame` at `at` in `look`, on a screen
+/// standing `short_of_rows` where its layout says so, as every pane on it stands; with the
+/// area it stands in.
+fn side_drawn(
+    frame: &mut Frame,
+    region: &Region,
+    at: Rect,
+    look: &Look,
+    short_of_rows: bool,
+) -> (Paned, Rect) {
+    let on_side = terminal(look, at.width);
+    let rows = usize::from(at.height);
+    let paned = match short_of_rows {
+        true => on_side.pane_short_of_rows(region, rows),
+        false => on_side.pane(region, rows),
+    };
+    write(frame, &paned.lines, at, look);
+    (paned, at)
+}
+
+/// Where a region beside the main one stands within `area`, its column, level with `screen`'s
+/// main region drawn as `main`: a row lower where an untitled main region opens on a blank
+/// row, as a form standing whole does, so its first words stand level with the main region's;
+/// else where its column opens, beside a titled region's title and the row under it.
+fn level_with(screen: &Screen, main: &[Line]) -> impl Fn(Rect) -> Rect {
+    let opens_blank = main.first().is_some_and(|line| line.text().is_empty());
+    let lower = u16::from(screen.main.title.is_empty() && opens_blank);
+    move |area| Rect {
+        y: area.y + lower,
+        height: area.height.saturating_sub(lower),
+        ..area
+    }
+}
+
 /// The row of the main region's title where a card whose fewest rows do not stand under it
 /// takes that row, as `on_main` draws the main region: given to the region in `areas`, and
 /// none where the title keeps its row.
@@ -74,7 +134,7 @@ fn title_given_way(screen: &Screen, on_main: &Terminal, areas: &mut Areas) -> Op
     let rows = usize::from(areas.main.height);
     let title = areas
         .main_title
-        .filter(|_| !on_main.keeps_its_title(&screen.main, rows))?;
+        .filter(|_| !on_main.keeps_its_title(&screen.main, rows, areas.short_of_rows))?;
     areas.main_title = None;
     areas.main = title.union(areas.main);
     Some(title)
@@ -91,16 +151,25 @@ fn holds(screen: &Screen, look: &Look, area: Rect) -> Holds {
     let edge = cell_width(&terminal(look, area.width).edge().text());
     let overlay = screen.overlay.as_ref().map(|overlay| {
         let most = layout::box_columns(area.width);
-        let whole = terminal(look, inner).boxed(overlay, usize::from(most), usize::MAX);
+        // A confirmation is read as a sentence: its box stands as wide as one where it fits.
+        let given = match overlay.confirms {
+            true => most.min(layout::CONFIRMATION),
+            false => most,
+        };
+        let size = terminal(look, inner).box_size(overlay, usize::from(given));
         Boxed {
-            columns: cells_or_rows(box_needs(&whole.lines, &overlay.title, most)),
-            rows: cells_or_rows(whole.lines.len()),
+            columns: cells_or_rows(size.cells),
+            rows: cells_or_rows(size.rows),
         }
     });
     Holds {
         about: cells_or_rows(about),
         side: screen.side.as_ref().map(|side| Beside {
             at: side.at,
+            cells: side
+                .region
+                .measure
+                .map(|measure| cells_or_rows(measure.cells)),
             edge: cells_or_rows(edge),
             titled: !side.region.title.is_empty(),
         }),
@@ -108,40 +177,6 @@ fn holds(screen: &Screen, look: &Look, area: Rect) -> Holds {
         meter: screen.meter.is_some(),
         overlay,
     }
-}
-
-/// The cells around a box's title in its top edge: a corner and a cell before it, a cell
-/// and a corner after it.
-const AROUND_A_TITLE: usize = 4;
-
-/// The blank cells a box as wide as what it holds keeps past its widest row, before its far
-/// upright: two, as the design's help leaves them past its longest row and a confirmation
-/// past its sentence.
-const PAST_THE_WIDEST: usize = 2;
-
-/// The cells a box needs whose rows Surco drew `most` cells wide as `whole`, under `title`:
-/// its widest row inside its edges, the trailing blanks that filled it out to the far
-/// upright left out, two blank cells past it and that upright; a row on the selection, a
-/// list a person picks from, reaching the far upright; its top edge, the title with the
-/// cells around it.
-fn box_needs(whole: &[Line], title: &str, most: u16) -> usize {
-    let most = usize::from(most);
-    let inside = whole
-        .get(1..whole.len().saturating_sub(1))
-        .unwrap_or_default();
-    let needs = |row: &Line| match row.spans().iter().any(|span| span.fill.is_some()) {
-        true => most,
-        false => {
-            let text = row.text();
-            let mut cells = text.chars();
-            let far_upright = cells
-                .next_back()
-                .map_or(0, |upright| cell_width(&upright.to_string()));
-            cell_width(cells.as_str().trim_end()) + PAST_THE_WIDEST + far_upright
-        }
-    };
-    let widest = inside.iter().map(needs).max().unwrap_or(0);
-    widest.max(cell_width(title) + AROUND_A_TITLE).min(most)
 }
 
 /// The rows around the regions: the trail, the rule, what the screen is about, the

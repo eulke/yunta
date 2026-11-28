@@ -51,7 +51,7 @@ pub(super) fn render(time: &TimeSpent, look: &Look) -> Vec<Line> {
     let mut words = Line::new();
     for (at, (name, spent, tone)) in parts.iter().enumerate() {
         if at > 0 {
-            words = words.push(Tone::Faint, format!(" {} ", look.glyphs.sep()));
+            words = words.push(Tone::Faint, look.glyphs.spaced_sep());
         }
         words = words
             .push(*tone, mark.as_str())

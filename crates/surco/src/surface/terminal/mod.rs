@@ -2,7 +2,7 @@
 //! stream's width, with its glyph set, painted by its paint. In a pane, whose
 //! edge cuts what passes it, a line past the edge goes on in the rows under it.
 
-use crate::components::{Lead, Section};
+use crate::components::{Fold, Lead, Section};
 use crate::doc::{Block, Doc, Prompt};
 use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
@@ -11,8 +11,10 @@ use crate::width::{cell_width, INDENT};
 use crate::words::Standing;
 
 mod asked;
+mod at_a_glance;
 mod attention;
 mod boxed;
+pub use boxed::BoxSize;
 mod card;
 pub use card::{said_whole, Placed};
 mod checklist;
@@ -27,6 +29,7 @@ mod evidence;
 mod feed;
 mod fields;
 mod finding_list;
+mod form;
 mod headline;
 mod horizon;
 mod key_list;
@@ -46,7 +49,10 @@ pub(in crate::surface) use problem::{HELP, REFUSED};
 mod runs;
 mod screen;
 mod scrolled;
+mod survey;
 mod table;
+mod word_choice;
+mod wordmark;
 
 /// The cells between what stands at the two ends of a row, when both stand on it: two, so
 /// the gap reads as a parting, where one would read as the space between two words.
@@ -71,11 +77,46 @@ fn at_ends(left: Line, right: Option<Line>, cells: usize) -> Line {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Terminal {
     pub look: Look,
+    /// How a page's labelled values and its checklist's rows stand.
+    values: Values,
+}
+
+/// How a page's labelled values and its checklist's rows stand at a terminal: wrapped under
+/// their first column, as a page drawn whole stands; or each on its own row, cut at the
+/// edge, as a page drawn close on a screen short of rows stands, every value cut to its row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::surface) enum Values {
+    Wrapped,
+    OnTheirRow,
 }
 
 impl Terminal {
     pub fn on(look: Look) -> Self {
-        Terminal { look }
+        Terminal {
+            look,
+            values: Values::Wrapped,
+        }
+    }
+
+    /// This terminal with a page's labelled values and its checklist's rows each on its own
+    /// row, cut at the edge.
+    pub(in crate::surface) fn values_on_their_row(&self) -> Terminal {
+        Terminal {
+            values: Values::OnTheirRow,
+            ..*self
+        }
+    }
+
+    /// This terminal with its lines `width` wide, all else it draws by kept: its glyphs, its
+    /// paint and its motion, and how a page's labelled values and its checklist's rows stand.
+    /// Every terminal one draws inside another is built so, as a section's blocks one step in
+    /// are. Not [`Terminal::on`], a terminal of a look alone, whose values stand as a page drawn
+    /// whole sets them.
+    pub(in crate::surface) fn at_width(&self, width: Width) -> Terminal {
+        Terminal {
+            look: Look { width, ..self.look },
+            ..*self
+        }
     }
 
     /// Whether this terminal's rows are the design's wide screen's, 98 cells inside the
@@ -91,7 +132,7 @@ impl Terminal {
     /// the nodes it covers, with the word that matters most among them, when
     /// there are more nodes than cells.
     pub fn furrow(&self, nodes: &[Standing], room: usize) -> Line {
-        let cells = room.min(nodes.len() * page::CELLS_A_NODE);
+        let cells = page::furrow_cells(nodes.len(), room);
         page::strokes(nodes, cells, page::spaced(nodes.len(), cells), &self.look)
     }
 
@@ -109,8 +150,9 @@ impl Terminal {
     fn in_rhythm(&self, blocks: &[Block]) -> Vec<Line> {
         let mut lines: Vec<Line> = Vec::new();
         let mut headed = false;
+        let lined = runs::LinedUp::among(blocks);
         for block in blocks {
-            let mut drawn = self.block(block);
+            let mut drawn = self.block_lined_up(block, lined);
             // What hangs from a heading starts on the line under it.
             if headed && drawn.first().is_some_and(|line| line.text().is_empty()) {
                 drawn.remove(0);
@@ -142,11 +184,20 @@ impl Terminal {
     }
 
     /// One block laid out for this stream; in a pane, each line that passes
-    /// its edge goes on in the rows under it.
+    /// its edge goes on in the rows under it, but a command's, which its own
+    /// drawing holds to the edge without parting a word.
     pub fn block(&self, block: &Block) -> Vec<Line> {
-        let drawn = self.laid(block);
+        self.block_lined_up(block, runs::LinedUp::among(std::slice::from_ref(block)))
+    }
+
+    /// One block laid out as [`Terminal::block`] lays it out, among the others of its
+    /// document: a list of runs lines its columns up with every list of runs there, as
+    /// `lined` says.
+    fn block_lined_up(&self, block: &Block, lined: runs::LinedUp) -> Vec<Line> {
+        let drawn = self.laid(block, lined);
         let width = self.look.width;
-        match width.cuts() {
+        let folds = width.cuts() && !matches!(block, Block::SameAtAShell(_));
+        match folds {
             true => drawn
                 .into_iter()
                 .flat_map(|line| line.rows_within(width.cells()))
@@ -180,6 +231,15 @@ impl Terminal {
             }
             Some(Prompt::TypedAnswer(asked)) => asked.drawn(&self.look),
             Some(Prompt::ChoiceList(list)) => list.drawn(&self.look, rows),
+            Some(Prompt::Form(form)) => self.form_held(form, rows),
+            Some(Prompt::Survey(survey)) => {
+                let held = self.survey_held(Vec::new(), survey, Vec::new(), rows);
+                Placed {
+                    lines: held.lines,
+                    cursor: held.cursor,
+                    laid: None,
+                }
+            }
             None => Placed {
                 lines: self.block(block),
                 cursor: None,
@@ -188,43 +248,46 @@ impl Terminal {
         }
     }
 
-    /// One block as its own layout draws it, at the stream's width.
-    fn laid(&self, block: &Block) -> Vec<Line> {
+    /// One block as its own layout draws it, at the stream's width, a list of runs lined up
+    /// as `lined` says. In a document a prompt takes the rows it needs: only a prompt held on
+    /// a terminal fits one to the rows it has.
+    fn laid(&self, block: &Block, lined: runs::LinedUp) -> Vec<Line> {
         let look = &self.look;
         match block {
             Block::Headline(block) => block.lines(look),
             Block::Furrow(block) => block.lines(look),
             Block::Ribbon(block) => block.lines(look),
             Block::Gist(block) => block.lines(look),
-            Block::Fields(block) => block.lines(look),
+            Block::Fields(block) => block.lines(look, self.values),
             Block::Labelled(block) => self.rows(&block.laid(look.width.cells(), look.glyphs)),
             Block::Table(block) => block.lines(look),
             Block::Nodes(block) => block.table(look.glyphs).lines(look),
-            Block::Runs(block) => block.lines(look),
+            Block::Runs(block) => block.lines(look, lined),
+            Block::AtAGlance(block) => block.lines(look),
             Block::Evidence(block) => block.lines(look),
             Block::Said(block) => block.lines(look),
             Block::Paths(block) => block.lines(look),
             Block::Diffstat(block) => block.lines(look),
             Block::Decision(block) => block.lines(look),
-            // In a document a card takes the rows it needs: only a prompt held on a
-            // terminal fits one to the rows it has.
             Block::Card(block) => block.drawn(look, usize::MAX).lines,
             Block::Desk(block) => block.drawn_whole(look),
-            Block::TypedAnswer(block) => block.drawn(look).lines,
-            Block::ChoiceList(block) => block.drawn(look, usize::MAX).lines,
-            Block::Checklist(block) => block.lines(look),
+            Block::WordChoice(block) => self.word_choice(block).into_iter().collect(),
+            Block::TypedAnswer(_) | Block::ChoiceList(_) | Block::Form(_) | Block::Survey(_) => {
+                self.asked_whole(block)
+            }
+            Block::Checklist(block) => block.lines(look, self.values),
             Block::Findings(block) => block.lines(look),
             Block::Problem(block) => block.lines(look),
             Block::Refusal(block) => block.lines(look),
             Block::Next(block) => block.lines(look),
+            Block::SameAtAShell(block) => block.lines(look),
             Block::Legend(block) => block.lines(look),
             Block::KeyList(block) => block.lines(look),
             Block::Attention(block) => block.lines(look),
             Block::Noted(block) => vec![self.noted(block)],
             Block::Heading(title) => self.heading(title),
             Block::Title(title) => title.lines(look),
-            Block::Section(section) => self.section(section),
-            Block::Fold(fold) => self.section(&fold.0),
+            Block::Section(section) | Block::Fold(Fold(section)) => self.section(section),
             Block::Prose(block) => block.lines(look),
             Block::Note(block) => block.lines(look),
             Block::Markdown(text) => self.markdown(text),
@@ -236,14 +299,26 @@ impl Terminal {
             Block::Rows(rows) => self.rows(rows),
             Block::Feed(block) => block.lines(look),
             Block::Meter(block) => vec![self.meter(block)],
-            // A document leaves no rows to fill: the field takes the least it stands in. A
-            // region that ends with it gives it the rows its blocks leave.
-            Block::Horizon(block) => self.horizon(block, horizon::LEAST),
+            Block::Wordmark(_) => self.wordmark(),
+            Block::Horizon(block) => self.horizon_in_a_document(block),
         }
     }
 }
 
 impl Terminal {
+    /// A line asked, a list, a form or a survey, whole, as a document draws it: each takes
+    /// the rows it needs. Nothing for any other block.
+    fn asked_whole(&self, block: &Block) -> Vec<Line> {
+        let look = &self.look;
+        match block.prompt() {
+            Some(Prompt::TypedAnswer(asked)) => asked.drawn(look).lines,
+            Some(Prompt::ChoiceList(list)) => list.drawn(look, usize::MAX).lines,
+            Some(Prompt::Form(form)) => self.form(form),
+            Some(Prompt::Survey(survey)) => self.survey(survey),
+            Some(Prompt::Card(_) | Prompt::Desk(_)) | None => Vec::new(),
+        }
+    }
+
     /// Rows a pointer moves along, each one row: cut at the stream's width with the ellipsis,
     /// never folded onto the row under it.
     fn rows(&self, rows: &[Line]) -> Vec<Line> {
@@ -316,13 +391,8 @@ impl Terminal {
     /// This stream one step in: what is left of the line under [`INDENT`], where a section's
     /// blocks are laid out.
     fn one_step_under(&self) -> Terminal {
-        Terminal::on(Look {
-            width: self
-                .look
-                .width
-                .within(self.look.width.cells().saturating_sub(cell_width(INDENT))),
-            ..self.look
-        })
+        let width = self.look.width;
+        self.at_width(width.within(width.cells().saturating_sub(cell_width(INDENT))))
     }
 
     /// A section's title, one step in, after a blank line: led by its lead, and going on

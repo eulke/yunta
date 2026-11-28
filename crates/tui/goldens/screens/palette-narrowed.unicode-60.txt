@@ -5,7 +5,7 @@
  n│▸ stop it and everything under it                     │
  p│  start a new run                                     │a
  w│  what it cost, and where its time went               │
- …│  every run of this repository                        │
+ …│  this repository's runs                              │
  r│  check adapters, git, forge, packs                   │
  r│  the shape of every document yunta reads             │
  r╰──────────────────────────────────────────────────────╯

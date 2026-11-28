@@ -116,6 +116,9 @@ fn steps_of_a_workflow() -> Vec<NextStep> {
         NextStep::ListRuns {
             reach: Reach::Machine,
         },
+        NextStep::ListRuns {
+            reach: Reach::MachineWithClosed,
+        },
         NextStep::Schemas,
         NextStep::Schema {
             document: Arg::Given("tasks".to_string()),
@@ -181,7 +184,8 @@ fn steps_of_the_machine() -> Vec<NextStep> {
         NextStep::Test {
             dir: Some(".".to_string()),
         },
-        NextStep::Init,
+        NextStep::Init { interactive: false },
+        NextStep::Init { interactive: true },
         NextStep::PackAdd {
             source: Arg::Given("github.com/acme/lint".to_string()),
         },

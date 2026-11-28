@@ -46,7 +46,7 @@ impl TypedRow {
         let inside = cells.saturating_sub(2 * SIDE);
         let (before, after) = self.fitted(inside.saturating_sub(CURSOR_CELL));
         let cursor = SIDE + cell_width(&before);
-        let words = match (placeholder, before.is_empty() && after.is_empty()) {
+        let words = match (placeholder, self.is_empty()) {
             (Some(placeholder), true) => Line::new()
                 .push(Tone::Faint, placeholder)
                 .cut(inside, glyphs),
@@ -68,6 +68,22 @@ impl TypedRow {
             cursor: Some((1, cursor)),
             laid: None,
         }
+    }
+
+    /// The row boxed `cells` wide as [`TypedRow::drawn`] boxes it, nothing typed standing
+    /// empty, `title` in its top edge a cell in from its corner where the edge holds it: a
+    /// line typed in place under a row names what it takes in its edge rather than over it.
+    pub(super) fn drawn_titled(&self, title: &str, cells: usize, glyphs: Glyphs) -> Placed {
+        let mut placed = self.drawn(cells, glyphs, None);
+        let [top_left, top_right, ..] = glyphs.corners(Shape::Round);
+        let level = glyphs.joint(false, false, true, true, Stroke::Open);
+        let titled = format!("{top_left} {title} ");
+        let left = cells.saturating_sub(cell_width(&titled) + cell_width(&top_right.to_string()));
+        if left > 0 {
+            let edge = format!("{titled}{}{top_right}", level.to_string().repeat(left));
+            placed.lines[0] = Line::new().push(Tone::Muted, edge);
+        }
+        placed
     }
 
     /// What `room` cells show of the words being typed, split at the cursor: the

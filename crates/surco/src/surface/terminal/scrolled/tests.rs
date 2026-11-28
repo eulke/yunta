@@ -126,7 +126,10 @@ fn a_document_that_fits_shows_whole_and_does_not_scroll() {
 
 #[test]
 fn the_last_lines_show_and_move_up_to_a_pointer_above_them() {
-    let at_the_question = Sight::at_the_end_with_the_pointer();
+    let at_the_question = Sight {
+        top: usize::MAX,
+        follows_pointer: true,
+    };
     let (rows, _) = terminal().scrolled(&numbered(20, None), at_the_question, 5);
     assert_eq!(rows.last().map(Line::text).as_deref(), Some("line 19"));
     let (rows, laid) = terminal().scrolled(&numbered(20, Some(3)), at_the_question, 5);

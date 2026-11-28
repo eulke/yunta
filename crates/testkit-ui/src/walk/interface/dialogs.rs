@@ -1,8 +1,9 @@
 //! The dialogs the walk opens over each state, apart from the strokes it walks: the
 //! palette, every row of each one it has not met taken, a row that names a key doing what
 //! pressing that key does; help, opened over each legend it has not met, listing each of
-//! its keys and closed with nothing done; and the rule that no work which stops, closes,
-//! removes or spends is asked but by Enter on its confirmation.
+//! its keys, saying with the legend every key the state takes, and closed with nothing done;
+//! and the rule that no work which stops, closes, removes or spends is asked but by Enter on
+//! its confirmation.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -14,13 +15,17 @@ use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Request, State};
 
 use super::InterfaceChecks;
+use crate::walk::classes::stage_kind;
+use crate::walk::strokes::strokes;
 use crate::walk::Reached;
 
 /// What palettes the walk must meet offer, by the command a row names, and where it
 /// offers it: one row of every stage that offers acts of its own, and those every stage
 /// offers.
-pub(super) const MUST_OFFER: [(&str, &str); 11] = [
+pub(super) const MUST_OFFER: [(&str, &str); 13] = [
     ("yunta resume", "the field"),
+    ("yunta run", "the field"),
+    ("yunta pack add", "the audit of the pack a setup installs"),
     ("yunta resolve-gate", "a parked run"),
     ("yunta stats", "a run"),
     ("yunta open", "a run's page for a browser"),
@@ -74,9 +79,12 @@ impl InterfaceChecks<'_> {
 
     /// Help over `state`, whose screen as Markdown lays it out is `screen`, reached as
     /// `reached` says, opened where its legend or the far keys beside it offer it and the
-    /// legend is one the walk has not met: it asks nothing, lists every key the legend names,
-    /// alone or beside another on one of its rows (`s g`), and Escape closes it, leaving the
-    /// screen as it was.
+    /// legend is one the walk has not met, at the field for each depth and reach it is asked to
+    /// show, which its one legend does not say and help over it does, and for each stage, page
+    /// that scrolls, place a run can or cannot be asked for and attention row standing or not:
+    /// it asks nothing, lists every key the legend names, alone or beside another on one of its
+    /// rows (`s g`), says with the legend and the far keys every key that changes the state
+    /// (`every_key_it_takes_said`), and Escape closes it, leaving the screen as it was.
     pub(super) fn help_taken(&mut self, state: &State, screen: &Screen, reached: &Reached<'_>) {
         let keys: Vec<(String, String)> = screen
             .legend
@@ -89,9 +97,7 @@ impl InterfaceChecks<'_> {
         if !offered.any(|key| key == "?") {
             return;
         }
-        let mut fingerprint = DefaultHasher::new();
-        keys.hash(&mut fingerprint);
-        if !self.helps.insert(fingerprint.finish()) {
+        if !self.helps.insert(help_told_apart(state, screen, &keys)) {
             return;
         }
         let opening = reached.then("Stroke(Insert('?'))");
@@ -118,6 +124,7 @@ impl InterfaceChecks<'_> {
                 opening.inputs()
             );
         }
+        every_key_it_takes_said(state, screen, (&keys, &listed), reached);
         let asked = opened.update(Input::Stroke(Stroke::Decline));
         assert!(asked.is_empty(), "closing help asked {asked:?}");
         let closed = Markdown.screen(&opened.screen(&Markdown.look()));
@@ -126,6 +133,87 @@ impl InterfaceChecks<'_> {
             Markdown.screen(screen),
             "help closed leaves the screen as it was"
         );
+    }
+}
+
+/// How the walk tells apart help over `state`, whose legend names `keys`: by those keys, the
+/// stage it lists them over, whether that stage's page scrolls, whether a run can be asked for
+/// where it stands and whether its attention row names anything, which decide which keys it
+/// takes beyond its legend; and at the field by what it is asked to show, its depth and its
+/// reach, which decide what `d` and `e` do there and which its one legend does not say.
+fn help_told_apart(state: &State, screen: &Screen, keys: &[(String, String)]) -> u64 {
+    let field = state
+        .field_depth()
+        .map(|depth| (depth, state.followed().field));
+    let stage = state.stage().map(stage_kind);
+    let scrolls = state.pane().map(|pane| pane.scrolls());
+    let asks_for_a_run = state.followed_runs().can_ask_for_a_run();
+    let attention = screen.attention.is_some();
+    let mut fingerprint = DefaultHasher::new();
+    (keys, field, stage, scrolls, asks_for_a_run, attention).hash(&mut fingerprint);
+    fingerprint.finish()
+}
+
+/// Every key the walk presses that changes `state`, whose screen as Markdown lays it out is
+/// `screen`, reached as `reached` says, is among the keys said by its legend (`keys`), the far
+/// keys beside it and help over it (`listed`): a key changes the state where pressing it asks
+/// for anything or leaves another screen. The keys that move what is read go together, as
+/// help says them: the arrows where `j k`, the arrows or the page keys are said, the page
+/// keys, `home`, `end` and the space bar where the arrows or the page keys are.
+fn every_key_it_takes_said(
+    state: &State,
+    screen: &Screen,
+    (keys, listed): (&[(String, String)], &[String]),
+    reached: &Reached<'_>,
+) {
+    let far = screen.anywhere.0.iter().map(|binding| binding.keys.named());
+    let legend = keys.iter().map(|(key, _)| key.as_str()).chain(far);
+    let said: Vec<&str> = legend
+        .flat_map(str::split_whitespace)
+        .chain(listed.iter().map(String::as_str))
+        .collect();
+    let drawn = Markdown.screen(screen);
+    let is_said = |key: &str| said.contains(&key);
+    let scroll_said = is_said("up-down") || is_said("pgup") || is_said("pgdn");
+    for stroke in strokes() {
+        let key = spelled(stroke);
+        let in_its_family = match stroke {
+            Stroke::Up | Stroke::Down => scroll_said || is_said("j") || is_said("k"),
+            Stroke::PageUp | Stroke::PageDown | Stroke::Home | Stroke::End => scroll_said,
+            Stroke::Insert(' ') => scroll_said,
+            _ => false,
+        };
+        if is_said(&key) || in_its_family {
+            continue;
+        }
+        let mut pressed = state.clone();
+        let asked = pressed.update(Input::Stroke(stroke));
+        let changed =
+            !asked.is_empty() || Markdown.screen(&pressed.screen(&Markdown.look())) != drawn;
+        assert!(
+            !changed,
+            "`{key}` changes the state and neither its legend nor help says it, after:\n{}",
+            reached.then(format!("Stroke({stroke:?})")).inputs()
+        );
+    }
+}
+
+/// `stroke` as a legend or help names its key: a character as it is typed, the space bar as
+/// `space`, every other key by its name.
+fn spelled(stroke: Stroke) -> String {
+    match stroke {
+        Stroke::Insert(' ') => "space".to_string(),
+        Stroke::Insert(character) => character.to_string(),
+        Stroke::Enter => "enter".to_string(),
+        Stroke::Decline => "esc".to_string(),
+        Stroke::Interrupt => "ctrl-c".to_string(),
+        Stroke::Tab => "tab".to_string(),
+        Stroke::BackTab => "shift-tab".to_string(),
+        Stroke::Up | Stroke::Down => "up-down".to_string(),
+        Stroke::Left | Stroke::Right => "left-right".to_string(),
+        Stroke::PageUp => "pgup".to_string(),
+        Stroke::PageDown => "pgdn".to_string(),
+        other => format!("{other:?}").to_lowercase(),
     }
 }
 
@@ -184,7 +272,7 @@ fn does_what_its_key_does(
 
 /// The rows of the palette standing over `state`, each the command that does the same and
 /// the key its stage takes it by, where one does; none where no palette stands.
-fn palette_rows(state: &State) -> Vec<(String, Option<String>)> {
+pub(crate) fn palette_rows(state: &State) -> Vec<(String, Option<String>)> {
     let screen = state.screen(&Markdown.look());
     let Some(overlay) = screen
         .overlay
@@ -229,7 +317,7 @@ pub(super) fn nothing_unconfirmed(
     let confirming = before
         .screen(&Markdown.look())
         .overlay
-        .is_some_and(|overlay| overlay.title == yunta_render::screen::CONFIRM);
+        .is_some_and(|overlay| overlay.confirms);
     assert!(
         confirming && matches!(input, Input::Stroke(Stroke::Enter)),
         "{operation:?} asked with no confirmation, after:\n{}",

@@ -69,8 +69,10 @@ pub enum NextStep {
     Doctor { sessions: bool, full: bool },
     /// `yunta test`: the test cases of the project, or of the one at `dir`.
     Test { dir: Option<String> },
-    /// `yunta init`: a repository prepared for yunta.
-    Init,
+    /// `yunta init`: a repository prepared for yunta, writing what it detects; with
+    /// `interactive`, `-i`: each value detected asked at a terminal first, what a person
+    /// answers written in its place.
+    Init { interactive: bool },
     /// `yunta new <name>`: a new workflow written from the skeleton of `shape`, or
     /// of the shape `new` picks when none is named.
     NewWorkflow {
@@ -141,7 +143,7 @@ impl NextStep {
             | NextStep::Schema { .. }
             | NextStep::Doctor { .. }
             | NextStep::Test { .. }
-            | NextStep::Init
+            | NextStep::Init { .. }
             | NextStep::NewWorkflow { .. }
             | NextStep::PackAdd { .. }
             | NextStep::PackUpdate { .. }
@@ -177,11 +179,24 @@ pub enum Choice {
 }
 
 /// Which runs `yunta list --runs` lists: this repository's, what needs a person
-/// first; the closed ones too, with `--full`; or every run on this machine,
-/// with `--all`.
+/// first; the closed ones too, with `--full`; every run on this machine, with
+/// `--all`; or every run on this machine with the closed ones too, with both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {
     Repository,
     WithClosed,
     Machine,
+    MachineWithClosed,
+}
+
+impl Reach {
+    /// The same reach with the closed runs too: this repository's with `--full`, every run on
+    /// this machine with `--all --full`. Not a wider reach: a listing that leaves its closed
+    /// runs out names this, and never the runs of another reach.
+    pub fn with_closed(self) -> Reach {
+        match self {
+            Reach::Repository | Reach::WithClosed => Reach::WithClosed,
+            Reach::Machine | Reach::MachineWithClosed => Reach::MachineWithClosed,
+        }
+    }
 }

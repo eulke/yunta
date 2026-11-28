@@ -46,6 +46,13 @@ pub fn resumed(run: &RunId) -> String {
     format!("run {run}: resumed, {INDEPENDENTLY}")
 }
 
+/// The note a screen leaves once it handed `run` back to a detached resume: the run by its
+/// handle, as the screen names it, and what drives it now. Not [`resumed`], what a client is
+/// answered, which names the run whole.
+pub fn resumed_note(run: &RunId) -> String {
+    format!("{} resumed, {INDEPENDENTLY}.", run.handle())
+}
+
 /// The line `run` starts with, as `start` starts it.
 pub fn line(run: &RunId, start: Start) -> String {
     format!(
@@ -72,5 +79,14 @@ mod tests {
             format!("run {run}: detached, driving forward independently (`{follow}` follows it)")
         );
         assert!(line(&run, Start::Resuming).contains(": resuming ("));
+    }
+
+    #[test]
+    fn a_resume_handed_on_is_noted_by_the_runs_handle() {
+        let run = RunId::from_static("01K3W48MFW7H0ZZA5PZ0ABCDEF");
+        assert_eq!(
+            resumed_note(&run),
+            "ABCDEF resumed, driving forward independently."
+        );
     }
 }

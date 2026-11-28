@@ -1,0 +1,21 @@
+This repository has never used yunta. Here is what it found. Nothing is written
+until you say so.
+
+what this repository is
+  + name        yunta
+  + language    rust
+  + suite       cargo test
+  + lint        cargo clippy --all-targets -- -D warnings
+  + forge       github eulke/yunta, from origin
+  + base        main
+  ! commits as  cannot name who commits here: set `git config --global user.name
+                "Your Name"` and `git config --global user.email
+                you@example.com` (without `--global`, for this repository
+                alone); git said: fatal: unable to auto-detect email address
+  ^ workflow    yunta/fragua, out of reach: fatal: '/home/nowhere' does not
+                appear to be a git repository
+
+who does the work
+  + planner     claude-code/opus                then codex
+
+ * write .yunta/config.yaml  ; then yunta asks what to build

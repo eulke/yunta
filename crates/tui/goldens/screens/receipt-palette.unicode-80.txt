@@ -10,7 +10,7 @@
   │  the whole page, in a browser                                            │
   │  the run's whole chronicle                                               │
   │  start a new run                                                         │
-  │  every run of this repository                                            │
+  │  this repository's runs                                                  │
   │  the workflows you can run                                               │
   │  check adapters, git, forge, packs                                       │
   │  remove orphaned checkouts                                               │

@@ -31,7 +31,7 @@ impl OpenedRun<'_> {
         let state = RunState::replay(&self.events);
         StatsReading {
             stats: RunStats::at(&state, &self.manifest.doc.workflow, now),
-            frame: self.frame_of(&state, now),
+            frame: self.frame_of(&state),
             pricing: self.project.config.pricing.clone(),
         }
     }

@@ -19,11 +19,12 @@
 //! run's gate waits on and the acts on a run; `evidence`, what a run leaves; `workflow`, a
 //! workflow's check, past runs and graph, the cases and a new workflow; `pack`, the packs';
 //! `machine`, what doctor checks of this machine and this project, and what upkeep collects
-//! of what runs left. What one piece of work finds that a later one takes stays with the
-//! performer, in `held`, under the ticket that found it: a repository's project detected for
-//! its setup, which is bound to the repository and written by the setup's own work. The
-//! state hands back only the ticket, and lets it go when the person leaves the stage that
-//! holds it.
+//! of what runs left; `setup`, a repository's setup. What one piece of work finds that a
+//! later one takes stays with the performer, in `held`, under the ticket that found it: a
+//! repository's project detected for its setup, which is bound to the repository, with the
+//! pack the setup installs once its own work fetches it, both taken by the setup's write; and
+//! a pack fetched, which its install vendors. The state hands back only the ticket, and lets
+//! it go when the person leaves the stage that holds it.
 
 mod evidence;
 mod following;
@@ -31,17 +32,18 @@ mod held;
 mod machine;
 mod pack;
 mod run;
+mod setup;
 mod workflow;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::mpsc::UnboundedSender;
-use yunta_api::{Error, Project, ProjectSetup, Remark, Remarks, Stop, Workspace};
+use yunta_api::{Error, Project, Remark, Remarks, Stop, Workspace};
 use yunta_core::events::Channel;
 
 use crate::{Input, News, Operation, Outcome, RepositoryReading, Request, Ticket};
 use following::FollowingTask;
-use held::{Found, Held};
+use held::Held;
 
 /// Carries out an [`Operation`] through `yunta-api`, against the workspace it was made
 /// with, and hands back what it says on the way and what it comes to as inputs.
@@ -72,19 +74,6 @@ impl Performer {
         &self.workspace
     }
 
-    /// Carries out `operation` under `ticket`, under a stop of its own: what it says
-    /// and what lasting work finds go to `inputs` as they come, and what it came to
-    /// last.
-    pub async fn perform(
-        &self,
-        ticket: Ticket,
-        operation: Operation,
-        inputs: UnboundedSender<Input>,
-    ) {
-        let stop = self.under_way(ticket);
-        self.performed(ticket, operation, inputs, stop).await;
-    }
-
     /// The work under `ticket` held as under way, and the stop that stops it: held before
     /// the work starts, so letting it go the moment after it was asked stops it.
     fn under_way(&self, ticket: Ticket) -> Stop {
@@ -93,7 +82,9 @@ impl Performer {
         stop
     }
 
-    /// [`Performer::perform`], its work held as under way already under `stop`.
+    /// `operation` carried out under `ticket`, its work held as under way already under
+    /// `stop`: what it says and what lasting work finds go to `inputs` as they come, and
+    /// what it came to last.
     async fn performed(
         &self,
         ticket: Ticket,
@@ -181,7 +172,8 @@ impl Performer {
         match operation {
             Operation::ReadRepository => repository_read(&project, stop).await,
             Operation::DetectProject => self.detected(&project, ticket, stop).await,
-            Operation::WriteSetup { held, setup } => self.written(held, setup).await,
+            Operation::FetchSetupPack => self.setup_pack(&project, ticket, stop).await,
+            writing @ Operation::WriteSetup { .. } => self.written(writing, remarks, stop).await,
             Operation::ReadCatalog => {
                 let catalog = project.workspace.catalog().await;
                 Ok(Outcome::Catalog(Box::new(catalog)))
@@ -218,38 +210,6 @@ impl Performer {
         }
     }
 
-    /// `project`'s repository as setting it up detects it, the project kept under
-    /// `ticket` for the setup to write; stopped where the ticket was let go first.
-    async fn detected(
-        &self,
-        project: &Project,
-        ticket: Ticket,
-        stop: &Stop,
-    ) -> Result<Outcome, Error> {
-        let detected = project.workspace.detect_project(false, stop).await?;
-        let draft = Box::new(detected.draft.clone());
-        match self.held().keep(ticket, Found::Project(Box::new(detected))) {
-            true => Ok(Outcome::Detected {
-                draft,
-                held: ticket,
-            }),
-            false => Err(Error::Stopped),
-        }
-    }
-
-    /// `setup` written into the repository whose project is held under `held`; failed
-    /// where it was let go first.
-    async fn written(&self, held: Ticket, setup: ProjectSetup) -> Result<Outcome, Error> {
-        let detected = self.held().take_project(held);
-        let Some(detected) = detected else {
-            return Ok(Outcome::Failed(
-                yunta_render::screen::SETUP_LET_GO.to_string(),
-            ));
-        };
-        let initialized = detected.write(setup).await?;
-        Ok(Outcome::Initialized(Box::new(initialized)))
-    }
-
     /// What it holds, whatever a panicking holder left it as.
     fn held(&self) -> MutexGuard<'_, Held> {
         self.held.lock().unwrap_or_else(PoisonError::into_inner)
@@ -257,12 +217,13 @@ impl Performer {
 }
 
 /// The repository `project` works in, as far as Yunta goes, with where the project keeps
-/// its runs and what it prices tokens at.
+/// its runs, what it prices tokens at and the person's home.
 async fn repository_read(project: &Project, stop: &Stop) -> Result<Outcome, Error> {
     Ok(Outcome::Repository(Box::new(RepositoryReading {
         repository: project.repository(stop).await?,
         storage: project.storage_path.clone(),
         prices: project.config.pricing.clone(),
+        home: project.workspace.env.home.clone(),
     })))
 }
 

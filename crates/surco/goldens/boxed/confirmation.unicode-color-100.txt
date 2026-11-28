@@ -1,0 +1,26 @@
+␛[2m╭␛[0m ␛[1mclose ST0PPD?␛[0m ␛[2m───────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m It closes as cancelled, by you, and stops waiting on a       ␛[2m│␛[0m
+␛[2m│␛[0m person. Its branch stays; its checkouts go back to the       ␛[2m│␛[0m
+␛[2m│␛[0m project.                                                     ␛[2m│␛[0m
+␛[2m│␛[0m                                                              ␛[2m│␛[0m
+␛[2m│␛[0m ␛[2myunta close ST0PPD␛[0m                                           ␛[2m│␛[0m
+␛[2m│␛[0m                                                              ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────╯␛[0m
+
+␛[2m╭␛[0m ␛[1mclose ST0PPD?␛[0m ␛[2m───────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m It closes as cancelled, by you, and stops waiting on a       ␛[2m│␛[0m
+␛[2m│␛[0m person. Its branch stays; its checkouts go back to the       ␛[2m│␛[0m
+␛[2m│␛[0m project.                                                     ␛[2m│␛[0m
+␛[2m│␛[0m                                                              ␛[2m│␛[0m
+␛[2m│␛[0m ␛[2myunta close ST0PPD␛[0m                                           ␛[2m│␛[0m
+␛[2m│␛[0m                                                              ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────╯␛[0m
+
+␛[2m╭␛[0m ␛[1mclose ST0PPD?␛[0m ␛[2m───────────────────────────────────────╮␛[0m
+␛[2m│␛[0m It closes as cancelled, by you, and stops waiting on ␛[2m│␛[0m
+␛[2m│␛[0m a person. Its branch stays; its checkouts go back to ␛[2m│␛[0m
+␛[2m│␛[0m the project.                                         ␛[2m│␛[0m
+␛[2m│␛[0m                                                      ␛[2m│␛[0m
+␛[2m│␛[0m ␛[2myunta close ST0PPD␛[0m                                   ␛[2m│␛[0m
+␛[2m│␛[0m                                                      ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────╯␛[0m

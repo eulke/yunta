@@ -13,7 +13,8 @@ use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::RunState;
 
 use super::super::fixtures::{
-    closing, failed_lint, finished, frame, lint_decision, lint_failure, parked_on_lint, places, RUN,
+    closing, failed_lint, finished, frame, lint_decision, lint_failure, parked_on_lint, places,
+    times, RUN,
 };
 use super::super::Run;
 use crate::escalation::Decision;
@@ -40,6 +41,7 @@ impl Stopped {
             depth: Depth::Glance,
             run_id: self.run_id.clone(),
             frame: self.frame.clone(),
+            times: times(&self.frame),
             state: self.state.clone(),
             places: places(),
             decision: self.decision.clone().map(|(on, escalation)| Decision {

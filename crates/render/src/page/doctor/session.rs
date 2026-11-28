@@ -7,6 +7,31 @@ use surco::words::Standing;
 use yunta_core::events::{Failure, PauseReason, SessionDeath};
 use yunta_core::{NodeId, RunnerCandidate, RunnerName};
 
+/// A runner that names a binding, and where among its candidates. Not an order a run falls
+/// back along: a run takes a runner's first candidate this binary builds, and a later one
+/// serves a run pinned to its adapter, or a binary that builds none of those before it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedBy {
+    pub runner: RunnerName,
+    /// Its place among the runner's candidates, counted from zero: the first is 0.
+    pub position: usize,
+}
+
+impl NamedBy {
+    /// The runner as a session's row names it: alone where the binding is its first
+    /// candidate, `reviewer's 2nd candidate` where it is a later one.
+    fn said(&self) -> String {
+        match self.position {
+            0 => self.runner.to_string(),
+            at => format!(
+                "{}'s {} candidate",
+                self.runner,
+                surco::text::ordinal(at + 1)
+            ),
+        }
+    }
+}
+
 /// How a binding's session ended.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionOutcome {
@@ -67,7 +92,7 @@ impl ProbeEnded {
 /// it, and how its session ended.
 pub(super) fn session_check(
     candidate: &RunnerCandidate,
-    named_by: &[(RunnerName, bool)],
+    named_by: &[NamedBy],
     outcome: &SessionOutcome,
 ) -> Check {
     let (found, said) = match outcome {
@@ -105,20 +130,18 @@ pub(super) fn session_check(
     let binding = label(candidate);
     let runners = named_by
         .iter()
-        .map(|(runner, first)| match first {
-            true => runner.to_string(),
-            false => format!("{runner} fallback"),
-        })
+        .map(NamedBy::said)
         .collect::<Vec<_>>()
         .join(", ");
     Check::new(found, format!("{binding} ({runners})"), said).brief(binding)
 }
 
-/// `adapter/model` or `adapter/model/agent`: what a reader matches back to a
-/// line of their own `runners:`.
+/// The candidate as its `runners:` line names it ([`crate::runner::candidate`]), then
+/// `/agent` where it names one: what a reader matches back to a line of their own.
 fn label(candidate: &RunnerCandidate) -> String {
+    let named = crate::runner::candidate(&candidate.adapter, candidate.model.as_ref());
     match &candidate.agent {
-        Some(agent) => format!("{}/{}/{agent}", candidate.adapter, candidate.model),
-        None => format!("{}/{}", candidate.adapter, candidate.model),
+        Some(agent) => format!("{named}/{agent}"),
+        None => named,
     }
 }

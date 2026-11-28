@@ -15,8 +15,8 @@ use super::titled;
 impl RunStage {
     /// The pane of the run `framed`, its process asking at its own terminal, for the node
     /// `pointed`: its title, the question, who asks it and since when, as the registry its
-    /// frame read says them, then that nothing here answers it; `look_failed` said under it
-    /// where a look failed.
+    /// frame read says them at the instant it is framed at, then that nothing here answers it;
+    /// `look_failed` said under it where a look failed.
     pub(super) fn asked_elsewhere_pane(
         &self,
         framed: &Framed<'_>,
@@ -24,7 +24,7 @@ impl RunStage {
         look_failed: Option<&String>,
     ) -> Region {
         let asked = framed
-            .frame
+            .times
             .asking
             .as_ref()
             .map(|asking| AskedAtItsTerminal { asking }.blocks());

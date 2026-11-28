@@ -33,9 +33,9 @@ const AT_WORK_FOR: Duration = Duration::from_secs(7 * 60 + 34);
 async fn a_run_at_work_is_seen_as_its_last_event_lands() {
     let cut = Cut::of_target("work").await;
     let (run, _) = read_whole(&cut, &design()).await;
-    let frame = run.frame(cut.now());
-    assert_eq!(frame.elapsed, Some(AT_WORK_FOR));
-    assert_eq!(frame.since_last_event, Some(Duration::ZERO));
+    let times = run.times(cut.now());
+    assert_eq!(times.elapsed, Some(AT_WORK_FOR));
+    assert_eq!(times.since_last_event, Some(Duration::ZERO));
 }
 
 #[tokio::test]
@@ -44,7 +44,7 @@ async fn a_runs_screen_stands_in_a_field_of_a_run_that_needs_the_person_and_one_
     let cut = Cut::of_target("work").await;
     let field = field_here(&cut).await;
     let born = |run: &FollowedRun| {
-        run.state
+        run.state()
             .clock()
             .first_at()
             .expect("a run of the field holds its first event")
@@ -52,17 +52,14 @@ async fn a_runs_screen_stands_in_a_field_of_a_run_that_needs_the_person_and_one_
     let in_view = field
         .runs
         .iter()
-        .find(|run| run.run == design())
+        .find(|run| *run.run() == design())
         .expect("the run in view stands in its field");
     let beside: Vec<&FollowedRun> = field
         .runs
         .iter()
-        .filter(|run| run.run != design())
+        .filter(|run| *run.run() != design())
         .collect();
-    let standings: Vec<Standing> = beside
-        .iter()
-        .map(|run| run.frame(cut.now()).standing)
-        .collect();
+    let standings: Vec<Standing> = beside.iter().map(|run| run.frame().standing).collect();
     assert_eq!(
         standings.len(),
         2,
@@ -79,7 +76,7 @@ async fn a_runs_screen_stands_in_a_field_of_a_run_that_needs_the_person_and_one_
         assert!(
             born(run) < born(in_view),
             "{} is born at {}, after the run in view",
-            run.run,
+            run.run(),
             born(run)
         );
     }
@@ -93,7 +90,7 @@ async fn the_findings_cut_holds_the_four_findings_one_blocking_none_answered_its
 {
     let cut = Cut::of_target("findings").await;
     let (run, _) = read_whole(&cut, &design()).await;
-    let findings = run.state.findings.effective();
+    let findings = run.state().findings.effective();
     assert_eq!(findings.len(), 4, "{findings:?}");
     assert!(
         findings
@@ -103,12 +100,12 @@ async fn the_findings_cut_holds_the_four_findings_one_blocking_none_answered_its
     );
     for posted in &findings {
         let answers = run
-            .state
+            .state()
             .findings
             .answers(posted.node.as_ref(), &posted.finding.id);
         assert!(answers.is_empty(), "`{}` is answered", posted.finding.id);
     }
-    let frame = run.frame(cut.now());
+    let frame = run.frame();
     for reviewer in REVIEWERS {
         let node = frame
             .nodes

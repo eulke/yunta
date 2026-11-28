@@ -1,4 +1,4 @@
-! fragua (quick) ; failed ; after 7m41s ; 32m10s ago                      7E5PH4
+! fragua (quick) ; failed ; in 7m41s ; 32m10s ago                         7E5PH4
 ========================== ========================== ..........................
   node `lint` failed: exit 101.
 
@@ -13,4 +13,4 @@
                . 1 never ran: test
 
 next
-  yunta status 7E5PH4 --full   the whole story, node by node
+  yunta status 7E5PH4 --full   the run's whole story

@@ -16,13 +16,20 @@
 //! The runs of the home's cuts, each standing at a scene of a run's screen, are followed on
 //! their screens, and the application is opened on each of their screens: what those screens
 //! ask to read as a scene opens, a pull request or a verification, is recorded there.
+//!
+//! Each kind of act a person takes, and of work a person waits on to take one, that the
+//! walk's bound has room for is also answered as refused and as failed below Yunta
+//! (`unanswered`), as the performer hands either back, so the screens that say what such work
+//! came to where it did not do what was asked are walked.
 
 mod followed;
+mod setting_up;
+mod unanswered;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use tokio::sync::mpsc;
 use yunta_api::{FollowNews, Repository, RunRequest, Workspace};
 use yunta_core::events::Channel;
 use yunta_core::step::NextStep;
@@ -30,15 +37,17 @@ use yunta_core::{
     Answer, InputName, NodeId, OptionId, PackRef, QuestionId, WorkflowName, WorkflowShape,
 };
 use yunta_ui::{
-    EvidenceOperation, EvidenceOutcome, Input, News, Operation, OperationKind, Outcome,
-    PackOperation, PackOutcome, Performer, Request, State, WorkflowOperation,
+    EvidenceOperation, EvidenceOutcome, Input, InstallsThePack, News, Operation, OperationKind,
+    Outcome, PackOperation, PackOutcome, Performer, Request, State, Ticket, WorkflowOperation,
 };
 
 use crate::cut::Cut;
+use crate::driving::{carried_out, CarriedOut};
 use crate::home::{root_of, Home};
-use crate::sandbox::{now, workspace, workspace_on};
+use crate::sandbox::{now, workspace, workspace_reaching};
 use crate::walk::Reached;
 use followed::{read_as, FollowedNews};
+use setting_up::{found_and_fetched, set_up};
 
 /// What each kind of operation found and came to where it was performed, what the
 /// application's following handed where it was recorded, and the steps the application
@@ -102,16 +111,23 @@ impl Recordings {
         self.machine_readings(home).await;
     }
 
-    /// Where the application opens, read in each place it opens differently, and
-    /// what setting a repository up finds, with an adapter answering.
+    /// Where the application opens, read in each place it opens differently; what setting
+    /// a repository up finds, with an adapter answering; and what fetching the pack a setup
+    /// installs comes to, in reach and out of it.
     async fn repository_readings(&mut self, home: &Home) {
         let (outside, never_set_up) = (home.outside.as_path(), home.never_set_up.as_path());
         let unworked = home.root();
         for dir in [outside, never_set_up, home.set_up.as_path()] {
             self.kept(performed(dir, unworked, Operation::ReadRepository).await);
         }
-        let answering = workspace_on(never_set_up, unworked, vec![home.clis.clone()]);
-        self.kept(performed_in(answering, Operation::DetectProject).await);
+        let in_reach = home.reaching_fragua(never_set_up);
+        let [found, fetched] = found_and_fetched(in_reach).await;
+        self.kept(found);
+        self.kept(fetched);
+        let clis = vec![home.clis.clone()];
+        let unreached = workspace_reaching(never_set_up, unworked, clis, home.out_of_reach());
+        let [_, unfetched] = found_and_fetched(unreached).await;
+        self.kept(unfetched);
     }
 
     /// The catalog, a workflow's check, past runs (none) and graph, the cases, and the
@@ -202,15 +218,24 @@ impl Recordings {
     /// Every act the application asks for, performed on a run it changes or a
     /// repository it sets up or writes into.
     async fn acts(&mut self, home: &Home) {
-        let answering = workspace_on(&home.to_set_up, home.root(), vec![home.clis.clone()]);
-        self.kept(set_up(answering).await);
-        self.catalog_acts(home).await;
+        let mut writes = Vec::new();
+        for (dir, installs) in [
+            (&home.to_set_up, InstallsThePack::Yes),
+            (&home.to_set_up_alone, InstallsThePack::No),
+        ] {
+            let written = set_up(home.reaching_fragua(dir), installs).await;
+            writes.push(written.0.clone());
+            self.kept(written);
+        }
+        let install = self.catalog_acts(home).await;
         self.run_acts(home).await;
+        let write = writes.into_iter().next().expect("a setup written");
+        self.unanswered(home, write, install);
     }
 
-    /// A new workflow and a new pack, each named and named by nothing, and the pack
-    /// installed removed.
-    async fn catalog_acts(&mut self, home: &Home) {
+    /// A new workflow and a new pack, each named and named by nothing, the pack installed
+    /// removed, and a pack installed: what installing it was asked as.
+    async fn catalog_acts(&mut self, home: &Home) -> Operation {
         for name in ["", "fresh"] {
             let new = WorkflowOperation::New {
                 name: name.to_string(),
@@ -228,10 +253,14 @@ impl Recordings {
         let removal = Operation::Pack(PackOperation::Remove { pack: demo });
         self.kept(performed(&home.packed, home.root(), removal).await);
         let source = home.tools.to_string_lossy().to_string();
-        self.kept(installed(workspace(&home.set_up, home.root()), source).await);
+        let install = installed(workspace(&home.set_up, home.root()), source).await;
+        let installing = install.0.clone();
+        self.kept(install);
+        installing
     }
 
-    /// A run started, decided, answered, resumed, cancelled and closed.
+    /// A run started, and a start admission refuses; a run decided, answered, resumed,
+    /// cancelled and closed.
     async fn run_acts(&mut self, home: &Home) {
         let start = Operation::Start {
             request: RunRequest {
@@ -243,6 +272,7 @@ impl Recordings {
             },
         };
         self.kept(performed(&home.set_up, home.root(), start).await);
+        self.kept(performed(&home.set_up, home.root(), refused_start()).await);
         let decide = Operation::Decide {
             run: home.deciding.run_id.clone(),
             option: OptionId::from("go"),
@@ -293,8 +323,8 @@ impl Recordings {
         let followed = state.followed();
         let in_view = state.followed_runs().in_view.as_ref();
         let held = in_view
-            .filter(|in_view| followed.run.as_ref() == Some(&in_view.run.run))
-            .and_then(|in_view| in_view.run.state.head());
+            .filter(|in_view| followed.run.as_ref() == Some(in_view.run.run()))
+            .and_then(|in_view| in_view.run.state().head());
         self.followed.about(&followed, held)
     }
 
@@ -363,48 +393,6 @@ impl Recordings {
     }
 }
 
-/// The repository `workspace` works in set up as the application sets it up, by one
-/// performer: the project detected under the ticket the application asks it under,
-/// then written with every answer left as detected, under another ticket of the
-/// application's own.
-async fn set_up(workspace: Workspace) -> (Operation, Vec<News>, Outcome) {
-    let dir = workspace.dir.clone();
-    let (mut state, requests) = State::opened(now());
-    let [Request::Perform(opening, _)] = requests.as_slice() else {
-        panic!("the application asks where it stands as it opens");
-    };
-    let never_set_up = read_as(&workspace, Repository::NeverSetUp);
-    let requests = state.update(Input::Outcome(*opening, never_set_up));
-    let [Request::Perform(detecting, Operation::DetectProject)] = requests.as_slice() else {
-        panic!("a repository never set up opens on finding what it runs");
-    };
-    let performer = Performer::new(workspace, Channel::Tty);
-    let (inputs, mut received) = mpsc::unbounded_channel();
-    performer
-        .perform(*detecting, Operation::DetectProject, inputs.clone())
-        .await;
-    let draft = loop {
-        match received.recv().await {
-            Some(Input::Outcome(_, Outcome::Detected { draft, .. })) => break draft,
-            Some(Input::Outcome(_, other)) => panic!("{dir:?} is not set up: {other:?}"),
-            Some(_) => continue,
-            None => panic!("the performer handed back no outcome"),
-        }
-    };
-    let writing = Operation::WriteSetup {
-        held: *detecting,
-        setup: draft.answered("", "", Vec::new()),
-    };
-    performer.perform(*opening, writing.clone(), inputs).await;
-    loop {
-        match received.recv().await {
-            Some(Input::Outcome(_, outcome)) => return (writing, Vec::new(), outcome),
-            Some(_) => continue,
-            None => panic!("the performer handed back no outcome"),
-        }
-    }
-}
-
 /// The pack `source` names installed as the application installs it, by one
 /// performer: fetched under a ticket of the application's own, then installed from
 /// the copy held under it, its executors confirmed, under another.
@@ -413,36 +401,43 @@ async fn installed(workspace: Workspace, source: String) -> (Operation, Vec<News
     let [Request::Perform(opening, _)] = requests.as_slice() else {
         panic!("the application asks where it stands as it opens");
     };
-    let never_set_up = read_as(&workspace, Repository::NeverSetUp);
+    let dir = workspace.dir.clone();
+    let never_set_up = read_as(&workspace, Repository::NeverSetUp { dir });
     let requests = state.update(Input::Outcome(*opening, never_set_up));
-    let [Request::Perform(fetching, _)] = requests.as_slice() else {
-        panic!("a repository never set up asks what setting it up finds");
+    let [Request::Perform(fetching, _), Request::Perform(_, _), Request::Follow(_)] =
+        requests.as_slice()
+    else {
+        panic!(
+            "a repository never set up asks what setting it up finds and its pack fetched, \
+             following its field: {requests:?}"
+        );
     };
-    let performer = Performer::new(workspace, Channel::Tty);
-    let (inputs, mut received) = mpsc::unbounded_channel();
+    let performer = Arc::new(Performer::new(workspace, Channel::Tty));
     let fetch = Operation::Pack(PackOperation::Fetch { source });
-    performer.perform(*fetching, fetch, inputs.clone()).await;
-    let held = loop {
-        match received.recv().await {
-            Some(Input::Outcome(_, Outcome::Pack(PackOutcome::Fetched(fetched)))) => {
-                break fetched.held
-            }
-            Some(Input::Outcome(_, other)) => panic!("the pack is not fetched: {other:?}"),
-            Some(_) => continue,
-            None => panic!("the performer handed back no outcome"),
-        }
+    let held = match carried_out(&performer, *fetching, fetch).await.outcome {
+        Outcome::Pack(PackOutcome::Fetched(fetched)) => fetched.held,
+        other => panic!("the pack is not fetched: {other:?}"),
     };
     let install = Operation::Pack(PackOperation::Install {
         held,
         confirmed: true,
     });
-    performer.perform(*opening, install.clone(), inputs).await;
-    loop {
-        match received.recv().await {
-            Some(Input::Outcome(_, outcome)) => return (install, Vec::new(), outcome),
-            Some(_) => continue,
-            None => panic!("the performer handed back no outcome"),
-        }
+    let installed = carried_out(&performer, *opening, install.clone()).await;
+    (install, Vec::new(), installed.outcome)
+}
+
+/// A start of `greet` admission refuses of an input it names, the one it needs left out,
+/// which a new run says under that input's row, the focus moved there. A refusal that names
+/// no row, said in the note, is left to the new run's own tests.
+fn refused_start() -> Operation {
+    Operation::Start {
+        request: RunRequest {
+            workflow: PathBuf::from("greet"),
+            inputs: HashMap::new(),
+            mode: None,
+            adapter: None,
+            hermetic: false,
+        },
     }
 }
 
@@ -467,17 +462,17 @@ async fn performed_in(
     let Some(Request::Perform(ticket, _)) = requests.into_iter().next() else {
         panic!("the application asks something as it opens");
     };
-    let (inputs, mut received) = mpsc::unbounded_channel();
-    Performer::new(workspace, Channel::Tty)
-        .perform(ticket, operation.clone(), inputs)
-        .await;
-    let mut news = Vec::new();
-    loop {
-        match received.recv().await {
-            Some(Input::News(_, found)) => news.push(found),
-            Some(Input::Outcome(_, outcome)) => return (operation, news, outcome),
-            Some(_) => continue,
-            None => panic!("the performer handed back no outcome"),
-        }
-    }
+    let performer = Arc::new(Performer::new(workspace, Channel::Tty));
+    performed_by(&performer, ticket, operation).await
+}
+
+/// `operation`, what it found while it lasted and what it came to, carried out by `performer`
+/// under `ticket`.
+async fn performed_by(
+    performer: &Arc<Performer>,
+    ticket: Ticket,
+    operation: Operation,
+) -> (Operation, Vec<News>, Outcome) {
+    let CarriedOut { news, outcome, .. } = carried_out(performer, ticket, operation.clone()).await;
+    (operation, news, outcome)
 }

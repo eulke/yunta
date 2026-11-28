@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use std::path::Path;
 
+use yunta_core::disk::Disk;
 use yunta_core::port::{Forge, ForgeUnanswered};
 use yunta_core::{Clock, ConfigLayer, Env, IdSource, SecretSource};
 
@@ -37,6 +38,9 @@ pub struct Workspace {
     /// The binary a detached run, a resume handed on and the rail hook
     /// start: Yunta itself.
     pub binary: PathBuf,
+    /// What reads how much of the disk is free where a page says it: the system's
+    /// ([`SystemDisk`](yunta_core::disk::SystemDisk)) for every interface.
+    pub disk: Arc<dyn Disk>,
 }
 
 impl Workspace {

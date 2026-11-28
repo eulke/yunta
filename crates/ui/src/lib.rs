@@ -31,7 +31,7 @@
 //!   keys, held by a desk's pane, every stage that shows a page and a run's feed: the
 //!   [`Scroll`] that says where it stands ([`ScrolledTo`]).
 //! - `room`, what a surface shows where it has less room than it lays a screen out
-//!   in ([`room_needed`]).
+//!   in ([`room_needed`]), and whether it has that room ([`Room`]).
 
 mod dialog;
 mod followed_runs;
@@ -54,15 +54,15 @@ pub use followed_runs::{AwaitedReading, FieldInView, FollowedRuns, RunInView};
 pub use input::Input;
 pub use news::News;
 pub use operation::{
-    EvidenceOperation, Operation, OperationKind, PackOperation, WorkflowOperation,
+    EvidenceOperation, InstallsThePack, Operation, OperationKind, PackOperation, WorkflowOperation,
 };
 pub use outcome::{
     EvidenceOutcome, NewWorkflowWritten, Outcome, PackFetched, PackInstalled, PackOutcome,
-    PackScaffolded, RepositoryReading, WorkflowOutcome,
+    PackScaffolded, RepositoryReading, SetupPackFetch, WorkflowOutcome,
 };
 pub use performer::Performer;
-pub use request::{Address, Request};
-pub use room::room_needed;
+pub use request::{Address, Request, WebLink};
+pub use room::{room_needed, Room};
 pub use scroll::{Scroll, ScrolledTo};
 pub use stage::{
     CatalogStage, ChronicleStage, DoctorStage, Evidence, EvidenceStage, FieldStage, FirstRunStage,

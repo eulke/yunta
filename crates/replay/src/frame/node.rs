@@ -1,15 +1,13 @@
 //! One declared node as a frame: what the frozen workflow says it is,
-//! what the log says it has done, and what it is doing at the instant
-//! the caller reads it.
+//! and what the log says it has done and is doing at its head. How long
+//! it has worked, gone quiet or kept a person is
+//! [`NodeTimes`](super::NodeTimes)'s, at an instant.
 
-use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use surco::words::Standing;
 
 use crate::registry::Engine;
-use crate::stats::NodeStat;
 use crate::RunState;
 use yunta_core::events::{
     ArtifactId, NodeState, OpenSession, PauseReason, RunPhaseRaw, TaskStatus, TokenUsage, ToolCall,
@@ -48,15 +46,6 @@ pub struct NodeFrame {
     /// The highest attempt number the log reached for this node; `None`
     /// for a node that never started.
     pub attempt: Option<u32>,
-    /// How long this node has spent working: every stretch of work that
-    /// closed, plus the one still open at the instant the run's clock reads:
-    /// now while the run is going, its last applied event once it has
-    /// finished or broken. Time spent waiting on a person is not work and is
-    /// left out. `None` for a node that never started.
-    pub elapsed: Option<Duration>,
-    /// How long ago this node wrote its last event: measured, it grows while the
-    /// node says nothing. `None` for a node with no events.
-    pub last_event_age: Option<Duration>,
     /// How many events of this node the log holds.
     pub events: u64,
     /// What this node's attempts have spent, first and retries alike. A child
@@ -91,10 +80,6 @@ pub struct NodeFrame {
     /// `max_reroutes` counts. A person's choice at a gate that sends the run
     /// somewhere is a decision, not counted here.
     pub reroutes: u32,
-    /// How long a person was asked about this node, booked as the run's
-    /// clock books a person's time, the stretch open at the frame's instant
-    /// included. Zero for a node no person was asked about.
-    pub people: Duration,
     /// How many times a person decided this node's gate: its own
     /// resolutions, each round a choice sends back counted.
     pub decisions: usize,
@@ -106,11 +91,13 @@ pub struct NodeFrame {
 }
 
 impl NodeFrame {
-    /// Whether the time this node's row shows is a person's: a gate a
-    /// person was asked about waits on that person and does no work of its
-    /// own.
-    pub fn person_took(&self) -> bool {
-        self.declares.gate.is_some() && !self.people.is_zero()
+    /// Whether the time this node's row shows is a person's, a person
+    /// having been asked about it for `people`
+    /// ([`NodeTimes::people`](super::NodeTimes::people)): a
+    /// gate a person was asked about waits on that person and does no work
+    /// of its own.
+    pub fn person_took(&self, people: Duration) -> bool {
+        self.declares.gate.is_some() && !people.is_zero()
     }
 
     /// The rounds a person has had with this node: for a gate, each time a
@@ -233,22 +220,17 @@ fn sent_to_correction(record: &NodeRecord) -> bool {
     }
 }
 
-/// The derivations every node frame is read from, and the instant they
-/// are read at.
+/// The derivations every node frame is read from.
 ///
-/// The run-wide ones — the per-node stats and the ids the mode includes —
-/// are computed once for the whole frame instead of once per node. What a
-/// node is doing right now is read off the same state the frame was given:
-/// the node ledger already folds it.
+/// The run-wide one — the ids the mode includes — is computed once for
+/// the whole frame instead of once per node. What a node is doing at the
+/// head is read off the same state the frame was given: the node ledger
+/// already folds it.
 pub(super) struct Reading<'a> {
-    pub(super) stats: HashMap<&'a NodeId, &'a NodeStat>,
-    /// Each node's share of a person's time, from the run's stats.
-    pub(super) people: &'a BTreeMap<NodeId, Duration>,
     pub(super) included: Included,
     /// What the run's birth left out, as `run_created` recorded it.
     pub(super) left_out: &'a [yunta_core::LeftOut],
     pub(super) state: &'a RunState,
-    pub(super) now: DateTime<Utc>,
     /// Whether the run has not closed: a correction under way belongs to
     /// a run that can still reach it.
     pub(super) open: bool,
@@ -261,8 +243,9 @@ impl Reading<'_> {
     /// Frames one node of the frozen DAG, `group` being the `parallel`
     /// group it is declared inside.
     pub(super) fn node(&self, node: &Node, group: Option<&Node>) -> NodeFrame {
-        let stat = self.stats.get(&node.id);
         let record = self.state.nodes.get(&node.id);
+        // A node the log started; what one never started has spent and tried is none.
+        let started = record.filter(|record| record.first_started.is_some());
         let gate = self.state.gates.get(&node.id);
         let state = self.standing(node, group);
         let correcting = self.open && record.is_some_and(sent_to_correction);
@@ -273,11 +256,11 @@ impl Reading<'_> {
             standing: self.word(&node.id, &state, correcting),
             state,
             runner: record.and_then(|record| record.runner.clone()),
-            attempt: stat.map(|stat| stat.attempts),
-            elapsed: stat.map(|stat| stat.active_so_far()),
-            last_event_age: self.state.last_event_age(&node.id, self.now),
+            attempt: started.map(|record| record.attempts),
             events: self.state.events_of(&node.id),
-            tokens: stat.map(|stat| stat.tokens).unwrap_or_default(),
+            tokens: started
+                .map(|record| record.spend.so_far())
+                .unwrap_or_default(),
             artifacts: self
                 .state
                 .artifacts
@@ -291,7 +274,6 @@ impl Reading<'_> {
             activity: self.state.recent_tool_calls(&node.id, usize::MAX),
             reroute: record.and_then(|record| record.last_reroute.clone()),
             reroutes: record.map_or(0, |record| record.on_failure_reroutes),
-            people: self.people.get(&node.id).copied().unwrap_or_default(),
             decisions: gate.map_or(0, |gate| gate.own_resolutions().count()),
             question_rounds: gate.map_or(0, |gate| gate.rounds.len()),
             declares: Declares::of(node),

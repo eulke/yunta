@@ -73,7 +73,9 @@ fn feed_of(screen: &RunScreen) -> (Option<String>, usize) {
     };
     let newest = feed.rows.last().filter(|_| feed.after == 0);
     let cells = look.width.cells() - step.len();
-    let cut = |row: &surco::line::Line| format!("{step}{}", row.cut(cells, look.glyphs).text());
+    let cut = |row: &surco::components::FeedRow| {
+        format!("{step}{}", row.line.cut(cells, look.glyphs).text())
+    };
     (newest.map(cut), feed.before + feed.rows.len() + feed.after)
 }
 

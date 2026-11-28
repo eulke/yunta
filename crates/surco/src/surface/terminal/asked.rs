@@ -1,5 +1,6 @@
 //! A line asked and a list picked from, at a terminal: the question and the boxed row
-//! an answer is typed on, with the cursor on it; the list what was typed leaves, in the
+//! an answer is typed on, with the cursor on it, a placeholder faint in the box while
+//! nothing is typed and a hint muted under it; the list what was typed leaves, in the
 //! rows it is given.
 //!
 //! A list is narrowed by typing, so it is no line asked and draws no box: its first row
@@ -7,27 +8,23 @@
 //! that typing filters; a blank row parts it from the rows. Each row is one row, its name
 //! in a column three cells past the widest name and what it says beside it cut at the
 //! row's end. A list whose rows carry keys, as the palette's do, stands in three columns
-//! instead where its width holds them, as a palette's box does on a terminal of 100
-//! columns: what a row does, its key strong, then what it says, its command, muted; on a
-//! narrower one, and in a box over a screen narrower than that, what a row does alone. A list longer than its rows keeps the rows around
-//! its pointer in sight and says how many it hides above them and under them, where its
-//! names stand. Its keys stand under it only where it says its own, folded as a legend
+//! instead over the design's wide screen, a terminal of 100 columns, as the legend's far keys
+//! do there: what a row does, its key strong, then what it says, its command, muted, cut at
+//! the row's end; over a narrower screen, in a box or not, what a row does alone. A list
+//! longer than its rows keeps the rows around its pointer in sight and says how many it hides
+//! above them and under them, where its names stand. Its keys stand under it only where it says its own, folded as a legend
 //! folds, between two keys and never inside one: a screen that holds them leaves them out.
 //! Short of rows, the blank row gives way first, then the rows the window leaves, then the
 //! keys.
 
 use super::card::options::Said;
 use super::card::Placed;
+use super::Terminal;
 use crate::components::{ChoiceList, ChoiceRow, Choices, TypedAnswer};
 use crate::glyphs::Glyphs;
 use crate::line::{Hidden, Line, Tone};
 use crate::look::Look;
-use crate::width::{cell_width, id_column, truncate};
-
-/// The cells between a list's widest name and what its rows say beside their names: the
-/// design's lists, a new run's workflows and the shapes of documents among them, stand
-/// them three apart, a cell wider than a card's options.
-const NAME_GAP: usize = 3;
+use crate::width::{cell_width, id_column, truncate, wrap, NAME_GAP};
 
 /// The cells the row a list is narrowed on stands in from the column its rows' pointer
 /// moves along, so its own pointer is never read as a row's.
@@ -41,20 +38,26 @@ const DOES: usize = 40;
 /// `enter` and a cell.
 const KEY: usize = 6;
 
-/// The fewest cells a list whose rows carry keys holds its keys and commands in: the
-/// palette's box on a terminal of 100 columns, the design's wide one, is 84 cells less its
-/// two uprights.
-const KEYS_FROM: usize = 82;
-
 impl TypedAnswer {
     /// The question, and under it the boxed row the words are typed on across the
     /// look's width, showing the part of them around the cursor that fits, with the
-    /// cursor on it.
+    /// cursor on it; the placeholder faint in the box while nothing is typed, the cursor
+    /// on its first cell; then the hint, muted, going on under itself where it passes the
+    /// look's width.
     pub fn drawn(&self, look: &Look) -> Placed {
-        let typed = self.typed.drawn(look.width.cells(), look.glyphs, None);
+        let cells = look.width.cells();
+        let typed = self
+            .typed
+            .drawn(cells, look.glyphs, self.placeholder.as_deref());
         let mut lines = vec![self.asked.clone()];
         let asked = lines.len();
         lines.extend(typed.lines);
+        lines.extend(
+            self.hint
+                .iter()
+                .flat_map(|hint| wrap(hint, cells))
+                .map(|part| Line::new().push(Tone::Muted, part)),
+        );
         Placed {
             lines,
             cursor: typed.cursor.map(|(row, cell)| (asked + row, cell)),
@@ -64,12 +67,25 @@ impl TypedAnswer {
 }
 
 /// Whether a list whose rows carry keys holds each row's key and command beside what it
-/// does: where its width holds them, or never, as a palette's box over a screen narrower
-/// than the design's wide one. Not the list's own keys, which stand under its rows.
+/// does, cut at the row's end, or what it does alone. Not the list's own keys, which stand
+/// under its rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Columns {
-    WhereTheyFit,
+    WithKeys,
     WordsAlone,
+}
+
+impl Columns {
+    /// The columns of a list over `screen`: each row's key and command beside what it does
+    /// over the design's wide screen ([`Terminal::wide`]), as the legend's far keys stand
+    /// there, and what it does alone over a narrower one, whatever room the list has. The one
+    /// gate of a palette's keys and commands.
+    pub(super) fn over(screen: &Terminal) -> Columns {
+        match screen.wide() {
+            true => Columns::WithKeys,
+            false => Columns::WordsAlone,
+        }
+    }
 }
 
 impl ChoiceList {
@@ -79,7 +95,7 @@ impl ChoiceList {
     /// leave, and with too few rows for the least of them beside the keys, the keys give way
     /// too; the row it is narrowed on stands as long as the list does.
     pub fn drawn(&self, look: &Look, rows: usize) -> Placed {
-        self.placed(look, rows, Columns::WhereTheyFit)
+        self.placed(look, rows, Columns::over(&Terminal::on(*look)))
     }
 
     /// The list as [`ChoiceList::drawn`] holds it, its rows' keys and commands standing as
@@ -202,9 +218,8 @@ pub(super) fn listed(
 }
 
 /// A row of a list whose rows carry keys, pointed at or not, in `room` cells: what it does
-/// in its column, its key strong, and its command muted, where `columns` lets them stand and
-/// the room holds them; what it does alone elsewhere. It is cut at the row's end, and says
-/// no cost.
+/// in its column, its key strong, and its command muted, where `columns` lets them stand;
+/// what it does alone elsewhere. It is cut at the row's end, and says no cost.
 fn keyed_row(
     row: &ChoiceRow,
     pointed: bool,
@@ -216,8 +231,8 @@ fn keyed_row(
         false => Tone::Plain,
     };
     let opening = Line::pointed(pointed, glyphs);
-    let line = match columns == Columns::WhereTheyFit && room >= KEYS_FROM {
-        true => {
+    let line = match columns {
+        Columns::WithKeys => {
             let key = match &row.key {
                 Some(key) => {
                     Line::new().push(Tone::Strong, format!("{} ", truncate(key, KEY - 1, glyphs)))
@@ -229,7 +244,7 @@ fn keyed_row(
                 .then(key)
                 .push(Tone::Muted, row.said.as_deref().unwrap_or_default())
         }
-        false => opening.push(does, row.name.as_str()),
+        Columns::WordsAlone => opening.push(does, row.name.as_str()),
     };
     line.cut(room, glyphs)
 }

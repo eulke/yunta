@@ -173,6 +173,7 @@ mod tests {
                     col: 5,
                     source: Some("    promt: p".to_string()),
                     len: 5,
+                    marked: None,
                 }),
             )
             .help(["did you mean `prompt`?".to_string()]);
@@ -207,6 +208,7 @@ mod tests {
                 col: 5,
                 source: Some("    promt: p".to_string()),
                 len: 5,
+                marked: None,
             }),
         );
         let look = Look::plain();

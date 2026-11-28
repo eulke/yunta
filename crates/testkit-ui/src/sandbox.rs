@@ -1,14 +1,15 @@
 //! The world a test of the application works in: a workspace in a directory of its own,
 //! whose state and org layer it keeps beside it, which reads nothing of the machine's and
 //! finds only the CLIs a test stands in for on its `PATH`, its git pointed where a test
-//! points it; packs to install from a local repository; and the instant every test stands
-//! at.
+//! points it, its disk read as the design's machine's where a page says what it has free;
+//! packs to install from a local repository; and the instant every test stands at.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use yunta_api::{Remark, Stop, Workspace};
+use yunta_core::disk::{Disk, Space};
 use yunta_core::process::SearchPath;
 use yunta_core::{Env, ProcessSecrets, SystemIdSource};
 use yunta_testkit_core::FixedClock;
@@ -19,11 +20,20 @@ pub fn workspace(dir: &Path, root: &Path) -> Workspace {
     workspace_on(dir, root, Vec::new())
 }
 
+/// The directories git stands in on every machine a test runs on.
+const GITS_DIRECTORIES: [&str; 2] = ["/usr/bin", "/bin"];
+
 /// A workspace as [`workspace`] makes it, whose `PATH` holds `first` before git's
 /// directories: where a test puts the CLIs it stands in for.
 pub fn workspace_on(dir: &Path, root: &Path, first: Vec<PathBuf>) -> Workspace {
     let mut dirs = first;
-    dirs.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
+    dirs.extend(GITS_DIRECTORIES.map(PathBuf::from));
+    workspace_searching(dir, root, dirs)
+}
+
+/// A workspace working in `dir`, its state kept in `root` and its org layer there too, whose
+/// `PATH` holds `dirs` alone.
+fn workspace_searching(dir: &Path, root: &Path, dirs: Vec<PathBuf>) -> Workspace {
     let env = Env {
         yunta_home: Some(root.to_path_buf()),
         org_config: Some(root.join("org.yaml")),
@@ -38,7 +48,45 @@ pub fn workspace_on(dir: &Path, root: &Path, first: Vec<PathBuf>) -> Workspace {
         secrets: Arc::new(ProcessSecrets),
         forges: Arc::new(yunta_api::DeclaredForge),
         binary: PathBuf::from("yunta"),
+        disk: Arc::new(DesignsDisk),
     }
+}
+
+/// What the disk of every place the kit makes has free, as a page says it: what the design's
+/// machine had free, so what doctor and upkeep say of it reads the same on every machine.
+const DESIGNS_FREE: u64 = 74_200_000_000;
+
+/// How much the disk of every place the kit makes holds, as a page reads it: the design's
+/// machine's, whose checkouts were given a fifth of it, 98.9 GB.
+const DESIGNS_DISK: u64 = 494_500_000_000;
+
+/// The disk every place the kit makes stands on, as a page that says what it has free reads
+/// it: the design's machine's. Not what keeps a run room, which reads the machine's own.
+struct DesignsDisk;
+
+impl Disk for DesignsDisk {
+    fn space(&self, _path: &Path) -> std::io::Result<Space> {
+        Ok(Space {
+            total: DESIGNS_DISK,
+            available: DESIGNS_FREE,
+        })
+    }
+}
+
+/// A workspace working in `dir`, its state kept in `root`, whose `PATH` holds git alone, a
+/// link to the machine's under `root`: no adapter's CLI answers there, and no C compiler
+/// links the probe doctor times a new binary's first run with, a figure of the machine's own
+/// that a macOS machine finds and another does not.
+pub fn workspace_on_git_alone(dir: &Path, root: &Path) -> Workspace {
+    let machines = SearchPath::new(GITS_DIRECTORIES.map(PathBuf::from).to_vec());
+    let git = machines.find("git").expect("git on the machine");
+    let alone = root.join("git-alone");
+    std::fs::create_dir_all(&alone).expect("a directory for git alone");
+    let link = alone.join("git");
+    if !link.exists() {
+        std::os::unix::fs::symlink(&git, &link).expect("a link to the machine's git");
+    }
+    workspace_searching(dir, root, vec![alone])
 }
 
 /// A workspace as [`workspace_on`] makes it, whose git reads `git`, the environment a
@@ -88,9 +136,9 @@ const MANIFEST: &str = "name: demo\npublisher: acme\nversion: 1.0.0\ndeclares:\n
 const DEMO_SAYS: &str = "name: demo-says\nnodes:\n  - { id: say, kind: bash, run: \"true\" }\n";
 
 /// A repository set up for Yunta under `root`, with `acme/demo` installed from a
-/// local repository beside it.
+/// local repository beside it ([`pack_installed_from`]).
 pub async fn with_a_pack_installed(root: &Path) -> PathBuf {
-    let upstream = root.join("upstream");
+    let upstream = pack_installed_from(root);
     tokio::fs::create_dir_all(upstream.join("workflows"))
         .await
         .expect("the pack's directory");
@@ -147,6 +195,12 @@ pub fn pack_with_an_executor(root: &Path) -> (PathBuf, String) {
     yunta_testkit::git(&upstream, &["commit", "-q", "-m", "v1"]);
     let head = commit_of(&upstream);
     (upstream, head)
+}
+
+/// The local repository under `root` that [`with_a_pack_installed`] installs `acme/demo`
+/// from.
+pub fn pack_installed_from(root: &Path) -> PathBuf {
+    root.join("upstream")
 }
 
 /// The commit `repo` stands at.

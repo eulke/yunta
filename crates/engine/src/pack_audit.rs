@@ -12,7 +12,8 @@
 //! neither of which this module touches).
 //!
 //! The inventory is core's `PackAudit`, which a page says; this builds one
-//! from a pack's files.
+//! from a pack's files, read through the tree `pack_tree` walked, so a
+//! workflow or a prompt it names is read from inside the pack alone.
 
 use std::path::Path;
 
@@ -21,16 +22,18 @@ use yunta_core::{
     PromptText, UnreadFile, WorkflowAudit, WorkflowUnread,
 };
 
+use crate::PackTree;
+
 /// Audits every workflow the manifest declares under `contents.workflows`,
-/// reading each from `pack_dir` (the pack's own root — either its vendored
+/// reading each from `tree` (the pack's own tree, walked: either its vendored
 /// location or a freshly cloned, not-yet-vendored checkout; both lay out
-/// `contents.workflows` paths the same way, relative to that root).
-pub fn audit_pack(pack_dir: &Path, manifest: PackManifest) -> PackAudit {
+/// `contents.workflows` paths the same way, relative to its root).
+pub fn audit_pack(tree: &PackTree, manifest: PackManifest) -> PackAudit {
     let workflows = manifest
         .contents
         .workflows
         .iter()
-        .map(|declared| audit_workflow(pack_dir, declared))
+        .map(|declared| audit_workflow(tree, declared))
         .collect();
     PackAudit {
         manifest,
@@ -38,9 +41,9 @@ pub fn audit_pack(pack_dir: &Path, manifest: PackManifest) -> PackAudit {
     }
 }
 
-fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
-    let path = pack_dir.join(declared);
-    let text = match std::fs::read_to_string(&path) {
+fn audit_workflow(tree: &PackTree, declared: &str) -> WorkflowAudit {
+    let path = tree.root().join(declared);
+    let text = match tree.read(Path::new(declared)) {
         Ok(text) => text,
         Err(e) => {
             return WorkflowAudit {
@@ -66,14 +69,14 @@ fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
             }
         }
     };
-    let workflow_dir = path.parent().unwrap_or(pack_dir);
+    let workflow_dir = Path::new(declared).parent().unwrap_or(Path::new(""));
     let node_defaults_hooks = workflow
         .node_defaults
         .as_ref()
         .and_then(|defaults| defaults.hooks.as_ref());
     let nodes = workflow
         .iter_nodes()
-        .map(|node| audit_node(node, workflow_dir, node_defaults_hooks))
+        .map(|node| audit_node(node, (tree, workflow_dir), node_defaults_hooks))
         .collect();
     WorkflowAudit {
         declared_path: declared.to_string(),
@@ -106,15 +109,22 @@ fn effective_hooks<'a>(
     (before, after)
 }
 
-fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hooks>) -> NodeAudit {
+/// `node` audited, a prompt it reads from a file read from `tree` under `workflow_dir`, the
+/// directory its workflow stands in under the pack's.
+fn audit_node(
+    node: &Node,
+    (tree, workflow_dir): (&PackTree, &Path),
+    node_defaults_hooks: Option<&Hooks>,
+) -> NodeAudit {
     let (before, after) = effective_hooks(node, node_defaults_hooks);
+    let prompt_text = |prompt: &PromptSource| resolve_prompt(prompt, tree, workflow_dir);
 
     let (command, prompt, executor) = match &node.kind {
-        NodeKind::Prompt { prompt } => (None, Some(resolve_prompt(prompt, workflow_dir)), None),
+        NodeKind::Prompt { prompt } => (None, Some(prompt_text(prompt)), None),
         NodeKind::Bash { run } => (Some(run.to_string()), None, None),
         NodeKind::Loop { until, prompt, .. } => (
             Some(until.as_str().to_string()),
-            Some(resolve_prompt(prompt, workflow_dir)),
+            Some(prompt_text(prompt)),
             None,
         ),
         NodeKind::Executor { executor, .. } => (None, None, Some(executor.clone())),
@@ -152,13 +162,15 @@ fn named_paths(node: &Node) -> Vec<String> {
     node.scope.globs().iter().map(ToString::to_string).collect()
 }
 
-fn resolve_prompt(prompt: &PromptSource, workflow_dir: &Path) -> PromptText {
+/// The text of `prompt`, a file it names read from `tree` under `workflow_dir`, the
+/// directory its workflow stands in under the pack's.
+fn resolve_prompt(prompt: &PromptSource, tree: &PackTree, workflow_dir: &Path) -> PromptText {
     match prompt {
         PromptSource::Inline(text) => Ok(text.clone()),
         PromptSource::File(path) => {
-            let full_path = workflow_dir.join(path);
-            std::fs::read_to_string(&full_path).map_err(|source| UnreadFile {
-                path: full_path.clone(),
+            let in_the_pack = workflow_dir.join(path);
+            tree.read(&in_the_pack).map_err(|source| UnreadFile {
+                path: tree.root().join(&in_the_pack),
                 source,
             })
         }

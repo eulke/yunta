@@ -1,0 +1,14 @@
+ yunta › set up                           nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ … 10 above
+   ✓ reviewer      claude-code
+   ✓ reviewer-alt  claude-code
+ ▸ ✓ mechanical  ▸ claude-code   codex
+                   ╭ model ───────────────────────╮
+                   │                              │
+                   ╰──────────────────────────────╯
+                   enter with none leaves it to the adapter
+
+    write .yunta/config.yaml and install yunta/fragua
+
+ ←→ adapter · enter take it · esc keep the detected default

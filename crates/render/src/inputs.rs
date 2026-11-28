@@ -104,6 +104,16 @@ fn listed(names: &[InputName], separator: &str) -> String {
         .join(separator)
 }
 
+/// What an input `spec` declares, as the catalog and a new run say it in brackets beside the
+/// input: the kind of value it takes, and whether it is required (`string, required`).
+pub(crate) fn declared(spec: &InputSpec) -> String {
+    let optionality = match spec.is_required() {
+        true => "required",
+        false => "optional",
+    };
+    format!("{}, {optionality}", type_label(spec))
+}
+
 /// What kind of value an input `spec` declares takes, as a reader names it.
 pub(crate) fn type_label(spec: &InputSpec) -> &'static str {
     match spec {

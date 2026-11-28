@@ -1,0 +1,2 @@
+␛[38;2;123;117;111myunta pack add https://github.com/eulke/yunta//packs/fragua@v0.0.5␛[0m
+␛[38;2;123;117;111myunta init␛[0m

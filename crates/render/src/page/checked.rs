@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::components::{Fields, Furrow, Headline, Next, Problem};
+use surco::components::{Fields, Furrow, Headline, Problem};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::look::Look;
@@ -14,6 +14,7 @@ use surco::text::counted;
 use yunta_core::step::{Arg, NextStep};
 
 use super::Page;
+use crate::command::SaidStep;
 
 /// Why a workflow cannot run here: every problem, each pointed at in its
 /// line when it has one, and what this project could declare for the ones
@@ -96,15 +97,15 @@ impl Page for Checked {
             headline = headline.fact(counted(diagnosis.warnings.len(), "warning"));
         }
         let steps = match diagnosis.errors() {
-            0 => Vec::new(),
-            _ => vec![check_again(&self.at)],
+            0 => None,
+            _ => Some(check_again(&self.at)),
         };
         Doc::new()
             .with(headline)
             .with(Furrow(Vec::new()))
             .with(Fields::new().push_if("at", self.at.as_str()))
             .with_all(diagnosis.blocks())
-            .with(Next { steps })
+            .with(crate::command::next(steps))
     }
 }
 
@@ -119,11 +120,8 @@ pub(super) fn file_named(path: &Path) -> String {
 
 /// The check to run once what a verdict found in the file `shown` names
 /// is fixed.
-pub(super) fn check_again(shown: &str) -> (String, &'static str) {
-    (
-        crate::command::line(&NextStep::Check {
-            workflow: Arg::Given(shown.to_string()),
-        }),
-        "again, once they are fixed",
-    )
+pub(super) fn check_again(shown: &str) -> SaidStep {
+    SaidStep::of(&NextStep::Check {
+        workflow: Arg::Given(shown.to_string()),
+    })
 }

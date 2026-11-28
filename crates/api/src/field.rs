@@ -1,24 +1,25 @@
 //! See [`crate`]. The field: the runs a project's listing is about — the
 //! runs of the repository it is rooted in, or every run on this machine —
-//! each read off its own [`RunFrame`] through the same projection `yunta
-//! status` prints, and grouped by what a reader can do about it. Naming a
-//! run `last` or `needs` reads the same groups, so a run the field shows
-//! under "needs you" is the run `needs` names.
+//! each read off its own [`RunFrame`](yunta_replay::frame::RunFrame) through
+//! the same projection `yunta status` prints, and grouped by what a reader can
+//! do about it. Naming a run `last` or `needs` reads the same groups, so a run
+//! the field shows under "needs you" is the run `needs` names.
 //!
 //! A run is read for a field one way, for a listing and a following alike
 //! ([`Placed::of`]): its directory, the manifest it froze and, only when that
 //! manifest places it here, its log, folded into a [`FollowedRun`] whose row
 //! is [`FollowedRun::row`]. So a run of another repository costs no read of
-//! the log, and a run's row reads the same on every interface.
+//! the log, and a run's row reads the same on every interface. The run a
+//! following reads whole is read the same way, wherever it stands
+//! ([`read_whole`]).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
 use yunta_engine::git::Cause;
 use yunta_render::page::{FieldGroup, FieldRow, RunUnread, UnreadableRun};
-use yunta_replay::frame::{RunFrame, RunPhase};
-use yunta_replay::RunState;
 use yunta_storage::LogReader;
 
 use crate::run::read_manifest;
@@ -84,17 +85,20 @@ impl Project {
     }
 
     /// The repository this project works in, as far as Yunta goes: what decides
-    /// whether its field is that repository's runs, and whether Yunta was set up
-    /// in it. It reads only where the repository's git directory is, which `.git`
-    /// says without a git process; which runs have a branch there is the field's.
+    /// whether its field is that repository's runs, and whether its checkout holds a
+    /// setup, with where it stands. It reads only where the repository's git directory
+    /// is, which `.git` says without a git process, and whether the config layer stands
+    /// there; it reads no run. Which runs have a branch there, and so whether the
+    /// repository used Yunta before, is the field's.
     pub async fn repository(&self, stop: &Stop) -> Result<Repository, Error> {
         if git_common_dir(self, stop).await?.is_none() {
             return Ok(Repository::Absent);
         }
-        let layer = crate::project::repository_layer(&self.workspace.dir);
+        let dir = &self.workspace.dir;
+        let layer = crate::project::repository_layer(dir);
         match tokio::fs::try_exists(&layer).await {
-            Ok(true) => Ok(Repository::SetUp),
-            Ok(false) => Ok(Repository::NeverSetUp),
+            Ok(true) => Ok(Repository::SetUp { dir: dir.clone() }),
+            Ok(false) => Ok(Repository::NeverSetUp { dir: dir.clone() }),
             Err(unread) => Err(Failure::new(unread).into()),
         }
     }
@@ -102,15 +106,28 @@ impl Project {
 
 /// The repository a project works in, as far as Yunta goes. Not the repository's own
 /// state, which nothing here reads beyond its being one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Repository {
     /// The project works in no git repository.
     Absent,
-    /// A git repository Yunta was never set up in: it holds no config layer of
-    /// Yunta's.
-    NeverSetUp,
-    /// A git repository Yunta was set up in.
-    SetUp,
+    /// A git repository whose checkout holds no config layer of Yunta's, at `dir`: never
+    /// set up as far as the checkout says, whatever runs of it the field holds. `dir` is
+    /// the directory a setup writes it under, which a screen names the repository by once
+    /// it is set up.
+    NeverSetUp { dir: PathBuf },
+    /// A git repository Yunta was set up in, at `dir`: the directory the project works
+    /// in, which its config layer stands under and a screen of its field names it by.
+    SetUp { dir: PathBuf },
+}
+
+impl Repository {
+    /// Where the repository stands, where the project works in one.
+    pub fn dir(&self) -> Option<&Path> {
+        match self {
+            Repository::Absent => None,
+            Repository::NeverSetUp { dir } | Repository::SetUp { dir } => Some(dir),
+        }
+    }
 }
 
 impl FieldReading {
@@ -187,15 +204,6 @@ async fn git_common_dir(project: &Project, stop: &Stop) -> Result<Option<PathBuf
     }
 }
 
-/// Whether the run `frame` draws stopped on a decision with a menu, which
-/// `yunta status` lists the options of and a row offers the command that
-/// answers: only a parked run has one to rebuild, and rebuilding one is a walk
-/// of its `state` under the workflow its `manifest` froze.
-pub fn offers_a_menu(frame: &RunFrame, manifest: &Manifest, state: &RunState) -> bool {
-    matches!(frame.phase, RunPhase::Waiting { .. })
-        && yunta_engine::awaits_decision(manifest, state).is_some()
-}
-
 /// Where a run read for a field goes. Not [`FieldGroup`], where a run read
 /// is listed.
 pub(crate) enum Placed {
@@ -239,29 +247,66 @@ impl Placed {
             return unread(RunUnread::NoDirectory { runs_root });
         };
         if let Some((read, registry)) = held {
-            if !holds(Some(&read.manifest)) {
+            if !holds(Some(read.manifest())) {
                 return Placed::Elsewhere;
             }
             return Placed::Read(Box::new(read.clone()), registry.clone());
         }
-        let path = yunta_engine::run_dir::manifest_path(&dir);
-        let Ok(manifest) = read_manifest(&path) else {
-            return unread(RunUnread::Manifest { path });
+        let manifest = match frozen(&dir) {
+            Ok(manifest) => manifest,
+            Err(problem) => return unread(problem),
         };
-        let manifest = manifest.doc;
         if !holds(Some(&manifest)) {
             return Placed::Elsewhere;
         }
-        let registry = RunRegistry::at(dir);
-        match reader.events(run).await {
-            Ok(events) => {
-                let read = FollowedRun::read(run.clone(), manifest, &events, registry.engine());
-                Placed::Read(Box::new(read), registry)
-            }
-            Err(unread) => {
-                let problem = RunUnread::EventLog(unread.to_string());
-                Placed::Unreadable(UnreadableRun::new(run, problem))
-            }
+        match logged(reader, run, dir, manifest).await {
+            Ok((read, registry, _)) => Placed::Read(Box::new(read), registry),
+            Err(problem) => Placed::Unreadable(UnreadableRun::new(run, problem)),
         }
     }
+}
+
+/// `run` read whole through `reader`, as a following reads the run it follows: its
+/// directory, found where `status` finds it, the manifest it froze and its log, folded into
+/// a [`FollowedRun`], with the registry its engine keeps beside it and every event of its
+/// log; or unreadable, with why, as a field says a run it cannot read.
+pub(crate) async fn read_whole(
+    project: &Project,
+    reader: &LogReader,
+    run: &RunId,
+) -> Result<(FollowedRun, RunRegistry, Vec<StoredEvent>), UnreadableRun> {
+    let unread = |problem| UnreadableRun::new(run, problem);
+    let Some(dir) = project.run_dir(run.as_str()) else {
+        let runs_root = project.runs_root.clone();
+        return Err(unread(RunUnread::NoDirectory { runs_root }));
+    };
+    let manifest = frozen(&dir).map_err(unread)?;
+    logged(reader, run, dir, manifest).await.map_err(unread)
+}
+
+/// The manifest the run whose directory is `dir` froze, or why it does not read.
+fn frozen(dir: &Path) -> Result<Manifest, RunUnread> {
+    let path = yunta_engine::run_dir::manifest_path(dir);
+    match read_manifest(&path) {
+        Ok(manifest) => Ok(manifest.doc),
+        Err(_) => Err(RunUnread::Manifest { path }),
+    }
+}
+
+/// `run`, whose directory is `dir` and which froze `manifest`, as every event of its log
+/// read through `reader` derives it, with the registry its engine keeps beside it and those
+/// events; or why its log does not read.
+async fn logged(
+    reader: &LogReader,
+    run: &RunId,
+    dir: PathBuf,
+    manifest: Manifest,
+) -> Result<(FollowedRun, RunRegistry, Vec<StoredEvent>), RunUnread> {
+    let events = reader
+        .events(run)
+        .await
+        .map_err(|unread| RunUnread::EventLog(unread.to_string()))?;
+    let registry = RunRegistry::at(dir);
+    let read = FollowedRun::read(run.clone(), manifest, &events, registry.engine());
+    Ok((read, registry, events))
 }

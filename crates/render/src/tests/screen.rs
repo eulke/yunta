@@ -1,10 +1,14 @@
 //! What a screen says that is no stage's page: how much room the application needs on a
 //! terminal too small for it, the keys each of a run's scenes names in its legend and
-//! the pair every screen answers to, and the note an act leaves or an answer given
-//! elsewhere does. What help lists is `help`'s.
+//! the pair every screen answers to, and the note an act leaves or an answer given elsewhere
+//! does. What help lists is `help`'s; what a confirmation asks, `confirming`'s.
 
 use surco::components::Legend;
+use surco::doc::Block;
 use surco::glyphs::Glyphs;
+use surco::line::Line;
+use surco::look::{Look, Width};
+use surco::surface::Terminal;
 use yunta_core::events::{
     AuthorGate, Channel, Claim, Escalation, EventBody, EventPayload, FailureMenu, GateEvent,
     GateOption, GateWaitingPayload, Leads, Menu, QuestionsAnsweredPayload, ScopeWait, StoredEvent,
@@ -17,8 +21,9 @@ use yunta_replay::frame::Effect;
 use crate::prompt::card::{self, ChosenWith};
 use crate::prompt::{choice_list, confirming_legend, desk, round, Escape, PromptAct};
 use crate::screen::{
-    answers_recorded, anywhere, in_the_legend, recorded, room_needed, round_answered_elsewhere,
-    run_legend, unread_run_legend, Along, Leaving, RunKeys, NOTHING_RECORDED,
+    answers_recorded, anywhere, field_place, in_the_legend, recorded, room_needed,
+    round_answered_elsewhere, run_legend, unread_run_legend, Along, Leaving, RunKeys,
+    NOTHING_RECORDED, NOTHING_TO_RESUME,
 };
 use yunta_core::ahead::NodesAhead;
 
@@ -34,8 +39,19 @@ fn a_terminal_too_small_is_told_the_room_it_needs_and_has() {
 }
 
 /// `legend` as a terminal's last row spells it in Unicode.
-fn spelled(legend: &Legend) -> String {
-    legend.spelled(Glyphs::Unicode)
+pub(crate) fn spelled(legend: &Legend) -> String {
+    spelled_in(legend, Glyphs::Unicode)
+}
+
+/// `legend` as a terminal folds it in `glyphs`, on rows wide enough to hold it on one.
+pub(crate) fn spelled_in(legend: &Legend, glyphs: Glyphs) -> String {
+    let look = Look {
+        glyphs,
+        width: Width::exact(usize::MAX),
+        ..Look::plain()
+    };
+    let rows = Terminal::on(look).block(&Block::Legend(legend.clone()));
+    rows.iter().map(Line::text).collect::<Vec<_>>().join("\n")
 }
 
 /// What a scene that moves along `along` offers, with `acts` and `new_run`, where `q`
@@ -108,6 +124,33 @@ fn a_scenes_acts_stand_in_the_legends_words() {
 #[test]
 fn a_run_not_read_yet_offers_the_field_alone() {
     assert_eq!(spelled(&unread_run_legend()), "q field");
+}
+
+/// The field stands on the trail as the repository it lists, its path under the home mark
+/// where it is under the home, or as the machine where it lists every run on it.
+#[test]
+fn the_field_stands_on_the_trail_as_its_repository_or_the_machine() {
+    let home = std::path::Path::new("/home/me");
+    let repository = std::path::Path::new("/home/me/development/yunta");
+    assert_eq!(
+        field_place(Some(repository), Some(home)),
+        "~/development/yunta"
+    );
+    assert_eq!(
+        field_place(Some(std::path::Path::new("/cut/worktree")), Some(home)),
+        "/cut/worktree"
+    );
+    assert_eq!(field_place(None, Some(home)), "this machine");
+}
+
+/// What `r` on the field leaves noted where the run pointed at waits on a decision, which
+/// no resume answers.
+#[test]
+fn resuming_a_run_that_waits_on_a_decision_is_noted_as_the_design_says() {
+    assert_eq!(
+        NOTHING_TO_RESUME,
+        "Nothing to resume: this one waits on a decision. Enter reads it."
+    );
 }
 
 /// The keys a person presses anywhere they are not typing: the palette and help.
@@ -405,4 +448,25 @@ fn chronicle_row(payload: EventPayload) -> String {
     let moments = yunta_replay::frame::chronicle(&events);
     let moment = moments.first().expect("one moment per event");
     crate::chronicle::say(moment, Glyphs::Unicode).text
+}
+
+/// A legend says each act as an order, in the words `PromptAct` owns: stopping the cases, the
+/// sessions and a collection under way, leaving where nothing else is left, taking the
+/// palette's row; and a pack's removal as its confirmation names it.
+#[test]
+fn legends_say_their_acts_as_orders() {
+    use crate::prompt::PromptAct;
+    use crate::screen::{
+        cases_legend, doctor_legend, leaving_legend, packs_legend, palette_legend, upkeep_legend,
+        DoctorChecks,
+    };
+
+    assert_eq!(spelled(&cases_legend()), "esc stop them");
+    let sessions = doctor_legend(false, DoctorChecks::OpeningSessions);
+    assert_eq!(spelled(&sessions), "esc stop the sessions");
+    assert_eq!(spelled(&upkeep_legend(true, true)), "esc stop it");
+    assert_eq!(spelled(&leaving_legend()), "q quit");
+    assert!(spelled(&palette_legend()).contains("enter do it"));
+    let removes = PromptAct::RemoveIt.said();
+    assert!(spelled(&packs_legend()).contains(&format!("x {removes}")));
 }

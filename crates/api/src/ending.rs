@@ -24,8 +24,8 @@
 //! A close ends a stopped run nobody is going to continue, as `cancelled` by
 //! who closed it, so it stops waiting on a person. A run whose engine died is
 //! settled first, the way a cancel settles one. Its checkouts go back to the
-//! project's pool; its branches stay for a person to read and for `gc` to
-//! remove.
+//! project's pool; its branch stays for a person to read, and `gc` never
+//! removes it.
 //!
 //! What either says while it works reaches the caller as a [`Remark`], in
 //! the order it is met; nothing here prints.
@@ -86,9 +86,7 @@ impl OpenedRun<'_> {
             return self.stop_engine(&state, remarks, stop).await;
         }
         let killed = self.settle_stopped(remarks, stop).await;
-        let standing = self
-            .frame_of(&state, self.project.workspace.clock.now())
-            .standing;
+        let standing = self.frame_of(&state).standing;
         Ok(CancelState::AlreadyStopped {
             killed,
             parked,
@@ -134,9 +132,7 @@ impl OpenedRun<'_> {
             .events_for_run(self.id.clone())
             .await
             .map_err(Failure::new)?;
-        let standing = self
-            .frame_of(&RunState::replay(&events), clock.now())
-            .standing;
+        let standing = self.frame_of(&RunState::replay(&events)).standing;
         Ok(ClosedRun { standing, by })
     }
 

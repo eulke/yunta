@@ -39,15 +39,6 @@ impl Sight {
     pub fn at_the_end() -> Self {
         Sight::from_line(usize::MAX)
     }
-
-    /// Its last lines, moved as far as the line a pointer stands on is in sight: a
-    /// question asked under what it is about, and the choice pointed at.
-    pub fn at_the_end_with_the_pointer() -> Self {
-        Sight {
-            top: usize::MAX,
-            follows_pointer: true,
-        }
-    }
 }
 
 /// What a surface laid out of a region that scrolls: the first of its lines it shows, how

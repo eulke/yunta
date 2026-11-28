@@ -23,6 +23,28 @@ fn change_by_file() -> Diffstat {
     }
 }
 
+/// What a run spent against the cap that stopped it, the cap and the spending with their
+/// values in one column, then what it wants to go past it for, a fact with no value.
+fn spent_against_its_cap() -> Labelled {
+    let label = |words: &str, tone: Tone| Line::new().plain("  ").push(tone, words);
+    Labelled {
+        rows: vec![
+            LabelledRow {
+                label: label("tokens per run", Tone::Muted),
+                value: Some("2.00M".to_string()),
+            },
+            LabelledRow {
+                label: label("spent", Tone::Muted),
+                value: Some("1.94M".to_string()),
+            },
+            LabelledRow {
+                label: label("it wants more to review what it built", Tone::Plain),
+                value: None,
+            },
+        ],
+    }
+}
+
 /// The blocks a plan and a run's rows are drawn with, and how a document
 /// closes: the decisions, the facts, and what to type next.
 pub(super) fn closing() -> Vec<Block> {
@@ -60,6 +82,7 @@ pub(super) fn closing() -> Vec<Block> {
         on_the_forge().into(),
         Note("the run holds its own state on disk.".to_string()).into(),
         Fields::new().push_if("tokens", "20.2k spent").into(),
+        spent_against_its_cap().into(),
         Next {
             steps: vec![("yunta status 7E5PH4".to_string(), "where it stands")],
         }

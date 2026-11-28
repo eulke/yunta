@@ -55,7 +55,10 @@ fn about() -> Doc {
     Doc::new()
         .with(headline)
         .with(Ribbon::new(stretches))
-        .with(Gist("nothing needs you: it is moving".to_string()))
+        .with(Gist {
+            said: "nothing needs you: it is moving".to_string(),
+            on_one_row: false,
+        })
 }
 
 /// What the plan node is doing, as its pane holds it.
@@ -73,6 +76,12 @@ fn work() -> Doc {
 
 /// A run's screen as the person reads it at its plan, help open over it.
 fn run_screen() -> Screen {
+    run_screen_on(false)
+}
+
+/// The run's screen of [`run_screen`], the keys on its nodes beside its pane where they stand
+/// `on_the_side`.
+fn run_screen_on(on_the_side: bool) -> Screen {
     let rail = lines(&[
         "grill  36s",
         "brief  22s",
@@ -92,12 +101,11 @@ fn run_screen() -> Screen {
         "esc    one step back; what it leaves stays waiting",
         "q      leave: every run keeps going",
     ]);
-    Screen::new(Region::new(work()).titled(["plan"]))
+    let mut screen = Screen::new(Region::new(work()).titled(["plan"]))
         .trail(["yunta", "Q78GRR", "plan"])
         .tally(Standing::NeedsYou, 13)
         .tally(Standing::Stalled, 1)
         .about(about())
-        .side(Region::new(rail).titled(["nodes"]), SideAt::Left)
         .attention(Attention::key("implement asks at its terminal", "a", "go there").of("EKPBGE"))
         .legend(
             Legend::new()
@@ -106,7 +114,14 @@ fn run_screen() -> Screen {
                 .key("g", "graph")
                 .key("q", "field, it keeps going"),
         )
-        .overlay(Overlay::new("keys", help).legend(Legend::new().key("esc", "back")))
+        .overlay(Overlay::new("keys", help).legend(Legend::new().key("esc", "back")));
+    screen.side = Some(Side {
+        region: Region::new(rail).titled(["nodes"]),
+        at: SideAt::Left,
+        focused: on_the_side,
+        instead: Vec::new(),
+    });
+    screen
 }
 
 /// The run's screen just after an answer was recorded: the note stands in the attention row's
@@ -299,8 +314,74 @@ fn a_page_marks_the_region_the_keys_act_on() {
     };
 
     let on_main = Html.screen(&run_screen());
-    let on_side = Html.screen(&run_screen().focus_side());
+    let on_side = Html.screen(&run_screen_on(true));
 
     assert!(current(&on_main, "main") && !current(&on_main, "side"));
     assert!(current(&on_side, "side") && !current(&on_side, "main"));
+}
+
+/// A page a screen stands on keeps every block but the faint line a page about no one run
+/// stands under, which the screen's rule stands for; a furrow of a run's nodes stays.
+#[test]
+fn a_page_on_a_screen_leaves_its_unplowed_line_to_the_screens_rule() {
+    let headline = || Headline::new(Mark::Done, "pack acme/demo", "installed");
+    let page = Doc::new()
+        .with(headline())
+        .with(Furrow(Vec::new()))
+        .with(vec![Line::new().plain("at  .yunta/packs/acme/demo")]);
+    let region = Region::of_a_page(page);
+    let kinds: Vec<bool> = region
+        .doc
+        .blocks()
+        .iter()
+        .map(|block| matches!(block, Block::Furrow(_)))
+        .collect();
+    assert_eq!(kinds, [false, false], "the headline and its line stay");
+    let run = Doc::new()
+        .with(headline())
+        .with(Furrow(vec![Standing::Finished, Standing::Running]));
+    let furrowed = Region::of_a_page(run).doc.blocks().len();
+    assert_eq!(furrowed, 2, "a run's furrow stays");
+}
+
+/// A page's sentence under its headline stands on a screen as a gist does: on its one row,
+/// one step in, with no closing period, cut at the pane's edge where it does not fit, where
+/// the printed page wraps it whole and ends it with a period.
+#[test]
+fn a_pages_sentence_on_a_screen_stands_on_its_row_as_a_gist() {
+    let sentence = "no run is collected: no retention is configured to guess from";
+    let page = || {
+        Doc::new()
+            .with(Headline::new(
+                Mark::Absent,
+                "upkeep",
+                "would reclaim no run",
+            ))
+            .with(Gist::new(sentence))
+    };
+    let drawn = |cells: usize| {
+        let look = Look {
+            glyphs: Glyphs::Unicode,
+            paint: Paint::Plain,
+            width: Width::exact(cells),
+            motion: crate::motion::Motion::Still,
+        };
+        let lines = Terminal::on(look).pane(&Region::of_a_page(page()), 4).lines;
+        lines.iter().map(Line::text).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        drawn(80)[1],
+        format!("  {sentence}"),
+        "whole, with no period"
+    );
+    assert_eq!(
+        drawn(40)[1],
+        "  no run is collected: no retention is…",
+        "cut at the edge, on its one row"
+    );
+    assert_eq!(
+        drawn(40).len(),
+        2,
+        "nothing of it wraps onto a row under it"
+    );
 }

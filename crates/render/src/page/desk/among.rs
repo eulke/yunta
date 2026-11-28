@@ -17,7 +17,7 @@ pub fn about(review: &PlanReview, question: &str, glyphs: Glyphs) -> Vec<String>
     {
         lines.push(summary.to_string());
     }
-    lines.push(head::facts(review, steps.len()).join(&format!(" {} ", glyphs.sep())));
+    lines.push(head::facts(review, steps.len()).join(&glyphs.spaced_sep()));
     lines.extend(tree::implied_by_all(
         &review.plan.shapes,
         review.shapes_read.as_ref(),

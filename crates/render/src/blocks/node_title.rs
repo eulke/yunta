@@ -1,5 +1,5 @@
 //! A node's pane title: the node and its kind, and at the far end who works it, as the
-//! region's title and edge. A session's runner on its adapter and model, a check's builtin,
+//! region's title and edge. A session's runner on its candidate (`runner`), a check's builtin,
 //! a gate's assignee; nothing for a command the engine runs itself or a pull request, which
 //! no one works. A pane about one task of a loop names the task there instead.
 //!
@@ -12,7 +12,7 @@
 
 use surco::components::Region;
 use yunta_core::events::ResolvedRunner;
-use yunta_core::{ConfigLayer, Node, NodeKind, RunnerName, TaskId};
+use yunta_core::{ConfigLayer, Node, NodeId, NodeKind, RunnerName, TaskId};
 use yunta_replay::frame::NodeFrame;
 use yunta_replay::RunState;
 
@@ -37,7 +37,10 @@ impl NodeTitle {
         state: &RunState,
         config: &ConfigLayer,
     ) -> NodeTitle {
-        let runner = || runner_of(node, declared, state, config).map(runner_on);
+        let runner = || {
+            runner_of(node, declared, state, config)
+                .map(|runner| runner_on(runner, &node.id, state))
+        };
         let works_it = match declared.map(|declared| &declared.kind) {
             Some(NodeKind::Check(builtin)) => Some(builtin.builtin_name().to_string()),
             Some(NodeKind::Gate { assignee, .. }) => Some(format!("{ASSIGNEE} {assignee}")),
@@ -106,10 +109,14 @@ fn resolved_for<'s>(named: &RunnerName, state: &'s RunState) -> Option<&'s Resol
         .map(|(_, runner)| runner)
 }
 
-/// Who works a node through `runner`: the runner's name on the adapter and model it chose.
-pub(crate) fn runner_on(runner: &ResolvedRunner) -> String {
-    format!(
-        "{} on {}/{}",
-        runner.runner, runner.chosen.adapter, runner.chosen.model
-    )
+/// Who works the node `node` through `runner`: the runner's name on the adapter it chose,
+/// with the model its candidate names, else the first the node's sessions reported in
+/// `state`; the adapter alone while neither is known.
+pub(crate) fn runner_on(runner: &ResolvedRunner, node: &NodeId, state: &RunState) -> String {
+    let reported = state
+        .nodes
+        .get(node)
+        .and_then(|record| record.models.first());
+    let model = runner.chosen.model.as_ref().or(reported);
+    crate::runner::on(&runner.runner, &runner.chosen.adapter, model)
 }

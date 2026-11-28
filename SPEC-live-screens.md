@@ -175,7 +175,7 @@ Where nothing is typed, `j` and `k` move a pointer, and the arrows, the wheel, `
 | a card | `j k` and `tab` choose; a number picks; `enter` answers; `n` adds a note; `r` reads the plan it offers; `esc` puts it aside |
 | a round | a line typed, or a choice picked with the arrows and narrowed by typing; `enter` answers; `shift-tab` the question before; `esc` puts it aside, nothing recorded |
 | the desk | `j k` and `tab` from task to task; the arrows through what is read; `p` proof; `d` what is decided; a number, then `enter`; `esc` puts it aside |
-| the first request | type; `enter` goes on to the new run's screen with what is typed; `esc` to the field where there is one, else leaves |
+| the first request | type; `enter` goes on to the new run's screen with what is typed; `esc` to the repository's field, whatever it holds: with no run it shows its first row alone, and the workflows, the machine and a new run are reached from it |
 | a new run | `tab` and `shift-tab` from row to row; on a typed row, type, `←→` in the line; on the workflows, `↑↓`; on the mode and the adapter, `←→`; `enter` starts, or says what is missing; `esc` goes back and keeps what was typed |
 | a setup | the pointer starts on the row that writes; `j k` along its rows; `enter` on a row changes it (a choice among the adapters this machine answers for; a typed line for a name, a branch, a model), on the last row writes; `q` leaves, nothing written |
 

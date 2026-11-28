@@ -6,10 +6,41 @@ use super::blocks::{draw_all, stroke, Reader};
 use super::text::{command, esc, mark, words};
 use super::GLYPHS;
 use crate::components::{
-    Answer, Attention, Binding, KeyList, Legend, Noted, Region, Ribbon, Screen, Tally,
+    Answer, AtAGlance, Attention, Binding, KeyList, Legend, Noted, Region, Ribbon, SameAtAShell,
+    Screen, Tally, WordChoice,
 };
 use crate::glyphs::Mark;
 use crate::words::{Standing, NOTHING_NEEDS_YOU};
+
+/// The commands that do the same at a shell, each a command a reader copies, a row each;
+/// nothing for none.
+pub(super) fn same_at_a_shell(same: &SameAtAShell) -> String {
+    if same.0.is_empty() {
+        return String::new();
+    }
+    let rows: String = same
+        .0
+        .iter()
+        .map(|said| command(&crate::text::one_line(said)))
+        .collect();
+    format!(r#"<div class="shell">{rows}</div>"#)
+}
+
+/// A row of words, apart by the separator, the chosen one after the pointer and in bold, the
+/// rest muted.
+pub(super) fn word_choice(choice: &WordChoice) -> String {
+    let chosen = choice.chosen_word();
+    let row: Vec<String> = choice
+        .words
+        .iter()
+        .enumerate()
+        .map(|(at, word)| match at == chosen {
+            true => format!("<b>{} {}</b>", GLYPHS.pointer(), words(word)),
+            false => format!(r#"<span class="muted">{}</span>"#, words(word)),
+        })
+        .collect();
+    format!("<p>{}</p>", row.join(&GLYPHS.spaced_sep()))
+}
 
 /// Each node's name over its stroke of the furrow, in the class of its word;
 /// every name with its word is said in the element's label. Nothing is drawn
@@ -70,14 +101,16 @@ fn keys(own: &Legend, anywhere: &Legend) -> String {
 /// A list of keys: its sentence, muted, then a key an item, each a button beside what it
 /// does. Nothing for a list with neither.
 pub(super) fn key_list(list: &KeyList) -> String {
-    let said = list
-        .said
-        .as_deref()
+    keys_under(list.said.as_deref(), &list.keys.0)
+}
+
+/// `keys` under `said`, muted, where there is one: a key an item, each a button beside what
+/// it does. Every list of keys a page draws draws its keys so.
+fn keys_under(said: Option<&str>, keys: &[Binding]) -> String {
+    let said = said
         .map(|said| format!(r#"<p class="muted">{}</p>"#, words(said)))
         .unwrap_or_default();
-    let keys: String = list
-        .keys
-        .0
+    let keys: String = keys
         .iter()
         .map(|binding| format!("<li>{}</li>", key(binding)))
         .collect();
@@ -85,6 +118,26 @@ pub(super) fn key_list(list: &KeyList) -> String {
         true => said,
         false => format!(r#"{said}<ul class="keys">{keys}</ul>"#),
     }
+}
+
+/// A run at a glance: its facts that say something as a list of terms, each label beside its
+/// words, then the acts as a list of keys under their heading, where the glance offers any.
+pub(super) fn at_a_glance(glance: &AtAGlance) -> String {
+    let facts: String = glance
+        .said()
+        .map(|(label, value)| format!("<dt>{}</dt><dd>{}</dd>", esc(label), words(value)))
+        .collect();
+    let facts = match facts.is_empty() {
+        true => String::new(),
+        false => format!(r#"<dl class="fields">{facts}</dl>"#),
+    };
+    let acts = glance
+        .acts
+        .as_ref()
+        .filter(|(_, acts)| !acts.is_empty())
+        .map(|(heading, acts)| keys_under(Some(heading), acts))
+        .unwrap_or_default();
+    format!("{facts}{acts}")
 }
 
 /// One key as a button carrying it as a program names it, beside what it
@@ -224,7 +277,7 @@ fn place(screen: &Screen) -> Option<String> {
 /// over its document, its parts apart by the separator and its edge at the
 /// heading's far end, current when the keys act on it.
 fn region(reader: &mut Reader, region: &Region, part: &str, focused: bool) -> String {
-    let sep = format!(" {} ", GLYPHS.sep());
+    let sep = GLYPHS.spaced_sep();
     let (label, heading) = match region.title.is_empty() {
         false => {
             let title = region.title.join(&sep);

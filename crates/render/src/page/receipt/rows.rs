@@ -11,10 +11,13 @@ use yunta_core::receipt::{self, BaselineSummary, DiagnosticCount, EventChainStat
 use super::Told;
 use crate::spend::Breakdown;
 
-/// `words`, and on a printed receipt `detail` after the separator, where there is one.
+/// `words`, and where the receipt keeps it, on a printed receipt or a page a screen opens
+/// over the run, `detail` after the separator, where there is one.
 pub(super) fn said(words: String, detail: Option<String>, told: Told) -> String {
     match (told, detail) {
-        (Told::Printed(glyphs), Some(detail)) => format!("{words} {} {detail}", glyphs.sep()),
+        (Told::Printed(glyphs) | Told::OnAPage(glyphs), Some(detail)) => {
+            format!("{words} {} {detail}", glyphs.sep())
+        }
         _ => words,
     }
 }
@@ -249,7 +252,7 @@ pub(super) fn baseline(baseline: Option<&BaselineSummary>, told: Told) -> (Found
         ),
         (None, 0) => {
             let passes = match told {
-                Told::OnScreen(_) => format!("{} still passes", b.suite),
+                Told::OnScreen(_) | Told::OnAPage(_) => format!("{} still passes", b.suite),
                 Told::Printed(_) => format!("`{}` still passes", b.suite),
             };
             (Found::Holds, said(passes, Some(compared), told))

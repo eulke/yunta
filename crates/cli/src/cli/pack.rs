@@ -5,9 +5,11 @@ use yunta_core::PackRef;
 
 #[derive(Subcommand)]
 pub(super) enum PackAction {
-    /// Clones, vendors to `.yunta/packs/<publisher>/<name>/`, and locks a
-    /// pack. `<source>` is a git URL or `host/publisher/name` shorthand,
-    /// optionally suffixed `@<ref>` (tag, branch or commit-ish).
+    /// Clone, vendor to `.yunta/packs/<publisher>/<name>/`, and lock a
+    /// pack. `<source>` is a git URL, `host/publisher/name` shorthand or
+    /// local path, followed by `//<directory>` where the pack stands below
+    /// the repository's root, and optionally suffixed `@<ref>` (tag, branch
+    /// or commit-ish).
     Add {
         source: String,
         /// Confirms installing a pack that ships executors (executable
@@ -22,7 +24,7 @@ pub(super) enum PackAction {
         #[arg(long)]
         run_tests: bool,
     },
-    /// Re-clones an installed pack at a new ref and re-vendors it.
+    /// Re-clone an installed pack at a new ref and re-vendor it.
     Update {
         /// `publisher/name`.
         pack: PackRef,
@@ -34,19 +36,19 @@ pub(super) enum PackAction {
         #[arg(long)]
         yes: bool,
     },
-    /// Scaffolds a new pack at `./<name>`: a manifest, one verified
-    /// workflow, a self-test config and case, and a README. Checks and
-    /// tests it on creation, so the scaffold passes from the first command.
+    /// Scaffold a new pack at `./<name>`: a manifest, one verified
+    /// workflow, a self-test config and case, and a README. It is checked
+    /// and tested on creation, so the scaffold passes from the first command.
     New {
         /// `publisher/name`.
         pack: PackRef,
     },
-    /// Removes a pack's vendored directory and its lock entry.
+    /// Remove a pack's vendored directory and its lock entry.
     Remove {
         /// `publisher/name`.
         pack: PackRef,
     },
-    /// Lists every locked pack, verifying its vendored content against
+    /// List every locked pack, verifying its vendored content against
     /// the lock.
     List,
     /// Full static inventory of an installed pack: every

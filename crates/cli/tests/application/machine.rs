@@ -2,17 +2,19 @@
 //! doctor, which says what collecting would reclaim and collects once it is confirmed.
 
 use yunta_core::step::NextStep;
+use yunta_render::screen::Confirming;
 use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::{stderr, yunta_at, Checkout, Terminal};
 
-use super::{given_back, opened, taken_from_the_palette};
+use super::{given_back, opened, taken_from_the_palette, THE_FIELD};
 
 /// The config of a repository whose finished runs are kept no day, so upkeep has one to
 /// reclaim.
 const KEPT_NO_DAY: &str = "defaults:\n  isolation: none\nstorage:\n  retention_days: 0\n";
 
-/// What doctor's findings stand under, whatever this machine holds: its headline.
-const DOCTORS_HEAD: &str = "yunta doctor ·";
+/// What doctor's findings stand under on the machine's page, whatever this machine holds:
+/// its headline, which names the machine.
+const DOCTORS_HEAD: &str = "this machine ·";
 
 /// Doctor's step, as the palette offers it on every stage.
 const DOCTOR: NextStep = NextStep::Doctor {
@@ -38,6 +40,8 @@ fn doctor_opens_from_the_palette_on_its_findings() {
     taken_from_the_palette(&mut terminal, &DOCTOR);
     terminal.wait_on_screen(DOCTORS_HEAD, "doctor's findings never stood");
     terminal.keys("q");
+    terminal.wait_on_screen(THE_FIELD, "`q` on the machine never went to the field");
+    terminal.keys("q");
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 
@@ -57,12 +61,17 @@ fn upkeep_says_what_it_would_reclaim_and_collects_once_confirmed() {
         "upkeep never said what it would reclaim",
     );
     terminal.keys("c");
-    terminal.wait_on_screen("removed for good", "collecting was never asked first");
+    // The confirmation's box folds what collecting does under its question, wherever its
+    // width parts the words: the question stands whole in its top edge.
+    let question = Confirming::Collect.question();
+    terminal.wait_on_screen(&question, "collecting was never asked first");
     terminal.keys("\r");
     yunta_testkit::wait_until(
         || !yunta_testkit::run_ids(&checkout.home).contains(&id),
         || "the run was never collected".to_string(),
     );
+    terminal.keys("q");
+    terminal.wait_on_screen(THE_FIELD, "`q` on upkeep never went to the field");
     terminal.keys("q");
     assert_eq!(given_back(&mut terminal), Some(0));
 }

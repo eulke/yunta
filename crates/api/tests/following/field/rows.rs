@@ -29,9 +29,14 @@ async fn rows_agree(world: &World, kept: &Kept, reach: FieldReach) {
         (rows.keys().copied().collect(), kept.field.keys().collect());
     assert_eq!(listed_runs, kept_runs, "the same runs");
     for followed in kept.field.values().chain(&kept.whole) {
-        let (row, listed) = (followed.row(now), rows[&followed.run]);
-        assert_eq!(row.frame, listed.frame, "{} framed alike", followed.run);
-        assert_eq!(row.menu, listed.menu, "{} with the same menu", followed.run);
+        let (row, listed) = (followed.row(now), rows[followed.run()]);
+        assert_eq!(row.frame, listed.frame, "{} framed alike", followed.run());
+        assert_eq!(
+            row.menu,
+            listed.menu,
+            "{} with the same menu",
+            followed.run()
+        );
     }
     let unread: Vec<&RunId> = listed.unreadable.iter().map(|run| &run.run_id).collect();
     let kept_unread: Vec<&RunId> = kept.unreadable.keys().collect();

@@ -9,7 +9,8 @@ use surco::words::Standing;
 use yunta_api::FollowedRun;
 use yunta_core::diagnostic::{DocumentKind, DocumentRef, Report};
 use yunta_core::events::{
-    AuthorGate, Claim, Escalation, Failure, GateOption, Leads, Menu, PauseReason,
+    AuthorGate, Claim, Escalation, EventPayload, Failure, GateOption, Leads, Menu, PauseReason,
+    RunCreatedPayload, RunEvent, RunPausedPayload,
 };
 use yunta_core::{
     CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, NodeId, NonEmpty, OptionId,
@@ -18,7 +19,7 @@ use yunta_core::{
 use yunta_render::watched::Heard;
 use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, WaitingOn};
 use yunta_replay::registry::Engine;
-use yunta_replay::RunState;
+use yunta_testkit_core::Log;
 
 use super::{scene, Grounds, Plan, Scene, Standstill};
 use crate::RunInView;
@@ -62,19 +63,46 @@ fn manifest() -> Manifest {
     }
 }
 
-/// The run in view, read whole with no event and nothing read of what it waits on; the
-/// engine rebuilds a decision for it where `menu` says.
-fn in_view(menu: bool) -> RunInView {
+/// The run's birth, as its log holds it.
+fn born() -> EventPayload {
+    EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+        checkout: None,
+        manifest_hash: ContentHash::sha256(b"manifest"),
+        inputs: BTreeMap::new(),
+        mode: Default::default(),
+        promoted_from: None,
+        yunta_schema: None,
+        base_branch: "main".to_string(),
+        base_commit: CommitSha::from_static("0123456789abcdef0123456789abcdef01234567"),
+        environment: None,
+        left_out: Vec::new(),
+        opens_on_base: false,
+    }))
+}
+
+/// The run in view, read whole with nothing read of what it waits on: from no event, where
+/// it waits on no decision; parked on its token cap, which the engine rebuilds a decision
+/// for, where `waits_on_a_decision`.
+fn in_view(waits_on_a_decision: bool) -> RunInView {
+    let events = match waits_on_a_decision {
+        false => Vec::new(),
+        true => {
+            let pause = PauseReason::BudgetExhausted { spent: 5, cap: 4 };
+            let paused = EventPayload::Run(RunEvent::Paused(RunPausedPayload { pause }));
+            Log::for_run(RUN.as_str())
+                .event(born())
+                .event(paused)
+                .build()
+        }
+    };
+    let run = FollowedRun::read(RUN, manifest(), &events, Engine::Unrecorded);
+    assert_eq!(run.menu(), waits_on_a_decision, "the run as its log reads");
     RunInView {
-        run: FollowedRun {
-            run: RUN,
-            manifest: manifest(),
-            state: RunState::replay(&[]),
-            engine: Engine::Unrecorded,
-            menu,
-        },
+        run,
         moments: Vec::new(),
         by_node: BTreeMap::new(),
+        fed: BTreeMap::new(),
+        calls: BTreeMap::new(),
         handed_over: BTreeMap::new(),
         heard: Heard::default(),
         missed: 0,

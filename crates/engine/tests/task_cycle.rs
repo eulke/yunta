@@ -42,7 +42,7 @@ fn bare_setup(run_dir: &std::path::Path) -> yunta_engine::SessionSetup {
         yunta_core::NodeId::from_static("build"),
         yunta_core::RunnerCandidate {
             adapter: "mock".into(),
-            model: "mock-model".into(),
+            model: Some("mock-model".into()),
             agent: None,
             effort: None,
         },

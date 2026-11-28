@@ -22,7 +22,7 @@ mod terminal;
 pub(crate) use html::tests::visible;
 pub use html::Html;
 pub use markdown::{Description, Leaves, Markdown};
-pub use terminal::{said_whole, Paned, Placed, Terminal};
+pub use terminal::{said_whole, BoxSize, Paned, Placed, Terminal};
 
 use crate::components::Code;
 use crate::doc::Doc;

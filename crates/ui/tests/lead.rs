@@ -59,7 +59,7 @@ fn pointed(screen: &RunScreen) -> Option<String> {
         .map(|in_view| {
             in_view
                 .run
-                .manifest
+                .manifest()
                 .workflow
                 .iter_nodes()
                 .map(|node| node.id.to_string())

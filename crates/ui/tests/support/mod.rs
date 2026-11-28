@@ -1,9 +1,9 @@
 //! What the interface's own tests share beyond the world they work in
 //! (`yunta_testkit_ui::sandbox`): the application open on a field the follower reads from
 //! runs a bench made, each stopped under an id the test names, with the world it reads;
-//! a performer working in a bench's world; a piece of work performed there; and a bench's
-//! run read whole, with what it asks where a key is to answer it, as what the application
-//! follows hands it first.
+//! a performer working in a bench's world; a piece of work performed there; a bench's run
+//! read whole, with what it asks where a key is to answer it, as what the application follows
+//! hands it first; and a legend's words as a terminal folds them.
 //!
 //! Every test binary that declares `mod support` compiles the whole module and uses a
 //! part of it, so what another binary needs reads as dead here.
@@ -18,7 +18,7 @@ use yunta_core::events::{Channel, EventPayload, PauseReason, RunEvent};
 use yunta_core::RunId;
 use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::{Bench, MOCK_CONFIG};
-use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::driving::{carried_out, drive, CarriedOut};
 use yunta_testkit_ui::sandbox::{now, workspace};
 use yunta_ui::{Input, News, Operation, Outcome, Performer, Request, State};
 
@@ -96,18 +96,9 @@ pub async fn performed(bench: &Bench, operation: Operation) -> (Vec<News>, Outco
     let Some(Request::Perform(ticket, _)) = requests.into_iter().next() else {
         panic!("the application asks something as it opens");
     };
-    let performer = performer_in(bench);
-    let (inputs, mut received) = mpsc::unbounded_channel();
-    performer.perform(ticket, operation, inputs).await;
-    let mut found = Vec::new();
-    loop {
-        match received.recv().await {
-            Some(Input::News(_, news)) => found.push(news),
-            Some(Input::Outcome(_, outcome)) => return (found, outcome),
-            Some(_) => continue,
-            None => panic!("the performer hands back an outcome"),
-        }
-    }
+    let CarriedOut { news, outcome, .. } =
+        carried_out(&performer_in(bench), ticket, operation).await;
+    (news, outcome)
 }
 
 /// `bench`'s run read whole, as a performer following it alone hands it first.
@@ -162,4 +153,19 @@ fn asks(news: &FollowNews) -> bool {
             ..
         }
     )
+}
+
+/// `legend` as a terminal folds it in `glyphs`, on rows wide enough to hold it on one: each
+/// key beside what it does, a separator between two.
+pub fn spelled(legend: &surco::components::Legend, glyphs: surco::glyphs::Glyphs) -> String {
+    let look = surco::look::Look {
+        glyphs,
+        width: surco::look::Width::exact(usize::MAX),
+        ..surco::look::Look::plain()
+    };
+    let rows = surco::surface::Terminal::on(look).block(&legend.clone().into());
+    rows.iter()
+        .map(surco::line::Line::text)
+        .collect::<Vec<_>>()
+        .join("\n")
 }

@@ -1,0 +1,6 @@
+  ␛[38;2;142;136;127mwaiting     ␛[0m for 40d
+  ␛[38;2;142;136;127mbranch      ␛[0m yunta/run/...EZRPE9 off main
+
+␛[38;2;142;136;127mwhat you can do␛[0m
+␛[1;38;2;255;255;255menter  ␛[0mread the decision
+␛[1;38;2;255;255;255mx      ␛[0mclose it for good

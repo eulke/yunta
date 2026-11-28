@@ -22,7 +22,7 @@ impl RunStage {
         look_failed: Option<&String>,
         look: &Look,
     ) -> Region {
-        let request = framed.in_view.run.manifest.request();
+        let request = framed.in_view.run.manifest().request();
         let asked = request.map(yunta_render::prompt::round::you_asked);
         let failed = look_failed.map(|failed| Block::from(Note(failed.clone())));
         let doc = Doc::new()

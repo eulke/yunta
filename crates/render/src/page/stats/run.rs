@@ -16,14 +16,13 @@ use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::text::counted;
-use surco::width::{
-    cell_width, id_column, middle_cut, truncate, INDENT, INDENT_WIDTH, LABEL_WIDTH,
-};
+use surco::width::{cell_width, id_column, middle_cut, truncate, INDENT, INDENT_WIDTH};
 use surco::words::{Standing, WAITING_ON_YOU};
 use yunta_core::NodeId;
 use yunta_replay::frame::{NodeFrame, RunFrame, RunPhase};
 use yunta_replay::stats::{NodeStat, RunStats};
 
+use super::barred::barred;
 use super::facts::{answers, cache, cptv, findings, rework, spent, submissions};
 
 /// What the `yunta stats <run_id>` block is drawn from: one run's stats,
@@ -106,7 +105,7 @@ impl Stats<'_> {
         let cost = crate::spend::cost(stats.total_tokens.total(), self.pricing);
         let unread = crate::state::unknown_kinds(&stats.unknown_kinds);
         Fields::new()
-            .push_if("task cost", cptv(stats))
+            .push_if(TASK_COST, cptv(stats))
             .push_if("rework", rework(stats, look.glyphs))
             .push_if("cache", cache(stats, look.glyphs))
             .push_if("tokens", spent(stats))
@@ -154,7 +153,7 @@ impl Stats<'_> {
             frame.phase,
             RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
         );
-        if let Some(took) = frame.elapsed {
+        if let Some(took) = self.stats.wall_clock {
             headline = headline.fact(match open {
                 true => format!("{} so far", duration(took)),
                 false => format!("in {}", duration(took)),
@@ -202,13 +201,15 @@ impl Stats<'_> {
             || NodeDisplay::of(Standing::NeverRan, None),
             NodeDisplay::from,
         );
-        let person = frame.is_some_and(NodeFrame::person_took);
+        let people = self.stats.people_by_node.get(&stat.node_id);
+        let people = people.copied().unwrap_or_default();
+        let person = frame.is_some_and(|frame| frame.person_took(people));
         NodeRow {
             stat,
             display,
-            took: match (person, frame) {
-                (true, Some(frame)) => frame.people,
-                _ => stat.active_so_far(),
+            took: match person {
+                true => people,
+                false => stat.active_so_far(),
             },
             person,
             rounds: frame.map_or(0, NodeFrame::person_rounds),
@@ -336,26 +337,13 @@ fn tail_of(row: &NodeRow<'_>, attempts: usize) -> (String, String) {
     (format!("  {:<attempts$}  ", row.attempts), last)
 }
 
-/// The cells a role's name takes in who spent it: the widest label a column
-/// holds, [`LABEL_WIDTH`], and a gap of two before its bar.
-const ROLE_COLUMN: usize = LABEL_WIDTH + 2;
-
-/// The cells a role's bar is drawn in, against the role that spent the
-/// most: twenty-eight, so the name's column, the bar's track and the widest
-/// figure of tokens stand on the line of the least terminal, 58 cells
-/// inside its margins.
-const SPENT_BAR: usize = 28;
-
-/// The cells of the track a role's bar stands on: the bar's, and a gap of
-/// two before its tokens, so every row's tokens start in one column.
-const SPENT_TRACK: usize = SPENT_BAR + 2;
+/// The label the cost per verified task stands under, on a run's numbers and a workflow's
+/// history alike.
+pub(super) const TASK_COST: &str = "task cost";
 
 /// Who spent the run's tokens, under its heading: a role a row, across
 /// however many nodes each role was given, the one that spent the most
-/// first; its name in a column, a fine bar of its tokens against that most
-/// in the running tone on a track of fixed cells, then its tokens, muted.
-/// A role that spent nothing says nothing, and a line too narrow for the
-/// track draws no bar.
+/// first, each as [`barred`] draws it.
 fn spent_lines(stats: &RunStats, look: &Look) -> Vec<Line> {
     let mut by_runner: Vec<(String, u64)> = stats
         .tokens_by_runner()
@@ -364,30 +352,15 @@ fn spent_lines(stats: &RunStats, look: &Look) -> Vec<Line> {
         .filter(|(_, total)| *total > 0)
         .collect();
     by_runner.sort_by_key(|(_, total)| std::cmp::Reverse(*total));
-    let Some(&(_, most)) = by_runner.first() else {
+    if by_runner.is_empty() {
         return Vec::new();
-    };
-    let figures: Vec<String> = by_runner
-        .iter()
-        .map(|(_, total)| Tokens(*total).to_string())
-        .collect();
-    let widest = figures.iter().map(|figure| cell_width(figure)).max();
-    let barred = ROLE_COLUMN + SPENT_TRACK + widest.unwrap_or(0) <= look.width.cells();
-    let mut lines = vec![Line::new(), Line::new().push(Tone::Muted, "who spent it")];
-    let gap = " ".repeat(ROLE_COLUMN - LABEL_WIDTH);
-    for ((runner, total), figure) in by_runner.iter().zip(figures) {
-        let line = Line::new().plain(middle_cut(runner, LABEL_WIDTH, look.glyphs) + &gap);
-        let line = match barred {
-            true => {
-                let drawn = fine_bar(*total as f64, most as f64, SPENT_BAR, look.glyphs).drawn();
-                let pad = SPENT_TRACK.saturating_sub(cell_width(&drawn));
-                line.push(Tone::Running, drawn).plain(" ".repeat(pad))
-            }
-            false => line,
-        };
-        lines.push(line.push(Tone::Muted, figure));
     }
-    lines
+    let rows = by_runner
+        .into_iter()
+        .map(|(runner, total)| (runner, total as f64, Tokens(total).to_string()))
+        .collect();
+    let heading = [Line::new(), Line::new().push(Tone::Muted, "who spent it")];
+    heading.into_iter().chain(barred(rows, look)).collect()
 }
 
 /// `line` with a fine bar of `value` against `scale` after a space, `cells`
@@ -482,7 +455,7 @@ fn private(stat: &NodeStat, look: &Look) -> Option<Line> {
         return None;
     }
     let room = look.width.cells().saturating_sub(UNDER_ID);
-    let separator = format!(" {} ", glyphs.sep());
+    let separator = glyphs.spaced_sep();
     let said = said.join(separator.as_str());
     let cut = truncate(&said, room, glyphs);
     Some(

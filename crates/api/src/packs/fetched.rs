@@ -7,8 +7,10 @@ use std::path::Path;
 
 use yunta_core::refusal::{PackRefusal, PackVerb};
 use yunta_core::{PackAudit, PackLock, PackLockEntry, PackManifest, PackRef};
+use yunta_engine::PackTree;
 
 use super::policy::PackPolicy;
+use super::source::Cloned;
 use super::{failed, held, refuse_vendored, refused, vendor, vendor_and_lock, InstalledPack};
 use crate::{Error, Remarks, Stop, Workspace};
 
@@ -19,7 +21,7 @@ use crate::{Error, Remarks, Stop, Workspace};
 /// [`FetchedPack::install`].
 pub struct FetchedPack {
     workspace: Workspace,
-    clone: tempfile::TempDir,
+    cloned: Cloned,
     pub manifest: PackManifest,
     policy: PackPolicy,
     confirmed: bool,
@@ -28,8 +30,10 @@ pub struct FetchedPack {
 
 /// What a fetched pack is installed as.
 pub(super) enum Installing {
-    /// A pack new to the repository, from `source`, at `reference` when one
-    /// was asked for, else on the branch its clone lands on.
+    /// A pack new to the repository, from `source` as the lock records it
+    /// (its repository, and the directory there where one is named), at
+    /// `reference` when one was asked for, else on the branch its clone lands
+    /// on.
     Added {
         source: String,
         reference: Option<String>,
@@ -64,12 +68,12 @@ impl Installing {
 }
 
 impl FetchedPack {
-    /// The pack cloned at `clone`, its manifest read, judged under `policy` with
-    /// what it executes `confirmed` ahead or not, to be installed as `installing`
-    /// says, in `workspace`'s repository.
+    /// The pack `cloned`, its manifest read, judged under `policy` with what it
+    /// executes `confirmed` ahead or not, to be installed as `installing` says,
+    /// in `workspace`'s repository.
     pub(super) fn new(
         workspace: Workspace,
-        clone: tempfile::TempDir,
+        cloned: Cloned,
         manifest: PackManifest,
         policy: PackPolicy,
         confirmed: bool,
@@ -77,7 +81,7 @@ impl FetchedPack {
     ) -> Self {
         FetchedPack {
             workspace,
-            clone,
+            cloned,
             manifest,
             policy,
             confirmed,
@@ -92,6 +96,11 @@ impl FetchedPack {
         self
     }
 
+    /// The workspace whose repository the pack installs into.
+    pub(crate) fn installs_into(&self) -> &Workspace {
+        &self.workspace
+    }
+
     /// The ref an update moves the pack to; none for a pack new to the
     /// repository.
     pub fn updating_to(&self) -> Option<&str> {
@@ -101,16 +110,24 @@ impl FetchedPack {
         }
     }
 
-    /// Where the copy its audit reads stands: what it installs from, gone once
-    /// it is installed or let go.
+    /// Where the copy its audit reads stands, the pack's own directory in its
+    /// repository's clone: what it installs from, gone once it is installed or
+    /// let go.
     pub fn checkout(&self) -> &Path {
-        self.clone.path()
+        self.cloned.tree().root()
+    }
+
+    /// The pack's tree in its clone, walked as it was fetched and found to
+    /// hold no symbolic link: what its audit, the roles a setup proposes from
+    /// it and its install read, and nothing outside it.
+    pub(crate) fn tree(&self) -> &PackTree {
+        self.cloned.tree()
     }
 
     /// The pack's audit, read, never run: the inventory a person confirms
     /// against.
     pub fn audit(&self) -> PackAudit {
-        yunta_engine::audit_pack(self.clone.path(), self.manifest.clone())
+        yunta_engine::audit_pack(self.cloned.tree(), self.manifest.clone())
     }
 
     /// Whether the executors the pack declares wait on a person's
@@ -131,7 +148,7 @@ impl FetchedPack {
         self.policy
             .admit_executors(&self.manifest, self.confirmed, self.installing.verb())?;
         let supervision = self.workspace.supervision(stop);
-        let clone = self.clone.path();
+        let clone = self.cloned.root();
         let commit = vendor::head_commit(clone, supervision)
             .await
             .map_err(failed)?;
@@ -168,7 +185,8 @@ impl FetchedPack {
             commit: commit.clone(),
             content_hash,
         };
-        let at = vendor_and_lock(dir, clone, &pack, lock, entry, remarks).map_err(failed)?;
+        let from = self.cloned.tree();
+        let at = vendor_and_lock(dir, from, &pack, lock, entry, remarks).map_err(failed)?;
         Ok(InstalledPack {
             workspace: self.workspace,
             pack,

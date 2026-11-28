@@ -16,6 +16,7 @@ fn working_in(dir: &Path) -> Workspace {
         secrets: Arc::new(ProcessSecrets),
         forges: Arc::new(crate::DeclaredForge),
         binary: "yunta".into(),
+        disk: Arc::new(yunta_core::disk::SystemDisk),
     }
 }
 

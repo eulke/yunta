@@ -116,14 +116,12 @@ async fn a_left_out_node_stands_apart_from_a_mode_skipped_one() {
     let workflow: Workflow = yunta_core::yaml::parse(LINTED).expect("the workflow parses");
 
     let events = bench.events();
-    let closed_at = events.last().expect("the run's log").timestamp;
     let frame = yunta_replay::frame::RunFrame::of(
         &bench.run_id,
         &workflow,
         &yunta_replay::RunState::replay(&events),
         None,
         &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
-        closed_at,
     );
 
     let lint = frame

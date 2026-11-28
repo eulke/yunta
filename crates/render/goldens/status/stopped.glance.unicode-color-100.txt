@@ -7,6 +7,6 @@
   ␛[2m            ␛[0m ␛[2m◌ ␛[0m2 never ran: build, test
 
 ␛[2mnext␛[0m
-  ␛[1myunta resume 7E5PH4       ␛[0m   ␛[2mcontinues it where it stopped␛[0m
+  ␛[1myunta resume 7E5PH4       ␛[0m   ␛[2mcontinue it where it stopped␛[0m
   ␛[1myunta close 7E5PH4        ␛[0m   ␛[2mclose it for good␛[0m
-  ␛[1myunta status 7E5PH4 --full␛[0m   ␛[2mthe whole story, node by node␛[0m
+  ␛[1myunta status 7E5PH4 --full␛[0m   ␛[2mthe run's whole story␛[0m

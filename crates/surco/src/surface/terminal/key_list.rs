@@ -87,11 +87,7 @@ impl KeyList {
             .iter()
             .map(|binding| binding.keys.spelled(look.glyphs))
             .collect();
-        let widest = spelled.iter().map(|key| cell_width(key)).max().unwrap_or(0);
-        let column = match widest < KEY_COLUMN {
-            true => KEY_COLUMN,
-            false => widest + KEY_GAP,
-        };
+        let column = key_column(&spelled);
         spelled
             .iter()
             .zip(&self.keys.0)
@@ -103,6 +99,17 @@ impl KeyList {
                     .cut(look.width.cells(), look.glyphs)
             })
             .collect()
+    }
+}
+
+/// The cells a column of `keys`, as spelled, takes with the space after them: seven, or the
+/// widest key and two cells where a key leaves no cell beside it in seven. Every list of keys
+/// a key a row lays its keys so, help's and a glance's acts alike.
+pub(super) fn key_column(keys: &[&str]) -> usize {
+    let widest = keys.iter().map(|key| cell_width(key)).max().unwrap_or(0);
+    match widest < KEY_COLUMN {
+        true => KEY_COLUMN,
+        false => widest + KEY_GAP,
     }
 }
 

@@ -57,8 +57,8 @@ struct Handed {
 
 /// What the window of the feed of `moments`, where `scroll` stands, hands render.
 fn handed(moments: &[Moment], scroll: &Scroll) -> Handed {
-    let listed: Vec<&Moment> = moments.iter().collect();
-    let feed = window(&listed, &BTreeMap::new(), scroll, &look());
+    let listed: Vec<usize> = (0..moments.len()).collect();
+    let feed = window(&listed, moments, &BTreeMap::new(), scroll, &look());
     Handed {
         rows: feed.rows.len(),
         before: feed.before,
@@ -70,8 +70,8 @@ fn handed(moments: &[Moment], scroll: &Scroll) -> Handed {
 /// rows: each row's text, and what was laid out handed back to `scroll`, as a surface hands
 /// it back after it draws.
 fn drawn(moments: &[Moment], scroll: &mut Scroll) -> Vec<String> {
-    let listed: Vec<&Moment> = moments.iter().collect();
-    let feed = window(&listed, &BTreeMap::new(), scroll, &look());
+    let listed: Vec<usize> = (0..moments.len()).collect();
+    let feed = window(&listed, moments, &BTreeMap::new(), scroll, &look());
     let region = Region::new(Doc::new().with(feed)).in_sight(scroll.sight());
     let paned = Terminal::on(look()).pane(&region, ROWS);
     scroll.laid(paned.laid);

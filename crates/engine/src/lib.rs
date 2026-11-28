@@ -28,7 +28,8 @@
 //! - Checkouts: `worktree` isolates and pools them; `wakefulness` notices a
 //!   host that slept.
 //! - Boundaries: `git`, `process`, `process_registry`, `lock` and `run_hold`.
-//! - Packs: `pack_audit` and `pack_requires`.
+//! - Packs: `pack_tree` walks a pack's files once, which `pack_audit` reads;
+//!   `pack_requires`.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.
@@ -72,6 +73,7 @@ pub mod lock;
 mod manifest;
 mod pack_audit;
 mod pack_requires;
+mod pack_tree;
 mod permissions;
 pub mod process;
 mod process_registry;
@@ -110,8 +112,9 @@ pub use catalog::{
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
 };
 pub use check::{
-    check, check_context_files, check_mode_start, check_mounted, check_warnings,
-    check_workflow_refs, programs_named, ContextFilesCheck, RefsCheck, RunTreeOrigin,
+    candidate_adapters, check, check_context_files, check_mode_start, check_mounted,
+    check_warnings, check_workflow_refs, programs_named, ContextFilesCheck, RefsCheck,
+    RunTreeOrigin,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
@@ -120,6 +123,7 @@ pub use inputs::{resolve_inputs, ResolvedInputs};
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
 pub use pack_audit::audit_pack;
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
+pub use pack_tree::{PackTree, PackWalkError};
 pub use permissions::command_violation;
 pub use process_registry::{
     read_engine, read_registry, registry_path, running_groups, EngineProcessFile, ProcessRegistry,
@@ -127,11 +131,11 @@ pub use process_registry::{
 };
 pub use run::schedule::{decide, follows_build, Decision, Policy as SchedulingPolicy};
 pub use run::{
-    awaits_decision, close_run, create_promotion_successor, create_run, current_escalation,
-    execute_run, read_manifest, record_pause_after_crash, resolve_gate, run_redactor,
-    session_token_budget, BirthArtifact, BirthOrigin, CallerInfra, CloseRunError, CreateRunParams,
-    ManifestReadError, OwedMeasurement, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv,
-    RunError, RunReport, RunRoots, RunTerminal,
+    awaited_escalation, awaits_decision, close_refusal, close_run, create_promotion_successor,
+    create_run, current_escalation, execute_run, read_manifest, record_pause_after_crash,
+    resolve_gate, run_redactor, session_token_budget, BirthArtifact, BirthOrigin, CallerInfra,
+    CloseRunError, CreateRunParams, ManifestReadError, OwedMeasurement, Predecessor,
+    PromotionSuccessor, ResolveGateError, RunEnv, RunError, RunReport, RunRoots, RunTerminal,
 };
 pub use run_hold::{contention_for, hold_refused, hold_run, RunHold};
 pub use run_tools::{

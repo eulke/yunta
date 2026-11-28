@@ -230,7 +230,7 @@ impl Desk {
         let Some(edge) = self.edge.as_deref() else {
             return title;
         };
-        let whole = self.title.join(&format!(" {} ", glyphs.sep()));
+        let whole = self.title.join(&glyphs.spaced_sep());
         match cell_width(&whole) + APART + cell_width(edge) <= measure {
             true => at_ends(title, Some(Line::new().push(Tone::Muted, edge)), measure),
             false => title,
@@ -241,7 +241,7 @@ impl Desk {
 /// The pane's title row in `cells`: its title in strong, and at its far end where it is among
 /// the places a person can stand on. A rail says that itself when there is one.
 fn pane_title_row(pane: &Pane, glyphs: Glyphs, cells: usize, has_rail: bool) -> Line {
-    let sep = format!(" {} ", glyphs.sep());
+    let sep = glyphs.spaced_sep();
     let place = if has_rail {
         None
     } else {

@@ -20,7 +20,7 @@ impl Run {
     /// whose failure has nothing more to quote, and whose claim the gist
     /// made, is not listed again.
     pub(super) fn evidence(&self, glyphs: Glyphs) -> Vec<Block> {
-        let asked = crate::state::gist(&self.frame).unwrap_or_default();
+        let asked = crate::state::gist(&self.frame, &self.times).unwrap_or_default();
         self.frame
             .failed()
             .filter_map(|(node, failure)| {

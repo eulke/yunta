@@ -21,6 +21,12 @@ lint→fix, a baseline check, multi-runner review, the work held to its plan, PR
 Both install and remove
 like any third-party pack; the engine treats them no differently, and
 they're worth reading as concrete, working examples of everything below.
+Setting a repository up in the application installs `yunta/fragua` as
+`yunta pack add` would, once you have read its audit and confirmed it, from
+this repository's `packs/fragua` at the tag of the binary's own version:
+`https://github.com/eulke/yunta//packs/fragua@v<version>`, the tag alone
+cloned, never the repository's history. A binary whose version is not tagged
+yet finds no such tag, and the setup says why and writes the config alone.
 
 ## Installing and using a pack
 
@@ -34,11 +40,28 @@ yunta pack remove acme/review-pack
 `add` clones the ref, vendors it to `.yunta/packs/<publisher>/<name>/`
 (checked into the repo alongside the team's own code — a pack's contents are
 versioned with your history, not fetched fresh on every checkout), and
-records `{ref, commit, content hash}` in `.yunta/yunta.lock`. Nothing updates
-itself: `update` always names an exact target ref. `list` re-hashes what's
-actually vendored on disk against the lock and says so if they've drifted —
-an offline, no-network way to confirm the vendoring hasn't been tampered with
-or gone stale.
+records `{source, ref, commit, content hash}` in `.yunta/yunta.lock`. Nothing
+updates itself: `update` always names an exact target ref, and fetches it
+again from the source the lock records. `list` re-hashes what's actually
+vendored on disk against the lock and says so if they've drifted — an
+offline, no-network way to confirm the vendoring hasn't been tampered with or
+gone stale.
+
+A pack that stands at a directory of a larger repository is named with that
+directory after a `//`, `<repository>//<directory>[@ref]`:
+
+```bash
+yunta pack add github.com/acme/packs//review@v1.2.0
+```
+
+The whole repository is cloned and the ref checked out, then only that
+directory is read, audited, hashed and vendored, exactly as a pack at a
+repository's root is; nothing outside it reaches your repo. The directory is
+named from the repository's root: one written absolute or with a `..`, one
+reached through a symbolic link, or one the repository does not hold at that
+ref is refused, naming the source and why. A repository or a ref that begins
+with `-`, which git would read as an option, is refused before anything is
+cloned, a source in `yunta.lock` that `update` reads back among them.
 
 `add`, `update` and `remove` hold `.yunta/yunta.lock.held` from the moment
 they read the lock to the moment they write it back, so two pack commands
@@ -81,14 +104,18 @@ servers reached, executors flagged as code, the repository paths a node's
 `scope:` names, and each workflow's
 **complete, untrimmed prompt text**. It's inventory, never a verdict: nothing here flags
 content as "suspicious" — that would be trivially evadible and would only
-give false confidence. It also reports whether the pack ships its own tests
-under `.yunta/tests/` (same format `yunta test` uses) and whether they pass.
+give false confidence. Among what the pack declares, its `tests` row says
+whether the pack ships its own tests under `.yunta/tests/` (same format
+`yunta test` uses) and whether they pass, each case that failed under it.
 `add` prints the same inventory before anything is vendored — nothing lands
 in your repo unseen — and runs nothing of the pack on its own: the pack's
 cases run only with `--run-tests`, after the install, so reading the audit
 and confirming it never executes what is being audited. A pack that ships
-a symlink, or whose `pack.yaml` names a publisher, pack or content path that
-would reach outside the pack's own directory, is refused before vendoring.
+a symlink anywhere in its own directory is refused as it is fetched, naming
+the link, before its audit or anything else of it is read; one whose
+`pack.yaml` names a publisher, pack or content path that would reach outside
+the pack's own directory is refused before vendoring, and a prompt file a
+workflow names outside it is never read.
 
 `declares:` in `pack.yaml` is a ceiling, not a description, and `yunta check`
 enforces it as one: a `prompt`/`loop` node inside a pack can never request a
@@ -353,7 +380,8 @@ yunta pack add ../my-pack
 There's no pack registry yet (v1 doesn't have one) — a pack's source is
 whatever `yunta pack add` can `git clone`: a bare `host/path` shorthand
 (`github.com/acme/review-pack`, `https://` is assumed), a full URL, an SSH
-shorthand (`git@github.com:acme/review-pack`), or a local path. "Publishing"
+shorthand (`git@github.com:acme/review-pack`), or a local path — followed by
+`//<directory>` when the pack stands below the repository's root. "Publishing"
 today means: push the pack's repo somewhere reachable, and tag a release.
 
 A few conventions worth following, since consumers will `add`/`update`
@@ -366,10 +394,13 @@ against exactly what you do here:
   audit`/`add` print this version straight from the manifest; a mismatch
   between the tag and the manifest is confusing for anyone reading the
   output.
-- **Keep the pack's own repo root *at* the pack root** — `pack.yaml` at the
-  top level, exactly the layout `add` clones and vendors verbatim. If a pack
-  lives inside a larger monorepo, publish it from a repo (or subtree) whose
-  root already looks like `packs/starter/` does in this one.
+- **Keep everything the pack ships under its own directory** — `pack.yaml`
+  at that directory's root, beside the files `contents` lists, exactly the
+  layout `add` vendors verbatim. A pack at the repository's root is named by
+  the repository alone; one inside a larger repository, as `packs/starter/`
+  is in this one, by the repository and its directory
+  (`github.com/acme/packs//starter`), and a tag of that repository is its
+  release.
 - **Write the `README.md` you listed in `contents.docs`** — it's the first
   thing a `pack audit` reader (and a human deciding whether to `add` you)
   sees referenced; describe what the pack does and what roles a consumer

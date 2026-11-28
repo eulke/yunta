@@ -7,7 +7,6 @@
 //! where they all fit beside it on one row; else on rows of their own under it, each as many
 //! keys as the row holds whole.
 
-use super::super::legend::separator;
 use super::super::{at_ends, APART};
 use crate::components::{Desk, FootRow};
 use crate::glyphs::Mark;
@@ -79,7 +78,7 @@ impl Desk {
         let Some(more) = self.more_on_the_card() else {
             return keys;
         };
-        let sep = separator(look);
+        let sep = look.glyphs.spaced_sep();
         let beside = keys
             .last()
             .map_or(0, |last| cell_width(&last.text()) + cell_width(&sep));

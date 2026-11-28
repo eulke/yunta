@@ -2,7 +2,7 @@ schema_version: 6
 yunta_version: "0.0.5"
 workflow:
   name: fragua
-  description: Full feature cycle — grill, verified tasks document, multi-runner review and the work held to its plan, one fix round, lint/fix, baseline, PR
+  description: "the full cycle: questions, plan, tests, work, review, PR"
   modes:
     quick:
       include:
@@ -39,7 +39,7 @@ workflow:
   inputs:
     idea:
       type: string
-      description: What to build — becomes the brief
+      description: this becomes the brief
       request: true
   nodes:
   - id: grill
@@ -295,7 +295,7 @@ base_branch: main
 base_commit: 36aeaf5927afd4e0d3f17907d2e043e38836d1c1
 isolation: worktree
 max_parallel_nodes: 3
-workflow_hash: c7d0700ad62cb55b83f88b79cc5053836ff36957f963ac0761c2e6e5a2bd02c1
+workflow_hash: 5a219857503f0e9bc2727b46c0713bab8d2906b1fdb3f0fa3e2109067d53c8a7
 config_hash: 2daf2ef925d87f37c22a96f4e06e39e9eacc3190f14fd7a022ad65af4de4d7fd
 project:
   git_common_dir: /designed/worktree/.git

@@ -131,7 +131,7 @@ impl Curtain {
 mod tests {
     use yunta_api::EventLog;
     use yunta_core::events::{EventPayload, NodeStartedPayload};
-    use yunta_core::{CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, RunId};
+    use yunta_core::{Manifest, RunId};
     use yunta_testkit::wait_until_async;
     use yunta_testkit_core::{Captured, FixedClock, Log};
 
@@ -155,28 +155,7 @@ mod tests {
     /// region's own rows, which every run has whatever its workflow
     /// declares.
     fn manifest() -> Manifest {
-        Manifest {
-            schema_version: 1,
-            yunta_version: "0.0.0".to_string(),
-            workflow: yunta_core::yaml::parse("name: paced\nnodes: []\n")
-                .expect("a workflow with no nodes parses"),
-            config: ConfigLayer::default(),
-            inputs: std::collections::BTreeMap::new(),
-            prompts: std::collections::BTreeMap::new(),
-            base_branch: "main".to_string(),
-            base_commit: CommitSha::from_static("0123456789abcdef0123456789abcdef01234567"),
-            isolation: Isolation::None,
-            max_parallel_nodes: 1,
-            workflow_hash: ContentHash::sha256(b"workflow"),
-            config_hash: ContentHash::sha256(b"config"),
-            paths: None,
-            pack: None,
-            project: None,
-            adapter: None,
-            frozen: None,
-            provenance_gaps: Vec::new(),
-            loaded_links: Vec::new(),
-        }
+        crate::surface::frozen("name: paced\nnodes: []\n")
     }
 
     /// The run's first `n` events, each in the beat the queue carries it
@@ -226,7 +205,6 @@ mod tests {
             let env = SurfaceEnv {
                 run_id: &RUN,
                 manifest: &manifest,
-                prior: None,
                 log: &log,
                 clock: Arc::new(FixedClock),
                 delivery,

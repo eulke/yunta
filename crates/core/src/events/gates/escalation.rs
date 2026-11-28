@@ -288,3 +288,36 @@ impl DecisionOn {
         }
     }
 }
+
+/// A decision a parked run waits on, as its manifest and its state alone rebuild it: what
+/// it is on, and what it asks, or why the gate it waits at cannot ask it from the log. Not
+/// the menu a person is put, which reads the documents a gate shows.
+#[derive(Debug, Clone)]
+pub struct AwaitedDecision {
+    pub on: DecisionOn,
+    pub asks: Result<Escalation, Unaskable>,
+}
+
+impl AwaitedDecision {
+    /// Its menu, where it could be put.
+    pub fn menu(&self) -> Option<&Escalation> {
+        self.asks.as_ref().ok()
+    }
+}
+
+/// Why a gate a run waits at cannot put its decision from the run's log, in the words a
+/// diagnostic says it: it shows a document the run does not hold, or the run's findings it
+/// shows could not be written out. The run still waits on the gate. Not a run that waits on
+/// no decision.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{why}")]
+pub struct Unaskable {
+    why: String,
+}
+
+impl Unaskable {
+    /// The gate's decision unaskable for `why`, said in words.
+    pub fn new(why: String) -> Unaskable {
+        Unaskable { why }
+    }
+}

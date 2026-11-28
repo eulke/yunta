@@ -10,11 +10,12 @@ impl State {
     /// and, where it is a run's, on to the run's own decision as `a` there brings it.
     pub(super) fn back_to_its_decision(&mut self) -> Vec<Request> {
         let mut asked = self.back();
-        let wants = match self.stage.as_mut() {
+        let by = self.on_screen();
+        let wants = match self.stage.as_mut().map(|standing| &mut standing.stage) {
             Some(Stage::Run(run)) => run.attending_its_decision(&self.followed_runs, self.now),
             Some(_) | None => Vec::new(),
         };
-        asked.extend(self.wanted(wants));
+        asked.extend(self.wanted(by, wants));
         asked
     }
 }

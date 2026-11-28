@@ -1,29 +1,30 @@
 //! See [`super`]. The project's config as `init` writes it, YAML a person reads and
 //! commits: its name and base branch, what the repository was detected to run, and its
-//! runners, each declared as a person answered it or proposed, commented, beside the
-//! adapters this machine answered for. Every value a person typed is written so it
-//! reads back whole (`tests`).
+//! runners, each declared on its candidates in order or proposed, commented, where no
+//! adapter answered, beside the adapters this machine answered for, and the default
+//! runner the proposal names. Every value a person typed is written so it reads back
+//! whole (`tests`).
 
 use yunta_core::step::NextStep;
-use yunta_core::{Detected, ProbedAdapter, RunnerCandidate, RunnerName};
+use yunta_core::{Detected, ProbedAdapter, RunnerName};
 use yunta_render::command;
 
-use super::{ProjectSetup, ProposedRunners, RunnerDeclaration};
+use super::{DeclaredRunner, ProjectSetup, RunnerDeclaration};
 
 /// The project's config as `init` writes it: its name and base branch, what
 /// the repository was detected to run, and its runners, declared as `setup`
 /// says or proposed, with each adapter this machine answered for, healthy or
-/// not.
+/// not, and the default runner the proposal `setup` was answered from names.
 pub(super) fn config_yaml(
     setup: &ProjectSetup,
     probed: &[ProbedAdapter],
     detected: &Detected,
-    proposed: &ProposedRunners,
 ) -> String {
+    let proposed = setup.proposed();
     let mut out = String::new();
     out.push_str(&format!(
         "# Written by `{}`: team-shared, commit this file.\n",
-        command::line(&NextStep::Init)
+        command::line(&NextStep::Init { interactive: false })
     ));
     out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
     out.push_str("# config layer), never in this file.\n\n");
@@ -51,63 +52,53 @@ pub(super) fn config_yaml(
             ));
         }
     }
-    let declared = match &setup.runners {
-        RunnerDeclaration::Declared(declared) if !declared.is_empty() => declared,
-        _ => {
-            out.push_str(&proposed_runners_yaml(probed, proposed));
+    let default = proposed.default_runner();
+    let declared = match setup.runners() {
+        RunnerDeclaration::Declared(declared) => declared,
+        RunnerDeclaration::Proposed => {
+            out.push_str(&proposed_runners_yaml(proposed.roles(), default));
             return out;
         }
     };
     out.push_str("runners:\n");
-    for role in &proposed.roles {
-        match declared.get(role) {
-            Some(candidate) => out.push_str(&declared_runner_yaml(role, candidate)),
-            None => out.push_str(&proposed_runner_yaml("  # ", role, probed)),
-        }
+    for runner in declared {
+        out.push_str(&declared_runner_yaml(runner));
     }
-    let default = proposed.roles.first().filter(|_| proposed.needs_default);
-    match default {
-        Some(role) if declared.contains_key(role) => {
-            out.push_str(&format!("defaults:\n  runner: {role}\n"));
-        }
-        Some(role) => out.push_str(&format!("# defaults:\n#   runner: {role}\n")),
-        None => {}
+    if let Some(default) = default {
+        out.push_str(&format!("defaults:\n  runner: {default}\n"));
     }
     out
 }
 
-/// The runners `proposed` names, commented out, each on the first adapter that
-/// answered and its model left blank; and `defaults.runner`, commented, where a
-/// node names none.
-fn proposed_runners_yaml(probed: &[ProbedAdapter], proposed: &ProposedRunners) -> String {
+/// The runners `roles` names, commented out, each on the first adapter this build
+/// knows, as none answered on this machine, its model left to it; and
+/// `defaults.runner`, commented, where the proposal names a `default`.
+fn proposed_runners_yaml(roles: &[RunnerName], default: Option<&RunnerName>) -> String {
+    let adapter = crate::machine::first_built_adapter();
     let mut out = String::from("# runners:\n");
-    for role in &proposed.roles {
-        out.push_str(&proposed_runner_yaml("#   ", role, probed));
+    for runner in roles {
+        out.push_str(&format!(
+            "#   {runner}:\n#     - {{ adapter: {adapter} }}\n"
+        ));
     }
-    if let (true, Some(first)) = (proposed.needs_default, proposed.roles.first()) {
-        out.push_str(&format!("# defaults:\n#   runner: {first}\n"));
+    if let Some(default) = default {
+        out.push_str(&format!("# defaults:\n#   runner: {default}\n"));
     }
     out
 }
 
-/// One proposed runner, commented out after `lead`: on the first adapter that
-/// answered, or the first this build knows when none did, its model blank.
-fn proposed_runner_yaml(lead: &str, runner: &RunnerName, probed: &[ProbedAdapter]) -> String {
-    let adapter = match probed.iter().find(|adapter| adapter.healthy) {
-        Some(healthy) => healthy.id.to_string(),
-        None => crate::machine::first_built_adapter().to_string(),
-    };
-    format!("{lead}{runner}:\n{lead}  - {{ adapter: {adapter}, model: <model-name> }}\n")
-}
-
-/// One declared runner, as a person answered it: on its adapter, with its model,
-/// which YAML reads back whole whatever it holds.
-fn declared_runner_yaml(runner: &RunnerName, candidate: &RunnerCandidate) -> String {
-    format!(
-        "  {runner}:\n    - adapter: {}\n      model: {}\n",
-        candidate.adapter,
-        yaml_scalar(candidate.model.as_str())
-    )
+/// One runner `declared` on its candidates, in the order a run tries them: each on its
+/// adapter, with its model where one was typed, which YAML reads back whole whatever it
+/// holds.
+fn declared_runner_yaml(declared: &DeclaredRunner) -> String {
+    let mut out = format!("  {}:\n", declared.runner);
+    for candidate in &declared.candidates {
+        out.push_str(&format!("    - adapter: {}\n", candidate.adapter));
+        if let Some(model) = &candidate.model {
+            out.push_str(&format!("      model: {}\n", yaml_scalar(model.as_str())));
+        }
+    }
+    out
 }
 
 /// What `init` found in the repository, as config: the commands a
@@ -119,7 +110,7 @@ fn detected_yaml(detected: &Detected) -> String {
         out.push_str("# What this project runs for each capability a workflow names\n");
         out.push_str(&format!(
             "# (`run: {{ command: lint }}`), as `{}` detected it.\n",
-            command::line(&NextStep::Init)
+            command::line(&NextStep::Init { interactive: false })
         ));
         out.push_str("commands:\n");
         for (name, text) in &detected.commands {

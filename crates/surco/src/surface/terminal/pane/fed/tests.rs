@@ -2,7 +2,7 @@
 //! stands above it said in fewer rows as its region says how: the first abridgement that
 //! leaves the window its least, else the last, kept whole where the pane stands close.
 
-use crate::components::{Feed, Region, Section, Sight};
+use crate::components::{Feed, FeedRow, Region, Section, Sight};
 use crate::doc::{Block, Doc};
 use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
@@ -45,8 +45,8 @@ fn calls(count: usize) -> Block {
     let feed = Feed {
         rows: (1..=count)
             .map(|at| Line::new().plain(format!("read    file-{at}.rs")))
+            .map(FeedRow::of)
             .collect(),
-        subjects: Vec::new(),
         before: 0,
         after: 0,
     };
@@ -139,10 +139,10 @@ fn what_stands_above_a_feed_says_itself_in_the_first_abridgement_that_leaves_the
 #[test]
 fn at_the_least_terminal_what_a_region_says_at_the_least_stands_whole_and_the_feed_keeps_the_rest()
 {
-    // A titled pane in its fewest rows stands close: the task's row alone stands over the
-    // feed, whose window keeps its least.
+    // A titled pane on a screen standing short of rows stands close: the task's row alone
+    // stands over the feed, whose window keeps its least.
     let titled = board(20).titled(["implement", "loop"]);
-    let paned = terminal(40).pane(&titled, 5);
+    let paned = terminal(40).pane_short_of_rows(&titled, 5);
     assert_eq!(
         texts(&paned.lines),
         [
@@ -158,7 +158,7 @@ fn at_the_least_terminal_what_a_region_says_at_the_least_stands_whole_and_the_fe
         .abridged(vec![vec![rows(&["task-1", "task-2"])]])
         .titled(["implement", "loop"])
         .in_sight(Sight::at_the_end());
-    let paned = terminal(40).pane(&two, 5);
+    let paned = terminal(40).pane_short_of_rows(&two, 5);
     assert_eq!(
         texts(&paned.lines),
         [
@@ -171,7 +171,7 @@ fn at_the_least_terminal_what_a_region_says_at_the_least_stands_whole_and_the_fe
     );
     // Rows fewer still: the feed keeps its newest row, and what stands above gives way from
     // its top for it.
-    let paned = terminal(40).pane(&two, 3);
+    let paned = terminal(40).pane_short_of_rows(&two, 3);
     assert_eq!(
         texts(&paned.lines),
         ["task-2", "  what it is doing", "  read    file-20.rs"]

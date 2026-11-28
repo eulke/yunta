@@ -20,7 +20,7 @@ use crate::line::Line;
 
 /// The fewest rows the field stands in: in fewer its furrows lie too flat to read as running
 /// away, and the rows are better left to what the region says.
-pub(super) const LEAST: usize = 3;
+const LEAST: usize = 3;
 
 /// The furrows to each side of the one in the middle: nineteen in all, the middle nine
 /// reaching the foot and the rest running off the sides.
@@ -41,6 +41,12 @@ const DOTS_ACROSS: usize = 2;
 const DOTS_DOWN: usize = 4;
 
 impl Terminal {
+    /// The field as a document draws it: a document leaves no rows to fill, so the field takes
+    /// the least it stands in. A region that ends with it gives it the rows its blocks leave.
+    pub(super) fn horizon_in_a_document(&self, horizon: &Horizon) -> Vec<Line> {
+        self.horizon(horizon, LEAST)
+    }
+
     /// The field `horizon` draws in `rows` rows across this look's width, a line a row, each
     /// ending after its last furrow: none in fewer rows than the least it stands in, and none
     /// where the glyphs draw no dots (ASCII), so the rows it would take stay blank.

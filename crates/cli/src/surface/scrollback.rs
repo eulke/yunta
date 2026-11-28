@@ -57,7 +57,7 @@ mod tests {
     use yunta_core::events::NodeState;
     use yunta_core::{NodeId, RunId};
     use yunta_replay::frame::NodeFrame;
-    use yunta_replay::frame::{NodeStanding, RunFrame, RunPhase};
+    use yunta_replay::frame::{NodeStanding, RunFrame, RunPhase, RunTimes};
     use yunta_testkit_core::Captured;
 
     use crate::surface::region::Region;
@@ -100,7 +100,8 @@ mod tests {
         let above = Captured::default();
         let mut region = region(&term, &above);
 
-        region.show(&frame(vec![running("plan")]), &RUN, false);
+        let plan = frame(vec![running("plan")]);
+        region.show(&plan, &RunTimes::sample(&plan), &RUN, false);
         assert!(term.shown().contains("plan"), "{}", term.shown());
         assert_eq!(above.text(), "", "nothing has stopped working yet");
 
@@ -108,7 +109,8 @@ mod tests {
         // comparing frames: the region shows what is open, and this is
         // what left it.
         region.record(&[surco::line::Line::new().plain("+ plan finished (exit 0)")]);
-        region.show(&frame(vec![running("build")]), &RUN, false);
+        let build = frame(vec![running("build")]);
+        region.show(&build, &RunTimes::sample(&build), &RUN, false);
         assert!(
             !term.shown().contains("plan"),
             "the finished node left the region: {}",

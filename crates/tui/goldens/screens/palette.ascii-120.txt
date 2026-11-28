@@ -14,7 +14,7 @@
    . review@review|  the whole page, in a browser            o     yunta open Q78GRR                 |
    . review@review|  the run's whole chronicle                     yunta status Q78GRR --follow      |
    . conform      |  start a new run                         n     yunta run <workflow>              |
-   . fix-findings |  every run of this repository                  yunta list --runs                 |
+   . fix-findings |  this repository's runs                        yunta list --runs                 |
    . lint         |  the workflows you can run                     yunta list                        |
    . fix-lint     |  check adapters, git, forge, packs             yunta doctor                      |
    . tests        |  remove orphaned checkouts                     yunta gc                          |

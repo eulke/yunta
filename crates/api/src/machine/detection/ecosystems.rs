@@ -1,5 +1,6 @@
 //! The ecosystems whose manifest says enough on its own: Rust, Go,
-//! Python. Their commands are the ecosystem's own conventions.
+//! Python, each its own language. Their commands are the ecosystem's own
+//! conventions.
 
 use std::path::Path;
 
@@ -12,7 +13,7 @@ use super::{commands, Found};
 pub(super) fn rust(repo: &Path) -> Option<Found> {
     repo.join("Cargo.toml").is_file().then(|| Found {
         ecosystem: Ecosystem {
-            name: "rust",
+            language: "rust",
             cache_tip: "share a build cache across worktrees: export \
                         CARGO_TARGET_DIR=$HOME/.cache/yunta-cargo-target before running yunta; \
                         otherwise every worktree rebuilds the whole dependency tree.",
@@ -32,7 +33,7 @@ pub(super) fn rust(repo: &Path) -> Option<Found> {
 pub(super) fn go(repo: &Path) -> Option<Found> {
     repo.join("go.mod").is_file().then(|| Found {
         ecosystem: Ecosystem {
-            name: "go",
+            language: "go",
             cache_tip: "Go's own build and module caches (GOCACHE/GOMODCACHE) are already \
                         shared machine-wide by default: nothing extra to configure for \
                         worktrees.",
@@ -54,7 +55,7 @@ pub(super) fn python(repo: &Path) -> Option<Found> {
     }
     Some(Found {
         ecosystem: Ecosystem {
-            name: "python",
+            language: "python",
             cache_tip: "share a virtualenv or package cache across worktrees (a shared \
                         `uv`/`pip` cache dir) to avoid reinstalling dependencies per worktree.",
         },

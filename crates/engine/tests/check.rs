@@ -220,7 +220,7 @@ fn config_with_runner(runner: &str, candidates: usize) -> ConfigLayer {
     let list = (0..candidates)
         .map(|_| RunnerCandidate {
             adapter: "mock".into(),
-            model: "mock-model".into(),
+            model: Some("mock-model".into()),
             agent: None,
             effort: None,
         })
@@ -280,7 +280,7 @@ fn on_failure_goto_never_counts_as_a_depends_on_cycle() {
         "mechanical".into(),
         vec![RunnerCandidate {
             adapter: "mock".into(),
-            model: "mock-model".into(),
+            model: Some("mock-model".into()),
             agent: None,
             effort: None,
         }],
@@ -715,7 +715,7 @@ fn context_on_a_prompt_node_is_never_an_error() {
                 "planner".into(),
                 vec![RunnerCandidate {
                     adapter: "mock".into(),
-                    model: "mock-model".into(),
+                    model: Some("mock-model".into()),
                     agent: None,
                     effort: None,
                 }],
@@ -758,7 +758,7 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
                 "planner".into(),
                 vec![RunnerCandidate {
                     adapter: "mock".into(),
-                    model: "mock-model".into(),
+                    model: Some("mock-model".into()),
                     agent: None,
                     effort: None,
                 }],
@@ -2162,13 +2162,13 @@ fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
             vec![
                 RunnerCandidate {
                     adapter: "plain".into(),
-                    model: "m".into(),
+                    model: Some("m".into()),
                     agent: None,
                     effort: None,
                 },
                 RunnerCandidate {
                     adapter: "fancy".into(),
-                    model: "m".into(),
+                    model: Some("m".into()),
                     agent: None,
                     effort: None,
                 },

@@ -8,7 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::components::{
-    Card, CardBody, Choices, Desk, Feed, Laid, Note, Prose, Region, Sight, TypedAnswer, TypedRow,
+    Card, CardBody, Choices, Desk, Feed, FeedRow, Laid, Note, Prose, Region, Sight, TypedAnswer,
+    TypedRow,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::{Glyphs, Mark};
@@ -54,6 +55,8 @@ fn named() -> TypedAnswer {
             before: "yunta-".to_string(),
             after: "tui".to_string(),
         },
+        placeholder: None,
+        hint: None,
     }
 }
 
@@ -232,8 +235,8 @@ fn five_moments(glyphs: Glyphs) -> Feed {
             .into_iter()
             .map(|row| Line::new().plain(row))
             .chain([Line::new().push(Tone::Strong, "read    crates/engine/src/catalog.rs")])
+            .map(FeedRow::of)
             .collect(),
-        subjects: Vec::new(),
         before: 0,
         after: 0,
     }
@@ -286,8 +289,8 @@ fn sixteen_moments(glyphs: Glyphs) -> Feed {
             .into_iter()
             .map(|row| Line::new().plain(row))
             .chain([Line::new().push(Tone::Strong, "edit    crates/cli/src/commands/pack.rs")])
+            .map(FeedRow::of)
             .collect(),
-        subjects: Vec::new(),
         before: 0,
         after: 0,
     }
@@ -388,8 +391,7 @@ fn a_feeds_window_is_counted_from_the_whole_feeds_first_row() {
         .map(|at| Line::new().plain(format!("read    file-{at}.rs")))
         .collect();
     let window = Feed {
-        rows,
-        subjects: Vec::new(),
+        rows: rows.into_iter().map(FeedRow::of).collect(),
         before: 100,
         after: 9_860,
     };
@@ -417,33 +419,35 @@ fn a_feeds_window_is_counted_from_the_whole_feeds_first_row() {
 }
 
 /// A titled pane opens a row under its title and parts two blocks by a blank row, its feed
-/// at its foot or none; in its fewest rows, a node's pane at the least terminal, it stands
-/// close, with neither.
+/// at its foot or none; on a screen standing short of rows, as a node's pane at the least
+/// terminal, it stands close, with neither, however many rows it has.
 #[test]
-fn a_titled_pane_opens_a_row_under_its_title_and_stands_close_in_its_fewest_rows() {
+fn a_titled_pane_opens_a_row_under_its_title_and_stands_close_short_of_rows() {
     let terminal = Terminal::on(pane_look(&ENVIRONMENTS[1]));
-    let drawn = |fed: bool, rows| {
+    let drawn = |fed: bool, short_of_rows: bool, rows| {
         let runs = Doc::new()
             .with(Block::Heading("what it runs".to_string()))
             .with(Block::Rows(vec![Line::new().plain("true")]));
         let running = vec![Line::new().plain("running")];
         let doc = match fed {
             true => runs.with(Block::Heading("calls".to_string())).with(Feed {
-                rows: running,
-                subjects: Vec::new(),
+                rows: running.into_iter().map(FeedRow::of).collect(),
                 before: 0,
                 after: 0,
             }),
             false => runs,
         };
-        let region = Region::new(doc).titled(["build", "bash"]);
-        let paned = terminal.pane(&region.in_sight(Sight::at_the_end()), rows);
+        let region = Region::new(doc)
+            .titled(["build", "bash"])
+            .in_sight(Sight::at_the_end());
+        let paned = terminal.pane_holding(&region, &[], rows, short_of_rows);
         texts(&paned.lines).join("|")
     };
-    assert_eq!(drawn(true, 8), "|what it runs|true||calls|running");
-    assert_eq!(drawn(true, 5), "what it runs|true|calls|running");
-    assert_eq!(drawn(false, 8), "|what it runs|true");
-    assert_eq!(drawn(false, 5), "what it runs|true");
+    assert_eq!(drawn(true, false, 8), "|what it runs|true||calls|running");
+    assert_eq!(drawn(true, true, 5), "what it runs|true|calls|running");
+    assert_eq!(drawn(true, true, 8), "what it runs|true|calls|running");
+    assert_eq!(drawn(false, false, 8), "|what it runs|true");
+    assert_eq!(drawn(false, true, 5), "what it runs|true");
 }
 
 /// A card under a sentence held in a short pane, a plan's desk in a pane of its own, a page

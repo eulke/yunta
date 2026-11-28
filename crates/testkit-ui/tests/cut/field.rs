@@ -25,16 +25,16 @@ fn asking_at_their_terminal(field: &FollowedField, now: DateTime<Utc>) -> Vec<(R
         .runs
         .iter()
         .filter_map(|run| {
-            let asking = run.frame(now).asking?;
+            let asking = run.times(now).asking?;
             let node = asking.prompt.node.map(|node| node.to_string());
-            Some((run.run.clone(), node.unwrap_or_default()))
+            Some((run.run().clone(), node.unwrap_or_default()))
         })
         .collect()
 }
 
-/// Whether `run` stands in sight at `now`, not closed, with a node its mode leaves out.
-fn leaves_a_node_out_in_sight(run: &FollowedRun, now: DateTime<Utc>) -> bool {
-    let frame = run.frame(now);
+/// Whether `run` stands in sight, not closed, with a node its mode leaves out.
+fn leaves_a_node_out_in_sight(run: &FollowedRun) -> bool {
+    let frame = run.frame();
     let closed = matches!(
         frame.phase,
         RunPhase::Finished
@@ -77,10 +77,11 @@ async fn r_is_pressed_on_a_run_a_decision_holds_and_on_one_it_resumes() {
         let pointed = read
             .runs
             .iter()
-            .find(|run| run.run.handle() == handle)
+            .find(|run| run.run().handle() == handle)
             .unwrap_or_else(|| panic!("`{handle}` stands in no row"));
         assert_eq!(
-            pointed.menu, decided,
+            pointed.menu(),
+            decided,
             "`{name}`: whether `{handle}` waits on a decision"
         );
     }
@@ -98,7 +99,7 @@ async fn the_field_holds_the_designs_run_asking_at_its_terminal_and_a_node_left_
     let handles: Vec<String> = field
         .runs
         .iter()
-        .map(|run| run.run.handle().to_string())
+        .map(|run| run.run().handle().to_string())
         .collect();
     for handle in THE_DESIGNS_OWN {
         assert!(
@@ -107,10 +108,7 @@ async fn the_field_holds_the_designs_run_asking_at_its_terminal_and_a_node_left_
         );
     }
     assert!(
-        field
-            .runs
-            .iter()
-            .any(|run| leaves_a_node_out_in_sight(run, cut.now())),
+        field.runs.iter().any(leaves_a_node_out_in_sight),
         "no run in sight has a node its mode leaves out: {handles:?}"
     );
 }

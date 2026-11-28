@@ -24,6 +24,11 @@ pub const LINE_WIDTH: usize = 80;
 /// and the numbers beside it have taken their share.
 pub const LABEL_WIDTH: usize = 12;
 
+/// The cells between a list's widest name and what its rows say beside their names: the
+/// design's lists, a new run's workflows, the workflows a repository can run and the shapes of
+/// documents among them, stand them three apart, a cell wider than a card's options.
+pub const NAME_GAP: usize = 3;
+
 /// One step of indent: how far a block's body sits from the line that
 /// introduced it.
 ///
@@ -267,7 +272,8 @@ fn pieces(word: &str, width: usize) -> Vec<String> {
 
 /// `text` in exactly `width` display cells: padded with spaces when it
 /// is narrower, cut and closed with `glyphs`' truncation mark when it is
-/// wider. Every cut Surco draws is this one.
+/// wider. Every cut Surco draws of words at their end is this one; an id,
+/// whose two ends tell it apart, is cut in its middle ([`middle_cut`]).
 ///
 /// The caller gets `width` cells for any input, which is what lets the
 /// columns of a row line up. The cut lands between clusters, never

@@ -10,18 +10,19 @@
 //! surface already builds, and changes none of them.
 
 use crate::components::{
-    Attention, Card, Checklist, ChoiceList, Code, Concern, Decision, Desk, Diffstat, Evidence,
-    Feed, Fields, FindingList, Furrow, Gist, Headline, Horizon, KeyList, Labelled, Legend, Marked,
-    Meter, Next, NodeTable, Note, Noted, Paths, Problem, Prose, Refusal, Ribbon, Runs, Said,
-    Section, Table, TypedAnswer,
+    AtAGlance, Attention, Card, Checklist, ChoiceList, Code, Concern, Decision, Desk, Diffstat,
+    Evidence, Feed, Fields, FindingList, Form, Furrow, Gist, Headline, Horizon, KeyList, Labelled,
+    Legend, Marked, Meter, Next, NodeTable, Note, Noted, Paths, Problem, Prose, Refusal, Ribbon,
+    Runs, Said, SameAtAShell, Section, Survey, Table, TypedAnswer, WordChoice, Wordmark,
 };
+use crate::glyphs::InAscii;
 use crate::line::Line;
 
 /// How much of a page its reader asked for. A page opens at a glance —
 /// where the thing stands, what it asks, what failed — and what the
 /// glance leaves out is one step away: the whole story, then every trace
 /// kept. No fact is only at a depth nothing reaches.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Depth {
     /// What a reader needs to act on: the page a command opens on.
     #[default]
@@ -71,6 +72,8 @@ pub enum Block {
     Nodes(NodeTable),
     /// A field of runs, a row to each.
     Runs(Runs),
+    /// A run seen at a glance beside a list of runs: its facts, then what can be done about it.
+    AtAGlance(AtAGlance),
     Evidence(Evidence),
     /// Lines a message says whole, as its author broke them.
     Said(Said),
@@ -91,6 +94,13 @@ pub enum Block {
     TypedAnswer(TypedAnswer),
     /// A list a person picks one value from, narrowed by what they type.
     ChoiceList(ChoiceList),
+    /// Words in one row with one of them chosen, which a person changes from word to word.
+    WordChoice(WordChoice),
+    /// What a person sets before an act starts, a row each, the keys on one of them.
+    Form(Form),
+    /// What was found and what an act will do with it, a row each under headings, changed in
+    /// place, the act at its foot.
+    Survey(Survey),
     Checklist(Checklist),
     /// What a review found, a finding a row, with the row a pointer stands on.
     Findings(FindingList),
@@ -99,6 +109,8 @@ pub enum Block {
     /// What a command would not do.
     Refusal(Refusal),
     Next(Next),
+    /// The commands that do at a shell what an act here does, alone.
+    SameAtAShell(SameAtAShell),
     /// The keys of what is on screen, each with what it does.
     Legend(Legend),
     /// The keys a person can press, a key a row with what each does, under the sentence that
@@ -140,6 +152,9 @@ pub enum Block {
     Feed(Feed),
     /// What a run has spent, on one row: its count, one bar a node, and its times.
     Meter(Meter),
+    /// The name in block letters, over what a screen that opens on nothing yet asks: drawing
+    /// alone, so a layer without it loses no fact.
+    Wordmark(Wordmark),
     /// Furrows running to a horizon, under what a screen says: a picture that says nothing,
     /// which only a terminal that draws braille draws.
     Horizon(Horizon),
@@ -165,6 +180,7 @@ block_from!(
     Table(Table),
     Nodes(NodeTable),
     Runs(Runs),
+    AtAGlance(AtAGlance),
     Evidence(Evidence),
     Said(Said),
     Paths(Paths),
@@ -173,11 +189,15 @@ block_from!(
     Card(Card),
     TypedAnswer(TypedAnswer),
     ChoiceList(ChoiceList),
+    WordChoice(WordChoice),
+    Form(Form),
+    Survey(Survey),
     Checklist(Checklist),
     Findings(FindingList),
     Problem(Problem),
     Refusal(Refusal),
     Next(Next),
+    SameAtAShell(SameAtAShell),
     Legend(Legend),
     KeyList(KeyList),
     Attention(Attention),
@@ -194,6 +214,7 @@ block_from!(
     Lines(Vec<Line>),
     Feed(Feed),
     Meter(Meter),
+    Wordmark(Wordmark),
     Horizon(Horizon),
 );
 
@@ -211,17 +232,21 @@ pub enum Prompt<'a> {
     Desk(&'a Desk),
     TypedAnswer(&'a TypedAnswer),
     ChoiceList(&'a ChoiceList),
+    Form(&'a Form),
+    Survey(&'a Survey),
 }
 
 impl Block {
     /// This block as the prompt a person answers, when it is one: a card, a desk, a typed
-    /// answer or a choice list.
+    /// answer, a choice list, a form or a survey.
     pub fn prompt(&self) -> Option<Prompt<'_>> {
         match self {
             Block::Card(card) => Some(Prompt::Card(card)),
             Block::Desk(desk) => Some(Prompt::Desk(desk)),
             Block::TypedAnswer(asked) => Some(Prompt::TypedAnswer(asked)),
             Block::ChoiceList(list) => Some(Prompt::ChoiceList(list)),
+            Block::Form(form) => Some(Prompt::Form(form)),
+            Block::Survey(survey) => Some(Prompt::Survey(survey)),
             _ => None,
         }
     }
@@ -279,5 +304,15 @@ impl Doc {
     /// What this document says, as blocks another document can hold.
     pub fn into_blocks(self) -> Vec<Block> {
         self.blocks
+    }
+}
+
+/// The document with each of its blocks in ASCII.
+impl InAscii for Doc {
+    fn in_ascii(&self) -> Self {
+        let Doc { blocks } = self;
+        Doc {
+            blocks: blocks.in_ascii(),
+        }
     }
 }

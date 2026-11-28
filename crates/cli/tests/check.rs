@@ -53,7 +53,7 @@ nodes:
     assert_eq!(
         next.get(1)
             .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" ")),
-        Some("yunta check workflow.yaml again, once they are fixed".to_string()),
+        Some("yunta check workflow.yaml check the workflow, each broken rule named".to_string()),
         "check offers itself again for once the errors are fixed: {refusal}"
     );
 }

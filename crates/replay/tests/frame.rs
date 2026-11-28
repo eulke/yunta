@@ -30,7 +30,7 @@ use yunta_core::{
     RunnerCandidate, TaskId, Workflow,
 };
 use yunta_replay::frame::{
-    Counter, NodeStanding, RunFrame, RunPhase, RunningTask, TaskCounter, WaitingOn,
+    Counter, NodeStanding, RunFrame, RunPhase, RunTimes, RunningTask, TaskCounter, WaitingOn,
 };
 use yunta_replay::history::{Percentiles, PriorEstimation};
 use yunta_replay::registry::Engine;
@@ -111,15 +111,19 @@ nodes:
     )
 }
 
-fn frame(workflow: &Workflow, events: &[StoredEvent], now_secs: i64) -> RunFrame {
+fn frame(workflow: &Workflow, events: &[StoredEvent]) -> RunFrame {
     RunFrame::of(
         &RUN.into(),
         workflow,
         &RunState::replay(events),
         None,
         &this_process(),
-        at(now_secs),
     )
+}
+
+/// What the clock adds at `now_secs` to the frame of `events`.
+fn times(events: &[StoredEvent], now_secs: i64) -> RunTimes {
+    RunTimes::of(&RunState::replay(events), &this_process(), at(now_secs))
 }
 
 fn created(mode: &str) -> EventPayload {
@@ -320,7 +324,7 @@ fn the_frame_names_the_run_and_the_workflow_its_manifest_froze() {
     let workflow = chain();
     let events = log(vec![(0, None, created("alpha"))]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     assert_eq!(frame.run_id, RUN);
     assert_eq!(
         frame.workflow, "ship",
@@ -334,15 +338,7 @@ fn what_past_runs_cost_is_the_callers_to_hand_over_and_travels_unchanged() {
     let state = RunState::replay(&log(vec![(0, None, created("alpha"))]));
 
     assert_eq!(
-        RunFrame::of(
-            &RUN.into(),
-            &workflow,
-            &state,
-            None,
-            &this_process(),
-            at(100)
-        )
-        .prior,
+        RunFrame::of(&RUN.into(), &workflow, &state, None, &this_process()).prior,
         None,
         "a run's own log cannot know what this workflow's other runs cost"
     );
@@ -368,8 +364,7 @@ fn what_past_runs_cost_is_the_callers_to_hand_over_and_travels_unchanged() {
             &workflow,
             &state,
             Some(&prior),
-            &this_process(),
-            at(100)
+            &this_process()
         )
         .prior,
         Some(prior)
@@ -395,7 +390,7 @@ fn a_node_that_reroutes_and_runs_again_moves_between_buckets_without_shrinking_t
 
     let mut totals = Vec::new();
     for prefix in 0..=events.len() {
-        let flow = frame(&workflow, &events[..prefix], 100).flow;
+        let flow = frame(&workflow, &events[..prefix]).flow;
         assert_eq!(
             buckets(&flow).iter().sum::<usize>(),
             flow.total,
@@ -411,8 +406,8 @@ fn a_node_that_reroutes_and_runs_again_moves_between_buckets_without_shrinking_t
     // The re-run of a node sent to be corrected is a move out of
     // `correcting` and into `running`, never a count that drops on its
     // own.
-    let before = frame(&workflow, &events[..8], 100).flow;
-    let after = frame(&workflow, &events, 100).flow;
+    let before = frame(&workflow, &events[..8]).flow;
+    let after = frame(&workflow, &events).flow;
     assert_eq!(buckets(&before), [2, 0, 1, 0, 0, 0, 0]);
     assert_eq!(buckets(&after), [2, 0, 0, 1, 0, 0, 0]);
     assert_eq!(after.total, before.total);
@@ -435,7 +430,7 @@ fn a_failed_node_rerouted_to_its_fix_counts_as_correcting_until_it_runs_again() 
         (8, Some("build"), started(2)),
     ]);
     let build = |prefix: usize| {
-        let frame = frame(&workflow, &events[..prefix], 100);
+        let frame = frame(&workflow, &events[..prefix]);
         let node = frame
             .nodes
             .iter()
@@ -484,7 +479,7 @@ fn a_correction_a_closed_run_never_reached_counts_as_failed() {
         (5, Some("build"), rerouted("fix")),
         (6, None, run_finished(TerminalState::Failed)),
     ]);
-    let flow = frame(&workflow, &events, 100).flow;
+    let flow = frame(&workflow, &events).flow;
     assert_eq!(flow.of(Standing::Rerouted), 0);
     assert_eq!(flow.of(Standing::Failed), 1, "nothing will correct it now");
 }
@@ -499,7 +494,7 @@ fn the_run_counts_every_reroute_and_the_node_keeps_the_last_one_it_took() {
         (3, Some("build"), rerouted("fix")),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     assert_eq!(frame.reroutes, 1);
     let build = frame
         .nodes
@@ -525,12 +520,12 @@ fn tasks_are_absent_until_a_ledger_registers_one() {
         (4, Some("build"), task_now("t1", TaskStatus::Done)),
     ]);
     assert_eq!(
-        frame(&workflow, &events[..2], 100).tasks,
+        frame(&workflow, &events[..2]).tasks,
         None,
         "a run with no ledger reports no ledger, never 0/0"
     );
 
-    let tasks = frame(&workflow, &events, 100)
+    let tasks = frame(&workflow, &events)
         .tasks
         .expect("the ledger registered two tasks");
     assert_eq!(task_buckets(&tasks), [1, 0, 0, 0, 1]);
@@ -549,12 +544,10 @@ fn a_task_that_returns_to_ready_moves_back_into_to_go_and_the_total_holds() {
         (3, Some("build"), task_now("t1", TaskStatus::Running)),
         (4, Some("build"), task_now("t1", TaskStatus::Ready)),
     ]);
-    let running = frame(&workflow, &events[..4], 100)
-        .tasks
-        .expect("registered");
+    let running = frame(&workflow, &events[..4]).tasks.expect("registered");
     assert_eq!(task_buckets(&running), [0, 0, 1, 0, 0]);
 
-    let back = frame(&workflow, &events, 100).tasks.expect("registered");
+    let back = frame(&workflow, &events).tasks.expect("registered");
     assert_eq!(task_buckets(&back), [0, 0, 0, 0, 1]);
     assert_eq!(back.total, running.total);
 }
@@ -572,7 +565,7 @@ fn a_blocked_task_is_counted_blocked_and_a_failed_one_failed() {
         (6, Some("build"), task_now("t2", TaskStatus::Failed)),
     ]);
 
-    let tasks = frame(&workflow, &events, 100).tasks.expect("registered");
+    let tasks = frame(&workflow, &events).tasks.expect("registered");
     assert_eq!(
         task_buckets(&tasks),
         [0, 1, 0, 1, 1],
@@ -607,7 +600,7 @@ fn a_modes_excluded_nodes_count_as_skipped_and_name_the_mode() {
     let workflow = moded();
     let events = log(vec![(0, None, created("alpha"))]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     assert_eq!(frame.mode, "alpha");
     assert_eq!(frame.flow.skipped, 1);
     assert_eq!(frame.flow.skipped_by, Some(ModeName::from("alpha")));
@@ -630,7 +623,7 @@ fn a_parallel_groups_children_are_included_with_their_group() {
     let workflow = moded();
     let events = log(vec![(0, None, created("alpha"))]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     for child in ["left", "right"] {
         let node = frame
             .nodes
@@ -647,7 +640,7 @@ fn a_mode_that_narrows_nothing_skips_nothing() {
     let workflow = moded();
     let events = log(vec![(0, None, created("beta"))]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     assert_eq!(frame.flow.skipped, 0);
     assert_eq!(frame.flow.skipped_by, None);
     assert_eq!(frame.flow.total, 5);
@@ -679,7 +672,7 @@ nodes:
     );
     let events = log(vec![(0, None, created("alpha"))]);
 
-    let kinds: Vec<&str> = frame(&workflow, &events, 100)
+    let kinds: Vec<&str> = frame(&workflow, &events)
         .nodes
         .iter()
         .map(|node| node.kind)
@@ -732,7 +725,7 @@ fn a_node_carries_every_artifact_it_produced_in_log_order() {
         (4, Some("plan"), started(1)),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     let artifacts = |id: &str| {
         frame
             .nodes
@@ -773,14 +766,14 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
                 runner: "implementer".into(),
                 chosen: RunnerCandidate {
                     adapter: "mock".into(),
-                    model: "mock-model".into(),
+                    model: Some("mock-model".into()),
                     agent: Some("builder".into()),
                     effort: None,
                 },
                 discarded: vec![DiscardedCandidate {
                     candidate: RunnerCandidate {
                         adapter: "absent".into(),
-                        model: "big-model".into(),
+                        model: Some("big-model".into()),
                         agent: None,
                         effort: None,
                     },
@@ -790,7 +783,7 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
         ),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     let build = frame
         .nodes
         .iter()
@@ -799,7 +792,7 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
     let runner = build.runner.as_ref().expect("the log resolved one");
     assert_eq!(runner.runner, "implementer");
     assert_eq!(runner.chosen.adapter, "mock");
-    assert_eq!(runner.chosen.model, "mock-model");
+    assert_eq!(runner.chosen.model, Some("mock-model".into()));
     assert_eq!(runner.chosen.agent, Some(AgentName::from("builder")));
     assert_eq!(runner.discarded.len(), 1);
     assert_eq!(runner.discarded[0].reason, RunnerRejection::Unavailable);
@@ -813,7 +806,7 @@ fn a_running_node_carries_the_spend_its_open_attempt_reported() {
         (2, Some("build"), usage_message(100, 50)),
     ]);
 
-    let frame = frame(&chain(), &events, 100);
+    let frame = frame(&chain(), &events);
     let build = frame
         .nodes
         .iter()
@@ -839,7 +832,7 @@ fn the_frame_and_the_stats_read_one_spend_while_a_question_waits() {
             EventPayload::Gates(GateEvent::QuestionsAsked(asked)),
         ),
     ]);
-    let frame = frame(&chain(), &events, 100);
+    let frame = frame(&chain(), &events);
     assert_eq!(
         frame.tokens,
         RunStats::as_logged(&RunState::replay(&events), &chain()).total_tokens
@@ -871,7 +864,7 @@ nodes:
         (8, Some("implement"), tool_use("cargo")),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     let node = frame.nodes.first().expect("declared");
     let sessions: Vec<&str> = node
         .sessions
@@ -926,7 +919,7 @@ nodes:
                     .map(|(payload, offset)| (offset, Some("implement"), payload)),
             )
             .collect());
-        let frame = frame(&workflow, &log, 100);
+        let frame = frame(&workflow, &log);
         let node = frame.nodes.first().expect("declared").clone();
         node.running_tasks
             .iter()
@@ -970,7 +963,7 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
         ),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     assert_eq!(frame.degraded.len(), 1);
     assert_eq!(frame.degraded[0].capability, Capability::ResumeSession);
     assert_eq!(frame.degraded[0].adapter, "mock");
@@ -982,7 +975,7 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
     assert_eq!(frame.degraded[0].at, at(2));
 }
 
-// --- the instant the frame is read at ----------------------------------
+// --- the instant the times are read at ---------------------------------
 
 #[test]
 fn elapsed_and_last_event_age_are_measured_against_the_injected_now() {
@@ -992,36 +985,31 @@ fn elapsed_and_last_event_age_are_measured_against_the_injected_now() {
         (10, Some("build"), started(1)),
     ]);
 
-    let early = frame(&workflow, &events, 70);
-    let late = frame(&workflow, &events, 610);
+    let early = times(&events, 70);
+    let late = times(&events, 610);
 
     assert_eq!(early.elapsed, Some(Duration::from_secs(70)));
     assert_eq!(late.elapsed, Some(Duration::from_secs(610)));
 
-    let node_at = |frame: &RunFrame| {
-        let build = frame
-            .nodes
-            .iter()
-            .find(|node| node.id == "build")
-            .expect("declared");
-        (build.elapsed, build.last_event_age, build.attempt)
+    let build = NodeId::from("build");
+    let node_at = |times: &RunTimes| {
+        let build = times.node(&build);
+        (build.elapsed, build.last_event_age)
     };
     assert_eq!(
         node_at(&early),
-        (
-            Some(Duration::from_secs(60)),
-            Some(Duration::from_secs(60)),
-            Some(1)
-        )
+        (Some(Duration::from_secs(60)), Some(Duration::from_secs(60)))
     );
     assert_eq!(
         node_at(&late),
         (
             Some(Duration::from_secs(600)),
-            Some(Duration::from_secs(600)),
-            Some(1)
+            Some(Duration::from_secs(600))
         )
     );
+    let framed = frame(&workflow, &events);
+    let attempt = framed.nodes.iter().find(|node| node.id == build);
+    assert_eq!(attempt.expect("declared").attempt, Some(1));
 }
 
 #[test]
@@ -1029,11 +1017,12 @@ fn a_node_that_never_started_reports_no_elapsed_rather_than_zero() {
     let workflow = chain();
     let events = log(vec![(0, None, created("alpha"))]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     let plan = frame.nodes.first().expect("declared");
     assert_eq!(plan.state, NodeStanding::ToGo);
-    assert_eq!(plan.elapsed, None);
-    assert_eq!(plan.last_event_age, None);
+    let plan_times = times(&events, 100).node(&plan.id);
+    assert_eq!(plan_times.elapsed, None);
+    assert_eq!(plan_times.last_event_age, None);
     assert_eq!(plan.attempt, None);
 }
 
@@ -1043,10 +1032,7 @@ fn a_log_that_starts_with_a_non_run_event_ages_from_that_event() {
         (10, Some("plan"), started(1)),
         (20, None, created("alpha")),
     ]);
-    assert_eq!(
-        frame(&chain(), &events, 100).elapsed,
-        Some(Duration::from_secs(90))
-    );
+    assert_eq!(times(&events, 100).elapsed, Some(Duration::from_secs(90)));
 }
 
 // --- composition -------------------------------------------------------
@@ -1084,7 +1070,7 @@ nodes:
         ),
     ]);
 
-    let open = frame(&workflow, &events[..3], 100);
+    let open = frame(&workflow, &events[..3]);
     assert_eq!(open.children.len(), 1);
     assert_eq!(open.children[0].run_id, "run-child");
     assert_eq!(open.children[0].node, Some(NodeId::from("sub")));
@@ -1098,7 +1084,7 @@ nodes:
     );
     assert_eq!(buckets(&open.flow), [0, 0, 0, 1, 0, 0, 0]);
 
-    let closed = frame(&workflow, &events, 100);
+    let closed = frame(&workflow, &events);
     assert_eq!(closed.children.len(), 1, "the link is closed, not doubled");
     assert_eq!(closed.children[0].terminal, Some(TerminalState::Done));
     assert_eq!(closed.flow.total, 1);
@@ -1131,7 +1117,7 @@ nodes:
         ),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     assert_eq!(frame.children.len(), 1);
     assert_eq!(frame.children[0].run_id, "run-child");
     assert_eq!(frame.children[0].node, Some(NodeId::from("sub")));
@@ -1151,7 +1137,7 @@ fn unknown_event_kinds_survive_into_the_frame() {
     push_unknown(&mut events, 3, "telemetry_sampled");
     push_unknown(&mut events, 4, "quota_checked");
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     let carried: Vec<(&str, usize)> = frame
         .unknown_kinds
         .iter()
@@ -1194,7 +1180,7 @@ nodes:
         ),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     assert_eq!(
         frame.phase,
         RunPhase::Waiting {
@@ -1222,7 +1208,7 @@ fn a_run_a_person_closed_is_stopped_not_finished() {
         (3, None, run_finished(TerminalState::Cancelled)),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     assert_eq!(frame.phase, RunPhase::Cancelled);
     assert_eq!(frame.standing, Standing::Stopped);
 }
@@ -1231,10 +1217,7 @@ fn a_run_a_person_closed_is_stopped_not_finished() {
 fn a_run_with_no_start_yet_is_created_and_a_finished_one_says_so() {
     let workflow = chain();
     let created_only = log(vec![(0, None, created("alpha"))]);
-    assert_eq!(
-        frame(&workflow, &created_only, 100).phase,
-        RunPhase::Created
-    );
+    assert_eq!(frame(&workflow, &created_only).phase, RunPhase::Created);
 
     let done = log(vec![
         (0, None, created("alpha")),
@@ -1242,10 +1225,10 @@ fn a_run_with_no_start_yet_is_created_and_a_finished_one_says_so() {
         (2, Some("build"), finished()),
         (3, None, run_finished(TerminalState::Done)),
     ]);
-    let frame = frame(&workflow, &done, 9_000);
+    let frame = frame(&workflow, &done);
     assert_eq!(frame.phase, RunPhase::Finished);
     assert_eq!(
-        frame.elapsed,
+        times(&done, 9_000).elapsed,
         Some(Duration::from_secs(3)),
         "a finished run's clock stops at its last event, whenever it is read"
     );
@@ -1262,7 +1245,7 @@ fn a_broken_log_reports_its_diagnostic_and_keeps_what_replay_derived() {
         (3, Some("build"), finished()),
     ]);
 
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
     match &frame.phase {
         RunPhase::Broken { diagnostic } => {
             assert!(
@@ -1297,7 +1280,7 @@ fn a_run_closed_with_no_evidence_behind_it_reports_none_instead_of_inventing_one
         (3, None, run_finished(TerminalState::Failed)),
     ]);
     assert_eq!(
-        frame(&workflow, &failed_blind, 100).phase,
+        frame(&workflow, &failed_blind).phase,
         RunPhase::Failed { failure: None }
     );
 
@@ -1308,7 +1291,7 @@ fn a_run_closed_with_no_evidence_behind_it_reports_none_instead_of_inventing_one
         (3, None, run_finished(TerminalState::Promoted)),
     ]);
     assert_eq!(
-        frame(&workflow, &promoted_blind, 100).phase,
+        frame(&workflow, &promoted_blind).phase,
         RunPhase::Promoted { to: None },
         "only the successor's own `run_created` names the mode"
     );
@@ -1332,7 +1315,7 @@ fn a_node_open_when_its_run_paused_reads_stopped() {
             ))),
         ),
     ]);
-    let frame = frame(&chain(), &events, 10);
+    let frame = frame(&chain(), &events);
     let plan = frame
         .nodes
         .iter()
@@ -1403,12 +1386,12 @@ nodes:
             ))),
         ),
     ];
-    let parked = frame(&workflow, &log(entries.clone()), 100);
+    let parked = frame(&workflow, &log(entries.clone()));
     assert_eq!(parked.standing, Standing::NeedsYou);
     assert_eq!(parked.nodes[0].standing, Standing::NeedsYou);
 
     entries.extend(approve_answered());
-    let answered = frame(&workflow, &log(entries), 100);
+    let answered = frame(&workflow, &log(entries));
     assert_eq!(answered.phase, RunPhase::Running);
     assert_eq!(answered.standing, Standing::Running);
     assert_eq!(answered.nodes[0].standing, Standing::Running);

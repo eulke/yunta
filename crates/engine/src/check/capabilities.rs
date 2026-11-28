@@ -193,7 +193,7 @@ fn refuse_if_none_can(
 
 /// Every adapter this node's runner could resolve to, in declaration
 /// order. Empty when the node names no runner the config defines.
-pub(crate) fn candidate_adapters(node: &Node, config: &ConfigLayer) -> Vec<AdapterId> {
+pub fn candidate_adapters(node: &Node, config: &ConfigLayer) -> Vec<AdapterId> {
     let names: Vec<&RunnerName> = if !node.runners.is_empty() {
         node.runners.iter().collect()
     } else {

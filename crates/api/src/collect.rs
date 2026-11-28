@@ -125,8 +125,9 @@ impl<'a> Collection<'a> {
         }
         if self.collected.dry_run {
             self.would_adopt().await;
-            match self.pool.report(self.supervision()).await {
-                Ok(kept) => self.collected.now = Some(kept.to_string()),
+            let disk = self.project.workspace.disk.as_ref();
+            match self.pool.report(self.supervision(), disk).await {
+                Ok(kept) => self.collected.now = Some(crate::machine::pool_kept(&kept)),
                 Err(e) => self.problem(Uncollected::Checkouts {
                     failed: e.to_string(),
                 }),

@@ -457,7 +457,7 @@ fn status_says_why_a_node_is_not_in_this_run() {
         said.contains("left out     lint: the project declares no command `lint`"),
         "{said}"
     );
-    assert!(said.contains("1 of 1 node done · 1 left out"), "{said}");
+    assert!(said.contains("1 of 1 node done, 1 left out"), "{said}");
 }
 
 /// A decision that shows a plan says how the plan got accepted, with the rules it broke:

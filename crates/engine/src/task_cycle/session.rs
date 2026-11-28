@@ -71,9 +71,9 @@ pub struct SessionSetup {
     /// node never write over each other's scaffolding.
     pub node: yunta_core::NodeId,
     /// The runner this node resolved to: every task session of the node
-    /// runs on its model and, when it names one, its agent. The runner
-    /// is resolved once for the whole loop, so no attempt can drift onto
-    /// another model than the one the log recorded.
+    /// runs on its model and its agent, each where it names one. The
+    /// runner is resolved once for the whole loop, so no attempt can drift
+    /// onto another candidate than the one the log recorded.
     pub chosen: yunta_core::RunnerCandidate,
     /// Where the files this node declares belong, when it declares any.
     /// A task session writes the loop node's own artifacts, so it is

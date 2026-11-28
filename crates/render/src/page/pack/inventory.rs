@@ -1,8 +1,9 @@
 //! A pack's inventory, as a person reads it before the pack is vendored or
-//! updated, or of an installed pack audited: what the pack declares, then
-//! each workflow, node by node — every command, context source,
-//! permission, agent, server, executor and repository path, and its full
-//! prompt. Inventory, never verdict: it shows everything and flags nothing.
+//! updated, or of an installed pack audited: what the pack declares, and of
+//! one audited what its own cases say among it, then each workflow, node by
+//! node — every command, context source, permission, agent, server, executor
+//! and repository path, and its full prompt. Inventory, never verdict: it
+//! shows everything and flags nothing.
 
 use surco::components::{Code, Fields, Furrow, Headline, Marked, Section};
 use surco::doc::{Block, Doc};
@@ -31,7 +32,8 @@ pub enum Inventory<'a> {
         audit: &'a PackAudit,
         waits_on_yes: bool,
     },
-    /// An installed pack, audited: its inventory, then what its own cases say.
+    /// An installed pack, audited: its inventory, what its own cases say among what it
+    /// declares.
     Audited {
         audit: &'a PackAudit,
         pack: &'a PackRef,
@@ -45,15 +47,15 @@ impl Page for Inventory<'_> {
             Inventory::Installing {
                 audit,
                 waits_on_yes,
-            } => inventory(audit, before(audit, waits_on_yes, "installing")),
+            } => inventory(audit, before(audit, waits_on_yes, "installing"), None),
             Inventory::Updating {
                 audit,
                 waits_on_yes,
-            } => inventory(audit, before(audit, waits_on_yes, "updating")),
+            } => inventory(audit, before(audit, waits_on_yes, "updating"), None),
             Inventory::Audited { audit, pack, cases } => {
                 let headline = Headline::new(cases.mark(), format!("pack {pack}"), "audited")
                     .fact(audit.manifest.version.to_string());
-                inventory(audit, headline).with_all(cases.blocks())
+                inventory(audit, headline, Some(cases))
             }
         }
     }
@@ -76,9 +78,10 @@ fn before(audit: &PackAudit, waits_on_yes: bool, doing: &str) -> Headline {
     }
 }
 
-/// The inventory under `headline`: what the pack declares, then each
+/// The inventory under `headline`: what the pack declares, with what its own
+/// `cases` say where they were read and each that failed under them, then each
 /// workflow, node by node.
-fn inventory(report: &PackAudit, headline: Headline) -> Doc {
+fn inventory(report: &PackAudit, headline: Headline, cases: Option<&Cases>) -> Doc {
     let m = &report.manifest;
     let runners: Vec<String> = m
         .requires
@@ -105,10 +108,17 @@ fn inventory(report: &PackAudit, headline: Headline) -> Doc {
         .push_if("runners", runners.join(", "))
         .push_if("mcp servers", m.requires.mcp_servers.join(", "))
         .push_if("programs", m.requires.programs.join(", "));
+    let (declares, failed) = match cases {
+        Some(cases) => (cases.labelled(declares), cases.failures_checked()),
+        None => (declares, None),
+    };
     let mut doc = Doc::new()
         .with(headline)
         .with(Furrow(Vec::new()))
         .with(declares);
+    if let Some(failed) = failed {
+        doc = doc.with(failed);
+    }
     for workflow in &report.workflows {
         doc = doc.with(workflow_section(workflow));
     }

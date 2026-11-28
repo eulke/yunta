@@ -112,11 +112,11 @@ impl RunStage {
 }
 
 /// Where the field `followed` keeps shows `run` standing at its head: on the child it stands
-/// parked on, or on none; nothing where the field does not hold it.
+/// parked on, or on none; nothing where the field does not hold it, or holds no event of it.
 fn parked_on(followed: &FollowedRuns, run: &RunId) -> Option<Option<RunId>> {
     let held = followed.field.as_ref()?.runs.get(run)?;
-    let head = held.state.clock().last_at()?;
-    let phase = held.frame(head).phase;
+    held.state().clock().last_at()?;
+    let phase = &held.frame().phase;
     let child = phase.waiting_on().and_then(WaitingOn::child_run);
     Some(child.map(|(_, child)| child.clone()))
 }

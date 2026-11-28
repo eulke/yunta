@@ -27,7 +27,7 @@ pub(super) fn desk(desk: &Desk) -> String {
 
 /// The title's parts, the first in bold, with the desk's edge after them.
 fn title(desk: &Desk) -> String {
-    let sep = format!(" {} ", GLYPHS.sep());
+    let sep = GLYPHS.spaced_sep();
     let parts: Vec<String> = desk
         .title
         .iter()
@@ -85,7 +85,7 @@ fn rail_row(row: &RailRow) -> String {
 /// What is being read: its title in bold with where it stands and its edge, then
 /// all of it, as a file writes a document.
 fn pane(pane: &Pane) -> String {
-    let sep = format!(" {} ", GLYPHS.sep());
+    let sep = GLYPHS.spaced_sep();
     let head: Vec<String> = std::iter::once(format!("**{}**", plain_text(&pane.title)))
         .chain(pane.place.as_deref().map(plain_text))
         .chain(pane.edge.as_deref().map(plain_text))
@@ -105,7 +105,7 @@ fn foot(foot: &DeskFoot) -> Vec<String> {
     );
     let answers = match &foot.row {
         FootRow::Options { named, more } => {
-            let sep = format!(" {} ", GLYPHS.sep());
+            let sep = GLYPHS.spaced_sep();
             let mut options: Vec<String> = named
                 .iter()
                 .enumerate()

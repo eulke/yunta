@@ -4,15 +4,24 @@
 //!
 //! A run's screen is drawn at each of the four sizes its targets are written at, from the
 //! state `yunta_testkit_ui::screens::run` opens on a target's cut, laid out before each key
-//! where its keys scroll, and held whole to its target, landed beside the goldens. Each
+//! where its keys scroll, and held whole to its target, landed beside the goldens; the field
+//! the same way, from the state `yunta_testkit_ui::screens::field` opens, and a screen that
+//! opens in a place of the test home from the state `yunta_testkit_ui::screens::home` opens
+//! there. Each
 //! target's cut is built and its screen drawn on every core at once, a target to a thread,
 //! since a cut builds its runs whole (`on_every_core`); every target that differs is named,
 //! at each size it differs at, none hiding another.
 //!
 //! The frames hold text alone; what a box covers is held in color, cell by cell, against the
-//! box drawn over nothing.
+//! box drawn over nothing. A frame in ASCII holds ASCII alone (`in_ascii`). Where a frame
+//! holds a placeholder for a figure its place makes afresh on each machine (the commit a pack
+//! is locked at), the frame is read with the figure the place made.
 
+#[path = "screens/asked_elsewhere.rs"]
+mod asked_elsewhere;
 mod covered;
+#[path = "screens/in_ascii.rs"]
+mod in_ascii;
 #[path = "screens/on_every_core.rs"]
 mod on_every_core;
 
@@ -26,6 +35,8 @@ use surco::glyphs::Glyphs;
 use surco::look::{Look, Width};
 use surco::motion::Motion;
 use surco::paint::Paint;
+use yunta_testkit_ui::cut::{Stands, TARGET_CUTS};
+use yunta_testkit_ui::home::Figure;
 use yunta_testkit_ui::screens;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::State;
@@ -63,13 +74,6 @@ const ASCII_120: Environment = Environment {
     rows: 36,
 };
 
-const ASCII_80: Environment = Environment {
-    name: "ascii-80",
-    glyphs: Glyphs::Ascii,
-    columns: 80,
-    rows: 24,
-};
-
 const UNICODE_60: Environment = Environment {
     name: "unicode-60",
     glyphs: Glyphs::Unicode,
@@ -99,19 +103,29 @@ fn drawn_moving(state: &State, environment: &Environment, motion: Motion) -> Str
 /// `state`'s screen drawn on a test backend of `environment`'s size in `motion`, and what
 /// the drawing laid out of it, which the next key that scrolls moves from.
 fn drawn_laid(state: &State, environment: &Environment, motion: Motion) -> (String, ScreenLaid) {
-    let look = Look {
+    let look = look_of(environment, motion);
+    drawn_screen(&state.screen(&look), environment, &look)
+}
+
+/// How a terminal of `environment`'s size draws in `motion`, unpainted.
+fn look_of(environment: &Environment, motion: Motion) -> Look {
+    Look {
         glyphs: environment.glyphs,
         paint: Paint::Plain,
         width: Width::exact(usize::from(environment.columns.saturating_sub(2))),
         motion,
-    };
-    let screen = state.screen(&look);
+    }
+}
+
+/// `screen` drawn in `look` on a test backend of `environment`'s size: every row, its
+/// trailing blanks cut, one a line, and what the drawing laid out of it.
+fn drawn_screen(screen: &Screen, environment: &Environment, look: &Look) -> (String, ScreenLaid) {
     let backend = TestBackend::new(environment.columns, environment.rows);
     let mut terminal = Terminal::new(backend).expect("a test backend");
     let mut laid = ScreenLaid::default();
     terminal
         .draw(|frame| {
-            laid = yunta_tui::drawn(frame, &screen, &look);
+            laid = yunta_tui::drawn(frame, screen, look);
         })
         .expect("a drawing");
     let buffer = terminal.backend().buffer();
@@ -128,16 +142,25 @@ fn drawn_laid(state: &State, environment: &Environment, motion: Motion) -> (Stri
 
 /// `drawn` against the target `name` in `environment`, both shown whole where they differ.
 fn held_to_its_target(name: &str, environment: &Environment, drawn: &str) {
-    if let Some(differs) = differs_from_its_target(name, environment, drawn) {
+    if let Some(differs) = differs_from_its_target(name, environment, drawn, &[]) {
         panic!("{differs}");
     }
 }
 
-/// How `drawn` differs from the target `name` in `environment`, both shown whole; none where
-/// it equals it.
-fn differs_from_its_target(name: &str, environment: &Environment, drawn: &str) -> Option<String> {
+/// How `drawn` differs from the target `name` in `environment`, each placeholder of `figures`
+/// in its frame read as the figure the screen's place made on this machine, both shown whole;
+/// none where it equals it.
+fn differs_from_its_target(
+    name: &str,
+    environment: &Environment,
+    drawn: &str,
+    figures: &[Figure],
+) -> Option<String> {
     let path = targets().join(format!("{name}.{}.txt", environment.name));
-    let target = std::fs::read_to_string(&path).expect("a target frame");
+    let frame = std::fs::read_to_string(&path).expect("a target frame");
+    let target = figures.iter().fold(frame, |frame, figure| {
+        frame.replace(figure.placeholder, &figure.said)
+    });
     (drawn != target).then(|| {
         format!(
             "{name} at {} differs from its target {}:\n--- drawn\n{drawn}--- target\n{target}",
@@ -147,17 +170,14 @@ fn differs_from_its_target(name: &str, environment: &Environment, drawn: &str) -
     })
 }
 
+/// A terminal short of the room the application needs says so in place of whatever stands,
+/// here the field the application opens on, as its frame says: a frame kept beside the
+/// targets, since none is written below 60 by 14.
 #[test]
-fn every_screen_equals_its_target_frame() {
+fn a_terminal_short_of_room_says_the_room_the_application_needs() {
     yunta_testkit::on_a_deep_stack(|| async {
-        let built = [("field", screens::field().await)];
-        for (name, state) in &built {
-            for environment in [&ASCII_80, &UNICODE_60] {
-                held_to_its_target(name, environment, &drawn(state, environment));
-            }
-        }
-        let (_, field) = &built[0];
-        held_to_its_target("room-needed", &UNICODE_59, &drawn(field, &UNICODE_59));
+        let field = screens::walked_to(&[]).await;
+        held_to_its_target("room-needed", &UNICODE_59, &drawn(&field, &UNICODE_59));
     });
 }
 
@@ -180,7 +200,8 @@ fn every_screen_equals_its_target_frame() {
 /// numbers and its graph, over the run waiting on the person at its last gate; then the
 /// palette over a run at work, whole and narrowed by words typed, over a run's receipt, and
 /// over the node whose round the person put aside, and help over a run at work; then the
-/// last gate's card in place, under the change by file
+/// confirmation that closes a stopped run and the one that stops a run at work, each over the
+/// run's screen; then the last gate's card in place, under the change by file
 /// and the findings and criteria in a line, and the note its answer leaves as the run goes on
 /// to its pull request; a gate that shows no plan, its card under the document it shows and
 /// its change; and a run parked on its child, shown in its place with the child's card; then
@@ -197,8 +218,26 @@ fn every_screen_equals_its_target_frame() {
 /// be confirmed, the words an option asks for typed at its foot in place of the options, the
 /// task turned over to its proof, what the plan decided for the person, and the change the
 /// plan makes as a whole. The node the run waits on the person at is reached by `esc` on the
-/// card in place, which puts it aside.
-const LANDED: [&str; 60] = [
+/// card in place, which puts it aside. Then the field: the design's, the pointer on the run
+/// that asks at its own terminal, and the same field pointed at a run it cannot read, at a
+/// run stalled and at a run stopped, each run pointed at seen at a glance beside the list; the
+/// same field with its closed runs too, and across the machine; two runs picked on it, and the
+/// confirmation that closes the one of them a close reaches and names the other, which an
+/// engine drives, as left open; the note `r` leaves on a run that waits on a decision, and the
+/// note of a run `r` resumes; help over the field, and the palette over it. In ASCII the field
+/// draws a session's own words with the separator they hold in its ASCII form. Then the first
+/// request, and the field with no run `esc` leaves it for; a new run of the design's repository
+/// set up with fragua, its request typed, its
+/// mode, a workflow's input row, and that input refused; a setup of the design's repository,
+/// its rows, a role changed, the pack out of reach, the pack's audit (a dash of the pack's own
+/// in ASCII), its install's confirmation and what was written. Then the workflows and one
+/// checked, opened on them; the machine over the field of a repository with runs, and upkeep
+/// opened from it; a workflow's past runs and its graph; opened on the workflows, the cases
+/// run, a new workflow's name asked, the packs installed, the commit a pack is locked at read
+/// as its place made it, a pack audited and the documents whose shape a person picks; a
+/// finished run's page written for a browser, its receipt and its evidence verified, each a
+/// page over the run; and the signpost, outside a repository.
+const LANDED: [&str; 101] = [
     "work",
     "work-moved",
     "work-command",
@@ -237,6 +276,8 @@ const LANDED: [&str; 60] = [
     "receipt-palette",
     "palette-aside",
     "help",
+    "close-run",
+    "cancel-run",
     "ship",
     "card-recorded",
     "card",
@@ -259,20 +300,78 @@ const LANDED: [&str; 60] = [
     "desk-proof",
     "desk-decided",
     "desk-change",
+    "field",
+    "field-unreadable",
+    "field-glance-stalled",
+    "field-glance-stopped",
+    "field-closed",
+    "field-machine",
+    "field-marked",
+    "field-close",
+    "field-note",
+    "field-resumed",
+    "field-help",
+    "field-palette",
+    "first-request",
+    "field-empty",
+    "new-run",
+    "new-run-mode",
+    "new-run-inputs",
+    "new-run-refused",
+    "setup",
+    "setup-changing",
+    "setup-unreachable",
+    "setup-audit",
+    "setup-confirm",
+    "setup-written",
+    "workflow-checked",
+    "workflows",
+    "machine",
+    "workflow-history",
+    "workflow-graph",
+    "cases",
+    "packs",
+    "evidence-page",
+    "signpost",
+    "new-workflow",
+    "pack-audited",
+    "document-shape",
+    "evidence-receipt",
+    "evidence-verified",
+    "upkeep",
 ];
 
-/// A run's screen equals its landed target, cell for cell, at each of the four sizes its
-/// targets are written at: its pane and its legend with every row around them. The targets
-/// are opened on every core at once, and every one that differs is named at each size.
+/// The application as the cut of the target `name` stands: on its run's screen, on the
+/// field, or at the place of the test home it opens in, with what that place made afresh on
+/// this machine that the target's frames hold a placeholder for.
+async fn opened(name: &'static str) -> (State, Vec<Figure>) {
+    let target = TARGET_CUTS.iter().find(|target| target.name == name);
+    match target.map(|target| target.stands) {
+        Some(Stands::Field(_)) => (
+            screens::field::opened(name).await.state().clone(),
+            Vec::new(),
+        ),
+        Some(Stands::Home(_)) => {
+            let screen = screens::home::opened(name).await;
+            (screen.state().clone(), screen.figures().to_vec())
+        }
+        _ => (screens::run::opened(name).await.state().clone(), Vec::new()),
+    }
+}
+
+/// A landed screen equals its target, cell for cell, at each of the four sizes its targets
+/// are written at: a run's pane, or the field's list and its glance, with every row around
+/// them. The targets are opened on every core at once, and every one that differs is named
+/// at each size.
 #[test]
-fn a_runs_screen_equals_its_landed_target_at_every_size() {
+fn a_landed_screen_equals_its_target_at_every_size() {
     let differing = on_every_core::differences(&LANDED, |target| async move {
-        let screen = screens::run::opened(target).await;
+        let (state, figures) = opened(target).await;
         [&UNICODE_120, &UNICODE_80, &ASCII_120, &UNICODE_60]
             .into_iter()
             .filter_map(|environment| {
-                let drawn = drawn_moving(screen.state(), environment, Motion::Moves);
-                differs_from_its_target(target, environment, &drawn)
+                let drawn = drawn_moving(&state, environment, Motion::Moves);
+                differs_from_its_target(target, environment, &drawn, &figures)
             })
             .collect()
     });
@@ -326,69 +425,6 @@ fn a_feed_scrolled_back_equals_its_landed_target_at_every_size() {
             .await;
             let drawn = drawn_moving(screen.state(), environment, Motion::Moves);
             held_to_its_target(target, environment, &drawn);
-        }
-    });
-}
-
-/// Where a target names the process that drives its run: the registry of its cut names the
-/// process the test runs in, so the target holds this in place of a number.
-const PID: &str = "{pid}";
-
-/// The gist of the run asked elsewhere, its process `pid`, on a row of `cells` as the rule on
-/// a cut cuts it, written apart from the code: whole where it fits; else what fits beside the
-/// ellipsis, the space before the cut left out, and the cut falling before the process's
-/// number where it would split that number or end on it.
-fn asking_gist_cut(pid: &str, cells: usize) -> String {
-    let gist = format!("node `ship` is asking at its terminal (pid {pid}); answer it there");
-    if gist.chars().count() <= cells {
-        return gist;
-    }
-    let number = gist.find(pid).expect("the gist names the process");
-    let kept: String = gist.chars().take(cells - 1).collect();
-    let end = match kept.len() {
-        end if end > number && end <= number + pid.len() => number,
-        end => end,
-    };
-    format!("{}…", kept[..end].trim_end())
-}
-
-/// A run whose process asks a question at its own terminal equals its landed target at each
-/// of the four sizes, its pane titled by the gate and its assignee: the target's process read
-/// as the one this test runs in, which the registry of its cut names. At the least terminal
-/// its gist, which names that process, is cut on its row: the target's row is the rule's cut
-/// for a number of five digits, and the row drawn is the rule's cut for the number in hand,
-/// so a process of any number holds it.
-#[test]
-fn a_run_asked_elsewhere_equals_its_landed_target_at_every_size() {
-    yunta_testkit::on_a_deep_stack(|| async {
-        let target = "asked-elsewhere";
-        let screen = screens::run::opened(target).await;
-        let pid = std::process::id().to_string();
-        let gist_cut_at = [
-            (&UNICODE_120, None),
-            (&UNICODE_80, None),
-            (&ASCII_120, None),
-            (&UNICODE_60, Some(5)),
-        ];
-        for (environment, gist) in gist_cut_at {
-            let drawn = drawn_moving(screen.state(), environment, Motion::Moves);
-            let path = targets().join(format!("{target}.{}.txt", environment.name));
-            let landed = std::fs::read_to_string(&path).expect("a target frame");
-            let mut rows: Vec<String> = landed.lines().map(|row| row.replace(PID, &pid)).collect();
-            if let Some(gist) = gist {
-                let cells = usize::from(environment.columns) - 2;
-                let held = landed.lines().nth(gist - 1).expect("the gist's row");
-                assert_eq!(held, format!(" {}", asking_gist_cut(PID, cells)));
-                rows[gist - 1] = format!(" {}", asking_gist_cut(&pid, cells));
-            }
-            let expected: String = rows.iter().map(|row| format!("{row}\n")).collect();
-            assert!(
-                drawn == expected,
-                "{target} at {} differs from {}, the process {pid}:\n--- drawn\n{drawn}--- \
-                 target\n{expected}",
-                environment.name,
-                path.display()
-            );
         }
     });
 }

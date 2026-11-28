@@ -1,18 +1,20 @@
-//! See [`super`]. What an answer to the work a run's stage asked for does: the workflows read
-//! open a new run's start over the run; an answer given on its prompt in place, once
-//! recorded, noted with what the run does now; what a pull request's forge and a receipt's
-//! store answered is kept beside what it was asked for; and what an act refused or failed on
-//! is noted until the next key, an answer given in place handed back to its prompt. What the
-//! run does after an act is the state's following to bring.
+//! See [`super`]. What an answer to the work a run's stage asked for does: an answer given on
+//! its prompt in place, once recorded, noted with what the run does now; what a pull request's
+//! forge and a receipt's store answered is kept beside what it was asked for; and what an act
+//! refused or failed on is noted until the next key, a close that left its run open among it,
+//! an answer given in place handed back to its prompt. What the run does after an act is the
+//! state's following to bring.
 
 use super::frame::Notice;
 use super::RunStage;
-use crate::stage::{Stage, StartStage, Want};
+use crate::stage::Want;
+use yunta_render::refusal::Refused;
+
 use crate::{EvidenceOperation, EvidenceOutcome, Operation, Outcome};
 
 impl RunStage {
-    /// What an answer to the work `asked`, which the stage asked for, does: the workflows
-    /// read for a new run, which opens over the run; an answer given on its prompt in place,
+    /// What an answer to the work `asked`, which the stage asked for, does: an answer given on
+    /// its prompt in place,
     /// recorded on this run's log, noted with what the run does now; what the forge and the
     /// store answered, kept; what refused or failed is said: in the receipt's place where its
     /// chain could not be verified, as a note otherwise, an answer given in place handed back
@@ -21,7 +23,6 @@ impl RunStage {
         match outcome {
             Outcome::Failed(said) if verifies_a_chain(asked) => self.chain_read(Err(said)),
             Outcome::Failed(said) => self.noticed(asked, Notice::Failed(said)),
-            Outcome::Catalog(catalog) => vec![Want::Open(Stage::Start(StartStage::new(catalog)))],
             Outcome::PullRequest(polled) => self.pull_request_read(polled),
             Outcome::Evidence(EvidenceOutcome::Verified { chain, .. }) => {
                 self.chain_read(Ok(chain))
@@ -33,7 +34,14 @@ impl RunStage {
                 Vec::new()
             }
             Outcome::Refused(refused) => self.noticed(asked, Notice::Refused(refused.to_string())),
+            Outcome::Closed {
+                refused, failed, ..
+            } => {
+                self.notice = unclosed(&refused, failed.as_ref()).or(self.notice.take());
+                Vec::new()
+            }
             Outcome::Repository(_)
+            | Outcome::Catalog(_)
             | Outcome::Workflow(_)
             | Outcome::Pack(_)
             | Outcome::Evidence(_)
@@ -42,13 +50,13 @@ impl RunStage {
             | Outcome::Decided { .. }
             | Outcome::Answered { .. }
             | Outcome::Cancelled { .. }
-            | Outcome::Closed { .. }
             | Outcome::History(_)
             | Outcome::Graph(_)
             | Outcome::Doctor(_)
             | Outcome::Collected(_)
             | Outcome::Detected { .. }
-            | Outcome::Initialized(_)
+            | Outcome::SetupPack { .. }
+            | Outcome::Initialized { .. }
             | Outcome::Stopped => Vec::new(),
         }
     }
@@ -61,6 +69,20 @@ impl RunStage {
         }
     }
 
+    /// What an act no standing stage asked came to, noted on the run where it did not do what
+    /// was asked; no prompt in place takes it, as none here asked it.
+    pub(crate) fn noted(&mut self, outcome: &Outcome) {
+        let notice = match outcome {
+            Outcome::Refused(refused) => Some(Notice::Refused(refused.to_string())),
+            Outcome::Failed(said) => Some(Notice::Failed(said.clone())),
+            Outcome::Closed {
+                refused, failed, ..
+            } => unclosed(refused, failed.as_ref()),
+            _ => None,
+        };
+        self.notice = notice.or(self.notice.take());
+    }
+
     /// `notice`, what the work `asked` refused or failed on, noted where the run is; where that
     /// work was recording an answer given on the prompt in place, an option or a round's
     /// answers, the answer handed back to it.
@@ -70,6 +92,16 @@ impl RunStage {
         }
         self.notice = Some(notice);
         Vec::new()
+    }
+}
+
+/// What a close came to where it left a run open: what failed below Yunta and stopped it,
+/// else why it refused the first run it left; none where it closed every run it was asked to.
+fn unclosed(refused: &[Refused], failed: Option<&String>) -> Option<Notice> {
+    match (failed, refused.first()) {
+        (Some(failed), _) => Some(Notice::Failed(failed.clone())),
+        (None, Some(refused)) => Some(Notice::Refused(refused.to_string())),
+        (None, None) => None,
     }
 }
 

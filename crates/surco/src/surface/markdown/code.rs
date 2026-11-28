@@ -7,6 +7,7 @@
 use super::{code_span, plain_text, Leaves, Page, GLYPHS};
 use crate::code::MIN_FENCE;
 use crate::components::Code;
+use crate::diagram::Diagram;
 
 /// Code as `page` says it: fenced with its lines, or, where the page leaves
 /// code lines out, only its title and what is said under it.
@@ -65,8 +66,14 @@ fn footer(code: &Code) -> String {
     let said = code.footer();
     match said.is_empty() {
         true => String::new(),
-        false => format!("\n\n_{}_", said.join(&format!(" {} ", GLYPHS.sep()))),
+        false => format!("\n\n_{}_", said.join(&GLYPHS.spaced_sep())),
     }
+}
+
+/// A diagram an author wrote, fenced as `mermaid`, which a viewer draws.
+pub(super) fn diagram(diagram: &Diagram) -> String {
+    let fence = fence(&diagram.source);
+    format!("{fence}mermaid\n{}\n{fence}", diagram.source)
 }
 
 /// The fence around `text` as code: one backtick more than the longest

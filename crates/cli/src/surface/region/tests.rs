@@ -2,7 +2,7 @@ use yunta_core::events::ChildLink;
 use yunta_core::events::NodeState;
 use yunta_core::NodeId;
 use yunta_replay::frame::{Counter, NodeStanding, RunPhase, WaitingOn};
-use yunta_replay::frame::{NodeFrame, RunFrame};
+use yunta_replay::frame::{NodeFrame, RunFrame, RunTimes};
 use yunta_testkit_core::Captured;
 
 use crate::surface::Watched;
@@ -59,6 +59,11 @@ fn composing(bore: &'static str, nodes: Vec<yunta_replay::frame::NodeFrame>) -> 
     }
 }
 
+/// `region` showing `frame`, the run `run`, its times as [`RunTimes::sample`] has them.
+fn shown(region: &mut Region, frame: &RunFrame, run: &RunId, answerable: bool) {
+    region.show(frame, &RunTimes::sample(frame), run, answerable);
+}
+
 fn rows(term: &Watched) -> Vec<String> {
     term.shown().lines().map(str::to_string).collect()
 }
@@ -83,7 +88,8 @@ fn the_attention_row_opens_the_region_only_while_something_needs_you() {
     let scrollback = Captured::default();
     let mut region = region(&term, &scrollback);
 
-    region.show(
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("plan")]),
         &RUN,
         false,
@@ -104,7 +110,7 @@ fn the_attention_row_opens_the_region_only_while_something_needs_you() {
         "and the gist over the meter says nothing needs you: {quiet:?}"
     );
 
-    region.show(&parked_on_plan(), &RUN, true);
+    shown(&mut region, &parked_on_plan(), &RUN, true);
     let demanded = rows(&term);
     let first = demanded.first().map(String::as_str).unwrap_or_default();
     assert!(
@@ -114,7 +120,8 @@ fn the_attention_row_opens_the_region_only_while_something_needs_you() {
     );
     assert_eq!(demanded.len(), quiet.len() + 1, "{demanded:?}");
 
-    region.show(
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("plan")]),
         &RUN,
         false,
@@ -127,7 +134,8 @@ fn a_closed_region_leaves_nothing_of_itself_on_the_terminal() {
     let term = Watched::sized(16, 80);
     let scrollback = Captured::default();
     let mut region = region(&term, &scrollback);
-    region.show(
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("plan")]),
         &RUN,
         false,
@@ -160,7 +168,8 @@ fn a_row_is_cut_to_the_terminal_and_never_past_the_width_it_is_written_for() {
         let term = Watched::sized(16, columns);
         let scrollback = Captured::default();
         let mut region = region(&term, &scrollback);
-        region.show(
+        shown(
+            &mut region,
             &frame(
                 RunPhase::Waiting {
                     on: WaitingOn::Node {
@@ -207,7 +216,12 @@ fn a_child_run_is_drawn_under_the_node_that_bore_it_and_never_as_a_number() {
     let scrollback = Captured::default();
     let mut region = region(&term, &scrollback);
 
-    region.show(&composing("compose", vec![running("compose")]), &RUN, false);
+    shown(
+        &mut region,
+        &composing("compose", vec![running("compose")]),
+        &RUN,
+        false,
+    );
     let drawn = rows(&term);
     let node = drawn
         .iter()
@@ -239,7 +253,12 @@ fn a_child_row_cut_to_a_narrow_terminal_still_says_where_the_child_stands() {
     let scrollback = Captured::default();
     let mut region = region(&term, &scrollback);
 
-    region.show(&composing("compose", vec![running("compose")]), &RUN, false);
+    shown(
+        &mut region,
+        &composing("compose", vec![running("compose")]),
+        &RUN,
+        false,
+    );
     let drawn = rows(&term);
     assert!(
         drawn.iter().any(|row| row.contains("still open")),
@@ -268,7 +287,7 @@ fn the_gist_and_the_meter_stay_the_last_rows_as_nodes_come_and_go() {
         vec![running("build")],
     ] {
         let bars = "_".repeat(nodes.len());
-        region.show(&frame(RunPhase::Running, nodes), &RUN, false);
+        shown(&mut region, &frame(RunPhase::Running, nodes), &RUN, false);
         let drawn = rows(&term);
         assert_eq!(
             drawn[drawn.len().saturating_sub(2)..],
@@ -296,10 +315,16 @@ fn a_run_with_no_gist_ends_its_region_on_the_meter() {
         }),
     );
 
-    region.show(&frame(RunPhase::Finished, vec![finished]), &RUN, false);
+    shown(
+        &mut region,
+        &frame(RunPhase::Finished, vec![finished]),
+        &RUN,
+        false,
+    );
     assert_eq!(rows(&term), ["0 tokens _ ; 0s at work"]);
 
-    region.show(
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("plan")]),
         &RUN,
         false,
@@ -342,7 +367,7 @@ async fn the_region_ends_on_the_runs_gist_and_what_it_spent() {
     )
     .expect("the region's row template parses");
 
-    region.show(&read.frame(cut.now()), &run, false);
+    region.show(read.frame(), &read.times(cut.now()), &run, false);
     let drawn = rows(&term);
     assert_eq!(
         drawn[drawn.len().saturating_sub(2)..],
@@ -378,7 +403,8 @@ fn a_node_that_works_again_does_not_show_what_its_last_attempt_said() {
     let mut region = region(&term, &scrollback);
     region.hear(said(&RUN, "build", "Compiling the parser."));
 
-    region.show(
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("build")]),
         &RUN,
         false,
@@ -391,12 +417,14 @@ fn a_node_that_works_again_does_not_show_what_its_last_attempt_said() {
         rows(&term)
     );
 
-    region.show(
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("test")]),
         &RUN,
         false,
     );
-    region.show(
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("build")]),
         &RUN,
         false,
@@ -419,8 +447,14 @@ fn what_a_node_said_before_its_start_is_shown_once_it_works() {
     region.hear(said(&RUN, "build", "First I read the parser."));
 
     let to_go = NodeFrame::sample(&NodeId::from_static("build"), NodeStanding::ToGo);
-    region.show(&frame(RunPhase::Running, vec![to_go]), &RUN, false);
-    region.show(
+    shown(
+        &mut region,
+        &frame(RunPhase::Running, vec![to_go]),
+        &RUN,
+        false,
+    );
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("build")]),
         &RUN,
         false,
@@ -444,7 +478,8 @@ fn what_another_run_said_is_not_shown() {
     let mut region = region(&term, &scrollback);
     region.hear(said(&CHILD, "build", "Said in the child."));
 
-    region.show(
+    shown(
+        &mut region,
         &frame(RunPhase::Running, vec![running("build")]),
         &RUN,
         false,

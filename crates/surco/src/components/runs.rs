@@ -17,11 +17,16 @@ pub struct RunLine {
     pub standing: Standing,
     /// What a reader types to name the run.
     pub handle: String,
-    /// The workflow it runs, and the mode it runs in.
+    /// The workflow it runs: what a printed page names beside the mode,
+    /// where no glance at the run pointed at names it.
     pub workflow: String,
+    /// The mode it runs in: all a screen's row names, the glance beside the
+    /// list naming the workflow.
     pub mode: String,
     /// Where each of its nodes stands, in the order the workflow declares
-    /// them.
+    /// them: drawn in a column of a fixed width that starts at the same cell
+    /// on every row, however many nodes a run has, so the furrows of a field
+    /// read down one column.
     pub furrow: Vec<Standing>,
     /// What holds it, in one line; empty when nothing does.
     pub said: String,
@@ -30,6 +35,14 @@ pub struct RunLine {
     pub pointed: bool,
     /// Whether a person picked the run for an act that takes several.
     pub marked: bool,
+}
+
+impl RunLine {
+    /// What it runs, as a page names it: the workflow and, in brackets, its
+    /// mode.
+    pub fn name(&self) -> String {
+        format!("{} ({})", self.workflow, self.mode)
+    }
 }
 
 /// What a run's row ends with, at the line's far edge.

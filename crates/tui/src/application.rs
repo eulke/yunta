@@ -37,11 +37,12 @@ use ratatui::layout::{Position, Rect};
 use surco::components::ScreenLaid;
 use surco::look::{Look, Width};
 use surco::paint::{BELL, SYNC_BEGIN, SYNC_END};
+use surco::surface::Terminal;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::time::MissedTickBehavior;
 use yunta_core::Clock;
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Address, Input, Performer, Request, State};
+use yunta_ui::{Address, Input, Performer, Request, Room, State};
 
 use crate::drawn::drawn;
 use crate::full_screen::{FullScreen, WindowTitle};
@@ -153,6 +154,7 @@ impl Application {
             application: self,
             inputs,
             drawing,
+            room: Room::Enough,
             laid: None,
             on_screen: None,
             title: full_screen.window_title(),
@@ -210,6 +212,9 @@ struct Running<'a> {
     application: &'a Application,
     inputs: UnboundedSender<Input>,
     drawing: Synchronized,
+    /// Whether the terminal had the room a screen is laid out in at the last drawing, as the
+    /// state was last told.
+    room: Room,
     laid: Option<ScreenLaid>,
     on_screen: Option<Buffer>,
     /// The title the window was given, which each drawing gives as its screen asks.
@@ -291,8 +296,9 @@ impl Running<'_> {
 
     /// The state's screen drawn and written to `out` as one update, or nothing where it
     /// changes no cell of what the terminal shows; the window given the screen's title after
-    /// it, and the bell rung after that where the person was called; and what was laid out
-    /// of it handed back where it changed, with what that asks carried out: how the
+    /// it, in ASCII where the screen is drawn in ASCII, and the bell rung after that where the
+    /// person was called; whether the terminal had the room to lay it out, and what was laid
+    /// out of it, each handed back where it changed, with what that asks carried out: how the
     /// application ended, where that asked it to leave.
     fn draw<E>(
         &mut self,
@@ -303,14 +309,16 @@ impl Running<'_> {
         let look = self.application.look;
         let mut laid = ScreenLaid::default();
         let mut title = None;
+        let mut room = self.room;
         let completed = terminal.draw(|frame| {
+            room = layout::room(frame.area());
             let columns = usize::from(layout::inner_columns(frame.area().width));
             let screen = state.screen(&Look {
                 width: Width::exact(columns),
                 ..look
             });
             laid = drawn(frame, &screen, &look);
-            title = screen.title;
+            title = Terminal::on(look).window_title(&screen);
         })?;
         let cells = completed.buffer.clone();
         match self.on_screen.as_ref() == Some(&cells) {
@@ -323,6 +331,13 @@ impl Running<'_> {
         self.title.give(title.as_deref(), out)?;
         if std::mem::take(&mut self.ringing) {
             out.write_all(BELL.as_bytes()).and_then(|()| out.flush())?;
+        }
+        if self.room != room {
+            self.room = room;
+            let asked = state.update(Input::Room(room));
+            if let Some(exit) = self.carried_out(state, asked, false) {
+                return Ok(Some(exit));
+            }
         }
         if self.laid == Some(laid) {
             return Ok(None);

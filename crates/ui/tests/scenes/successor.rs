@@ -82,7 +82,11 @@ async fn a_page_written_for_the_run_keeps_naming_it_as_its_successor_takes_its_p
         "the page keeps naming the run it was written for"
     );
     let trail = state.screen(&Look::plain()).trail;
-    assert_eq!(trail[1], promoted.handle());
+    assert_eq!(
+        trail[1],
+        format!("{} {}", promoted.handle(), yunta_render::screen::PAGE),
+        "the page's place is the run it was written for and its word"
+    );
     let back = driven(state, Vec::new(), &performer, &[Stroke::Decline]).await;
     assert_eq!(back.state.its_run(), Some(ItsRun::Shows(successor)));
 }

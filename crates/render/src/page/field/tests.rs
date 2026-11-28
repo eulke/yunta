@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use surco::doc::Depth;
@@ -8,12 +9,14 @@ use surco::width::cell_width;
 use surco::words::Standing;
 use yunta_core::events::PauseReason;
 use yunta_core::{ModeName, NodeId, Pid, RunId};
-use yunta_replay::frame::{RunPhase, WaitingOn};
+use yunta_replay::frame::{Effect, RunPhase, RunTimes, WaitingOn};
 use yunta_replay::registry::{Engine, Prompt};
 use yunta_testkit_core::fixed_now;
 
 use super::*;
-use crate::page::run::fixtures::{ahead, finished, frame, parked_on_lint};
+use crate::page::run::fixtures::{
+    ahead, failed_lint, finished, frame, lint_failure, parked_on_lint, times,
+};
 
 /// A run of the `review` workflow, `id`, in `group`, where it has stood for
 /// `age_secs`: its first node finished, its second standing as the run is
@@ -44,8 +47,15 @@ fn row(id: &'static str, group: FieldGroup, age_secs: u64) -> FieldRow {
     frame.workflow = "review".into();
     frame.mode = ModeName::default();
     frame.standing = word;
-    frame.since_last_event = Some(Duration::from_secs(age_secs));
-    FieldRow { frame, menu: false }
+    let times = RunTimes {
+        since_last_event: Some(Duration::from_secs(age_secs)),
+        ..times(&frame)
+    };
+    FieldRow {
+        frame: Arc::new(frame),
+        times,
+        menu: false,
+    }
 }
 
 /// The field of `rows` and `unreadable`, as deep as `depth`, drawn unpainted.
@@ -67,8 +77,6 @@ fn field_page<'a>(
         here: true,
         storage: std::path::Path::new("/home/me/.yunta"),
         depth,
-        pointed: None,
-        marked: &[],
     }
 }
 
@@ -149,7 +157,8 @@ fn a_glance_counts_the_closed_runs_and_the_whole_story_lists_them_newest_first()
     let closed: Vec<FieldRow> = (0..12u64)
         .map(|at| {
             let mut closed = row(OLDEST, FieldGroup::Closed, 60 * (at + 1));
-            closed.frame.run_id = RunId::from(format!("01JBZ5X8K3N7Q2W6E4R9T1Y0P{at:X}").as_str());
+            Arc::make_mut(&mut closed.frame).run_id =
+                RunId::from(format!("01JBZ5X8K3N7Q2W6E4R9T1Y0P{at:X}").as_str());
             closed
         })
         .collect();
@@ -194,15 +203,38 @@ fn a_run_that_does_not_read_back_is_counted_and_listed_in_the_whole_story_by_id(
     assert_eq!(listed(&full), handles(&[OLDEST, TIED_A, NEWEST]), "{full}");
 }
 
+/// A stalled run's row ends in how long it has stood, as a stopped run's and every other
+/// row does; the command that continues each stands in the page's next steps, beside what it
+/// does to that run, as `yunta status` says it: from its log for the stalled, where it stopped
+/// for the stopped; the stalled before the stopped as the field lists them.
 #[test]
-fn a_stopped_run_ends_on_the_command_that_continues_it() {
-    let text = render(vec![row(OLDEST, FieldGroup::Stopped, 5)]);
-    assert!(
-        text.lines().any(|line| line
-            .trim_end()
-            .ends_with(&format!("yunta resume {}", handles(&[OLDEST])[0]))),
-        "{text}"
-    );
+fn a_stalled_row_ends_in_its_age() {
+    let text = render(vec![
+        row(TIED_A, FieldGroup::Stopped, 2 * 86_400),
+        row(OLDEST, FieldGroup::Stalled, 5 * 3_600),
+    ]);
+    let row_of = |handle: &str| {
+        text.lines()
+            .find(|line| line.contains(handle) && !line.contains("yunta "))
+            .unwrap_or_default()
+    };
+    let [stalled, stopped] = [handles(&[OLDEST])[0], handles(&[TIED_A])[0]];
+    assert!(row_of(stalled).ends_with("  5h"), "{text}");
+    assert!(row_of(stopped).ends_with("  2d"), "{text}");
+    let continues = |handle: &str| {
+        let (run, goes_on) = match handle == stalled {
+            true => (OLDEST, Effect::ContinuesFromLog),
+            false => (TIED_A, Effect::ContinuesWhereStopped),
+        };
+        let step = NextStep::Resume {
+            run: RunId::from_static(run),
+        };
+        let command = command::line(&step);
+        text.lines()
+            .position(|line| line.contains(&command) && line.contains(command::effect(goes_on)))
+            .unwrap_or_else(|| panic!("no `{command}` among the next steps: {text}"))
+    };
+    assert!(continues(stalled) < continues(stopped), "{text}");
 }
 
 #[test]
@@ -213,7 +245,7 @@ fn every_row_fits_the_line_and_its_age_ends_in_one_column() {
     ]);
     let rows: Vec<&str> = text
         .lines()
-        .filter(|line| line.contains("review"))
+        .filter(|line| line.contains("T1Y0P") && !line.contains("yunta "))
         .collect();
     assert_eq!(rows.len(), 2, "{text}");
     assert!(rows[0].ends_with("5d"), "{text}");
@@ -227,7 +259,7 @@ fn every_row_fits_the_line_and_its_age_ends_in_one_column() {
 fn field() -> Vec<FieldRow> {
     // Asked at its terminal, by an engine alive now, about `implement`.
     let mut asking = row(OLDEST, FieldGroup::NeedsYou, 32 * 60);
-    asking.frame.phase = RunPhase::Running;
+    Arc::make_mut(&mut asking.frame).phase = RunPhase::Running;
     let since = fixed_now() - chrono::Duration::minutes(32);
     let engine = Engine::Alive {
         pid: Pid::current(),
@@ -237,7 +269,7 @@ fn field() -> Vec<FieldRow> {
         }),
         words: None,
     };
-    asking.frame.asking = engine.asking(fixed_now());
+    asking.times.asking = engine.asking(fixed_now());
     vec![
         asking,
         row(TIED_A, FieldGroup::NeedsYou, 22 * 86_400),
@@ -296,9 +328,145 @@ fn every_word_a_run_can_be_called_by_has_a_group() {
     assert_eq!(groups.len(), Standing::ALL.len());
 }
 
-/// Where a person moves through the field, the run a key acts on carries the pointer and
-/// the runs picked for an act that takes several carry the picked mark; a field only
-/// read carries neither.
+/// The run that does not read back on the field the screen's list is held on.
+const UNREAD: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P5";
+
+/// The field as a screen lists it, drawn as the field's region at 120 columns lays it out (74
+/// cells, a row cut at its edge): a run asking at its terminal, two needing the person, one
+/// stalled and one that does not read back.
+fn listed_on_a_screen() -> String {
+    let mut rows = field();
+    rows.retain(|row| matches!(row.group(), FieldGroup::NeedsYou));
+    rows.push(row(TIED_B, FieldGroup::NeedsYou, 3 * 86_400));
+    rows.push(row(NEWEST, FieldGroup::Stalled, 5 * 3_600));
+    let unreadable = [UnreadableRun::new(
+        &RunId::from_static(UNREAD),
+        RunUnread::Manifest {
+            path: format!("/home/me/.yunta/runs/{UNREAD}/manifest.yaml").into(),
+        },
+    )];
+    let listing = FieldRows {
+        rows: &rows,
+        unreadable: &unreadable,
+        depth: Depth::Glance,
+        pointed: None,
+        marked: &[],
+        asks_for_a_run: true,
+    };
+    let look = Look {
+        width: surco::look::Width::exact(74),
+        ..Look::plain()
+    };
+    Terminal::on(look).draw(&listing.document(&look))
+}
+
+/// The field as a screen lists it: the first row that asks what to build, then the groups in
+/// render's order, then the runs that do not read back, each with why; no headline, and no
+/// next steps, which the screen's legend and palette say.
+#[test]
+fn the_fields_rows_list_its_first_row_its_groups_then_the_unreadable() {
+    let text = listed_on_a_screen();
+    let lines: Vec<&str> = text.lines().filter(|line| !line.is_empty()).collect();
+    assert_eq!(
+        lines.first(),
+        Some(&":: what do you want to build?  ; n"),
+        "{text}"
+    );
+    let headings: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| !line.starts_with(' ') && !line.starts_with("::"))
+        .collect();
+    assert_eq!(
+        headings,
+        [
+            "asking now",
+            "needs you, oldest first",
+            "stalled",
+            "unreadable"
+        ],
+        "{text}"
+    );
+    assert_eq!(
+        listed(&text),
+        handles(&[OLDEST, TIED_A, TIED_B, NEWEST, UNREAD]),
+        "{text}"
+    );
+    let unread = lines.last().copied().unwrap_or_default();
+    assert!(
+        unread.contains("T1Y0P5") && unread.contains("manifest missing or unreadab..."),
+        "{text}"
+    );
+    for absent in ["runs of this repository", "next", "yunta "] {
+        assert!(!text.contains(absent), "{absent}: {text}");
+    }
+}
+
+/// The field's legend says the design's five keys in the design's words where a run stands in
+/// sight: moving, opening the run pointed at, a new run, closing, and quitting; where none
+/// does, a new run and quitting; and no new run where none can be asked for.
+#[test]
+fn the_fields_legend_says_the_designs_five_keys() {
+    let spelled = |asks_for_a_run, acts_on_a_run| {
+        let legend = crate::screen::field_legend(asks_for_a_run, acts_on_a_run);
+        crate::tests::screen::spelled(&legend)
+    };
+    assert_eq!(
+        spelled(true, true),
+        "j k move · enter open · n new run · x close · q quit"
+    );
+    assert_eq!(spelled(true, false), "n new run · q quit");
+    assert_eq!(
+        spelled(false, true),
+        "j k move · enter open · x close · q quit"
+    );
+    assert_eq!(spelled(false, false), "q quit");
+}
+
+/// A closed run's row says its gist, as the run's page does: the node a failed run failed at
+/// and how, how many findings still block one that finished; the whole story lists them under
+/// the group's word.
+#[test]
+fn a_closed_runs_row_says_its_gist() {
+    let closed = |id: &'static str, phase: RunPhase, nodes, blocking| {
+        let mut frame = frame(phase, nodes, blocking);
+        frame.run_id = RunId::from_static(id);
+        let times = times(&frame);
+        FieldRow {
+            frame: Arc::new(frame),
+            times,
+            menu: false,
+        }
+    };
+    let failed = closed(
+        OLDEST,
+        RunPhase::Failed {
+            failure: Some(lint_failure()),
+        },
+        vec![finished("plan"), failed_lint()],
+        0,
+    );
+    let reported = closed(NEWEST, RunPhase::Finished, vec![finished("plan")], 1);
+    let text = render_at(vec![failed, reported], Vec::new(), Depth::Full);
+    let row_of = |id: &'static str| {
+        text.lines()
+            .find(|line| line.contains(handles(&[id])[0]) && !line.contains("yunta "))
+            .unwrap_or_default()
+    };
+    assert!(
+        row_of(OLDEST).contains("node `lint` failed: exit 101"),
+        "{text}"
+    );
+    assert!(
+        row_of(NEWEST).contains("finished holding 1 blocking finding"),
+        "{text}"
+    );
+    assert!(text.lines().any(|line| line == "closed"), "{text}");
+}
+
+/// Where a person moves through the field's list, the run a key acts on carries the pointer
+/// and the runs picked for an act that takes several carry the picked mark; the printed page,
+/// only read, carries neither.
 #[test]
 fn the_run_pointed_at_and_the_ones_picked_are_said_on_their_rows() {
     let rows = vec![
@@ -306,13 +474,16 @@ fn the_run_pointed_at_and_the_ones_picked_are_said_on_their_rows() {
         row("01BBBBBBBBBBBBBBBBBBBBBBBB", FieldGroup::Stopped, 30),
     ];
     let picked = [RunId::from_static("01BBBBBBBBBBBBBBBBBBBBBBBB")];
-    let field = Field {
+    let listing = FieldRows {
+        rows: &rows,
+        unreadable: &[],
+        depth: Depth::Glance,
         pointed: Some(&rows[0].frame.run_id),
         marked: &picked,
-        ..field_page(&rows, &[], Depth::Glance)
+        asks_for_a_run: true,
     };
     let look = Look::plain();
-    let drawn = Terminal::on(look).draw(&field.document(&look));
+    let drawn = Terminal::on(look).draw(&listing.document(&look));
     let row_of = |handle: &str| {
         drawn
             .lines()

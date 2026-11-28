@@ -4,7 +4,7 @@
 use super::*;
 use crate::components::{
     Attention, Card, CardBody, Checklist, ChoiceRow, Choices, Fields, Found, Horizon, Lead, Legend,
-    Noted, Ribbon, Section, Stretch,
+    Noted, Ribbon, SameAtAShell, Section, Stretch, Wordmark,
 };
 
 /// A run's ribbon: two nodes finished, the one running with its plow, and the
@@ -96,7 +96,11 @@ pub(super) fn on_a_screen() -> Vec<Block> {
         .into(),
         card().into(),
         crate::components::desk::tests::plan().into(),
-        crate::components::typed_answer::tests::named().into(),
+        crate::components::typed_answer::tests::requested().into(),
+        crate::components::word_choice::tests::modes().into(),
+        crate::components::form::tests::new_run().into(),
+        crate::components::survey::tests::a_role_changed().into(),
+        installing_at_a_shell().into(),
         crate::components::choice_list::tests::shapes().into(),
         crate::components::key_list::tests::help().into(),
         moved_through(true).into(),
@@ -105,8 +109,19 @@ pub(super) fn on_a_screen() -> Vec<Block> {
         crate::components::finding_list::tests::answered().into(),
         crate::components::feed::tests::scrolled_back().into(),
         crate::components::meter::tests::waited_on_you().into(),
+        crate::components::at_a_glance::tests::asking().into(),
+        Wordmark.into(),
         Horizon { tone: Tone::Done }.into(),
     ]
+}
+
+/// What installing a pack and setting a repository up do at a shell, as a confirmation names
+/// them: the first command wider than the narrowest row.
+fn installing_at_a_shell() -> SameAtAShell {
+    SameAtAShell(vec![
+        "yunta pack add https://github.com/eulke/yunta//packs/fragua@v0.0.5".to_string(),
+        "yunta init".to_string(),
+    ])
 }
 
 /// A list of checks a person moves through, the pointer on its second row.

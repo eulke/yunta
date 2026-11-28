@@ -12,7 +12,7 @@ use yunta_core::step::{Choice, NextStep};
 use yunta_core::{NodeId, OptionId, RunId};
 
 use super::Page;
-use crate::command;
+use crate::command::{self, SaidStep};
 
 /// How a gate's answer ended.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -48,15 +48,7 @@ impl Page for GateAnswered<'_> {
                 .with(Gist::new(
                     "nothing recorded: it still waits on the decision",
                 ))
-                .with(Next {
-                    steps: vec![(
-                        command::line(&NextStep::ResolveGate {
-                            run: self.run_id.clone(),
-                            choice: Choice::Asked,
-                        }),
-                        "puts the decision to you again",
-                    )],
-                }),
+                .with(asked_again(self.run_id)),
             Resolution::Interrupted => Doc::new(),
         }
     }
@@ -93,15 +85,6 @@ pub struct QuestionsAnswered<'a> {
 impl Page for QuestionsAnswered<'_> {
     fn document(&self, _look: &Look) -> Doc {
         let handle = self.run_id.handle();
-        let again = |does: &'static str| Next {
-            steps: vec![(
-                command::line(&NextStep::ResolveGate {
-                    run: self.run_id.clone(),
-                    choice: Choice::Asked,
-                }),
-                does,
-            )],
-        };
         match self.answer {
             RoundAnswer::Answered { node } => Doc::new()
                 .with(Headline::new(
@@ -110,9 +93,7 @@ impl Page for QuestionsAnswered<'_> {
                     format!("answered node `{node}`"),
                 ))
                 .with(Gist::new(CARRIED_ON))
-                .with(Next {
-                    steps: vec![following(self.run_id)],
-                }),
+                .with(command::next([following(self.run_id)])),
             RoundAnswer::Declined { node } => Doc::new()
                 .with(Headline::new(
                     Standing::NeedsYou.mark(),
@@ -122,7 +103,7 @@ impl Page for QuestionsAnswered<'_> {
                 .with(Gist::new(format!(
                     "nothing recorded: it still waits on the questions node `{node}` asked"
                 )))
-                .with(again("puts the questions to you again")),
+                .with(asked_again(self.run_id)),
             RoundAnswer::Interrupted => Doc::new(),
         }
     }
@@ -176,15 +157,20 @@ fn resolved(run_id: &RunId, option: &OptionId) -> Doc {
             resolved_as(option),
         ))
         .with(Gist::new(APPLIED))
-        .with(Next {
-            steps: vec![following(run_id)],
-        })
+        .with(command::next([following(run_id)]))
 }
 
 /// The step that follows `run` on from its answer, with what it does.
-fn following(run: &RunId) -> (String, &'static str) {
-    let follow = NextStep::Follow { run: run.clone() };
-    (command::line(&follow), command::does(&follow))
+fn following(run: &RunId) -> SaidStep {
+    SaidStep::of(&NextStep::Follow { run: run.clone() })
+}
+
+/// The step that asks again what `run` waits on, where nothing was recorded.
+fn asked_again(run: &RunId) -> Next {
+    command::next([SaidStep::of(&NextStep::ResolveGate {
+        run: run.clone(),
+        choice: Choice::Asked,
+    })])
 }
 
 #[cfg(test)]

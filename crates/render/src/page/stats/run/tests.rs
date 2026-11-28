@@ -79,10 +79,8 @@ fn render_run_stats(
     pricing: Option<&BTreeMap<String, yunta_core::PricingEntry>>,
     look: &Look,
 ) -> String {
-    // The header reads the run's own time, as its stats measured it.
     let frame = RunFrame {
         nodes: nodes.to_vec(),
-        elapsed: stats.wall_clock,
         ..yunta_replay::frame::RunFrame::sample(&RUN)
     };
     let page = Stats {
@@ -273,7 +271,8 @@ fn unicode(width: usize) -> Look {
 }
 
 /// A node's frame: a plain node, or, when `people` is not zero, a gate a
-/// person was asked about for `people`, decided `rounds` times.
+/// person was asked about, decided `rounds` times; how long, its run's stats
+/// say.
 fn frame(id: &str, people: Duration, rounds: usize) -> NodeFrame {
     let gate = (!people.is_zero()).then_some(GateAsks {
         question: None,
@@ -284,7 +283,6 @@ fn frame(id: &str, people: Duration, rounds: usize) -> NodeFrame {
             Some(_) => "gate",
             None => "bash",
         },
-        people,
         decisions: rounds,
         declares: Declares {
             gate,
@@ -301,7 +299,6 @@ fn frame(id: &str, people: Duration, rounds: usize) -> NodeFrame {
 fn lines_at(run: &RunStats, nodes: &[NodeFrame], depth: Depth, look: &Look) -> Vec<String> {
     let view = RunFrame {
         nodes: nodes.to_vec(),
-        elapsed: run.wall_clock,
         ..yunta_replay::frame::RunFrame::sample(&RUN)
     };
     let page = Stats {

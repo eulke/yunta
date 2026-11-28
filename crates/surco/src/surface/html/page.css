@@ -171,5 +171,6 @@ svg.flow polygon.head{fill:var(--muted)}
 .next{display:flex;flex-direction:column;gap:6px}
 .steps{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:6px 12px;align-items:center}
 .steps span.does{color:var(--muted);font-size:13.5px}
+.shell{display:grid;gap:6px}
 @media (max-width:560px){.steps{grid-template-columns:minmax(0,1fr)}}
 @media (prefers-reduced-motion:no-preference){.cmd{transition:border-color .12s}}

@@ -60,15 +60,15 @@ pub(super) async fn started(
 }
 
 /// `run` cancelled with everything under it, what cancelling says said through
-/// `remarks`, and how it ended.
+/// `remarks`: how it stands then is its log's to say, which the application follows.
 pub(super) async fn cancelled(
     project: &Project,
     run: RunId,
     remarks: &dyn Remarks,
     stop: &Stop,
 ) -> Result<Outcome, Error> {
-    let state = project.run(&run).await?.cancel(remarks, stop).await?;
-    Ok(Outcome::Cancelled { run, state })
+    project.run(&run).await?.cancel(remarks, stop).await?;
+    Ok(Outcome::Cancelled { run })
 }
 
 /// `run` handed back to a detached resume, refused where another engine drives it.

@@ -29,7 +29,7 @@ pub(super) fn problem(problem: &Problem) -> String {
     }
     if !problem.help.is_empty() {
         let help: Vec<String> = problem.help.iter().map(|item| plain_text(item)).collect();
-        let help = help.join(&format!(" {} ", GLYPHS.sep()));
+        let help = help.join(&GLYPHS.spaced_sep());
         out.push_str(&format!("\n\n_{}_ {help}", crate::surface::terminal::HELP));
     }
     out

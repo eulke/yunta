@@ -6,7 +6,7 @@ use yunta_core::events::{
 };
 use yunta_core::{RunId, Workflow};
 use yunta_replay::frame::RunPhase;
-use yunta_testkit_core::{fixed_now, Log};
+use yunta_testkit_core::Log;
 
 fn node_started(attempt: u32) -> EventPayload {
     EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(attempt)))
@@ -117,7 +117,6 @@ fn doctor_and_the_phase_page_name_the_same_last_failure() {
         &yunta_replay::RunState::replay(&events),
         None,
         &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
-        fixed_now(),
     );
     let RunPhase::Failed { failure: page } = frame.phase else {
         panic!("the run closed failed");

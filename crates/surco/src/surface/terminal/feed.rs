@@ -13,7 +13,7 @@
 
 use std::ops::Range;
 
-use crate::components::{Feed, Laid, Sight};
+use crate::components::{Feed, FeedRow, Laid, Sight};
 use crate::glyphs::Glyphs;
 use crate::line::{Hidden, Line, Tone};
 use crate::look::Look;
@@ -47,19 +47,22 @@ impl Feed {
     /// in a column as wide as the widest subject among them and [`APART`] more, in the tone
     /// its row opens in; the rows as they are where it says none.
     fn subjected(&self, held: Range<usize>) -> Vec<Line> {
-        let rows = &self.rows[held.clone()];
-        if self.subjects.is_empty() {
-            return rows.to_vec();
+        let rows = &self.rows[held];
+        if self.rows.iter().all(|row| row.subject.is_none()) {
+            return rows.iter().map(|row| row.line.clone()).collect();
         }
-        let subject = |at: usize| self.subjects.get(at).map_or("", String::as_str);
-        let widest = held.clone().map(|at| cell_width(subject(at))).max();
+        let widest = rows.iter().map(|row| cell_width(subject(row))).max();
         let column = widest.unwrap_or(0) + APART;
-        held.zip(rows)
-            .map(|(at, row)| {
-                let tone = row.spans().first().map_or(Tone::Plain, |span| span.tone);
-                let pad = column.saturating_sub(cell_width(subject(at)));
-                let opening = format!("{}{}", subject(at), " ".repeat(pad));
-                Line::new().push(tone, opening).then(row.clone())
+        rows.iter()
+            .map(|row| {
+                let tone = row
+                    .line
+                    .spans()
+                    .first()
+                    .map_or(Tone::Plain, |span| span.tone);
+                let pad = column.saturating_sub(cell_width(subject(row)));
+                let opening = format!("{}{}", subject(row), " ".repeat(pad));
+                Line::new().push(tone, opening).then(row.line.clone())
             })
             .collect()
     }
@@ -116,6 +119,11 @@ impl Feed {
         };
         (lines, laid)
     }
+}
+
+/// What `row` is about, as its subject's column holds it: nothing where it says nothing.
+fn subject(row: &FeedRow) -> &str {
+    row.subject.as_deref().unwrap_or_default()
 }
 
 /// Which of a feed's `whole` rows a window `rows` high shows from the row `top`: the first

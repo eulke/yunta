@@ -1,7 +1,28 @@
 //! How much a file system holds and how much of it is free — what keeps a
-//! run from filling the disk it works on.
+//! run from filling the disk it works on. A page that says what the disk has
+//! free reads it through a [`Disk`] its caller hands it, the system's
+//! ([`SystemDisk`]) unless a test fixes one; the checks that keep a run room
+//! read the system's directly ([`space`]).
 
 use std::path::Path;
+
+/// What reads how much of a file system is free, for a page that says it: the
+/// system's, or one a test fixes so a page reads the same on every machine.
+/// Not what keeps a run room, which reads the system's ([`space`]).
+pub trait Disk: Send + Sync {
+    /// The space of the file system `path` is on.
+    fn space(&self, path: &Path) -> std::io::Result<Space>;
+}
+
+/// The system's reading of a file system's space, [`space`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemDisk;
+
+impl Disk for SystemDisk {
+    fn space(&self, path: &Path) -> std::io::Result<Space> {
+        space(path)
+    }
+}
 
 /// A file system's size and what its user may still write there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

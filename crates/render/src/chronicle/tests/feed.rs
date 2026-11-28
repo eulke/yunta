@@ -75,7 +75,7 @@ fn texts(moments: &[Moment], tasks: &BTreeMap<SessionId, TaskId>) -> Vec<String>
     feed(moments, tasks, 0, 0, &look(Glyphs::Unicode))
         .rows
         .iter()
-        .map(|row| row.text())
+        .map(|row| row.line.text())
         .collect()
 }
 
@@ -103,7 +103,12 @@ fn a_call_stands_in_its_verb_column_and_any_other_moment_says_its_words() {
         feed(&moments, &BTreeMap::new(), 2, after, &look(Glyphs::Unicode))
             .rows
             .iter()
-            .map(|row| row.spans().iter().all(|span| span.tone == Tone::Strong))
+            .map(|row| {
+                row.line
+                    .spans()
+                    .iter()
+                    .all(|span| span.tone == Tone::Strong)
+            })
             .collect()
     };
     assert_eq!(strong(0), [false, false, false, true]);
@@ -271,8 +276,16 @@ fn the_whole_chronicle_says_every_moment_about_its_subject_and_counts_them() {
         call(ToolAction::Read, "crates/cli/src/pack.rs", None),
     ];
     let whole = whole(&moments, &BTreeMap::new(), 2, 0, &look(Glyphs::Unicode));
-    assert_eq!(whole.subjects, ["run", "implement", "implement"]);
-    let rows: Vec<String> = whole.rows.iter().map(|row| row.text()).collect();
+    let subjects: Vec<Option<&str>> = whole
+        .rows
+        .iter()
+        .map(|row| row.subject.as_deref())
+        .collect();
+    assert_eq!(
+        subjects,
+        [Some("run"), Some("implement"), Some("implement")]
+    );
+    let rows: Vec<String> = whole.rows.iter().map(|row| row.line.text()).collect();
     assert_eq!(
         rows,
         [

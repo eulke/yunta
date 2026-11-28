@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 
 use yunta_api::Workspace;
+use yunta_core::disk::SystemDisk;
 use yunta_core::{Env, ProcessSecrets, SystemClock, SystemIdSource};
 
 use crate::error::CliError;
@@ -68,6 +69,7 @@ impl Shell {
                 // A host that will not say where this binary lives falls back
                 // to the name on `PATH`.
                 binary: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta")),
+                disk: Arc::new(SystemDisk),
             },
             interrupt,
         })

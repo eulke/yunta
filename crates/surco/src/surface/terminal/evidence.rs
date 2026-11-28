@@ -44,7 +44,7 @@ impl Evidence {
         }
         // One line when it fits, and each fact on its own when it does
         // not: a path cut to fit is a path nobody can open.
-        let sep = format!(" {} ", look.glyphs.sep());
+        let sep = look.glyphs.spaced_sep();
         let joined = rest.iter().map(Line::text).collect::<Vec<_>>().join(&sep);
         let room = look.width.cells().saturating_sub(cell_width(INDENT));
         match cell_width(&joined) <= room {

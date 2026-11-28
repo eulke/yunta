@@ -4,7 +4,7 @@
 //! `yunta new` prints standing until Escape or Enter goes back to the workflows,
 //! read again with the new one pointed at.
 
-use surco::components::{Legend, Note, Prose};
+use surco::components::{ChoiceList, Legend, Note, Prose};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_core::WorkflowShape;
@@ -25,8 +25,8 @@ pub(super) enum NewWorkflowAsked {
         name: String,
         picker: Picker<WorkflowShape>,
     },
-    /// The workflow `name` being written and checked.
-    Writing { name: String },
+    /// The workflow `name` being written from the skeleton of `shape`, and checked.
+    Writing { name: String, shape: WorkflowShape },
     /// What writing it came to.
     Written(Box<NewWorkflowWritten>),
 }
@@ -38,9 +38,10 @@ impl NewWorkflowAsked {
         NewWorkflowAsked::Naming(LineAsked::new(asks))
     }
 
-    /// The question in front, the workflow being written, or its page; and the keys
-    /// the screen lists, none where a list carries its own.
-    pub(super) fn screen(&self, look: &Look) -> (Doc, Legend) {
+    /// The question in front, the workflow being written, or its page; and the keys the
+    /// screen lists, the shapes' in the legend's row as the documents' shapes are, a new run
+    /// among them where one `asks_for_a_run` here.
+    pub(super) fn screen(&self, look: &Look, asks_for_a_run: bool) -> (Doc, Legend) {
         match self {
             NewWorkflowAsked::Naming(line) => (
                 Doc::new().with(line.block(look)),
@@ -48,18 +49,25 @@ impl NewWorkflowAsked {
             ),
             NewWorkflowAsked::Shaping { picker, .. } => {
                 let asks = Prose(CHOOSE_A_SHAPE.to_string());
-                (
-                    Doc::new().with(asks).with(picker.block(look)),
-                    Legend::new(),
-                )
+                let shapes = ChoiceList {
+                    choices: picker.list(),
+                    filter: picker.filter().map(str::to_string),
+                    legend: Legend::new(),
+                };
+                let legend = yunta_render::screen::shapes_legend();
+                (Doc::new().with(asks).with(shapes), legend)
             }
-            NewWorkflowAsked::Writing { name } => {
+            NewWorkflowAsked::Writing { name, .. } => {
                 let writing = Note(yunta_render::screen::writing_workflow(name));
                 (Doc::new().with(writing), Legend::new())
             }
             NewWorkflowAsked::Written(written) => (
                 written_page(written, look),
-                yunta_render::screen::over_the_workflows_legend(),
+                yunta_render::screen::page_legend(
+                    yunta_render::screen::PageRead::Whole,
+                    Legend::new(),
+                    asks_for_a_run,
+                ),
             ),
         }
     }
@@ -92,8 +100,11 @@ impl NewWorkflowAsked {
                     Press::Stay | Press::Moved => return Next::Stays,
                 };
                 let name = name.clone();
-                *self = NewWorkflowAsked::Writing { name: name.clone() };
-                Next::Work(Operation::Workflow(WorkflowOperation::New { name, shape }))
+                *self = NewWorkflowAsked::Writing { name, shape };
+                match self.shown_under_way() {
+                    Some(writing) => Next::Work(writing),
+                    None => Next::Stays,
+                }
             }
             NewWorkflowAsked::Writing { .. } => match stroke {
                 Stroke::Interrupt => Next::Leave,
@@ -101,19 +112,35 @@ impl NewWorkflowAsked {
             },
             NewWorkflowAsked::Written(_) => match stroke {
                 Stroke::Decline | Stroke::Enter => Next::Done,
-                Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
+                Stroke::Interrupt => Next::Leave,
                 _ => Next::Stays,
             },
         }
     }
 
-    /// Whether its name is being typed.
+    /// The work its screen says is under way: the workflow written and checked, until it is.
+    pub(super) fn shown_under_way(&self) -> Option<Operation> {
+        match self {
+            NewWorkflowAsked::Writing { name, shape } => {
+                let new = WorkflowOperation::New {
+                    name: name.clone(),
+                    shape: *shape,
+                };
+                Some(Operation::Workflow(new))
+            }
+            NewWorkflowAsked::Naming(_)
+            | NewWorkflowAsked::Shaping { .. }
+            | NewWorkflowAsked::Written(_) => None,
+        }
+    }
+
+    /// Whether every printable key types here: its name being typed, or the shapes being
+    /// narrowed by what is typed.
     pub(super) fn typing(&self) -> bool {
         match self {
             NewWorkflowAsked::Naming(line) => line.typing(),
-            NewWorkflowAsked::Shaping { .. }
-            | NewWorkflowAsked::Writing { .. }
-            | NewWorkflowAsked::Written(_) => false,
+            NewWorkflowAsked::Shaping { .. } => true,
+            NewWorkflowAsked::Writing { .. } | NewWorkflowAsked::Written(_) => false,
         }
     }
 

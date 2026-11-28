@@ -20,11 +20,8 @@ use yunta_core::reserved::ReservedOption;
 use yunta_core::{NodeId, OptionId};
 use yunta_replay::frame::Effect;
 
-use super::{
-    listed, to_what_needs_you, ANYTHING, BACK, LEAVE, MOVES, NEW_RUN, ONE_STEP_BACK, OPENS,
-    STARTS_A_RUN,
-};
-use crate::prompt::ESC;
+use super::{listed, GoingDown, FIELD, MOVES, NEW_RUN, ONE_STEP_BACK, OPENS, SCROLLS_THE_PANE};
+use crate::prompt::{ENTER, ESC};
 
 /// Where a run's receipt stands on the trail.
 pub const RECEIPT: &str = "receipt";
@@ -44,16 +41,11 @@ pub const VERIFYING: &str = "verifying the run's log and what it names";
 /// What stands while a run's page for a browser is written.
 pub const WRITING_THE_PAGE: &str = "writing the run's page for a browser";
 
-/// The keys of a page opened over a run, what it leaves or how it is drawn: back to
-/// the run.
-pub fn over_the_run_legend() -> Legend {
-    Legend::new().key(ESC, BACK)
-}
-
-/// The keys of a run's page written for a browser: opening it again, or back to the
-/// run.
-pub fn opened_legend() -> Legend {
-    Legend::new().key("enter", "open it again").key(ESC, BACK)
+/// The keys of a run's page written for a browser: opening it again, back to the run, and
+/// a new run where one can be asked for (`new_run`).
+pub fn opened_legend(new_run: bool) -> Legend {
+    let own = Legend::new().key(ENTER, "open it again");
+    super::page_legend(super::PageRead::Whole, own, new_run)
 }
 
 /// Where what a run cost stands on the trail.
@@ -75,17 +67,6 @@ pub fn place_of(subject: &str, page: &str) -> String {
     format!("{subject} {page}")
 }
 
-/// The keys of a page over a run standing in the run's frame, its numbers, its graph or its
-/// whole chronicle: the arrows where it `scrolls` by them, as the graph and the chronicle
-/// do, back to the run, and a new run.
-pub fn in_the_runs_frame_legend(scrolls: bool) -> Legend {
-    let legend = match scrolls {
-        true => Legend::new().arrows("scroll"),
-        false => Legend::new(),
-    };
-    legend.key(ESC, BACK).key("n", NEW_RUN)
-}
-
 /// What stands while what a run cost is read.
 pub const READING_THE_STATS: &str = "reading what the run cost";
 
@@ -94,6 +75,10 @@ pub const READING_THE_HISTORY: &str = "reading the workflow's past runs";
 
 /// What stands while a workflow is read to be drawn.
 pub const READING_THE_GRAPH: &str = "reading the workflow to draw it";
+
+/// What stands while the run whose graph is drawn is read, as the application follows it.
+/// Not [`READING_THE_GRAPH`], a workflow read as written, which a reading asked answers.
+pub const READING_THE_RUNS_GRAPH: &str = "reading the run to draw its graph";
 
 /// What stands while a run's whole chronicle is read.
 pub const READING_THE_CHRONICLE: &str = "reading the run's chronicle";
@@ -128,9 +113,6 @@ impl Leaving {
         }
     }
 }
-
-/// What `q` does on a run's screen, in a word: it goes to the field.
-const FIELD: &str = "field";
 
 /// What a scene of a run offers its legend: what `j k` move along, its own acts (each
 /// key with what it does, in the legend's words: [`in_the_legend`]), whether `n` starts
@@ -182,14 +164,13 @@ pub fn unread_run_legend() -> Legend {
 }
 
 /// What an act on a run says in a scene's legend: closing it and handing it back in a
-/// word or two, going on where it stopped as the field's glance says it to a person, any
-/// other act as every page says it.
+/// word or two, any other act as every page says it.
 pub fn in_the_legend(effect: Effect) -> &'static str {
     match effect {
         Effect::Closes => "close",
         Effect::HandsBackOnceSettled => "hand it back",
-        Effect::ContinuesWhereStopped => "continue it where it stopped",
-        Effect::ContinuesFromLog
+        Effect::ContinuesWhereStopped
+        | Effect::ContinuesFromLog
         | Effect::WaitsForReset
         | Effect::RetriesOnceTreeChanged
         | Effect::ReadsPlan
@@ -250,9 +231,11 @@ impl PromptKeys<'_> {
     }
 }
 
-/// Help over a run: the keys every screen answers to and the run's own, `tab` where `j k`
-/// move `along` the findings, then each of the scene's `acts` those rows do not say (each
-/// key with what it does), the ones its legend leaves out among them, then `q`, saying
+/// Help over a run: the keys every screen answers to and the run's own, a new run where the
+/// scene's `acts` hold one (none where a prompt stands, nor where no run can be asked for),
+/// `tab` where `j k` move `along` the findings, then each of the scene's `acts` those rows do
+/// not say (each key with what it does), the ones its legend leaves out among them, then `q`,
+/// saying
 /// whether the run keeps going as `leaving` says, and Ctrl-C. Under a prompt standing in
 /// place, its keys first, in its words, the run's rows for those keys gone, and every row a
 /// line typed there swallows (`PromptKeys`).
@@ -262,32 +245,52 @@ pub fn help_over_a_run(
     prompt: Option<PromptKeys<'_>>,
     leaving: Leaving,
 ) -> surco::doc::Doc {
-    let keys = Legend::new()
-        .key("/", ANYTHING)
-        .key("n", STARTS_A_RUN)
-        .key("j k", MOVES);
+    let keys = Legend::new().key("j k", MOVES);
     let keys = match along {
         Along::Nodes => keys,
         Along::Findings => keys.key("tab", "hand j k to the nodes and back"),
     };
     let mut keys = keys
-        .key("pgup pgdn", "scroll the pane a page at a time")
-        .key("enter", OPENS)
+        .key("pgup pgdn", SCROLLS_THE_PANE)
+        .key(ENTER, OPENS)
         .key(ESC, ONE_STEP_BACK)
-        .key("a", to_what_needs_you())
+        .key("a", surco::words::TO_WHAT_NEEDS_YOU)
         .key("f", "follow what the run is doing")
         .key("s g", "what it cost, its graph");
     for (key, does) in acts.iter().filter(|(key, _)| !HELPS_ROWS_SAY.contains(key)) {
         keys = keys.key(key.to_string(), *does);
     }
+    let field = GoingDown::ToTheField.said();
     let field = match leaving {
-        Leaving::KeepsGoing => "go to the field; it keeps going",
-        Leaving::Waits | Leaving::Ended => "go to the field",
+        Leaving::KeepsGoing => format!("{field}; it keeps going"),
+        Leaving::Waits | Leaving::Ended => field.to_string(),
     };
-    let keys = keys.key("q", field).key("ctrl-c", LEAVE);
+    let keys = super::StageKeys {
+        legend: &keys.key("q", field),
+        beyond: Legend::new(),
+        new_run: acts.iter().any(|(key, _)| *key == 'n'),
+        attends: false,
+        scrolls: false,
+        down: None,
+    }
+    .rows();
     listed(match prompt {
         Some(prompt) => prompt.over(keys),
         None => keys,
+    })
+}
+
+/// Help over a run's screen before the run is read, whose legend is `legend`: going to the
+/// field and the keys every screen answers to, a new run where one can be asked for
+/// (`new_run`), `esc` one step back as `q`, and what needs the person.
+pub fn help_over_an_unread_run(legend: &Legend, new_run: bool) -> surco::doc::Doc {
+    super::help(super::StageKeys {
+        legend,
+        beyond: Legend::new().key(ESC, ONE_STEP_BACK),
+        new_run,
+        attends: true,
+        scrolls: false,
+        down: None,
     })
 }
 

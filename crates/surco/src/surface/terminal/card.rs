@@ -358,8 +358,9 @@ fn saying(
 }
 
 /// `text` wrapped in `room` cells, its first row opened by `mark` in the mark's own
-/// tone and a space, and every later row under the width the mark takes.
-fn marked(mark: Mark, text: Line, room: usize, glyphs: Glyphs) -> Vec<Line> {
+/// tone and a space, and every later row under the width the mark takes: a card's refusal of
+/// the words typed on it, a form's refusal of what a row holds.
+pub(super) fn marked(mark: Mark, text: Line, room: usize, glyphs: Glyphs) -> Vec<Line> {
     text.wrap(room.saturating_sub(MARKED))
         .into_iter()
         .enumerate()

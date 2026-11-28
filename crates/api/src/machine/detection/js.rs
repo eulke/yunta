@@ -1,6 +1,6 @@
-//! JavaScript and TypeScript: the package manager a repository's
-//! lockfile names, and the scripts its `package.json` declares for each
-//! capability a workflow asks for.
+//! JavaScript and TypeScript: which of the two a repository is in, the
+//! package manager its lockfile names, and the scripts its `package.json`
+//! declares for each capability a workflow asks for.
 
 use std::path::Path;
 
@@ -46,7 +46,7 @@ pub(super) fn node(repo: &Path) -> Option<Found> {
         .map(|(_, text)| text.clone());
     Some(Found {
         ecosystem: Ecosystem {
-            name: "node",
+            language: language(repo),
             cache_tip: "share a package cache across worktrees: point the package manager's \
                         cache at a shared directory, or use one with content-addressed storage \
                         (pnpm).",
@@ -54,6 +54,15 @@ pub(super) fn node(repo: &Path) -> Option<Found> {
         commands: commands(&found),
         suite,
     })
+}
+
+/// The language a Node repository's code is in: TypeScript where a `tsconfig.json` at its
+/// root configures the compiler, JavaScript otherwise.
+fn language(repo: &Path) -> &'static str {
+    match repo.join("tsconfig.json").is_file() {
+        true => "typescript",
+        false => "javascript",
+    }
 }
 
 /// Whether a script does anything but fail: `npm init` writes a `test`

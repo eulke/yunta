@@ -1,7 +1,8 @@
 //! See [`super`]. What the run read whole waits on a person for, read once for each pause.
 //!
-//! What a run asks is keyed by the [`AnswerablePause`] it waits at: a decision, by the
-//! node or run `awaits_decision` names and the seq of the run's pause; a round of
+//! What a run asks is keyed by the [`AnswerablePause`] it waits at: a decision, by what
+//! the decision the run holds is on ([`FollowedRun::decision`]) and the seq of the run's
+//! pause; a round of
 //! questions, by its node and the seq of its `questions_asked`, which stays the same
 //! while the run parks again on the same round. A round whose answer the log holds asks no
 //! one: it waits on its resume, as a decision answered does, so its key goes with the
@@ -22,12 +23,13 @@
 //! nothing waits ahead of the events that say why, and an interface would let a prompt go
 //! with what was answered on it unsaid. A run that waits on none is handed `Awaited(None)`
 //! once. A read that fails, as a document a decision shows that fails today's shape, is
-//! handed as `AwaitedUnread` with its key and why, and the following goes on.
+//! handed as `AwaitedUnread` with its key and why, and the following goes on; so is a
+//! decision whose gate shows what the run does not hold, which the run's log says cannot be
+//! asked, with no read.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use yunta_core::events::DecisionOn;
@@ -147,14 +149,14 @@ impl Drop for Asking {
 
 impl Following {
     /// What the run held asks, worked out again once its head moved or another run is
-    /// held, its frame taken at `now`: a key new to the following read on a task of its
-    /// own, and `Awaited(None)` handed once the run waits on none after it was handed
-    /// something it waits on.
-    pub(super) fn ask(&mut self, now: DateTime<Utc>) {
+    /// held, from its frame there: a key new to the following read on a task of its own,
+    /// and `Awaited(None)` handed once the run waits on none after it was handed something
+    /// it waits on.
+    pub(super) fn ask(&mut self) {
         let at = self
             .held
             .as_ref()
-            .map(|held| (held.run.run.clone(), held.run.state.head()));
+            .map(|held| (held.run.run().clone(), held.run.state().head()));
         if at == self.asking.worked_out_at {
             return;
         }
@@ -165,8 +167,8 @@ impl Following {
         }
         self.asking.worked_out_at = at;
         let key = self.held.as_ref().and_then(|held| {
-            let on = asked_of(&held.run, now)?;
-            let run = held.run.run.clone();
+            let on = asked_of(&held.run)?;
+            let run = held.run.run().clone();
             Some(AnswerablePause { run, on })
         });
         if key == self.asking.key {
@@ -195,15 +197,26 @@ impl Following {
     }
 
     /// `key` read on a task of its own, from the run held as the following holds it, and
-    /// handed with what was read of it.
+    /// handed with what was read of it; a decision whose gate cannot put it, as the run's
+    /// log says, handed unread at once, with why.
     fn read_asked(&mut self, key: AnswerablePause) {
         let Some(held) = &self.held else {
             return;
         };
+        let unaskable = held
+            .run
+            .decision()
+            .and_then(|decision| decision.asks.as_ref().err());
+        if let (AskedOn::Decision { .. }, Some(unaskable)) = (&key.on, unaskable) {
+            let why = unaskable.to_string();
+            self.found(RunNews::AwaitedUnread { pause: key, why });
+            self.asking.waits = true;
+            return;
+        }
         let read = Read {
-            manifest: held.run.manifest.clone(),
+            manifest: held.run.manifest().clone(),
             dir: held.registry.run_dir().to_path_buf(),
-            state: held.run.state.clone(),
+            state: held.run.state().clone(),
             reader: Arc::clone(&self.reader),
         };
         let (turn, hand) = (self.asking.turn, self.asking.hand.clone());
@@ -254,21 +267,21 @@ impl Read {
     }
 }
 
-/// What `run` waits on a person for, by the pause it waits at, its frame taken at `now`:
-/// none while it is not parked on a person, as a round once its answer is on the log, which
-/// waits on its resume from then.
-fn asked_of(run: &FollowedRun, now: DateTime<Utc>) -> Option<AskedOn> {
-    let (_, paused_at) = run.state.run.paused()?;
-    let frame = run.frame(now);
+/// What `run` waits on a person for, by the pause its frame waits at: none while it is not
+/// parked on a person, as a round once its answer is on the log, which waits on its resume
+/// from then.
+fn asked_of(run: &FollowedRun) -> Option<AskedOn> {
+    let (_, paused_at) = run.state().run.paused()?;
+    let frame = run.frame();
     frame.phase.waiting_on()?;
-    if let Some(node) = waiting_round(&frame) {
-        let round = run.state.gates.get(node)?.rounds.last()?;
+    if let Some(node) = waiting_round(frame) {
+        let round = run.state().gates.get(node)?.rounds.last()?;
         if round.answered.is_some() {
             return None;
         }
         let (node, asked_at) = (node.clone(), round.asked_at);
         return Some(AskedOn::Round { node, asked_at });
     }
-    let on = yunta_engine::awaits_decision(&run.manifest, &run.state)?;
+    let on = run.decision()?.on.clone();
     Some(AskedOn::Decision { on, paused_at })
 }

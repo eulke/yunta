@@ -7,8 +7,8 @@ use crate::{Error, Stop, Workspace};
 /// Who git commits as in a repository, or that it can name no one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Committer {
-    /// Who git commits as.
-    Named(String),
+    /// Who git commits as: their name, and their address apart.
+    Named(yunta_engine::git::Identity),
     /// git names no one: what it said, whose last line is its reason.
     Unnamed { git_said: String },
 }

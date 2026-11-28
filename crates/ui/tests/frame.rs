@@ -5,7 +5,7 @@
 //! those answered here, never one asked at its own terminal, with no key where a line is
 //! typed and none at all where the decision stands in sight; the legend ends with the far
 //! keys where no line is typed; and the note stands in the attention row's place until the
-//! next key, through news. Each row is held to its target's, drawn at the design's widest
+//! next key, through news, what an act refused or failed on, a close's among them. Each row is held to its target's, drawn at the design's widest
 //! screen.
 
 use surco::components::{Attention, Screen};
@@ -215,6 +215,53 @@ fn refused_on(state: &mut State, stroke: Stroke, refused: Refused) {
         panic!("the key asks to resume the run: {asked:?}");
     };
     state.update(Input::Outcome(ticket, Outcome::Refused(refused)));
+}
+
+/// The close `x` asks for on `state`, once confirmed, answered `closing` in place of the work.
+fn closed_on(state: &mut State, closing: Outcome) {
+    state.update(Input::Stroke(Stroke::Insert('x')));
+    let asked = state.update(Input::Stroke(Stroke::Enter));
+    let Some(ticket) = asked.iter().find_map(|request| match request {
+        Request::Perform(ticket, Operation::Close { .. }) => Some(*ticket),
+        _ => None,
+    }) else {
+        panic!("the key asks to close the run once confirmed: {asked:?}");
+    };
+    state.update(Input::Outcome(ticket, closing));
+}
+
+/// A close refused or failed on the run's own screen is noted there, as a stop's is: why it
+/// refused, or what failed below Yunta.
+#[tokio::test]
+async fn a_close_refused_or_failed_on_the_runs_screen_is_noted_there() {
+    let stopped = run::opened("stopped").await;
+    let run = stopped
+        .state()
+        .followed()
+        .run
+        .expect("the run's screen follows its run");
+    let refused = Refused::Moving {
+        run,
+        pid: Pid::current(),
+    };
+    let said = refused.to_string();
+    let mut state = stopped.state().clone();
+    let refusing = Outcome::Closed {
+        closed: Vec::new(),
+        refused: vec![refused],
+        failed: None,
+    };
+    closed_on(&mut state, refusing);
+    assert_eq!(note(&state), Some((Mark::Done, said)));
+    let mut state = stopped.state().clone();
+    let failed = "the disk refused the close".to_string();
+    let failing = Outcome::Closed {
+        closed: Vec::new(),
+        refused: Vec::new(),
+        failed: Some(failed.clone()),
+    };
+    closed_on(&mut state, failing);
+    assert_eq!(note(&state), Some((Mark::Failed, failed)));
 }
 
 #[tokio::test]

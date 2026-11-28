@@ -18,4 +18,4 @@ read    crates/cli/src/cli/pack.rs
 ␛[1mread    crates/engine/src/catalog.rs␛[0m
 
 ␛[2mnext␛[0m
-  ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m
+  ␛[1myunta status Q78GRR␛[0m   ␛[2mwhere the run stands␛[0m

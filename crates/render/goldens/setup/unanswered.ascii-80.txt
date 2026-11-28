@@ -1,12 +1,13 @@
-. yunta init ; to write ; in /home/me/project
-................................................................................
+This repository has never used yunta. Here is what it found. Nothing is written
+until you say so.
 
-  name         project
-  base branch  main
-  writes       .yunta/config.yaml, .gitignore, .claude/skills/yunta/SKILL.md
-  ecosystem    none known (looked for Cargo.toml, package.json, go.mod,
-               pyproject.toml); declare `commands:` and `baseline.suite` by hand
+what this repository is
+  + name         project
+  + base         main
+  + commits as   Marta Ruiz
 
-  ^ claude-code  unavailable (not on PATH)
+who does the work
+  ^ implementer  no adapter CLI answered on this machine (this build knows
+                 `claude-code`, `codex`)
 
-  runners      `implementer`
+   write .yunta/config.yaml  ; then yunta asks what to build

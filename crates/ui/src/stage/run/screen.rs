@@ -15,7 +15,7 @@ use surco::line::{Line, Tone};
 use surco::look::Look;
 use yunta_core::NodeId;
 use yunta_render::watched;
-use yunta_replay::frame::RunFrame;
+use yunta_replay::frame::{RunFrame, RunTimes};
 
 use super::{Framed, RunStage, Scene};
 use crate::FollowedRuns;
@@ -24,7 +24,8 @@ impl RunStage {
     /// The run `followed` keeps as a screen at `now`: its headline, ribbon and gist across
     /// it, its nodes beside its pane, the pane its scene composes, what it has spent under
     /// them, but where its scene heads itself, in its frame, a line typed in what stands over
-    /// it where `typed`.
+    /// it where `typed`. A look that failed is said in the pane, and before the run is read,
+    /// why it cannot be read, where it cannot.
     pub(crate) fn screen(
         &self,
         look: &Look,
@@ -33,7 +34,11 @@ impl RunStage {
         typed: bool,
     ) -> Screen {
         let framed = self.framed(followed, now);
-        let read = self.read(framed.as_ref(), followed.look_failed.as_ref(), look);
+        let unreadable = (followed.in_view_unreadable.as_ref())
+            .filter(|why| why.run_id == self.run)
+            .map(|why| why.problem.to_string());
+        let failed = followed.look_failed.clone().or(unreadable);
+        let read = self.read(framed.as_ref(), failed.as_ref(), look);
         let sight = self.pane_in(framed.as_ref()).sight();
         let mut screen = Screen::new(read.in_sight(sight));
         let pointed = framed.as_ref().and_then(|framed| self.pointed_in(framed));
@@ -53,14 +58,14 @@ impl RunStage {
         screen.about = across_it.map(|framed| {
             let gist = self.receipt_gist(framed);
             let gist = gist.map(|gist| Line::new().push(Tone::Muted, gist));
-            across(&framed.frame, gist, look)
+            across(framed.frame, &framed.times, gist, look)
         });
         let lists_its_nodes = scene.as_ref().is_none_or(Scene::lists_its_nodes);
         screen.side = framed
             .as_ref()
             .filter(|_| lists_its_nodes)
             .map(|framed| self.nodes_beside(framed, pointed.as_ref(), look));
-        screen.meter = across_it.map(|framed| watched::spent(&framed.frame));
+        screen.meter = across_it.map(|framed| watched::spent(framed.frame, &framed.times));
         self.in_its_frame(&mut screen, framed.as_ref(), followed, typed, look, now);
         screen
     }
@@ -69,25 +74,35 @@ impl RunStage {
     /// pointer kept in sight, drawn in `look`.
     fn nodes_beside(&self, framed: &Framed<'_>, pointed: Option<&NodeId>, look: &Look) -> Side {
         let run = &framed.in_view.run;
-        let workflow = &run.manifest.workflow;
+        let workflow = &run.manifest().workflow;
         let leads = self.leads();
-        let nodes = watched::nodes(&framed.frame, workflow, &run.state, pointed, leads, look);
+        let times = &framed.times;
+        let state = run.state();
+        let nodes = watched::nodes(framed.frame, times, workflow, state, pointed, leads, look);
         Side {
             region: Region::new(Doc::new().with(Block::Rows(nodes)))
                 .in_sight(Sight::following_pointer()),
             at: SideAt::Left,
             focused: true,
+            instead: Vec::new(),
         }
     }
 }
 
-/// What stands across the screen of the run `frame`: its headline, its ribbon with each
-/// stretch named, and `gist`, the gist its scene says, else the run's, a row of its own
-/// however long, blank where the run's word says it all.
-pub(in crate::stage) fn across(frame: &RunFrame, gist: Option<Line>, look: &Look) -> Doc {
-    let gist = gist.or_else(|| watched::gist(frame)).unwrap_or_default();
+/// What stands across the screen of the run `frame`, its times as `times` measures them:
+/// its headline, its ribbon with each stretch named, and `gist`, the gist its scene says,
+/// else the run's, a row of its own however long, blank where the run's word says it all.
+pub(in crate::stage) fn across(
+    frame: &RunFrame,
+    times: &RunTimes,
+    gist: Option<Line>,
+    look: &Look,
+) -> Doc {
+    let gist = gist
+        .or_else(|| watched::gist(frame, times))
+        .unwrap_or_default();
     Doc::new()
-        .with(watched::headline(frame))
+        .with(watched::headline(frame, times))
         .with(watched::ribbon(frame, look.motion))
         .with(Block::Rows(vec![gist]))
 }

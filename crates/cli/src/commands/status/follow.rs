@@ -15,7 +15,8 @@
 //!
 //! A follower only reads: it takes no lock, writes no event, writes no registry and
 //! never signals the engine. A run that is not moving has nothing to follow, so it gets
-//! the page `yunta status` prints and the code its stop gives; but one that closed
+//! the page `yunta status` prints and the code its stop gives, as one the following cannot
+//! read whole does, which that page refuses with why; but one that closed
 //! promoted before it is followed is followed on to its successor, read whole, once the
 //! following hands one, and where none comes in the time one takes to be created since
 //! the close, nothing moved while it was followed, and its page is what is printed.
@@ -47,7 +48,7 @@ pub(crate) async fn follow(
     };
     let mut following = project.follow(followed).await?;
     let stop = shell.stop();
-    match start(&mut following, &stop, &project).await {
+    match start(&mut following, &stop, run_id).await {
         Ok(Start::Moving(run, events)) => {
             let reading = (&project, look);
             moving(&mut following, &stop, *run, events, reading).await
@@ -68,20 +69,19 @@ async fn moving(
     events: Vec<StoredEvent>,
     (project, look): (&Project, &Look),
 ) -> Result<Outcome, CliError> {
-    let run_id = &kept.run.clone();
+    let run_id = &kept.run().clone();
     let clock = std::sync::Arc::clone(&project.workspace.clock);
-    let frame = kept.frame(clock.now());
+    let frame = kept.frame();
     let started = events.first().map(|event| event.timestamp);
     let prior = project
-        .prior_estimation(&kept.manifest, &frame.mode, started)
+        .prior_estimation(kept.manifest(), &frame.mode, started)
         .await;
     let log = project.event_log().await?;
     let registry = project.run(run_id).await?.registry();
     let surface = Surface::open(
         SurfaceEnv {
             run_id,
-            manifest: &kept.manifest,
-            prior: prior.as_ref(),
+            manifest: kept.manifest(),
             log: &log,
             clock: std::sync::Arc::clone(&clock),
             delivery: Delivery::choose(false, TerminalEnv::settled()),
@@ -90,14 +90,12 @@ async fn moving(
         },
         events,
     );
-    let drawn = drawn(following, &mut kept, stop, &surface, (project, look)).await;
+    let drawn = drawn(following, &mut kept, stop, &surface, look).await;
     surface.close().await;
     match drawn {
         // What drove the run is gone, so no block closes it out: the page says
         // what holds it.
-        Ok(()) if kept.frame(clock.now()).standing == Standing::Stalled => {
-            page(project, run_id, look).await
-        }
+        Ok(()) if kept.frame().standing == Standing::Stalled => page(project, run_id, look).await,
         Ok(()) => closing(&kept, prior.as_ref(), project, look).await,
         Err(yunta_api::Error::Stopped) => Ok(left_running(run_id, look)),
         Err(error) => Err(error.into()),
@@ -120,18 +118,21 @@ enum Start {
     Still(RunId),
 }
 
-/// Where a follower of `following` starts, at `project`'s clock: the run read whole,
-/// where it moves; else, where it closed promoted, its successor read whole once one is
-/// handed, on along the chain; else the run that stands still.
+/// Where a follower of `following`, which follows `run_id`, starts: the run read whole, where
+/// it moves; else, where it closed promoted, its successor read whole once one is handed, on
+/// along the chain; else the run that stands still, as one that cannot be read whole does,
+/// whose page says why.
 async fn start(
     following: &mut Following,
     stop: &Stop,
-    project: &Project,
+    run_id: &RunId,
 ) -> Result<Start, yunta_api::Error> {
-    let (mut run, mut events) = read_whole(following, stop).await?;
-    while !run.frame(project.workspace.clock.now()).moves() {
+    let Some((mut run, mut events)) = read_whole(following, stop).await? else {
+        return Ok(Start::Still(run_id.clone()));
+    };
+    while !run.frame().moves() {
         let Some(successor) = handed_on(following, stop).await? else {
-            return Ok(Start::Still(run.run));
+            return Ok(Start::Still(run.run().clone()));
         };
         (run, events) = successor;
     }
@@ -139,15 +140,18 @@ async fn start(
 }
 
 /// The run `following` hands first, read whole, and every event of its log from its
-/// first.
+/// first; none where it cannot be read whole.
 async fn read_whole(
     following: &mut Following,
     stop: &Stop,
-) -> Result<(FollowedRun, Vec<StoredEvent>), yunta_api::Error> {
+) -> Result<Option<(FollowedRun, Vec<StoredEvent>)>, yunta_api::Error> {
     loop {
-        // A following hands the run it was asked for read whole before anything of it.
-        if let FollowNews::Whole { run, events } = following.next(stop).await? {
-            return Ok((*run, events));
+        // A following hands the run it was asked for read whole, or that it cannot be,
+        // before anything of it.
+        match following.next(stop).await? {
+            FollowNews::Whole { run, events } => return Ok(Some((*run, events))),
+            FollowNews::WholeUnreadable(_) => return Ok(None),
+            _ => {}
         }
     }
 }
@@ -178,9 +182,8 @@ fn left_running(run_id: &RunId, look: &Look) -> Outcome {
     crate::output::Outcome::interrupted()
 }
 
-/// Hands `surface` each news of `following` until the run's frame, as `kept` reads it
-/// at `project`'s clock with each batch folded in, no longer moves and the following
-/// awaits no successor: the events, and what was said through its observer, the same
+/// Hands `surface` each news of `following` until the run's frame, as `kept` keeps it
+/// with each batch folded in, no longer moves and the following awaits no successor: the events, and what was said through its observer, the same
 /// door the engine of `yunta run`'s own process hands it through, so the region does not
 /// know which feed a frame came by. A successor's log moves the region onto it. Where
 /// the engine stands the surface reads from the registry itself. What reading a run
@@ -191,9 +194,9 @@ async fn drawn(
     kept: &mut FollowedRun,
     stop: &Stop,
     surface: &Surface,
-    (project, look): (&Project, &Look),
+    look: &Look,
 ) -> Result<(), yunta_api::Error> {
-    while following.awaits_successor() || kept.frame(project.workspace.clock.now()).moves() {
+    while following.awaits_successor() || kept.frame().moves() {
         // Only the run asked for is followed, so every piece of news is of the run kept.
         let FollowNews::Run { news, .. } = following.next(stop).await? else {
             continue;
@@ -231,10 +234,10 @@ async fn closing(
     project: &Project,
     look: &Look,
 ) -> Result<Outcome, CliError> {
-    let (run_id, manifest) = (&followed.run, &followed.manifest);
+    let (run_id, manifest) = (followed.run(), followed.manifest());
     let run_dir = project.run(run_id).await?.dir;
     let bound = followed
-        .state
+        .state()
         .run
         .checkout()
         .map(std::path::Path::to_path_buf);

@@ -78,6 +78,14 @@ pub struct TypedRow {
     pub after: String,
 }
 
+impl TypedRow {
+    /// Whether nothing is typed on the row, before the cursor or after it: where what is
+    /// asked of the words, or a placeholder, stands in their place.
+    pub fn is_empty(&self) -> bool {
+        self.before.is_empty() && self.after.is_empty()
+    }
+}
+
 /// One question of a round.
 pub struct RoundRow {
     /// What it asks.

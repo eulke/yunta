@@ -47,7 +47,7 @@
     ␛[2mfix␛[0m        declare a runner in .yunta/config.yaml:
                  runners:
                    implementer:
-                     - { adapter: claude-code, model: <model> }
+                     - { adapter: claude-code }
 
   outside the declared globs:
     src/main.rs
@@ -109,8 +109,8 @@
   ␛[2m◌␛[0m ␛[2mnever ran␛[0m └─ conform
   ␛[2m◌␛[0m ␛[2mnever ran␛[0m lint ↺ fix-lint  ␛[2msends a failure back at most once␛[0m
 
-  ␛[1;35m◆␛[0m ␛[1mEKPBGE␛[0m  ␛[2mfragua (standard)␛[0m  ␛[32m━␛[0m␛[32m━━␛[0m␛[32m━␛[0m␛[32m━␛[0m␛[32m━━␛[0m␛[1;35m━␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m  implement asks at its ter…                  ␛[2m32m␛[0m
-  ␛[2m■␛[0m ␛[1m60Y934␛[0m  ␛[2mfragua (quick)   ␛[0m  ␛[32m━━━␛[0m␛[32m━━━␛[0m␛[2m━━━␛[0m␛[2m┄┄␛[0m␛[2m┄┄┄␛[0m␛[2m┄┄┄␛[0m␛[2m┄┄┄␛[0m  stopped while it ran        ␛[1myunta resume 60Y934␛[0m
+  ␛[1;35m◆␛[0m ␛[1mEKPBGE␛[0m ␛[2mfragua (standard) ␛[0m ␛[32m━␛[0m␛[32m━␛[0m␛[32m━␛[0m␛[32m━␛[0m␛[32m━␛[0m␛[1;35m━␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m implement asks at its terminal                    ␛[2m32m␛[0m
+  ␛[2m■␛[0m ␛[1m60Y934␛[0m ␛[2mfragua (quick)    ␛[0m ␛[32m━␛[0m ␛[32m━␛[0m ␛[2m━␛[0m ␛[2m┄┄␛[0m ␛[2m┄␛[0m ␛[2m┄␛[0m ␛[2m┄␛[0m   stopped while it ran              ␛[1myunta resume 60Y934␛[0m
 
   crates/cli/src/pack.rs  ␛[32m+142␛[0m ␛[31m−38␛[0m  ␛[32m███████████████␛[0m␛[31m████␛[0m
   docs/notes.md           ␛[32m +38␛[0m ␛[31m   ␛[0m  ␛[32m████␛[0m
@@ -141,6 +141,10 @@
   ␛[2mthe run holds its own state on disk.␛[0m
 
   ␛[2mtokens      ␛[0m 20.2k spent
+
+  ␛[2mtokens per run␛[0m                         2.00M
+  ␛[2mspent␛[0m                                  1.94M
+  it wants more to review what it built
 
 ␛[2mnext␛[0m
   ␛[1myunta status 7E5PH4␛[0m   ␛[2mwhere it stands␛[0m
@@ -191,10 +195,56 @@
  ␛[1;35m◆␛[0m ␛[1mPlan registered. Approve?␛[0m
  ␛[1m1␛[0m approve   ␛[1m2␛[0m adjust   ␛[1m3␛[0m abort                     ␛[1mtab␛[0m␛[2m next place␛[0m␛[2m · ␛[0m␛[1mp␛[0m␛[2m proof␛[0m␛[2m · ␛[0m␛[1mesc␛[0m␛[2m leave it waiting␛[0m
 
-␛[1mproject name␛[0m␛[2m (enter keeps `yunta`)␛[0m
+␛[1mWhat do you want to build?␛[0m
 ␛[2m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮␛[0m
-␛[2m│␛[0m ␛[1myunta-tui␛[0m                                                                                        ␛[2m│␛[0m
+␛[2m│␛[0m ␛[2madd support for installing a pack globally␛[0m                                                       ␛[2m│␛[0m
 ␛[2m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯␛[0m
+␛[2mthis becomes the brief; fragua asks before it decides for you␛[0m
+
+   ␛[2mquick␛[0m ␛[1;35m▸␛[0m ␛[1mstandard␛[0m   ␛[2mfull␛[0m
+
+␛[1mWhat do you want to build?␛[0m
+␛[2m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[1madd support␛[0m                                                                                      ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯␛[0m
+␛[2mthis becomes the brief; fragua asks only what it cannot decide for you␛[0m
+
+␛[2mworkflow␛[0m
+␛[1;35m▸␛[0m ␛[1myunta/fragua   ␛[0mthe full cycle: questions, plan, tests, work, review, PR
+  lint-fix       lint and format, with one fix round
+  run-tasks      a tasks document you wrote by hand
+
+␛[2mmode␛[0m
+ ␛[2m▸␛[0m ␛[1mquick␛[0m   ␛[2mstandard␛[0m   ␛[2mfull␛[0m
+
+␛[2madapter␛[0m
+ ␛[2m▸␛[0m ␛[1mas the runners in config.yaml say␛[0m   ␛[2mclaude-code␛[0m   ␛[2mcodex␛[0m
+
+␛[2mwhat runs␛[0m
+  ␛[2m┄␛[0m ␛[2m┄┄␛[0m ␛[2m╌␛[0m ␛[2m┄␛[0m
+  grill plan ship
+  it stops for you at ship
+
+␛[2mThis repository has never used yunta. Nothing is written until you say so.␛[0m
+
+␛[2mwhat this repository is␛[0m
+  ␛[32m✓␛[0m ␛[1mname␛[0m        yunta
+  ␛[32m✓␛[0m ␛[1mlanguage␛[0m    rust
+  ␛[32m✓␛[0m ␛[1msuite␛[0m       cargo test
+
+␛[2mwho does the work␛[0m
+  ␛[32m✓␛[0m ␛[1mplanner␛[0m     claude-code
+␛[1m▸␛[0m ␛[32m✓␛[0m ␛[1mexecutor␛[0m  ␛[1;35m▸␛[0m ␛[1mclaude-code␛[0m   ␛[2mcodex␛[0m
+                ␛[2m╭ model ───────────╮␛[0m
+                ␛[2m│␛[0m                  ␛[2m│␛[0m
+                ␛[2m╰──────────────────╯␛[0m
+                ␛[2menter with none leaves it to the adapter␛[0m
+  ␛[32m✓␛[0m ␛[1mmechanical␛[0m  claude-code
+
+ write .yunta/config.yaml
+
+␛[2myunta pack add https://github.com/eulke/yunta//packs/fragua@v0.0.5␛[0m
+␛[2myunta init␛[0m
 
  ␛[2m▸␛[0m ␛[1mn␛[0m
 
@@ -246,6 +296,19 @@ edit    crates/cli/src/cli/dispatch.rs
 ␛[2m… 4 under␛[0m
 
 967k tokens ␛[36m▃▂█▁▁▁▁▁▁▁▁▁▁▁▁␛[0m␛[2m · ␛[0m2m34s␛[2m at work␛[0m␛[2m · ␛[0m␛[1;35m5m00s␛[0m␛[2m waiting on you␛[0m
+
+  ␛[2mprogress    ␛[0m 12 of 15 nodes done, 1 reroute
+  ␛[2mtokens      ␛[0m 26.1M in / 1.06M out (25M cached)
+  ␛[2mtime        ␛[0m 1h12m at work, 38m51s waiting on you
+  ␛[2mslowest     ␛[0m implement 41m05s, spec 13m53s, plan 6m25s
+  ␛[2mbranch      ␛[0m yunta/run/...Q78GRR off main
+
+␛[2mwhat you can do␛[0m
+␛[1mc      ␛[0mstop it and everything under it
+␛[1ms      ␛[0mwhat it cost
+
+                                        ␛[1m█ █ █ █ █▄ █ ▀█▀ ▄▀█␛[0m
+                                        ␛[1m █  █▄█ █ ▀█  █  █▀█␛[0m
 
     ␛[32m⢀⣀⣀⣀⣀⣀⣀⣀⣀⣤⣤⣤⣤⣤⣤⣤⣤⣴⣶⣶⣶⣶⣶⣶⡶⢶⣿⣿⣿⡿⢿⣿⣿⡿⠿⠿⣟⣛⠿⠯⠛⣒⠭⠒⠁ ⡇⠈⠒⠭⣒⠛⠽⠿⣛⣻⠿⠿⢿⣿⣿⡿⢿⣿⣿⣿⡶⢶⣶⣶⣶⣶⣶⣶⣦⣤⣤⣤⣤⣤⣤⣤⣤⣀⣀⣀⣀⣀⣀⣀⣀⡀␛[0m
 ␛[32m⣿⣿⣿⣿⣿⣿⣿⣿⠿⠿⠿⠿⠿⠛⣛⣛⣛⣛⠭⠭⠭⠭⠛⣓⣒⣊⠭⠭⠭⠓⠒⠊⣉⣉⠥⠤⠒⠒⠉⠉ ⣀⠤⠒⠉     ⡇    ⠉⠒⠤⣀ ⠉⠉⠒⠒⠤⠬⣉⣉⠑⠒⠚⠫⠭⠭⣑⣒⣚⠛⠫⠭⠭⠭⣛⣛⣛⣛⠛⠿⠿⠿⠿⠿⣿⣿⣿⣿⣿⣿⣿⣿␛[0m

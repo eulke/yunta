@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::time::Instant;
+use yunta_core::disk::SystemDisk;
 use yunta_core::events::{
     EventDraft, EventPayload, GateEvent, HostSuspendedPayload, RunCreatedPayload, RunEvent,
     RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
@@ -48,6 +49,7 @@ fn project_of(bench: &Bench) -> Project {
             secrets: Arc::new(ProcessSecrets),
             forges: Arc::new(crate::DeclaredForge),
             binary: PathBuf::from("yunta"),
+            disk: Arc::new(SystemDisk),
         },
     }
 }
@@ -229,7 +231,7 @@ async fn a_round_read_again_as_its_answer_lands_is_read_at_the_head_held() {
     let recorded = bench.answer_round("ask", &[("summary", "the greeting")]);
     recorded.await.expect("the answer is recorded");
     following.asking.forget();
-    following.ask(project.workspace.clock.now());
+    following.ask();
     let again = read_of_what_it_asks(&mut following).await;
     let [FollowNews::Run {
         news: RunNews::Awaited(Some((read_at, _))),
@@ -393,7 +395,7 @@ async fn none_come_is_final() {
     let late = born_promoted_from(&bench, &run, "late").await;
     following.look(&Stop::new()).await.unwrap();
     let handed: Vec<FollowNews> = following.news.drain(..).collect();
-    let joined = |news: &FollowNews| matches!(news, FollowNews::Joined(it) if it.run == late);
+    let joined = |news: &FollowNews| matches!(news, FollowNews::Joined(it) if *it.run() == late);
     assert!(handed.iter().any(joined), "it joins the field: {handed:?}");
     let handed_on = holds(&handed, |news| matches!(news, RunNews::Successor { .. }));
     assert!(!handed_on, "no successor after none came: {handed:?}");

@@ -3,6 +3,7 @@
 //! workflow's past runs say, as `yunta stats --workflow` does ([`History`]), with
 //! what its history says of how effective its checks were.
 
+mod barred;
 mod facts;
 mod history;
 mod run;

@@ -6,7 +6,7 @@ use surco::motion::Motion;
 use surco::words::Standing;
 use yunta_core::events::{Failure, NodeState, TokenUsage};
 use yunta_core::{NodeId, OptionId};
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase};
+use yunta_replay::frame::{NodeFrame, NodeStanding, NodeTimes, RunFrame, RunPhase, RunTimes};
 use yunta_replay::RunState;
 
 use super::nodes;
@@ -15,10 +15,11 @@ use crate::watched::tests::{ascii, designed_at, designed_parked, drawn, fragua, 
 /// The design's run cut at `seq`, its nodes as a run that leads draws them in `look`, the
 /// pointer on `pointed`.
 fn designed_rows(seq: u64, pointed: Option<&str>, look: &Look) -> Vec<String> {
-    let (frame, workflow, state) = designed_at(seq);
+    let (frame, times, workflow, state) = designed_at(seq);
     let pointed = pointed.map(NodeId::from);
     drawn(nodes(
         &frame,
+        &times,
         &workflow,
         &state,
         pointed.as_ref(),
@@ -83,6 +84,32 @@ fn the_reviewers_keep_their_names_whole_in_the_column() {
     );
 }
 
+/// What the clock adds to `frame`, each of its nodes having worked `elapsed`.
+fn worked(frame: &RunFrame, elapsed: Duration) -> RunTimes {
+    let times = NodeTimes {
+        elapsed: Some(elapsed),
+        ..NodeTimes::sample()
+    };
+    let nodes = frame.nodes.iter().map(|node| (node.id.clone(), times));
+    RunTimes {
+        nodes: nodes.collect(),
+        ..RunTimes::sample(frame)
+    }
+}
+
+/// The rows of fragua's run `frame`, its nodes having worked `elapsed`, `pointed` pointed
+/// at, the run leading where `leads`, drawn in `look`.
+fn listed(
+    frame: &RunFrame,
+    elapsed: Duration,
+    pointed: Option<&NodeId>,
+    leads: bool,
+    look: &Look,
+) -> Vec<surco::line::Line> {
+    let (times, state) = (worked(frame, elapsed), RunState::default());
+    nodes(frame, &times, &fragua(), &state, pointed, leads, look)
+}
+
 /// A node at work under the pointer, and one a person's choice at its gate sent the run back
 /// from, while the person leads: the pointed row filled with the selection, the one sent back
 /// marked rerouted, and under the nodes a blank row, then the key that gives the lead back.
@@ -103,7 +130,6 @@ fn while_the_person_leads_the_nodes_say_how_to_give_the_lead_back() {
     let approve = NodeId::from("approve-plan");
     let mut sent_back = NodeFrame::sample(&approve, NodeStanding::Reached(failed));
     sent_back.standing = Standing::Failed;
-    sent_back.elapsed = Some(Duration::ZERO);
     let frame = RunFrame {
         phase: RunPhase::Running,
         standing: Standing::Running,
@@ -111,8 +137,7 @@ fn while_the_person_leads_the_nodes_say_how_to_give_the_lead_back() {
         ..RunFrame::sample(&RUN)
     };
     let pointed = NodeId::from("plan");
-    let state = RunState::default();
-    let rows = nodes(&frame, &fragua(), &state, Some(&pointed), false, &look(31));
+    let rows = listed(&frame, Duration::ZERO, Some(&pointed), false, &look(31));
     assert_eq!(
         drawn(rows.clone()),
         [
@@ -134,7 +159,6 @@ fn a_node_says_how_long_it_took_once_done_and_turns_only_while_the_run_moves() {
     let done = |id: &'static str, standing: Standing| {
         let mut node = NodeFrame::sample(&NodeId::from_static(id), NodeStanding::ToGo);
         node.standing = standing;
-        node.elapsed = Some(Duration::from_secs(45));
         node
     };
     let stalled = RunFrame {
@@ -148,8 +172,8 @@ fn a_node_says_how_long_it_took_once_done_and_turns_only_while_the_run_moves() {
         ],
         ..RunFrame::sample(&RUN)
     };
-    let state = RunState::default();
-    let rows = drawn(nodes(&stalled, &fragua(), &state, None, true, &look(31)));
+    let took = Duration::from_secs(45);
+    let rows = drawn(listed(&stalled, took, None, true, &look(31)));
     assert_eq!(
         rows,
         [
@@ -167,7 +191,7 @@ fn a_node_says_how_long_it_took_once_done_and_turns_only_while_the_run_moves() {
         motion: Motion::Still,
         ..look(31)
     };
-    let rows = drawn(nodes(&moving, &fragua(), &state, None, true, &still));
+    let rows = drawn(listed(&moving, took, None, true, &still));
     assert_eq!(rows[3], "  ● tests");
 }
 
@@ -178,8 +202,16 @@ fn a_node_says_how_long_it_took_once_done_and_turns_only_while_the_run_moves() {
 #[test]
 fn the_node_the_run_waits_on_a_person_at_draws_needs_you() {
     let rows = |seq| {
-        let (frame, workflow, state) = designed_parked(seq);
-        drawn(nodes(&frame, &workflow, &state, None, true, &look(31)))
+        let (frame, times, workflow, state) = designed_parked(seq);
+        drawn(nodes(
+            &frame,
+            &times,
+            &workflow,
+            &state,
+            None,
+            true,
+            &look(31),
+        ))
     };
     let scope = rows(118);
     assert_eq!(

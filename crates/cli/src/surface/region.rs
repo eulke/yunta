@@ -34,7 +34,7 @@ use surco::surface::Terminal;
 use yunta_core::port::Said;
 use yunta_core::RunId;
 use yunta_render::watched::{self, Heard};
-use yunta_replay::frame::RunFrame;
+use yunta_replay::frame::{RunFrame, RunTimes};
 
 use super::scrollback::Scrollback;
 use super::Screen;
@@ -137,18 +137,24 @@ impl Region {
         self.heard.hear(said);
     }
 
-    /// Redraws the region from `frame`, sending up the nodes that stopped
-    /// working since the last redraw.
+    /// Redraws the region from `frame`, its times as `times` measures them,
+    /// sending up the nodes that stopped working since the last redraw.
     ///
     /// `answerable` says whether the run stopped on a menu of its own —
     /// which decides the command the attention row offers, and which
     /// only the run's frozen manifest can answer. When the engine asks at
     /// its own terminal, as a process that follows the run reads it off the
     /// registry, the row says so instead.
-    pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
+    pub(super) fn show(
+        &mut self,
+        frame: &RunFrame,
+        times: &RunTimes,
+        run_id: &RunId,
+        answerable: bool,
+    ) {
         self.heard.kept_to(frame, run_id);
         let look = self.look();
-        let rows = watched::rows(frame, run_id, answerable, &self.heard, &look);
+        let rows = watched::rows(frame, times, run_id, answerable, &self.heard, &look);
         let attention = rows.attention.map(|line| self.fit(&line));
         self.attend(attention);
         let nodes: Vec<String> = rows.nodes.iter().map(|row| self.fit(row)).collect();
@@ -156,9 +162,9 @@ impl Region {
         for (bar, text) in self.body.iter().zip(nodes) {
             bar.set_message(text);
         }
-        let gist = watched::gist(frame).map(|line| self.fit(&line));
+        let gist = watched::gist(frame, times).map(|line| self.fit(&line));
         self.sum_up(gist);
-        let meter = Terminal::on(look).meter(&watched::spent(frame));
+        let meter = Terminal::on(look).meter(&watched::spent(frame, times));
         self.meter.set_message(self.fit(&meter));
     }
 

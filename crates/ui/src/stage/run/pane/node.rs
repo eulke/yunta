@@ -32,10 +32,13 @@ impl RunStage {
         look_failed: Option<&String>,
         look: &Look,
     ) -> Region {
-        let frame = &framed.frame;
+        let frame = framed.frame;
         let waited_at = frame.waits_on_a_person_at() == Some(pointed);
         let node = frame.nodes.iter().find(|node| node.id == *pointed);
-        let stands = node.map(|node| HowItStands::of(node, &frame.mode, waited_at));
+        let stands = node.map(|node| {
+            let times = framed.times.node(&node.id);
+            HowItStands::of(node, &times, &frame.mode, waited_at)
+        });
         let failed = || look_failed.map(|failed| Block::from(Note(failed.clone())));
         let least = stands.iter().flat_map(HowItStands::least);
         let abridged = vec![least.chain(failed()).collect()];

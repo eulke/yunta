@@ -1,0 +1,24 @@
+ yunta › Q78GRR receipt                             ◆ 1 needs you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ✓ receipt of fragua (standard) · finished                               Q78GRR
+
+   run          01M7DES1GNED00000000Q78GRR
+
+   ✓ criteria     1 of 1 green, red before the work · 2 guards green
+   ✓ baseline     cargo test --workspace still passes · 0 regressions across 1
+                  comparison (suite `cargo test --workspace`, hash
+                  `4b6ca1e5108d`)
+   ✓ scope        7 files, 2 of them granted by you · none outside it
+   ✓ review       4 findings, 4 answered · by 2 independent runners via
+                  `review` (mock, mock)
+   ✓ event chain  intact · 276 events, hash-linked, replayable
+
+   cost         27.1M tokens per verified task, 1 reroute · 27.1M tokens (26.1M
+                in / 1.06M out (25M cached))
+   changed      7 files, +65 −24
+   pull request #31: https://github.com/eulke/yunta/pull/31
+
+ criteria
+ … 3 more lines
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused…  · a go there
+ esc back · n new run · ? keys

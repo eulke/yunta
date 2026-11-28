@@ -25,16 +25,16 @@
 //! never signals the engine. It owns what it reads, so a task drawing the run holds its
 //! own.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use yunta_core::pace::Pace;
 use yunta_core::{Clock, RunId};
 use yunta_engine::said::Heard;
+use yunta_render::page::UnreadableRun;
 use yunta_replay::frame::{RunFrame, RunPhase};
 use yunta_replay::registry::Engine;
 use yunta_storage::LogReader;
@@ -44,7 +44,7 @@ use super::field::HeldField;
 use super::listening::Listening;
 use super::successor::SuccessorWait;
 use super::{document::Handing, FollowNews, Followed, FollowedRun, RunNews, RunRegistry};
-use crate::{Error, Failure, OpenedRun, Project, Stop};
+use crate::{Error, Failure, Project, Stop};
 
 /// How often a following reads the run's registry while the run's log says it moves or
 /// asks a person. Once a second tells a gone engine within the two seconds a stall is
@@ -71,6 +71,10 @@ pub struct Following {
     pub(super) followed: Followed,
     /// The run followed, as far as it has been read; none until it is read whole.
     pub(super) held: Option<Held>,
+    /// The run followed as its last reading whole found it, where it could not be read,
+    /// with why: read whole again after the next commit, and said again only where why
+    /// changed.
+    unread: Option<UnreadableRun>,
     /// The field followed, as far as each run of it has been read; none until it is
     /// read whole.
     pub(super) field: Option<HeldField>,
@@ -101,6 +105,9 @@ pub(super) struct Held {
     /// The registry the run keeps beside it, in its directory.
     pub(super) registry: RunRegistry,
     pub(super) successor: SuccessorWait,
+    /// The runs held along the promotions that led here from the run read whole, this
+    /// one among them: none of them is a successor of this one.
+    pub(super) chain: BTreeSet<RunId>,
 }
 
 impl Project {
@@ -120,6 +127,7 @@ impl Project {
             clock: Arc::clone(&self.workspace.clock),
             followed,
             held: None,
+            unread: None,
             field: None,
             commit_unread: false,
             engine_read: None,
@@ -138,7 +146,7 @@ impl Project {
         let now = following.clock.now();
         following.onto_successors(now).await?;
         following.hand_over().await;
-        following.ask(now);
+        following.ask();
         Ok(following)
     }
 }
@@ -194,6 +202,7 @@ impl Following {
         let holds = self.followed.run.is_some() && self.whole_owed().is_none();
         if !holds {
             self.held = None;
+            self.unread = None;
             self.engine_read = None;
             self.listening.on(None);
             self.asking.forget();
@@ -233,8 +242,8 @@ impl Following {
         // The registry before the log: an engine that wrote its last event and left
         // between the two reads is read gone with that event, never as stalled.
         let now = self.clock.now();
-        self.read_registry(now);
-        self.read_field_registries(now);
+        self.read_registry();
+        self.read_field_registries();
         self.check_field_dirs();
         if self.reader.moved().await.map_err(Failure::new)? {
             self.commit_unread = true;
@@ -253,47 +262,54 @@ impl Following {
         self.hand_field_engines();
         self.onto_successors(now).await?;
         self.hand_over().await;
-        self.ask(now);
+        self.ask();
         self.commit_unread = false;
         let socket = self
             .held
             .as_ref()
-            .filter(|held| moves_or_asks(&held.run.frame(now)))
-            .and_then(|held| held.run.engine.words());
+            .filter(|held| moves_or_asks(held.run.frame()))
+            .and_then(|held| held.run.engine().words());
         self.listening.on(socket);
         Ok(())
     }
 
     /// The run followed, when it is not the one held: the run to read whole.
     fn whole_owed(&self) -> Option<RunId> {
-        let held = self.held.as_ref().map(|held| &held.run.run);
+        let held = self.held.as_ref().map(|held| held.run.run());
         self.followed.run.clone().filter(|run| held != Some(run))
     }
 
     /// The run followed read whole and handed, when it is not the one held: as the
-    /// field reads it, where it does.
+    /// field reads it, where it does; else through the following's reader, as the field
+    /// reads each of its runs. One that cannot be read is said so, with why, where why
+    /// changed, and read again after the next commit.
     async fn read_whole(&mut self) -> Result<(), Error> {
         let Some(run) = self.whole_owed() else {
             return Ok(());
         };
-        let (read, registry, events) = match self.whole_from_the_field(&run).await? {
-            Some(whole) => whole,
-            None => {
-                let open = self.project.run(&run).await?;
-                let registry = open.registry();
-                let OpenedRun {
-                    id,
-                    manifest,
-                    events,
-                    ..
-                } = open;
-                let read = FollowedRun::read(id, manifest.doc, &events, registry.engine());
-                (read, registry, events)
+        let tried = self.unread.as_ref().filter(|unread| unread.run_id == run);
+        let whole = match self.whole_from_the_field(&run).await? {
+            Some(whole) => Ok(whole),
+            None if tried.is_some() && !self.commit_unread => return Ok(()),
+            None => crate::field::read_whole(&self.project, &self.reader, &run).await,
+        };
+        let (read, registry, events) = match whole {
+            Ok(whole) => whole,
+            Err(why) => {
+                let said = tried.is_some_and(|tried| tried.problem == why.problem);
+                if !said {
+                    self.news
+                        .push_back(FollowNews::WholeUnreadable(why.clone()));
+                }
+                self.unread = Some(why);
+                return Ok(());
             }
         };
+        self.unread = None;
         // Its successor is awaited from the successor's side of the same look, which
         // begins the wait for a run read closed promoted.
         self.hold(Held {
+            chain: BTreeSet::from([run]),
             run: read.clone(),
             registry,
             successor: SuccessorWait::NotPromoted,
@@ -320,11 +336,11 @@ impl Following {
         let Some(held) = &self.held else {
             return Ok(());
         };
-        let run = &held.run.run;
+        let run = held.run.run();
         if self.field_holds(run) {
             return Ok(());
         }
-        let past = match held.run.state.head() {
+        let past = match held.run.state().head() {
             Some(head) => self.reader.events_after(run, head).await,
             None => self.reader.events(run).await,
         };
@@ -337,24 +353,24 @@ impl Following {
 
     /// The engine the registry of the run held names, kept to hand when it changed: read
     /// again once the last reading is a second old, while the run's log says it moves or
-    /// asks a person. `now` frames the run; the second is told on tokio's time. A run the
-    /// field holds is the field's to read.
-    fn read_registry(&mut self, now: DateTime<Utc>) {
+    /// asks a person. The second is told on tokio's time. A run the field holds is the
+    /// field's to read.
+    fn read_registry(&mut self) {
         let Some(held) = &self.held else {
             return;
         };
-        if self.field_holds(&held.run.run) {
+        if self.field_holds(held.run.run()) {
             return;
         }
         if self.registry_read_at.elapsed() < REGISTRY_EVERY {
             return;
         }
-        if !moves_or_asks(&held.run.frame(now)) {
+        if !moves_or_asks(held.run.frame()) {
             return;
         }
         self.registry_read_at = Instant::now();
         let engine = held.registry.engine();
-        self.engine_read = (engine != held.run.engine).then_some(engine);
+        self.engine_read = (engine != *held.run.engine()).then_some(engine);
     }
 
     /// `news` of the run held folded into it, and kept to hand back.
@@ -362,7 +378,7 @@ impl Following {
         let Some(held) = &self.held else {
             return;
         };
-        let run = held.run.run.clone();
+        let run = held.run.run().clone();
         self.found_of(run, news);
     }
 }

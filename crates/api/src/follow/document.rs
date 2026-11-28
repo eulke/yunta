@@ -120,7 +120,7 @@ impl Following {
         let Some(held) = &self.held else {
             return;
         };
-        let at = (held.run.run.clone(), held.run.state.head());
+        let at = (held.run.run().clone(), held.run.state().head());
         let (newly_held, past) = match &self.handing.worked_out_at {
             Some((run, head)) if *run == at.0 => (false, *head),
             _ => (true, None),
@@ -131,7 +131,7 @@ impl Following {
         if newly_held {
             self.handing.owed.clear();
         }
-        let documents = yunta_engine::documents_handed_over(&held.run.state, past);
+        let documents = yunta_engine::documents_handed_over(held.run.state(), past);
         self.handing.owed.extend(documents);
         let remark = newly_held
             .then(|| unread_keys_in(held.registry.run_dir()))
@@ -148,8 +148,8 @@ impl Following {
         let held = self.held.as_ref()?;
         let (node, shown) = self.handing.owed.front()?;
         let dir = held.registry.run_dir();
-        let asked = held.run.manifest.request();
-        let document = Document::read(dir, shown, &held.run.state, asked).await;
+        let asked = held.run.manifest().request();
+        let document = Document::read(dir, shown, held.run.state(), asked).await;
         let node = node.clone();
         Some(RunNews::Document { node, document })
     }

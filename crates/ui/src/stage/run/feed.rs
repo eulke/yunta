@@ -6,7 +6,9 @@
 //! whoever points at the node. A feed that lists nothing yet draws no row, and its place is
 //! still the pane's, so a node's first moment comes into sight at the feed's end. Render is
 //! handed only the rows around where the feed stands, its window (`Scroll::window`), with
-//! how many stand above and under them, from the run in view's moments of the node. The
+//! how many stand above and under them, from the moments of the node its feed lists, which
+//! the run in view keeps listed as they come, with its open attempt's calls counted: a
+//! drawing reads the moments in sight and no other, however many calls the node made. The
 //! window is counted from the feed's first row, as Surco lays a feed out, so a place stays on
 //! the rows in sight whatever grows under them.
 //!
@@ -71,46 +73,40 @@ impl RunStage {
         }
     }
 
-    /// The moments of `node` of the run `framed` its feed lists, of every attempt, in the
-    /// log's order.
-    pub(super) fn listed<'a>(&self, framed: &Framed<'a>, node: &NodeId) -> Vec<&'a Moment> {
-        let in_view = framed.in_view;
-        in_view
-            .by_node
-            .get(node)
-            .into_iter()
-            .flatten()
-            .filter_map(|at| in_view.moments.get(*at))
-            .filter(|moment| chronicle::in_feed(&moment.happening))
-            .collect()
+    /// Where among the moments of the run `framed` the moments of `node` its feed lists
+    /// stand, of every attempt, in the log's order, as the run in view keeps them.
+    pub(super) fn listed<'a>(&self, framed: &Framed<'a>, node: &NodeId) -> &'a [usize] {
+        framed.in_view.fed(node)
     }
 
-    /// The feed of `node` of the run `framed`, which lists `listed`, in its window where the
-    /// feed stands, in render's words.
+    /// The feed of `node` of the run `framed`, which lists the moments at `listed`, in its
+    /// window where the feed stands, in render's words.
     pub(super) fn feed_of(
         &self,
         framed: &Framed<'_>,
         node: &NodeId,
-        listed: &[&Moment],
+        listed: &[usize],
         look: &Look,
     ) -> Feed {
         let none = BTreeMap::new();
         let tasks = framed
             .in_view
             .run
-            .state
+            .state()
             .nodes
             .get(node)
             .map_or(&none, |record| &record.session_tasks);
-        window(listed, tasks, &self.feed, look)
+        window(listed, &framed.in_view.moments, tasks, &self.feed, look)
     }
 }
 
-/// The feed of a node whose feed lists `listed`, of every attempt in the log's order, in its
-/// window where `scroll` stands (`Scroll::window`), its calls naming the task of their
-/// session by `tasks`, how many stand above and under the rows it holds counted.
+/// The feed of a node whose feed lists the moments of `moments` at `listed`, of every attempt
+/// in the log's order, in its window where `scroll` stands (`Scroll::window`), its calls
+/// naming the task of their session by `tasks`, how many stand above and under the rows it
+/// holds counted. Only the moments in the window are read.
 pub(super) fn window(
-    listed: &[&Moment],
+    listed: &[usize],
+    moments: &[Moment],
     tasks: &BTreeMap<SessionId, TaskId>,
     scroll: &Scroll,
     look: &Look,
@@ -118,11 +114,13 @@ pub(super) fn window(
     let rows = listed.len();
     let held = scroll.window(rows);
     let (from, to) = (held.start, held.end);
-    let moments: Vec<Moment> = listed[held]
+    let in_sight = listed.get(held).unwrap_or_default();
+    let in_sight: Vec<Moment> = in_sight
         .iter()
-        .map(|moment| (*moment).clone())
+        .filter_map(|at| moments.get(*at))
+        .cloned()
         .collect();
-    chronicle::feed(&moments, tasks, from, rows - to, look)
+    chronicle::feed(&in_sight, tasks, from, rows - to, look)
 }
 
 #[cfg(test)]

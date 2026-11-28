@@ -1,11 +1,13 @@
 //! See [`super`]. What a run cost, opened from the run with `s`: its facts, where its time
 //! went and who spent it, as a run's screen tells them, what only the printed page has room
 //! for left to `yunta stats`; in the run's frame (`over_the_run`), where `a` goes where its
-//! attention row names and `n` starts a new run once the workflows are read. Or what a
+//! attention row names and `n` opens a new run over it. Or what a
 //! workflow's past runs cost and what their checks never caught, as `yunta stats
-//! --workflow` shows it, opened from the catalog with `h`.
+//! --workflow` shows it, told as a run's numbers are, opened from the catalog with `h`, in
+//! the frame of the field it was opened over (`over_the_field`), where `a` and `n` do the
+//! same.
 //! Either scrolls where it is taller than what shows of it. Escape goes back to where it was
-//! opened.
+//! opened, and `q` down to the field.
 //!
 //! A run's stats are made at each draw from the run in view, which the state keeps of
 //! what it follows, framed at the instant of the draw and costed at the prices the
@@ -15,17 +17,19 @@
 //! their first line. A workflow's past runs are read once, as the stage opens.
 
 use chrono::{DateTime, Utc};
-use surco::components::{Laid, Note, Region, Screen};
+use surco::components::{Laid, Legend, Note, Region, Screen};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::HistoryReading;
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::{RunId, WorkflowName};
 use yunta_render::page::{History, Page, Stats, StatsTold};
-use yunta_render::screen;
+use yunta_render::screen::{self, PageRead};
 use yunta_replay::stats::RunStats;
 
+use super::over_the_field::{attending_over_the_field, in_the_fields_frame, KeyA};
 use super::over_the_run::{attending, in_the_runs_frame};
-use super::{ItsRun, Stage, StartStage, Want};
+use super::{ItsRun, Want};
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
 use crate::{FollowedRuns, Operation, Outcome};
@@ -47,6 +51,9 @@ enum Spending {
     Run(RunId),
     Workflow {
         workflow: WorkflowName,
+        /// The name the catalog offers the workflow by, which the trail names it by, where
+        /// the stage was opened from the catalog; its own name otherwise.
+        offered_as: Option<String>,
         read: Option<Box<HistoryReading>>,
     },
 }
@@ -61,8 +68,18 @@ impl StatsStage {
     pub(crate) fn of_workflow(workflow: WorkflowName) -> Self {
         StatsStage::of(Spending::Workflow {
             workflow,
+            offered_as: None,
             read: None,
         })
+    }
+
+    /// This stage, where it shows a workflow's past runs, opened from the catalog, which
+    /// offers the workflow as `name`: its trail names it so.
+    pub(crate) fn offered_as(mut self, name: String) -> Self {
+        if let Spending::Workflow { offered_as, .. } = &mut self.spending {
+            *offered_as = Some(name);
+        }
+        self
     }
 
     fn of(spending: Spending) -> Self {
@@ -81,14 +98,10 @@ impl StatsStage {
         }
     }
 
-    /// Where the page of a run's numbers stands, which no row of its screen says, its legend
-    /// the run's frame's whether it scrolls or not. None for a workflow's past runs, whose
-    /// legend names the keys that scroll once they scroll.
-    pub(crate) fn run_page(&self) -> Option<Scroll> {
-        match self.spending {
-            Spending::Run(_) => Some(self.scroll),
-            Spending::Workflow { .. } => None,
-        }
+    /// Where the page stands, a run's numbers or a workflow's past runs, which no row of its
+    /// screen says, its legend the same whether it scrolls or not.
+    pub(crate) fn page(&self) -> Scroll {
+        self.scroll
     }
 
     /// What the stage asks for as it opens: a workflow's past runs, read; nothing for a
@@ -96,9 +109,19 @@ impl StatsStage {
     pub(crate) fn opening(&self) -> Vec<Want> {
         match &self.spending {
             Spending::Run(_) => Vec::new(),
-            Spending::Workflow { workflow, .. } => vec![Want::Work(Operation::ReadHistory {
-                workflow: workflow.clone(),
-            })],
+            Spending::Workflow { workflow, .. } => vec![Want::Work(past_runs_read(workflow))],
+        }
+    }
+
+    /// The work its screen says is under way: a workflow's past runs read, until they are.
+    pub(crate) fn shown_under_way(&self) -> Option<Operation> {
+        match &self.spending {
+            Spending::Workflow {
+                workflow,
+                read: None,
+                ..
+            } => Some(past_runs_read(workflow)),
+            Spending::Workflow { read: Some(_), .. } | Spending::Run(_) => None,
         }
     }
 
@@ -113,39 +136,43 @@ impl StatsStage {
         now: DateTime<Utc>,
         typed: bool,
     ) -> Screen {
-        let (mut doc, trail, legend) = match &self.spending {
+        let (mut doc, trail) = match &self.spending {
             Spending::Run(run) => {
                 let doc = self.run_spent(run, look, followed, now);
                 let trail = vec![screen::place_of(run.handle(), screen::STATS)];
-                (doc, trail, screen::in_the_runs_frame_legend(false))
+                (doc, trail)
             }
-            Spending::Workflow { workflow, read } => {
+            Spending::Workflow {
+                workflow,
+                offered_as,
+                read,
+            } => {
+                let named = offered_as.as_deref().unwrap_or(workflow.as_str());
                 let trail = vec![
                     screen::WORKFLOWS.to_string(),
-                    workflow.to_string(),
-                    screen::HISTORY.to_string(),
+                    screen::place_of(named, screen::HISTORY),
                 ];
                 let doc = past_runs(workflow, read.as_deref(), look);
-                (doc, trail, screen::over_the_workflows_legend())
+                (doc, trail)
             }
         };
         if let Some(said) = &self.said {
             doc = doc.with(Note(said.clone()));
         }
-        let mut shown = Screen::new(Region::new(doc).in_sight(self.scroll.sight()));
+        let region = match &self.spending {
+            Spending::Run(_) => Region::new(doc),
+            Spending::Workflow { .. } => Region::of_a_page(doc),
+        };
+        let mut shown = Screen::new(region.in_sight(self.scroll.sight()));
         shown.trail = std::iter::once(screen::YUNTA.to_string())
             .chain(trail)
             .collect();
+        let new_run = followed.can_ask_for_a_run();
+        shown.legend = screen::page_legend(PageRead::Whole, Legend::new(), new_run);
         match &self.spending {
-            Spending::Run(run) => {
-                shown.legend = legend;
-                in_the_runs_frame(&mut shown, run, followed, now, typed);
-            }
+            Spending::Run(run) => in_the_runs_frame(&mut shown, run, followed, now, typed),
             Spending::Workflow { .. } => {
-                shown.legend = match self.scroll.scrolls() {
-                    true => screen::scrolling(legend),
-                    false => legend,
-                };
+                in_the_fields_frame(&mut shown, followed, now, typed, KeyA::Attends);
             }
         }
         shown
@@ -162,13 +189,13 @@ impl StatsStage {
         now: DateTime<Utc>,
     ) -> Doc {
         let in_view = followed.in_view.as_deref();
-        let Some(in_view) = in_view.filter(|in_view| in_view.run.run == *run) else {
+        let Some(in_view) = in_view.filter(|in_view| in_view.run.run() == run) else {
             return Doc::new().with(Note(screen::READING_THE_STATS.to_string()));
         };
         let kept = &in_view.run;
         Stats {
-            frame: &kept.frame(now),
-            stats: &RunStats::at(&kept.state, &kept.manifest.workflow, now),
+            frame: kept.frame(),
+            stats: &RunStats::at(kept.state(), &kept.manifest().workflow, now),
             pricing: followed.prices.as_ref(),
             told: StatsTold::OnScreen,
         }
@@ -186,10 +213,9 @@ impl StatsStage {
         }
     }
 
-    /// What `stroke` asks for here, over what `followed` keeps at `now`: on a run's stats
-    /// `a` goes where the attention row names and `n` reads the workflows a new run can be
-    /// of; Escape goes back, `q` or Ctrl-C leaves, and the keys that scroll scroll the
-    /// page.
+    /// What `stroke` asks for here, over what `followed` keeps at `now`: `a` goes where the
+    /// attention row names and `n` opens a new run over the page; Escape goes back, `q` goes
+    /// down to the field, Ctrl-C leaves, and the keys that scroll scroll the page.
     pub(crate) fn pressed(
         &mut self,
         stroke: Stroke,
@@ -198,9 +224,17 @@ impl StatsStage {
     ) -> Vec<Want> {
         match (stroke, &self.spending) {
             (Stroke::Insert('a'), Spending::Run(run)) => attending(run, followed, now),
-            (Stroke::Insert('n'), Spending::Run(_)) => vec![Want::Work(Operation::ReadCatalog)],
+            (Stroke::Insert('a'), Spending::Workflow { .. }) => {
+                attending_over_the_field(followed, now)
+            }
+            (Stroke::Insert('n'), _) if followed.can_ask_for_a_run() => {
+                Want::taking(&NextStep::Run {
+                    workflow: Arg::Blank,
+                })
+            }
             (Stroke::Decline, _) => vec![Want::Back],
-            (Stroke::Insert('q') | Stroke::Interrupt, _) => vec![Want::Leave],
+            (Stroke::Insert('q'), _) => vec![Want::ToTheField(None)],
+            (Stroke::Interrupt, _) => vec![Want::Leave],
             (other, _) => {
                 self.scroll.pressed(other);
                 Vec::new()
@@ -213,15 +247,11 @@ impl StatsStage {
         self.scroll.laid(laid);
     }
 
-    /// What an answer to the stage's work does: a workflow's past runs read stand; the
-    /// workflows read for a new run open its start over a run's stats; what refused or
-    /// failed is said.
+    /// What an answer to the stage's work does: a workflow's past runs read stand; what
+    /// refused or failed is said.
     pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
         match (outcome, &mut self.spending) {
             (Outcome::History(past), Spending::Workflow { read, .. }) => *read = Some(past),
-            (Outcome::Catalog(catalog), Spending::Run(_)) => {
-                return vec![Want::Open(Stage::Start(StartStage::new(catalog)))];
-            }
             (Outcome::Refused(refused), _) => self.said = Some(refused.to_string()),
             (Outcome::Failed(said), _) => self.said = Some(said),
             (
@@ -242,7 +272,8 @@ impl StatsStage {
                 | Outcome::Cancelled { .. }
                 | Outcome::Closed { .. }
                 | Outcome::Detected { .. }
-                | Outcome::Initialized(_)
+                | Outcome::SetupPack { .. }
+                | Outcome::Initialized { .. }
                 | Outcome::Stopped,
                 _,
             ) => {}
@@ -262,5 +293,12 @@ fn past_runs(workflow: &WorkflowName, read: Option<&HistoryReading>, look: &Look
         }
         .document(look),
         None => Doc::new().with(Note(screen::READING_THE_HISTORY.to_string())),
+    }
+}
+
+/// The work that reads the past runs of the workflow called `workflow`.
+fn past_runs_read(workflow: &WorkflowName) -> Operation {
+    Operation::ReadHistory {
+        workflow: workflow.clone(),
     }
 }

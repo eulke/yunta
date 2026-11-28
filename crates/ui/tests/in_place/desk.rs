@@ -137,7 +137,7 @@ async fn the_desk_stands_by_itself_on_the_plans_first_task_with_its_keys_in_the_
         drawn.attention.is_none(),
         "the run's decision stands in sight"
     );
-    let legend = drawn.legend.spelled(Glyphs::Unicode);
+    let legend = super::support::spelled(&drawn.legend, Glyphs::Unicode);
     assert!(
         legend.starts_with("1 2 3 answer · tab next place"),
         "{legend}"
@@ -195,7 +195,7 @@ async fn an_option_that_asks_for_words_opens_its_line_at_the_desks_foot() {
         "the run's decision stands in sight"
     );
     assert_eq!(
-        drawn.legend.spelled(Glyphs::Unicode),
+        super::support::spelled(&drawn.legend, Glyphs::Unicode),
         "enter send it · esc go back"
     );
     screen.pressed(&[Stroke::Decline]).await;
@@ -292,7 +292,7 @@ async fn r_turns_a_card_to_its_plans_desk_in_place_and_a_number_picked_there_dec
     assert!(matches!(state.scene(), Some(Scene::Desk)));
     assert!(holds_the_desk_alone(&state), "the desk takes the screen");
     let legend = state.screen(&Look::plain()).legend;
-    let spelled = legend.spelled(Glyphs::Unicode);
+    let spelled = super::support::spelled(&legend, Glyphs::Unicode);
     assert!(spelled.ends_with("esc go back"), "{spelled}");
     let asked = state.update(Input::Stroke(Stroke::Decline));
     assert!(asked.is_empty(), "{asked:?}");

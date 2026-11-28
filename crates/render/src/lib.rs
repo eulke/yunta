@@ -23,8 +23,9 @@
 //!   `engine` (what holds a run its log says moves: an engine gone, or one
 //!   asking at its terminal), `outcome`, `failure`, `spend`, `changes`,
 //!   `caution`, `inputs`, `place`, `target`, `policy`, and `progress`, how far
-//!   it has come and where it stands on one line, and `children`, the runs
-//!   it bore, under the nodes that bore them.
+//!   it has come and where it stands on one line, `children`, the runs it
+//!   bore, under the nodes that bore them, and `runner`, a runner's candidate
+//!   on its adapter and the model known.
 //! - What happened to a run, in order: `chronicle`, what each moment of it
 //!   says, the same on every surface that follows the run; and `watched`,
 //!   the rows a person watches a moving run by: on the CLI's region what
@@ -83,6 +84,7 @@ pub mod progress;
 pub mod prompt;
 pub mod published;
 pub mod refusal;
+pub mod runner;
 pub mod screen;
 pub mod spend;
 pub mod start;
@@ -105,6 +107,7 @@ mod tests {
     mod catalog;
     mod cautions;
     mod claims;
+    mod confirming;
     mod console_page;
     mod deciding;
     mod desk;
@@ -123,6 +126,6 @@ mod tests {
     mod publication_text;
     mod retry;
     mod routes;
-    mod screen;
+    pub(crate) mod screen;
     mod setup;
 }

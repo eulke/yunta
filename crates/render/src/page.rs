@@ -16,7 +16,9 @@
 //! - [`Node`]: one of a run's nodes, as `status --node` shows it.
 //! - [`LeftRunning`]: a run a person stopped following, which goes on.
 //! - [`Field`]: the runs of a repository or a machine, each a [`FieldRow`] in
-//!   its [`FieldGroup`], and those that do not read back ([`UnreadableRun`]).
+//!   its [`FieldGroup`], and those that do not read back ([`UnreadableRun`]);
+//!   [`FieldRows`]: the same runs as a screen lists them; [`RunAtAGlance`]: the run it
+//!   points at, beside them, and what the field offers on it ([`GlanceAct`]).
 //! - [`Stats`]: what a run spent and where its time went; [`History`]: what a
 //!   workflow's past runs say, and replay's `VerificationFindings`, how its
 //!   checks performed, a page of its own.
@@ -27,6 +29,8 @@
 //!   [`Review`]: what `resolve-gate`, `gc` and `review` answer.
 //! - [`Catalog`]: the workflows a repository offers, each an [`OfferedWorkflow`],
 //!   and [`PointedCatalog`], the same with one pointed at;
+//!   [`FirstRequest`]: what a repository with no run yet is asked, over the workflows
+//!   it offers; [`NewRun`]: what a new run says of the workflow and the mode chosen;
 //!   [`Signpost`]: what `yunta` alone shows where it has no field to show.
 //! - [`Schema`]: every kind of document Yunta reads, or every key a workflow
 //!   reads.
@@ -35,7 +39,8 @@
 //!   verdict on it; [`Setup`]: what setting a project up found and would write;
 //!   [`Initialized`]: what `init` wrote and detected.
 //! - [`Tested`] and [`TestedCase`]: what `test` says as its cases run, each a
-//!   [`RanCase`] and how its run ended ([`CaseRun`]).
+//!   [`RanCase`] and how its run ended ([`CaseRun`]); [`CasesOnScreen`], the same cases as
+//!   a screen shows them, the tally heading them once they ran.
 //! - [`pack`]: a pack's pages: its inventory, and what `pack add`, `update`,
 //!   `remove`, `list` and `new` answer.
 //! - [`Receipt`]: a run's receipt, in a file, a pull request or a terminal;
@@ -65,10 +70,12 @@ pub mod desk;
 pub mod doctor;
 mod field;
 pub(crate) mod findings;
+mod first_request;
 mod gate;
 mod graph;
 mod initialized;
 mod left_running;
+mod new_run;
 mod new_workflow;
 mod node;
 mod opened;
@@ -76,7 +83,7 @@ pub mod pack;
 pub(crate) mod plan;
 mod receipt;
 mod review;
-mod run;
+pub(crate) mod run;
 mod schema;
 mod setup;
 pub(crate) mod shown;
@@ -92,27 +99,35 @@ pub use catalog::{Catalog, OfferedWorkflow, PointedCatalog, ReadableWorkflow, Un
 pub use checked::{Checked, Diagnosis, Unrunnable};
 pub use closed::Closed;
 pub use collected::{Collected, Reclaim, Uncollected};
-pub use field::{Field, FieldGroup, FieldRow, RunUnread, UnreadableRun};
+pub use field::{
+    Field, FieldGroup, FieldRow, FieldRows, GlanceAct, RunAtAGlance, RunUnread, UnreadableRun,
+};
 pub use findings::Findings;
+pub use first_request::FirstRequest;
 pub use gate::Gate;
 pub use graph::Graph;
-pub use initialized::Initialized;
+pub use initialized::{Initialized, WrittenRunners};
 pub use left_running::LeftRunning;
+pub use new_run::{NewRun, WhatItTakes};
 pub use new_workflow::NewWorkflow;
 pub use node::Node;
 pub use opened::{unopened, Opened};
 pub use plan::{Form, Plan};
 pub use receipt::{verdicts, Receipt, Told};
 pub use review::Review;
-pub(crate) use run::stood_open;
 pub use run::{Places, Run, RunInABrowser, RunScope};
 pub use schema::Schema;
-pub use setup::Setup;
+pub use setup::{
+    Candidates, Choosing, CommitsAs, OfferedPack, Pointed, ProposedCandidate, ProposedRole,
+    RepositoryPast, Setup, Typing,
+};
 pub use shown::Shown;
 pub use signpost::Signpost;
 pub use spec::Spec;
 pub use stats::{History, Stats, StatsTold};
-pub use tested::{not_a_final_state, CaseProblem, CaseRun, RanCase, Tested, TestedCase};
+pub use tested::{
+    not_a_final_state, CaseProblem, CaseRun, CasesOnScreen, RanCase, Tested, TestedCase,
+};
 pub(crate) use verified::Integrity;
 pub use verified::{FaultCause, ObjectFault, ObjectsChecked, ObjectsRead, Verification, Verified};
 

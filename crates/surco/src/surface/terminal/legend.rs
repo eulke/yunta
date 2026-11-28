@@ -68,7 +68,7 @@ impl Terminal {
 /// `keys` on as many lines as the width takes, each key beside what it does.
 fn lines(keys: &[&Binding], look: &Look) -> Vec<Line> {
     let width = look.width.cells();
-    let sep = separator(look);
+    let sep = look.glyphs.spaced_sep();
     let mut lines = Vec::new();
     let mut line = Line::new();
     for binding in keys {
@@ -100,7 +100,7 @@ fn row(keys: &[&Binding], look: &Look) -> Line {
     if whole.next().is_none() {
         return first_cut;
     }
-    let sep = separator(look);
+    let sep = look.glyphs.spaced_sep();
     let Some((last, first)) = keys.split_last() else {
         return Line::new();
     };
@@ -126,7 +126,7 @@ fn before_far(keys: &[&Binding], room: usize, look: &Look) -> Line {
         return every;
     }
     let more = Line::new()
-        .push(Tone::Faint, separator(look))
+        .push(Tone::Faint, look.glyphs.spaced_sep())
         .push(Tone::Faint, look.glyphs.ellipsis());
     let kept = first_fitting(keys, room.saturating_sub(cell_width(&more.text())), look);
     match kept.text().is_empty() {
@@ -137,7 +137,7 @@ fn before_far(keys: &[&Binding], room: usize, look: &Look) -> Line {
 
 /// The first of `keys` that fit in `room` cells, a faint separator between two.
 fn first_fitting(keys: &[&Binding], room: usize, look: &Look) -> Line {
-    let sep = separator(look);
+    let sep = look.glyphs.spaced_sep();
     let mut row = Line::new();
     for binding in keys {
         let said = spelled(binding, look);
@@ -155,7 +155,7 @@ fn first_fitting(keys: &[&Binding], room: usize, look: &Look) -> Line {
 
 /// `keys` on one line, however wide, a faint separator between two.
 fn joined(keys: &[&Binding], look: &Look) -> Line {
-    let sep = separator(look);
+    let sep = look.glyphs.spaced_sep();
     keys.iter()
         .enumerate()
         .fold(Line::new(), |line, (at, binding)| match at {
@@ -164,12 +164,6 @@ fn joined(keys: &[&Binding], look: &Look) -> Line {
                 .push(Tone::Faint, sep.as_str())
                 .then(spelled(binding, look)),
         })
-}
-
-/// What stands between two keys, and after the last of them before what a key's row says
-/// beside its keys.
-pub(in crate::surface::terminal) fn separator(look: &Look) -> String {
-    format!(" {} ", look.glyphs.sep())
 }
 
 /// One key, strong, and what it does, muted.

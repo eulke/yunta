@@ -17,9 +17,9 @@
 //!   works, its config layers merged and the roots its runs live under;
 //!   `catalog`, the workflows its repository and installed packs offer;
 //!   `packs`, the repository's [`Packs`], fetched, installed, updated,
-//!   removed, listed, audited and scaffolded; and `setup`, the repository
-//!   set up for Yunta, a [`DetectedProject`] written by `init` and a new
-//!   workflow written from the shape it starts as.
+//!   removed, listed, audited and scaffolded; and `setup`, the repository set up
+//!   for Yunta, a [`DetectedProject`] written by `init`, the [`SetupPack`] a setup
+//!   offers to install, and a new workflow written from the shape it starts as.
 //! - What a repository's cases do: `cases`, the [`CaseSuite`] under a
 //!   directory's `.yunta/tests/`, each run in a sandbox of its own with its
 //!   sessions scripted, and held to what it expects.
@@ -98,7 +98,7 @@ pub use drive::{ClosingReading, Driven, Ending, Ports};
 pub use ending::ClosedRun;
 pub use error::{Error, Failure};
 pub use event_log::EventLog;
-pub use field::{offers_a_menu, FieldReach, FieldReading, Repository};
+pub use field::{FieldReach, FieldReading, Repository};
 pub use follow::{
     AnswerablePause, Document, FollowNews, Followed, FollowedField, FollowedRun, Following,
     RunNews, RunRegistry,
@@ -111,8 +111,8 @@ pub use project::{config_layers, Project};
 pub use remark::{Remark, Remarks};
 pub use run::{OpenedRun, PullRequestPolled, RunReading, RunRef, StatsReading};
 pub use setup::{
-    DetectedProject, InitializedProject, ProjectDraft, ProjectSetup, ProposedRunners, RunnerAnswer,
-    RunnerDeclaration, WorkflowStem, WrittenWorkflow,
+    DeclaredRunner, DetectedProject, InitializedProject, ProjectDraft, ProjectSetup,
+    ProposedRunners, RunnerAnswer, RunnerDeclaration, SetupPack, WorkflowStem, WrittenWorkflow,
 };
 pub use stop::Stop;
 pub use verdict::{ContextFiles, Judged, Verdict, VerdictReach, WorkflowCheck};

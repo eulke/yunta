@@ -14,9 +14,9 @@ use crate::width::{cell_width, id_column, middle_cut};
 /// them, so no row moves when the pointer does.
 const POINTER: usize = 2;
 
-/// The cells between an option's name and what it says: one would read as a word's
-/// space.
-const NAME_GAP: usize = 2;
+/// The cells between a card's option's name and what it says: one would read as a word's
+/// space. Not [`NAME_GAP`](crate::width::NAME_GAP), a cell wider, which a list's names keep.
+const OPTION_GAP: usize = 2;
 
 /// The fewest cells what an option says is wrapped in beside its name. Fewer are
 /// too few for a sentence, so it goes under the name instead.
@@ -37,7 +37,7 @@ impl Choices {
     /// name leaves it, as `said` says.
     pub(super) fn lines(&self, look: &Look, room: usize, most: usize, said: Said) -> Vec<Line> {
         let glyphs = look.glyphs;
-        let name = id_column(self.rows.iter().map(|row| row.name.as_str())) + NAME_GAP;
+        let name = id_column(self.rows.iter().map(|row| row.name.as_str())) + OPTION_GAP;
         let len = self.rows.len();
         let most = most.max(1);
         let (start, end) = match len <= most {

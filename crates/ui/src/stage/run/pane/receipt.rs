@@ -31,7 +31,7 @@ impl RunStage {
             Some(Ok(receipt)) => {
                 let page = Receipt { receipt: &receipt };
                 let told = Told::OnScreen(look.glyphs);
-                let blocking = FindingsThatBlock::of(&framed.in_view.run.state);
+                let blocking = FindingsThatBlock::of(framed.in_view.run.state());
                 Doc::new()
                     .with(page.checks(told))
                     .with(page.facts(told))

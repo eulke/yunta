@@ -30,6 +30,8 @@ pub enum Escape {
     LeavesWaiting,
     /// The value the command detected for itself stands.
     KeepsDefault,
+    /// A row changed in place stands as a person changed it before it was opened.
+    KeepsItAsItWas,
     /// A choice with no detected value: Escape takes the first, the plainest of them.
     TakesTheFirst,
     /// A question of several a person is taken through: Escape goes back to where they
@@ -50,6 +52,7 @@ impl Escape {
             Escape::Parks => PromptAct::LeaveItForLater.said(),
             Escape::LeavesWaiting => PromptAct::LeaveItWaiting.said(),
             Escape::KeepsDefault => "keep the detected default",
+            Escape::KeepsItAsItWas => "keep it as it was",
             Escape::TakesTheFirst => "take the first",
             Escape::GoesBack => PromptAct::GoBack.said(),
         }
@@ -57,8 +60,11 @@ impl Escape {
 }
 
 /// What a key does on a prompt, said once as an order, so a prompt at a terminal and a
-/// run's screen say one act in the same words whatever key does it there. Not what Escape
-/// comes to where a prompt opens ([`Escape`]), which says some of these.
+/// run's screen say one act in the same words whatever key does it there; a confirmation's
+/// acts among them, each the act it asks about and keeping things as they are; and the acts
+/// a screen's legend names that a prompt shares or stops: work under way stopped, the
+/// palette's row taken, leaving. Not what Escape comes to where a prompt opens ([`Escape`]),
+/// which says some of these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptAct {
     /// The pointer moved to another of what is offered.
@@ -81,6 +87,39 @@ pub enum PromptAct {
     LeaveItWaiting,
     /// Away from a round of questions, nothing of it recorded.
     LeaveItForLater,
+    /// The run a confirmation names closed for good.
+    CloseIt,
+    /// The runs a confirmation names, several, closed for good.
+    CloseThem,
+    /// The run a confirmation names stopped, with everything under it; or a collection under
+    /// way stopped.
+    StopIt,
+    /// The cases under way stopped.
+    StopThem,
+    /// The sessions doctor opens, under way, stopped.
+    StopTheSessions,
+    /// The pack a confirmation names removed from the project.
+    RemoveIt,
+    /// The pack a confirmation names installed.
+    InstallIt,
+    /// The setup written without the pack its confirmation names, which is let go.
+    WriteWithoutIt,
+    /// A session opened on each agent binding.
+    OpenThem,
+    /// What a dry run found collected.
+    CollectIt,
+    /// Away from a confirmation, what it would change kept as it is.
+    KeepIt,
+    /// Away from a confirmation of an act on several runs, each kept as it is.
+    KeepThem,
+    /// A row opened to be changed in place.
+    ChangeIt,
+    /// What is chosen or typed in a row changed in place taken into it.
+    TakeIt,
+    /// The act a palette's row offers done.
+    DoIt,
+    /// The application left.
+    Quit,
 }
 
 impl PromptAct {
@@ -97,6 +136,22 @@ impl PromptAct {
             PromptAct::GoBack => "go back",
             PromptAct::LeaveItWaiting => "leave it waiting",
             PromptAct::LeaveItForLater => "leave it for later",
+            PromptAct::CloseIt => "close it",
+            PromptAct::CloseThem => "close them",
+            PromptAct::StopIt => "stop it",
+            PromptAct::StopThem => "stop them",
+            PromptAct::StopTheSessions => "stop the sessions",
+            PromptAct::RemoveIt => "remove it",
+            PromptAct::InstallIt => "install it",
+            PromptAct::WriteWithoutIt => "write without it",
+            PromptAct::OpenThem => "open them",
+            PromptAct::CollectIt => "collect it",
+            PromptAct::KeepIt => "keep it",
+            PromptAct::KeepThem => "keep them",
+            PromptAct::ChangeIt => "change it",
+            PromptAct::TakeIt => "take it",
+            PromptAct::DoIt => "do it",
+            PromptAct::Quit => "quit",
         }
     }
 }
@@ -134,8 +189,9 @@ pub fn list_legend() -> Legend {
     Legend::new().arrows(PromptAct::Choose.said())
 }
 
-/// The keys of what waits to be confirmed, a number at a plan's desk or an act over a
-/// screen: `enter` confirms it, and `esc` goes back.
+/// The keys of a number chosen at a plan's desk, waiting to be confirmed: `enter` confirms
+/// it, and `esc` goes back. Not a confirmation over a screen, whose keys name its act
+/// (`screen::Confirming::legend`).
 pub fn confirming_legend() -> Legend {
     Legend::new()
         .key(ENTER, PromptAct::Confirm.said())
@@ -157,17 +213,21 @@ pub fn defaulting_to(shape: &str) -> String {
 }
 
 /// A line asked, and the row its answer is typed on: the words before the cursor and
-/// after it, whole, after the mark an answer stands after.
+/// after it, whole, after the mark an answer stands after. What it asks says it all, so
+/// the box holds no placeholder and nothing stands under it.
 pub fn typed_answer(asked: &Line, before: String, after: String) -> TypedAnswer {
     TypedAnswer {
         asked: asked.clone(),
         typed: typed_row(before, after),
+        placeholder: None,
+        hint: None,
     }
 }
 
 /// The row words are typed on, before the cursor and after it, opened as an answer is
-/// where it is written on one line.
-fn typed_row(before: String, after: String) -> TypedRow {
+/// where it is written on one line: an answer's, a card's words, a setup's row changed in
+/// place.
+pub(crate) fn typed_row(before: String, after: String) -> TypedRow {
     TypedRow {
         prompt: ANSWER.to_string(),
         before,
@@ -187,11 +247,11 @@ pub fn choice_list(choices: Option<Choices>, filter: Option<&str>, escape: Escap
     }
 }
 
-/// What `init -i` asks a project's name with.
-pub const PROJECT_NAME: &str = "project name";
+/// What `init -i` asks a project's name with, and a setup labels its row with.
+pub const PROJECT_NAME: &str = "name";
 
-/// What `init -i` asks a project's base branch with.
-pub const BASE_BRANCH: &str = "base branch";
+/// What `init -i` asks a project's base branch with, and a setup labels its row with.
+pub const BASE_BRANCH: &str = "base";
 
 /// A setting `asked` for with the value `kept` that stands where none is given.
 pub fn keeping(asked: &str, kept: &str) -> Line {
@@ -206,12 +266,26 @@ pub fn runs_on(runner: &RunnerName) -> String {
     format!("the adapter `{runner}` runs on")
 }
 
-/// What `init -i` asks `runner`'s model with: it has no default, since the model is
-/// the project's to choose, and a line left empty leaves the runner to declare later.
-pub fn model_of(runner: &RunnerName) -> Line {
+/// What a role's model is asked with, `init -i` asking it under the adapter it runs on
+/// ([`runs_on`]) and a setup labelling the box it is typed in with it.
+pub const MODEL: &str = "model";
+
+/// What a model left empty comes to: the role is declared on its adapter alone, whose CLI
+/// runs the model it runs by default.
+pub const NONE_LEAVES_IT_TO_THE_ADAPTER: &str = "enter with none leaves it to the adapter";
+
+/// What a line typed in place under a row comes to where it is left empty: `kept`, what stands
+/// there, stays, as a setup's name and base do.
+pub fn none_keeps(kept: &str) -> String {
+    format!("enter with none keeps `{kept}`")
+}
+
+/// What `init -i` asks a role's model with, under the adapter it runs on: what is asked,
+/// and what a line left empty comes to.
+pub fn model_asked() -> Line {
     Line::new()
-        .push(Tone::Strong, format!("the model `{runner}` runs"))
-        .push(Tone::Muted, " (enter with none leaves it to declare later)")
+        .push(Tone::Strong, MODEL)
+        .push(Tone::Muted, format!(" ({NONE_LEAVES_IT_TO_THE_ADAPTER})"))
 }
 
 /// What `new -i` says above the shapes it offers.

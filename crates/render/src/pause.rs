@@ -9,6 +9,10 @@
 //! on one surface meets the same phrase on the next. The fact is stored as
 //! data; the words are produced here, where a reader is told.
 //!
+//! What holds a run parked on a person's answer is one more thing: a kind of hold
+//! (`Hold`) says it whole, on the run's row, its glance and its page alike
+//! ([`holding`]), and asks it on its decision's card.
+//!
 //! What holds a run whose log says it moves is no pause: [`crate::engine`]
 //! says that, from what the run's registry says of its engine.
 
@@ -21,6 +25,10 @@ use yunta_core::{NodeId, QuestionId, RunId};
 use yunta_replay::frame::WaitingOn;
 
 use crate::escalation;
+
+mod hold;
+
+pub(crate) use hold::{asks_to_touch, departs, FailedHold, Hold};
 
 /// What a run a person interrupted says of the stop: what the log knows,
 /// whoever reads it, a teammate or an agent among them.
@@ -131,6 +139,17 @@ pub fn parked_on(on: &WaitingOn) -> String {
             }
         },
         WaitingOn::Run { reason } => text::one_line(&sentence(reason)),
+    }
+}
+
+/// What holds a run parked on `on`, as its field's row, its glance and its page's
+/// gist say it alike: what the person's answer settles, where a kind of hold names
+/// it, and the claim the log parked it on ([`parked_claim`])
+/// otherwise.
+pub fn holding(on: &WaitingOn) -> String {
+    match on.reason().and_then(Hold::of) {
+        Some(hold) => hold.said(),
+        None => parked_claim(on),
     }
 }
 

@@ -1,11 +1,13 @@
 //! See [`super`]. The run in view's fold: the run read whole, then each piece of news of
-//! it taken once, what its sessions said kept to the nodes at work, and when it stands
-//! caught up with the log; and what it keeps, read for the pause it stands at: the decision
-//! or the round it waits on, and the change a node counted.
+//! it taken once, each moment indexed under its node and its node's feed as it comes, what
+//! its sessions said kept to the nodes at work, and when it stands caught up with the log;
+//! and what it keeps, read for the pause it stands at: the decision or the round it waits
+//! on, and the change a node counted. The run followed becomes the run in view as it is
+//! read whole, and is kept as unreadable, with why, while it cannot be.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use yunta_api::{
     waiting_round, Awaited, Document, FollowedRun, RunNews, WaitingDecision, WaitingQuestions,
 };
@@ -13,10 +15,39 @@ use yunta_core::events::run::happening;
 use yunta_core::events::{Shown, StoredEvent};
 use yunta_core::port::Said;
 use yunta_core::{NodeId, RunId, Seq};
+use yunta_render::chronicle;
+use yunta_render::page::UnreadableRun;
 use yunta_render::watched::Heard;
 use yunta_replay::frame::{chronicle, Happening, Moment, RunFrame, RunPhase};
 
-use super::{AwaitedReading, RunInView};
+use super::{AwaitedReading, FollowedRuns, RunInView};
+
+impl FollowedRuns {
+    /// `run`, read whole with `events`, made the run in view where it is the run
+    /// followed, which reads now: one held at that head or past it already changes nothing.
+    pub(super) fn read_whole(&mut self, run: FollowedRun, events: &[StoredEvent]) {
+        if self.asked.run.as_ref() != Some(run.run()) {
+            return;
+        }
+        self.in_view_unreadable = None;
+        let held = self
+            .in_view
+            .as_ref()
+            .filter(|held| held.run.run() == run.run());
+        if held.is_some_and(|held| held.run.state().head() >= run.state().head()) {
+            return;
+        }
+        self.in_view = Some(Arc::new(RunInView::read_whole(run, events)));
+    }
+
+    /// Why the run followed could not be read whole, `why`, kept where it is still the run
+    /// followed.
+    pub(super) fn unreadable_whole(&mut self, why: UnreadableRun) {
+        if self.asked.run.as_ref() == Some(&why.run_id) {
+            self.in_view_unreadable = Some(why);
+        }
+    }
+}
 
 impl RunInView {
     /// `run` read whole with `events`: its moments their chronicle, and nothing heard,
@@ -26,6 +57,8 @@ impl RunInView {
             run,
             moments: Vec::new(),
             by_node: BTreeMap::new(),
+            fed: BTreeMap::new(),
+            calls: BTreeMap::new(),
             handed_over: BTreeMap::new(),
             heard: Heard::default(),
             missed: 0,
@@ -38,15 +71,30 @@ impl RunInView {
         read
     }
 
-    /// `moments` kept after those before them, each indexed under its node.
+    /// `moments` kept after those before them, each indexed under its node, and under its
+    /// node's feed where the feed lists it, its open attempt's calls counted.
     fn told(&mut self, moments: Vec<Moment>) {
         for moment in moments {
             if let Some(node) = &moment.node {
                 let at = self.moments.len();
                 self.by_node.entry(node.clone()).or_default().push(at);
+                if chronicle::in_feed(&moment.happening) {
+                    self.fed.entry(node.clone()).or_default().push(at);
+                    self.calls.entry(node.clone()).or_default().took(&moment);
+                }
             }
             self.moments.push(moment);
         }
+    }
+
+    /// Where in its moments the moments `node`'s feed lists stand, in order.
+    pub(crate) fn fed(&self, node: &NodeId) -> &[usize] {
+        self.fed.get(node).map_or(&[], Vec::as_slice)
+    }
+
+    /// How many calls `node`'s open attempt made, as its feed's heading counts them.
+    pub(crate) fn open_attempt_calls(&self, node: &NodeId) -> usize {
+        self.calls.get(node).map_or(0, |calls| calls.count())
     }
 
     /// `news` of the run folded in: the moments the events that came are, its engine, what
@@ -56,10 +104,10 @@ impl RunInView {
     pub(super) fn took(&mut self, news: RunNews) {
         match news {
             RunNews::Events(_) | RunNews::Engine(_) => {
-                let head = self.run.state.head();
+                let head = self.run.state().head();
                 let moments = self.run.took(&news);
                 self.told(moments);
-                if self.run.state.head() != head {
+                if self.run.state().head() != head {
                     self.heard_kept_to_work();
                 }
             }
@@ -90,15 +138,14 @@ impl RunInView {
         }
     }
 
-    /// What its sessions said kept to the nodes at work and those yet to start: a node that
-    /// stopped working lets its words go, so working again it shows none of its last
-    /// session's. Whether a node works reads no clock, so the frame is taken at the
-    /// instant of the run's last event; a run with none has said nothing.
+    /// What its sessions said kept to the nodes at work and those yet to start, as its frame
+    /// says where each stands: a node that stopped working lets its words go, so working
+    /// again it shows none of its last session's. A run with no event has said nothing.
     fn heard_kept_to_work(&mut self) {
-        let Some(at) = self.run.state.clock().last_at() else {
+        if self.run.state().clock().last_at().is_none() {
             return;
-        };
-        self.heard.kept_to(&self.run.frame(at), &self.run.run);
+        }
+        self.heard.kept_to(self.run.frame(), self.run.run());
     }
 
     /// Whether `said` came before its node last started or last ended, by where it sits
@@ -106,7 +153,7 @@ impl RunInView {
     /// node let go then. Handed again, as a following made anew hears a run's recent
     /// past, they are not heard again.
     fn said_by_a_session_gone(&self, said: &Said) -> bool {
-        let Some(node) = self.run.state.nodes.get(&said.node_id) else {
+        let Some(node) = self.run.state().nodes.get(&said.node_id) else {
             return false;
         };
         [node.last_started, node.last_terminal]
@@ -129,18 +176,18 @@ impl RunInView {
     }
 
     /// Whether it stands at its head in `heads`, every document its nodes handed over by
-    /// then kept, read or not; where it stands parked on a person at `now` with a menu or a
-    /// round, what it waits for is read for that pause; and where it closed promoted, its
-    /// successor came, or none did.
-    pub(super) fn caught_up(&self, heads: &BTreeMap<RunId, Seq>, now: DateTime<Utc>) -> bool {
-        let at_head = self.run.state.head() == heads.get(&self.run.run).copied();
+    /// then kept, read or not; where it stands parked on a person with a menu or a round,
+    /// what it waits for is read for that pause; and where it closed promoted, its successor
+    /// came, or none did.
+    pub(super) fn caught_up(&self, heads: &BTreeMap<RunId, Seq>) -> bool {
+        let at_head = self.run.state().head() == heads.get(self.run.run()).copied();
         let read_for = self.awaited.as_ref().map(|read| read.pause().seq());
-        let promoted = matches!(self.run.frame(now).phase, RunPhase::Promoted { .. });
+        let promoted = matches!(self.run.frame().phase, RunPhase::Promoted { .. });
         at_head
             && self.handed_over_kept()
             && (!promoted || self.no_successor || self.successor.is_some())
             && self
-                .parked_on_a_person(now)
+                .parked_on_a_person()
                 .is_none_or(|pause| read_for == Some(pause))
     }
 
@@ -148,7 +195,7 @@ impl RunInView {
     /// the node that handed it over, read or not: what its following hands of it by the head
     /// it stands at, after the run read whole.
     fn handed_over_kept(&self) -> bool {
-        Document::handed_over_in(&self.run.state)
+        Document::handed_over_in(self.run.state())
             .iter()
             .all(|(node, due)| {
                 let kept = self.handed_over.get(node).into_iter().flatten();
@@ -156,15 +203,15 @@ impl RunInView {
             })
     }
 
-    /// Where the log holds the event of the pause it stands parked on a person at, at
-    /// `now`, as the follower names the pause it reads what a run waits on for: the
-    /// `questions_asked` of the round a node waits on, or the `run_paused` of a decision
-    /// with a menu. None while it stands parked on neither.
-    fn parked_on_a_person(&self, now: DateTime<Utc>) -> Option<Seq> {
-        let (_, paused_at) = self.run.state.run.paused()?;
-        match waiting_round(&self.run.frame(now)) {
+    /// Where the log holds the event of the pause it stands parked on a person at, as the
+    /// follower names the pause it reads what a run waits on for: the `questions_asked` of
+    /// the round a node waits on, or the `run_paused` of a decision with a menu. None while
+    /// it stands parked on neither.
+    fn parked_on_a_person(&self) -> Option<Seq> {
+        let (_, paused_at) = self.run.state().run.paused()?;
+        match waiting_round(self.run.frame()) {
             Some(node) => self.round_asked_at(node),
-            None => self.run.menu.then_some(paused_at),
+            None => self.run.menu().then_some(paused_at),
         }
     }
 
@@ -172,7 +219,7 @@ impl RunInView {
     /// while no answer to it is recorded: once one is, the round waits on its resume, not on
     /// a person.
     fn round_asked_at(&self, node: &NodeId) -> Option<Seq> {
-        let round = self.run.state.gates.get(node)?.rounds.last()?;
+        let round = self.run.state().gates.get(node)?.rounds.last()?;
         round.answered.is_none().then_some(round.asked_at)
     }
 
@@ -180,7 +227,7 @@ impl RunInView {
     /// none while it stands at none, before what it waits on is read for that pause, and
     /// where it could not be read.
     pub(crate) fn awaited_decision(&self) -> Option<&WaitingDecision> {
-        let paused_at = self.run.state.run.paused().map(|(_, at)| at);
+        let paused_at = self.run.state().run.paused().map(|(_, at)| at);
         match &self.awaited {
             Some(AwaitedReading::Read {
                 pause,
@@ -224,7 +271,7 @@ impl RunInView {
         };
         let stands_at = match waiting_round(frame) {
             Some(node) => self.round_asked_at(node),
-            None => self.run.state.run.paused().map(|(_, at)| at),
+            None => self.run.state().run.paused().map(|(_, at)| at),
         };
         (Some(pause.seq()) == stands_at).then_some(why.as_str())
     }

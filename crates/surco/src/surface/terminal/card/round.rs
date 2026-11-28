@@ -12,6 +12,7 @@
 //! on, so the cursor stands there wherever it stands, as it stands on a line being typed.
 
 use super::super::asked::{filter_cursor, filter_row, listed, Columns};
+use super::super::Terminal;
 use crate::components::{Card, Choices, RoundRow, RoundStanding, TypedRow};
 use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Hidden, Line, Tone};
@@ -180,7 +181,7 @@ fn list(open: &Open, look: &Look, room: usize, fold: Fold, left: usize) -> Vec<L
         .chain(listed(
             open.choices,
             look,
-            (room, Columns::WhereTheyFit),
+            (room, Columns::over(&Terminal::on(*look))),
             budget,
         ))
         .collect()

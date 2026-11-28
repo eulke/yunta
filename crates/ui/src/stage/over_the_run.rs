@@ -1,5 +1,6 @@
-//! See [`super`]. The frame a page over a run stands in, the run's numbers, its graph or its
-//! whole chronicle: the tally and the attention row as `FollowedRuns::framing` composes them
+//! See [`super`]. The frame a page over a run stands in, the run's numbers, its graph, its
+//! whole chronicle or what it leaves (its receipt, its evidence verified, its page for a
+//! browser): the tally and the attention row as `FollowedRuns::framing` composes them
 //! for every stage, the run's own decision out of sight under the page, so the row names it
 //! where the run waits on the person; and the far keys beside the page's own where no line is
 //! typed. `a` goes where the row names, by the rule every screen that draws it follows
@@ -39,6 +40,13 @@ pub(super) fn attending(run: &RunId, followed: &FollowedRuns, now: DateTime<Utc>
         Some(Attended::Another(named)) => Want::in_place(&named),
         None => Vec::new(),
     }
+}
+
+/// Whether the attention row of a page over `run` names anything `a` goes to, as `followed`
+/// keeps it at `now`: the run's own decision or another run, where the palette offers going
+/// there.
+pub(super) fn attends(run: &RunId, followed: &FollowedRuns, now: DateTime<Utc>) -> bool {
+    followed.attended(standing_over(run, false), now).is_some()
 }
 
 /// Where the person stands on a page over `run`: the run's own decision out of sight under

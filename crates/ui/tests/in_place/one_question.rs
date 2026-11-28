@@ -117,7 +117,7 @@ async fn an_answer_whose_round_is_read_again_as_it_lands_is_noted_with_its_outco
     let mut state = on_the_round(&bench).await;
     let read_again: Vec<FollowNews> = read_whole_and_asked(&bench).await;
     let in_view = state.followed_runs().in_view.as_ref();
-    let held = in_view.and_then(|in_view| in_view.run.state.head());
+    let held = in_view.and_then(|in_view| in_view.run.state().head());
 
     let mut asked = typed(&mut state, "the greeting");
     asked.extend(state.update(Input::Stroke(Stroke::Enter)));
@@ -205,7 +205,7 @@ async fn a_round_out_of_sight_with_its_answer_on_the_log_types_nothing_and_its_k
 /// the run they are of.
 async fn answered_on_the_log(bench: &Bench, state: &mut State) -> RunId {
     let in_view = state.followed_runs().in_view.as_ref();
-    let held = in_view.and_then(|in_view| in_view.run.state.head());
+    let held = in_view.and_then(|in_view| in_view.run.state().head());
     let recorded = bench.answer_round("ask", &[("summary", "the greeting")]);
     recorded.await.expect("the answers are recorded");
     let past = bench
@@ -225,8 +225,8 @@ async fn answered_on_the_log(bench: &Bench, state: &mut State) -> RunId {
 fn legend_and_far_keys(state: &State) -> (String, String) {
     let drawn = state.screen(&Look::plain());
     (
-        drawn.legend.spelled(Glyphs::Unicode),
-        drawn.anywhere.spelled(Glyphs::Unicode),
+        super::support::spelled(&drawn.legend, Glyphs::Unicode),
+        super::support::spelled(&drawn.anywhere, Glyphs::Unicode),
     )
 }
 

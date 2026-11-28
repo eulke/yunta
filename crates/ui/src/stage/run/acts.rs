@@ -6,8 +6,8 @@
 //! to the run; `a` goes where the attention row says: to the run's own decision, the lead
 //! given back to the run and its prompt in place as the person left it, or to the run it
 //! names, whose screen takes this one's place;
-//! `n` a new run where no prompt stands, the start stage opened once the workflows are
-//! read; `q` and `esc` down to the field, which notes whether the run keeps going, an engine
+//! `n` a new run where no prompt stands, before the run is read among it, and where a run can
+//! be asked for, opened once the workflows are read; `q` and `esc` down to the field, which notes whether the run keeps going, an engine
 //! driving it, waits until someone answers or resumes it, or ended, `esc` putting a prompt in
 //! place aside first, where one stands, then going up to the run whose child the stage shows
 //! in its place, where it shows one; and each act the run
@@ -95,13 +95,14 @@ pub(super) enum Takes {
 /// naming those the scene names; the pull request it waits on, shown by its link, where the
 /// scene stands as it; then what every run offers, what it cost, its graph, its page for a
 /// browser, bound to no key where `o` shows the pull request, and its whole chronicle; then
-/// a new run, where no prompt stands in the scene.
+/// a new run, where no prompt stands in the scene and one `asks_for_a_run` here.
 pub(super) fn offered(
     framed: &Framed<'_>,
     decision: Option<&GateWaitingPayload>,
     scene: Option<&Scene<'_>>,
+    asks_for_a_run: bool,
 ) -> Vec<Offered> {
-    let frame = &framed.frame;
+    let frame = framed.frame;
     let named_acts = scene.map_or(NamedActs::Neither, Scene::named_acts);
     let room = scene.filter(|scene| scene.makes_room()).map(|_| Offered {
         key: Some('u'),
@@ -128,7 +129,7 @@ pub(super) fn offered(
         })
     });
     let shows = shows_the_pull_request(frame, scene);
-    let others = every_run_offers(&frame.run_id, shows.is_none(), scene);
+    let others = every_run_offers(&frame.run_id, shows.is_none(), scene, asks_for_a_run);
     room.into_iter()
         .chain(taken_up)
         .chain(actions)
@@ -155,11 +156,13 @@ fn shows_the_pull_request(frame: &RunFrame, scene: Option<&Scene<'_>>) -> Option
 /// What every run offers, `run` here, standing as `scene`: what it cost; its graph; its page
 /// for a browser, by `o` where `o_shows_the_page` and by no key elsewhere; its whole
 /// chronicle, by no key, in the palette's words of its own; and a new run, where no prompt
-/// stands in the scene. The legend names none among the scene's own.
+/// stands in the scene and one `asks_for_a_run` here. The legend names none among the
+/// scene's own.
 fn every_run_offers(
     run: &RunId,
     o_shows_the_page: bool,
     scene: Option<&Scene<'_>>,
+    asks_for_a_run: bool,
 ) -> impl Iterator<Item = Offered> {
     let always = [
         (Some('s'), NextStep::Stats { run: run.clone() }, None),
@@ -176,22 +179,29 @@ fn every_run_offers(
         ),
     ];
     let prompt_stands = scene.is_some_and(|scene| scene.asks_in_place());
-    let new_run = (!prompt_stands).then_some((
-        Some('n'),
-        NextStep::Run {
-            workflow: Arg::Blank,
-        },
-        None,
-    ));
+    let new_run = (asks_for_a_run && !prompt_stands).then(a_new_run);
     always
         .into_iter()
-        .chain(new_run)
         .map(|(key, step, does)| Offered {
             key,
             takes: Takes::Step(step),
             named: None,
             does,
         })
+        .chain(new_run)
+}
+
+/// A new run, by `n`: what a run offers where no prompt stands in its scene, and before the
+/// run is read, where none stands yet, wherever a run can be asked for.
+pub(super) fn a_new_run() -> Offered {
+    Offered {
+        key: Some('n'),
+        takes: Takes::Step(NextStep::Run {
+            workflow: Arg::Blank,
+        }),
+        named: None,
+        does: None,
+    }
 }
 
 /// Going on from the log of the run `framed`, where an answer recorded awaits the resume
@@ -271,7 +281,7 @@ impl Framed<'_> {
     /// Whether an answer a person recorded awaits the resume that acts on it and no engine
     /// is there to take it up: one the run is left waiting by ([`Framed::leaving`]).
     fn answer_awaits_no_engine(&self) -> bool {
-        let awaits = self.in_view.run.state.answer_awaits_its_resume();
+        let awaits = self.in_view.run.state().answer_awaits_its_resume();
         awaits && self.leaving() == Leaving::Waits
     }
 
@@ -290,7 +300,7 @@ impl Framed<'_> {
             | RunPhase::Broken { .. } => return Leaving::Ended,
             RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. } => {}
         }
-        match (&self.in_view.run.engine, self.handed_on) {
+        match (self.in_view.run.engine(), self.handed_on) {
             (Engine::Alive { .. }, true | false) | (Engine::Unrecorded, true) => {
                 Leaving::KeepsGoing
             }

@@ -42,7 +42,7 @@ fn child_offered_by(repo: &Path, home: &Path, id: &str) -> String {
     let next = document["next"].as_array().expect("what comes next");
     let step = next
         .iter()
-        .find(|step| step["why"] == "shows what it is waiting on")
+        .find(|step| step["why"] == "what it is waiting on")
         .unwrap_or_else(|| panic!("nothing reaches the child: {document:#}"));
     let command = step["command"].as_str().expect("its command");
     command
@@ -64,10 +64,7 @@ fn the_parent_of_a_stopped_child_offers_the_command_that_reaches_it() {
 
     let page = yunta_in!(&repo, &home, &["status", &id]);
     let said = unwrapped(&stdout(&page));
-    let words = format!(
-        "yunta status {} shows what it is waiting on",
-        handle(&child)
-    );
+    let words = format!("yunta status {} what it is waiting on", handle(&child));
     assert!(said.contains(&words), "no `{words}` in: {said}");
 
     let reached = yunta_in!(&repo, &home, &["status", &child]);

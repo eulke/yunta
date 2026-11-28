@@ -1,0 +1,14 @@
+ yunta › workflows › yunta/fragua graph           ◆ 1 · ▲ 1
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◌ fragua · the nodes it runs, in order          as written
+   grill → brief → plan → spec → approve-plan → implement
+   implement → review@reviewer → fix-findings
+   implement → review@reviewer-alt → fix-findings
+   implement → conform → fix-findings
+   fix-findings → lint
+   lint → tests → ship → pr
+   lint → fix-lint
+
+
+ ◆ C0NS0E needs you: node `approve` wants an…  · a go there
+ ↑↓ scroll · esc back · n new run · ? keys

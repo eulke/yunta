@@ -28,7 +28,7 @@ use yunta_core::events::{
     TerminalState, TokenUsage,
 };
 use yunta_core::persisted::PersistedDoc;
-use yunta_core::{Clock, Pid, RunId, Seq};
+use yunta_core::{Clock, NodeId, Pid, RunId, Seq};
 use yunta_engine::lock::SystemProbe;
 use yunta_engine::ProcessRegistry;
 use yunta_replay::frame::RunFrame;
@@ -61,9 +61,14 @@ impl World {
 
     /// Run `run`'s directory, with the manifest it froze of `workflow` in it.
     async fn dir_of(&self, run: &RunId, workflow: &str) -> PathBuf {
+        self.dir_configured(run, workflow, "").await
+    }
+
+    /// Run `run`'s directory, with the manifest it froze of `workflow` under `config` in it.
+    async fn dir_configured(&self, run: &RunId, workflow: &str, config: &str) -> PathBuf {
         let dir = self.bench.runs_root.join(run.as_str());
         std::fs::create_dir_all(&dir).unwrap();
-        let manifest = self.bench.manifest_for(workflow, "").await;
+        let manifest = self.bench.manifest_for(workflow, config).await;
         let bytes = PersistedDoc::of(manifest).write().unwrap();
         std::fs::write(yunta_engine::run_dir::manifest_path(&dir), bytes).unwrap();
         std::fs::create_dir_all(yunta_engine::registry_path(&dir).parent().unwrap()).unwrap();
@@ -81,6 +86,12 @@ impl World {
     /// Appends `payload` to `run`'s log.
     fn record(&self, run: &RunId, payload: EventPayload) -> Seq {
         let draft = EventDraft::new(run.clone(), None, payload).unwrap();
+        self.bench.storage.append(&draft, &FixedClock).unwrap()
+    }
+
+    /// Appends `payload` to `run`'s log, as of its node `node`.
+    fn record_of(&self, run: &RunId, node: &NodeId, payload: EventPayload) -> Seq {
+        let draft = EventDraft::new(run.clone(), Some(node.clone()), payload).unwrap();
         self.bench.storage.append(&draft, &FixedClock).unwrap()
     }
 
@@ -110,7 +121,7 @@ impl World {
 
     /// `kept`'s frame at the world's clock.
     fn frame(&self, kept: &FollowedRun) -> RunFrame {
-        kept.frame(self.clock().now())
+        kept.frame().clone()
     }
 
     /// Run `successor`, born on the log as promoted from `from`, its manifest beside it.
@@ -184,7 +195,7 @@ async fn whole(following: &mut Following) -> (FollowedRun, Vec<StoredEvent>) {
 async fn next_of(following: &mut Following, kept: &mut FollowedRun) -> RunNews {
     match next(following).await {
         FollowNews::Run { run, news } => {
-            assert_eq!(run, kept.run, "news of the run held");
+            assert_eq!(&run, kept.run(), "news of the run held");
             kept.took(&news);
             news
         }
@@ -206,7 +217,7 @@ async fn what_came_past_the_last_event_read_is_handed_back() {
         panic!("the event appended comes back");
     };
     assert_eq!(seqs(&events), vec![seq]);
-    assert_eq!(kept.state.head(), Some(seq), "what came is read on");
+    assert_eq!(kept.state().head(), Some(seq), "what came is read on");
 }
 
 /// The run read whole arrives first, with every event of its log from its first, and
@@ -223,15 +234,19 @@ async fn the_run_read_whole_is_handed_every_event_from_its_first_once() {
     let (mut kept, events) = whole(&mut following).await;
     let logged = world.logged(&run);
     assert_eq!(events, logged, "every event of the log, from its first");
-    assert_eq!(kept.state, RunState::replay(&logged), "the run at its head");
-    assert_eq!(kept.state.head(), logged.last().map(|event| event.seq));
+    assert_eq!(
+        *kept.state(),
+        RunState::replay(&logged),
+        "the run at its head"
+    );
+    assert_eq!(kept.state().head(), logged.last().map(|event| event.seq));
 
     let came = world.slept(&run);
     let RunNews::Events(batch) = next_of(&mut following, &mut kept).await else {
         panic!("what came past the run read whole comes back");
     };
     assert_eq!(seqs(&batch), vec![came], "only what came past, once");
-    assert_eq!(kept.state, RunState::replay(&world.logged(&run)));
+    assert_eq!(*kept.state(), RunState::replay(&world.logged(&run)));
 }
 
 /// Another run asked for is read whole from its first event, and the run let go hands
@@ -246,14 +261,14 @@ async fn refollow_onto_another_run_hands_it_whole() {
     world.slept(&second);
     let mut following = world.follow(&first).await;
     let (kept, _) = whole(&mut following).await;
-    assert_eq!(kept.run, first);
+    assert_eq!(*kept.run(), first);
 
     following.refollow(Followed {
         field: None,
         run: Some(second.clone()),
     });
     let (mut kept, events) = whole(&mut following).await;
-    assert_eq!(kept.run, second);
+    assert_eq!(*kept.run(), second);
     assert_eq!(
         events,
         world.logged(&second),
@@ -288,7 +303,7 @@ async fn dropping_next_between_looks_loses_no_news() {
         let FollowNews::Run { run, news } = news else {
             panic!("only news of the run held comes, and came {news:?}");
         };
-        assert_eq!(run, kept.run);
+        assert_eq!(&run, kept.run());
         if let RunNews::Events(events) = &news {
             came.extend(seqs(events));
         }
@@ -311,7 +326,7 @@ async fn dropping_next_between_looks_loses_no_news() {
         came, recorded,
         "every event handed once, in the log's order"
     );
-    assert_eq!(kept.state, RunState::replay(&world.logged(&run)));
+    assert_eq!(*kept.state(), RunState::replay(&world.logged(&run)));
 }
 
 #[tokio::test]
@@ -348,13 +363,13 @@ async fn a_run_that_closes_promoted_is_followed_onto_its_successor() {
     else {
         panic!("the successor is followed on");
     };
-    assert_eq!(next_run.run, successor);
+    assert_eq!(*next_run.run(), successor);
     assert_eq!(
         events,
         world.logged(&successor),
         "the successor's log as it stands"
     );
-    assert_eq!(kept.run, successor, "the run held is the successor");
+    assert_eq!(*kept.run(), successor, "the run held is the successor");
     assert!(!following.awaits_successor());
 }
 
@@ -370,13 +385,13 @@ async fn a_followed_run_handed_each_news_stands_where_the_following_does() {
 
     world.record(&run, closed_promoted());
     let successor = world.successor_of(&run, "copied-on").await;
-    while kept.run != successor {
+    while *kept.run() != successor {
         next_of(&mut following, &mut kept).await;
     }
 
-    assert_eq!(kept.state, RunState::replay(&world.logged(&successor)));
+    assert_eq!(*kept.state(), RunState::replay(&world.logged(&successor)));
     let registry = yunta_engine::read_engine(&dir.with_file_name(successor.as_str()), &SystemProbe);
-    assert_eq!(kept.engine, registry);
+    assert_eq!(*kept.engine(), registry);
 }
 
 /// A run parked by the engine that drove it, then resumed by another: the pause is

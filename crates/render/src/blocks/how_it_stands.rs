@@ -22,7 +22,7 @@ use surco::line::Line;
 use surco::words::Standing;
 use yunta_core::events::{NodeState, TokenUsage};
 use yunta_core::{Because, ModeName};
-use yunta_replay::frame::{NodeFrame, NodeStanding};
+use yunta_replay::frame::{NodeFrame, NodeStanding, NodeTimes};
 
 use crate::spend::Breakdown;
 use crate::state::NodeDisplay;
@@ -40,9 +40,6 @@ pub(super) const STANDS: &str = "stands";
 
 /// The label of how long a node that ran took.
 pub(super) const TOOK: &str = "took";
-
-/// The label of what a node that ran spent.
-const TOKENS: &str = "tokens";
 
 /// How a node stands, as its own scene says it and its printed page prints it. Not replay's
 /// `NodeStanding`, where its log puts it, nor Surco's `Standing`, the word it is called by.
@@ -73,9 +70,15 @@ pub enum CameTo {
 }
 
 impl HowItStands {
-    /// How `node` stands in a run of the mode `mode`, the run waiting on a person at it where
-    /// `waited_at`: what that person's decision holds it on, where its word carries it.
-    pub fn of(node: &NodeFrame, mode: &ModeName, waited_at: bool) -> HowItStands {
+    /// How `node` stands in a run of the mode `mode`, how long it took as `times` measures
+    /// it, the run waiting on a person at it where `waited_at`: what that person's decision
+    /// holds it on, where its word carries it.
+    pub fn of(
+        node: &NodeFrame,
+        times: &NodeTimes,
+        mode: &ModeName,
+        waited_at: bool,
+    ) -> HowItStands {
         if let (true, Some(what)) = (waited_at, NodeDisplay::from(node).modifier) {
             return HowItStands::WaitsOn(what);
         }
@@ -85,7 +88,7 @@ impl HowItStands {
             NodeStanding::LeftOut(because) => HowItStands::LeftOut(because.clone()),
             NodeStanding::Paused { .. } | NodeStanding::Reached(_) => HowItStands::Ran {
                 stands: listed_as(node),
-                took: time_taken(node),
+                took: time_taken(node, times),
                 tokens: node.tokens,
                 came_to: came_to(&node.state),
             },
@@ -156,7 +159,7 @@ impl HowItStands {
                 Fields::new()
                     .push_if(STANDS, stands.word())
                     .push_if(TOOK, took.map(duration).unwrap_or_default())
-                    .push_if(TOKENS, spent)
+                    .push_if(crate::page::run::facts::TOKENS, spent)
             }
             HowItStands::NotRun
             | HowItStands::LeftOutByItsMode(_)

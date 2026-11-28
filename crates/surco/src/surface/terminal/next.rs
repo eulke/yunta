@@ -1,10 +1,21 @@
 //! What a reader types next, each command beside what it does, or, when that
-//! is too long to stand beside it, with it on the line under the command.
+//! is too long to stand beside it, with it on the line under the command; and
+//! the commands that do at a shell what an act does, each alone on its row,
+//! muted, from the row's first cell.
+//!
+//! A command a person copies is never parted inside a word: it folds only
+//! between two of its words, the row it leaves ending ` \`. Where a row cannot
+//! pass its edge, in a pane or a box (a width whose edge cuts), a word wider
+//! than the width words wrap at stands whole where the cells lent past it let
+//! it (a box's cell before its far upright), and a word wider even than that is
+//! cut at the row's end by the one cut rule, which never parts a number. On a
+//! printed page, a stream, a row may pass its width and the terminal wraps it:
+//! there a word wider than the page stands whole, to be copied whole.
 
-use crate::components::Next;
+use crate::components::{Next, SameAtAShell};
 use crate::line::{Line, Tone};
 use crate::look::Look;
-use crate::width::{cell_width, command_lines, wrap, GAP, INDENT};
+use crate::width::{cell_width, command_lines, truncate, wrap, GAP, INDENT};
 
 /// The title the next steps stand under, on every surface.
 pub(in crate::surface) const NEXT: &str = "next";
@@ -22,6 +33,25 @@ impl Next {
         let mut lines = vec![Line::new().push(Tone::Muted, NEXT)];
         lines.extend(steps(&self.steps, INDENT, look));
         lines
+    }
+}
+
+impl SameAtAShell {
+    /// Each command on its row, muted: one wider than the row goes on in the rows under it,
+    /// folded between two of its words where a shell reads it as the same command; where the
+    /// edge cuts, a word wider than the row and the cells lent past it is cut at their end.
+    pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
+        let edge = look.width.reach();
+        let passes = |piece: &str| look.width.cuts() && cell_width(piece) > edge;
+        self.0
+            .iter()
+            .flat_map(|command| command_lines(command, look.width.cells()))
+            .map(|piece| match passes(&piece) {
+                true => truncate(&piece, edge, look.glyphs).trim_end().to_string(),
+                false => piece,
+            })
+            .map(|piece| Line::new().push(Tone::Muted, piece))
+            .collect()
     }
 }
 
@@ -84,3 +114,6 @@ fn step(command: &str, gloss: &str, margin: &str, column: usize, look: &Look) ->
     }
     lines
 }
+
+#[cfg(test)]
+mod tests;

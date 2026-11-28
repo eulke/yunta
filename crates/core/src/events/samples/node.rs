@@ -11,7 +11,7 @@ pub(crate) fn runner_resolved() -> RunnerResolvedPayload {
         runner: "executor".into(),
         chosen: RunnerCandidate {
             adapter: "mock".into(),
-            model: "mock-model".into(),
+            model: Some("mock-model".into()),
             agent: None,
             effort: None,
         },

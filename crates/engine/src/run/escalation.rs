@@ -10,8 +10,9 @@
 use std::sync::Arc;
 
 use yunta_core::events::{
-    Claim, DecisionOn, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption,
-    GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal, Remedy,
+    AwaitedDecision, Claim, DecisionOn, Escalation, ExhaustedReroute, Failure, FailureMenu,
+    GateOption, GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal,
+    Remedy, Unaskable,
 };
 use yunta_core::protected::Protected;
 use yunta_core::refusal::GateRefusal;
@@ -208,22 +209,52 @@ async fn node_escalation(
     Ok(menu_of(manifest, &mode_name, decision))
 }
 
-/// The node a parked run waits on a decision from, if any — without
-/// reading what its gate shows: whether a run needs someone, not what it
-/// asks them. It names a node exactly when [`current_escalation`] builds
-/// that node's menu, so no surface offers a choice the menu does not hold.
+/// What a decision a parked run waits on is on, as [`awaited_escalation`]
+/// rebuilds it, reading no document: whether a run needs someone, not what
+/// it asks them. It names what that one names, so every reader of what a
+/// run asks agrees on it.
 pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<DecisionOn> {
-    if cap_escalation(state).is_some() {
-        return Some(DecisionOn::Run);
+    awaited_escalation(manifest, state).map(|awaited| awaited.on)
+}
+
+/// The decision a parked run waits on as its manifest and its state alone rebuild it, reading
+/// no document: the cap's, a node's reroutes or failure, as [`current_escalation`] builds
+/// them; a gate answered here with what it shows as the run holds it, its question its
+/// author's words or, where it would be read from the documents it shows, that the gate needs
+/// a decision, or, where it shows what the run does not hold, why it cannot be asked. The
+/// node is chosen by the scheduler with no protected path, and what the menu offers to do
+/// about the run (whether it shows a plan, whether a failure waits for the tree to change) is
+/// read from the state, as a reader that reads no document needs it. Not
+/// [`current_escalation`], what a person is put: a gate's question may read the documents it
+/// shows, and an option it withholds where one of them cannot be proven stands on this menu.
+pub fn awaited_escalation(manifest: &Manifest, state: &RunState) -> Option<AwaitedDecision> {
+    if let Some(escalation) = cap_escalation(state) {
+        let on = DecisionOn::Run;
+        return Some(AwaitedDecision {
+            on,
+            asks: Ok(escalation),
+        });
     }
     let mode_name = state.run.mode().clone();
     // Which node waits does not depend on what the set protects, and no
     // document is read here, so the empty set decides the same node.
-    let node = match current_decision(manifest, state, &mode_name, Arc::default())? {
-        Decision::ResolveInternalGate { node } => node,
-        decision => menu_of(manifest, &mode_name, decision).map(|(node, _)| node)?,
+    let decision = current_decision(manifest, state, &mode_name, Arc::default())?;
+    let (node, asks) = match decision {
+        Decision::ResolveInternalGate { node } => {
+            let node = super::find_node(&manifest.workflow, &node).ok()?;
+            let gate = super::internal_gate::InternalGate::of(node)?;
+            let asks = gate.unread(&manifest.workflow, state).map_err(|unbuilt| {
+                Unaskable::new(super::internal_gate::unbuilt_said(node, &unbuilt))
+            });
+            (node.id.clone(), asks)
+        }
+        decision => {
+            let (node, escalation) = menu_of(manifest, &mode_name, decision)?;
+            (node, Ok(escalation))
+        }
     };
-    Some(DecisionOn::Node(node))
+    let on = DecisionOn::Node(node);
+    Some(AwaitedDecision { on, asks })
 }
 
 /// The menu of a decision that reads no document: a node's reroutes

@@ -65,7 +65,7 @@ fn designed_at(seq: u64) -> (RunFrame, RunStats) {
     let state = yunta_replay::RunState::replay(&events);
     let now = state.clock().last_at().expect("a run with events");
     let engine = yunta_replay::registry::Engine::Unrecorded;
-    let frame = RunFrame::of(&events[0].run_id, &workflow, &state, None, &engine, now);
+    let frame = RunFrame::of(&events[0].run_id, &workflow, &state, None, &engine);
     (frame, RunStats::at(&state, &workflow, now))
 }
 

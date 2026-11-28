@@ -27,7 +27,7 @@ impl Meter {
         if bars && !self.bars.is_empty() {
             row = row.plain(" ").push(Tone::Running, self.bars(glyphs));
         }
-        let sep = format!(" {} ", glyphs.sep());
+        let sep = glyphs.spaced_sep();
         for time in self.times.iter().take(times) {
             let tone = match time.by_person {
                 true => Tone::NeedsYou,

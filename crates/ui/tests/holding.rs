@@ -6,14 +6,20 @@
 //! stays through news of its pause; an open palette keeps the row it points at. With no event,
 //! two drawings a second apart differ only in their times, and each time is the log's, to the
 //! second (`times`). A held prompt never meets its run read whole again, since the application
-//! keeps one following, which reads a run's screen whole once (`one_following`).
+//! keeps one following, which reads a run's screen whole once (`one_following`). A run's frame
+//! is derived once for each head of its log, its times at each drawing (`derived`).
 //!
 //! Reached by: `crates/ui/src/state.rs`, `crates/ui/src/scroll.rs`,
 //! `crates/ui/src/stage/run.rs`, `crates/ui/src/stage/run/feed.rs`,
 //! `crates/ui/src/stage/run/in_place.rs`, `crates/ui/src/stage/run/scene.rs`,
 //! `crates/ui/src/dialog/palette.rs`, `crates/render/src/watched/nodes.rs`,
-//! `crates/render/src/watched/spent.rs`
+//! `crates/render/src/watched/spent.rs`, `crates/api/src/follow/followed.rs`,
+//! `crates/replay/src/frame/mod.rs`
 
+mod support;
+
+#[path = "holding/derived.rs"]
+mod derived;
 #[path = "holding/one_following.rs"]
 mod one_following;
 #[path = "holding/times.rs"]
@@ -214,7 +220,7 @@ fn attention_row(state: &State) -> Option<String> {
 /// The keys `state`'s legend says, as a terminal spells them.
 fn legend(state: &State) -> String {
     let legend = state.screen(&Look::plain()).legend;
-    legend.spelled(Glyphs::Unicode)
+    support::spelled(&legend, Glyphs::Unicode)
 }
 
 /// What `stroke` does on `state`, branched: where the person stands after it, the scene

@@ -1,6 +1,13 @@
 //! The task that draws: it folds what the engine delivers, closes the
 //! holes a dropped frame leaves, and redraws on its own beat so a
 //! measured age keeps growing while nothing happens.
+//!
+//! It runs on the invocation's runtime, which is one thread, beside the
+//! engine it draws: every pass it makes is time the engine's next step
+//! waits for. So a pass costs what is new and never the run's length: the
+//! run is kept folded as its follower keeps it ([`Folded`]), each event
+//! folded once as it comes and the frame derived once for each piece of
+//! news, and a beat with no news works out only what the clock adds.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,9 +17,8 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
 use yunta_api::EventLog;
 use yunta_core::events::{StoredEvent, TerminalState};
-use yunta_core::{Clock, Manifest, RunId};
-use yunta_replay::frame::RunFrame;
-use yunta_replay::history::PriorEstimation;
+use yunta_core::{Clock, RunId};
+use yunta_replay::frame::Moment;
 use yunta_replay::RunState;
 
 use super::beats::Beat;
@@ -31,20 +37,15 @@ const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 /// redrawing the region for every event in it.
 const BATCH: usize = super::QUEUE_DEPTH;
 
-/// One invocation's drawing state: the run it is on, what it has of that
-/// run's log, and the surface it puts it on.
+/// One invocation's drawing state: the run it is on, folded as far as
+/// its log reaches, and the surface it puts it on.
 pub(super) struct Painter {
-    run_id: RunId,
-    /// The manifest the run froze. A promotion successor inherits its
-    /// predecessor's workflow whole, so the chain is drawn from this one
-    /// — and it is what rebuilds the menu a parked run stopped on, which
-    /// decides the command the attention row offers.
-    manifest: Manifest,
+    /// The run drawn, kept as its follower keeps it, with the events that
+    /// came above a hole in its log.
     folded: Folded,
     draw: Draw,
     log: EventLog,
     clock: Arc<dyn Clock>,
-    prior: Option<PriorEstimation>,
     /// Whether the hole in the stream was already there at the last beat.
     /// A hole is provisional on arrival — parallel nodes emit from
     /// different tasks and storage assigns the seq under its own lock, so
@@ -54,13 +55,13 @@ pub(super) struct Painter {
     /// Whether this painter may draw at all. It stands down for as long
     /// as a prompt has the terminal, and what it would have drawn in
     /// the meantime is not lost: the region redraws from the run as it
-    /// stands when it comes back, and the lines it owes are counted
-    /// rather than queued.
+    /// stands when it comes back, and the lines it owes wait in `owed`.
     standing: Standing,
-    /// How many settled moments have gone out. By the chronicle's own
-    /// invariant — one moment per event — this is also how many events
-    /// are behind them.
-    written: usize,
+    /// The moments settled and not yet put on the surface, each with the
+    /// run it is a moment of, in the log's order: none while the painter
+    /// draws, and those settled while a prompt has the terminal until it
+    /// gives it back.
+    owed: Vec<(RunId, Moment)>,
     /// The glyph set every moment this painter puts out is marked with.
     glyphs: Glyphs,
     /// Where the frame reads the process driving the run from.
@@ -72,30 +73,8 @@ pub(super) struct Painter {
 }
 
 impl Painter {
-    /// A painter on `env`'s run, holding the log as it stood when the
-    /// surface opened.
-    pub(super) fn seeded(env: &SurfaceEnv<'_>, draw: Draw, seed: Vec<StoredEvent>) -> Self {
-        let mut painter = Self {
-            run_id: env.run_id.clone(),
-            manifest: env.manifest.clone(),
-            folded: Folded::default(),
-            draw,
-            log: env.log.clone(),
-            clock: Arc::clone(&env.clock),
-            prior: env.prior.cloned(),
-            stale_gap: false,
-            standing: Standing::Drawing,
-            written: 0,
-            glyphs: env.glyphs,
-            engine: env.engine.clone(),
-            held: Vec::new(),
-        };
-        painter.attach_to(seed);
-        painter
-    }
-
-    /// Folds the log as it stood when this invocation attached, without
-    /// writing a line for any of it.
+    /// A painter on `env`'s run, folded from `seed`, its log as it stood
+    /// when the surface opened, without writing a line for any of it.
     ///
     /// Those events are what the frame is derived from, so they are
     /// folded; they are not what this invocation did, so they earn
@@ -103,25 +82,34 @@ impl Painter {
     /// every time it picked one up — on the append-only surface, where
     /// a reader has no region to see the state in and every line looks
     /// like something that just happened.
-    fn attach_to(&mut self, seed: Vec<StoredEvent>) {
-        let Self { run_id, folded, .. } = self;
-        for event in seed {
-            if &event.run_id == run_id {
-                folded.fold(event);
-            }
+    pub(super) fn seeded(env: &SurfaceEnv<'_>, draw: Draw, seed: Vec<StoredEvent>) -> Self {
+        let folded = Folded::read(
+            env.run_id.clone(),
+            env.manifest.clone(),
+            env.engine.read(),
+            seed,
+        );
+        Self {
+            folded,
+            draw,
+            log: env.log.clone(),
+            clock: Arc::clone(&env.clock),
+            stale_gap: false,
+            standing: Standing::Drawing,
+            owed: Vec::new(),
+            glyphs: env.glyphs,
+            engine: env.engine.clone(),
+            held: Vec::new(),
         }
-        self.written = self.folded.settled().len();
     }
 
     /// Folds the events of the run being drawn and writes the line each
     /// newly settled one earns.
     fn fold(&mut self, events: Vec<StoredEvent>) {
-        let Self { run_id, folded, .. } = self;
-        for event in events {
-            if &event.run_id == run_id {
-                folded.fold(event);
-            }
-        }
+        let run = self.folded.run().run().clone();
+        let moments = self.folded.fold(events);
+        self.owed
+            .extend(moments.into_iter().map(|moment| (run.clone(), moment)));
         self.write_settled();
     }
 
@@ -131,25 +119,18 @@ impl Painter {
     ///
     /// Nothing goes out while the painter is stood down: a line printed
     /// under an open prompt lands on the rows a person is reading, and
-    /// what is owed is counted rather than queued, so the order and the
+    /// what is owed waits, each moment with its run, so the order and the
     /// content survive the wait.
     fn write_settled(&mut self) {
         if self.standing == Standing::StoodDown {
             return;
         }
         let Self {
-            run_id,
-            folded,
-            draw,
-            written,
-            glyphs,
-            ..
+            draw, owed, glyphs, ..
         } = self;
-        let moments = yunta_replay::frame::chronicle(folded.settled());
-        for moment in moments.iter().skip(*written) {
-            draw.record(moment, run_id, *glyphs);
+        for (run, moment) in owed.drain(..) {
+            draw.record(&moment, &run, *glyphs);
         }
-        *written = moments.len();
     }
 
     /// Takes one diagnostic the run raised while it is being drawn.
@@ -190,50 +171,41 @@ impl Painter {
     /// drawn knows of it is on its own log already, as
     /// `child_run_created` and `child_run_finished`.
     async fn absorb(&mut self, events: Vec<StoredEvent>) {
+        let drawn = self.folded.run().run();
         let foreign: Vec<RunId> = events
             .iter()
-            .filter(|event| event.run_id != self.run_id)
+            .filter(|event| &event.run_id != drawn)
             .map(|event| event.run_id.clone())
             .collect();
         self.fold(events);
         if foreign.is_empty() {
             return;
         }
-        let successor = {
-            let state = RunState::replay(self.folded.settled());
-            foreign.into_iter().find(|id| succeeds(&state, id))
-        };
+        let state = self.folded.run().state();
+        let successor = foreign.into_iter().find(|id| succeeds(state, id));
         if let Some(successor) = successor {
             self.follow(successor).await;
         }
     }
 
-    /// The run's state and its frame, with what drives it, as they stand at
-    /// this instant.
-    fn reading(&self) -> (RunState, RunFrame) {
-        let state = RunState::replay(self.folded.settled());
-        let now = self.clock.now();
-        let frame = RunFrame::of(
-            &self.run_id,
-            &self.manifest.workflow,
-            &state,
-            self.prior.as_ref(),
-            &self.engine.read(),
-            now,
-        );
-        (state, frame)
+    /// Reads the process driving the run into the run kept, as the reading
+    /// says now: its frame is derived again only where the reading moved.
+    fn read_engine(&mut self) {
+        self.folded.engine(self.engine.read());
     }
 
     /// Redraws the region from the run as it stands at this instant,
-    /// unless a prompt has the terminal.
+    /// unless a prompt has the terminal: the frame kept for the run's head,
+    /// and what the clock adds to it now.
     fn redraw(&mut self) {
         if self.standing == Standing::StoodDown || !matches!(self.draw, Draw::Live(_)) {
             return;
         }
-        let (state, frame) = self.reading();
-        let answerable = yunta_api::offers_a_menu(&frame, &self.manifest, &state);
+        self.read_engine();
+        let run = self.folded.run();
+        let times = run.times(self.clock.now());
         if let Draw::Live(region) = &mut self.draw {
-            region.show(&frame, &self.run_id, answerable);
+            region.show(run.frame(), &times, run.run(), run.menu());
         }
     }
 
@@ -246,27 +218,36 @@ impl Painter {
         self.redraw();
     }
 
-    /// Reads the run's log and folds it whole — how a frame the queue
-    /// dropped comes back. The log is the truth; this is the surface
+    /// Reads the run's log past what is folded of it and folds what it
+    /// reads — how a frame the queue dropped comes back, and how a
+    /// successor is read whole. The log is the truth; this is the surface
     /// admitting its copy is behind.
     async fn reread(&mut self) {
-        let Ok(events) = self.log.events(&self.run_id).await else {
+        let run = self.folded.run().run();
+        let read = match self.folded.head() {
+            Some(head) => self.log.events_after(run, head).await,
+            None => self.log.events(run).await,
+        };
+        let Ok(events) = read else {
             // A read that failed leaves the surface exactly as behind as
             // it was, and the next beat asks again.
             return;
         };
-        self.folded.refill(events);
-        self.write_settled();
+        self.fold(events);
     }
 
     /// Moves onto a promotion successor: a run of its own, with its own
     /// log, drawn as this same invocation carrying on.
+    ///
+    /// A successor inherits its predecessor's workflow whole, so the chain
+    /// is drawn from the manifest the run drawn froze — which is also what
+    /// rebuilds the menu a parked run stopped on, and that decides the
+    /// command the attention row offers.
     async fn follow(&mut self, run_id: RunId) {
         self.engine = self.engine.of_successor(&run_id);
-        self.run_id = run_id;
-        self.folded = Folded::default();
+        let manifest = self.folded.run().manifest().clone();
+        self.folded = Folded::read(run_id, manifest, self.engine.read(), Vec::new());
         self.stale_gap = false;
-        self.written = 0;
         self.reread().await;
         self.redraw();
     }
@@ -285,12 +266,13 @@ impl Painter {
         match standing {
             Standing::StoodDown => {
                 if matches!(self.draw, Draw::Live(_)) {
-                    let (_, frame) = self.reading();
+                    self.read_engine();
+                    let run = self.folded.run();
                     if let Draw::Live(region) = &mut self.draw {
                         // A prompt has the terminal: a person is being asked,
                         // whatever the log has got to. Not from the frames: the
                         // ones a painter catches up on after a prompt are old news.
-                        region.ask(&frame, &self.run_id);
+                        region.ask(run.frame(), run.run());
                         region.lower();
                     }
                 }

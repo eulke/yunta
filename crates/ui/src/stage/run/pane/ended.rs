@@ -57,13 +57,14 @@ fn failed(framed: &Framed<'_>, pointed: &NodeId, failure: Option<&Failure>) -> V
     let Some(failure) = its_own.or(failure) else {
         return Vec::new();
     };
-    let workflow = &framed.in_view.run.manifest.workflow;
+    let workflow = &framed.in_view.run.manifest().workflow;
     let declared = workflow
         .iter_nodes()
         .find(|declared| declared.id == *pointed);
     HowItFailed {
         failure,
         node,
+        times: framed.times.node(&node.id),
         declared,
     }
     .blocks()
@@ -72,7 +73,7 @@ fn failed(framed: &Framed<'_>, pointed: &NodeId, failure: Option<&Failure>) -> V
 /// Why the run `framed` closed promoted, on a row of its own, then its successor where one
 /// came or none did, in `look`'s glyphs.
 fn promoted(framed: &Framed<'_>, look: &Look) -> Vec<Block> {
-    let state = &framed.in_view.run.state;
+    let state = framed.in_view.run.state();
     let why = state.run.promotion().map(|promotion| {
         let reason = yunta_render::outcome::promotion_reason(
             promotion.cause.as_ref(),
@@ -82,9 +83,12 @@ fn promoted(framed: &Framed<'_>, look: &Look) -> Vec<Block> {
         Block::Rows(vec![Line::new().plain(reason)])
     });
     let successor = framed.in_view.successor.as_deref();
-    let frame = successor.map(|successor| successor.run.frame(framed.now));
-    let its_successor = match (&frame, framed.in_view.no_successor) {
-        (Some(frame), _) => Some(ItsSuccessor::Came(frame)),
+    let framed_at = successor.map(|successor| {
+        let run = &successor.run;
+        (run.frame(), run.times(framed.now))
+    });
+    let its_successor = match (&framed_at, framed.in_view.no_successor) {
+        (Some((frame, times)), _) => Some(ItsSuccessor::Came(frame, times)),
         (None, true) => Some(ItsSuccessor::NoneCame),
         (None, false) => None,
     };
@@ -99,7 +103,7 @@ fn promoted(framed: &Framed<'_>, look: &Look) -> Vec<Block> {
 fn broken(framed: &Framed<'_>, diagnostic: &str) -> Vec<Block> {
     WhereItsLogBreaks {
         diagnostic,
-        reads_up_to: framed.in_view.run.state.reads_up_to(),
+        reads_up_to: framed.in_view.run.state().reads_up_to(),
         waited_on: framed.frame.waits_on_a_person_at(),
     }
     .blocks()

@@ -111,13 +111,13 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
                 node_id: NodeId::from("review@reviewer"),
                 runner: "reviewer".into(),
                 adapter: "claude-code".into(),
-                model: "claude-sonnet-4-6".into(),
+                model: Some("claude-sonnet-4-6".into()),
             },
             RunnerUsage {
                 node_id: NodeId::from("review@reviewer-alt"),
                 runner: "reviewer-alt".into(),
                 adapter: "codex".into(),
-                model: "gpt-5-codex".into(),
+                model: Some("gpt-5-codex".into()),
             },
         ],
         cost: CostSummary {
@@ -224,6 +224,87 @@ fn baseline_absent_never_invents_a_zero_regression_line() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 10 });
     receipt.baseline = None;
     assert_golden(&golden("no-baseline"), &render_receipt_markdown(&receipt));
+}
+
+/// The receipt of a run that holds every field the document can: a baseline measured red,
+/// a scope with a path out of it and paths granted, the change counted, a node that
+/// failed, events the binary could not read, the problems its documents had, findings
+/// posted and answered, and the pull request it opened.
+fn every_field() -> Receipt {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 512 });
+    receipt.criteria.guards = 1;
+    receipt.criteria.guards_green = 1;
+    receipt.criteria.total = 4;
+    receipt.criteria.green = 4;
+    receipt.baseline = Some(BaselineSummary {
+        suite: "make test".to_string(),
+        hash: yunta_core::sha256_hex(b"make test"),
+        compared: 2,
+        regressions: 0,
+        origin: yunta_core::events::BaselineOrigin::Inherited {
+            run: RunId::from("run-2026-08-20-0007"),
+        },
+        red: Some(2),
+    });
+    receipt.scope = ScopeSummary {
+        files_touched: 6,
+        violations: vec!["Cargo.lock".into()],
+        granted: 2,
+    };
+    receipt.unknown_kinds = vec![yunta_core::events::UnknownKindCount {
+        kind: "node_wandered".to_string(),
+        events: 3,
+    }];
+    receipt.diagnostics = vec![DiagnosticCount {
+        kind: Some(ArtifactKind::Tasks.into()),
+        code: DiagnosticCode::Rule(RuleCode::NoCriteria),
+        occurrences: 1,
+    }];
+    receipt.failed = vec![yunta_core::receipt::FailedNode {
+        node: NodeId::from("build"),
+        failure: Failure::Message {
+            outcome: "`cargo build` exited 101".into(),
+        },
+    }];
+    receipt.blocking_findings = 1;
+    receipt.findings = FindingsSummary {
+        posted: 3,
+        answered: 2,
+    };
+    receipt.pull_request = Some(yunta_core::receipt::OpenedPullRequest {
+        number: 42,
+        url: "https://github.com/acme/widgets/pull/42".to_string(),
+    });
+    receipt
+}
+
+/// The golden file of the JSON receipt `case` is checked against.
+fn golden_json(case: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("goldens/receipt")
+        .join(format!("{case}.json"))
+}
+
+/// `receipt.json` as a program reads it, its every field, under the version of its shape.
+#[test]
+fn the_json_receipt_holds_its_shape_whole() {
+    let json = serde_json::to_string_pretty(&every_field()).unwrap();
+    assert_golden(&golden_json("every-field"), &json);
+}
+
+/// A runner whose model nobody named and no session reported is written with no model at
+/// all, never an empty one.
+#[test]
+fn a_runner_that_names_no_model_is_written_without_one() {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 40 });
+    receipt.runners = vec![RunnerUsage {
+        node_id: NodeId::from("build"),
+        runner: "executor".into(),
+        adapter: "codex".into(),
+        model: None,
+    }];
+    let json = serde_json::to_string_pretty(&receipt).unwrap();
+    assert_golden(&golden_json("no-model"), &json);
 }
 
 /// A run of a lineage compares against a measurement another run took,

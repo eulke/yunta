@@ -7,7 +7,7 @@
     |  --> src/lib.rs:3:5
     whole output: yunta status 7E5PH4 --node lint
 
-  progress     2 of 5 nodes done ; 1 reroute
+  progress     2 of 5 nodes done, 1 reroute
   nodes        + 2 finished: plan, build
                ! 1 failed: lint
                . 2 never ran: fix-lint, ship

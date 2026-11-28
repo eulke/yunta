@@ -6,4 +6,4 @@
 next
   yunta receipt 7E5PH4         write the receipt
   yunta verify 7E5PH4          verify its evidence
-  yunta status 7E5PH4 --full   the whole story, node by node
+  yunta status 7E5PH4 --full   the run's whole story

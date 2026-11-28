@@ -1,0 +1,24 @@
+␛[1mWhat do you want to build?␛[0m
+␛[2m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[1madd support␛[0m                                                                                      ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯␛[0m
+␛[2mthis becomes the brief; fragua asks only what it cannot decide for you␛[0m
+
+␛[2mworkflow␛[0m
+␛[1;35m▸␛[0m ␛[1myunta/fragua   ␛[0mthe full cycle: questions, plan, tests, work, review, PR
+  lint-fix       lint and format, with one fix round
+  run-tasks      a tasks document you wrote by hand
+
+␛[2mtasks (document, required)␛[0m
+␛[2m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m                                                                                                  ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯␛[0m
+␛[2mTasks document YAML, relative to the repository root.␛[0m
+
+␛[2madapter␛[0m
+ ␛[2m▸␛[0m ␛[1mas the runners in config.yaml say␛[0m   ␛[2mclaude-code␛[0m   ␛[2mcodex␛[0m
+
+␛[2mwhat runs␛[0m
+  ␛[2m┄␛[0m ␛[2m┄┄␛[0m ␛[2m╌␛[0m ␛[2m┄␛[0m
+  grill plan ship
+  it stops for you at ship

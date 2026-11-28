@@ -6,7 +6,7 @@
 //! being typed on the card keeps its box in the fewest rows.
 
 use crate::components::{
-    Card, CardBody, ChoiceRow, Choices, Laid, Legend, Prose, Region, Sight, TypedRow,
+    Card, CardBody, ChoiceRow, Choices, Laid, Legend, Note, Prose, Region, Sight, TypedRow,
 };
 use crate::doc::Doc;
 use crate::glyphs::Glyphs;
@@ -200,6 +200,69 @@ fn above_a_card_standing_whole_the_blank_rows_and_what_stands_above_give_way() {
     assert_eq!(untitled[0], "  ground 1", "{untitled:#?}");
     assert!(untitled[1].contains("Ship it?"), "{untitled:#?}");
     assert_eq!(untitled[2], "|", "the card keeps its blank row");
+}
+
+/// The options a card asking whether to ship may offer, as many as a test asks for.
+const OPTIONS: [&str; 6] = ["approve", "abort", "adjust", "retry", "skip", "close"];
+
+/// Two grounds, then a card of the first `options` of [`OPTIONS`] under the region's title,
+/// with a note under the card where it stands `noted`: read at its end.
+fn under_a_title(options: usize, noted: bool) -> Region {
+    let mut asked = card();
+    if let CardBody::Choosing { choices, .. } = &mut asked.body {
+        choices.rows = OPTIONS[..options]
+            .iter()
+            .map(|name| ChoiceRow {
+                name: name.to_string(),
+                said: Some(format!("{name} it")),
+                cost: None,
+                key: None,
+            })
+            .collect();
+    }
+    let doc = Doc::new().with_all(grounds(2)).with(asked);
+    let doc = match noted {
+        true => doc.with(Note("approving opens the pull request".to_string())),
+        false => doc,
+    };
+    Region::new(doc)
+        .titled(["ship", "gate"])
+        .in_sight(Sight::at_the_end())
+}
+
+/// The title gives way exactly where the card's fewest rows do not stand under it, as the pane
+/// draws it there: kept, the card's question and each of its options stand under the title;
+/// given way, they do not. Short of rows or not, aired or close, with a note under the card or
+/// none, a card of two options and one of six.
+#[test]
+fn the_title_gives_way_exactly_where_the_cards_least_does_not_stand_under_it() {
+    let look = Look {
+        width: Width::exact(CELLS),
+        ..Look::plain()
+    };
+    let terminal = Terminal::on(look);
+    let mut wrong = Vec::new();
+    for (options, noted) in [(2, false), (2, true), (6, false), (6, true)] {
+        let region = under_a_title(options, noted);
+        for short_of_rows in [false, true] {
+            for rows in 0..=16 {
+                let paned = match short_of_rows {
+                    true => terminal.pane_short_of_rows(&region, rows),
+                    false => terminal.pane(&region, rows),
+                };
+                let lines: Vec<String> = paned.lines.iter().map(Line::text).collect();
+                let stands = std::iter::once("Ship it?")
+                    .chain(OPTIONS[..options].iter().copied())
+                    .all(|said| lines.iter().any(|line| line.contains(said)));
+                if terminal.keeps_its_title(&region, rows, short_of_rows) != stands {
+                    wrong.push(format!(
+                        "{options} options, noted {noted}, short {short_of_rows}, {rows} rows: {lines:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// `count` lines of what a card rests on.

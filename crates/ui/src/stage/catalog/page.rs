@@ -6,10 +6,11 @@
 
 use std::mem::{discriminant, Discriminant};
 
-use surco::components::{Laid, Legend, Sight};
+use surco::components::{Laid, Sight};
 
 use super::packs::PacksStanding;
 use super::{CatalogStage, Shown};
+use crate::scroll::Scroll;
 
 /// What stands in the catalog's place, by its kind and, for the packs, by theirs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,12 @@ impl CatalogStage {
         }
     }
 
+    /// Where a page standing in the catalog's place stands, which no row of its screen says,
+    /// its legend the same whether it scrolls or not; none where no page stands.
+    pub(crate) fn page(&self) -> Option<Scroll> {
+        self.shows_a_page().then_some(self.scroll)
+    }
+
     /// Back at the first line where what stands is no longer what stood, `before`.
     pub(super) fn rewound_unless(&mut self, before: Standing) {
         if self.standing() != before {
@@ -53,15 +60,6 @@ impl CatalogStage {
         match self.shows_a_page() {
             true => self.scroll.sight(),
             false => Sight::following_pointer(),
-        }
-    }
-
-    /// `legend`, led by the keys that scroll where a page stands taller than what shows
-    /// of it.
-    pub(super) fn scrolled(&self, legend: Legend) -> Legend {
-        match self.shows_a_page() && self.scroll.scrolls() {
-            true => yunta_render::screen::scrolling(legend),
-            false => legend,
         }
     }
 

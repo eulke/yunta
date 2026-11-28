@@ -192,6 +192,7 @@ fn opened_in(repository: Repository) -> (State, Vec<Request>) {
         repository,
         storage: PathBuf::from("/home/me/.yunta/yunta.db"),
         prices: None,
+        home: None,
     }));
     let asked = state.update(Input::Outcome(*opening, read));
     (state, asked)
@@ -224,7 +225,9 @@ fn the_field_here_is_followed_before_the_application_stands() {
         field: Some(FieldReach::Here),
         run: None,
     };
-    let (state, asked) = opened_in(Repository::SetUp);
+    let (state, asked) = opened_in(Repository::SetUp {
+        dir: PathBuf::from("/home/me/repo"),
+    });
     assert_eq!(follows(&asked), [&here]);
     assert_eq!(state.followed(), here);
 
@@ -372,7 +375,7 @@ async fn a_successor_folded_takes_the_place_of_its_run() {
     };
     assert_eq!(follows(&asked), [&onto], "the successor is followed");
     assert_eq!(state.followed(), onto);
-    assert_eq!(in_view(&state).run.run, successor.run_id);
+    assert_eq!(*in_view(&state).run.run(), successor.run_id);
     let trail = state.screen(&Look::plain()).trail;
     assert_eq!(
         trail.get(1).map(String::as_str),
@@ -411,7 +414,7 @@ async fn what_a_run_waits_on_is_kept_unread_with_why() {
     let seq = slept(&bench);
     surface.caught_up(&mut state, Vec::new(), &bench).await;
     assert_eq!(
-        in_view(&state).run.state.head(),
+        in_view(&state).run.state().head(),
         Some(seq),
         "the news folds"
     );

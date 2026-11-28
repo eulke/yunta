@@ -50,7 +50,7 @@ fn foot(code: &Code) -> String {
     if said.is_empty() {
         return String::new();
     }
-    let sep = format!(" {} ", GLYPHS.sep());
+    let sep = GLYPHS.spaced_sep();
     format!(
         "<p class=\"foot\">{}</p>",
         text::esc(&said.join(sep.as_str()))

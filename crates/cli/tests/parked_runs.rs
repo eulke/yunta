@@ -107,13 +107,15 @@ sessions:
 
 /// A node that holds the run open until the test hands it `go.txt`. It
 /// announces itself with `started.txt` first, so the test watches for a
-/// marker the node writes instead of waiting a fixed time for it.
+/// marker the node writes instead of waiting a fixed time for it. It also
+/// ends when that marker is gone, which is when the test's directory is: a
+/// test that fails before it hands `go.txt` leaves no run looking for it.
 const HOLDS_OPEN: &str = r#"
 name: holds-open
 nodes:
   - id: hold
     kind: bash
-    run: "touch started.txt; until [ -f go.txt ]; do :; done"
+    run: "touch started.txt; until [ -f go.txt ] || [ ! -e started.txt ]; do sleep 0.05; done"
 "#;
 
 /// A git repo carrying `workflows` as `<name>.yaml`, committed — every
@@ -687,8 +689,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
 
     let list = stdout(&yunta_in!(&repo, &home, &["list", "--runs"]));
     assert!(
-        list.contains("\nneeds you, oldest first\n")
-            && list.contains("node `ask` asked 1 question: `summary`"),
+        list.contains("\nneeds you, oldest first\n") && list.contains("node `ask` asks 1 question"),
         "the listing groups it with what needs a person, under the words the page uses: {list}"
     );
 }
@@ -720,7 +721,7 @@ fn a_run_whose_manifest_does_not_read_back_is_listed_as_itself() {
     );
     let full = stdout(&yunta_in!(&repo, &home, &["list", "--runs", "--full"]));
     assert!(
-        full.contains("\ncould not be read\n") && full.contains(&format!("{}: ", handle(&run_id))),
+        full.contains("\nunreadable\n") && full.contains(&format!("{}: ", handle(&run_id))),
         "and the whole story says why: {full}"
     );
 }

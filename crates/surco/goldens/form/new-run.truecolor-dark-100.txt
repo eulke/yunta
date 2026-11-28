@@ -1,0 +1,21 @@
+␛[1;38;2;255;255;255mWhat do you want to build?␛[0m
+␛[38;2;142;136;127m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮␛[0m
+␛[38;2;142;136;127m│␛[0m ␛[1;38;2;255;255;255madd support␛[0m                                                                                      ␛[38;2;142;136;127m│␛[0m
+␛[38;2;142;136;127m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯␛[0m
+␛[38;2;142;136;127mthis becomes the brief; fragua asks only what it cannot decide for you␛[0m
+
+␛[38;2;142;136;127mworkflow␛[0m
+␛[1;38;2;220;148;234;48;2;48;36;58m▸␛[0m␛[48;2;48;36;58m ␛[0m␛[1;38;2;255;255;255;48;2;48;36;58myunta/fragua   ␛[0m␛[48;2;48;36;58mthe full cycle: questions, plan, tests, work, review, PR␛[0m␛[48;2;48;36;58m␛[K␛[0m
+  lint-fix       lint and format, with one fix round
+  run-tasks      a tasks document you wrote by hand
+
+␛[38;2;142;136;127mmode␛[0m
+ ␛[38;2;142;136;127m▸␛[0m ␛[1;38;2;255;255;255mquick␛[0m   ␛[38;2;142;136;127mstandard␛[0m   ␛[38;2;142;136;127mfull␛[0m
+
+␛[38;2;142;136;127madapter␛[0m
+ ␛[38;2;142;136;127m▸␛[0m ␛[1;38;2;255;255;255mas the runners in config.yaml say␛[0m   ␛[38;2;142;136;127mclaude-code␛[0m   ␛[38;2;142;136;127mcodex␛[0m
+
+␛[38;2;142;136;127mwhat runs␛[0m
+  ␛[38;2;75;70;80m┄␛[0m ␛[38;2;75;70;80m┄┄␛[0m ␛[38;2;75;70;80m╌␛[0m ␛[38;2;75;70;80m┄␛[0m
+  grill plan ship
+  it stops for you at ship

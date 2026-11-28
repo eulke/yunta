@@ -10,7 +10,7 @@
 use surco::components::CardBody;
 use surco::doc::Block;
 use surco::look::Look;
-use surco::surface::{Markdown, Surface};
+use surco::surface::Markdown;
 use yunta_api::RunNews;
 use yunta_render::screen::Leaving;
 use yunta_testkit::Bench;
@@ -134,10 +134,20 @@ async fn esc_again_or_q_leaves_the_run_for_the_field_saying_it_waits() {
             "{leaving:?} stays in the application: {asked:?}"
         );
         let drawn = field.screen(&Markdown.look());
-        assert_eq!(drawn.trail, ["yunta"], "{leaving:?} goes to the field");
+        let repository = field
+            .followed_runs()
+            .repository
+            .as_ref()
+            .and_then(yunta_api::Repository::dir);
+        let place = repository.map(|place| place.display().to_string());
+        assert_eq!(
+            drawn.trail.get(1),
+            place.as_ref(),
+            "{leaving:?} goes to the field"
+        );
         assert_eq!(field.followed().run, None, "no run is followed under it");
-        let said = Markdown.draw(&drawn.main.doc);
-        assert!(said.contains(Leaving::Waits.said()), "{leaving:?}: {said}");
+        let said = drawn.noted.map(|noted| noted.said);
+        assert_eq!(said.as_deref(), Some(Leaving::Waits.said()), "{leaving:?}");
     }
 }
 

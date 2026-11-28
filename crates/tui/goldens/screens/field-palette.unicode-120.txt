@@ -1,0 +1,36 @@
+ yunta › /cut/worktree                                                                       ◆ 5 need you · ▲ 1 stalled
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  › what do you want to build?  · n                                           │ ◆ fragua (standard) · needs you  Q78GRR
+                                                                              │ ━━ ━ ━━ ━━ ━ ━━ ━━ ━ ━━ ━━ ━ ━━ ━━ ┄ ┄┄
+  asking now                                                                  │   node `tests` asks at its terminal.
+  ▸ ◆ Q78GRR standard  ━━━━━━━━━━━━━━┄┄ node `tests` asks at its termi…   0s  │
+                  ╭ what do you want to do? ─────────────────────────────────────────────────────────╮5 nodes done, 1
+  needs you, oldes│ ▸ type to filter                                                                 │
+    ◆ EZRPE9 quick│                                                                                  │n / 1.06M out
+    ◆ C0NS0E defau│▸ follow it as it moves                   enter yunta status Q78GRR --follow      │ched)
+    ◆ T0KENS defau│  stop it and everything under it         c     yunta cancel Q78GRR               │t work, 38m51s
+    ◆ B10CKD defau│  what it cost, and where its time went   s     yunta stats Q78GRR                │ on you
+                  │  go to what needs you                    a     yunta status needs                │nt 41m05s, spec
+  stalled         │  start a new run                         n     yunta run <workflow>              │ plan 6m25s
+    ▲ EKPBGE stand│  this repository's runs                        yunta list --runs                 │un/...Q78GRR off
+                  │  this repository's runs, the closed too  d     yunta list --runs --full          │
+  stopped         │  the runs on this machine                e     yunta list --runs --all           │
+    ■ ST0PPD defau│  the workflows you can run               w     yunta list                        │
+    ■ AB0RTD defau│  check adapters, git, forge, packs       m     yunta doctor                      │rything under it
+                  │  remove orphaned checkouts                     yunta gc                          │
+  running         │  the shape of every document yunta reads       yunta schema                      │
+    ● TW0TSK defau╰──────────────────────────────────────────────────────────────────────────────────╯
+                                                                              │
+  unreadable                                                                  │
+    ✗ 0RPHAN                            manifest missing or unreadable…       │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+                                                                              │
+ ◆ EZRPE9 needs you: node `grill` failed: session `mock` refused the request (its credential was refused): Not logged…
+ ↑↓ move · enter do it · esc back

@@ -373,7 +373,8 @@ fn scope_summary(state: &RunState) -> ScopeSummary {
 /// reroute, again on a retry — and the receipt's line counts
 /// runners, not resolutions, so each node appears once. Fan-out siblings
 /// carry distinct ids (`<base>@<runner>`), so they are not collapsed by
-/// this.
+/// this. A runner that names no model ran on the one its CLI chose, which
+/// the node's first session reported.
 fn runner_usage(state: &RunState) -> Vec<RunnerUsage> {
     // Keyed by the seq of each node's first resolution, so the map reads
     // in the order the nodes first resolved one.
@@ -386,7 +387,11 @@ fn runner_usage(state: &RunState) -> Vec<RunnerUsage> {
                 node_id: node_id.clone(),
                 runner: resolved.runner.clone(),
                 adapter: resolved.chosen.adapter.clone(),
-                model: resolved.chosen.model.clone(),
+                model: resolved
+                    .chosen
+                    .model
+                    .clone()
+                    .or_else(|| record.models.first().cloned()),
             };
             Some((*seq, usage))
         })

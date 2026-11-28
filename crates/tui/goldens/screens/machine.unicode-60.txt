@@ -1,0 +1,14 @@
+ yunta › machine                              ◆ 1 needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ✓ this machine · ready · 1 thing worth a look
+   ✓ 2 healthy  git · checkouts
+   ▲ runners    none declared: a workflow's agent nodes ca…
+     fix        declare a runner in .yunta/config.yaml; no…
+                  runners:
+                    implementer:
+                      - { adapter: <adapter> }
+                  defaults:
+                    runner: implementer
+
+ ◆ 000000 needs you: Go on?  · a go there
+ f every check · s a session per binding · … · ? keys

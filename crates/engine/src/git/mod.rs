@@ -27,7 +27,7 @@ pub use error::{Cause, GitError, Invocation, Stopped};
 pub use mutation::{mutation_lock, MutationLock};
 pub use numstat::{numstat, Numstat};
 pub use objects::blobs;
-pub use repo::{committer, common_dir, push_branch, remote_url, run_branches, words_in};
+pub use repo::{committer, common_dir, push_branch, remote_url, run_branches, words_in, Identity};
 pub use status::{tree_state, Status};
 
 use std::path::Path;
@@ -316,6 +316,37 @@ fn lossy(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Who git commits as is handed as what it is: the name, and the address apart from it,
+    /// without the brackets git writes around the address or the time it adds. The identity
+    /// is set where git reads it first, the command's own environment, over whatever the
+    /// test's process carries, so no `GIT_COMMITTER_*`, `GIT_AUTHOR_*` or `EMAIL` there moves
+    /// it.
+    #[tokio::test]
+    async fn who_git_commits_as_is_a_name_and_an_address_apart() {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let identity = [
+            ("GIT_AUTHOR_NAME", "Marta Ruiz"),
+            ("GIT_AUTHOR_EMAIL", "marta.ruiz@example.com"),
+            ("GIT_COMMITTER_NAME", "Marta Ruiz"),
+            ("GIT_COMMITTER_EMAIL", "marta.ruiz@example.com"),
+        ]
+        .map(|(key, value)| (key.to_string(), value.to_string()));
+        let supervision = Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock)
+            .with_env(&identity);
+        let repo = tempfile::tempdir().unwrap();
+        yunta_testkit::init_repo(repo.path());
+
+        let who = committer(repo.path(), supervision).await.unwrap();
+
+        assert_eq!(
+            who,
+            Identity {
+                name: "Marta Ruiz".to_string(),
+                address: "marta.ruiz@example.com".to_string(),
+            }
+        );
+    }
 
     /// The engine's git starts no upkeep of its own: whatever the
     /// repository configures, the commands it runs read `gc.auto` as 0

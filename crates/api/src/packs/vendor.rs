@@ -1,14 +1,19 @@
-//! See [`super`]. How a pack reaches a project: cloned, its manifest read,
-//! its tree hashed and vendored through a staging directory beside its place,
-//! and the `yunta.lock` it is recorded in read and written whole. What fails
-//! here is a [`PackError`], said in its own words.
+//! See [`super`]. How a pack reaches a project: its repository cloned from
+//! where its source names, `<repository>//<directory>[@ref]` (`source` reads
+//! the form and holds the directory inside the clone), its manifest read at
+//! that directory, its tree there, as its walk found it, hashed and vendored
+//! through a staging directory beside its place, and the `yunta.lock` it is
+//! recorded in, with its source and directory, read and written whole. What
+//! fails here is a [`PackError`], said in its own words.
 
 use std::path::{Path, PathBuf};
 
 use yunta_core::durable::{self, Durability};
 use yunta_core::{sha256_hex, CommitSha, ContentHash, PackLock, PackManifest, PackRef};
 use yunta_engine::process::Supervision;
-use yunta_engine::GitError;
+use yunta_engine::{GitError, PackTree, PackWalkError};
+
+use super::source::Checkout;
 
 use crate::{Remark, Remarks};
 
@@ -42,10 +47,7 @@ pub(super) enum PackError {
         #[source]
         source: yunta_core::InvalidId,
     },
-    #[error(
-        "`{path}` is a symlink: a pack ships regular files only, so vendoring never follows a \
-         link out of the pack or copies what one points at"
-    )]
+    #[error("{}", yunta_render::page::pack::link_in_its_tree(path))]
     Symlink { path: PathBuf },
     #[error("pack.yaml: {detail}")]
     Manifest { detail: String },
@@ -55,41 +57,6 @@ pub(super) enum PackError {
         cause: Box<PackError>,
         cleanup: Box<PackError>,
     },
-}
-
-/// `<source>[@<ref>]` (e.g. `github.com/acme/review-pack@v1.2.0`) —
-/// split on the last `@` **only when it follows the source's last `/`
-/// and what follows it holds no `:`**, which git refuses in a ref, so an
-/// SSH shorthand like `git@github.com:acme/repo.git` (whose `@` comes
-/// before any `/`) or `git@host:repo.git` (with no `/` at all) is never
-/// mistaken for a `source@ref` pin.
-pub(super) fn split_source_and_ref(spec: &str) -> (&str, Option<&str>) {
-    let Some(at) = spec.rfind('@') else {
-        return (spec, None);
-    };
-    let (source, reference) = (&spec[..at], &spec[at + 1..]);
-    let after_the_path = spec.rfind('/').is_none_or(|slash| at > slash);
-    match after_the_path && !reference.contains(':') {
-        true => (source, Some(reference)),
-        false => (spec, None),
-    }
-}
-
-/// A bare `host/path` shorthand (no scheme, no SSH `user@host:` prefix,
-/// not already a local filesystem path) gets `https://` prepended —
-/// `github.com/acme/review-pack` is exactly this shorthand, never a
-/// literally clonable URL on its own. A local path
-/// (starts with `.`, `/` or `~`) or anything already carrying a scheme
-/// or an `@` (SSH shorthand) passes through untouched.
-pub(super) fn clone_url(source: &str) -> String {
-    let looks_local = source.starts_with('.') || source.starts_with('/') || source.starts_with('~');
-    let has_scheme = source.contains("://");
-    let looks_ssh_shorthand = source.contains('@');
-    if looks_local || has_scheme || looks_ssh_shorthand {
-        source.to_string()
-    } else {
-        format!("https://{source}")
-    }
 }
 
 async fn run_git(
@@ -103,26 +70,29 @@ async fn run_git(
         .map_err(PackError::Git)
 }
 
-/// Clones `url` into `dest` (a fresh, empty directory), checking out
-/// `ref_` when given — a full clone, not shallow: `--depth 1` would
-/// only work for a ref that's a branch tip, and a ref here can just as
-/// well be a tag or a commit-ish. A local `url` written relative is read
-/// from `from`, the repository the pack is installed in.
+/// Clones `url` into `dest` (a fresh, empty directory), with `checkout` checked
+/// out: a tag known to be one alone, at depth one; else the whole repository,
+/// since a ref named can be a commit, which a clone at depth one cannot reach,
+/// and the ref checked out in it. Each command ends its options before the
+/// url and the ref, so neither is read as one. A local `url` written relative
+/// is read from `from`, the repository the pack is installed in.
 pub(super) async fn clone_pack(
     url: &str,
-    ref_: Option<&str>,
+    checkout: Checkout<'_>,
     from: &Path,
     dest: &Path,
     supervision: Supervision<'_>,
 ) -> Result<(), PackError> {
-    run_git(
-        from,
-        &["clone", "--quiet", url, &dest.display().to_string()],
-        supervision,
-    )
-    .await?;
-    if let Some(ref_) = ref_ {
-        run_git(dest, &["checkout", "--quiet", ref_], supervision).await?;
+    let dest_arg = dest.display().to_string();
+    let clone: &[&str] = match checkout {
+        Checkout::Tag(tag) => &["clone", "--quiet", "--depth", "1", "--branch", tag],
+        Checkout::Landed | Checkout::Ref(_) => &["clone", "--quiet"],
+    };
+    let clone = [clone, &["--", url, &dest_arg]].concat();
+    run_git(from, &clone, supervision).await?;
+    if let Checkout::Ref(reference) = checkout {
+        let checked_out = ["checkout", "--quiet", "--end-of-options", reference];
+        run_git(dest, &checked_out, supervision).await?;
     }
     Ok(())
 }
@@ -193,21 +163,19 @@ fn parse_manifest(dir: &Path) -> Result<PackManifest, PackError> {
 /// lexicographic path order — deterministic regardless of the
 /// filesystem's own directory-entry order, and independent of file
 /// mtimes/permissions surviving a copy (only path + content matter,
-/// same as any other content-addressed hash in this codebase).
+/// same as any other content-addressed hash in this codebase). A
+/// symbolic link anywhere in the tree is an error, never followed.
 pub(super) fn hash_tree(dir: &Path) -> Result<ContentHash, PackError> {
-    let mut files: Vec<PathBuf> = Vec::new();
-    collect_files(dir, dir, &mut files)?;
-    files.sort();
-
+    let tree = walked(dir)?;
     let mut digest_input = String::new();
-    for relative in &files {
+    for relative in tree.files() {
         let full = dir.join(relative);
         let bytes = std::fs::read(&full).map_err(|source| PackError::Read {
             path: full.clone(),
             source,
         })?;
         let relative_str = relative.to_str().ok_or_else(|| PackError::NonUtf8Path {
-            path: relative.clone(),
+            path: relative.to_path_buf(),
         })?;
         digest_input.push_str(relative_str);
         digest_input.push('\0');
@@ -217,58 +185,24 @@ pub(super) fn hash_tree(dir: &Path) -> Result<ContentHash, PackError> {
     Ok(sha256_hex(digest_input.as_bytes()))
 }
 
-/// Every regular file under `dir`, relative to `root`, `.git` skipped.
-/// A symlink anywhere in the tree is an error, never followed: the
-/// entry's own metadata decides, so a link to a directory is refused
-/// the same as a link to a file.
-fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), PackError> {
-    let entries = std::fs::read_dir(dir).map_err(|source| PackError::Read {
-        path: dir.to_path_buf(),
-        source,
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|source| PackError::Read {
-            path: dir.to_path_buf(),
-            source,
-        })?;
-        let path = entry.path();
-        if path.file_name().is_some_and(|n| n == ".git") {
-            continue;
-        }
-        let metadata = std::fs::symlink_metadata(&path).map_err(|source| PackError::Read {
-            path: path.clone(),
-            source,
-        })?;
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|_| PackError::Read {
-                path: path.clone(),
-                source: std::io::Error::other("entry outside the tree being collected"),
-            })?
-            .to_path_buf();
-        if metadata.file_type().is_symlink() {
-            return Err(PackError::Symlink { path: relative });
-        }
-        if metadata.is_dir() {
-            collect_files(root, &path, out)?;
-        } else {
-            out.push(relative);
-        }
-    }
-    Ok(())
+/// The tree of the pack at `dir`, walked: refused at a symbolic link anywhere
+/// in it, which a pack vendored here holds none of.
+pub(super) fn walked(dir: &Path) -> Result<PackTree, PackError> {
+    PackTree::walk(dir).map_err(|walked| match walked {
+        PackWalkError::Link { link } => PackError::Symlink { path: link },
+        PackWalkError::Read { path, source } => PackError::Read { path, source },
+    })
 }
 
-/// Copies every file under `src` (skipping `.git`) into `dest`,
+/// Copies every file of `tree` (its walk passed `.git` over) into `dest`,
 /// creating directories as needed — the vendoring step itself,
 /// separate from the clone so `add`/`update` can hash the clone (which
 /// still has `.git`) and vendor a `.git`-free copy from the same
 /// checkout without cloning twice.
-fn vendor_tree(src: &Path, dest: &Path) -> Result<(), PackError> {
-    let mut files: Vec<PathBuf> = Vec::new();
-    collect_files(src, src, &mut files)?;
-    for relative in files {
-        let from = src.join(&relative);
-        let to = dest.join(&relative);
+fn vendor_tree(tree: &PackTree, dest: &Path) -> Result<(), PackError> {
+    for relative in tree.files() {
+        let from = tree.root().join(relative);
+        let to = dest.join(relative);
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent).map_err(|source| PackError::Write {
                 path: parent.to_path_buf(),
@@ -386,7 +320,7 @@ pub(super) fn with_cleanup(cause: PackError, cleanup: Result<(), PackError>) -> 
     }
 }
 
-/// Vendors `src` into `dest` through a staging directory beside it: the
+/// Vendors the files of `tree` into `dest` through a staging directory beside it: the
 /// whole tree is copied first and renamed into place last, so `dest` either
 /// does not exist or holds the complete pack. A failure removes the staging
 /// tree and puts `dest` back as it was; a cleanup that fails too is joined to
@@ -394,21 +328,21 @@ pub(super) fn with_cleanup(cause: PackError, cleanup: Result<(), PackError>) -> 
 /// tree is complete, and the replaced tree stays on disk until the returned
 /// `Swap` is committed.
 pub(super) fn vendor_into_place(
-    src: &Path,
+    tree: &PackTree,
     staging: &Path,
     dest: &Path,
 ) -> Result<Swap, PackError> {
-    stage_and_swap(src, staging, dest).map_err(|cause| with_cleanup(cause, Swap::discard(staging)))
+    stage_and_swap(tree, staging, dest).map_err(|cause| with_cleanup(cause, Swap::discard(staging)))
 }
 
-fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<Swap, PackError> {
+fn stage_and_swap(tree: &PackTree, staging: &Path, dest: &Path) -> Result<Swap, PackError> {
     if let Some(parent) = staging.parent() {
         std::fs::create_dir_all(parent).map_err(|source| PackError::Write {
             path: parent.to_path_buf(),
             source,
         })?;
     }
-    vendor_tree(src, staging)?;
+    vendor_tree(tree, staging)?;
     let previous = dest.with_file_name(format!(
         ".previous-{}-{}",
         dest.file_name().and_then(|n| n.to_str()).unwrap_or("pack"),

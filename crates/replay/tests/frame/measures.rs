@@ -1,6 +1,6 @@
-//! What a frame measures at the instant it is read at: how long a person
-//! has been asked at a terminal, how long the run has stood where it is, and
-//! where its time went. A surface says these durations; none of them
+//! What the clock adds to a frame at the instant it is read at: how long a
+//! person has been asked at a terminal, how long the run has stood where it
+//! is, and where its time went. A surface says these durations; none of them
 //! subtracts two instants of its own.
 
 use super::*;
@@ -35,15 +35,8 @@ fn building(last_secs: i64) -> Vec<StoredEvent> {
     ])
 }
 
-fn read(events: &[StoredEvent], engine: &Engine, now_secs: i64) -> RunFrame {
-    RunFrame::of(
-        &RUN.into(),
-        &chain(),
-        &RunState::replay(events),
-        None,
-        engine,
-        at(now_secs),
-    )
+fn read(events: &[StoredEvent], engine: &Engine, now_secs: i64) -> RunTimes {
+    RunTimes::of(&RunState::replay(events), engine, at(now_secs))
 }
 
 #[test]

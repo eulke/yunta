@@ -14,7 +14,10 @@ use super::{given_back, opened, THE_FIELD};
 
 /// A word of the field, which a drawing writes whole: it moves the cursor over the spaces
 /// between words rather than write them.
-const FIELD_WORD: &str = "repository";
+const FIELD_WORD: &str = "build?";
+
+/// What the field printed says of a repository with runs.
+const THE_PRINTED_FIELD: &str = "runs of this repository";
 
 /// A repository set up for Yunta under `root`, with one run that finished.
 fn with_a_run(root: &Path) -> Checkout {
@@ -141,12 +144,16 @@ fn a_dumb_terminal_and_a_pipe_get_the_field_printed() {
     let mut dumb = yunta_on_terminal!(&checkout.repo, &checkout.home, &[], &[("TERM", "dumb")]);
     let drawn = dumb.ended();
     assert_eq!(dumb.exit_code(), Some(0), "{drawn}");
-    assert!(drawn.contains(THE_FIELD), "{drawn}");
+    assert!(drawn.contains(THE_PRINTED_FIELD), "{drawn}");
     assert!(
         !drawn.contains(ALT_SCREEN_ON),
         "no other screen taken\n{drawn}"
     );
     let piped = yunta_in!(&checkout.repo, &checkout.home, &[]);
     assert!(piped.status.success());
-    assert!(stdout(&piped).contains(THE_FIELD), "{}", stdout(&piped));
+    assert!(
+        stdout(&piped).contains(THE_PRINTED_FIELD),
+        "{}",
+        stdout(&piped)
+    );
 }

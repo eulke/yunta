@@ -242,9 +242,10 @@ impl Project {
         };
         let now = self.workspace.clock.now();
         let mut frame =
-            yunta_replay::frame::RunFrame::of(id, &manifest.workflow, &state, None, &engine, now);
+            yunta_replay::frame::RunFrame::of(id, &manifest.workflow, &state, None, &engine);
         frame.prior = self.budget_prior(manifest, &frame, &events).await;
-        let document = RunDocument::of(id, &events, &state, manifest, &frame, decision);
+        let times = yunta_replay::frame::RunTimes::of(&state, &engine, now);
+        let document = RunDocument::of(id, &events, &state, manifest, &frame, &times, decision);
         Ok(document.warnings(warnings))
     }
 

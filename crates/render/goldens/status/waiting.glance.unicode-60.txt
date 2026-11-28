@@ -10,6 +10,6 @@
 
 next
   yunta resume 7E5PH4
-    waits for the reset, then drives on
+    wait for the reset, then drive on
   yunta close 7E5PH4           close it for good
-  yunta status 7E5PH4 --full   the whole story, node by node
+  yunta status 7E5PH4 --full   the run's whole story

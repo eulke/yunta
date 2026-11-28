@@ -1,7 +1,8 @@
 //! A page or a link shown in a browser, by the system's own opener: what `yunta open` does
 //! for a person at a terminal, and what the application does with what it is asked to
-//! show. The opener takes a page's path and a link alike and hands either to the browser.
-//! One way to a browser, for both.
+//! show. The opener takes a page's path and a link alike and hands either to the browser:
+//! a link is `https://` alone, as its type admits, since the opener launches whatever
+//! another scheme names. One way to a browser, for both.
 
 use std::process::{Command, Stdio};
 
@@ -19,7 +20,7 @@ pub(crate) fn open(address: &Address) -> std::io::Result<()> {
     let mut opener = Command::new(program);
     match address {
         Address::Page(page) => opener.arg(page),
-        Address::Link(link) => opener.arg(link),
+        Address::Link(link) => opener.arg(link.as_str()),
     };
     let mut opening = opener
         .stdin(Stdio::null())

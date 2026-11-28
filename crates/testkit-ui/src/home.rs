@@ -1,6 +1,6 @@
 //! The places the walk's recordings are made in: a directory in no repository, a
 //! repository never set up and another the walk sets up, one set up with a workflow and
-//! no run, a repository with runs, one finished and one parked on a gate, and three
+//! no run, a repository set up with runs, one finished and one parked on a gate, and three
 //! repositories of one run each: parked on a gate for the walk to decide, on a round of
 //! questions for it to answer, and on its plan's gate for the walk to open the application
 //! on. Those three stand apart, since every run the field lists multiplies the places a
@@ -10,9 +10,10 @@
 //! And the places the design's starting screens stand in, which a target names
 //! ([`HomePlace`]) and [`Home::workspace_at`] opens: the design's repository before its
 //! setup, with the pack a setup installs in reach, in a local repository git reads in the
-//! Yunta repository's place ([`ReferencePack`]), or out of reach; and a repository set up
-//! as the design's, fragua installed and its past runs, which a cut of [`WITH_FRAGUA`]
-//! makes ([`DesignsPlaces`]). The design's machine answers for two adapters, so a `codex`
+//! Yunta repository's place ([`ReferencePack`]),
+//! or out of reach; and a repository set up as the design's, fragua installed and its past
+//! runs, which a cut of [`WITH_FRAGUA`](crate::cut::WITH_FRAGUA) makes ([`DesignsPlaces`], in
+//! `designs`, which makes each alone too). The design's machine answers for two adapters, so a `codex`
 //! stands on their `PATH` beside the walk's `claude`; the walk's own places find the
 //! `claude` alone. They are made the first time a test opens one: no walk opens any, and
 //! the past runs of fragua alone take seconds to make.
@@ -28,6 +29,10 @@
 //! round is typed, is no reason, since every run's screen the walk opens multiplies by the
 //! nodes it points, the rows it scrolls and the fields it stands over.
 
+mod designs;
+
+pub use designs::{DesignsPlaces, Figure, MadeAlone};
+
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
@@ -38,8 +43,9 @@ use yunta_testkit::reference_pack::{self, ReferencePack};
 use yunta_testkit::workflows::{ASKS, FINISHES, GREETS, HANDS_ONE_QUESTION_OVER};
 use yunta_testkit::Bench;
 
-use crate::cut::{Built, Cut, HomePlace, Shown, Stands, TARGET_CUTS, WITH_FRAGUA};
-use crate::sandbox::{workspace, workspace_on, workspace_reaching};
+use crate::cut::{Built, Cut, HomePlace, Shown, Stands, TARGET_CUTS};
+use crate::sandbox::{workspace, workspace_on_git_alone, workspace_reaching};
+use designs::with_fragua;
 
 /// The targets whose cuts stand the design's run at the moments the walk opens its screen
 /// at, each a scene of a run's screen no other run of the home stands at: a loop at work,
@@ -113,8 +119,24 @@ sessions:
 const PARKS: &str = "name: gated\nnodes:\n  - { id: approve, kind: gate, assignee: lead, \
                      message: \"Go on?\", options: [go] }\n";
 
-/// The config a repository set up for Yunta holds.
-const SET_UP: &str = "defaults:\n  isolation: none\n";
+/// The config a repository set up for Yunta holds: its sessions in place, and its runners, as
+/// a setup writes them, one with a candidate on each adapter this binary builds, so a run there
+/// can be pinned to either.
+const SET_UP: &str = "defaults:\n  isolation: none\nrunners:\n  executor:\n    \
+                      - { adapter: claude-code, model: any }\n    \
+                      - { adapter: codex, model: any }\n";
+
+/// What a repository set up a target reads the machine in keeps of the disk for its checkouts:
+/// the budget the design's machine gave their builds, a fifth of its disk, and a floor kept
+/// free that any disk a test runs on keeps, so what doctor and upkeep find of them reads the
+/// same on every machine.
+const CHECKOUTS_KEEP: &str = "storage:\n  pool:\n    budget: \"98.9G\"\n    keep_free: \"1G\"\n";
+
+/// The id of the worked repository's finished run.
+const FINISHED: &str = "01M7WALKFN1SHED00000000000";
+
+/// The id of the worked repository's run parked on its gate.
+const PARKED: &str = "01M7WALKPARKED000000000000";
 
 /// A mock fixture with no sessions: neither workflow opens one.
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
@@ -123,21 +145,15 @@ const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 const GREETS_CASE: &str = "workflow: greet\ninputs: { ask: hello }\nfixture: fixtures/none.yaml\n\
                            expect: { final_state: finished }\n";
 
-/// The design's repository's manifest: a Rust workspace, which a setup reads its
-/// commands off.
-const CARGO_WORKSPACE: &str = "[workspace]\nresolver = \"2\"\nmembers = [\"crates/*\"]\n";
-
-/// The repository on GitHub the design's repository's origin is, as git names it over
-/// ssh, which no pointing of the Yunta repository's https URL rewrites.
-const ORIGIN: &str = "git@github.com:eulke/yunta.git";
-
 /// Where, under the home's root, no repository stands: what the Yunta repository's URL
 /// points at where the pack a setup installs is out of reach.
 const NOWHERE: &str = "nowhere";
 
-/// Who git commits as in the design's repository, before its setup and set up: a person,
-/// by a name and an address, as the design's machine says who commits.
-const COMMITTER: (&str, &str) = ("Marta Ruiz", "marta.ruiz@example.com");
+/// The directory under the home's root that stands in no git repository.
+const OUTSIDE: &str = "outside";
+
+/// Where, under the home's root, the Yunta repository stands as a test reaches it.
+const UPSTREAM: &str = "upstream/yunta";
 
 /// The scratch places.
 pub struct Home {
@@ -146,19 +162,29 @@ pub struct Home {
     pub outside: PathBuf,
     /// A git repository Yunta was never set up in.
     pub never_set_up: PathBuf,
-    /// A git repository Yunta was never set up in, which the walk's recordings set up.
+    /// A git repository Yunta was never set up in, which the walk's recordings set up with
+    /// the pack a setup installs.
     pub to_set_up: PathBuf,
+    /// A git repository Yunta was never set up in, which the walk's recordings set up
+    /// without the pack a setup installs.
+    pub to_set_up_alone: PathBuf,
+    /// The Yunta repository a setup fetches the pack it installs from, its `packs/fragua`
+    /// under the binary's version tag: what the git of the places a setup stands in reads
+    /// for the Yunta repository's URL ([`Home::reaching_fragua`]).
+    pub reference_pack: ReferencePack,
     /// A git repository set up for Yunta with the pack `acme/demo` installed.
     pub packed: PathBuf,
     /// A local repository holding the pack `acme/tools`, which ships an executor.
     pub tools: PathBuf,
     /// Where the CLIs the walk stands in for are, for the `PATH` of a setup: a
     /// `claude` that answers its probe, so each proposed runner's adapter and model
-    /// are asked.
+    /// are asked. A setup standing on it reaches the pack it installs
+    /// ([`Home::reaching_fragua`]).
     pub clis: PathBuf,
-    /// A git repository set up for Yunta, with one workflow, a case of it, and no run.
+    /// A git repository set up for Yunta, its runners on both adapters this binary builds,
+    /// with one workflow, a case of it, and no run.
     pub set_up: PathBuf,
-    /// A repository with runs, its state kept beside it.
+    /// A repository set up with runs, its state kept beside it.
     pub worked: Bench,
     /// The run of `worked` parked on its gate.
     pub parked: RunId,
@@ -175,36 +201,6 @@ pub struct Home {
     designs: OnceCell<DesignsPlaces>,
     /// The runs whose scenes the walk opens.
     pub scenes: Scenes,
-}
-
-/// The places the design's starting screens stand in, which only a target's test opens.
-/// Not [`Home`]'s own places, which the walk's recordings are made in.
-pub struct DesignsPlaces {
-    /// Where a `codex` that answers its probe is: beside `clis` on the `PATH` of a place
-    /// the design's screens stand in, the second adapter the design's machine answers for.
-    pub codex: PathBuf,
-    /// The Yunta repository a setup fetches the pack it installs from, its `packs/fragua`
-    /// under the binary's version tag.
-    pub reference_pack: ReferencePack,
-    /// The design's repository before its setup: a Rust workspace named `yunta`, its
-    /// origin on GitHub, its git committing as a person, never set up.
-    pub setting_up: PathBuf,
-    /// A repository set up as the design's: `yunta/fragua` installed, its own `lint-fix`
-    /// and `run-tasks`, three finished runs of fragua, a run that needs the person and one
-    /// stalled, its origin on GitHub, its git committing as a person.
-    pub with_fragua: Cut,
-}
-
-impl DesignsPlaces {
-    /// Each place, made under `root`.
-    async fn built(root: &Path) -> DesignsPlaces {
-        DesignsPlaces {
-            codex: crate::sandbox::codex_answering(root),
-            reference_pack: ReferencePack::made(&root.join("upstream/yunta")),
-            setting_up: designs_repository(root).await,
-            with_fragua: designs_repository_set_up().await,
-        }
-    }
 }
 
 /// The runs whose scenes of a run's screen the walk opens, each in the cut its target's row
@@ -266,21 +262,19 @@ impl Home {
     /// Every place, made, and the runs of the worked repository run.
     pub async fn built() -> Home {
         let root = tempfile::tempdir().expect("a temporary root");
-        let outside = root.path().join("outside");
+        let outside = root.path().join(OUTSIDE);
         tokio::fs::create_dir_all(&outside)
             .await
             .expect("a directory outside any repository");
         let never_set_up = repository(root.path(), "never-set-up").await;
         let to_set_up = repository(root.path(), "to-set-up").await;
+        let to_set_up_alone = repository(root.path(), "to-set-up-alone").await;
+        let reference_pack = ReferencePack::made(&root.path().join(UPSTREAM));
         let clis = crate::sandbox::claude_answering(root.path());
         let packed = crate::sandbox::with_a_pack_installed(&root.path().join("packed")).await;
         let (tools, _) = crate::sandbox::pack_with_an_executor(root.path());
         let set_up = set_up_with_a_case(root.path()).await;
-        let worked = Bench::with_run_id("01M7WALKFN1SHED00000000000");
-        worked.run(FINISHES, NO_SESSIONS).await;
-        let parked_bench = worked.beside("01M7WALKPARKED000000000000");
-        parked_bench.run(PARKS, NO_SESSIONS).await;
-        let parked = parked_bench.run_id.clone();
+        let (worked, parked) = worked().await;
         let deciding = Bench::with_run_id("01M7WALKDEC1DED00000000000");
         deciding.run(PARKS, NO_SESSIONS).await;
         let asking = Bench::with_run_id("01M7WALKASK1NG000000000000");
@@ -293,6 +287,8 @@ impl Home {
             outside,
             never_set_up,
             to_set_up,
+            to_set_up_alone,
+            reference_pack,
             packed,
             tools,
             clis,
@@ -338,31 +334,42 @@ impl Home {
             HomePlace::Outside => workspace(&self.outside, root),
             HomePlace::SettingUp => {
                 let designs = designs().await;
-                let reached = designs.reference_pack.reached();
+                let reached = self.reference_pack.reached();
                 workspace_reaching(&designs.setting_up, root, machine(designs), reached)
             }
             HomePlace::PackOutOfReach => {
                 let designs = designs().await;
-                let nowhere = reference_pack::out_of_reach(&root.join(NOWHERE));
+                let nowhere = self.out_of_reach();
                 workspace_reaching(&designs.setting_up, root, machine(designs), nowhere)
             }
             HomePlace::SetUp => workspace(&self.set_up, root),
             HomePlace::WithFragua => {
                 let designs = designs().await;
-                let cut = &designs.with_fragua;
-                Workspace {
-                    env: workspace_on(&cut.repository(), cut.root(), machine(designs)).env,
-                    ..cut.workspace()
-                }
+                with_fragua(&designs.with_fragua, machine(designs))
             }
             HomePlace::Packed => workspace(&self.packed, root),
-            HomePlace::Worked => workspace(&self.worked.worktree, self.worked_root()),
+            HomePlace::Worked => workspace_on_git_alone(&self.worked.worktree, self.worked_root()),
         }
     }
 
     /// The state root the places outside the worked repository keep their state in.
     pub fn root(&self) -> &Path {
         self.root.path()
+    }
+
+    /// A workspace in `dir`, its state kept in the home's root, standing on the walk's CLIs,
+    /// whose git reads the home's reference pack for the Yunta repository's URL: the pack a
+    /// setup installs in reach, and no network asked.
+    pub fn reaching_fragua(&self, dir: &Path) -> Workspace {
+        let reached = self.reference_pack.reached();
+        workspace_reaching(dir, self.root(), vec![self.clis.clone()], reached)
+    }
+
+    /// The environment that points git at a directory under the home's root that holds no
+    /// repository, for the Yunta repository's URL: the pack a setup installs out of reach,
+    /// and no network asked.
+    pub fn out_of_reach(&self) -> Vec<(String, String)> {
+        reference_pack::out_of_reach(&self.root().join(NOWHERE))
     }
 
     /// The state root of the worked repository: where its runs and log are.
@@ -409,6 +416,24 @@ pub(crate) fn root_of(bench: &Bench) -> &Path {
         .expect("a bench's log stands in its root")
 }
 
+/// A repository set up with runs, its state kept beside it: one finished, and one parked on a
+/// gate, whose id it hands back; its config keeps for its checkouts what [`CHECKOUTS_KEEP`]
+/// says and declares no runner.
+async fn worked() -> (Bench, RunId) {
+    let worked = Bench::with_run_id(FINISHED);
+    worked.run(FINISHES, NO_SESSIONS).await;
+    let parked = worked.beside(PARKED);
+    parked.run(PARKS, NO_SESSIONS).await;
+    let yunta = worked.worktree.join(".yunta");
+    tokio::fs::create_dir_all(&yunta)
+        .await
+        .expect("the worked repository's .yunta");
+    tokio::fs::write(yunta.join("config.yaml"), CHECKOUTS_KEEP)
+        .await
+        .expect("its config");
+    (worked, parked.run_id.clone())
+}
+
 /// A git repository named `name` under `root`, which Yunta was never set up in.
 async fn repository(root: &Path, name: &str) -> PathBuf {
     let repo = root.join(name);
@@ -419,39 +444,8 @@ async fn repository(root: &Path, name: &str) -> PathBuf {
     repo
 }
 
-/// `repo`'s git committing as [`COMMITTER`].
-fn committing_as_a_person(repo: &Path) {
-    let (name, address) = COMMITTER;
-    yunta_testkit::git(repo, &["config", "user.name", name]);
-    yunta_testkit::git(repo, &["config", "user.email", address]);
-}
-
-/// The design's repository before its setup, under `root`: a Rust workspace named
-/// `yunta`, committed by a person, its origin on GitHub.
-async fn designs_repository(root: &Path) -> PathBuf {
-    let repo = repository(root, "yunta").await;
-    committing_as_a_person(&repo);
-    tokio::fs::write(repo.join("Cargo.toml"), CARGO_WORKSPACE)
-        .await
-        .expect("its manifest");
-    yunta_testkit::git(&repo, &["add", "."]);
-    yunta_testkit::git(&repo, &["commit", "-q", "-m", "workspace"]);
-    yunta_testkit::git(&repo, &["remote", "add", "origin", ORIGIN]);
-    repo
-}
-
-/// A repository set up as the design's, the cut of [`WITH_FRAGUA`]: its origin on GitHub,
-/// its git committing as a person.
-async fn designs_repository_set_up() -> Cut {
-    let with_fragua = Cut::of(WITH_FRAGUA).await;
-    let repository = with_fragua.repository();
-    yunta_testkit::git(&repository, &["remote", "add", "origin", ORIGIN]);
-    committing_as_a_person(&repository);
-    with_fragua
-}
-
-/// A git repository under `root` set up for Yunta, with one workflow, a case of it, and
-/// no run.
+/// A git repository under `root` set up for Yunta, its runners on both adapters this binary
+/// builds ([`SET_UP`]), with one workflow, a case of it, and no run.
 async fn set_up_with_a_case(root: &Path) -> PathBuf {
     let set_up = root.join("set-up");
     tokio::fs::create_dir_all(set_up.join(".yunta/workflows"))

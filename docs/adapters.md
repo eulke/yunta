@@ -28,7 +28,10 @@ runners:
 A role can list more than one candidate. The engine takes the first whose
 adapter this binary builds, and probes that adapter before the run starts: an
 unhealthy one refuses the run, naming what the probe found, rather than
-passing the role to its next candidate.
+passing the role to its next candidate. The order is no fallback: a candidate
+after the first serves a run pinned to its adapter, and a binary that builds
+no adapter of those before it. A candidate may leave its `model:` out, and
+its adapter's CLI runs on its own default ([reference](reference.md)).
 
 `yunta run --adapter <id>` pins the run to one adapter: each role resolves to
 its candidate on that adapter, and the log records the candidates it passes
@@ -363,12 +366,13 @@ gives every check its own row:
                & Security > Developer Tools, then open it again
 
 next
-  yunta doctor --session   opens a session per binding, a prompt each
+  yunta doctor --session   open a session on each agent binding
 ```
 
 A config whose `runners:` names no adapter has nothing to probe, and `doctor`
-says so with the runner to declare as its fix, on the adapter CLIs this machine
-answers for and the model left for you to name:
+says so with the runner to declare as its fix, on the first adapter CLI this
+machine answers for, naming every one that answers, its model left to the
+adapter's CLI until you name one:
 
 ```text
   ✗ runners    none declared, and `lint-fix` needs one
@@ -376,7 +380,7 @@ answers for and the model left for you to name:
                `claude-code`:
                  runners:
                    implementer:
-                     - { adapter: claude-code, model: <model> }
+                     - { adapter: claude-code }
                  defaults:
                    runner: implementer
 ```
@@ -385,12 +389,20 @@ That is a `✗` only when a workflow in the catalog has an agent node that would
 stop on it; with none, it is a `▲`. The same holds for a forge whose
 token variable is not set: `doctor` fails for it only when a workflow in the
 catalog opens a pull request, since a gate published to the forge asks on the
-console without one. `yunta init` ends with the same runner step, and `yunta
-check` adds it under a workflow that names a runner the config lacks. `yunta
-init -i` declares the runners instead: it asks each one the repository's
-workflows name, or `implementer` when they name none, on an adapter this
-machine answers for, with the model you type, and writes it uncommented, with
-`defaults.runner` where a node names no runner.
+console without one. `yunta check` adds the same runner step under a workflow
+that names a runner the config lacks. `yunta init` declares the runners itself,
+each one the repository's workflows name on every adapter CLI this machine
+answers for, in the order it found them, the model left to each, and makes the
+first the default runner where a node names none. Where the workflows name no
+runner it declares `implementer` and makes it the default runner, so a
+workflow added later whose nodes name none runs on it. The page it prints names
+each runner with its adapters, `(the default)` beside the default one. Only
+where no adapter CLI answers does it write the runners commented and end with
+the runner step. `yunta init -i` asks
+each runner's adapter, among those that answer, and its model, or none, which
+leaves the model to that adapter's CLI: the adapter picked stands first, with
+that model, and every other adapter that answers follows it with none, so a
+run pinned to any of them finds the runner there.
 
 It also validates every installed pack's own `requires:` against your merged
 config: a `runners:` entry the merged `runners:` doesn't define (or defines with zero
@@ -417,16 +429,18 @@ yunta doctor --session
 
 opens the smallest run there is — one `kind: prompt` node that declares a
 `questions` document, with run tools mounted, driven through the same
-machinery a workflow is — once per *binding*: an adapter, a model and an agent that some runner names. The
-binding and not the runner name, because a session exercises a binding:
-two runners naming the same one are not two things to check, and one a
-runner falls back to is checked too, since a run reaches it exactly when
-the first is down. A binding whose session ended well folds into the row of
-what holds, named alone; with `--full`, each one has a row:
+machinery a workflow is — once per *binding*: an adapter, with the model and
+the agent some runner names on it. The binding and not the runner name,
+because a session exercises a binding: two runners naming the same one are
+not two things to check, and a candidate after a runner's first is checked
+too, since a run pinned to its adapter runs on it; the row names such a
+runner with the candidate's place (`planner's 2nd candidate`). A binding whose
+session ended well folds into the row of what holds, named alone; with
+`--full`, each one has a row:
 
 ```text
   ✓ claude-code/claude-sonnet-5 (executor, reviewer)  ok: 812 tokens
-  ✗ codex/gpt-5-codex (planner fallback)               session died: session `codex` exited with code 2 before any terminal event: url is not supported for stdio
+  ✗ codex/gpt-5-codex (planner's 2nd candidate)       session died: session `codex` exited with code 2 before any terminal event: url is not supported for stdio
 ```
 
 The prompt asks the session to call `yunta_submit_questions` with

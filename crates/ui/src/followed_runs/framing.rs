@@ -94,7 +94,7 @@ impl FollowedRuns {
         });
         let tally = Tally::Counted(counts.filter(|count| count.runs > 0).collect());
         let named = self.named_among(at, &open, now);
-        let attention = named.map(|row| watched::needing(&row.frame, at.typed));
+        let attention = named.map(|row| watched::needing(&row.frame, &row.times, at.typed));
         (tally, attention)
     }
 
@@ -118,7 +118,7 @@ impl FollowedRuns {
             .filter(|row| row.group() != FieldGroup::Closed)
             .collect();
         let named = self.named_among(at, &open, now);
-        named.map(|row| row.frame.run_id)
+        named.map(|row| row.frame.run_id.clone())
     }
 
     /// The row of the run the attention row names among the field's `open` rows, read from
@@ -152,7 +152,7 @@ impl FollowedRuns {
         let field = open.iter().find(|row| row.frame.run_id == *run);
         let in_view = || {
             let in_view = self.in_view.as_deref();
-            let held = in_view.filter(|in_view| in_view.run.run == *run);
+            let held = in_view.filter(|in_view| in_view.run.run() == run);
             held.map(|in_view| in_view.run.row(now))
         };
         field.map(|row| (*row).clone()).or_else(in_view)

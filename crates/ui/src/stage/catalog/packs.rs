@@ -10,6 +10,7 @@
 //! as soon as it is fetched, as `yunta pack update` does. Each page stands in the
 //! listing's place until Escape takes the person back to it.
 
+mod answered;
 mod install;
 
 use std::mem::{discriminant, Discriminant};
@@ -23,14 +24,13 @@ use yunta_core::step::{Arg, NextStep};
 use yunta_core::{CommitSha, PackRef};
 use yunta_render::page::pack::{Inventory, Listed, NewPack, PointedPacks, Removed};
 use yunta_render::page::Page;
+use yunta_render::screen::Confirming;
 
 use super::super::Act;
 use super::Next;
 use crate::dialog::Confirmation;
 use crate::prompt::{Answerable, LineAsked, Press, Stroke};
-use crate::{
-    Operation, PackFetched, PackInstalled, PackOperation, PackOutcome, PackScaffolded, Ticket,
-};
+use crate::{Operation, PackFetched, PackInstalled, PackOperation, PackScaffolded, Ticket};
 use install::{installing_screen, PackAsked};
 
 /// The packs installed, one pointed at, and the page standing in their place.
@@ -38,6 +38,9 @@ use install::{installing_screen, PackAsked};
 pub(super) struct PacksView {
     /// The packs, once read.
     listed: Option<Arc<Listed>>,
+    /// Whether they are being read: from the packs opening, and from a pack removed, until
+    /// what reading them came to lands, read or refused.
+    reading: bool,
     /// The pack the pointer stands on.
     pointed: Option<PackRef>,
     shown: PacksShown,
@@ -78,8 +81,11 @@ enum PacksShown {
     Fetching { work: PackOperation, what: String },
     /// A pack fetched, its copy held, its inventory read.
     Fetched(Arc<PackFetched>),
-    /// The pack being installed from its copy.
-    Installing { pack: PackRef },
+    /// The pack being installed from its copy, by `install`.
+    Installing {
+        pack: PackRef,
+        install: PackOperation,
+    },
     /// What installing a pack new to the repository came to.
     Installed(Arc<PackInstalled>),
     /// What updating an installed pack came to.
@@ -95,6 +101,7 @@ impl PacksView {
     pub(super) fn reading() -> Self {
         PacksView {
             listed: None,
+            reading: true,
             pointed: None,
             shown: PacksShown::Listing,
             removed: None,
@@ -104,13 +111,14 @@ impl PacksView {
     }
 
     /// The listing, an audit, a new pack's question or its page, what the work
-    /// under way said, and what refused or failed; with the keys.
-    pub(super) fn screen(&self, look: &Look) -> (Doc, Legend) {
+    /// under way said, and what refused or failed; with the keys, a new run among them where
+    /// one `asks_for_a_run` here.
+    pub(super) fn screen(&self, look: &Look, asks_for_a_run: bool) -> (Doc, Legend) {
         let (mut doc, legend) = match &self.shown {
             PacksShown::Listing => (self.listing(look), yunta_render::screen::packs_legend()),
             PacksShown::Auditing { pack } => {
                 let auditing = Note(yunta_render::screen::auditing(&pack.to_string()));
-                (Doc::new().with(auditing), Legend::new())
+                (Doc::new().with(auditing), super::screen::working_legend())
             }
             PacksShown::Audited { pack, audited } => {
                 let inventory = Inventory::Audited {
@@ -118,7 +126,11 @@ impl PacksView {
                     pack,
                     cases: &audited.cases,
                 };
-                let legend = yunta_render::screen::pack_page_legend();
+                let legend = yunta_render::screen::page_legend(
+                    yunta_render::screen::PageRead::Whole,
+                    Legend::new(),
+                    asks_for_a_run,
+                );
                 (inventory.document(look), legend)
             }
             PacksShown::Naming(line) => (
@@ -131,9 +143,13 @@ impl PacksView {
             }
             PacksShown::Scaffolded(scaffolded) => (
                 scaffolded_page(scaffolded, look),
-                yunta_render::screen::pack_page_legend(),
+                yunta_render::screen::page_legend(
+                    yunta_render::screen::PageRead::Whole,
+                    Legend::new(),
+                    asks_for_a_run,
+                ),
             ),
-            other => installing_screen(other, look),
+            other => installing_screen(other, look, asks_for_a_run),
         };
         for remark in &self.remarked {
             doc = doc.with(Note(crate::remark::said(remark, look.glyphs).words));
@@ -144,7 +160,7 @@ impl PacksView {
         (doc, legend)
     }
 
-    /// The pack removed last, then the packs pointed at, or that they are read.
+    /// The pack removed last, then the packs pointed at, or that they are read where they are.
     fn listing(&self, look: &Look) -> Doc {
         let mut doc = Doc::new();
         if let Some(pack) = &self.removed {
@@ -152,7 +168,7 @@ impl PacksView {
         }
         let Some(listed) = &self.listed else {
             let reading = yunta_render::screen::READING_THE_PACKS.to_string();
-            return doc.with(Note(reading));
+            return doc.with_all(self.reading.then(|| Note(reading).into()));
         };
         let page = match &self.pointed {
             Some(pointed) => PointedPacks { listed, pointed }.document(look),
@@ -170,16 +186,37 @@ impl PacksView {
                 Some(pack.to_string())
             }
             PacksShown::Naming(_) | PacksShown::Scaffolding { .. } | PacksShown::Scaffolded(_) => {
-                Some(yunta_render::screen::NEW.to_string())
+                Some(yunta_render::screen::NEW_PACK.to_string())
             }
             PacksShown::Asking(asked) => Some(asked.trail()),
             PacksShown::Fetching { .. } => Some(yunta_render::screen::INSTALL.to_string()),
-            PacksShown::Installing { pack } | PacksShown::Updated { pack, .. } => {
+            PacksShown::Installing { pack, .. } | PacksShown::Updated { pack, .. } => {
                 Some(pack.to_string())
             }
             PacksShown::Fetched(fetched) => Some(fetched.pack.to_string()),
             PacksShown::Installed(installed) => Some(installed.manifest.reference().to_string()),
         }
+    }
+
+    /// The work its screen says is under way: the packs listed, one audited, written, fetched
+    /// or installed, until it ends.
+    pub(super) fn shown_under_way(&self) -> Option<Operation> {
+        let work = match &self.shown {
+            PacksShown::Listing if self.listed.is_none() && self.reading => PackOperation::List,
+            PacksShown::Auditing { pack } => PackOperation::Audit { pack: pack.clone() },
+            PacksShown::Scaffolding { pack } => PackOperation::Scaffold { pack: pack.clone() },
+            PacksShown::Fetching { work, .. } => work.clone(),
+            PacksShown::Installing { install, .. } => install.clone(),
+            PacksShown::Listing
+            | PacksShown::Audited { .. }
+            | PacksShown::Naming(_)
+            | PacksShown::Scaffolded(_)
+            | PacksShown::Asking(_)
+            | PacksShown::Fetched(_)
+            | PacksShown::Installed(_)
+            | PacksShown::Updated { .. } => return None,
+        };
+        Some(Operation::Pack(work))
     }
 
     /// The ticket the performer holds a fetched pack's copy under, while its
@@ -229,7 +266,7 @@ impl PacksView {
                     self.remarked.clear();
                     Next::Stays
                 }
-                Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
+                Stroke::Interrupt => Next::Leave,
                 _ => Next::Stays,
             },
             _ => self.pressed_installing(stroke),
@@ -247,6 +284,24 @@ impl PacksView {
                 | PacksShown::Installed(_)
                 | PacksShown::Updated { .. }
         )
+    }
+
+    /// Whether a page stands where Enter goes back to the listing, as Escape does: an audit,
+    /// what a new pack came to, what installing or updating one came to.
+    pub(super) fn enter_goes_back(&self) -> bool {
+        matches!(
+            self.shown,
+            PacksShown::Audited { .. }
+                | PacksShown::Scaffolded(_)
+                | PacksShown::Installed(_)
+                | PacksShown::Updated { .. }
+        )
+    }
+
+    /// Whether the listing stands, where `a` audits the pack pointed at and `n` asks for a new
+    /// pack.
+    pub(super) fn on_the_listing(&self) -> bool {
+        matches!(self.shown, PacksShown::Listing)
     }
 
     /// What stands where the packs are, by its kind: what a page standing for another
@@ -308,7 +363,9 @@ impl PacksView {
             },
             Stroke::Insert('x') => match self.pointed.clone() {
                 Some(pack) => {
-                    let asks = yunta_render::screen::removing_pack(&pack.to_string());
+                    let asks = Confirming::RemovePack {
+                        pack: pack.to_string(),
+                    };
                     let same = vec![NextStep::PackRemove { pack: pack.clone() }];
                     let removal = Operation::Pack(PackOperation::Remove { pack });
                     Next::Confirm(Confirmation::new(asks, same, removal))
@@ -332,7 +389,7 @@ impl PacksView {
                 None => Next::Stays,
             },
             Stroke::Decline => Next::Done,
-            Stroke::Insert('q') | Stroke::Interrupt => Next::Leave,
+            Stroke::Interrupt => Next::Leave,
             _ => Next::Stays,
         }
     }
@@ -372,75 +429,6 @@ impl PacksView {
             | PacksShown::Scaffolding { .. }
             | PacksShown::Scaffolded(_) => false,
         }
-    }
-
-    /// What work on the packs came to: the listing read, an audit, a pack removed
-    /// (said, and the listing read again), or a new pack's page.
-    pub(super) fn answered(&mut self, outcome: PackOutcome) -> Next {
-        match outcome {
-            PackOutcome::Listed(listed) => self.listed(listed),
-            PackOutcome::Audited { pack, audited } => self.audited(pack, audited),
-            PackOutcome::Removed { pack } => return self.removed(pack),
-            PackOutcome::Scaffolded(scaffolded) => self.scaffolded(scaffolded),
-            PackOutcome::Fetched(fetched) => return self.fetched(fetched),
-            PackOutcome::Installed(installed) => {
-                if self.awaits_the_install() {
-                    self.shown = PacksShown::Installed(installed);
-                }
-            }
-            PackOutcome::Updated { pack, to, commit } => {
-                if self.awaits_the_install() {
-                    self.shown = PacksShown::Updated { pack, to, commit };
-                }
-            }
-        }
-        Next::Stays
-    }
-
-    /// The packs read: the pointer stays on the one it stood on while it is
-    /// installed, and goes to the first otherwise.
-    fn listed(&mut self, listed: Arc<Listed>) {
-        let packs = listed.packs();
-        let kept = self
-            .pointed
-            .as_ref()
-            .is_some_and(|pointed| packs.contains(&pointed));
-        if !kept {
-            self.pointed = packs.first().map(|pack| (*pack).clone());
-        }
-        self.listed = Some(listed);
-    }
-
-    /// `pack`'s audit, where it was being audited.
-    fn audited(&mut self, pack: PackRef, audited: Arc<AuditedPack>) {
-        if matches!(&self.shown, PacksShown::Auditing { pack: auditing } if *auditing == pack) {
-            self.shown = PacksShown::Audited { pack, audited };
-        }
-    }
-
-    /// `pack` removed: said over the listing, which is read again.
-    fn removed(&mut self, pack: PackRef) -> Next {
-        self.removed = Some(pack);
-        self.shown = PacksShown::Listing;
-        Next::Work(Operation::Pack(PackOperation::List))
-    }
-
-    /// What writing a new pack came to, where one was being written.
-    fn scaffolded(&mut self, scaffolded: Arc<PackScaffolded>) {
-        if let PacksShown::Scaffolding { .. } = self.shown {
-            self.shown = PacksShown::Scaffolded(scaffolded);
-        }
-    }
-
-    /// What the work under way says while it works.
-    pub(super) fn remarked(&mut self, remark: Remark) {
-        self.remarked.push(remark);
-    }
-
-    /// `said` said over the listing.
-    pub(super) fn unanswered(&mut self, said: String) {
-        self.said = Some(said);
-        self.shown = PacksShown::Listing;
     }
 }
 

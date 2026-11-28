@@ -357,6 +357,57 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
     assert_eq!(lock["packs"]["acme/review-pack"]["ref"], "v2.0.0");
 }
 
+/// A pack at a directory of a larger repository, named
+/// `<repository>//<directory>`, installs from there alone, and an update to a
+/// later commit fetches it again from the same directory, which the lock
+/// records with its source.
+#[test]
+fn a_pack_added_from_a_directory_of_its_repository_updates_from_there() {
+    let (root, _upstream, repo, home) = setup();
+    let monorepo = root.path().join("monorepo");
+    let pack = monorepo.join("packs/demo");
+    std::fs::create_dir_all(&pack).unwrap();
+    init_repo(&monorepo);
+    write_pack_v1(&pack);
+    std::fs::write(monorepo.join("README.md"), "many things\n").unwrap();
+    commit_all(&monorepo, "v1 among other things");
+    let source = format!("file://{}//packs/demo", monorepo.display());
+
+    let added = yunta_in!(&repo, &home, &["pack", "add", &source]);
+    assert!(added.status.success(), "{}", stderr(&added));
+    assert!(
+        stdout(&added).contains("pack acme/review-pack · installed"),
+        "{}",
+        stdout(&added)
+    );
+    let vendored = repo.join(".yunta/packs/acme/review-pack");
+    assert!(vendored.join("workflows/review.yaml").exists());
+    assert!(!vendored.join("README.md").exists());
+    assert!(!vendored.join("packs").exists());
+
+    write_pack_v2(&pack);
+    commit_all(&monorepo, "v2");
+    let later = yunta_testkit::git_output(&monorepo, &["rev-parse", "HEAD"]);
+    let updated = yunta_in!(
+        &repo,
+        &home,
+        &["pack", "update", "acme/review-pack", &later]
+    );
+    assert!(updated.status.success(), "{}", stderr(&updated));
+
+    let manifest: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(vendored.join("pack.yaml")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["version"], "2.0.0");
+    let lock: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+            .unwrap();
+    let entry = &lock["packs"]["acme/review-pack"];
+    assert_eq!(entry["source"], source.as_str());
+    assert_eq!(entry["ref"], later.as_str());
+    assert_eq!(entry["commit"], later.as_str());
+}
+
 #[test]
 fn update_on_an_uninstalled_pack_is_refused() {
     let (_root, _upstream, repo, home) = setup();
@@ -395,9 +446,10 @@ fn remove_deletes_the_vendored_tree_and_the_lock_entry() {
     assert!(lock["packs"].as_mapping().unwrap().is_empty());
 }
 
-/// A pack whose repo ships a symlink — `add` refuses it before vendoring,
-/// naming the link: vendoring follows nothing, so nothing outside the
-/// pack can be copied in and nothing inside can point out.
+/// A pack whose repo ships a symlink — `add` refuses it as it is fetched,
+/// naming the link, before its inventory is read or printed: nothing of
+/// the pack is read through a link, so nothing outside it can be shown or
+/// copied in.
 #[test]
 fn add_refuses_symlinks() {
     let (_root, upstream, repo, home) = setup();
@@ -406,11 +458,13 @@ fn add_refuses_symlinks() {
 
     let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
     assert!(!out.status.success(), "{}", stdout(&out));
+    let refused = stderr(&out).replace("\n  ", " ");
     assert!(
-        stderr(&out).contains("symlink") && stderr(&out).contains("workflows/link.yaml"),
+        refused.contains("symbolic link") && refused.contains("workflows/link.yaml"),
         "{}",
         stderr(&out)
     );
+    assert!(stdout(&out).is_empty(), "no inventory: {}", stdout(&out));
     assert!(!repo.join(".yunta/packs/acme/review-pack").exists());
     assert!(!repo.join(".yunta/yunta.lock").exists());
 }

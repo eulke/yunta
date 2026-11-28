@@ -19,15 +19,17 @@
 //!
 //! Columns: a margin at each side, but for the rule, which takes every cell; the side region
 //! at the edge its screen names, the left (a run's nodes, 31 cells) or the right (what is
-//! read beside a list, 39 cells), with the edge between it and the main region. It stands
-//! from a terminal of 102 columns and keeps its width wider, the main region taking the
-//! rest; below 102 it gives way whole and the main region takes every cell inside the
-//! margins. What is open over the screen stands in a box between the rule and the meter's
-//! row, as wide as it needs up to [`BOX_MOST`], so the rows under the regions stay in sight
-//! under it. Under the least terminal, nothing is laid out: the screen is the room it needs.
+//! read beside a list, 39 cells), or as many cells as its words' measure where it keeps one (a
+//! new run's panel), with the edge between it and the main region. It stands from a terminal
+//! of 102 columns and keeps its width wider, the main region taking the rest; below 102 it
+//! gives way whole and the main region takes every cell inside the margins. What is open over the screen stands in a box between the rule and the meter's
+//! row, as wide as it needs up to [`BOX_MOST`], a confirmation [`CONFIRMATION`] wide where it
+//! fits, so the rows under the regions stay in sight under it. Under the least terminal,
+//! nothing is laid out: the screen is the room it needs.
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use surco::components::SideAt;
+use yunta_ui::Room;
 
 /// The cells a margin takes at each side of the terminal: a cell between what is read and
 /// the terminal's edge.
@@ -49,6 +51,10 @@ const SIDE_AT_RIGHT: u16 = 39;
 /// The widest a box stands: the palette's three columns, what each act does, its key and
 /// the command that does the same, as a terminal of 120 columns draws them.
 pub(crate) const BOX_MOST: u16 = 84;
+
+/// The cells a confirmation's box stands: its sentence wrapped at sixty cells, a line the eye
+/// takes in one sweep, with a blank cell and an upright at each side of it.
+pub(crate) const CONFIRMATION: u16 = 64;
 
 /// The cells a box stands inside each edge of the terminal, where what is under it shows.
 const BOX_INSIDE: u16 = 2;
@@ -95,11 +101,14 @@ pub(crate) struct Holds {
     pub(crate) overlay: Option<Boxed>,
 }
 
-/// A region beside the main one: the edge of the screen it stands at, the cells of the edge
-/// between them, and whether it has a title, which takes the first row of its column.
+/// A region beside the main one: the edge of the screen it stands at, the cells it takes where
+/// its words keep a measure, the cells of the edge between them, and whether it has a title,
+/// which takes the first row of its column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Beside {
     pub(crate) at: SideAt,
+    /// The cells it takes, its words' measure; none takes its edge's own width.
+    pub(crate) cells: Option<u16>,
     pub(crate) edge: u16,
     pub(crate) titled: bool,
 }
@@ -136,10 +145,19 @@ pub(crate) struct Areas {
     pub(crate) short_of_rows: bool,
 }
 
+/// Whether a terminal of `size` has the room a screen is laid out in: the least terminal or
+/// more. Under it, the screen is the room it needs.
+pub(crate) fn room(size: Rect) -> Room {
+    match size.width < LEAST_COLUMNS || size.height < LEAST_ROWS {
+        true => Room::Short,
+        false => Room::Enough,
+    }
+}
+
 /// Where each part of a screen holding `holds` stands on a terminal of `size`; none under
 /// the least terminal, where the screen is the room it needs.
 pub(crate) fn areas(size: Rect, holds: Holds) -> Option<Areas> {
-    if size.width < LEAST_COLUMNS || size.height < LEAST_ROWS {
+    if room(size) == Room::Short {
         return None;
     }
     let side = holds.side.filter(|_| size.width >= SIDE_FROM);
@@ -230,13 +248,13 @@ fn beside(area: Rect, side: Option<Beside>) -> (Option<(Rect, Rect)>, Rect) {
     let main = Constraint::Fill(1);
     match side.at {
         SideAt::Left => {
-            let [side, edge, main] =
-                Layout::horizontal([Constraint::Length(SIDE_AT_LEFT), edge, main]).areas(area);
+            let cells = Constraint::Length(side.cells.unwrap_or(SIDE_AT_LEFT));
+            let [side, edge, main] = Layout::horizontal([cells, edge, main]).areas(area);
             (Some((side, edge)), main)
         }
         SideAt::Right => {
-            let [main, edge, side] =
-                Layout::horizontal([main, edge, Constraint::Length(SIDE_AT_RIGHT)]).areas(area);
+            let cells = Constraint::Length(side.cells.unwrap_or(SIDE_AT_RIGHT));
+            let [main, edge, side] = Layout::horizontal([main, edge, cells]).areas(area);
             (Some((side, edge)), main)
         }
     }

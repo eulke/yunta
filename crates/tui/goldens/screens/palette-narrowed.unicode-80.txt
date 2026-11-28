@@ -8,7 +8,7 @@
   │▸ stop it and everything under it                                         │
  w│  start a new run                                                         │
  ◌│  what it cost, and where its time went                                   │
-  │  every run of this repository                                            │
+  │  this repository's runs                                                  │
  w│  check adapters, git, forge, packs                                       │
  r│  the shape of every document yunta reads                                 │
  s╰──────────────────────────────────────────────────────────────────────────╯

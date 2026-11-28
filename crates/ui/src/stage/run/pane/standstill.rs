@@ -26,7 +26,8 @@ impl RunStage {
         look_failed: Option<&String>,
         look: &Look,
     ) -> Region {
-        let stopped = WhereItStopped::of(&framed.frame, &framed.in_view.run.manifest);
+        let manifest = framed.in_view.run.manifest();
+        let stopped = WhereItStopped::of(framed.frame, &framed.times, manifest);
         let failed = || look_failed.map(|failed| Block::from(Note(failed.clone())));
         let least = stopped
             .iter()

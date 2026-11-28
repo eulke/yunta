@@ -92,7 +92,10 @@ pub struct RunnerUsage {
     pub node_id: NodeId,
     pub runner: RunnerName,
     pub adapter: AdapterId,
-    pub model: ModelName,
+    /// The model the node ran on: the one its runner named, else the first
+    /// its sessions reported; absent while neither is known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelName>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -194,7 +197,11 @@ impl Receipt {
     /// version is for whoever consumes `receipt.json` outside yunta,
     /// who has no log to derive it from and needs to know what shape
     /// they were handed.
-    pub const SCHEMA_VERSION: u32 = 2;
+    ///
+    /// It counts the shapes the document has had: it moves by one each
+    /// time a field is added, removed or left out where it once always
+    /// stood, as a runner's model is left out where nobody knows it.
+    pub const SCHEMA_VERSION: u32 = 3;
 
     /// The fan-out siblings among the runners, by the base id they share
     /// (`<base>@<runner>`): each group of two or more, its members in the

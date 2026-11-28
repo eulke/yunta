@@ -1,11 +1,13 @@
 //! A run promoted before it is followed: its successor, already in the log, handed as one
 //! that comes, a chain already in the log followed to its end, and none in the log after
 //! the time one takes to be created since the close handed at once as none come; and a
-//! successor written between two looks handed, whenever the run held read its close.
+//! successor written between two looks handed, whenever the run held read its close; and a
+//! chain whose log names a run it holds already stopped there.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use yunta_api::{FieldReach, FollowNews, Followed, RunNews};
+use yunta_api::{FieldReach, FollowNews, Followed, Following, RunNews};
 use yunta_core::RunId;
 use yunta_testkit_core::{fixed_now, AtClock};
 
@@ -29,13 +31,13 @@ async fn a_run_promoted_before_it_is_followed_hands_its_successor() {
     else {
         panic!("the successor already in the log is handed");
     };
-    assert_eq!(handed.run, successor);
+    assert_eq!(*handed.run(), successor);
     assert_eq!(
         events,
         world.logged(&successor),
         "the successor's log as it stands"
     );
-    assert_eq!(kept.run, successor, "the run held is the successor");
+    assert_eq!(*kept.run(), successor, "the run held is the successor");
     assert!(!following.awaits_successor());
 }
 
@@ -57,7 +59,7 @@ async fn a_chain_promoted_before_it_is_followed_is_followed_to_its_end() {
         let RunNews::Successor { run, .. } = news else {
             panic!("each successor is handed in turn, and came {news:?}");
         };
-        assert_eq!(run.run, *successor);
+        assert_eq!(*run.run(), *successor);
     }
     assert!(!following.awaits_successor(), "the chain ends");
 }
@@ -75,6 +77,64 @@ async fn a_run_promoted_long_ago_with_no_successor_has_none_at_once() {
     let mut following = world.follow(&run).await;
     let (mut kept, _) = whole(&mut following).await;
 
+    let news = next_of(&mut following, &mut kept).await;
+    assert!(matches!(news, RunNews::NoSuccessor), "{news:?}");
+    assert!(!following.awaits_successor());
+}
+
+/// How long a following of a chain of promotions may take to be made before the test calls
+/// it hung: far longer than reading a few runs' logs whole.
+const MADE_WITHIN: Duration = Duration::from_secs(10);
+
+/// `run` followed from here, by a world whose clock reads an hour after its runs closed, so
+/// a run with no successor new to its chain has none at once; made within
+/// [`MADE_WITHIN`].
+async fn followed_an_hour_on(world: &mut World, run: &RunId) -> Following {
+    let an_hour_on = fixed_now() + chrono::TimeDelta::hours(1);
+    world.project.workspace.clock = Arc::new(AtClock(an_hour_on));
+    let followed = Followed {
+        field: None,
+        run: Some(run.clone()),
+    };
+    let made = tokio::time::timeout(MADE_WITHIN, world.project.follow(followed)).await;
+    made.expect("the following is made").unwrap()
+}
+
+/// A run whose birth names it as the run it was promoted from is no successor of its own:
+/// the chain stops at the run it holds, and none came.
+#[tokio::test]
+async fn a_run_promoted_from_itself_is_no_successor_of_its_own() {
+    let mut world = World::new();
+    let named = RunId::from("self-named");
+    let run = world.successor_of(&named, "self-named").await;
+    world.record(&run, closed_promoted());
+    let mut following = followed_an_hour_on(&mut world, &run).await;
+    let (mut kept, _) = whole(&mut following).await;
+
+    let news = next_of(&mut following, &mut kept).await;
+    assert!(matches!(news, RunNews::NoSuccessor), "{news:?}");
+    assert_eq!(*kept.run(), run);
+    assert!(!following.awaits_successor());
+}
+
+/// Two runs each born promoted from the other: the chain is followed to the second, and
+/// stops at the first, which it holds already; none came after it.
+#[tokio::test]
+async fn a_cycle_of_two_promotions_stops_at_the_run_it_holds() {
+    let mut world = World::new();
+    let (first, second) = (RunId::from("cycle-first"), RunId::from("cycle-second"));
+    world.successor_of(&second, first.as_str()).await;
+    world.successor_of(&first, second.as_str()).await;
+    world.record(&first, closed_promoted());
+    world.record(&second, closed_promoted());
+    let mut following = followed_an_hour_on(&mut world, &first).await;
+    let (mut kept, _) = whole(&mut following).await;
+
+    let news = next_of(&mut following, &mut kept).await;
+    let RunNews::Successor { run: handed, .. } = news else {
+        panic!("the second is handed, and came {news:?}");
+    };
+    assert_eq!(*handed.run(), second);
     let news = next_of(&mut following, &mut kept).await;
     assert!(matches!(news, RunNews::NoSuccessor), "{news:?}");
     assert!(!following.awaits_successor());
@@ -103,7 +163,7 @@ async fn a_successor_written_between_two_looks_is_handed() {
             ..
         } = next(&mut following).await
         {
-            assert_eq!(handed.run, successor);
+            assert_eq!(*handed.run(), successor);
             break;
         }
     }

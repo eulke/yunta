@@ -9,10 +9,12 @@ mod doctor;
 mod fixture;
 mod serving;
 
+pub(crate) use adapters::pinnable_adapter_ids;
 pub use adapters::{
     built_adapter, built_adapter_ids, built_adapters, declared_facts, first_built_adapter,
     real_adapters, scripts_sessions, service_vars, Adapters,
 };
 pub use detection::{adapters_for, fix_for, in_files, in_repo, probe_known_adapters, suggestions};
+pub(crate) use doctor::pool_kept;
 pub use fixture::read_fixture;
 pub use serving::servable;

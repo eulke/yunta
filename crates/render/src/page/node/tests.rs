@@ -5,7 +5,7 @@ use surco::look::Look;
 use surco::surface::{Surface, Terminal};
 use yunta_core::events::StoredEvent;
 use yunta_core::{ConfigLayer, NodeId, NodeKind, Pid, RunId, TaskId, Workflow};
-use yunta_replay::frame::{Moment, RunFrame};
+use yunta_replay::frame::{Moment, RunFrame, RunTimes};
 use yunta_replay::registry::Engine;
 use yunta_replay::RunState;
 
@@ -65,7 +65,8 @@ fn page(node: &str, seq: u64, driven: Driven) -> Node {
         Driven::Parked => Engine::Unrecorded,
     };
     let now = state.clock().last_at().expect("a run with events");
-    let frame = RunFrame::of(&run, &workflow, &state, None, &engine, now);
+    let frame = RunFrame::of(&run, &workflow, &state, None, &engine);
+    let times = RunTimes::of(&state, &engine, now).node(&id);
     let declares = workflow.iter_nodes().find(|declared| declared.id == id);
     let declares = declares.expect("the node is declared");
     let works = matches!(declares.kind, NodeKind::Loop { .. });
@@ -86,6 +87,7 @@ fn page(node: &str, seq: u64, driven: Driven) -> Node {
     Node {
         run_id: RunId::from(run.as_str()),
         node,
+        times,
         runner,
         run_dir: PathBuf::from("/home/me/.yunta/runs").join(run.as_str()),
         cwd: PathBuf::from("/home/me/project"),

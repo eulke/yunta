@@ -9,22 +9,25 @@ use yunta_core::check::CheckError;
 use yunta_core::step::NextStep;
 use yunta_core::{AdapterId, GitHubRepo, PackRef, RunnerCandidate, RunnerName};
 
-use super::session::{session_check, SessionOutcome};
+use super::pool::PoolKept;
+use super::session::{session_check, NamedBy, SessionOutcome};
 use crate::command;
 
 /// What one check `doctor` makes found, in the order the checks run.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Finding {
-    /// An adapter `runners:` names, as probing it answered.
+    /// An adapter `runners:` names, as probing it answered, and the catalog workflows it
+    /// serves: those with a node that takes a session on a runner naming it as a candidate.
     Adapter {
         adapter: AdapterId,
         health: AdapterHealth,
+        serving: Vec<String>,
     },
     /// `runners:` names no adapter this build supports: the catalog
     /// workflows that need one, and the runner to declare.
     NoRunner { needing: Vec<String>, declare: Fix },
-    /// Who git commits a run's work as.
-    Committer { who: String },
+    /// Who git commits a run's work as: their name, and their address apart.
+    Committer { name: String, address: String },
     /// git names no one to commit a run's work as: what it said.
     NoCommitter { git_said: String },
     /// The forge the config declares, by its repository, as it answered.
@@ -47,8 +50,8 @@ pub enum Finding {
         answer: RemoteAnswer,
     },
     /// What the project's checkouts keep of the disk, `kept` as their pool
-    /// says it.
-    Checkouts { kept: String, keep: CheckoutsKeep },
+    /// measures it, and how that stands against the disk.
+    Checkouts { kept: PoolKept, keep: CheckoutsKeep },
     /// What the project's checkouts keep could not be read: what stopped it.
     CheckoutsUnread { said: String },
     /// What a new binary's first run costs here over its second, and whether
@@ -75,10 +78,10 @@ pub enum Finding {
     /// `--session` found no binding whose adapter answered healthy.
     NoBinding,
     /// One binding's session, opened and driven: the binding, each runner
-    /// that names it and whether first, and how its session ended.
+    /// that names it and where among its candidates, and how its session ended.
     Session {
         candidate: RunnerCandidate,
-        named_by: Vec<(RunnerName, bool)>,
+        named_by: Vec<NamedBy>,
         outcome: SessionOutcome,
     },
 }
@@ -146,10 +149,87 @@ pub enum PackLack {
 }
 
 impl Finding {
+    /// Whether a session per binding found it: one binding's session, or that no binding
+    /// answered to open one on. What a plain check of the machine leaves as it stands.
+    pub fn of_a_session(&self) -> bool {
+        matches!(self, Finding::Session { .. } | Finding::NoBinding)
+    }
+
+    /// Whether the finding bears on a run of the catalog's workflow `workflow`: one that names
+    /// the workflows it bears on, an adapter by those it serves, the forge whose token is not
+    /// set and runners none declares, bears on those alone; any other bears on every run.
+    pub fn bears_on(&self, workflow: &str) -> bool {
+        match self {
+            Finding::Adapter { serving, .. } => serving.iter().any(|name| name == workflow),
+            Finding::ForgeTokenUnset { opening, .. } => opening.iter().any(|name| name == workflow),
+            Finding::NoRunner { needing, .. } => needing.iter().any(|name| name == workflow),
+            Finding::Committer { .. }
+            | Finding::NoCommitter { .. }
+            | Finding::Forge { .. }
+            | Finding::Remote { .. }
+            | Finding::Checkouts { .. }
+            | Finding::CheckoutsUnread { .. }
+            | Finding::FirstRun { .. }
+            | Finding::PackBroken { .. }
+            | Finding::PackLacks { .. }
+            | Finding::PackRefused { .. }
+            | Finding::PackCaution { .. }
+            | Finding::NoBinding
+            | Finding::Session { .. } => true,
+        }
+    }
+
+    /// The row the finding is at a glance beside a new run, where it says what this machine
+    /// answers for: an adapter by the version it reported, who git commits as by name, and
+    /// what the checkouts' builds take of their budget, each where it holds or is worth a look;
+    /// the forge, and whatever does not hold, in the words its own row says. None for a check
+    /// the glance leaves to `yunta doctor`: a binary's first run, the packs, the sessions.
+    pub fn glanced(&self) -> Option<Check> {
+        match self {
+            Finding::Adapter {
+                health: AdapterHealth::Healthy { version },
+                ..
+            } => Some(Check {
+                said: version_number(version.as_deref())
+                    .unwrap_or(HEALTHY)
+                    .to_string(),
+                ..self.check()
+            }),
+            Finding::Committer { name, .. } => Some(Check {
+                said: commits_as(name),
+                ..self.check()
+            }),
+            Finding::Checkouts {
+                kept,
+                keep: CheckoutsKeep::Within | CheckoutsKeep::BuildsOverBudget,
+            } => Some(Check {
+                said: kept.builds(),
+                ..self.check()
+            }),
+            Finding::Adapter { .. }
+            | Finding::NoRunner { .. }
+            | Finding::NoCommitter { .. }
+            | Finding::Forge { .. }
+            | Finding::ForgeTokenUnset { .. }
+            | Finding::Remote { .. }
+            | Finding::Checkouts { .. }
+            | Finding::CheckoutsUnread { .. } => Some(self.check()),
+            Finding::FirstRun { .. }
+            | Finding::PackBroken { .. }
+            | Finding::PackLacks { .. }
+            | Finding::PackRefused { .. }
+            | Finding::PackCaution { .. }
+            | Finding::NoBinding
+            | Finding::Session { .. } => None,
+        }
+    }
+
     /// The row the finding is, as a person reads it.
     pub fn check(&self) -> Check {
         match self {
-            Finding::Adapter { adapter, health } => adapter_check(adapter, health),
+            Finding::Adapter {
+                adapter, health, ..
+            } => adapter_check(adapter, health),
             Finding::NoRunner { needing, declare } => {
                 let check = match needing.is_empty() {
                     true => Check::new(
@@ -169,9 +249,11 @@ impl Finding {
                 };
                 check.fix(declare.clone())
             }
-            Finding::Committer { who } => {
-                Check::new(Found::Holds, "git", format!("commits as {who}"))
-            }
+            Finding::Committer { name, address } => Check::new(
+                Found::Holds,
+                "git",
+                commits_as(&format!("{name} <{address}>")),
+            ),
             Finding::NoCommitter { git_said } => Check::new(
                 Found::Problem,
                 "git",
@@ -250,7 +332,7 @@ fn adapter_check(adapter: &AdapterId, health: &AdapterHealth) -> Check {
                 .as_deref()
                 .map(|v| format!(" ({v})"))
                 .unwrap_or_default();
-            Check::new(Found::Holds, adapter.as_str(), format!("healthy{said}"))
+            Check::new(Found::Holds, adapter.as_str(), format!("{HEALTHY}{said}"))
                 .brief(versioned(adapter, version.as_deref()))
         }
         AdapterHealth::Unhealthy { said } => Check::new(
@@ -264,23 +346,37 @@ fn adapter_check(adapter: &AdapterId, health: &AdapterHealth) -> Check {
 /// What names a healthy adapter where the checks that hold fold: its id,
 /// and the version number its CLI reported, when it reported one.
 pub(super) fn versioned(adapter: &AdapterId, version: Option<&str>) -> String {
-    let number = version.and_then(|version| {
-        version
-            .split_whitespace()
-            .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
-    });
-    match number {
+    match version_number(version) {
         Some(number) => format!("{adapter} {number}"),
         None => adapter.to_string(),
     }
 }
 
-/// What the forge of `repo` answered, as its row.
+/// The version number in what an adapter's CLI reported of its version: its
+/// first word that starts with a digit, `2.1.0` of `2.1.0 (Claude Code)` and
+/// `0.157.0` of `codex-cli 0.157.0`; none where it reported none.
+fn version_number(version: Option<&str>) -> Option<&str> {
+    version?
+        .split_whitespace()
+        .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// What an adapter that answered is said to be where no version number says more.
+const HEALTHY: &str = "healthy";
+
+/// Who git commits a run's work as, `who`, as its row says it, in the words a setup's row is
+/// labelled with.
+fn commits_as(who: &str) -> String {
+    format!("{} {who}", crate::page::Setup::COMMITS_AS)
+}
+
+/// What the forge of `repo` answered, as its row: in reach, its repository
+/// alone, the mark saying it holds.
 fn forge_check(repo: &GitHubRepo, answer: &ForgeAnswer) -> Check {
     let named = format!("github {repo}");
     match answer {
         ForgeAnswer::Reachable => {
-            Check::new(Found::Holds, "forge", format!("{named}: reachable")).brief(named.as_str())
+            Check::new(Found::Holds, "forge", named.as_str()).brief(named.as_str())
         }
         ForgeAnswer::CannotPush => Check::new(
             Found::Problem,
@@ -332,8 +428,8 @@ fn token_unset_check(repo: &GitHubRepo, token_env: &str, opening: &[String]) -> 
 /// What the checkouts keep, as its row: a problem when the disk is already
 /// under the part kept free, and a caution when their builds are over their
 /// budget, each with what to do about it.
-pub(super) fn checkouts_check(kept: &str, keep: CheckoutsKeep) -> Check {
-    let check = |found| Check::new(found, "checkouts", kept);
+pub(super) fn checkouts_check(kept: &PoolKept, keep: CheckoutsKeep) -> Check {
+    let check = |found| Check::new(found, "checkouts", kept.to_string());
     match keep {
         CheckoutsKeep::DiskUnderFree => {
             check(Found::Problem).fix(Fix::said(crate::pause::make_room()))

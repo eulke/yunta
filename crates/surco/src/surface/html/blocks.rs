@@ -90,17 +90,19 @@ impl Reader {
 }
 
 /// One block, `depth` sections deep, drawn as HTML: what it holds, through
-/// the writers each kind of block has.
+/// the writers each kind of block has. Pictures that say nothing, the name in block letters
+/// and the field in perspective, draw nothing: a page loses no fact without them.
 pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String {
     match block {
         Block::Headline(head) => headline(reader, head),
         Block::Furrow(stands) => furrow(&stands.0),
         Block::Ribbon(stretches) => screen::ribbon(stretches),
-        Block::Gist(gist) => paragraph("gist", &gist.0),
+        Block::Gist(gist) => paragraph("gist", &gist.said),
         Block::Fields(rows) => fields(rows),
         Block::Table(table) => tables::table(table),
         Block::Nodes(nodes) => tables::table(&nodes.table(GLYPHS)),
         Block::Runs(runs) => tables::runs(runs),
+        Block::AtAGlance(glance) => screen::at_a_glance(glance),
         Block::Evidence(evidence) => tables::evidence(evidence),
         Block::Said(said) => said_lines(&said.0),
         Block::Paths(listed) => paths(listed),
@@ -108,13 +110,16 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
         Block::Decision(asked) => decision::decision(asked),
         Block::Card(asked) => card::card(asked),
         Block::Desk(read) => desk::desk(reader, read),
-        Block::TypedAnswer(drawn) => asked::typed_answer(drawn),
-        Block::ChoiceList(drawn) => asked::choice_list(drawn),
+        Block::WordChoice(choice) => screen::word_choice(choice),
+        Block::TypedAnswer(_) | Block::ChoiceList(_) | Block::Form(_) | Block::Survey(_) => {
+            asked::asked(reader, block, depth)
+        }
         Block::Checklist(list) => tables::checklist(list),
         Block::Findings(list) => findings(list),
         Block::Problem(problem) => notices::problem(problem),
         Block::Refusal(refusal) => notices::refusal(refusal),
         Block::Next(next) => next_steps(next, depth),
+        Block::SameAtAShell(same) => screen::same_at_a_shell(same),
         Block::Legend(legend) => screen::legend(legend),
         Block::KeyList(list) => screen::key_list(list),
         Block::Attention(attention) => screen::attention(attention),
@@ -134,8 +139,7 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
         Block::Labelled(labelled) => lines(&labelled.laid(usize::MAX, Glyphs::Unicode)),
         Block::Feed(feed) => lines(&feed.said(GLYPHS)),
         Block::Meter(meter) => lines(&[meter.said(GLYPHS)]),
-        // A picture that says nothing: a page loses no fact without it.
-        Block::Horizon(_) => String::new(),
+        Block::Wordmark(_) | Block::Horizon(_) => String::new(),
     }
 }
 

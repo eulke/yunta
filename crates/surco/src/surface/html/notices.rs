@@ -127,7 +127,7 @@ fn help(items: &[String]) -> String {
     format!(
         r#"<p class="help">{} {}</p>"#,
         esc(HELP),
-        said.join(format!(" {} ", GLYPHS.sep()).as_str())
+        said.join(GLYPHS.spaced_sep().as_str())
     )
 }
 

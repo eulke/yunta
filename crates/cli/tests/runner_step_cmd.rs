@@ -1,7 +1,9 @@
 //! A project that declares no runner is told how to declare one, by
-//! `init`, `check` and `doctor` alike, naming the adapter CLIs this
-//! machine answers for — and `doctor` fails for it only when a workflow
-//! here would stop on it.
+//! `check` and `doctor` alike, naming the adapter CLIs this machine answers
+//! for, on the adapter alone — and `doctor` fails for it only when a workflow
+//! here would stop on it. `init` declares the runner itself on the adapters
+//! this machine answers for, and ends with the same step only where none
+//! answers.
 
 use std::path::{Path, PathBuf};
 
@@ -27,7 +29,7 @@ fn project(root: &Path) -> Checkout {
 const AGENT_WORKFLOW: &str =
     "name: wf\nnodes:\n  - id: plan\n    kind: prompt\n    prompt: plan it\n";
 
-const SNIPPET_LINE: &str = "- { adapter: claude-code, model: <model> }";
+const SNIPPET_LINE: &str = "- { adapter: claude-code }";
 
 fn markers() -> (tempfile::TempDir, PathBuf) {
     let root = tempfile::tempdir().unwrap();
@@ -35,17 +37,62 @@ fn markers() -> (tempfile::TempDir, PathBuf) {
     (root, path)
 }
 
+/// `init` declares the runner it proposes on the adapter this machine answers
+/// for, its model left to it, as the default runner, and so says no step to
+/// declare one.
 #[test]
-fn init_ends_with_the_runner_step() {
+fn init_declares_the_runner_on_the_adapter_this_machine_answers_for() {
     let (_keep, root) = markers();
     let checkout = project(&root);
     let init = yunta_at!(&checkout, &["init"]);
     assert!(init.status.success(), "{}", stderr(&init));
-    let said = stdout(&init);
+    let said = yunta_testkit::unwrapped(&stdout(&init));
     assert!(
-        said.contains("this machine answers for `claude-code`")
-            && said.contains(SNIPPET_LINE)
-            && said.contains("    runner: implementer"),
+        said.contains(" runners implementer (the default) on claude-code "),
+        "{said}"
+    );
+    assert!(!said.contains("declare a runner"), "{said}");
+    let config = std::fs::read_to_string(checkout.repo.join(".yunta/config.yaml")).unwrap();
+    assert!(
+        config.ends_with(
+            "\nrunners:\n  implementer:\n    - adapter: claude-code\ndefaults:\n  runner: implementer\n"
+        ),
+        "{config}"
+    );
+}
+
+/// In a repository with no workflow, the runner `init` declares is the default one, so
+/// a workflow added afterwards whose node names no runner checks clean.
+#[test]
+fn a_workflow_whose_node_names_no_runner_checks_clean_after_init() {
+    let (_keep, root) = markers();
+    let checkout = project(&root);
+    let init = yunta_at!(&checkout, &["init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    std::fs::write(checkout.repo.join("wf.yaml"), AGENT_WORKFLOW).unwrap();
+    let check = yunta_at!(&checkout, &["check", "wf.yaml"]);
+    assert!(
+        check.status.success(),
+        "{}{}",
+        stdout(&check),
+        stderr(&check)
+    );
+}
+
+/// Where no adapter CLI answers, `init` leaves the runner proposed and ends with
+/// the step that declares it, the adapter to name the one placeholder.
+#[test]
+fn init_where_no_adapter_answers_ends_with_the_runner_step() {
+    let (_keep, root) = markers();
+    let checkout =
+        Checkout::under(&root).with_stubs(vec![("PATH".to_string(), "/usr/bin:/bin".to_string())]);
+    let init = yunta_at!(&checkout, &["init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let said = yunta_testkit::unwrapped(&stdout(&init));
+    assert!(
+        said.contains("no adapter CLI answered on this machine")
+            && said.contains("- { adapter: <adapter> }")
+            && said.contains("runner: implementer"),
         "{said}"
     );
 }

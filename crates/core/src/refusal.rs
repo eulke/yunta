@@ -167,6 +167,48 @@ pub enum PackRefusal {
     /// A `new` pack where a directory already stands.
     #[error("directory_exists")]
     DirectoryExists { dir: PathBuf },
+    /// A pack source, `named` as it was given, whose `directory` inside its
+    /// repository is no place to fetch a pack from, for the reason `why`.
+    #[error("source_directory")]
+    SourceDirectory {
+        named: String,
+        directory: String,
+        why: SourceDirectoryFault,
+    },
+    /// A pack source, `named` as it was given, whose pack holds `link`, a
+    /// symbolic link at that path inside the pack's own directory: refused as
+    /// the pack is fetched, before any file of it is read, since a link could
+    /// lead out of it.
+    #[error("link_in_pack")]
+    LinkInPack { named: String, link: String },
+    /// A pack source, `named` as it was given or as a lock records it, whose
+    /// `part` begins with `-`, which git would read as an option.
+    #[error("reads_as_an_option")]
+    ReadsAsAnOption { named: String, part: SourcePart },
+}
+
+/// Why the directory a pack source names inside its repository is no place to
+/// fetch a pack from: written `Absolute`, from a filesystem's root; one that
+/// `Climbs` with a `..`; one reached through `Linked`'s `link`, a symbolic
+/// link on the way to it inside the repository, which could lead out of the
+/// clone; or `Missing` from the repository at the commit fetched.
+///
+/// Not a symbolic link inside the pack's own tree, which
+/// [`PackRefusal::LinkInPack`] refuses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceDirectoryFault {
+    Absolute,
+    Climbs,
+    Linked { link: String },
+    Missing,
+}
+
+/// The part of a pack source a refusal names, as written: its `Repository`,
+/// what git clones, or the `Ref` asked of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourcePart {
+    Repository(String),
+    Ref(String),
 }
 
 /// Why setting a repository up refuses: a file it would write that is there

@@ -115,6 +115,7 @@ fn tokens(glyphs: Glyphs) -> Vec<String> {
     tokens.push(glyphs.ellipsis().to_string());
     tokens.push(glyphs.within().to_string());
     tokens.push(glyphs.up_down().to_string());
+    tokens.push(glyphs.left_right().to_string());
     tokens
 }
 

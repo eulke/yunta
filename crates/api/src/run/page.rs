@@ -62,7 +62,7 @@ impl OpenedRun<'_> {
             .filter_map(|event| state.chronicled(event))
             .filter(|moment| moment.node.as_ref() == Some(node))
             .collect();
-        let frame = self.frame_of(&state, self.project.workspace.clock.now());
+        let (frame, times) = self.framed(&state, self.project.workspace.clock.now());
         let Some(framed) = frame.nodes.iter().find(|frame| frame.id == *node) else {
             return Err(Refused::NoSuchNode {
                 run: self.id.clone(),
@@ -88,6 +88,7 @@ impl OpenedRun<'_> {
         Ok(Node {
             run_id: self.id.clone(),
             node: framed.clone(),
+            times: times.node(node),
             runner,
             run_dir: self.dir.clone(),
             cwd: workspace.dir.clone(),
@@ -171,6 +172,7 @@ impl OpenedRun<'_> {
             &reading.state,
             &reading.run.manifest.doc,
             &reading.frame,
+            &reading.times,
             reading.decision.clone(),
         ))
     }
@@ -226,6 +228,7 @@ impl RunReading<'_> {
             depth,
             run_id: self.run.id,
             frame: self.frame,
+            times: self.times,
             state: self.state,
             places: Places {
                 run_dir: self.run.dir,

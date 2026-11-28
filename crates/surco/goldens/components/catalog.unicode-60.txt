@@ -52,9 +52,9 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
                Developer Tools, then open it again
   ✗ runners    none declared, and `lint-fix` needs one
     fix        declare a runner in .yunta/config.yaml:
-      runners:
-        implementer:
-          - { adapter: claude-code, model: <model> }
+                 runners:
+                   implementer:
+                     - { adapter: claude-code }
 
   outside the declared globs:
     src/main.rs
@@ -116,8 +116,8 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
   ◌ never ran └─ conform
   ◌ never ran lint ↺ fix-lint  sends a failu…
 
-  ◆ EKPBGE  fragua (standa…  implement…                  32m
-  ■ 60Y934  fragua (quick)   stopped w…  yunta resume 60Y934
+  ◆ EKPBGE fragua (standar… implement…                   32m
+  ■ 60Y934 fragua (quick)   stopped wh…  yunta resume 60Y934
 
   crates/cli/src/pack.rs  +142 −38  ███████████████████
   docs/notes.md            +38      ████
@@ -148,6 +148,10 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
   the run holds its own state on disk.
 
   tokens       20.2k spent
+
+  tokens per run                         2.00M
+  spent                                  1.94M
+  it wants more to review what it built
 
 next
   yunta status 7E5PH4   where it stands
@@ -199,10 +203,60 @@ grill brief plan build review lint ship
  1 approve   2 adjust   3 abort
  tab next place · p proof · esc leave it waiting
 
-project name (enter keeps `yunta`)
+What do you want to build?
 ╭──────────────────────────────────────────────────────────╮
-│ yunta-tui                                                │
+│ add support for installing a pack globally               │
 ╰──────────────────────────────────────────────────────────╯
+this becomes the brief; fragua asks before it decides for
+you
+
+   quick ▸ standard   full
+
+What do you want to build?
+╭──────────────────────────────────────────────────────────╮
+│ add support                                              │
+╰──────────────────────────────────────────────────────────╯
+this becomes the brief; fragua asks only what it cannot
+decide for you
+
+workflow
+▸ yunta/fragua   the full cycle: questions, plan, tests, wo…
+  lint-fix       lint and format, with one fix round
+  run-tasks      a tasks document you wrote by hand
+
+mode
+ ▸ quick   standard   full
+
+adapter
+ ▸ as the runners in config.yaml say   claude-code   codex
+
+what runs
+  ┄ ┄┄ ╌ ┄
+  grill plan ship
+  it stops for you at ship
+
+This repository has never used yunta. Nothing is written
+until you say so.
+
+what this repository is
+  ✓ name        yunta
+  ✓ language    rust
+  ✓ suite       cargo test
+
+who does the work
+  ✓ planner     claude-code
+▸ ✓ executor  ▸ claude-code   codex
+                ╭ model ───────────╮
+                │                  │
+                ╰──────────────────╯
+                enter with none leaves it to the adapter
+  ✓ mechanical  claude-code
+
+ write .yunta/config.yaml
+
+yunta pack add \
+  https://github.com/eulke/yunta//packs/fragua@v0.0.5
+yunta init
 
  ▸ n
 
@@ -256,6 +310,19 @@ edit    crates/cli/src/cli/dispatch.rs
 … 4 under
 
 967k tokens · 2m34s at work · 5m00s waiting on you
+
+  progress     12 of 15 nodes done, 1 reroute
+  tokens       26.1M in / 1.06M out (25M cached)
+  time         1h12m at work, 38m51s waiting on you
+  slowest      implement 41m05s, spec 13m53s, plan 6m25s
+  branch       yunta/run/...Q78GRR off main
+
+what you can do
+c      stop it and everything under it
+s      what it cost
+
+                    █ █ █ █ █▄ █ ▀█▀ ▄▀█
+                     █  █▄█ █ ▀█  █  █▀█
 
    ⣀⣀⣀⣀⣀⣤⣤⣤⣤⣤⣶⣶⣶⣶⢶⣿⣿⢿⣿⡿⠿⣛⠿⠛⡩⠊ ⡇⠑⢍⠛⠿⣛⠿⢿⣿⡿⣿⣿⡶⣶⣶⣶⣶⣤⣤⣤⣤⣤⣀⣀⣀⣀⣀
 ⣿⣿⣿⣿⣿⠿⠿⠿⢛⣛⡻⠭⠭⠛⣒⡪⠭⠕⠒⣉⡡⠔⠊⠉⢀⠤⠊   ⡇  ⠑⠢⡀⠉⠑⠢⢌⣉⠒⠚⠭⢕⣒⠛⠭⠭⢟⣛⡛⠿⠿⠿⣿⣿⣿⣿⣿

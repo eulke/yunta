@@ -18,9 +18,10 @@ use std::collections::BTreeMap;
 
 use yunta_core::events::{ArtifactId, Failure};
 use yunta_core::{
-    AdapterId, ArtifactKind, NodeId, RunTool, RunnerCandidate, RunnerName, ToolNaming,
+    AdapterId, AgentName, ArtifactKind, ModelName, NodeId, RunTool, RunnerCandidate, RunnerName,
+    ToolNaming,
 };
-use yunta_render::page::doctor::{Finding, ProbeEnded, SessionOutcome};
+use yunta_render::page::doctor::{Finding, NamedBy, ProbeEnded, SessionOutcome};
 
 use crate::remark::Unestimated;
 use crate::sandbox::Sandbox;
@@ -64,10 +65,11 @@ const PROBE_NODE: NodeId = NodeId::from_static("probe");
 /// One binding, and every runner that reaches it.
 pub(super) struct Binding {
     pub(super) candidate: RunnerCandidate,
-    /// Each runner that names it, and whether it names it first. A
-    /// binding a runner falls back to is worth as much as its first:
-    /// a run reaches it exactly when the first one is down.
-    pub(super) named_by: Vec<(RunnerName, bool)>,
+    /// Each runner that names it, and where among its candidates. A
+    /// binding a runner names after its first is worth as much as its first:
+    /// a run pinned to its adapter, or a binary that builds none of the
+    /// earlier ones, runs on it.
+    pub(super) named_by: Vec<NamedBy>,
 }
 
 /// Every distinct binding any runner names, in the order a reader meets
@@ -75,19 +77,18 @@ pub(super) struct Binding {
 ///
 /// The binding and not the runner name, because a session exercises a
 /// binding: two runners naming the same one are not two things to test,
-/// and a binding held in reserve is.
+/// and a binding a runner names after its first is one.
 pub(super) fn bindings(config: &yunta_core::ConfigLayer) -> Vec<Binding> {
-    let mut found: BTreeMap<(String, String, String), Binding> = BTreeMap::new();
+    // A candidate that names no model or agent comes before one that names
+    // any on the same adapter.
+    let mut found: BTreeMap<(AdapterId, Option<ModelName>, Option<AgentName>), Binding> =
+        BTreeMap::new();
     for (runner, candidates) in config.runners.iter().flatten() {
         for (position, candidate) in candidates.iter().enumerate() {
             let key = (
-                candidate.adapter.to_string(),
-                candidate.model.to_string(),
-                candidate
-                    .agent
-                    .as_ref()
-                    .map(ToString::to_string)
-                    .unwrap_or_default(),
+                candidate.adapter.clone(),
+                candidate.model.clone(),
+                candidate.agent.clone(),
             );
             found
                 .entry(key)
@@ -96,7 +97,10 @@ pub(super) fn bindings(config: &yunta_core::ConfigLayer) -> Vec<Binding> {
                     named_by: Vec::new(),
                 })
                 .named_by
-                .push((runner.clone(), position == 0));
+                .push(NamedBy {
+                    runner: runner.clone(),
+                    position,
+                });
         }
     }
     found.into_values().collect()

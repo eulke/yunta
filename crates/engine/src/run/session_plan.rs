@@ -267,7 +267,7 @@ pub(crate) async fn open_session(
     let request = SessionRequest {
         prompt: told(setup, plan.prompt, run_tools.as_ref(), plan.task.as_deref()),
         cwd: plan.cwd,
-        model: Some(setup.chosen.model.clone()),
+        model: setup.chosen.model.clone(),
         agent: setup.agent.clone(),
         effort: setup.chosen.effort,
         // Only a session the engine listens to can be told what was

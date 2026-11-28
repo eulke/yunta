@@ -4,7 +4,60 @@ use surco::components::{Fix, Found};
 use yunta_core::{AdapterId, RunnerName};
 
 use super::finding::{checkouts_check, first_run_check, versioned};
-use super::{checks, CheckoutsKeep, Finding, PackLack, Readiness, SessionOutcome};
+use super::{
+    checks, CheckoutsKeep, Finding, NamedBy, PackLack, PoolKept, Readiness, SessionOutcome,
+};
+
+/// Two checkouts whose builds take 1.2 GB of a 10 GB budget, on a disk with 40 GB free of
+/// which 5 GB stay free.
+fn two_checkouts() -> PoolKept {
+    PoolKept {
+        checkouts: 2,
+        builds: 1_200_000_000,
+        uncounted: 0,
+        budget: 10_000_000_000,
+        available: 40_000_000_000,
+        keep_free: 5_000_000_000,
+    }
+}
+
+/// What the pool keeps reads as one sentence on doctor's row and gc's page, and its builds as
+/// a clause of their own, the row a new run's panel says.
+#[test]
+fn what_the_pool_keeps_reads_its_checkouts_its_builds_and_the_free_disk() {
+    let kept = two_checkouts();
+    assert_eq!(kept.builds(), "builds 1.2 GB of a 10 GB budget");
+    assert_eq!(
+        kept.to_string(),
+        "2 checkouts, builds 1.2 GB of a 10 GB budget; 40 GB free, 5 GB kept free"
+    );
+    let uncounted = PoolKept {
+        checkouts: 1,
+        uncounted: 3,
+        ..kept
+    };
+    assert_eq!(
+        uncounted.to_string(),
+        "1 checkout, builds 1.2 GB of a 10 GB budget and 3 builds not counted; 40 GB free, 5 GB \
+         kept free"
+    );
+}
+
+/// A forge in reach reads as its repository, the words a new run's panel says it in.
+#[test]
+fn a_forge_in_reach_reads_as_its_repository() {
+    let reachable = Finding::Forge {
+        repo: "eulke/yunta".parse().expect("a repository"),
+        answer: super::ForgeAnswer::Reachable,
+    };
+    let check = reachable.check();
+    assert_eq!(check.found, Found::Holds);
+    assert_eq!(
+        (check.subject.as_str(), check.said.as_str()),
+        ("forge", "github eulke/yunta")
+    );
+    assert_eq!(check.brief.as_deref(), Some("github eulke/yunta"));
+}
 
 #[test]
 fn a_healthy_adapter_folds_as_its_id_and_the_version_it_reported() {
@@ -22,14 +75,14 @@ fn a_healthy_adapter_folds_as_its_id_and_the_version_it_reported() {
 
 #[test]
 fn checkouts_within_their_budget_hold() {
-    let check = checkouts_check("2 checkouts", CheckoutsKeep::Within);
+    let check = checkouts_check(&two_checkouts(), CheckoutsKeep::Within);
     assert_eq!(check.found, Found::Holds);
     assert!(check.fix.is_none(), "{check:?}");
 }
 
 #[test]
 fn builds_past_their_budget_are_worth_a_look_and_say_how_to_empty_them() {
-    let check = checkouts_check("2 checkouts", CheckoutsKeep::BuildsOverBudget);
+    let check = checkouts_check(&two_checkouts(), CheckoutsKeep::BuildsOverBudget);
     assert_eq!(check.found, Found::Caution);
     assert_eq!(
         check.so.as_deref(),
@@ -43,7 +96,7 @@ fn builds_past_their_budget_are_worth_a_look_and_say_how_to_empty_them() {
 
 #[test]
 fn a_disk_under_what_it_keeps_free_stops_a_run_and_says_how_to_make_room() {
-    let check = checkouts_check("2 checkouts", CheckoutsKeep::DiskUnderFree);
+    let check = checkouts_check(&two_checkouts(), CheckoutsKeep::DiskUnderFree);
     assert_eq!(check.found, Found::Problem);
     assert_eq!(
         check.fix.map(|fix| fix.said).as_deref(),
@@ -95,7 +148,8 @@ fn a_fix_is_said_once_under_the_first_row_that_needs_it() {
 #[test]
 fn a_machine_is_ready_only_when_every_check_holds() {
     let named = Finding::Committer {
-        who: "Ada <ada@example.com>".to_string(),
+        name: "Ada".to_string(),
+        address: "ada@example.com".to_string(),
     };
     let unnamed = Finding::NoCommitter {
         git_said: "no user.name".to_string(),
@@ -111,22 +165,28 @@ fn a_machine_is_ready_only_when_every_check_holds() {
 fn a_session_that_ended_well_folds_under_its_binding() {
     let candidate = yunta_core::RunnerCandidate {
         adapter: AdapterId::from_static("claude-code"),
-        model: "claude-sonnet-5".parse().unwrap(),
+        model: Some("claude-sonnet-5".parse().unwrap()),
         agent: None,
         effort: None,
     };
     let session = Finding::Session {
         candidate,
         named_by: vec![
-            (RunnerName::from_static("executor"), true),
-            (RunnerName::from_static("reviewer"), false),
+            NamedBy {
+                runner: RunnerName::from_static("executor"),
+                position: 0,
+            },
+            NamedBy {
+                runner: RunnerName::from_static("reviewer"),
+                position: 1,
+            },
         ],
         outcome: SessionOutcome::Ok { tokens: 812 },
     };
     let check = session.check();
     assert_eq!(
         check.subject,
-        "claude-code/claude-sonnet-5 (executor, reviewer fallback)"
+        "claude-code/claude-sonnet-5 (executor, reviewer's 2nd candidate)"
     );
     assert_eq!(check.said, "ok: 812 tokens");
     assert_eq!(check.brief.as_deref(), Some("claude-code/claude-sonnet-5"));
@@ -151,5 +211,23 @@ fn a_forge_not_reached_with_its_token_says_the_variable_and_why() {
         check.said,
         "github acme/web: `ACME_TOKEN`, the variable its token is in, is set, and reaching the \
          forge with it failed: forge: no answer while trying to build the HTTP client"
+    );
+}
+
+/// Who git commits as reads on doctor's row as git writes it, the address in brackets after
+/// the name, and at a glance by the name alone.
+#[test]
+fn a_committer_reads_with_the_address_on_doctors_row_and_by_name_at_a_glance() {
+    let committer = Finding::Committer {
+        name: "Marta Ruiz".to_string(),
+        address: "marta.ruiz@example.com".to_string(),
+    };
+    assert_eq!(
+        committer.check().said,
+        "commits as Marta Ruiz <marta.ruiz@example.com>"
+    );
+    assert_eq!(
+        committer.glanced().map(|check| check.said).as_deref(),
+        Some("commits as Marta Ruiz")
     );
 }

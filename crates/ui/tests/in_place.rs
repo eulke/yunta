@@ -5,7 +5,8 @@
 //! at on the run's log, once, and the note says what the run does now. On the design's run
 //! where a task asks for a path outside its scope, the grant is recorded so and noted; where
 //! a check failed, its card keeps both options on the least terminal, what the check printed
-//! cut from its top above them. Help over a card says each key the card names in the card's
+//! cut from its top above them. An answer refused while a page stands over the run is said on
+//! the run, and its card answers keys again. Help over a card says each key the card names in the card's
 //! words, and no row of the run's for those keys. A round of questions in place is
 //! `round`'s, one of one question on a run a bench parks `one_question`'s, and the plan's
 //! desk `desk`'s, the plan read from a card among it; a prompt put aside and brought back is
@@ -31,11 +32,12 @@ use surco::line::Line;
 use surco::look::{Look, Width};
 use surco::surface::Terminal;
 use yunta_core::events::{EventPayload, GateEvent, GateResolvedPayload};
-use yunta_core::RunId;
+use yunta_core::{Pid, RunId};
+use yunta_render::refusal::Refused;
 use yunta_storage::Storage;
 use yunta_testkit_ui::screens::run::{self, RunScreen};
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Grounds, Scene, ScrolledTo};
+use yunta_ui::{Grounds, Operation, Outcome, Scene, ScrolledTo, Stage};
 
 /// The cells and the rows the pane of a run's screen holds under its title on the least
 /// terminal, 60 by 14: what stands above a card cannot all stand there.
@@ -177,7 +179,7 @@ async fn the_card_stands_at_the_panes_foot_by_itself_while_the_run_leads() {
         "its keys stand in the screen's legend"
     );
     let legend = screen.state().screen(&Look::plain()).legend;
-    let spelled = legend.spelled(surco::glyphs::Glyphs::Unicode);
+    let spelled = support::spelled(&legend, surco::glyphs::Glyphs::Unicode);
     assert!(
         spelled.starts_with("j k choose · enter answer"),
         "{spelled}"
@@ -231,6 +233,41 @@ async fn a_number_points_its_option_and_enter_records_it_once_with_what_the_run_
     assert_eq!(
         noted.said,
         "Recorded: abort. The run pauses here, and asks again when it is resumed."
+    );
+}
+
+/// An answer given on the card is the run's while a page stands over the run: refused while
+/// the run's numbers stand over it, the refusal is said on the run as the person comes back,
+/// and the card, handed its answer back, answers keys again.
+#[tokio::test]
+async fn an_answer_refused_while_the_runs_numbers_stand_over_it_is_said_on_the_card() {
+    let mut screen = run::opened("ship").await;
+    let deciding = |work: &Operation| matches!(work, Operation::Decide { .. });
+    let over = [Stroke::Enter, Stroke::Insert('s')];
+    let withheld = screen.pressed_while(deciding, &over).await;
+    let [(ticket, Operation::Decide { run, .. })] = withheld.as_slice() else {
+        panic!("the option is recorded once: {withheld:?}");
+    };
+    assert!(
+        matches!(screen.state().stage(), Some(Stage::Stats(_))),
+        "the run's numbers stand over the run while its answer is recorded"
+    );
+    let refused = Refused::Moving {
+        run: run.clone(),
+        pid: Pid::current(),
+    };
+    let said = refused.to_string();
+    screen.answered(*ticket, Outcome::Refused(refused)).await;
+    screen.pressed(&[Stroke::Decline]).await;
+    let noted = screen.state().screen(&Look::plain()).noted;
+    let noted = noted.expect("the refusal is noted on the run");
+    assert_eq!(noted.said, said);
+    screen.pressed(&[Stroke::Insert('2')]).await;
+    let card = card(&screen).expect("the card stands");
+    assert_eq!(
+        card.pointed.as_deref(),
+        Some("abort"),
+        "the card answers keys again"
     );
 }
 

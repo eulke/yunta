@@ -14,16 +14,39 @@ use crate::line::Line;
 /// cuts a row at its edge rather than fold it, so a row stays one moment. Not the CLI's
 /// `Beats`, a queue of what a run's surface draws.
 pub struct Feed {
-    /// The rows in sight, the oldest first, each as its caller composed it.
-    pub rows: Vec<Line>,
-    /// What each row is about, one a row in the rows' order, where the feed lists the moments
-    /// of more than one thing: said before its row, in the row's opening tone. Empty where
-    /// every row is one thing's, as a node's feed under its pane's title.
-    pub subjects: Vec<String>,
+    /// The rows in sight, the oldest first.
+    pub rows: Vec<FeedRow>,
     /// How many rows stand above the rows in sight.
     pub before: usize,
     /// How many rows stand under the rows in sight.
     pub after: usize,
+}
+
+/// One row of a [`Feed`]: what it is about, where the feed lists the moments of more than one
+/// thing, and the row as its caller composed it. A feed any of whose rows says what it is
+/// about says it before each of its rows, in the row's opening tone; one whose every row is one
+/// thing's, as a node's feed under its pane's title, says none.
+pub struct FeedRow {
+    pub subject: Option<String>,
+    pub line: Line,
+}
+
+impl FeedRow {
+    /// A row of a feed that lists one thing's moments: `line` alone.
+    pub fn of(line: Line) -> FeedRow {
+        FeedRow {
+            subject: None,
+            line,
+        }
+    }
+
+    /// A row about `subject`, in a feed that lists the moments of more than one thing.
+    pub fn about(subject: impl Into<String>, line: Line) -> FeedRow {
+        FeedRow {
+            subject: Some(subject.into()),
+            line,
+        }
+    }
 }
 
 #[cfg(test)]

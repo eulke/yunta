@@ -4,7 +4,7 @@ use yunta_core::{
     AdapterId, CommandName, ConfigKey, Detected, MachineAdapters, NodeId, RunnerName,
 };
 
-use super::fix_for;
+use super::{fix_for, in_files};
 
 /// What this repository says, on a machine where codex answers.
 fn on_codex() -> Detected {
@@ -27,11 +27,7 @@ fn a_runner_a_node_names_is_declared_on_an_adapter_that_answers() {
     let fix = fix_for(&error, &on_codex()).expect("a runner to declare");
     assert_eq!(
         fix.paste,
-        [
-            "runners:",
-            "  planner:",
-            "    - { adapter: codex, model: <model> }"
-        ]
+        ["runners:", "  planner:", "    - { adapter: codex }"]
     );
 }
 
@@ -79,4 +75,30 @@ fn a_command_this_repository_answers_for_is_fixed_by_its_detected_value() {
             "detected here: declare `commands: { lint: \"pnpm lint\" }`"
         ))
     );
+}
+
+/// The language a repository holding `files` at its root is found to be in, where an
+/// ecosystem is found.
+fn language_of(files: &[(&str, &str)]) -> Option<&'static str> {
+    let repo = tempfile::tempdir().expect("a scratch repository");
+    for (name, content) in files {
+        std::fs::write(repo.path().join(name), content).expect("a file of the repository");
+    }
+    in_files(repo.path())
+        .ecosystem
+        .map(|ecosystem| ecosystem.language)
+}
+
+#[test]
+fn each_ecosystem_says_the_language_its_code_is_in() {
+    let package = r#"{ "scripts": { "test": "vitest" } }"#;
+    assert_eq!(language_of(&[("Cargo.toml", "")]), Some("rust"));
+    assert_eq!(language_of(&[("go.mod", "module demo\n")]), Some("go"));
+    assert_eq!(language_of(&[("pyproject.toml", "")]), Some("python"));
+    assert_eq!(
+        language_of(&[("package.json", package)]),
+        Some("javascript")
+    );
+    let typed = [("package.json", package), ("tsconfig.json", "{}")];
+    assert_eq!(language_of(&typed), Some("typescript"));
 }

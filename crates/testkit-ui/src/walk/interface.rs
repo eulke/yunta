@@ -5,16 +5,21 @@
 //! confirmation, its screen draws on Markdown and HTML, and where its trail names a run,
 //! under any stage opened over the run's, it follows the run it names last. Over each state
 //! the palette is opened and every row of each palette the walk meets is taken, and help is
-//! opened over each legend it meets, holding the same (`dialogs`). Once the walk ends it has
-//! shown every screen `MUST_REACH` names, scrolled every page `MUST_SCROLL` names and met a
-//! palette offering every command `MUST_OFFER` names. A state that breaks one is named with
-//! the inputs that reach it. Among the inputs is what a terminal of a few rows laid out of the
-//! state's screen, so every page a stage shows scrolls.
+//! opened over each legend it meets, holding the same (`dialogs`); and where nothing is typed
+//! and no prompt stands, `n` opens a new run and `q` goes down to the field (`everywhere`);
+//! and a screen that shows work under way waits on that work (`under_way`).
+//! Once the walk ends it has shown every screen `MUST_REACH` names, scrolled every page
+//! `MUST_SCROLL` names and met a palette offering every command `MUST_OFFER` names. A state
+//! that breaks one is named with the inputs that reach it. Among the inputs is what a
+//! terminal of a few rows laid out of the state's screen, so every page a stage shows
+//! scrolls.
 //!
 //! The rules stand here, beside the walk, and not in a test of `yunta-ui`: the test that
 //! walks holds them beside a terminal's layout, so the states are reached once for both.
 
-mod dialogs;
+pub(crate) mod dialogs;
+mod everywhere;
+mod under_way;
 
 use std::collections::HashSet;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -27,21 +32,73 @@ use yunta_ui::{Input, ItsRun, Request, State};
 use super::{Checks, Reached};
 use crate::recorded::Recordings;
 use dialogs::{nothing_unconfirmed, MUST_OFFER};
+use everywhere::keys_everywhere_hold;
+use under_way::under_way_waited_on;
 
 /// What a screen the walk must reach shows, and what that screen is: every screen of the
 /// application, and every scene of a run's screen, as the log of a run of the walk's home
 /// stands at it.
-const MUST_REACH: [(&str, &str); 80] = [
+const MUST_REACH: [(&str, &str); 97] = [
     ("not in a repository", "the signpost"),
-    ("project name", "a setup"),
-    ("runs on", "a runner's adapter asked"),
-    ("leaves it to declare later", "a runner's model asked"),
+    ("choose a shape", "a new workflow's shapes"),
+    ("what this repository is", "a setup"),
+    ("to install as a pack", "a setup whose pack is in reach"),
+    ("out of reach: fatal:", "a setup whose pack is out of reach"),
+    (
+        "`enter` change it",
+        "a setup's row that changes, pointed at",
+    ),
+    ("`type` the name", "a setup's name typed in place"),
+    ("`type` the base", "a setup's base typed in place"),
+    (
+        "`←→` adapter",
+        "a setup's role, its adapter chosen in place",
+    ),
+    (
+        "`type` the model",
+        "a setup's role, its model typed in place",
+    ),
     ("for this repo's CLAUDE.md", "a setup written"),
-    ("no runs yet", "an empty field"),
-    ("runs of this repository", "the field of this repository"),
-    ("runs on this machine", "the field of this machine"),
-    ("closed, newest first", "the field with its closed runs"),
-    ("does the same at a shell", "a confirmation"),
+    (
+        "› set up › yunta/fragua",
+        "a setup's pack audited before it is installed",
+    ),
+    (
+        "`esc` write without it",
+        "a setup's pack, its install confirmed",
+    ),
+    (
+        "Nothing outside .yunta/ was touched",
+        "a setup written, what it touched noted",
+    ),
+    // The field: its first row with nothing under it but its keys, read with no run in sight,
+    // so a new run and quitting alone; its trail naming the repository by its path, or this
+    // machine.
+    (
+        "· **n**\n\n`n` new run · `q` quit",
+        "a field read with no run in sight",
+    ),
+    ("**yunta** › /", "the field of this repository"),
+    ("**yunta** › this machine", "the field of this machine"),
+    ("## closed\n", "the field with its closed runs"),
+    (
+        "needs you, oldest first",
+        "the field's runs that need you, a group",
+    ),
+    ("what you can do", "the glance at the run pointed at"),
+    ("It closes as cancelled, by you", "a run's close asked"),
+    (
+        " is not closed: ",
+        "a close that names a run it leaves open",
+    ),
+    (
+        "Nothing to resume: this one waits on a decision.",
+        "`r` on a run of the field that waits on a decision",
+    ),
+    (
+        "It stops now, with every session under it",
+        "a run's stop asked",
+    ),
     ("`j k` node", "a run"),
     ("Go on?", "a decision"),
     (
@@ -57,9 +114,14 @@ const MUST_REACH: [(&str, &str); 80] = [
         "a plan read from its card in place",
     ),
     ("What changed?", "a round"),
-    ("What do you want to build?", "the first run"),
-    ("Which workflow builds it?", "a start"),
-    ("checks it", "the catalog"),
+    ("what you want to build", "the first run"),
+    ("as the runners in config.yaml say", "a new run"),
+    ("what runs", "a new run's panel"),
+    (
+        "input `ask` is required and has no default",
+        "a new run's start refused of an input it names, said under that input's row",
+    ),
+    ("the workflows you can run", "the catalog"),
     ("can run here", "a workflow checked"),
     ("What is the new workflow called?", "a new workflow named"),
     ("fresh.yaml", "a new workflow written"),
@@ -68,24 +130,22 @@ const MUST_REACH: [(&str, &str); 80] = [
     ("acme/demo", "the packs listed"),
     ("none installed", "no pack installed"),
     ("demo-says", "a pack audited"),
-    (
-        "remove acme/demo from this project?",
-        "a pack's removal asked",
-    ),
+    ("## remove acme/demo?\n", "a pack's removal asked"),
     ("What is the new pack called?", "a new pack named"),
     ("acme/fresh", "a new pack written"),
     ("Where is the pack?", "a pack's source asked"),
     ("ships executors it runs", "a pack's executors confirmed"),
     ("acme/tools · installed", "a pack installed"),
     ("receipt of done", "a run's receipt"),
+    ("intact:", "a run's evidence verified"),
     ("page.html", "a run's page for a browser"),
     ("nothing here could open it", "a page not shown"),
     ("000000 stats", "a run's stats"),
     ("● done · the nodes it runs, in order", "a run's graph"),
-    ("cost per verified task over time", "a workflow's past runs"),
+    ("per verified task, oldest", "a workflow's past runs"),
     ("no runs of workflow", "a workflow that never ran"),
     ("as written", "a workflow's graph"),
-    ("yunta doctor --session", "doctor's findings"),
+    ("this machine · ", "the machine's findings"),
     ("It spends a prompt each", "a session per binding asked"),
     (
         "stopped before every session ended",
@@ -186,16 +246,17 @@ const MUST_REACH: [(&str, &str); 80] = [
 /// end their ids with, and a page about a run or a workflow by its word after the handle or
 /// the name. A run's numbers scroll on the design's run, which spent and found enough for
 /// them to pass a screen.
-const MUST_SCROLL: [(&str, &str); 9] = [
+const MUST_SCROLL: [(&str, &str); 10] = [
     ("000000", "a run's page, its nodes beside it"),
     ("receipt", "a run's receipt"),
     ("stats", "a run's stats"),
     ("history", "a workflow's past runs"),
     ("graph", "a graph"),
-    ("doctor", "doctor's findings"),
+    ("machine", "the machine's findings"),
     ("upkeep", "what collecting would reclaim"),
     ("workflow", "a document's shape"),
     ("acme/demo", "a pack's audit"),
+    ("yunta/fragua", "the audit of the pack a setup installs"),
 ];
 
 /// What every piece of work under way remarks, in the walk.
@@ -237,7 +298,8 @@ impl<'r> InterfaceChecks<'r> {
         self.palettes.len()
     }
 
-    /// How many helps the walk opened, each over a legend told apart by its keys.
+    /// How many helps the walk opened, each over a legend told apart by its keys, and at the
+    /// field by what it is asked to show.
     pub fn helps_opened(&self) -> usize {
         self.helps.len()
     }
@@ -288,6 +350,8 @@ impl Checks for InterfaceChecks<'_> {
             self.unscrolled.retain(|(at, _)| *at != page);
         }
         follows_the_run_it_names(state, &screen.trail, &self.runs, reached);
+        keys_everywhere_hold(state, &screen, reached);
+        under_way_waited_on(state, reached);
         self.palette_taken(state, reached);
         self.help_taken(state, &screen, reached);
         remarks_hold(state, reached);
@@ -311,7 +375,7 @@ fn scrolled<'s>(screen: &'s Screen, state: &State) -> Option<&'s str> {
     let in_view = state.followed_runs().in_view.as_ref();
     let of_the_run = |place: &String| {
         in_view.is_some_and(|in_view| {
-            let mut nodes = in_view.run.manifest.workflow.iter_nodes();
+            let mut nodes = in_view.run.manifest().workflow.iter_nodes();
             nodes.any(|node| node.id.as_str() == place)
         })
     };

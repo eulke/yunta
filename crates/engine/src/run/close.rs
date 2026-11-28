@@ -14,6 +14,7 @@ use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::run_log::RunLog;
 use yunta_replay::registry::Engine;
+use yunta_replay::RunState;
 
 /// Why a run is not closed: a refusal, or what failed below.
 #[derive(Debug, thiserror::Error)]
@@ -37,9 +38,10 @@ pub enum CloseRunError {
 /// left running stopped and its pause recorded — so by the time this is
 /// called it is stopped like any other.
 ///
-/// Nothing else of the run is touched: its branch and its worktree stay
-/// for a person to read, and for `gc` to remove. The closing event goes
-/// through the run's log, redacted with `redactor`.
+/// Nothing else of the run is touched here: its branch stays for a person
+/// to read, and `gc` never removes it; its checkouts are the caller's to
+/// give back to the project's pool. The closing event goes through the
+/// run's log, redacted with `redactor`.
 pub async fn close_run(
     storage: &AsyncStorage,
     run_id: &RunId,
@@ -50,16 +52,8 @@ pub async fn close_run(
     redactor: &Redactor,
 ) -> Result<(), CloseRunError> {
     let state = crate::run_log::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
-    if state.run.finished().is_some() {
-        return Err(CloseRunError::Refused(CloseRefusal::AlreadyClosed));
-    }
-    if !state.tail_paused() {
-        return Err(match engine {
-            Engine::Alive { .. } => CloseRunError::Refused(CloseRefusal::Driven),
-            Engine::Dead | Engine::Unrecorded | Engine::Unknown => {
-                CloseRunError::Refused(CloseRefusal::Moving)
-            }
-        });
+    if let Some(refusal) = close_refusal(&state, engine) {
+        return Err(CloseRunError::Refused(refusal));
     }
     let closed =
         RunFinishedPayload::closed(TerminalState::Cancelled, state.metrics()).closed_by(by);
@@ -71,4 +65,22 @@ pub async fn close_run(
     // `tokio::fs` would run the same write and rename on a pool thread.
     crate::events_export::write_jsonl(run_dir, &events)
         .map_err(|error| CloseRunError::Export(yunta_core::describe(&error)))
+}
+
+/// Why a close refuses the run `state` derives, `engine` what its registry says drives it:
+/// its log says it closed already; or it has not stopped, and an engine that lives drives it,
+/// or nothing says the engine that drove it is gone. None for a run stopped on a person, which
+/// a close takes. The one rule [`close_run`] refuses by, which a reader that keeps a run's
+/// state asks to say why a close leaves the run open.
+pub fn close_refusal(state: &RunState, engine: &Engine) -> Option<CloseRefusal> {
+    if state.run.finished().is_some() {
+        return Some(CloseRefusal::AlreadyClosed);
+    }
+    if state.tail_paused() {
+        return None;
+    }
+    Some(match engine {
+        Engine::Alive { .. } => CloseRefusal::Driven,
+        Engine::Dead | Engine::Unrecorded | Engine::Unknown => CloseRefusal::Moving,
+    })
 }

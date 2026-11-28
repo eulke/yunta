@@ -79,7 +79,7 @@ nodes:
 "#,
     );
     let events = log(vec![(0, None, created("alpha"))]);
-    let frame = frame(&workflow, &events, 10);
+    let frame = frame(&workflow, &events);
 
     let lint = &node(&frame, "lint").declares;
     let rule = lint
@@ -106,10 +106,10 @@ nodes:
     assert_eq!(node(&frame, "fix").declares, Declares::default());
 }
 
-/// A node's frame holds how long a person was asked about it, the wait
-/// open at the frame's instant included, how often a person decided its
-/// gate, and how many rounds of questions it asked. Two nodes asked at once
-/// each hold their own wait.
+/// A node's frame holds how often a person decided its gate and how many
+/// rounds of questions it asked; its times, how long a person was asked
+/// about it, the wait open at their instant included. Two nodes asked at
+/// once each hold their own wait.
 #[test]
 fn a_frame_holds_how_long_and_how_often_a_person_answered_a_node() {
     let workflow = workflow(
@@ -132,17 +132,19 @@ nodes:
         (70, Some("ask"), STARTED),
         (75, Some("ask"), ASKED),
     ]);
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
+    let times = times(&events, 100);
+    let people = |node: &NodeFrame| times.node(&node.id).people;
 
     let approve = node(&frame, "approve");
-    assert_eq!(approve.people, Duration::from_secs(30));
+    assert_eq!(people(approve), Duration::from_secs(30));
     assert_eq!(approve.decisions, 1);
     assert_eq!(approve.question_rounds, 0);
     let ship = node(&frame, "ship");
-    assert_eq!(ship.people, Duration::from_secs(40));
+    assert_eq!(people(ship), Duration::from_secs(40));
     assert_eq!(ship.decisions, 0);
     let ask = node(&frame, "ask");
-    assert_eq!(ask.people, Duration::from_secs(25));
+    assert_eq!(people(ask), Duration::from_secs(25));
     assert_eq!(ask.question_rounds, 1);
 }
 
@@ -156,7 +158,7 @@ fn a_frame_counts_the_reroutes_a_node_s_own_rule_made() {
         (2, Some("build"), failed("red")),
         (3, Some("build"), rerouted("fix")),
     ]);
-    let frame = frame(&workflow, &events, 100);
+    let frame = frame(&workflow, &events);
 
     assert_eq!(node(&frame, "build").reroutes, 1);
     assert_eq!(node(&frame, "plan").reroutes, 0);
@@ -174,25 +176,16 @@ fn a_gate_a_person_was_asked_about_took_a_persons_time() {
         }),
         ..Declares::default()
     };
+    let waited = Duration::from_secs(60);
     let asked = NodeFrame {
-        people: Duration::from_secs(60),
-        declares: gate.clone(),
-        ..yunta_replay::frame::NodeFrame::sample(&id, gate_awaiting_a_person())
-    };
-    assert!(asked.person_took());
-
-    let unasked = NodeFrame {
-        people: Duration::ZERO,
         declares: gate,
         ..yunta_replay::frame::NodeFrame::sample(&id, gate_awaiting_a_person())
     };
-    assert!(!unasked.person_took());
+    assert!(asked.person_took(waited));
+    assert!(!asked.person_took(Duration::ZERO));
 
-    let not_a_gate = NodeFrame {
-        people: Duration::from_secs(60),
-        ..yunta_replay::frame::NodeFrame::sample(&NodeId::from("ask"), finished_node())
-    };
-    assert!(!not_a_gate.person_took());
+    let not_a_gate = yunta_replay::frame::NodeFrame::sample(&NodeId::from("ask"), finished_node());
+    assert!(!not_a_gate.person_took(waited));
 }
 
 /// A gate's rounds are its decisions and the round it waits in now.

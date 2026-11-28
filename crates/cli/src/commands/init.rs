@@ -3,18 +3,21 @@
 //! machine answers for and the runners its workflows propose, and writes
 //! `.yunta/config.yaml`, defensive `.gitignore` entries and the mechanism
 //! skill. Non-interactive by default: every step picks the best answer it can
-//! detect and reports it, and the runners stay proposed, commented;
+//! detect and reports it, and each runner is declared on every adapter this
+//! machine answers for, in the order they were found, its model left to each;
 //! `-i/--interactive` asks the name and base branch, and each runner's adapter
-//! and model, which writes it declared. It degrades to non-interactive with a
-//! warning when stdin isn't a TTY: `init` must never hang waiting for input
-//! that isn't coming.
+//! and model, none leaving it to the adapter: the adapter picked stands first,
+//! the others follow by themselves. Where no adapter answers, the runners stay
+//! proposed, commented. A repository whose workflows name no runner gets the one
+//! role that stands for it, as its default runner too. It degrades to non-interactive with a warning when
+//! stdin isn't a TTY: `init` must never hang waiting for input that isn't
+//! coming.
 
 use surco::look::Look;
 use yunta_api::{ProjectDraft, RunnerAnswer};
 use yunta_core::{AdapterId, ModelName, RunnerName};
-use yunta_render::page::Initialized;
 use yunta_render::prompt::{
-    keeping, model_of, runs_on, Escape, BASE_BRANCH, PROJECT_NAME, USING_DETECTED_DEFAULTS,
+    keeping, model_asked, runs_on, Escape, BASE_BRANCH, PROJECT_NAME, USING_DETECTED_DEFAULTS,
 };
 use yunta_ui::prompt::Alternative;
 
@@ -47,16 +50,7 @@ pub async fn init(
     };
     let setup = draft.answered(&name, &base_branch, runners);
     let initialized = detected.write(setup).await?;
-    let page = Initialized {
-        repo: &workspace.dir,
-        wrote: &initialized.wrote,
-        skipped: &initialized.skipped,
-        detected: &initialized.detected,
-        probed: &initialized.probed,
-        declared: &initialized.declared,
-        undeclared: &initialized.undeclared,
-    };
-    crate::output::show(look, &page);
+    crate::output::show(look, &initialized.page(&workspace.dir));
     Ok(Outcome::Success)
 }
 
@@ -107,9 +101,9 @@ fn runner_answers(console: &Console, draft: &ProjectDraft) -> Option<Vec<RunnerA
         return Some(Vec::new());
     };
     let mut answers = Vec::new();
-    for runner in &draft.proposed.roles {
+    for runner in draft.proposed.roles() {
         let adapter = adapter_of(console, runner, &answering)?.unwrap_or_else(|| (*first).clone());
-        let model = model_of_runner(console, runner)?;
+        let model = model_of_runner(console)?;
         answers.push(RunnerAnswer {
             runner: runner.clone(),
             adapter,
@@ -140,12 +134,12 @@ fn adapter_of(
     }
 }
 
-/// The model `runner` runs, as typed: `Some(None)` where the line was left empty,
-/// and asked again where what was typed is no model name; `None` where a person
-/// stopped `init`.
-fn model_of_runner(console: &Console, runner: &RunnerName) -> Option<Option<ModelName>> {
+/// The model of the runner whose adapter was just picked, as typed: `Some(None)` where
+/// the line was left empty, and asked again where what was typed is no model name;
+/// `None` where a person stopped `init`.
+fn model_of_runner(console: &Console) -> Option<Option<ModelName>> {
     loop {
-        let typed = ask_line(console, &model_of(runner), "")?;
+        let typed = ask_line(console, &model_asked(), "")?;
         if typed.is_empty() {
             return Some(None);
         }

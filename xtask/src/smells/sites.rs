@@ -309,6 +309,9 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             // Blessing a golden is what a person asks of a test run, and
             // reading that request is what the module is for.
             "crates/surco/src/golden.rs",
+            // So is the walk's table, written where a person names a file
+            // for it: the module that counts it reads where.
+            "crates/testkit-ui/src/walk/classes.rs",
         ],
     )
 }

@@ -1,13 +1,14 @@
 //! See [`super`]. The repository's cases, run as `yunta test` runs them: each shown
 //! as it ends, in the one column every case's name fits, what their runs say under
-//! them, and the tally once every one ran. Escape stops them while they run, keeping
-//! what ended, and goes back to the workflows once they stopped or ended.
+//! them, and the tally heading the page once every one ran. Escape stops them while
+//! they run, keeping what ended, and goes back to the workflows once they stopped or
+//! ended; `q`, as on every page, goes down to the field, which lets them go.
 
 use surco::components::{Legend, Note};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_api::Remark;
-use yunta_render::page::{Page, RanCase, Tested, TestedCase};
+use yunta_render::page::{CasesOnScreen, Page, RanCase, Tested};
 
 use super::Next;
 use crate::prompt::Stroke;
@@ -47,17 +48,20 @@ impl CasesRun {
         }
     }
 
-    /// Each case that ended, as its row; what their runs said; and that the others
-    /// run, that they were stopped, or the tally; with the keys.
-    pub(super) fn screen(&self, look: &Look) -> (Doc, Legend) {
-        let mut doc = Doc::new();
-        for case in &self.ended {
-            let row = TestedCase {
-                names: &self.names,
-                case: case.clone(),
-            };
-            doc = doc.with_all(row.document(look).into_blocks());
-        }
+    /// The tally heading the page once every case ran, each case that ended as its row,
+    /// what their runs said, and that the others run or that they were stopped; with the
+    /// keys, a new run among them where one `asks_for_a_run` here.
+    pub(super) fn screen(&self, look: &Look, asks_for_a_run: bool) -> (Doc, Legend) {
+        let tested = match &self.progress {
+            Progress::Ran(tested) => Some(tested),
+            Progress::Running | Progress::Stopped => None,
+        };
+        let page = CasesOnScreen {
+            names: &self.names,
+            ended: &self.ended,
+            tested,
+        };
+        let mut doc = page.document(look);
         for remark in &self.remarked {
             doc = doc.with(Note(crate::remark::said(remark, look.glyphs).words));
         }
@@ -68,14 +72,20 @@ impl CasesRun {
             }
             Progress::Stopped => {
                 let stopped = Note(yunta_render::screen::CASES_STOPPED.to_string());
-                (
-                    doc.with(stopped),
-                    yunta_render::screen::over_the_workflows_legend(),
-                )
+                let legend = yunta_render::screen::page_legend(
+                    yunta_render::screen::PageRead::Whole,
+                    Legend::new(),
+                    asks_for_a_run,
+                );
+                (doc.with(stopped), legend)
             }
-            Progress::Ran(tested) => (
-                doc.with_all(tested.document(look).into_blocks()),
-                yunta_render::screen::over_the_workflows_legend(),
+            Progress::Ran(_) => (
+                doc,
+                yunta_render::screen::page_legend(
+                    yunta_render::screen::PageRead::Whole,
+                    Legend::new(),
+                    asks_for_a_run,
+                ),
             ),
         }
     }
@@ -84,7 +94,7 @@ impl CasesRun {
     /// to the workflows, as Enter does, once they stopped or ran.
     pub(super) fn pressed(&mut self, stroke: Stroke) -> Next {
         match (stroke, &self.progress) {
-            (Stroke::Insert('q') | Stroke::Interrupt, _) => Next::Leave,
+            (Stroke::Interrupt, _) => Next::Leave,
             (Stroke::Decline, Progress::Running) => {
                 self.progress = Progress::Stopped;
                 Next::LetGo(Operation::Workflow(WorkflowOperation::RunCases))
@@ -94,7 +104,18 @@ impl CasesRun {
         }
     }
 
+    /// Whether the cases stopped or ran, and their page stands.
+    pub(super) fn ended(&self) -> bool {
+        matches!(self.progress, Progress::Stopped | Progress::Ran(_))
+    }
+
     /// What the cases running hand back: every name, and each case as it ends. A
+    /// The work its screen says is under way: the cases run, until they end or stop.
+    pub(super) fn shown_under_way(&self) -> Option<Operation> {
+        matches!(self.progress, Progress::Running)
+            .then_some(Operation::Workflow(WorkflowOperation::RunCases))
+    }
+
     /// case ends once: one heard again is the one already shown.
     pub(super) fn heard(&mut self, news: News) {
         match news {

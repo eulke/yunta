@@ -59,7 +59,7 @@ async fn a_runs_numbers_and_its_graph_are_cut_where_it_needs_the_person_at_its_l
     for name in ["stats", "graph"] {
         let (cut, run) = in_view(name).await;
         let (read, _) = read_whole(&cut, &run).await;
-        let frame = read.frame(cut.now());
+        let frame = read.frame();
         let waits_at = match frame.phase.waiting_on() {
             Some(WaitingOn::Node { node, .. }) => Some(node.to_string()),
             _ => None,
@@ -187,7 +187,7 @@ async fn an_answer_recorded_is_cut_where_the_run_went_on_to_its_next_nodes_start
             "`{name}` is cut at seq {}",
             moved.seq
         );
-        let frame = read.frame(cut.now());
+        let frame = read.frame();
         assert!(
             matches!(frame.phase, RunPhase::Running),
             "`{name}`: {:?}",

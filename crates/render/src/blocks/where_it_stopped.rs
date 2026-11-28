@@ -25,9 +25,10 @@ use surco::line::{Line, Tone};
 use surco::words::Standing;
 use yunta_core::events::PauseReason;
 use yunta_core::{Isolation, Manifest, NodeId};
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunTimes};
 
 use super::how_it_stands::WAITS_ON;
+use crate::page::run::facts;
 use crate::watched::listed_as;
 
 /// What a pause no option here answers asks of a person instead.
@@ -42,9 +43,6 @@ const LEFT_HALF_DONE: &str = "left half done";
 
 /// The label of why a run stopped.
 const WHY: &str = "why";
-
-/// The label of the branch the work left half done stands on.
-const BRANCH: &str = "branch";
 
 /// The label of what the disk has free.
 const FREE: &str = "free";
@@ -88,26 +86,32 @@ pub struct AsLeft {
 impl WhereItStopped {
     /// Why the run framed as `frame`, of the run created as `manifest` froze it, stands with
     /// nothing to answer here: no process driving it where it stalled, else the pause it
-    /// stands at. None for a run that neither stalled nor stands at a pause.
-    pub fn of(frame: &RunFrame, manifest: &Manifest) -> Option<WhereItStopped> {
+    /// stands at, each node it held saying how long it worked as `times` measures it. None
+    /// for a run that neither stalled nor stands at a pause.
+    pub fn of(frame: &RunFrame, times: &RunTimes, manifest: &Manifest) -> Option<WhereItStopped> {
         if frame.standing == Standing::Stalled {
             let at_work = frame
                 .nodes
                 .iter()
                 .filter(|node| node.standing == Standing::Running);
             return Some(WhereItStopped::Stopped {
-                held: at_work.filter_map(AsLeft::of).collect(),
+                held: at_work.filter_map(|node| AsLeft::of(node, times)).collect(),
                 why: crate::engine::STALLED.to_string(),
             });
         }
         let pause = frame.phase.waiting_on()?.reason()?;
-        Some(WhereItStopped::at(pause, frame, manifest))
+        Some(WhereItStopped::at(pause, frame, times, manifest))
     }
 
     /// Why the run framed as `frame`, of the run created as `manifest` froze it, stands at
     /// `pause` with nothing to answer here: what it waits on, then, by the pause, what moves
     /// it again, or where it stopped and why.
-    fn at(pause: &PauseReason, frame: &RunFrame, manifest: &Manifest) -> WhereItStopped {
+    fn at(
+        pause: &PauseReason,
+        frame: &RunFrame,
+        times: &RunTimes,
+        manifest: &Manifest,
+    ) -> WhereItStopped {
         let waits_on = crate::pause::sentence(pause);
         match pause {
             PauseReason::NoRoom {
@@ -122,7 +126,7 @@ impl WhereItStopped {
             PauseReason::UncertainOrphans { nodes } | PauseReason::Blocked { on: nodes, .. } => {
                 let left = nodes.iter().filter_map(|id| {
                     let node = frame.nodes.iter().find(|node| node.id == *id)?;
-                    AsLeft::of(node)
+                    AsLeft::of(node, times)
                 });
                 WhereItStopped::HalfDone {
                     waits_on,
@@ -136,7 +140,7 @@ impl WhereItStopped {
             | PauseReason::Recorded { .. } => {
                 let held = frame.nodes.iter().filter(|node| held_by_the_pause(node));
                 WhereItStopped::Stopped {
-                    held: held.filter_map(AsLeft::of).collect(),
+                    held: held.filter_map(|node| AsLeft::of(node, times)).collect(),
                     why: waits_on,
                 }
             }
@@ -181,7 +185,7 @@ impl WhereItStopped {
             ])],
             WhereItStopped::HalfDone { left, branch, .. } => {
                 let rows = left.iter().map(|left| left.row(glyphs));
-                let branch = (muted(BRANCH), branch.clone());
+                let branch = (muted(facts::BRANCH), branch.clone());
                 vec![
                     Block::Heading(LEFT_HALF_DONE.to_string()),
                     labelled(rows.chain(std::iter::once(branch)).collect()),
@@ -200,13 +204,14 @@ impl WhereItStopped {
 }
 
 impl AsLeft {
-    /// `node` as a standstill left it: none for a node its log never started.
-    fn of(node: &NodeFrame) -> Option<AsLeft> {
+    /// `node` as a standstill left it, how long it worked as `times` measures it: none for
+    /// a node its log never started.
+    fn of(node: &NodeFrame, times: &RunTimes) -> Option<AsLeft> {
         Some(AsLeft {
             mark: listed_as(node).mark(),
             node: node.id.clone(),
             attempt: node.attempt?,
-            worked: node.elapsed,
+            worked: times.node(&node.id).elapsed,
         })
     }
 
@@ -241,7 +246,7 @@ fn held_by_the_pause(node: &NodeFrame) -> bool {
 /// else the branch it started from, in the person's checkout.
 fn branch(frame: &RunFrame, manifest: &Manifest) -> String {
     match manifest.isolation {
-        Isolation::Worktree => format!("{} off {}", frame.run_id.branch(), manifest.base_branch),
+        Isolation::Worktree => facts::off(&frame.run_id.branch(), &manifest.base_branch),
         Isolation::None => manifest.base_branch.clone(),
     }
 }

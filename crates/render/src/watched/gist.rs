@@ -6,17 +6,18 @@
 
 use surco::line::{Line, Tone};
 use surco::words::Standing;
-use yunta_replay::frame::RunFrame;
+use yunta_replay::frame::{RunFrame, RunTimes};
 
 /// The row under a watched run's work that says what the run comes to: its gist, in the
-/// person's tone while the run needs them and muted otherwise. `None` for a run whose word
-/// says it all. Not [`state::gist`](crate::state::gist), the sentence alone.
-pub fn gist(frame: &RunFrame) -> Option<Line> {
+/// person's tone while the run needs them and muted otherwise, whom its engine asks as
+/// `times` says it. `None` for a run whose word says it all. Not
+/// [`state::gist`](crate::state::gist), the sentence alone.
+pub fn gist(frame: &RunFrame, times: &RunTimes) -> Option<Line> {
     let tone = match frame.standing {
         Standing::NeedsYou => Tone::NeedsYou,
         _ => Tone::Muted,
     };
-    crate::state::gist(frame).map(|gist| Line::new().push(tone, gist))
+    crate::state::gist(frame, times).map(|gist| Line::new().push(tone, gist))
 }
 
 #[cfg(test)]

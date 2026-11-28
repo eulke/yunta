@@ -1,10 +1,13 @@
 //! What a pass of `gc` did, said as one page once the pass is over: a
 //! row for each thing it took away, emptied or kept, and what the
-//! project's checkouts hold after it.
+//! project's checkouts hold after it. On the application's screen the page
+//! is upkeep's, named so in its headline, and doing what a dry run found is
+//! the screen's own key ([`Collected::on_screen`]).
 
+use super::doctor::PoolKept;
 use super::Page;
-use crate::command;
-use surco::components::{Fields, Furrow, Gist, Headline, Next};
+use crate::command::{self, SaidStep};
+use surco::components::{Fields, Furrow, Gist, Headline};
 use surco::doc::Doc;
 use surco::figures::Bytes;
 use surco::glyphs::Mark;
@@ -25,8 +28,8 @@ pub struct Collected {
     pub reclaimed: usize,
     /// What was done, or would be, in the order it was.
     rows: Vec<Reclaim>,
-    /// What the project's checkouts keep after the pass.
-    pub now: Option<String>,
+    /// What the project's checkouts keep after the pass, as their pool measured it.
+    pub now: Option<PoolKept>,
     /// How many things the pass could not do, each warned as it happened.
     pub problems: usize,
 }
@@ -147,10 +150,17 @@ impl Uncollected {
     }
 }
 
-impl Page for Collected {
-    /// The page: what the pass reclaimed, each row it did, and the pass
-    /// that does what a dry run found.
-    fn document(&self, _look: &Look) -> Doc {
+impl Collected {
+    /// The page as the application's screen tells it: its headline names upkeep, where the
+    /// printed page names its command, then what the pass did, row by row; the pass that does
+    /// what a dry run found is the screen's own key, so no next step stands.
+    pub fn on_screen(&self) -> Doc {
+        self.told(crate::screen::UPKEEP)
+    }
+
+    /// The page under a headline whose subject is `subject`: what the pass reclaimed, that no
+    /// retention is configured where none is, and each row it did.
+    fn told(&self, subject: &str) -> Doc {
         let said = match (self.reclaimed, self.dry_run) {
             (0, false) => "no run to reclaim".to_string(),
             (0, true) => "would reclaim no run".to_string(),
@@ -162,8 +172,7 @@ impl Page for Collected {
             (0, true) => Mark::Absent,
             _ => Mark::Caution,
         };
-        let mut headline =
-            Headline::new(mark, command::line(&NextStep::Gc { dry_run: false }), said);
+        let mut headline = Headline::new(mark, subject, said);
         if self.problems > 0 {
             headline = headline.fact(format!("{} above", counted(self.problems, "problem")));
         }
@@ -179,20 +188,28 @@ impl Page for Collected {
             .iter()
             .map(|reclaim| reclaim.row(self.dry_run))
             .fold(Fields::new(), |rows, (done, what)| rows.push_if(done, what))
-            .push_if("now", self.now.clone().unwrap_or_default());
-        let steps = match self.dry_run && !self.rows.is_empty() {
-            true => vec![(
-                command::line(&NextStep::Gc { dry_run: false }),
-                "does what this pass would",
-            )],
-            false => Vec::new(),
-        };
+            .push_if(
+                "now",
+                self.now.map(|kept| kept.to_string()).unwrap_or_default(),
+            );
         Doc::new()
             .with(headline)
             .with(Furrow(Vec::new()))
             .with_all(unretained)
             .with(rows)
-            .with(Next { steps })
+    }
+}
+
+impl Page for Collected {
+    /// The page: what the pass reclaimed, each row it did, and the pass
+    /// that does what a dry run found.
+    fn document(&self, _look: &Look) -> Doc {
+        let gc = NextStep::Gc { dry_run: false };
+        let steps = match self.dry_run && !self.rows.is_empty() {
+            true => Some(SaidStep::of(&gc)),
+            false => None,
+        };
+        self.told(&command::line(&gc)).with(command::next(steps))
     }
 }
 
@@ -203,8 +220,19 @@ mod tests {
 
     use yunta_core::RunId;
 
-    use super::{Collected, Reclaim, Uncollected};
+    use super::{Collected, PoolKept, Reclaim, Uncollected};
     use crate::page::Page;
+
+    /// One checkout whose builds take nothing of a 10 GB budget, on a disk with 40 GB free
+    /// that keeps 20 GB free.
+    const ONE_CHECKOUT: PoolKept = PoolKept {
+        checkouts: 1,
+        builds: 0,
+        uncounted: 0,
+        budget: 10_000_000_000,
+        available: 40_000_000_000,
+        keep_free: 20_000_000_000,
+    };
 
     #[test]
     fn a_pass_says_what_it_reclaimed_then_a_row_for_each_thing_it_did() {
@@ -218,7 +246,7 @@ mod tests {
             run: run.clone(),
             events: 12,
         });
-        collected.now = Some("1 checkout, builds 0 B of a 10 GB budget; 40 GB free".to_string());
+        collected.now = Some(ONE_CHECKOUT);
         let furrow = ".".repeat(80);
         assert_eq!(
             Terminal::on(Look::plain()).draw(&collected.document(&Look::plain())),
@@ -227,7 +255,8 @@ mod tests {
                  removed      ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4\n               \
                  ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4\n  \
                  purged       12 events of run {}\n  \
-                 now          1 checkout, builds 0 B of a 10 GB budget; 40 GB free\n",
+                 now          1 checkout, builds 0 B of a 10 GB budget; 40 GB free, 20 GB kept\n               \
+                 free\n",
                 run.handle()
             )
         );
@@ -319,7 +348,7 @@ mod tests {
             "{page}"
         );
         assert!(
-            page.ends_with("\nnext\n  yunta gc   does what this pass would\n"),
+            page.ends_with("\nnext\n  yunta gc   remove orphaned checkouts\n"),
             "{page}"
         );
     }
@@ -327,7 +356,7 @@ mod tests {
     #[test]
     fn a_dry_run_that_finds_nothing_offers_no_pass() {
         let mut collected = Collected::new(true);
-        collected.now = Some("1 checkout, builds 0 B of a 10 GB budget; 40 GB free".to_string());
+        collected.now = Some(ONE_CHECKOUT);
         let page = Terminal::on(Look::plain()).draw(&collected.document(&Look::plain()));
         assert!(
             page.starts_with(". yunta gc ; would reclaim no run\n"),

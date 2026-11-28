@@ -6,6 +6,7 @@ use crate::dialog::Confirmation;
 use crate::{Address, Operation, Ticket};
 use yunta_core::step::{NextStep, Reach};
 use yunta_core::RunId;
+use yunta_render::screen::Confirming;
 
 /// What a stage wants of the state after a stroke, a piece of news or an answer.
 pub(crate) enum Want {
@@ -33,8 +34,10 @@ pub(crate) enum Want {
     /// Where `a` takes the person from a page over a run whose attention row names the run's
     /// own decision.
     BackToItsDecision,
-    /// Down to the field at the bottom of the stages this one stands over, noting there
-    /// what leaving said, where it said anything: what leaving a run says of it.
+    /// Down to the nearest field under this one, noting there what leaving said, where it
+    /// said anything (what leaving a run says of it); where no field stands under it, down to
+    /// the stage at the bottom of what stands. No stage is built, and the one at the bottom is
+    /// never dropped.
     ToTheField(Option<String>),
     /// The person leaves the application.
     Leave,
@@ -42,31 +45,34 @@ pub(crate) enum Want {
 
 impl Want {
     /// What taking `step` wants, the one mapping from a step to it, by a key or from the
-    /// palette: every run of this repository, down to the field, which shows them under
-    /// every stage; stopping a run and closing it, once confirmed; going on with it, at once;
-    /// a new run, once the workflows it can be of are read; any other, the stage it opens
-    /// ([`Stage::opened_by`]), opened over this one; nothing where no stage takes it.
+    /// palette: this repository's runs, down to the nearest field under the stage; stopping a run and closing it, once confirmed; going on with it, at once;
+    /// any other, the stage it opens ([`Stage::opened_by`]), a new run among them, opened over
+    /// this one; nothing where no stage takes it.
     pub(crate) fn taking(step: &NextStep) -> Vec<Want> {
         match step {
             NextStep::ListRuns {
                 reach: Reach::Repository,
             } => vec![Want::ToTheField(None)],
             NextStep::Cancel { run } => {
-                let asks = yunta_render::screen::cancelling(run.handle());
+                let asks = Confirming::Stop {
+                    run: run.handle().to_string(),
+                };
                 let same = vec![NextStep::Cancel { run: run.clone() }];
                 let cancel = Operation::Cancel { run: run.clone() };
                 vec![Want::Confirm(Confirmation::new(asks, same, cancel))]
             }
             NextStep::Resume { run } => vec![Want::Work(Operation::Resume { run: run.clone() })],
             NextStep::Close { run } => {
-                let asks = yunta_render::screen::closing(&[run.handle()]);
+                let asks = Confirming::Close {
+                    runs: vec![run.handle().to_string()],
+                    left: Vec::new(),
+                };
                 let same = vec![NextStep::Close { run: run.clone() }];
                 let close = Operation::Close {
                     runs: vec![run.clone()],
                 };
                 vec![Want::Confirm(Confirmation::new(asks, same, close))]
             }
-            NextStep::Run { .. } => vec![Want::Work(Operation::ReadCatalog)],
             other => Stage::opened_by(other)
                 .map(Want::Open)
                 .into_iter()

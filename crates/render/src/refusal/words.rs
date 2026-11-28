@@ -12,6 +12,7 @@ use yunta_core::inputs::InputsProblem;
 use yunta_core::refusal::Unservable;
 use yunta_core::refusal::{
     AnswersRefusal, CasesRefusal, CloseRefusal, GateRefusal, PackRefusal, PackVerb, SetupRefusal,
+    SourceDirectoryFault, SourcePart,
 };
 use yunta_core::step::{Arg, NextStep, Reach};
 use yunta_core::{AdapterId, OptionId, PackRef, Pid};
@@ -370,7 +371,48 @@ pub(super) fn pack(refusal: &PackRefusal) -> String {
             "{} already exists; choose another name or remove it first",
             dir.display()
         ),
+        PackRefusal::SourceDirectory {
+            named,
+            directory,
+            why,
+        } => source_directory(named, directory, why),
+        PackRefusal::LinkInPack { named, link } => format!(
+            "`{named}` holds `{link}`, a symbolic link: a pack ships regular files only, so \
+             nothing of it is read through a link that could lead out of it"
+        ),
+        PackRefusal::ReadsAsAnOption { named, part } => {
+            let (names, which) = match part {
+                SourcePart::Repository(repository) => (repository, "repository"),
+                SourcePart::Ref(reference) => (reference, "ref"),
+            };
+            format!(
+                "`{named}` names `{names}` as the pack's {which}, which begins with `-`: git \
+                 would read it as an option, not as a {which}"
+            )
+        }
     }
+}
+
+/// Why the pack source `named` cannot be fetched from `directory` inside its
+/// repository: the source and the directory named, then what keeps the
+/// directory out of reach.
+fn source_directory(named: &str, directory: &str, why: &SourceDirectoryFault) -> String {
+    let why = match why {
+        SourceDirectoryFault::Absolute => "an absolute path: a pack's directory is named from \
+             its repository's root, as `packs/<name>`"
+            .to_string(),
+        SourceDirectoryFault::Climbs => "which climbs out of the repository with `..`: a pack \
+             is fetched only from a directory inside the repository its source names"
+            .to_string(),
+        SourceDirectoryFault::Linked { link } => format!(
+            "and `{link}` on the way to it is a symbolic link: a pack is fetched only from \
+             the repository's own directories, never through a link that could lead out of it"
+        ),
+        SourceDirectoryFault::Missing => {
+            "which the repository does not hold at the commit fetched".to_string()
+        }
+    };
+    format!("`{named}` names `{directory}` as the pack's directory, {why}")
 }
 
 /// Why setting a repository up refuses, in the words of the command refused.

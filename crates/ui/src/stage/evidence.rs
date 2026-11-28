@@ -4,22 +4,26 @@
 //! it, then shown by the surface ([`Want::Show`]): a terminal hands it to the
 //! system's opener, the desktop to a window. A page the surface could not show is said
 //! in the words `yunta open` says it in, and Enter asks for it again. A receipt or a
-//! check taller than what shows of it scrolls. Escape goes back to the run.
+//! check taller than what shows of it scrolls. Each stands as a page over the run, in the
+//! run's frame (`over_the_run`): `a` goes where its attention row names, `n` opens a new
+//! run, Escape goes back to the run and `q` down to the field.
 
 use std::path::PathBuf;
 
-use surco::components::{Check, Laid, Note, Region, Screen};
+use chrono::{DateTime, Utc};
+use surco::components::{Check, Laid, Legend, Note, Region, Screen};
 use surco::doc::Doc;
 use surco::look::Look;
 use yunta_core::receipt::Receipt;
-use yunta_core::step::NextStep;
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::RunId;
 use yunta_render::page::{self, Opened, Page, Verified};
 
+use super::over_the_run::{attending, in_the_runs_frame};
 use super::{Act, ItsRun, Want};
 use crate::prompt::Stroke;
 use crate::scroll::Scroll;
-use crate::{Address, EvidenceOperation, EvidenceOutcome, Operation, Outcome};
+use crate::{Address, EvidenceOperation, EvidenceOutcome, FollowedRuns, Operation, Outcome};
 
 /// What a run leaves, one of it asked for.
 #[derive(Debug, Clone)]
@@ -77,21 +81,38 @@ impl EvidenceStage {
 
     /// What the stage asks for as it opens: what was asked for, derived.
     pub(crate) fn opening(&self) -> Vec<Want> {
+        vec![Want::Work(self.deriving_work())]
+    }
+
+    /// The work its screen says is under way: what was asked for, derived, until it is.
+    pub(crate) fn shown_under_way(&self) -> Option<Operation> {
+        matches!(self.shown, Shown::Deriving).then(|| self.deriving_work())
+    }
+
+    /// The work that derives what was asked for.
+    fn deriving_work(&self) -> Operation {
         let run = self.run.clone();
         let work = match self.asked {
             Evidence::Receipt => EvidenceOperation::WriteReceipt { run },
             Evidence::Verification => EvidenceOperation::Verify { run },
             Evidence::PageForABrowser => EvidenceOperation::WritePageForBrowser { run },
         };
-        vec![Want::Work(Operation::Evidence(work))]
+        Operation::Evidence(work)
     }
 
-    /// What was asked for, being derived or as its command says it, and what
-    /// refused or failed; with the keys.
-    pub(crate) fn screen(&self, look: &Look) -> Screen {
+    /// What was asked for, being derived or as a page over the run says it, and what
+    /// refused or failed, in the run's frame as `followed` keeps it at `now`, a line typed in
+    /// what stands over it where `typed`; with the keys.
+    pub(crate) fn screen(
+        &self,
+        look: &Look,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+        typed: bool,
+    ) -> Screen {
         let mut doc = match &self.shown {
             Shown::Deriving => Doc::new().with(Note(self.deriving().to_string())),
-            Shown::Receipt(receipt) => page::Receipt { receipt }.document(look),
+            Shown::Receipt(receipt) => page::Receipt { receipt }.on_screen(look.glyphs),
             Shown::Verified(checks) => Verified {
                 run_id: &self.run,
                 checks,
@@ -103,28 +124,27 @@ impl EvidenceStage {
                     page: &page,
                     opened: unshown.then_some(false),
                 }
-                .document(look)
+                .on_screen()
             }
         };
         if let Some(said) = &self.said {
             doc = doc.with(Note(said.clone()));
         }
-        let mut screen = Screen::new(Region::new(doc).in_sight(self.scroll.sight()));
+        let region = Region::of_a_page(doc).in_sight(self.scroll.sight());
+        let mut screen = Screen::new(region);
         screen.trail = vec![
             yunta_render::screen::YUNTA.to_string(),
-            self.run.handle().to_string(),
-            self.trail().to_string(),
+            yunta_render::screen::place_of(self.run.handle(), self.trail()),
         ];
-        let legend = match self.shown {
-            Shown::Opened { .. } => yunta_render::screen::opened_legend(),
+        let new_run = followed.can_ask_for_a_run();
+        screen.legend = match self.shown {
+            Shown::Opened { .. } => yunta_render::screen::opened_legend(new_run),
             Shown::Deriving | Shown::Receipt(_) | Shown::Verified(_) => {
-                yunta_render::screen::over_the_run_legend()
+                let whole = yunta_render::screen::PageRead::Whole;
+                yunta_render::screen::page_legend(whole, Legend::new(), new_run)
             }
         };
-        screen.legend = match self.scroll.scrolls() {
-            true => yunta_render::screen::scrolling(legend),
-            false => legend,
-        };
+        in_the_runs_frame(&mut screen, &self.run, followed, now, typed);
         screen
     }
 
@@ -146,11 +166,23 @@ impl EvidenceStage {
         }
     }
 
-    /// What `stroke` asks for here: Enter shows the page for a browser again,
-    /// Escape goes back to the run, `q` or Ctrl-C leaves, and the keys that scroll
-    /// scroll what stands.
-    pub(crate) fn pressed(&mut self, stroke: Stroke) -> Vec<Want> {
+    /// What `stroke` asks for here, over what `followed` keeps at `now`: Enter shows the
+    /// page for a browser again, Escape goes back to the run, `a` goes where the attention
+    /// row names, `n` opens a new run, `q` goes down to the field, Ctrl-C leaves, and the keys
+    /// that scroll scroll what stands.
+    pub(crate) fn pressed(
+        &mut self,
+        stroke: Stroke,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Vec<Want> {
         match (stroke, &self.shown) {
+            (Stroke::Insert('a'), _) => attending(&self.run, followed, now),
+            (Stroke::Insert('n'), _) if followed.can_ask_for_a_run() => {
+                Want::taking(&NextStep::Run {
+                    workflow: Arg::Blank,
+                })
+            }
             (Stroke::Enter, Shown::Opened { page, .. }) => {
                 let page = page.clone();
                 self.shown = Shown::Opened {
@@ -160,7 +192,8 @@ impl EvidenceStage {
                 vec![Want::Show(Address::Page(page))]
             }
             (Stroke::Decline, _) => vec![Want::Back],
-            (Stroke::Insert('q') | Stroke::Interrupt, _) => vec![Want::Leave],
+            (Stroke::Insert('q'), _) => vec![Want::ToTheField(None)],
+            (Stroke::Interrupt, _) => vec![Want::Leave],
             (other, _) => {
                 self.scroll.pressed(other);
                 Vec::new()
@@ -197,6 +230,12 @@ impl EvidenceStage {
                 *unshown = true;
             }
         }
+    }
+
+    /// Where its page stands, which no row of its screen says, its legend the same whether
+    /// it scrolls or not.
+    pub(crate) fn page(&self) -> Scroll {
+        self.scroll
     }
 
     /// What a surface laid out of what stands, which the keys that scroll move from.
@@ -248,7 +287,8 @@ impl EvidenceStage {
             | Outcome::Cancelled { .. }
             | Outcome::Closed { .. }
             | Outcome::Detected { .. }
-            | Outcome::Initialized(_)
+            | Outcome::SetupPack { .. }
+            | Outcome::Initialized { .. }
             | Outcome::Stopped => Vec::new(),
         }
     }

@@ -2,13 +2,13 @@
 ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
 
   ␛[2mwrote       ␛[0m .yunta/config.yaml
-  ␛[2mecosystem   ␛[0m none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml); declare
+  ␛[2mlanguage    ␛[0m none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml); declare
                `commands:` and `baseline.suite` by hand
 
   ␛[32m✓␛[0m ␛[1mclaude-code␛[0m  healthy (2.1.0)
   ␛[33m▲␛[0m ␛[1mcodex␛[0m        unavailable (not on PATH)
 
-  ␛[2mrunners     ␛[0m implementer on claude-code, model opus
+  ␛[2mrunners     ␛[0m implementer (the default) on claude-code/opus
 
 ␛[2mfor this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file␛[0m
   This repo uses Yunta for verified workflows. Before implementing
@@ -16,5 +16,5 @@
   tool) for an existing verified workflow that already covers it.
 
 ␛[2mnext␛[0m
-  ␛[1myunta pack add <source>␛[0m   ␛[2minstalls a pack of workflows to run␛[0m
+  ␛[1myunta pack add <source>␛[0m   ␛[2minstall a pack␛[0m
   ␛[1myunta doctor           ␛[0m   ␛[2mcheck adapters, git, forge, packs␛[0m

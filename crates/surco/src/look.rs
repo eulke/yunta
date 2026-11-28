@@ -72,6 +72,12 @@ impl Look {
 pub struct Width {
     cells: usize,
     edge: Edge,
+    /// The cells past `cells` before the edge, which a word that cannot be parted may take
+    /// whole: in a box, the cell before the far upright.
+    lent: usize,
+    /// The cells of the pane these cells stand in as a column of, where they do: what a line
+    /// said across the column may take ([`Width::across`]).
+    pane: Option<usize>,
 }
 
 /// What becomes of a line that passes its width.
@@ -103,6 +109,8 @@ impl Width {
         Width {
             cells,
             edge: Edge::Wraps,
+            lent: 0,
+            pane: None,
         }
     }
 
@@ -128,11 +136,46 @@ impl Width {
         Width {
             cells,
             edge: Edge::Cuts,
+            lent: 0,
+            pane: None,
         }
+    }
+
+    /// This width with `cells` more before its edge, which a word that cannot be parted, as a
+    /// command's, takes whole where it passes the width words wrap at: a box lends the cell
+    /// before its far upright. Not more width: words still wrap at [`Width::cells`].
+    pub fn lending(self, cells: usize) -> Self {
+        Width {
+            lent: cells,
+            ..self
+        }
+    }
+
+    /// These cells as the column of a pane `pane` cells wide that a region's words are set
+    /// in: a line said across the column, as the sentence a screen opens over its rows, may
+    /// take up to the pane's cells ([`Width::across`]). Not more width: words still wrap at
+    /// [`Width::cells`].
+    pub fn in_a_pane(self, pane: usize) -> Self {
+        Width {
+            pane: Some(pane),
+            ..self
+        }
+    }
+
+    /// The cells a line said across the column these cells are may take: the pane's, where
+    /// they are a column of a wider one ([`Width::in_a_pane`]); these cells otherwise.
+    pub fn across(self) -> usize {
+        self.pane.unwrap_or(self.cells).max(self.cells)
     }
 
     pub fn cells(self) -> usize {
         self.cells
+    }
+
+    /// The cells a row may take before the edge: [`Width::cells`] and those
+    /// [`Width::lending`] lent past them.
+    pub fn reach(self) -> usize {
+        self.cells + self.lent
     }
 
     /// Whether the edge of these cells cuts what passes it, as a pane's

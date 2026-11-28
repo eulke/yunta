@@ -5,9 +5,9 @@
 
 use std::panic::resume_unwind;
 
-use yunta_ui::{Input, Request, State};
+use yunta_ui::{Request, State};
 
-use super::{Checks, Walk};
+use super::{Checks, Move, Walk};
 
 /// What the states the walk expanded last came to, which the checks hold while the cores
 /// expand the states after them: the states expanded, each at its place among the steps,
@@ -18,11 +18,11 @@ pub(super) struct Unchecked {
     pub(super) handed: Vec<HandedOn>,
 }
 
-/// An input handed to one of the states expanded, `to` by where it stands among them, what
-/// it asked, and the state it came to where the walk kept it.
+/// A move made on one of the states expanded, `to` by where it stands among them, what it
+/// asked, and the state it came to where the walk kept it.
 pub(super) struct HandedOn {
     pub(super) to: usize,
-    pub(super) input: Input,
+    pub(super) moved: Move,
     pub(super) asked: Vec<Request>,
     pub(super) kept: Option<Kept>,
 }
@@ -51,17 +51,20 @@ impl Walk<'_> {
     }
 
     /// `unchecked` held by `checks`: each input handed, then the state it came to where the
-    /// walk kept it, in the order the walk took them.
+    /// walk kept it, in the order the walk took them. A palette's row taken is held as an
+    /// input by the interface's check of the palette over the state it was taken on.
     fn checked_by(&self, unchecked: &Unchecked, checks: &mut dyn Checks) {
         for HandedOn {
             to,
-            input,
+            moved,
             asked,
             kept,
         } in &unchecked.handed
         {
             let (at, from) = &unchecked.expanded[*to];
-            checks.handed(from, input, asked, &self.at(*at, input));
+            if let Move::Input(input) = moved {
+                checks.handed(from, input, asked, &self.at(*at, moved));
+            }
             if let Some(Kept {
                 place,
                 state,

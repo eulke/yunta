@@ -52,6 +52,7 @@ mod scopes;
 mod sources;
 mod unset;
 
+pub use capabilities::candidate_adapters;
 pub use context_files::{check_context_files, ContextFilesCheck, RunTreeOrigin};
 pub(crate) use programs::leading_programs;
 pub use programs::programs_named;

@@ -123,6 +123,19 @@ impl Failure {
     pub fn said(&self) -> String {
         yunta_core::describe(self)
     }
+
+    /// What failed below said in its own words, without what was being done when it
+    /// failed, where the failure says the two apart: git's own lines where git did not
+    /// answer, as a row that says why something is out of reach quotes them, the command
+    /// and the directory it ran in left to [`Failure::said`]; the failure's own sentence
+    /// otherwise, and where git said nothing.
+    pub fn in_its_own_words(&self) -> String {
+        let git = self.0.downcast_ref::<yunta_engine::git::GitError>();
+        match git.map(yunta_engine::git::GitError::detail) {
+            Some(detail) if !detail.is_empty() => detail,
+            Some(_) | None => self.to_string(),
+        }
+    }
 }
 
 /// The failure's own sentence, as the error it holds says it.

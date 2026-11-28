@@ -7,15 +7,18 @@
 //! never touches the edge it starts from; a list a person picks from across every cell
 //! between them, its pointer in that cell, so the row it stands on is filled from one upright
 //! to the other. A row cut at the box's edge meets the right upright, since the cut's mark
-//! already says the row goes on.
+//! already says the row goes on. A confirmation is read as a sentence: its words stand a cell
+//! inside each upright, so they wrap four cells short of the box, and a blank row stands at
+//! its foot, the first of its rows to give way. The cell inside the far upright is lent to a
+//! word of a command that cannot be parted, which stands there whole.
 //!
 //! The box stands over a screen as wide as it is given and as tall as what it holds, up to
 //! the rows it is given; an engine of cells says where it stands and how wide. A list whose
 //! rows carry keys, as the palette's, holds each row's key and command beside what it does
-//! only over the design's wide screen, 100 columns, and where the box's room holds them: a
-//! box as wide over a narrower screen holds what each row does alone. A box takes at least
-//! its two uprights and the cells around its title: given fewer cells than that it still
-//! draws them, wider than it was given.
+//! only over the design's wide screen, 100 columns, cut at the box's edge where its room is
+//! short of them: a box as wide over a narrower screen holds what each row does alone. A box
+//! takes at least its two uprights and the cells around its title: given fewer cells than
+//! that it still draws them, wider than it was given.
 
 use super::{Paned, Terminal};
 use crate::components::{Laid, Overlay};
@@ -23,7 +26,7 @@ use crate::diagram::{Shape, Stroke};
 use crate::doc::Block;
 use crate::glyphs::Glyphs;
 use crate::line::{Line, Tone};
-use crate::look::{Look, Width};
+use crate::look::Width;
 use crate::width::cell_width;
 
 use super::asked::Columns;
@@ -50,43 +53,21 @@ impl Terminal {
     /// screen; with what was laid out of it, and where the cursor stands in the box.
     pub fn boxed(&self, overlay: &Overlay, cells: usize, rows: usize) -> Paned {
         let edges = Edges::of(self.look.glyphs);
-        // A list picked from takes the cell inside the left upright for its pointer.
-        let inset = match overlay.doc.prompt_at() {
-            Some(_) => 0,
-            None => INSIDE,
-        };
-        let room = cells.saturating_sub(2 * UPRIGHT + inset);
-        let inside = Terminal::on(Look {
-            width: Width::exact(room),
-            ..self.look
-        });
+        let (inset, short_of_the_far) = insets(overlay);
+        let room = cells.saturating_sub(2 * UPRIGHT + inset + short_of_the_far);
         let inner_rows = rows.saturating_sub(EDGE_ROWS);
-        // A list alone, as the palette's, lays its rows out by the screen it stands over.
-        let held = match overlay.doc.blocks() {
-            [Block::ChoiceList(list)] => {
-                let columns = match self.wide() {
-                    true => Columns::WhereTheyFit,
-                    false => Columns::WordsAlone,
-                };
-                let placed = list.placed(&inside.look, inner_rows, columns);
-                let mut lines = placed.lines;
-                lines.truncate(inner_rows);
-                Paned {
-                    lines,
-                    cursor: placed.cursor.filter(|(row, _)| *row < inner_rows),
-                    laid: Laid::default(),
-                }
-            }
-            _ => inside.paned(&overlay.doc, overlay.sight, inner_rows),
-        };
+        let held = self.held_in_a_box(overlay, cells, inner_rows);
         let title = Line::new()
             .push(Tone::Strong, overlay.title.as_str())
             .cut(cells.saturating_sub(AROUND_TITLE), self.look.glyphs);
+        // A confirmation keeps a blank row at its foot where its rows leave one.
+        let foot = (overlay.confirms && held.lines.len() < inner_rows).then(Line::new);
         let mut lines = vec![edges.top(title, cells)];
         lines.extend(
             held.lines
                 .into_iter()
-                .map(|line| edges.inside(line, inset, room)),
+                .chain(foot)
+                .map(|line| edges.inside(line, inset, room + short_of_the_far)),
         );
         lines.push(edges.bottom(cells));
         lines.truncate(rows);
@@ -98,6 +79,43 @@ impl Terminal {
             laid: held.laid,
         }
     }
+
+    /// What `overlay` holds inside a box `cells` wide, in at most `rows` rows between its
+    /// edges: its document drawn by the rule a region is drawn by, a list alone, as the
+    /// palette's, laid out by the screen it stands over.
+    fn held_in_a_box(&self, overlay: &Overlay, cells: usize, rows: usize) -> Paned {
+        let (inset, short_of_the_far) = insets(overlay);
+        let room = cells.saturating_sub(2 * UPRIGHT + inset + short_of_the_far);
+        let inside = self.at_width(Width::exact(room).lending(short_of_the_far));
+        match overlay.doc.blocks() {
+            [Block::ChoiceList(list)] => {
+                let placed = list.placed(&inside.look, rows, Columns::over(self));
+                let mut lines = placed.lines;
+                lines.truncate(rows);
+                Paned {
+                    lines,
+                    cursor: placed.cursor.filter(|(row, _)| *row < rows),
+                    laid: Laid::default(),
+                }
+            }
+            _ => inside.paned(&overlay.doc, overlay.sight, rows),
+        }
+    }
+}
+
+/// The blank cells `overlay`'s box keeps inside its uprights, before what it holds and after
+/// it: a cell before words, none before a list picked from, whose pointer takes that cell;
+/// a cell after a confirmation's sentence, none after anything else.
+fn insets(overlay: &Overlay) -> (usize, usize) {
+    let before = match overlay.doc.prompt_at() {
+        Some(_) => 0,
+        None => INSIDE,
+    };
+    let after = match overlay.confirms {
+        true => INSIDE,
+        false => 0,
+    };
+    (before, after)
 }
 
 /// The marks a box is drawn in, in a glyph set: its four round corners, the level stroke of
@@ -157,6 +175,9 @@ impl Edges {
         Line::new().push(Tone::Muted, format!("{left}{level}{right}"))
     }
 }
+
+mod size;
+pub use size::BoxSize;
 
 #[cfg(test)]
 mod tests;

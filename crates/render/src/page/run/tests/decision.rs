@@ -11,7 +11,7 @@ use yunta_replay::frame::NodeFrame;
 use yunta_replay::RunState;
 
 use super::super::fixtures::{
-    ahead, failed_lint, finished, frame, lint_decision, parked_on_lint, places, RUN,
+    ahead, failed_lint, finished, frame, lint_decision, parked_on_lint, places, times, RUN,
 };
 use super::super::{Run, RunScope};
 use crate::escalation::Decision;
@@ -32,6 +32,7 @@ fn status_with(lint: NodeFrame) -> String {
         scope: RunScope::Status,
         depth: Depth::Glance,
         run_id: RUN,
+        times: times(&frame),
         frame,
         state,
         places: places(),

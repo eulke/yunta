@@ -42,6 +42,26 @@ pub enum Request {
 pub enum Address {
     /// A page written on this machine, by its path.
     Page(PathBuf),
-    /// A page elsewhere, by its link as its host hands it.
-    Link(String),
+    /// A page elsewhere, by its `https://` link.
+    Link(WebLink),
+}
+
+/// A page elsewhere, by a link that is `https://` and nothing else: the system's opener a
+/// surface hands it to launches whatever another scheme names, an application by a
+/// `file://` link among them. Not a link as a log holds it, which is untrusted text a
+/// screen says and never opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebLink(String);
+
+impl WebLink {
+    /// `link` as a page elsewhere, where it is `https://`; none otherwise.
+    pub fn https(link: &str) -> Option<WebLink> {
+        link.starts_with("https://")
+            .then(|| WebLink(link.to_string()))
+    }
+
+    /// The link, as written.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }

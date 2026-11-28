@@ -21,6 +21,11 @@
 //! A screen about a run says, under its regions, what the run has spent: its meter, which
 //! a terminal draws on the row over the attention row's place.
 //!
+//! A page a screen stands on is its main region ([`Region::of_a_page`]): the faint line a page
+//! about no one run stands under, an empty [`Furrow`], is the screen's own rule there, so the
+//! page's gives way to it; and its sentence under its headline is said as a run's gist is, on
+//! one row, cut where it does not fit.
+//!
 //! A screen's keys are two legends: its own, the keys of what is on it, and the far keys,
 //! pressed anywhere a person is not typing (the palette, and help, which lists every key).
 //! A terminal wide enough draws the far keys at the far end of the keys' row; a narrower one
@@ -28,7 +33,7 @@
 //! there are no far keys and no key that lists every key, and over a box there are none: its
 //! own keys stand for the screen's.
 
-use super::{Attention, Laid, Legend, Meter, Sight};
+use super::{Attention, Furrow, Laid, Legend, Meter, Sight};
 use crate::doc::{Block, Doc};
 use crate::glyphs::Mark;
 use crate::words::{Standing, NEED_YOU};
@@ -118,11 +123,68 @@ pub struct Region {
     /// region holding a card, what stands above the card said again in fewer rows: a pane
     /// that leaves it fewer rows than it needs draws the first of these that fits. In a
     /// region with no feed and no prompt, its whole document said again in fewer rows: a
-    /// pane too short for all of it draws the first of these that fits. A surface that draws
-    /// a region whole says its document. Not the region's [`Sight`], what of it a person
-    /// asked to see.
+    /// pane too short for all of it draws the first of these that fits. A pane reads it once,
+    /// as the kind of region it lays out; a region holding another prompt, a list of keys alone
+    /// or one that lists runs says nothing in fewer rows. A surface that draws a region whole
+    /// says its document. Not the region's [`Sight`], what of it a person asked to see.
     pub abridged: Vec<Vec<Block>>,
     pub sight: Sight,
+    /// The column its words are set in where its pane is wider ([`Measure`]). None: its words
+    /// take the pane's width.
+    pub measure: Option<Measure>,
+    /// Whether it lists runs, a pointer on one of them, as the field does: a pane lays it out
+    /// as its lists whatever it holds at the moment, so a field with no run yet stands where
+    /// one listing runs does. Not its [`Sight`], which says what of it is in sight.
+    pub lists_runs: bool,
+}
+
+/// The most cells a row of a region's words takes, as a page set to a line's measure is: where
+/// its pane is wider, its words stand in a column that wide, centred or at the pane's left
+/// edge, and the field in
+/// perspective its document ends with spans the pane under them, since it is no row of words. A
+/// line said across the column, as the sentence a setup opens over its rows, stands whole up to
+/// the pane's width, centred over the column. A screen that opens on a few words over the
+/// field, the first request, stands them lower on a tall pane; a setup, whose rows fill it,
+/// does not. A region beside the main one that keeps a measure stands that wide where an
+/// interface lays it beside, as a new run's panel does. A surface that lays its regions out in
+/// a column of its own, as Markdown and HTML do, keeps its own measure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Measure {
+    pub cells: usize,
+    /// Whether, over the field in perspective on a tall pane, the words stand lower in it.
+    pub lowered: bool,
+    /// Whether the column stands centred in a wider pane, or at its left edge, as a question's
+    /// box stands where a new run's request does.
+    pub centred: bool,
+}
+
+impl Measure {
+    /// A column of `cells`, standing where its words fall, centred in a wider pane.
+    pub fn of(cells: usize) -> Measure {
+        Measure {
+            cells,
+            lowered: false,
+            centred: true,
+        }
+    }
+
+    /// This measure with its column at the pane's left edge: a line asked on a page of its
+    /// own, whose box stands where a new run's request does.
+    pub fn from_the_left(self) -> Measure {
+        Measure {
+            centred: false,
+            ..self
+        }
+    }
+
+    /// This measure with its words lowered over the field on a tall pane: a screen that opens
+    /// on a few words over the field.
+    pub fn lowered(self) -> Measure {
+        Measure {
+            lowered: true,
+            ..self
+        }
+    }
 }
 
 /// What a surface laid out of a screen's regions: of the main one, of the one beside it
@@ -137,12 +199,18 @@ pub struct ScreenLaid {
     pub overlay: Option<Laid>,
 }
 
-/// The region beside the main one, the edge it stands at, and whether the keys act on it
-/// rather than on the main one.
+/// The region beside the main one, the edge it stands at, whether the keys act on it
+/// rather than on the main one, and what the main region holds in its stead where it gives
+/// way.
 pub struct Side {
     pub region: Region,
     pub at: SideAt,
     pub focused: bool,
+    /// What a person acts on from it, which the main region holds under its own blocks where
+    /// an interface gives the side region no room, as the field's list holds the keys of the
+    /// run its glance shows: none where nothing of it is acted on. An interface that shows the
+    /// side region whole, or says it first, as Markdown and HTML do, holds none of it twice.
+    pub instead: Vec<Block>,
 }
 
 /// The edge of a screen the region beside the main one stands at, where an interface lays
@@ -163,6 +231,10 @@ pub struct Overlay {
     pub doc: Doc,
     pub legend: Legend,
     pub sight: Sight,
+    /// Whether it asks a person to confirm an act before the act is done: what it holds is
+    /// then read as a sentence, a line taken in one sweep, where any other overlay holds rows
+    /// as wide as they are.
+    pub confirms: bool,
 }
 
 impl Screen {
@@ -204,26 +276,6 @@ impl Screen {
     /// This screen about what `doc` says, across it.
     pub fn about(mut self, doc: Doc) -> Self {
         self.about = Some(doc);
-        self
-    }
-
-    /// This screen with `region` beside the main one, at its edge `at`, the keys still on
-    /// the main one.
-    pub fn side(mut self, region: Region, at: SideAt) -> Self {
-        self.side = Some(Side {
-            region,
-            at,
-            focused: false,
-        });
-        self
-    }
-
-    /// This screen with the keys on its side region; with no side region,
-    /// they stay on the main one.
-    pub fn focus_side(mut self) -> Self {
-        if let Some(side) = &mut self.side {
-            side.focused = true;
-        }
         self
     }
 
@@ -292,7 +344,35 @@ impl Region {
             doc,
             abridged: Vec::new(),
             sight: Sight::default(),
+            measure: None,
+            lists_runs: false,
         }
+    }
+
+    /// A region that holds `page`, a page a screen stands on: every block of it but the faint
+    /// line a page about no one run stands under, an empty [`Furrow`], which the screen's rule
+    /// stands for; its sentence under its headline, its [`Gist`](super::Gist), stands as a
+    /// run's gist does, on its one row, with no closing period, cut at the pane's edge where
+    /// the printed page wraps it. Not [`Region::new`], which holds every block of a
+    /// document.
+    pub fn of_a_page(page: Doc) -> Self {
+        let unplowed =
+            |block: &Block| matches!(block, Block::Furrow(Furrow(nodes)) if nodes.is_empty());
+        let blocks = page
+            .into_blocks()
+            .into_iter()
+            .filter(|block| !unplowed(block))
+            .map(|block| match block {
+                Block::Gist(gist) => Block::Gist(gist.on_one_row()),
+                block => block,
+            });
+        Region::new(Doc::new().with_all(blocks))
+    }
+
+    /// This region with its words set to `measure`, centred where its pane is wider.
+    pub fn measured(mut self, measure: Measure) -> Self {
+        self.measure = Some(measure);
+        self
     }
 
     /// This region with what stands above its feed or its card, or with neither its whole
@@ -319,6 +399,14 @@ impl Region {
         self.sight = sight;
         self
     }
+
+    /// This region as a list of runs a person moves along, as the field is: laid out as its
+    /// lists whatever it holds, the row pointed at in sight.
+    pub fn listing_runs(mut self) -> Self {
+        self.lists_runs = true;
+        self.sight = Sight::following_pointer();
+        self
+    }
 }
 
 impl Overlay {
@@ -329,7 +417,14 @@ impl Overlay {
             doc,
             legend: Legend::new(),
             sight: Sight::default(),
+            confirms: false,
         }
+    }
+
+    /// This overlay asking a person to confirm an act before it is done.
+    pub fn confirming(mut self) -> Self {
+        self.confirms = true;
+        self
     }
 
     /// This overlay with what of it `sight` asks to have in sight.

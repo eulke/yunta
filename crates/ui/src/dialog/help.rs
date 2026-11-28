@@ -1,8 +1,10 @@
 //! See [`super`]. The keys of where the person is, worded by render, which the stage under
 //! it lists (`Stage::help`): over a run, the keys every screen answers to and the run's own,
-//! then each act its scene offers by a key of its own; over any other stage, each key its
-//! legend names, then those every stage answers to. Either way help never says a key the
-//! screen does not take. Taller than its box, it scrolls; Escape or `?` closes it.
+//! then each act its scene offers by a key of its own; over the field, every key it takes;
+//! over any other stage, the keys its legend names, those it takes beyond them and those
+//! every stage answers to wherever each acts there, `q` saying where it goes down to. Help
+//! never says a key the screen does not take, nor leaves out one it takes. Taller than its
+//! box, it scrolls; Escape or `?` closes it.
 
 use surco::components::{Laid, Overlay};
 use surco::doc::Doc;

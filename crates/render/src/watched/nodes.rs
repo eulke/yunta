@@ -25,7 +25,7 @@ use surco::motion::Motion;
 use surco::words::Standing;
 use yunta_core::events::{Failure, NodeState};
 use yunta_core::{NodeId, NodeKind, Workflow};
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
+use yunta_replay::frame::{NodeFrame, NodeStanding, NodeTimes, RunFrame, RunTimes};
 use yunta_replay::RunState;
 
 use crate::blocks::task_mark;
@@ -49,12 +49,14 @@ const FOLLOW: (&str, &str) = ("f", "follow what it is doing");
 /// The run's nodes, one a row in the order `workflow` declares them, which a person moves
 /// along: the pointer on the one `pointed` at, a node at work turning on the frame of
 /// `state`'s last event while the run moves, each other with its mark, each name in its
-/// column and how long a node that is done with took; under each loop the tasks it works,
+/// column and how long a node that is done with took, as `times` measures it; under each
+/// loop the tasks it works,
 /// each with its mark; and, where the run does not lead (`leads` false), a blank row, then
 /// the key that gives it back. Not [`working`](super::working), the nodes the CLI's region
 /// gives rows of.
 pub fn nodes(
     frame: &RunFrame,
+    times: &RunTimes,
     workflow: &Workflow,
     state: &RunState,
     pointed: Option<&NodeId>,
@@ -72,7 +74,8 @@ pub fn nodes(
     for node in &frame.nodes {
         let on = pointed == Some(&node.id);
         let mark = mark(node, waited_at == Some(&node.id));
-        rows.push(row(node, mark, moves, turned, on, look));
+        let took = took(node, &times.node(&node.id));
+        rows.push(row(node, took, mark, moves, turned, on, look));
         if loops(&node.id) {
             rows.extend(tasks(state, look));
         }
@@ -92,8 +95,16 @@ pub fn nodes(
 
 /// `node`'s row, `on` the row pointed at or not: its sign, `mark` or, at work in a run that
 /// `moves`, the spinner's frame `turned` events bring it to where the look moves; its name
-/// in its column; and how long it took where it is done with.
-fn row(node: &NodeFrame, mark: Mark, moves: bool, turned: u64, on: bool, look: &Look) -> Line {
+/// in its column; and how long it `took` where it is done with.
+fn row(
+    node: &NodeFrame,
+    took: Option<String>,
+    mark: Mark,
+    moves: bool,
+    turned: u64,
+    on: bool,
+    look: &Look,
+) -> Line {
     let glyphs = look.glyphs;
     let sign = match (node.standing, moves, look.motion) {
         (Standing::Running, true, Motion::Moves) => {
@@ -108,7 +119,7 @@ fn row(node: &NodeFrame, mark: Mark, moves: bool, turned: u64, on: bool, look: &
     let row = Line::pointed(on, glyphs)
         .push(Tone::of(mark), sign)
         .plain(" ");
-    match took(node) {
+    match took {
         Some(took) => row
             .push(name, format!("{:<NAME$}", node.id.as_str()))
             .push(Tone::Muted, format!("{took:>TOOK$}")),
@@ -150,22 +161,23 @@ pub(crate) fn listed_as(node: &NodeFrame) -> Standing {
     }
 }
 
-/// How long `node` took, where it is done with: finished, or failed and corrected by a
-/// reroute. None for a node at work, waiting, stopped, failed or not yet run.
-fn took(node: &NodeFrame) -> Option<String> {
+/// How long `node` took as `times` measures it, where it is done with: finished, or failed
+/// and corrected by a reroute. None for a node at work, waiting, stopped, failed or not yet
+/// run.
+fn took(node: &NodeFrame, times: &NodeTimes) -> Option<String> {
     if !matches!(node.standing, Standing::Finished | Standing::Rerouted) {
         return None;
     }
-    time_taken(node).map(duration)
+    time_taken(node, times).map(duration)
 }
 
-/// How long `node` took, wherever it ran: a gate a person was asked at, how long they took,
-/// as the run's page says it; any other node, its own time at work. None for a node that
-/// never started.
-pub(crate) fn time_taken(node: &NodeFrame) -> Option<Duration> {
-    match node.person_took() {
-        true => Some(node.people),
-        false => node.elapsed,
+/// How long `node` took, wherever it ran, as `times` measures it: a gate a person was asked
+/// at, how long they took, as the run's page says it; any other node, its own time at work.
+/// None for a node that never started.
+pub(crate) fn time_taken(node: &NodeFrame, times: &NodeTimes) -> Option<Duration> {
+    match node.person_took(times.people) {
+        true => Some(times.people),
+        false => times.elapsed,
     }
 }
 

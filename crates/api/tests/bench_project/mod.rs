@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use yunta_api::{Project, Workspace};
+use yunta_core::disk::SystemDisk;
 use yunta_core::{ConfigLayer, Env, ProcessSecrets, SystemIdSource};
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
@@ -25,6 +26,7 @@ pub fn project_of(bench: &Bench) -> Project {
             secrets: Arc::new(ProcessSecrets),
             forges: Arc::new(yunta_api::DeclaredForge),
             binary: PathBuf::from("yunta"),
+            disk: Arc::new(SystemDisk),
         },
     }
 }

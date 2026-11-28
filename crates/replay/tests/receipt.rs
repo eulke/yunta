@@ -5,13 +5,16 @@
 use std::collections::BTreeMap;
 
 use yunta_core::events::{
-    CriteriaCheckedPayload, Criterion, CriterionResult, EventPayload, NodeEvent,
-    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, Phase, RunCreatedPayload, RunEvent,
-    RunFinishedPayload, RunMetrics, TaskEvent, TaskRegisteredPayload, TaskStatus,
-    TaskStatusChangedPayload, TerminalState, TokenUsage,
+    AgentSessionOpenedPayload, CriteriaCheckedPayload, Criterion, CriterionResult, EventPayload,
+    NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, Phase, RunCreatedPayload,
+    RunEvent, RunFinishedPayload, RunMetrics, RunnerResolvedPayload, SessionEvent, TaskEvent,
+    TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TerminalState, TokenUsage,
 };
 use yunta_core::receipt::{CriteriaSummary, CriterionEntry, EventChainStatus};
-use yunta_core::{CommitSha, ConfigLayer, ContentHash, Isolation, Manifest};
+use yunta_core::{
+    Capabilities, CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, ModelName,
+    RunnerCandidate,
+};
 use yunta_replay::receipt;
 use yunta_testkit_core::Log;
 
@@ -191,4 +194,73 @@ fn a_task_checked_red_after_its_work_then_green_is_counted_green_once() {
         "a retried task is certified by its last check after the work, and only by it, red \
          before the work as its check before it found"
     );
+}
+
+/// `planner` resolved on Claude Code, naming `model` or leaving it to the CLI.
+fn resolved(model: Option<&str>) -> EventPayload {
+    EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
+        runner: "planner".into(),
+        chosen: RunnerCandidate {
+            adapter: "claude-code".into(),
+            model: model.map(ModelName::from),
+            agent: None,
+            effort: None,
+        },
+        discarded: Vec::new(),
+    }))
+}
+
+/// A session opened on the CLI, which reported it runs on `model`.
+fn opened_on(model: &str) -> EventPayload {
+    EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
+        session_id: "sess-1".into(),
+        agent: None,
+        model: Some(model.into()),
+        effort: None,
+        capabilities: Capabilities::default(),
+        fence: None,
+        confinement: None,
+        task_id: None,
+        continues: None,
+    }))
+}
+
+/// The receipt of a run whose one node resolved `planner` naming `named`, and whose
+/// session reported it ran on `reported`.
+fn receipted(named: Option<&str>, reported: &str) -> yunta_core::receipt::Receipt {
+    let events = Log::for_run(RUN)
+        .event(created())
+        .node("plan", started())
+        .node("plan", resolved(named))
+        .node("plan", opened_on(reported))
+        .node("plan", finished())
+        .event(closed())
+        .build();
+    let chain = EventChainStatus::Intact {
+        events: events.len(),
+    };
+    receipt::closed(&RUN.into(), &manifest(), &events, chain)
+        .expect("a log read to its close certifies a closed run")
+}
+
+#[test]
+fn a_runner_that_names_no_model_is_receipted_on_the_model_its_session_reported() {
+    let receipt = receipted(None, "cli-model");
+    let models: Vec<Option<String>> = receipt
+        .runners
+        .iter()
+        .map(|usage| usage.model.as_ref().map(ToString::to_string))
+        .collect();
+    assert_eq!(models, [Some("cli-model".to_string())]);
+}
+
+#[test]
+fn a_runner_that_names_its_model_is_receipted_on_it() {
+    let receipt = receipted(Some("named-model"), "cli-model");
+    let models: Vec<Option<String>> = receipt
+        .runners
+        .iter()
+        .map(|usage| usage.model.as_ref().map(ToString::to_string))
+        .collect();
+    assert_eq!(models, [Some("named-model".to_string())]);
 }

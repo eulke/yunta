@@ -21,7 +21,7 @@ use yunta_core::{Answer, NodeId, PricingEntry, QuestionId, RunId, Seq};
 use yunta_testkit::workflows::{ASKS, FINISHES, GATED, HANDS_ONE_QUESTION_OVER};
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
-use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::driving::{carried_out, drive};
 use yunta_testkit_ui::sandbox::{now, workspace};
 use yunta_ui::{Input, Operation, Outcome, Performer, Request, State};
 
@@ -36,9 +36,9 @@ async fn opened_in(workspace: Workspace) -> Outcome {
     };
     assert_eq!(*operation, Operation::ReadRepository);
     let (inputs, mut received) = mpsc::unbounded_channel();
-    Performer::new(workspace, Channel::Tty)
-        .perform(*ticket, operation.clone(), inputs)
-        .await;
+    let performer = Arc::new(Performer::new(workspace, Channel::Tty));
+    let asked = Request::Perform(*ticket, operation.clone());
+    assert!(performer.take(asked, &inputs).is_none());
     loop {
         match received.recv().await.expect("an outcome") {
             Input::Outcome(answered, outcome) => {
@@ -70,7 +70,7 @@ async fn the_repository_it_works_in_is_answered() {
     yunta_testkit::init_repo(&repo);
     let answered = opened_in(workspace(&repo, root.path())).await;
     assert!(
-        matches!(&answered, Outcome::Repository(read) if read.repository == Repository::NeverSetUp),
+        matches!(&answered, Outcome::Repository(read) if read.repository == Repository::NeverSetUp { dir: repo.clone() }),
         "{answered:?}"
     );
 
@@ -78,7 +78,7 @@ async fn the_repository_it_works_in_is_answered() {
     std::fs::write(repo.join(".yunta/config.yaml"), "").unwrap();
     let answered = opened_in(workspace(&repo, root.path())).await;
     assert!(
-        matches!(&answered, Outcome::Repository(read) if read.repository == Repository::SetUp),
+        matches!(&answered, Outcome::Repository(read) if read.repository == Repository::SetUp { dir: repo.clone() }),
         "{answered:?}"
     );
 }
@@ -101,7 +101,7 @@ async fn the_repository_read_says_where_its_runs_are_kept_and_its_prices() {
     let Outcome::Repository(read) = answered else {
         panic!("{answered:?}");
     };
-    assert_eq!(read.repository, Repository::SetUp);
+    assert_eq!(read.repository, Repository::SetUp { dir: repo.clone() });
     assert_eq!(read.storage, kept, "the store its configuration names");
     let priced = BTreeMap::from([(
         "claude-opus".to_string(),
@@ -141,7 +141,10 @@ async fn a_round_is_answered_on_the_channel_the_performer_was_made_with() {
         .store_path()
         .parent()
         .expect("a bench's log stands in its root");
-    let performer = Performer::new(workspace(&asking.worktree, root), Channel::Mcp);
+    let performer = Arc::new(Performer::new(
+        workspace(&asking.worktree, root),
+        Channel::Mcp,
+    ));
     // A ticket of the application's own: the performer hands back under what it is given.
     let (_, requests) = State::opened(now());
     let Some(Request::Perform(ticket, _)) = requests.into_iter().next() else {
@@ -155,8 +158,7 @@ async fn a_round_is_answered_on_the_channel_the_performer_was_made_with() {
             value: "the greeting".to_string(),
         }],
     };
-    let (inputs, _received) = mpsc::unbounded_channel();
-    performer.perform(ticket, answer, inputs).await;
+    carried_out(&performer, ticket, answer).await;
     let channels: Vec<Channel> = asking
         .events()
         .iter()
@@ -221,7 +223,7 @@ async fn one_following_follows_what_it_is_asked_to() {
         Input::FollowNews(FollowNews::Field(read)) => read,
         other => panic!("the field read whole comes first: {other:?}"),
     };
-    let runs: BTreeSet<RunId> = read.runs.iter().map(|run| run.run.clone()).collect();
+    let runs: BTreeSet<RunId> = read.runs.iter().map(|run| run.run().clone()).collect();
     let made = BTreeSet::from([finished.run_id.clone(), parked.run_id.clone()]);
     assert_eq!(runs, made);
 
@@ -236,7 +238,7 @@ async fn one_following_follows_what_it_is_asked_to() {
     loop {
         match received.recv().await.expect("what the following hands") {
             Input::FollowNews(FollowNews::Whole { run, .. }) => {
-                assert_eq!(run.run, parked.run_id);
+                assert_eq!(*run.run(), parked.run_id);
                 break;
             }
             Input::FollowNews(FollowNews::Field(_)) => panic!("the field is read once"),

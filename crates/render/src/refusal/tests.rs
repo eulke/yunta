@@ -373,3 +373,80 @@ fn a_word_no_run_answers_to_points_at_the_listing() {
         );
     }
 }
+
+/// A pack source whose directory is refused is said with the source as it was
+/// given, the directory it names, and what keeps that directory out of reach.
+#[test]
+fn a_refused_pack_directory_names_its_source_and_why() {
+    use yunta_core::refusal::{PackRefusal, SourceDirectoryFault};
+    let said = |directory: &str, why| {
+        let refusal = PackRefusal::SourceDirectory {
+            named: format!("github.com/acme/mono//{directory}"),
+            directory: directory.to_string(),
+            why,
+        };
+        Refused::Pack(Box::new(refusal)).said(Reader::Person)
+    };
+    assert_eq!(
+        said("/etc", SourceDirectoryFault::Absolute),
+        "`github.com/acme/mono///etc` names `/etc` as the pack's directory, an absolute path: \
+         a pack's directory is named from its repository's root, as `packs/<name>`"
+    );
+    assert_eq!(
+        said("packs/../..", SourceDirectoryFault::Climbs),
+        "`github.com/acme/mono//packs/../..` names `packs/../..` as the pack's directory, which \
+         climbs out of the repository with `..`: a pack is fetched only from a directory inside \
+         the repository its source names"
+    );
+    let link = "packs".to_string();
+    assert_eq!(
+        said("packs/demo", SourceDirectoryFault::Linked { link }),
+        "`github.com/acme/mono//packs/demo` names `packs/demo` as the pack's directory, and \
+         `packs` on the way to it is a symbolic link: a pack is fetched only from the \
+         repository's own directories, never through a link that could lead out of it"
+    );
+    assert_eq!(
+        said("packs/absent", SourceDirectoryFault::Missing),
+        "`github.com/acme/mono//packs/absent` names `packs/absent` as the pack's directory, \
+         which the repository does not hold at the commit fetched"
+    );
+}
+
+/// A pack whose own tree holds a symbolic link is said with its source as it was given and
+/// the link, by its path inside the pack.
+#[test]
+fn a_link_in_a_pack_names_its_source_and_the_link() {
+    use yunta_core::refusal::PackRefusal;
+    let refusal = PackRefusal::LinkInPack {
+        named: "github.com/acme/review-pack".to_string(),
+        link: "workflows/review.yaml".to_string(),
+    };
+    assert_eq!(
+        Refused::Pack(Box::new(refusal)).said(Reader::Person),
+        "`github.com/acme/review-pack` holds `workflows/review.yaml`, a symbolic link: a pack \
+         ships regular files only, so nothing of it is read through a link that could lead out \
+         of it"
+    );
+}
+
+/// A source whose repository or ref begins with `-` is said with the source and the part
+/// git would read as an option.
+#[test]
+fn a_source_that_reads_as_an_option_names_the_part() {
+    use yunta_core::refusal::{PackRefusal, SourcePart};
+    let said = |part| {
+        let named = "-u@host:repo".to_string();
+        let refusal = PackRefusal::ReadsAsAnOption { named, part };
+        Refused::Pack(Box::new(refusal)).said(Reader::Person)
+    };
+    assert_eq!(
+        said(SourcePart::Repository("-u@host:repo".to_string())),
+        "`-u@host:repo` names `-u@host:repo` as the pack's repository, which begins with `-`: \
+         git would read it as an option, not as a repository"
+    );
+    assert_eq!(
+        said(SourcePart::Ref("--orphan".to_string())),
+        "`-u@host:repo` names `--orphan` as the pack's ref, which begins with `-`: git would \
+         read it as an option, not as a ref"
+    );
+}

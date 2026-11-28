@@ -1,5 +1,6 @@
 //! See [`super`]. A run's screen as a target's cut makes it: the application opened on the
-//! run the target shows, in its field, the cut its row of [`TARGET_CUTS`] names loaded
+//! run the target shows, in its field, the cut its row of
+//! [`TARGET_CUTS`](crate::cut::TARGET_CUTS) names loaded
 //! into a fresh store ([`Cut::of_target`]), and driven as every helper drives a state:
 //! each request carried out and each key pressed once the state waits on nothing and
 //! stands caught up with the log. Every drive of a screen goes through the same inputs, so
@@ -32,7 +33,9 @@
 //! is opened laid out before each key ([`opened_laid_out`]), as a terminal draws the screen
 //! between two keys: a key that scrolls moves from what the last drawing laid out. Each
 //! piece of work the application handed its performer is kept in the order asked, for a
-//! test to count a reading that leaves no trace of its own ([`RunScreen::performed`]).
+//! test to count a reading that leaves no trace of its own ([`RunScreen::performed`]). What
+//! the application is handed of the place the cut is kept under names it as the target's
+//! frames name it, `/cut` (`named_as`), as where a run's page for a browser was written.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -46,10 +49,11 @@ use yunta_core::port::QuestionsReply;
 use yunta_core::step::NextStep;
 use yunta_core::{Answer, NodeId, OptionId, QuestionId, Responder, RunId, Seq};
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Address, Input, Operation, Outcome, Performer, Request, State};
+use yunta_ui::{Address, Input, Operation, Outcome, Performer, Request, State, Ticket};
 
-use crate::cut::{Asked, Cut, Pointed, Shown, Stands, TargetCut, TARGET_CUTS};
-use crate::driving::{driven_through, Driven, Inputs};
+use super::{named_as, strokes, target, CUT};
+use crate::cut::{Asked, Cut, Pointed, Shown, Stands, TargetCut};
+use crate::driving::{driven_through, pressed_while, Driven, Inputs, Withheld};
 
 /// The application on a run's screen as a target's cut stands, with the cut it reads and
 /// the performer that works there, so a test presses keys on it and lets the run go on.
@@ -78,7 +82,7 @@ pub struct RunScreen {
 /// as the recording recorded it where the cut's log goes on, and what the run asks taken back
 /// where the cut says it is not handed yet.
 pub async fn opened(name: &str) -> RunScreen {
-    let target = run_target(name);
+    let target = target(name);
     let mut screen = at_its_cut(target).await;
     let keys: Vec<Stroke> = target.keys.iter().flat_map(|key| strokes(key)).collect();
     match target.goes_on_to {
@@ -102,7 +106,7 @@ pub async fn opened_laid_out(
     name: &str,
     mut laid_out: impl FnMut(&State) -> ScreenLaid,
 ) -> RunScreen {
-    let target = run_target(name);
+    let target = target(name);
     let mut screen = at_its_cut(target).await;
     for stroke in target.keys.iter().flat_map(|key| strokes(key)) {
         let laid = laid_out(screen.state());
@@ -112,14 +116,6 @@ pub async fn opened_laid_out(
     screen.gone_on(target).await;
     screen.asked(target);
     screen
-}
-
-/// The row of [`TARGET_CUTS`] of the target `name`.
-fn run_target(name: &str) -> &'static TargetCut {
-    TARGET_CUTS
-        .iter()
-        .find(|target| target.name == name)
-        .unwrap_or_else(|| panic!("no target is named `{name}`"))
 }
 
 /// The run's screen of `target` at its cut: the cut loaded, the application opened on the
@@ -136,7 +132,8 @@ async fn at_its_cut(target: &TargetCut) -> RunScreen {
     let run = cut.runs()[0].clone();
     let (opened, asked) = State::opened_on(cut.now(), &NextStep::status(&run))
         .expect("the run's stage takes the step");
-    let mut inputs = Inputs::new();
+    let place = cut.root().to_path_buf();
+    let mut inputs = Inputs::naming(move |input| named_as(input, &place, CUT));
     let Driven {
         state, performed, ..
     } = driven_through(&mut inputs, opened, asked, &performer, &[]).await;
@@ -222,6 +219,41 @@ impl RunScreen {
         self.state = driven.state;
         self.performed.extend(driven.performed);
         driven.surfaced
+    }
+
+    /// `strokes` pressed while the work `withheld` picks is under way, each once the state
+    /// waits on nothing else and stands caught up with the log, that work held back from the
+    /// performer ([`pressed_while`]): each piece of it under its ticket, which the state still
+    /// waits on where no key let it go, for the test to answer ([`RunScreen::answered`]).
+    pub async fn pressed_while(
+        &mut self,
+        withheld: impl Fn(&Operation) -> bool,
+        strokes: &[Stroke],
+    ) -> Vec<(Ticket, Operation)> {
+        let state = self.state.clone();
+        let performer = &self.performer;
+        let pressed = pressed_while(
+            &mut self.inputs,
+            state,
+            Vec::new(),
+            performer,
+            withheld,
+            strokes,
+        );
+        let Withheld { driven, withheld } = pressed.await;
+        self.state = driven.state;
+        self.performed.extend(driven.performed);
+        withheld
+    }
+
+    /// `outcome` handed back under `ticket`, as the performer hands back what work came to,
+    /// and the state driven until it waits on nothing and stands caught up with the log.
+    pub async fn answered(&mut self, ticket: Ticket, outcome: Outcome) {
+        let asked = self.state.update(Input::Outcome(ticket, outcome));
+        let state = self.state.clone();
+        let driven = driven_through(&mut self.inputs, state, asked, &self.performer, &[]).await;
+        self.state = driven.state;
+        self.performed.extend(driven.performed);
     }
 
     /// Each piece of work the application handed its performer since it opened, in the
@@ -385,7 +417,7 @@ impl RunScreen {
             );
         };
         let in_view = self.state.followed_runs().in_view.as_ref();
-        let nodes = in_view.map_or(0, |in_view| in_view.run.frame(self.cut.now()).nodes.len());
+        let nodes = in_view.map_or(0, |in_view| in_view.run.frame().nodes.len());
         for _ in 0..nodes {
             self.pressed(&[Stroke::Insert('j')]).await;
             if self.named().as_deref() == Some(node) {
@@ -408,29 +440,4 @@ impl RunScreen {
         };
         Some(node.clone())
     }
-}
-
-/// `key`, as the design's recording names a key, as the strokes a surface hands in: a
-/// letter or a digit, `enter`, `esc`, `tab`, `space`, `up`, `down`, `/`, `?`, or `type:`
-/// and the words typed, a stroke a character.
-fn strokes(key: &str) -> Vec<Stroke> {
-    if let Some(typed) = key.strip_prefix("type:") {
-        return typed.chars().map(Stroke::Insert).collect();
-    }
-    let stroke = match key {
-        "enter" => Stroke::Enter,
-        "esc" => Stroke::Decline,
-        "tab" => Stroke::Tab,
-        "space" => Stroke::Insert(' '),
-        "up" => Stroke::Up,
-        "down" => Stroke::Down,
-        one => {
-            let mut chars = one.chars();
-            match (chars.next(), chars.next()) {
-                (Some(char), None) => Stroke::Insert(char),
-                _ => panic!("no key is named `{key}`"),
-            }
-        }
-    };
-    vec![stroke]
 }

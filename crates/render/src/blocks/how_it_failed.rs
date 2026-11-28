@@ -17,7 +17,7 @@ use surco::doc::Block;
 use surco::figures::duration;
 use yunta_core::events::{Failure, RedCheck};
 use yunta_core::{Node, NodeKind};
-use yunta_replay::frame::NodeFrame;
+use yunta_replay::frame::{NodeFrame, NodeTimes};
 
 use super::how_it_stands::TOOK;
 use super::FailureDetail;
@@ -33,12 +33,13 @@ const ATTEMPT: &str = "attempt";
 /// beside the row that counts the lines cut above them, as a feed keeps its two newest rows.
 const KEPT_OVER_ITS_FACTS: usize = 2;
 
-/// How a node failed: the failure, the node's frame and its declaration, where the run's
-/// workflow holds it. Not [`FailureDetail`], the failure's own words alone, nor a failure's
-/// card, which asks what to do about it.
+/// How a node failed: the failure, the node's frame and what the clock adds to it, and its
+/// declaration, where the run's workflow holds it. Not [`FailureDetail`], the failure's own
+/// words alone, nor a failure's card, which asks what to do about it.
 pub struct HowItFailed<'a> {
     pub failure: &'a Failure,
     pub node: &'a NodeFrame,
+    pub times: NodeTimes,
     pub declared: Option<&'a Node>,
 }
 
@@ -105,7 +106,7 @@ impl HowItFailed<'_> {
             _ => node.kind.to_string(),
         };
         let attempt = node.attempt.filter(|_| attempt).map(|at| at.to_string());
-        let took = time_taken(node).map(duration);
+        let took = time_taken(node, &self.times).map(duration);
         Fields::new()
             .push_if(KIND, kind)
             .push_if(ATTEMPT, attempt.unwrap_or_default())

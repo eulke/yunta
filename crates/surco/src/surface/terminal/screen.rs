@@ -12,10 +12,10 @@
 //! between two blocks.
 
 use super::{at_ends, Terminal, APART};
-use crate::components::{Count, Furrow, Noted, Region, Tally};
+use crate::components::{Count, Furrow, Noted, Region, Screen, Tally};
 use crate::diagram::Stroke;
 use crate::doc::{Block, Doc};
-use crate::glyphs::Glyphs;
+use crate::glyphs::{Glyphs, InAscii};
 use crate::line::{Line, Tone};
 use crate::width::cell_width;
 use crate::words::NOTHING_NEEDS_YOU;
@@ -156,7 +156,7 @@ enum TallyWords {
 /// Each of `counts` with its standing's mark, in its tone, with its words where `words`
 /// keeps them, a muted separator between two.
 fn counted(counts: &[Count], glyphs: Glyphs, words: TallyWords) -> Line {
-    let sep = format!(" {} ", glyphs.sep());
+    let sep = glyphs.spaced_sep();
     counts
         .iter()
         .enumerate()
@@ -178,7 +178,7 @@ fn counted(counts: &[Count], glyphs: Glyphs, words: TallyWords) -> Line {
 /// parts as fit stand whole, the first in `first` and the rest muted after the separator. A
 /// first part too wide for the cells is cut.
 pub(super) fn title_parts(parts: &[String], cells: usize, glyphs: Glyphs, first: Tone) -> Line {
-    let sep = format!(" {} ", glyphs.sep());
+    let sep = glyphs.spaced_sep();
     let mut width = 0;
     let kept = parts
         .iter()
@@ -208,3 +208,15 @@ pub(super) fn title_parts(parts: &[String], cells: usize, glyphs: Glyphs, first:
 
 #[cfg(test)]
 mod tests;
+
+impl Terminal {
+    /// What this terminal names its window while `screen` stands: the screen's title as it
+    /// draws the screen, in ASCII where its glyphs are, as a terminal that names no UTF-8
+    /// locale draws the screen's rows; none leaves the window its own.
+    pub fn window_title(&self, screen: &Screen) -> Option<String> {
+        match self.look.glyphs {
+            Glyphs::Ascii => screen.title.in_ascii(),
+            Glyphs::Unicode => screen.title.clone(),
+        }
+    }
+}

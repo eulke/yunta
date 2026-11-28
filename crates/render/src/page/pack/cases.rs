@@ -61,14 +61,26 @@ impl Cases {
     /// Their row, and a row for each case that failed with every problem it
     /// had under it, each line as written, as `yunta test` lists them.
     pub(super) fn blocks(&self) -> Vec<Block> {
+        let row = self.labelled(Fields::new()).into();
+        std::iter::once(row)
+            .chain(self.failures_checked().map(Block::from))
+            .collect()
+    }
+
+    /// `fields` with their row after the rows it holds: what a page about the pack
+    /// says of them among what it says of the pack.
+    pub(super) fn labelled(&self, fields: Fields) -> Fields {
+        fields.push_if("tests", self.said())
+    }
+
+    /// A row for each case that failed, with every problem it had under it, each
+    /// line as written, as `yunta test` lists them; none where none failed.
+    pub(super) fn failures_checked(&self) -> Option<Checklist> {
         let failures = self.failures();
         let mut failed = Checklist::default();
         for case in &failures {
             failed.push_check(case.check());
         }
-        let failed = (!failures.is_empty()).then(|| failed.into());
-        std::iter::once(Fields::new().push_if("tests", self.said()).into())
-            .chain(failed)
-            .collect()
+        (!failures.is_empty()).then_some(failed)
     }
 }

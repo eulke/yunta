@@ -1,32 +1,50 @@
 //! See [`super`]. A repository prepared for Yunta once: its ecosystem, test
 //! command, base branch and the adapter CLIs this machine answers for are
-//! detected, and the runner roles its workflows name proposed; then
-//! `.yunta/config.yaml`, defensive `.gitignore` entries and the mechanism
-//! skill are written. Every value is the best one detected; a caller that asks
-//! a person hands in what they answered instead, the runners included: each
-//! role a person put on an adapter with a model is written declared, and the
-//! rest stay proposed, commented, as `init` writes them unasked. The config's YAML is
-//! `config_yaml`'s.
+//! detected, and the runner roles its workflows name proposed, with those of a
+//! pack fetched to install beside it where there is one
+//! (`DetectedProject::proposing`); then `.yunta/config.yaml`, defensive
+//! `.gitignore` entries and the mechanism skill are written. Every value is the
+//! best one detected; a caller that asks a person hands in what they answered
+//! instead, the runners included.
+//!
+//! A role is declared with every candidate the machine answers for: the
+//! adapter a person picked first, with the model they typed for it or none,
+//! which leaves it to the adapter's CLI; then every other adapter that
+//! answered, in the order they were probed, each with no model. A role nobody
+//! answered for stands on the first that answered, so `init` unasked and every
+//! question left write the same. Every adapter is a candidate so a run on any
+//! of them finds the role there: a run pinned to an adapter takes the role's
+//! candidate on it, and a binary that builds no adapter of the first takes the
+//! next. Where no adapter answers, the roles stay proposed, commented.
+//!
+//! A repository whose workflows name no runner is proposed the one role that
+//! stands for whatever a node naming none runs on (`ProposedRunners::StandIn`):
+//! it is the default runner, `defaults.runner`, as well as declared, so a
+//! workflow added afterwards runs on it. Where the workflows name their runners,
+//! the default is the first, written only where a node names none. The config's
+//! YAML is `config_yaml`'s, and what the workflows propose is `proposed`'s.
 
 mod config_yaml;
+mod proposed;
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use yunta_core::refusal::SetupRefusal;
 use yunta_core::step::NextStep;
 use yunta_core::{
-    AdapterId, ConfigKey, Detected, ModelName, ProbedAdapter, RunnerCandidate, RunnerName, Workflow,
+    AdapterId, Detected, ModelName, ProbedAdapter, RunnerCandidate, RunnerName, Workflow,
 };
 use yunta_engine::git::Cause;
 use yunta_engine::process::Supervision;
 use yunta_render::command;
+use yunta_render::page::{Initialized, WrittenRunners};
 use yunta_render::refusal::Refused;
 
 use super::skill::{self, MECHANISM_SKILL_DIR};
 use super::SetupUnwritten;
-use crate::{Error, Failure, Stop, Workspace};
+use crate::{Error, Failure, FetchedPack, Stop, Workspace};
 use config_yaml::config_yaml;
+pub use proposed::ProposedRunners;
 
 impl Workspace {
     /// What `init` would write for the repository this workspace works in:
@@ -46,18 +64,13 @@ impl Workspace {
         let base_branch = base_branch(&self.dir, self.supervision(stop)).await?;
         let detected = crate::machine::in_repo(self, &self.dir, stop).await?;
         let probed = crate::machine::probe_known_adapters(&self.env.path).await;
-        let workflows: Vec<Workflow> = self
-            .catalog_workflows()
-            .into_iter()
-            .map(|(_, workflow)| workflow)
-            .collect();
         let draft = ProjectDraft {
             repo: self.dir.clone(),
             name,
             base_branch,
             detected,
             probed,
-            proposed: ProposedRunners::of(&workflows),
+            proposed: proposed(self.catalog_workflows()),
         };
         Ok(DetectedProject {
             workspace: self.clone(),
@@ -67,57 +80,50 @@ impl Workspace {
     }
 }
 
-/// The runner roles a repository's setup proposes: those its workflows name, or
-/// the one proposed to a project whose workflows name none; and whether a node
-/// names no runner, so `defaults.runner` names the first.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProposedRunners {
-    pub roles: Vec<RunnerName>,
-    pub needs_default: bool,
-}
-
-impl ProposedRunners {
-    /// What `workflows` propose, each role once, in the order their nodes name
-    /// them.
-    fn of(workflows: &[Workflow]) -> Self {
-        let mut roles: Vec<RunnerName> = Vec::new();
-        let mut needs_default = false;
-        for node in workflows.iter().flat_map(Workflow::iter_nodes) {
-            for role in node.runner.iter().chain(&node.runners) {
-                if !roles.contains(role) {
-                    roles.push(role.clone());
-                }
-            }
-            needs_default |= ConfigKey::needed_by(node).contains(&ConfigKey::Runner);
-        }
-        if roles.is_empty() {
-            roles.push(RunnerName::PROPOSED);
-        }
-        ProposedRunners {
-            roles,
-            needs_default,
-        }
-    }
-}
-
-/// What a project is set up as: the name and base branch it is written under, and
-/// how its runners are written.
+/// What a project is set up as: the name and base branch it is written under, how its
+/// runners are written, and the proposal they were answered from, which names the roles
+/// and the default runner written, as [`ProjectDraft::answered`] alone makes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectSetup {
     pub name: String,
     pub base_branch: String,
-    pub runners: RunnerDeclaration,
+    runners: RunnerDeclaration,
+    proposed: ProposedRunners,
 }
 
-/// How setting a project up writes its runners.
+impl ProjectSetup {
+    /// How its runners are written.
+    pub fn runners(&self) -> &RunnerDeclaration {
+        &self.runners
+    }
+
+    /// The proposal its runners were answered from: the roles a commented setup writes,
+    /// and the default runner every setup writes.
+    pub fn proposed(&self) -> &ProposedRunners {
+        &self.proposed
+    }
+}
+
+/// How setting a project up writes its runners: every role proposed, either declared
+/// or, where no adapter answers on this machine, commented.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunnerDeclaration {
-    /// Commented out, each proposed role on the first adapter that answered, its
-    /// model left blank: what `init` writes when nobody answers for them.
+    /// Commented out, each proposed role on the first adapter this build knows, its
+    /// model left to the adapter: what setting a project up writes where no adapter
+    /// answers on this machine.
     Proposed,
-    /// As a person answered: each role on the adapter they picked, with the model
-    /// they typed. A proposed role missing here stays proposed.
-    Declared(BTreeMap<RunnerName, RunnerCandidate>),
+    /// Every proposed role, in the order proposed, on its candidates.
+    Declared(Vec<DeclaredRunner>),
+}
+
+/// A role declared, on its candidates in the order a run tries them, as the
+/// configuration's list for the runner holds them: the adapter picked first, with the
+/// model typed for it where one was, then every other adapter that answered, each with
+/// no model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredRunner {
+    pub runner: RunnerName,
+    pub candidates: Vec<RunnerCandidate>,
 }
 
 /// A repository's project as `init` would write it, bound to the repository it is
@@ -143,7 +149,7 @@ pub struct ProjectDraft {
 }
 
 /// What a person answered for one proposed runner: the adapter it runs on, and the
-/// model it runs, none where the line was left empty.
+/// model it runs, none where the line was left empty, which leaves it to the adapter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunnerAnswer {
     pub runner: RunnerName,
@@ -164,8 +170,11 @@ impl ProjectDraft {
     }
 
     /// The setup a person answers this draft with: the `name` and `base_branch` typed,
-    /// each left empty keeping what was detected; and each of `runners` declared on its
-    /// adapter where it has a model, staying proposed where it has none.
+    /// each left empty keeping what was detected; and every role proposed declared on its
+    /// candidates, as its answer among `runners` picks the first or as the machine does
+    /// where none answers for it; every role proposed, commented, where no adapter
+    /// answers on this machine. It keeps the proposal it was answered from, which its
+    /// write takes the default runner from.
     pub fn answered(
         &self,
         name: &str,
@@ -176,26 +185,26 @@ impl ProjectDraft {
             true => detected.to_string(),
             false => typed.to_string(),
         };
-        let declared: BTreeMap<RunnerName, RunnerCandidate> = runners
-            .into_iter()
-            .filter_map(|answer| {
-                let model = answer.model?;
-                let candidate = RunnerCandidate {
-                    adapter: answer.adapter,
-                    model,
-                    agent: None,
-                    effort: None,
-                };
-                Some((answer.runner, candidate))
-            })
-            .collect();
+        let answering = self.answering();
+        let runners = match answering.first() {
+            Some(first) => RunnerDeclaration::Declared(
+                (self.proposed.roles().iter())
+                    .map(|runner| {
+                        let answer = runners.iter().find(|answer| &answer.runner == runner);
+                        DeclaredRunner {
+                            runner: runner.clone(),
+                            candidates: candidates(answer, first, &answering),
+                        }
+                    })
+                    .collect(),
+            ),
+            None => RunnerDeclaration::Proposed,
+        };
         ProjectSetup {
             name: kept(name, &self.name),
             base_branch: kept(base_branch, &self.base_branch),
-            runners: match declared.is_empty() {
-                true => RunnerDeclaration::Proposed,
-                false => RunnerDeclaration::Declared(declared),
-            },
+            runners,
+            proposed: self.proposed.clone(),
         }
     }
 
@@ -220,48 +229,118 @@ fn mechanism_skill_written() -> String {
     format!("{MECHANISM_SKILL_DIR}/SKILL.md")
 }
 
+/// The candidates a role answered as `answer` says is declared with, in the order a run
+/// tries them: the adapter picked, with the model typed for it, or `first` of those that
+/// `answering` where nothing was picked; then every other adapter answering, in the order
+/// they were probed, each with no model.
+fn candidates(
+    answer: Option<&RunnerAnswer>,
+    first: &AdapterId,
+    answering: &[&AdapterId],
+) -> Vec<RunnerCandidate> {
+    let on = |adapter: &AdapterId, model: Option<ModelName>| RunnerCandidate {
+        adapter: adapter.clone(),
+        model,
+        agent: None,
+        effort: None,
+    };
+    let first = match answer {
+        Some(answer) => on(&answer.adapter, answer.model.clone()),
+        None => on(first, None),
+    };
+    let mut candidates: Vec<RunnerCandidate> = (answering.iter())
+        .filter(|adapter| ***adapter != first.adapter)
+        .map(|adapter| on(adapter, None))
+        .collect();
+    candidates.insert(0, first);
+    candidates
+}
+
 /// What `init` wrote, and what it left as it was, with what it detected, the
-/// adapters this machine answered for, the runners declared and those proposed
-/// and left undeclared.
+/// adapters this machine answered for, and the runners as it wrote them beside the
+/// proposal they came from, which names the default runner.
 #[derive(Debug, Clone)]
 pub struct InitializedProject {
     pub wrote: Vec<String>,
     pub skipped: Vec<String>,
     pub detected: Detected,
     pub probed: Vec<ProbedAdapter>,
-    pub declared: BTreeMap<RunnerName, RunnerCandidate>,
-    pub undeclared: Vec<RunnerName>,
+    pub runners: RunnerDeclaration,
+    pub proposed: ProposedRunners,
+}
+
+impl InitializedProject {
+    /// The page `init` ends with, for the repository at `repo`.
+    pub fn page<'a>(&'a self, repo: &'a Path) -> Initialized<'a> {
+        let runners = match &self.runners {
+            RunnerDeclaration::Declared(declared) => WrittenRunners::Declared(
+                (declared.iter())
+                    .map(|declared| (&declared.runner, declared.candidates.as_slice()))
+                    .collect(),
+            ),
+            RunnerDeclaration::Proposed => WrittenRunners::Proposed(self.proposed.roles()),
+        };
+        Initialized {
+            repo,
+            wrote: &self.wrote,
+            skipped: &self.skipped,
+            detected: &self.detected,
+            probed: &self.probed,
+            runners,
+            default: self.proposed.default_runner(),
+        }
+    }
 }
 
 impl DetectedProject {
+    /// This project proposing the roles it would once `pack`, fetched, is installed:
+    /// those of the repository's workflows and the pack's, in the order the catalog
+    /// lists them then, so `init` after the pack's install proposes the same. Nothing
+    /// is written.
+    pub fn proposing(&mut self, pack: &FetchedPack) {
+        self.draft.proposed = pack.proposed();
+    }
+
     /// Writes the project as `setup` says: its config, from what the repository
-    /// runs, the adapters this machine answers for and the runners as declared,
-    /// parsed back before it is written; the ignore entries `init` adds once; and
-    /// the mechanism skill, written again only under `force`.
+    /// runs, the adapters this machine answers for and the runners as declared, with
+    /// the default runner of the proposal `setup` was answered from, parsed back
+    /// before it is written; the ignore entries `init` adds once; and the mechanism
+    /// skill, written again only under `force`. Nothing of the draft's own proposal
+    /// is read, so a proposal worked out again since the answer moves nothing.
     pub async fn write(self, setup: ProjectSetup) -> Result<InitializedProject, Error> {
         let draft = self.draft;
-        let config_yaml = config_yaml(&setup, &draft.probed, &draft.detected, &draft.proposed);
+        let config_yaml = config_yaml(&setup, &draft.probed, &draft.detected);
         let repo = &self.workspace.dir;
         let (wrote, skipped) = write_project(repo, config_yaml, self.force).await?;
-        let declared = match setup.runners {
-            RunnerDeclaration::Proposed => BTreeMap::new(),
-            RunnerDeclaration::Declared(declared) => declared,
-        };
-        let undeclared = draft
-            .proposed
-            .roles
-            .into_iter()
-            .filter(|role| !declared.contains_key(role))
-            .collect();
         Ok(InitializedProject {
             wrote,
             skipped,
             detected: draft.detected,
             probed: draft.probed,
-            declared,
-            undeclared,
+            runners: setup.runners,
+            proposed: setup.proposed,
         })
     }
+}
+
+impl FetchedPack {
+    /// The roles a setup of the repository it installs into proposes once it is installed:
+    /// those of the repository's workflows and its own, in the order the catalog lists them
+    /// then. Read from the copy fetched and the repository alone, so it needs nothing a
+    /// detection finds: what a setup shows while the pack is still to be confirmed, and a
+    /// setup written without it writes none of. Nothing is written.
+    pub fn proposed(&self) -> ProposedRunners {
+        proposed(self.installs_into().catalog_workflows_installing(self))
+    }
+}
+
+/// The roles the catalog's `workflows` propose, in the order it lists them.
+fn proposed(workflows: Vec<(String, Workflow)>) -> ProposedRunners {
+    let workflows: Vec<Workflow> = workflows
+        .into_iter()
+        .map(|(_, workflow)| workflow)
+        .collect();
+    ProposedRunners::of(&workflows)
 }
 
 /// The base branch a project starts from: the remote's default, else the
@@ -299,7 +378,10 @@ async fn base_branch(repo: &Path, supervision: Supervision<'_>) -> Result<String
 /// The line `init` writes above the entries it adds to `.gitignore`, and
 /// finds again so a second `init` adds nothing.
 fn gitignore_marker() -> String {
-    format!("# added by `{}`", command::line(&NextStep::Init))
+    format!(
+        "# added by `{}`",
+        command::line(&NextStep::Init { interactive: false })
+    )
 }
 
 /// Defensive only: `paths.runs`/`paths.worktrees` default to `~/.yunta`,

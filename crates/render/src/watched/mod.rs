@@ -27,7 +27,7 @@ use surco::motion::Motion;
 use surco::words::Standing;
 use yunta_core::step::{Choice, NextStep};
 use yunta_core::RunId;
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase};
+use yunta_replay::frame::{NodeFrame, NodeStanding, NodeTimes, RunFrame, RunPhase, RunTimes};
 
 use crate::command;
 use crate::engine;
@@ -100,12 +100,13 @@ pub fn attention(frame: &RunFrame, run_id: &RunId, answerable: bool, look: &Look
 const GO_THERE: (&str, &str) = ("a", "go there");
 
 /// The attention row a screen of the application gives `frame`, a run that needs the
-/// person: its handle, what holds it in its gist's words, then the key that goes there.
+/// person, beside what the clock adds to it (`times`): its handle, what holds it in its
+/// gist's words, then the key that goes there.
 /// Where a line is typed (`typed`), every key types, `a` among them, so the row names no
 /// key. Not [`attention`], the row the CLI's region opens with, which names the command
 /// that answers.
-pub fn needing(frame: &RunFrame, typed: bool) -> Attention {
-    let asks = crate::state::gist(frame).unwrap_or_default();
+pub fn needing(frame: &RunFrame, times: &RunTimes, typed: bool) -> Attention {
+    let asks = crate::state::gist(frame, times).unwrap_or_default();
     let (key, does) = GO_THERE;
     let row = match typed {
         true => Attention::unkeyed(asks),
@@ -130,8 +131,9 @@ fn answer_command(run_id: &RunId, answerable: bool) -> String {
     }
 }
 
-/// The rows one working node takes: what it is, what its tasks are doing,
-/// what one of its sessions said last, and what its last calls reached for.
+/// The rows one working node takes: what it is and how long it has worked and
+/// gone quiet as `times` measures it, what its tasks are doing, what one of
+/// its sessions said last, and what its last calls reached for.
 ///
 /// A running node's spin turns a frame per event it says, and once it goes
 /// long enough without one its row says how long. What a session said moves
@@ -139,6 +141,7 @@ fn answer_command(run_id: &RunId, answerable: bool) -> String {
 pub fn node_rows(
     frame: &RunFrame,
     node: &NodeFrame,
+    times: &NodeTimes,
     said: Option<&yunta_core::port::Said>,
     look: &Look,
 ) -> Vec<Line> {
@@ -150,7 +153,7 @@ pub fn node_rows(
         None => String::new(),
     };
     let detail = format!("{under}{}", indent(DETAIL_DEPTH));
-    let mut rows = vec![own_row(node, glyphs, look.motion).under(&under)];
+    let mut rows = vec![own_row(node, times, glyphs, look.motion).under(&under)];
     if !node.running_tasks.is_empty() {
         rows.push(Line::new().plain(detail.as_str()).push(
             Tone::Muted,
@@ -186,17 +189,18 @@ const QUIET_AFTER: Duration = Duration::from_secs(10);
 
 /// The node's own row: its mark, or the frame of its spin; its id; its state and
 /// how long it has worked; how long it has been quiet, past [`QUIET_AFTER`]; and
-/// the runner it resolved through with the adapter and model behind it. When a
-/// row is cut to fit, what it runs on goes first.
-fn own_row(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
+/// the runner it resolved through with the candidate behind it, the model its open
+/// sessions reported where the candidate names none, each time as `times` measures
+/// it. When a row is cut to fit, what it runs on goes first.
+fn own_row(node: &NodeFrame, times: &NodeTimes, glyphs: Glyphs, motion: Motion) -> Line {
     let standing = crate::state::NodeDisplay::from(node).standing;
     let running = standing == Standing::Running;
-    let quiet = node
+    let quiet = times
         .last_event_age
         .filter(|age| running && *age >= QUIET_AFTER);
     let mut word = standing.word().to_string();
     let mut rest = Vec::new();
-    if let Some(elapsed) = node.elapsed {
+    if let Some(elapsed) = times.elapsed {
         match running {
             true => word.push_str(&format!(" for {}", duration(elapsed))),
             false => rest.push(duration(elapsed)),
@@ -206,10 +210,10 @@ fn own_row(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
         rest.push(format!("quiet {}", duration(age)));
     }
     if let Some(runner) = &node.runner {
-        let mut chose = format!(
-            "{} {}/{}",
-            runner.runner, runner.chosen.adapter, runner.chosen.model
-        );
+        let reported = node.sessions.iter().find_map(|open| open.model.as_ref());
+        let model = runner.chosen.model.as_ref().or(reported);
+        let candidate = crate::runner::candidate(&runner.chosen.adapter, model);
+        let mut chose = format!("{} {candidate}", runner.runner);
         if let Some(agent) = &runner.chosen.agent {
             chose.push_str(&format!("/{agent}"));
         }
@@ -227,7 +231,7 @@ fn own_row(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
         .push(Tone::Strong, node.id.as_str())
         .plain(" ")
         .push(tone, word);
-    let sep = format!(" {} ", glyphs.sep());
+    let sep = glyphs.spaced_sep();
     match rest.is_empty() {
         true => row,
         false => row.push(Tone::Muted, format!("{sep}{}", rest.join(&sep))),
@@ -248,24 +252,28 @@ pub struct Rows {
     pub nodes: Vec<Line>,
 }
 
-/// The rows of `frame`, the run `run_id`, with what `heard` kept of what its sessions
-/// said. `answerable` says whether the run stopped on a menu of its own, which decides
-/// the command the attention row offers; a run whose engine asks at its own terminal
-/// says so in its place.
+/// The rows of `frame`, the run `run_id`, with what the clock adds to it (`times`) and
+/// what `heard` kept of what its sessions said. `answerable` says whether the run stopped
+/// on a menu of its own, which decides the command the attention row offers; a run whose
+/// engine asks at its own terminal says so in its place.
 pub fn rows(
     frame: &RunFrame,
+    times: &RunTimes,
     run_id: &RunId,
     answerable: bool,
     heard: &Heard,
     look: &Look,
 ) -> Rows {
-    let attention = match &frame.asking {
+    let attention = match &times.asking {
         Some(asking) => asked(asking, look),
         None => attention(frame, run_id, answerable, look),
     };
     let nodes = working(frame)
         .into_iter()
-        .flat_map(|node| node_rows(frame, node, heard.of(run_id, &node.id), look))
+        .flat_map(|node| {
+            let said = heard.of(run_id, &node.id);
+            node_rows(frame, node, &times.node(&node.id), said, look)
+        })
         .collect();
     Rows { attention, nodes }
 }
@@ -319,30 +327,33 @@ pub fn stretch_names(ids: &[&str]) -> Vec<String> {
 /// took what it took `in` its whole span. The handle gives way first on a row too narrow
 /// for the whole headline, since the screen's trail names the run too. Not
 /// [`Run::headline`](crate::page::Run::headline), a printed page's, which keeps its handle,
-/// says how long ago a closed run stopped and that a stalled one went quiet.
-pub fn headline(frame: &RunFrame) -> Headline {
+/// says how long ago a closed run stopped and that a stalled one went quiet. Each time is as
+/// `times` measures it.
+pub fn headline(frame: &RunFrame, times: &RunTimes) -> Headline {
     let word = frame.standing;
     let headline = Headline::new(
         word.mark(),
         crate::state::called(&frame.workflow, &frame.mode),
         word.word(),
     );
-    stood(frame)
+    stood(frame, times)
         .into_iter()
         .fold(headline, Headline::fact)
         .edge_said_elsewhere(frame.run_id.handle())
 }
 
-/// How long the run `frame` has stood where it is, as its headline says it: `for` as long as
-/// a person sees an open run hold, `in` the whole span of one that closed.
-pub(crate) fn stood(frame: &RunFrame) -> Option<String> {
+/// How long the run `frame` has stood where it is as `times` measures it, as its headline
+/// says it: `for` as long as a person sees an open run hold, `in` the whole span of one that
+/// closed.
+pub(crate) fn stood(frame: &RunFrame, times: &RunTimes) -> Option<String> {
     let open = matches!(
         frame.phase,
         RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
     );
     match open {
-        true => crate::page::stood_open(frame).map(|stood| format!("for {}", duration(stood))),
-        false => frame.elapsed.map(|took| format!("in {}", duration(took))),
+        true => crate::page::run::stood_open(frame, times)
+            .map(|stood| crate::page::run::facts::stood_for(duration(stood))),
+        false => times.elapsed.map(crate::page::run::facts::closed_in),
     }
 }
 
@@ -365,7 +376,7 @@ pub fn title(frame: &RunFrame, run_id: &RunId, glyphs: Glyphs) -> String {
 /// does now is what stays.
 fn calls_row(node: &NodeFrame, look: &Look, taken: usize) -> String {
     let room = look.width.cells().saturating_sub(taken);
-    let apart = format!(" {} ", look.glyphs.sep());
+    let apart = look.glyphs.spaced_sep();
     let gathered = crate::target::gathered(&node.activity, look.glyphs.times());
     let mut kept: Vec<&str> = Vec::new();
     let mut used = 0;

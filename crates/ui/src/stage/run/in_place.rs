@@ -383,7 +383,7 @@ impl RunStage {
                 Some(InPlace::desk(&self.run, decision, pause))
             }
             PlacedAs::Round => {
-                let asked = framed.in_view.awaited_round(&framed.frame)?;
+                let asked = framed.in_view.awaited_round(framed.frame)?;
                 Some(InPlace::round(asked, pause))
             }
         }

@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use surco::components::Meter;
 use surco::glyphs::Glyphs;
 use surco::look::Look;
 use surco::motion::Motion;
@@ -9,7 +10,7 @@ use surco::paint::Paint;
 use surco::surface::Terminal;
 use yunta_core::events::TokenUsage;
 use yunta_core::{NodeId, RunId};
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame};
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunTimes};
 use yunta_replay::TimeSpent;
 
 use super::spent;
@@ -33,28 +34,39 @@ fn node(id: &'static str, input: u64) -> NodeFrame {
     }
 }
 
-/// A run of three nodes that spent 20.2k tokens between two of them, at work for
-/// `working` seconds and waiting on the person for `people` milliseconds.
-fn run(working: u64, people: u64) -> RunFrame {
-    RunFrame {
+/// A run of three nodes that spent 20.2k tokens between two of them, and what the clock
+/// adds to it: at work for `working` seconds and waiting on the person for `people`
+/// milliseconds.
+fn run(working: u64, people: u64) -> (RunFrame, RunTimes) {
+    let frame = RunFrame {
         tokens: TokenUsage {
             input: 18_000,
             output: 2_200,
             cached: Some(9_000),
         },
         nodes: vec![node("plan", 18_000), node("build", 2_200), node("ship", 0)],
+        ..RunFrame::sample(&RUN)
+    };
+    let times = RunTimes {
         time: TimeSpent {
             working: Duration::from_secs(working),
             people: Duration::from_millis(people),
             ..TimeSpent::default()
         },
-        ..RunFrame::sample(&RUN)
-    }
+        ..RunTimes::sample(&frame)
+    };
+    (frame, times)
 }
 
-/// The times a meter says, each as its figure, its label and whether it is the person's.
-fn times(frame: &RunFrame) -> Vec<(String, String, bool)> {
-    spent(frame)
+/// The meter of `run`, its frame and what the clock adds to it.
+fn meter((frame, times): &(RunFrame, RunTimes)) -> Meter {
+    spent(frame, times)
+}
+
+/// The times a meter of `run` says, each as its figure, its label and whether it is the
+/// person's.
+fn times(run: &(RunFrame, RunTimes)) -> Vec<(String, String, bool)> {
+    meter(run)
         .times
         .into_iter()
         .map(|time| (time.figure, time.label, time.by_person))
@@ -63,7 +75,7 @@ fn times(frame: &RunFrame) -> Vec<(String, String, bool)> {
 
 #[test]
 fn the_meter_says_the_runs_tokens_a_bar_a_node_and_its_time_at_work() {
-    let meter = spent(&run(154, 0));
+    let meter = meter(&run(154, 0));
     assert_eq!(
         meter.count, "20.2k tokens",
         "in and out, the cache no part of it"
@@ -94,10 +106,12 @@ fn a_run_that_spent_nothing_says_it_spent_nothing() {
         nodes: vec![node("plan", 0)],
         ..RunFrame::sample(&RUN)
     };
-    let meter = spent(&frame);
+    let measured = RunTimes::sample(&frame);
+    let nothing = (frame, measured);
+    let meter = meter(&nothing);
     assert_eq!(meter.count, "0 tokens");
     assert_eq!(
-        times(&frame),
+        times(&nothing),
         [("0s".to_string(), "at work".to_string(), false)]
     );
 }
@@ -112,7 +126,7 @@ fn a_terminal_draws_the_meter_as_one_row() {
         width: surco::look::Width::row(120, None),
         motion: Motion::Still,
     };
-    let row = Terminal::on(look).meter(&spent(&run(154, 300_000)));
+    let row = Terminal::on(look).meter(&meter(&run(154, 300_000)));
     assert_eq!(
         row.text(),
         "20.2k tokens █▂▁ · 2m34s at work · 5m00s waiting on you"

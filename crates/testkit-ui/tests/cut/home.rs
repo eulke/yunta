@@ -151,12 +151,11 @@ async fn commits_by_name(workspace: &Workspace, target: &str) {
     let Committer::Named(who) = committer else {
         panic!("`{target}`: git names nobody: {committer:?}");
     };
-    let (name, address) = who
-        .split_once(" <")
-        .unwrap_or_else(|| panic!("`{target}`: `{who}` names no address"));
     assert!(
-        name != NOBODYS_NAME && name.split_whitespace().count() >= 2 && address.contains('@'),
-        "`{target}`: git commits as `{who}`, no name a person goes by"
+        who.name != NOBODYS_NAME
+            && who.name.split_whitespace().count() >= 2
+            && who.address.contains('@'),
+        "`{target}`: git commits as {who:?}, no name a person goes by"
     );
 }
 
@@ -277,7 +276,10 @@ async fn never_set_up(workspace: &Workspace, target: &str) {
         .repository(&Stop::new())
         .await
         .expect("the place's repository");
-    assert_eq!(repository, Repository::NeverSetUp, "`{target}`");
+    assert!(
+        matches!(repository, Repository::NeverSetUp { .. }),
+        "`{target}`: {repository:?}"
+    );
 }
 
 /// The Yunta repository cloned under `into` and checked out at the binary's version, by

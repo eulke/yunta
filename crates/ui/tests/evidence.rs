@@ -1,6 +1,7 @@
-//! What a run leaves, from its stage: a finished run's receipt written beside it as
-//! `yunta receipt` writes it, its page for a browser written as `yunta open` writes it
-//! and asked to be shown where the API wrote it, and a broken run's evidence verified as
+//! What a run leaves, from its stage, each a page over the run its trail names with the
+//! page's word: a finished run's receipt written beside it as `yunta receipt` writes it and
+//! shown as a screen's page says it, its page for a browser written as `yunta open` writes
+//! it and asked to be shown where the API wrote it, and a broken run's evidence verified as
 //! `yunta verify` says it.
 
 mod support;
@@ -14,6 +15,7 @@ use yunta_core::events::{
 };
 use yunta_core::NodeId;
 use yunta_render::page::{self, Page, Verified};
+use yunta_render::screen::place_of;
 use yunta_storage::Storage;
 use yunta_testkit::Bench;
 use yunta_testkit_ui::driving::drive;
@@ -73,9 +75,9 @@ async fn a_finished_runs_receipt_is_the_one_receipt_writes() {
         .expect("the receipt `yunta receipt` writes");
     assert_eq!(written("receipt.md"), markdown);
     assert_eq!(written("receipt.json"), json);
-    let look = Markdown.look();
-    let printed = Markdown.draw(&page::Receipt { receipt: &receipt }.document(&look));
-    assert_eq!(main_region(&state), printed);
+    let glyphs = Markdown.look().glyphs;
+    let on_screen = Markdown.draw(&page::Receipt { receipt: &receipt }.on_screen(glyphs));
+    assert_eq!(main_region(&state), on_screen);
 }
 
 #[tokio::test]
@@ -94,7 +96,8 @@ async fn a_runs_page_is_shown_where_open_writes_it() {
     assert_eq!(surfaced, [Request::ShowPage(Address::Page(page.clone()))]);
     assert!(page.is_file(), "the page is written before it is shown");
     let trail = state.screen(&Markdown.look()).trail;
-    assert_eq!(trail.last().map(String::as_str), Some("page"));
+    let place = place_of(bench.run_id.handle(), yunta_render::screen::PAGE);
+    assert_eq!(trail.last(), Some(&place));
 }
 
 /// A page the surface could not show is said, with where it is, in the words `yunta open`
@@ -177,5 +180,6 @@ async fn a_broken_runs_evidence_is_verified_as_verify_says_it() {
         Markdown.draw(&said.document(&Markdown.look()))
     );
     let trail = state.screen(&Markdown.look()).trail;
-    assert_eq!(trail.last().map(String::as_str), Some("verification"));
+    let place = place_of(bench.run_id.handle(), yunta_render::screen::VERIFICATION);
+    assert_eq!(trail.last(), Some(&place));
 }

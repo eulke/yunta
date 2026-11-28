@@ -1,7 +1,7 @@
 //! What a count of tokens reads as in a line that says what was spent, and
 //! the same figures as a JSON document; and what a workflow's past runs say
-//! a run is likely to take, its tokens and time ([`estimation`]) and their
-//! price ([`cost`]).
+//! a run is likely to take, its tokens and time ([`estimation`], in its
+//! three parts) and their price ([`cost`]).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use surco::figures::{duration, Tokens};
 use yunta_core::events::{Spend, TokenUsage};
+use yunta_replay::history::PriorEstimation;
 
 /// A count read as its breakdown: `1.86M in / 20.2k out (9k cached)`. A cache
 /// that served nothing is no part of it.
@@ -56,26 +57,44 @@ impl SpendJson {
     }
 }
 
-/// What a workflow's past runs usually spent, as one line: how many there
-/// are, the median and p90 of their tokens, and their median wall-clock. The
-/// history, the catalog and a run's page say it here, so none phrases the
-/// same numbers differently.
-pub fn estimation(
-    estimation: &yunta_replay::history::PriorEstimation,
-    glyphs: surco::glyphs::Glyphs,
-) -> String {
-    let sep = glyphs.sep();
+/// How many past runs a workflow's history holds, as every reader counts
+/// them, with an estimate or without one: `3 past runs`.
+pub fn past_runs(count: usize) -> String {
+    surco::text::counted(count, "past run")
+}
+
+/// The median and p90 of the tokens a workflow's past runs spent: `median
+/// 2.17M tokens, p90 27.1M`.
+pub fn usual_tokens(estimation: &PriorEstimation) -> String {
+    format!(
+        "median {}, p90 {}",
+        Tokens::rounded(estimation.tokens.median),
+        Tokens::rounded(estimation.tokens.p90).figure(),
+    )
+}
+
+/// The median wall-clock a workflow's past runs took, `n/a` where none of
+/// them measured one: `median wall-clock 1h07m`.
+pub fn usual_wall_clock(estimation: &PriorEstimation) -> String {
     let wall_clock = match estimation.wall_clock_secs {
         Some(p) => duration(Duration::from_secs_f64(p.median)),
         None => "n/a".to_string(),
     };
-    format!(
-        "{} {sep} median {}, p90 {} {sep} median wall-clock {}",
-        surco::text::counted(estimation.sample_count, "past run"),
-        Tokens::rounded(estimation.tokens.median),
-        Tokens::rounded(estimation.tokens.p90).figure(),
-        wall_clock,
-    )
+    format!("median wall-clock {wall_clock}")
+}
+
+/// What a workflow's past runs usually spent, as one line: its three parts
+/// ([`past_runs`], [`usual_tokens`], [`usual_wall_clock`]) apart by the
+/// look's separator. The history, the catalog and a run's page say it here,
+/// and a new run's panel says each part on a row of its own, so none phrases
+/// the same numbers differently.
+pub fn estimation(estimation: &PriorEstimation, glyphs: surco::glyphs::Glyphs) -> String {
+    [
+        past_runs(estimation.sample_count),
+        usual_tokens(estimation),
+        usual_wall_clock(estimation),
+    ]
+    .join(&glyphs.spaced_sep())
 }
 
 /// What the run's spend costs at its model's price: one blended line when

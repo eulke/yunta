@@ -53,7 +53,7 @@ fn title(doc: &Doc) -> String {
     });
     let said = match (headline, name) {
         (Some(headline), _) => {
-            let sep = format!(" {} ", GLYPHS.sep());
+            let sep = GLYPHS.spaced_sep();
             std::iter::once(headline.subject.clone())
                 .chain(std::iter::once(headline.said.clone()))
                 .chain(headline.edge.clone())

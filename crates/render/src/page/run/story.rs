@@ -49,7 +49,8 @@ impl Run {
             .enumerate()
             .map(|(at, node)| {
                 let display = NodeDisplay::from(node);
-                let person = node.person_took();
+                let times = self.times.node(&node.id);
+                let person = node.person_took(times.people);
                 NodeRow {
                     mark: display.standing.mark(),
                     word: display.standing.word(),
@@ -62,8 +63,8 @@ impl Run {
                         .map(|rule| rule.goto.to_string()),
                     note: self.note(node, &display, person, glyphs),
                     took: match person {
-                        true => duration(node.people),
-                        false => node.elapsed.map(duration).unwrap_or_default(),
+                        true => duration(times.people),
+                        false => times.elapsed.map(duration).unwrap_or_default(),
                     },
                     took_by_person: person,
                     spent: match node.tokens.total() {
@@ -91,7 +92,7 @@ impl Run {
     ) -> String {
         let accepted = self.plans.iter().find(|(id, _)| *id == node.id);
         let asked_about = self
-            .frame
+            .times
             .asking
             .as_ref()
             .is_some_and(|asking| asking.prompt.is_about(&node.id));
@@ -104,11 +105,12 @@ impl Run {
                 .map(|said| prose::first_sentence(said)),
         };
         // A wait under a second would read as `0s`, which says nothing.
-        let waited = (!person && node.people.as_secs() > 0).then(|| match node.person_rounds() {
-            0 | 1 => format!("{WAITED_ON_YOU} {}", duration(node.people)),
+        let people = self.times.node(&node.id).people;
+        let waited = (!person && people.as_secs() > 0).then(|| match node.person_rounds() {
+            0 | 1 => format!("{WAITED_ON_YOU} {}", duration(people)),
             rounds => format!(
                 "{WAITED_ON_YOU} {} over {rounds} rounds of questions",
-                duration(node.people)
+                duration(people)
             ),
         });
         let rerouted = (node.reroutes > 0).then(|| match node.standing {
@@ -130,7 +132,7 @@ impl Run {
         .flatten()
         .chain(ahead(node))
         .collect::<Vec<_>>()
-        .join(&format!(" {} ", glyphs.sep()))
+        .join(&glyphs.spaced_sep())
     }
 
     /// Whether the decision this page ends on says how its plan got accepted, with the rules

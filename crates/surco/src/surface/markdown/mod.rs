@@ -104,17 +104,19 @@ fn drawn(doc: &Doc, page: Page) -> String {
     }
 }
 
-/// One block, `depth` sections deep, written as `page` says.
+/// One block, `depth` sections deep, written as `page` says. Pictures that say nothing, a
+/// run's furrow, the name in block letters and the field in perspective, are written as
+/// nothing: a file has no cell to draw them in, and loses no fact.
 fn block(block: &Block, depth: usize, page: Page) -> String {
     match block {
         Block::Headline(headline) => headline::headline(headline),
-        Block::Furrow(_) => String::new(),
         Block::Ribbon(ribbon) => screen::ribbon(ribbon),
-        Block::Gist(gist) => plain_text(&gist.0),
+        Block::Gist(gist) => plain_text(&gist.said),
         Block::Fields(fields) => self::fields(fields),
         Block::Table(table) => self::table(table),
         Block::Nodes(nodes) => self::table(&nodes.table(GLYPHS)),
         Block::Runs(runs) => self::runs(runs),
+        Block::AtAGlance(glance) => screen::at_a_glance(glance),
         Block::Evidence(evidence) => self::evidence(evidence),
         Block::Said(said) => self::said(&said.0),
         Block::Paths(paths) => self::paths(paths),
@@ -124,11 +126,15 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         Block::Desk(drawn) => desk::desk(drawn),
         Block::TypedAnswer(drawn) => asked::typed_answer(drawn),
         Block::ChoiceList(drawn) => asked::choice_list(drawn),
+        Block::WordChoice(choice) => screen::word_choice(choice),
+        Block::Form(form) => asked::form(form),
+        Block::Survey(survey) => asked::survey(survey, depth, page),
         Block::Checklist(list) => self::checklist(list),
         Block::Findings(list) => findings::findings(list),
         Block::Problem(said) => problem::problem(said),
         Block::Refusal(refusal) => problem::refusal(refusal),
         Block::Next(next) => self::next(next),
+        Block::SameAtAShell(same) => screen::same_at_a_shell(same),
         Block::Legend(legend) => screen::legend(legend),
         Block::KeyList(list) => screen::key_list(list),
         Block::Attention(attention) => screen::attention(attention),
@@ -142,17 +148,13 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         Block::Markdown(text) => fence::closed(text.trim()),
         Block::Marked(marked) => self::marked(marked, page),
         Block::Concern(concern) => self::concern(concern),
-        Block::Diagram(diagram) => {
-            let fence = code::fence(&diagram.source);
-            format!("{fence}mermaid\n{}\n{fence}", diagram.source)
-        }
+        Block::Diagram(diagram) => code::diagram(diagram),
         Block::Code(shown) => code::drawn(shown, page),
         Block::Lines(lines) | Block::Rows(lines) => rows(lines),
         Block::Labelled(labelled) => rows(&labelled.laid(usize::MAX, GLYPHS)),
         Block::Feed(feed) => rows(&feed.said(GLYPHS)),
         Block::Meter(meter) => rows(&[meter.said(GLYPHS)]),
-        // A picture that says nothing: a file has no cell to draw it in, and loses no fact.
-        Block::Horizon(_) => String::new(),
+        Block::Furrow(_) | Block::Wordmark(_) | Block::Horizon(_) => String::new(),
     }
 }
 
@@ -323,7 +325,7 @@ fn runs(runs: &Runs) -> String {
             Edge::Command(command) => cell_code_span(command),
         };
         out.push_str(&format!(
-            "\n| {}{} {}{} | {} | {} ({}) | {} | {edge} |",
+            "\n| {}{} {}{} | {} | {} | {} | {edge} |",
             held(row),
             GLYPHS.mark(row.standing.mark()),
             row.standing.word(),
@@ -332,8 +334,7 @@ fn runs(runs: &Runs) -> String {
                 false => "",
             },
             cell_code_span(&row.handle),
-            cell(&row.workflow),
-            cell(&row.mode),
+            cell(&row.name()),
             cell(&row.said),
         ));
     }
@@ -356,10 +357,7 @@ fn evidence(evidence: &Evidence) -> String {
         });
     }
     if !rest.is_empty() {
-        out.push_str(&format!(
-            "\n\n{}",
-            rest.join(&format!(" {} ", GLYPHS.sep()))
-        ));
+        out.push_str(&format!("\n\n{}", rest.join(&GLYPHS.spaced_sep())));
     }
     out
 }
@@ -380,7 +378,7 @@ fn paths(paths: &Paths) -> String {
 }
 
 fn checklist(list: &Checklist) -> String {
-    let sep = format!(" {} ", GLYPHS.sep());
+    let sep = GLYPHS.spaced_sep();
     let fold = list.fold().map(|fold| {
         let names: Vec<String> = fold.names.iter().map(|name| plain_text(name)).collect();
         let head = format!(

@@ -5,6 +5,8 @@
 
 use std::path::PathBuf;
 
+use surco::components::{Edge, RunLine};
+use surco::words::Standing;
 use yunta_core::RunId;
 
 /// A run a field can name but not derive: its log or the manifest it froze
@@ -24,6 +26,23 @@ impl UnreadableRun {
         UnreadableRun {
             run_id: run_id.clone(),
             problem,
+        }
+    }
+
+    /// The run as a field's row draws it, named `handle`: the mark of a log that does not
+    /// read back and why, with nothing of a workflow, a furrow or an age, which only a
+    /// derived run has.
+    pub fn line(&self, handle: String) -> RunLine {
+        RunLine {
+            standing: Standing::Broken,
+            handle,
+            workflow: String::new(),
+            mode: String::new(),
+            furrow: Vec::new(),
+            said: self.problem.to_string(),
+            edge: Edge::Age(String::new()),
+            pointed: false,
+            marked: false,
         }
     }
 }

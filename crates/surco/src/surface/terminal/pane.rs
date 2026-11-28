@@ -1,9 +1,11 @@
-//! A region of a screen drawn in a pane: the one rule an engine of cells draws a region
-//! by, so every surface and every test of one draws a region the same way. A region whose
-//! document holds a prompt holds it, fitted to the rows the blocks around it leave, with
-//! the cursor where it is typed into; any other region scrolls from what of it the person
-//! asked to see. A pane is not a terminal's bottom row, so a prompt in one fills every row
-//! it is given, where one held where a person is ([`Terminal::held`]) keeps the last.
+//! A region of a screen drawn in a pane: the one rule an engine of cells draws a region by,
+//! so every surface and every test of one draws a region the same way. A region is
+//! classified once from its document (`laying`, which says how to add a kind), and how the
+//! pane spaces it, whether its title gives way and how it is drawn all match on that kind.
+//! A region whose document holds a prompt holds it, fitted to the rows the blocks around it
+//! leave, the cursor where it is typed into; any other scrolls from what of it the person
+//! asked to see. A pane is no terminal's bottom row: a prompt in one fills every row it is
+//! given, where one held where a person is ([`Terminal::held`]) keeps the last.
 //!
 //! A card stands at the pane's foot under what it rests on (`card_at_the_foot`): whole,
 //! taller than the shortest look, room made above it by the blank rows around what stands
@@ -20,12 +22,21 @@
 //! so where its rows are too few for all of it: the first of its abridgements that fits,
 //! else all of it, scrolled (`fitted`).
 //!
-//! A region that holds neither and whose document ends with a horizon, the field in
-//! perspective, lays its blocks out first, then the horizon in every row they leave, a blank
-//! row parting them (`horizon`). Given fewer rows than the horizon's least, it draws none,
-//! and the blocks stand where they stood; short of rows for the blocks themselves, their
-//! blank rows give way before their rows scroll. The first request and a setup end with one,
-//! and so does a run's receipt.
+//! A region that lists runs, as the field does, is laid out as its lists whatever it lists at
+//! the moment, none among them, a cell inside its edges: short of rows, the blank rows between
+//! two lists give way first, then a window that keeps the run pointed at in sight counts the
+//! runs it hides; standing close, what stands above the lists gives way before the window
+//! opens (`listed`). Where a region beside the main one gave way, the main region holds what a
+//! person acts on from it ([`Terminal::pane_holding`]): a region that lists runs under its
+//! lists, which give way first; a form alone at its foot, a part of its own it gives way
+//! with; any other under what it shows.
+//!
+//! A region whose document ends with a horizon, the field in perspective, lays its blocks out
+//! first, a line asked among them held as any prompt is, then the horizon in every row they
+//! leave, a blank row parting them (`horizon`). Given fewer rows than the horizon's least, it
+//! draws none; short of rows, the blocks' blank rows give way before their rows scroll, but a
+//! survey's (a setup's rows), which holds what stands above it as its drawing says. Words set
+//! to a measure narrower than the pane stand in a column that wide, centred (`measured`).
 //!
 //! A region whose document ends with a feed is laid out as its feed, as one holding a desk
 //! is laid out as its pane: only the feed scrolls (`fed`). The blocks above it stand still
@@ -37,34 +48,34 @@
 //! under them counted.
 //!
 //! A titled region's pane opens a row under its title, a blank row parting them, and keeps
-//! a blank row between two of its blocks. In the fewest rows a titled pane is given
-//! ([`CLOSE_ROWS`], a node's pane at the least terminal) it stands close: no blank row under
-//! its title nor between its blocks, each row one of what it says. Above a feed, what gives
-//! way is counted with the blank rows standing, which then go, their rows the window's. A
-//! prompt held in a pane keeps its own blank rows, which its drawing lets go in its own
-//! order. On a screen standing short of rows, as on the least terminal, a page stands close
-//! too ([`Terminal::pane_short_of_rows`]): an untitled region read from its top that holds
-//! neither a prompt, a feed nor a horizon and says itself in no fewer rows lets its blank rows
-//! go before its rows are counted under its window, where a taller screen keeps them and
-//! counts the rows it hides; and a region holding a plan's desk holds it close, its own blank
-//! rows given way. Whether a screen stands short of rows is its layout's to say.
+//! a blank row between two of its blocks. Short of rows, as at the least terminal, where a
+//! node's pane holds five rows, it stands close ([`Terminal::pane_short_of_rows`]): no blank
+//! row under its title nor between its blocks, each row one of what it says. Above a feed,
+//! what gives way is counted with the blank rows standing, which then go, their rows the
+//! window's. A prompt held in a pane keeps its own blank rows, which its drawing lets go in
+//! its own order, but a line or a list asked on a page of its own (`asked`). Short of rows,
+//! a page stands close too: an untitled region read from its top or along a pointer, holding
+//! no prompt, feed or horizon, lets its blank rows go before its rows are counted under its
+//! window, where a taller screen keeps them; and a plan's desk stands close. Whether a screen
+//! stands short of rows is its layout's, the one signal every pane on it stands close by.
 
 use super::Terminal;
-use crate::components::{Card, Laid, Region, Sight};
+use crate::components::{Laid, Measure, Region, Sight};
 use crate::doc::{Block, Doc, Prompt};
 use crate::line::Line;
 
+mod asked;
 mod card_at_the_foot;
 mod fed;
 mod fitted;
 mod horizon;
+mod laying;
+mod listed;
+mod measured;
 
+use asked::asked_on_a_page;
 use card_at_the_foot::Room;
-use fed::Foot;
-
-/// The most rows a pane stands close in, with no blank row: a node's pane under its title at
-/// the least terminal, 60 by 14, where a row left blank is a row of what the node does lost.
-const CLOSE_ROWS: usize = 5;
+use laying::{holds_a_desk, Laying};
 
 /// How a pane spaces what it holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -96,38 +107,99 @@ impl Terminal {
     /// document is a list of keys alone holds it from its sight, giving way as a list does.
     /// A region whose document ends with a feed shows the feed's window from its sight
     /// under the blocks above it, which give way from their top. Any other region scrolls
-    /// from its sight. A titled region opens a row under its title; in the fewest rows a
-    /// titled pane is given, a node's pane at the least terminal, it stands close, with no
-    /// blank row.
+    /// from its sight. A titled region opens a row under its title, a blank row parting them.
     pub fn pane(&self, region: &Region, rows: usize) -> Paned {
         self.region_paned(region, rows, false)
     }
 
     /// `region` drawn in a pane `rows` high as [`Terminal::pane`] draws it, on a screen
-    /// standing short of rows, as the least terminal's does: a page stands close there too,
-    /// with no blank row, before what it hides is counted under its window.
+    /// standing short of rows, as the least terminal's does: a titled pane stands close there,
+    /// with no blank row under its title nor between its blocks, and a page stands close too,
+    /// before what it hides is counted under its window.
     pub fn pane_short_of_rows(&self, region: &Region, rows: usize) -> Paned {
         self.region_paned(region, rows, true)
     }
 
-    /// Whether `region`, drawn under its title in a pane `rows` high, keeps the title: it
-    /// does, but where it holds a card whose fewest rows ([`Card::least`]) and what stands
-    /// under it do not stand in those rows. The title is what stands above the card there,
-    /// and gives way to it as the rest of what stands above it does, before the card gives
-    /// way in its own order: the region is drawn in its title's row too
+    /// `region` drawn in a pane `rows` high as [`Terminal::pane`] draws it, on a screen
+    /// standing `short_of_rows` where its layout says so, holding `instead` under its own
+    /// blocks: what a person acts on from a region beside it that gave way. A region that
+    /// lists runs holds it under its lists, which give way first; an untitled region holding
+    /// a form alone holds it at the form's foot, a part of the form's own that the form gives
+    /// way with, a row of its window where its rows do not all fit; any other holds it under
+    /// what it shows in the rows `instead` leaves it, a blank row parting them where the pane
+    /// is aired.
+    pub fn pane_holding(
+        &self,
+        region: &Region,
+        instead: &[Block],
+        rows: usize,
+        short_of_rows: bool,
+    ) -> Paned {
+        if instead.is_empty() {
+            return self.region_paned(region, rows, short_of_rows);
+        }
+        let spacing = match short_of_rows {
+            true => Spacing::Close,
+            false => Spacing::Aired,
+        };
+        match (region.title.is_empty(), Laying::of(region)) {
+            (true, Laying::Form { form, .. }) => {
+                let stead = closed_up(self.in_rhythm(instead), spacing);
+                let held = self.form_held_with(form, stead, rows);
+                return Paned {
+                    lines: held.lines,
+                    cursor: held.cursor,
+                    laid: held.laid.unwrap_or_default(),
+                };
+            }
+            (true, Laying::Listed(listed)) => {
+                let (lines, laid) = self.listed(&listed.holding(instead), rows, spacing);
+                return Paned {
+                    lines,
+                    cursor: None,
+                    laid,
+                };
+            }
+            (true | false, _) => {}
+        }
+        let held = closed_up(self.in_rhythm(instead), spacing);
+        let parted = usize::from(spacing == Spacing::Aired);
+        let left = rows.saturating_sub(held.len() + parted);
+        let mut paned = self.region_paned(region, left, short_of_rows);
+        if spacing == Spacing::Aired {
+            paned.lines.push(Line::new());
+        }
+        paned.lines.extend(held);
+        paned.lines.truncate(rows);
+        paned
+    }
+
+    /// Whether `region`, drawn under its title in a pane `rows` high on a screen standing
+    /// `short_of_rows` where its layout says so, keeps the title: it does, but where it holds a
+    /// card whose fewest rows ([`Card::least`]) do not stand in the pane as it is drawn there,
+    /// with what stands around the card. The title is what stands above the card there, and
+    /// gives way to it as the rest of what stands above it does, before the card gives way in
+    /// its own order: the region is drawn in its title's row too
     /// ([`Terminal::pane_in_place_of_its_title`]).
     ///
     /// [`Card::least`]: crate::components::Card
-    pub fn keeps_its_title(&self, region: &Region, rows: usize) -> bool {
-        let blocks = region.doc.blocks();
-        let Some(at) = region.doc.prompt_at() else {
+    pub fn keeps_its_title(&self, region: &Region, rows: usize, short_of_rows: bool) -> bool {
+        let laying = Laying::of(region);
+        let Laying::Card {
+            blocks,
+            at,
+            card,
+            shorter,
+        } = laying
+        else {
             return true;
         };
-        let Some(Prompt::Card(card)) = blocks[at].prompt() else {
+        if region.title.is_empty() {
             return true;
-        };
-        let below = parted(self.in_rhythm(&blocks[at + 1..]), Side::Below);
-        card.least(&self.look) + below.len() <= rows
+        }
+        let spacing = laying.spacing(short_of_rows, true);
+        let room = Room::under_the_title(rows, true, spacing, short_of_rows);
+        self.keeps_the_cards_least((blocks, shorter), (at, card), room, spacing)
     }
 
     /// `region` drawn in a pane `rows` high that takes its title's row too, where it does not
@@ -158,26 +230,30 @@ impl Terminal {
         short_of_rows: bool,
         titled: bool,
     ) -> Paned {
-        let spacing = match titled {
-            true if rows <= CLOSE_ROWS => Spacing::Close,
-            false if short_of_rows && (a_page(region) || a_desk(region)) => Spacing::Close,
-            true | false => Spacing::Aired,
-        };
+        let laying = Laying::of(region);
+        let spacing = laying.spacing(short_of_rows, titled);
         let parted = titled && spacing == Spacing::Aired;
-        let (doc, abridged) = (&region.doc, region.abridged.as_slice());
-        if let Some((at, card)) = card_in(doc) {
-            let room = Room {
-                rows,
-                under_a_title: parted,
-                shortest: short_of_rows,
-            };
-            let blocks = (doc.blocks(), abridged);
-            return self.card_at_the_foot(blocks, (at, card), region.sight, room, spacing);
+        if let Laying::Card {
+            blocks,
+            at,
+            card,
+            shorter,
+        } = laying
+        {
+            let room = Room::under_the_title(rows, titled, spacing, short_of_rows);
+            return self.card_at_the_foot(
+                (blocks, shorter),
+                (at, card),
+                region.sight,
+                room,
+                spacing,
+            );
         }
-        if !parted {
-            return self.spaced(doc, abridged, region.sight, rows, spacing);
+        let (sight, measure) = (region.sight, region.measure);
+        if !parted || rows == 0 {
+            return self.spaced(&laying, sight, rows, spacing, measure);
         }
-        let mut paned = self.spaced(doc, abridged, region.sight, rows - 1, spacing);
+        let mut paned = self.spaced(&laying, sight, rows - 1, spacing, measure);
         paned.lines.insert(0, Line::new());
         paned.cursor = paned.cursor.map(|(row, cell)| (row + 1, cell));
         paned
@@ -187,58 +263,86 @@ impl Terminal {
     /// by the rule [`Terminal::pane`] states, its blank rows standing: what is open over a
     /// screen is drawn by.
     pub(super) fn paned(&self, doc: &Doc, sight: Sight, rows: usize) -> Paned {
-        self.spaced(doc, &[], sight, rows, Spacing::Aired)
+        let laying = Laying::of_a_doc(doc, &[], false);
+        self.spaced(&laying, sight, rows, Spacing::Aired, None)
     }
 
-    /// `doc`, of which `sight` is what a person asked to see, drawn in a pane `rows` high
-    /// by the rule [`Terminal::pane`] states, spaced as `spacing` says, what stands above a
-    /// feed it ends with said in fewer rows as `abridged` says.
+    /// A region laid out as `laying` says, of which `sight` is what a person asked to see,
+    /// drawn in a pane `rows` high by the rule [`Terminal::pane`] states, spaced as `spacing`
+    /// says, its words set to `measure` where it gives one: in a column that wide, centred
+    /// where the pane is wider; the field in perspective spans the pane under them.
     fn spaced(
         &self,
-        doc: &Doc,
-        abridged: &[Vec<Block>],
+        laying: &Laying<'_>,
+        sight: Sight,
+        rows: usize,
+        spacing: Spacing,
+        measure: Option<Measure>,
+    ) -> Paned {
+        if let Laying::Horizon {
+            above,
+            horizon,
+            shorter,
+        } = laying
+        {
+            let over = (*above, *horizon);
+            return self.over_a_horizon(over, shorter, sight, rows, spacing, measure);
+        }
+        match self.column(measure) {
+            Some(column) => {
+                let paned = column.words.laid_across(laying, sight, rows, spacing);
+                column.placed(paned)
+            }
+            None => self.laid_across(laying, sight, rows, spacing),
+        }
+    }
+
+    /// A region laid out as `laying` says, of which `sight` is what a person asked to see,
+    /// drawn across a pane `rows` high by the rule [`Terminal::pane`] states, spaced as
+    /// `spacing` says, its words as wide as the pane.
+    fn laid_across(
+        &self,
+        laying: &Laying<'_>,
         sight: Sight,
         rows: usize,
         spacing: Spacing,
     ) -> Paned {
-        // A list of keys alone, as help is, gives way as a list does rather than scroll as
-        // lines: its blank rows first, then its window counts the keys it hides.
-        if let [Block::KeyList(list)] = doc.blocks() {
-            let (lines, laid) = list.held(&self.look, sight, rows);
-            return Paned {
-                lines,
-                cursor: None,
-                laid,
-            };
-        }
-        if let Some(foot) = Foot::of(doc) {
-            return self.fed(&foot, abridged, sight, rows, spacing);
-        }
-        let Some(at) = doc.prompt_at() else {
-            if let Some((Block::Horizon(horizon), above)) = doc.blocks().split_last() {
-                return self.over_a_horizon(above, horizon, abridged, sight, rows, spacing);
-            }
-            let lines = self.fitted(doc.blocks(), abridged, rows, spacing);
-            let (lines, laid) = self.scrolled_lines(&lines, sight, rows);
-            return Paned {
-                lines,
-                cursor: None,
-                laid,
-            };
+        let scrolled = |(lines, laid): (Vec<Line>, Laid)| Paned {
+            lines,
+            cursor: None,
+            laid,
         };
-        match doc.blocks()[at].prompt() {
+        match laying {
             // A card outside a region, as what is open over a screen holds one, keeps its least
             // as a pane at the shortest look does.
-            Some(Prompt::Card(card)) => {
+            Laying::Card {
+                blocks,
+                at,
+                card,
+                shorter,
+            } => {
                 let room = Room {
                     rows,
                     under_a_title: false,
                     shortest: true,
                 };
-                self.card_at_the_foot((doc.blocks(), abridged), (at, card), sight, room, spacing)
+                self.card_at_the_foot((*blocks, *shorter), (*at, *card), sight, room, spacing)
             }
-            Some(Prompt::Desk(_) | Prompt::TypedAnswer(_) | Prompt::ChoiceList(_)) | None => {
-                self.prompted(doc.blocks(), at, rows, spacing)
+            Laying::Horizon {
+                above,
+                horizon,
+                shorter,
+            } => self.over_a_horizon((*above, *horizon), shorter, sight, rows, spacing, None),
+            // A list of keys alone, as help is, gives way as a list does rather than scroll as
+            // lines: its blank rows first, then its window counts the keys it hides.
+            Laying::Keys(list) => scrolled(list.held(&self.look, sight, rows)),
+            Laying::Fed { foot, shorter, .. } => self.fed(foot, shorter, sight, rows, spacing),
+            Laying::Form { blocks, .. } => self.prompted(blocks, 0, rows, spacing),
+            Laying::Prompted { blocks, at } => self.prompted(blocks, *at, rows, spacing),
+            Laying::Listed(listed) => scrolled(self.listed(listed, rows, spacing)),
+            Laying::Page { blocks, shorter } => {
+                let lines = self.fitted(blocks, shorter, rows, spacing);
+                scrolled(self.scrolled_lines(&lines, sight, rows))
             }
         }
     }
@@ -248,9 +352,20 @@ impl Terminal {
     /// stands above it in at most half of what that leaves, and the prompt in the rest; a
     /// plan's desk in a pane that stands close stands close itself.
     fn prompted(&self, blocks: &[Block], at: usize, rows: usize, spacing: Spacing) -> Paned {
+        if let ([alone @ Block::TypedAnswer(_)], Spacing::Aired) = (blocks, spacing) {
+            return self.line_asked_alone(alone, rows);
+        }
         let below = parted(self.in_rhythm(&blocks[at + 1..]), Side::Below);
+        if let Some(Prompt::Survey(survey)) = blocks[at].prompt() {
+            let above = parted(self.in_rhythm(&blocks[..at]), Side::Above);
+            return self.survey_held(above, survey, below, rows);
+        }
         let left = rows.saturating_sub(below.len());
-        let mut above = parted(self.in_rhythm(&blocks[..at]), Side::Above);
+        let above = self.in_rhythm(&blocks[..at]);
+        let mut above = match spacing {
+            Spacing::Close if asked_on_a_page(blocks) => closed_up(above, spacing),
+            Spacing::Close | Spacing::Aired => parted(above, Side::Above),
+        };
         // What stands above a prompt is what it is about: it keeps the lines nearest the
         // prompt, and never more than half, so what a person answers stays in sight.
         let kept_above = above.len().min(left / 2);
@@ -280,32 +395,27 @@ impl Terminal {
     }
 }
 
-/// The card `doc` holds and where it stands among its blocks, where it holds one.
-fn card_in(doc: &Doc) -> Option<(usize, &Card)> {
-    let at = doc.prompt_at()?;
-    match doc.blocks()[at].prompt()? {
-        Prompt::Card(card) => Some((at, card)),
-        Prompt::Desk(_) | Prompt::TypedAnswer(_) | Prompt::ChoiceList(_) => None,
+impl Laying<'_> {
+    /// How a pane spaces a region laid out so, under its title where it stands `titled`, on a
+    /// screen standing `short_of_rows` where its layout says so: there a titled pane stands
+    /// close, and so does a page that says itself in no fewer rows, runs listed along a
+    /// pointer, a plan's desk, and a line or a list asked on a page of its own; any other pane
+    /// is aired.
+    fn spacing(&self, short_of_rows: bool, titled: bool) -> Spacing {
+        let close_untitled = match self {
+            Laying::Page { shorter, .. } => shorter.is_empty(),
+            Laying::Listed(_) => true,
+            Laying::Prompted { blocks, .. } => holds_a_desk(blocks) || asked_on_a_page(blocks),
+            Laying::Horizon { above: blocks, .. } | Laying::Fed { blocks, .. } => {
+                holds_a_desk(blocks)
+            }
+            Laying::Card { .. } | Laying::Keys(_) | Laying::Form { .. } => false,
+        };
+        match short_of_rows && (titled || close_untitled) {
+            true => Spacing::Close,
+            false => Spacing::Aired,
+        }
     }
-}
-
-/// Whether `region` holds a plan's desk, which lays out columns of its own across the pane.
-fn a_desk(region: &Region) -> bool {
-    let doc = &region.doc;
-    let held = doc.prompt_at().and_then(|at| doc.blocks()[at].prompt());
-    matches!(held, Some(Prompt::Desk(_)))
-}
-
-/// Whether `region` is a page: read from its top, no pointer to follow, saying itself in no
-/// fewer rows, and holding neither a prompt, a feed at its foot, a horizon at its end nor a
-/// list of keys alone, so it is drawn whole where it fits and scrolled where it does not.
-fn a_page(region: &Region) -> bool {
-    let doc = &region.doc;
-    let drawn_otherwise = matches!(doc.blocks(), [Block::KeyList(_)])
-        || matches!(doc.blocks().last(), Some(Block::Horizon(_)))
-        || Foot::of(doc).is_some()
-        || doc.prompt_at().is_some();
-    !region.sight.follows_pointer && region.abridged.is_empty() && !drawn_otherwise
 }
 
 /// `lines` as a pane spaced by `spacing` holds them: whole where it is aired, with no blank

@@ -9,7 +9,7 @@ use yunta_testkit::stubs::path_opening_no_browser;
 use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::{stderr, yunta_at, Checkout, Terminal};
 
-use super::{given_back, opened_with, FOLLOWED};
+use super::{given_back, opened_with, FOLLOWED, THE_FIELD};
 
 /// A repository with one run that finished, and that run's whole id.
 fn with_a_finished_run() -> (Checkout, String) {
@@ -23,12 +23,17 @@ fn with_a_finished_run() -> (Checkout, String) {
     (checkout, id)
 }
 
-/// Bare `yunta` with `environment` set over the harness's, on the field, its closed run
-/// listed, opened and followed.
-fn its_closed_run_followed(checkout: &Checkout, environment: &[(&str, &str)]) -> Terminal {
+/// Bare `yunta` with `environment` set over the harness's, on the field, its closed run `id`
+/// listed by its handle and its mode, opened and followed.
+fn its_closed_run_followed(
+    checkout: &Checkout,
+    id: &str,
+    environment: &[(&str, &str)],
+) -> Terminal {
     let mut terminal = opened_with(checkout, environment);
     terminal.keys("d");
-    terminal.wait_on_screen("done (default)", "the closed run was never listed");
+    let row = format!("{} default ", yunta_testkit::handle(id));
+    terminal.wait_on_screen(&row, "the closed run was never listed");
     terminal.keys("\r");
     terminal.wait_on_screen(FOLLOWED, "the run was never followed");
     terminal
@@ -37,7 +42,7 @@ fn its_closed_run_followed(checkout: &Checkout, environment: &[(&str, &str)]) ->
 #[test]
 fn a_runs_numbers_graph_and_receipt_open_from_its_stage() {
     let (checkout, id) = with_a_finished_run();
-    let mut terminal = its_closed_run_followed(&checkout, &[]);
+    let mut terminal = its_closed_run_followed(&checkout, &id, &[]);
     terminal.keys("s");
     let stats = place_of(yunta_testkit::handle(&id), STATS);
     terminal.wait_on_screen(&format!("› {stats}"), "its numbers never opened");
@@ -51,6 +56,8 @@ fn a_runs_numbers_graph_and_receipt_open_from_its_stage() {
     terminal.keys("e");
     terminal.wait_on_screen("receipt of", "its receipt never opened");
     terminal.keys("q");
+    terminal.wait_on_screen(THE_FIELD, "`q` on its receipt never went to the field");
+    terminal.keys("q");
     assert_eq!(given_back(&mut terminal), Some(0));
 }
 
@@ -61,7 +68,7 @@ fn a_runs_page_is_shown_through_the_opener_as_open_names_it() {
     let marks = tempfile::tempdir().unwrap();
     let recorded = marks.path().join("opened.txt");
     let path = path_opening_no_browser(marks.path(), Some(&recorded));
-    let mut terminal = its_closed_run_followed(&checkout, &[("PATH", &path)]);
+    let mut terminal = its_closed_run_followed(&checkout, &id, &[("PATH", &path)]);
     terminal.keys("o");
     terminal.wait_on_screen("page.html", "the page was never written");
     let read = || std::fs::read_to_string(&recorded).unwrap_or_default();
@@ -70,6 +77,8 @@ fn a_runs_page_is_shown_through_the_opener_as_open_names_it() {
         || "the opener was never handed the page".to_string(),
     );
     let shown = read();
+    terminal.keys("q");
+    terminal.wait_on_screen(THE_FIELD, "`q` on its page never went to the field");
     terminal.keys("q");
     assert_eq!(given_back(&mut terminal), Some(0));
     // Off a terminal `yunta open` says where the page is, which a person at one gets opened.
@@ -86,10 +95,10 @@ fn a_runs_page_is_shown_through_the_opener_as_open_names_it() {
 /// Where nothing here can open a page, the screen says so, and where the page is.
 #[test]
 fn a_page_nothing_here_can_open_is_said_with_where_it_is() {
-    let (checkout, _) = with_a_finished_run();
+    let (checkout, id) = with_a_finished_run();
     let marks = tempfile::tempdir().unwrap();
     let path = path_opening_no_browser(marks.path(), None);
-    let mut terminal = its_closed_run_followed(&checkout, &[("PATH", &path)]);
+    let mut terminal = its_closed_run_followed(&checkout, &id, &[("PATH", &path)]);
     terminal.keys("o");
     terminal.wait_on_screen(
         "nothing here could open it",
@@ -100,6 +109,8 @@ fn a_page_nothing_here_can_open_is_said_with_where_it_is() {
         "{:#?}",
         terminal.screen().rows
     );
+    terminal.keys("q");
+    terminal.wait_on_screen(THE_FIELD, "`q` on its page never went to the field");
     terminal.keys("q");
     assert_eq!(given_back(&mut terminal), Some(0));
 }

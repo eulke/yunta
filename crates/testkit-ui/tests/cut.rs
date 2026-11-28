@@ -33,7 +33,7 @@ const PATIENCE: Duration = Duration::from_secs(10);
 const PLANS_GATE: u64 = 78;
 
 /// How many target screens the targets' tasks write.
-const TARGETS: usize = 102;
+const TARGETS: usize = 103;
 
 /// The place the kept log names wherever a path of the recording's place stood.
 const KEPT_PLACE: &str = "/designed";
@@ -105,8 +105,8 @@ async fn the_designs_run_cut_at_the_plans_gate_reads_as_its_log_up_to_there_and_
         panic!("the first piece of news is the run read whole");
     };
     assert_eq!(events, up_to_the_gate);
-    assert_eq!(run.state, RunState::replay(&up_to_the_gate));
-    assert_eq!(run.state.head().map(|seq| seq.get()), Some(PLANS_GATE));
+    assert_eq!(*run.state(), RunState::replay(&up_to_the_gate));
+    assert_eq!(run.state().head().map(|seq| seq.get()), Some(PLANS_GATE));
     let asked = loop {
         match next(&mut following, "what the run asks").await {
             FollowNews::Run {
@@ -135,12 +135,12 @@ async fn at_every_tenth_seq_of_the_designs_run_the_follower_reads_the_replay_of_
     for seq in (10..=length).step_by(10) {
         let cut = Cut::of(&[Shown::at(Built::Designed, seq as u64)]).await;
         let (run, events) = read_whole(&cut, &design()).await;
-        let state = run.state;
+        let state = run.state();
         let kept = kept_in(&cut);
         let up_to: &[StoredEvent] = &kept[..seq];
         assert_eq!(seqs(&events), seqs(up_to), "the log cut at {seq}");
         assert_eq!(events, up_to, "the log cut at {seq}");
-        assert_eq!(state, RunState::replay(up_to), "the run cut at {seq}");
+        assert_eq!(*state, RunState::replay(up_to), "the run cut at {seq}");
         assert_eq!(state.head().map(|head| head.get()), Some(seq as u64));
     }
 }
@@ -169,7 +169,7 @@ async fn three_runs_loaded_at_their_moments_are_followed_as_one_field() {
     let heads: BTreeMap<&RunId, u64> = field
         .runs
         .iter()
-        .map(|run| (&run.run, run.state.head().map_or(0, |seq| seq.get())))
+        .map(|run| (run.run(), run.state().head().map_or(0, |seq| seq.get())))
         .collect();
     let expected: BTreeMap<&RunId, u64> = [
         (&cut.runs()[0], PLANS_GATE),

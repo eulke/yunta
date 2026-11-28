@@ -117,8 +117,7 @@ fn opening() -> Vec<Block> {
             Standing::NeverRan,
         ])
         .into(),
-        Gist("approve-plan asks you to approve the plan before anything is built.".to_string())
-            .into(),
+        Gist::new("approve-plan asks you to approve the plan before anything is built.").into(),
         Prose("Then the run builds the change and checks what it built.".to_string()).into(),
         Block::Heading("what it found".to_string()),
         checks.into(),
@@ -197,7 +196,9 @@ fn readiness() -> Checklist {
             paste: vec![
                 "runners:".to_string(),
                 "  implementer:".to_string(),
-                "    - { adapter: claude-code, model: <model> }".to_string(),
+                // Mirrors the advice Yunta gives to declare a runner, which render owns and
+                // Surco cannot read: the adapter alone, its model left to its CLI.
+                "    - { adapter: claude-code }".to_string(),
             ],
         }),
     );
@@ -216,6 +217,7 @@ fn found() -> Vec<Block> {
                 col: 5,
                 source: Some("    promt: \"Fix what lint reported.\"".to_string()),
                 len: 5,
+                marked: None,
             }),
         )
         .help([
@@ -403,8 +405,8 @@ fn fan_out_rows() -> Vec<NodeRow> {
 }
 
 /// Every block the document is made of, each once: what the golden tests
-/// and the color tests draw.
-pub(super) fn catalog() -> Doc {
+/// and the color tests draw, and what a pane is held to its rows with.
+pub(crate) fn catalog() -> Doc {
     opening()
         .into_iter()
         .chain(quoting())

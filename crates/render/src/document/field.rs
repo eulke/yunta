@@ -83,7 +83,7 @@ impl<'a> Row<'a> {
             age: row.stood(),
             reason: row.reason(Glyphs::Unicode),
             command: row.command(),
-            said: row.said(Glyphs::Unicode),
+            said: row.said(),
             furrow: frame.nodes.iter().map(|node| node.standing).collect(),
             asking: row.asking(),
         }

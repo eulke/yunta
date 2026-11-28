@@ -6,7 +6,7 @@ use surco::motion::Motion;
 use surco::paint::Paint;
 use yunta_core::port::Said;
 use yunta_core::{NodeId, SessionId, TaskId};
-use yunta_replay::frame::RunFrame;
+use yunta_replay::frame::{NodeTimes, RunFrame};
 
 use crate::watched::{node_rows, NodeFrame, NodeStanding, RunId, Standing};
 
@@ -49,7 +49,7 @@ fn working() -> NodeFrame {
 
 fn rows(node: &NodeFrame, said: Option<&Said>) -> Vec<String> {
     let frame = RunFrame::sample(&RUN);
-    node_rows(&frame, node, said, &look())
+    node_rows(&frame, node, &NodeTimes::sample(), said, &look())
         .iter()
         .map(|row| Paint::Plain.line(row))
         .collect()

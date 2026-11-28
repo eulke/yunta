@@ -122,7 +122,7 @@ impl Code {
                 .into_iter()
                 .map(|line| line.under(&under)),
         );
-        let footer = self.footer().join(&format!(" {} ", look.glyphs.sep()));
+        let footer = self.footer().join(&look.glyphs.spaced_sep());
         let rest = self.rest.as_ref().map(|rest| {
             let hidden = crate::text::counted(self.whole - self.lines.len(), "line");
             format!("{hidden} more: {rest}")

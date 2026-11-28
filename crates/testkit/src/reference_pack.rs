@@ -1,8 +1,10 @@
 //! The pack a setup installs, as the Yunta repository holds it, in a local repository a
 //! test reaches in the Yunta repository's place: `packs/fragua` copied from this checkout
-//! and committed under the binary's version tag ([`ReferencePack`]); and the environment
-//! that points git at it for the Yunta repository's URL ([`ReferencePack::reached`]), or
-//! at a directory no repository stands in ([`out_of_reach`]).
+//! and committed under the binary's version tag ([`ReferencePack`]), alone or on a commit
+//! after another, which a clone of the tag alone leaves behind; and the environment that
+//! points git at it for the Yunta repository's URL, by its path ([`ReferencePack::reached`])
+//! or by its `file://` URL, which git's own transport reads as it reads a remote, or at a
+//! directory no repository stands in ([`out_of_reach`]).
 //!
 //! Git's own `url.<base>.insteadOf` does the pointing, handed to git through the
 //! environment (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0`, `GIT_CONFIG_VALUE_0`): a
@@ -49,6 +51,24 @@ impl ReferencePack {
         }
     }
 
+    /// The Yunta repository made at `at` as [`ReferencePack::made`] makes it, on a commit
+    /// of its own before the one [`VERSION_TAG`] names: a clone of the tag alone holds one
+    /// commit of the two, a whole clone both.
+    pub fn made_with_history(at: &Path) -> ReferencePack {
+        std::fs::create_dir_all(at).expect("the repository's directory");
+        commit_git(at, &["init", "-q", "-b", crate::INITIAL_BRANCH]);
+        std::fs::write(at.join("README.md"), "the Yunta repository\n").expect("a readme");
+        commit_git(at, &["add", "-A"]);
+        commit_git(at, &["commit", "-q", "-m", "before fragua"]);
+        copied(&checked_out(), &at.join(FRAGUA));
+        commit_git(at, &["add", "-A"]);
+        commit_git(at, &["commit", "-q", "-m", "fragua"]);
+        commit_git(at, &["tag", VERSION_TAG]);
+        ReferencePack {
+            repository: at.to_path_buf(),
+        }
+    }
+
     /// Where the repository stands.
     pub fn repository(&self) -> &Path {
         &self.repository
@@ -75,7 +95,14 @@ impl ReferencePack {
 
     /// The environment that points git at this repository for [`YUNTA_REPOSITORY`].
     pub fn reached(&self) -> Vec<(String, String)> {
-        pointed_at(&self.repository)
+        pointed_at(&self.repository.display().to_string())
+    }
+
+    /// The environment that points git at this repository's `file://` URL for
+    /// [`YUNTA_REPOSITORY`]: reached through git's own transport, as a remote is, so a
+    /// clone at depth one takes what it asks, where a local path is copied whole.
+    pub fn reached_through_its_url(&self) -> Vec<(String, String)> {
+        pointed_at(&format!("file://{}", self.repository.display()))
     }
 }
 
@@ -83,17 +110,17 @@ impl ReferencePack {
 /// for [`YUNTA_REPOSITORY`]: the pack a setup installs, out of reach, and no network
 /// asked.
 pub fn out_of_reach(nowhere: &Path) -> Vec<(String, String)> {
-    pointed_at(nowhere)
+    pointed_at(&nowhere.display().to_string())
 }
 
-/// The environment that has git read `local` wherever it is asked for
+/// The environment that has git read `local`, a path or a URL, wherever it is asked for
 /// [`YUNTA_REPOSITORY`].
-fn pointed_at(local: &Path) -> Vec<(String, String)> {
+fn pointed_at(local: &str) -> Vec<(String, String)> {
     vec![
         ("GIT_CONFIG_COUNT".to_string(), "1".to_string()),
         (
             "GIT_CONFIG_KEY_0".to_string(),
-            format!("url.{}.insteadOf", local.display()),
+            format!("url.{local}.insteadOf"),
         ),
         (
             "GIT_CONFIG_VALUE_0".to_string(),

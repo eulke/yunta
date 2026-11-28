@@ -88,7 +88,7 @@ fn rests_on(
         Grounds::Failure => failed(framed, decision),
         Grounds::Scope => {
             let node = decision.on.node();
-            let record = node.and_then(|node| framed.in_view.run.state.nodes.get(node));
+            let record = node.and_then(|node| framed.in_view.run.state().nodes.get(node));
             let refused = record.map_or(&[][..], |record| record.refused.as_slice());
             let fence = FenceRefused::asked_by(escalation, refused);
             (fence.blocks(look.glyphs), Vec::new())
@@ -110,7 +110,7 @@ fn rests_on(
 /// its card in place, in `look`: its documents, the change by file, and the findings and the
 /// criteria in a line.
 fn shown(run: &RunId, framed: &Framed<'_>, decision: &WaitingDecision, look: &Look) -> Vec<Block> {
-    let state = &framed.in_view.run.state;
+    let state = framed.in_view.run.state();
     let findings = yunta_replay::receipt::findings_summary(state);
     let criteria = yunta_replay::receipt::criteria_summary(state);
     let shown = Gate::OverTheCardInPlace {
@@ -135,10 +135,11 @@ fn failed(framed: &Framed<'_>, decision: &WaitingDecision) -> (Vec<Block>, Vec<V
     let Some((failure, at)) = failure.zip(at) else {
         return (Vec::new(), Vec::new());
     };
-    let workflow = &framed.in_view.run.manifest.workflow;
+    let workflow = &framed.in_view.run.manifest().workflow;
     let failed = HowItFailed {
         failure,
         node: at,
+        times: framed.times.node(&at.id),
         declared: workflow.iter_nodes().find(|declared| declared.id == at.id),
     };
     (failed.blocks(), failed.abridged())

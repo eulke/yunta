@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use yunta_core::caution::Caution;
 use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, StoredEvent};
 use yunta_core::{Manifest, RunId};
-use yunta_replay::frame::{RunFrame, RunPhase};
+use yunta_replay::frame::{RunFrame, RunPhase, RunTimes};
 use yunta_replay::RunState;
 
 mod cancel;
@@ -245,16 +245,18 @@ pub struct AwaitingResetJson {
 }
 
 impl RunDocument {
-    /// The run as its own log describes it. `frame` is the run as the caller framed it at one
-    /// instant, with the history it read and what the run's registry says about the process
-    /// driving it. `state` is the run derived from `events`; the log is read again only for the
-    /// failures each node's diagnostics name.
+    /// The run as its own log describes it. `frame` is the run as the caller framed it, with
+    /// the history it read and what the run's registry says about the process driving it, and
+    /// `times` what the clock adds to it at the instant the document is read at. `state` is the
+    /// run derived from `events`; the log is read again only for the failures each node's
+    /// diagnostics name.
     pub fn of(
         run_id: &RunId,
         events: &[StoredEvent],
         state: &RunState,
         manifest: &Manifest,
         frame: &RunFrame,
+        times: &RunTimes,
         decision: Option<(
             yunta_core::events::DecisionOn,
             yunta_core::events::Escalation,
@@ -269,8 +271,8 @@ impl RunDocument {
             mode: frame.mode.to_string(),
             outcome: frame.standing,
             // A document reads the same whichever terminal asked for it.
-            summary: crate::progress::summary(frame, surco::glyphs::Glyphs::Unicode),
-            said: crate::state::gist(frame),
+            summary: crate::progress::summary(frame, times, surco::glyphs::Glyphs::Unicode),
+            said: crate::state::gist(frame, times),
             counts: CountsJson::of(frame),
             exit_code: exit_code(frame.standing),
             reason: reason(&frame.phase),
@@ -283,11 +285,11 @@ impl RunDocument {
             shapes_read: shapes_read(state),
             diagnostics: node_diagnostics(events),
             decision: parked_decision(run_id, decision, &frame.phase),
-            waiting_on: WaitingOnJson::of(frame),
+            waiting_on: WaitingOnJson::of(frame, times),
             awaiting_reset: awaiting_reset_of(frame),
             tokens: SpendJson::of(&state.spend()),
-            elapsed_secs: frame.elapsed.map(|elapsed| elapsed.as_secs_f64()),
-            time: TimeJson::of(&frame.time),
+            elapsed_secs: times.elapsed.map(|elapsed| elapsed.as_secs_f64()),
+            time: TimeJson::of(&times.time),
             changed: state.current_change().cloned(),
             branch: BranchJson::of(manifest, run_id),
             pull_requests: PullRequestJson::all_of(frame),

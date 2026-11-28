@@ -4,7 +4,6 @@
 use std::time::Duration;
 
 use surco::doc::Depth;
-use surco::glyphs::Glyphs;
 use surco::look::Look;
 use yunta_core::events::{
     AskingOpenedPayload, ChangesCountedPayload, EngineFact, EventPayload, FileChange, GateEvent,
@@ -13,9 +12,16 @@ use yunta_core::events::{
 use yunta_replay::TimeSpent;
 use yunta_testkit_core::{fixed_now, Log};
 
-use super::super::facts::time_row;
+use super::super::facts::{time_row, tokens};
 use super::super::RunScope;
-use super::{closing_of, draw, page_of, RUN};
+use super::{closing_of, draw, page_of, running_page, spend_log, RUN};
+
+#[test]
+fn the_closing_and_the_status_page_show_one_tokens_figure() {
+    let said = |page: super::Run| tokens(&page.frame);
+    assert_eq!(said(running_page()).as_deref(), Some("100 in / 0 out"));
+    assert_eq!(said(closing_of(spend_log())), said(running_page()));
+}
 
 /// The row of `drawn` that opens on `start`, trimmed.
 fn row(drawn: &str, start: &str) -> Option<String> {
@@ -123,19 +129,19 @@ fn time_is_said_only_where_a_person_weighed_in_it() {
         ..TimeSpent::default()
     };
     assert_eq!(
-        time_row(&spent(4440, 23_220), Glyphs::Ascii).as_deref(),
-        Some("1h14m at work ; 6h27m waiting on you")
+        time_row(&spent(4440, 23_220)).as_deref(),
+        Some("1h14m at work, 6h27m waiting on you")
     );
     assert_eq!(
-        time_row(&spent(0, 60), Glyphs::Ascii).as_deref(),
+        time_row(&spent(0, 60)).as_deref(),
         Some("1m00s waiting on you")
     );
-    assert_eq!(time_row(&spent(4440, 0), Glyphs::Unicode), None);
+    assert_eq!(time_row(&spent(4440, 0)), None);
     let moment = TimeSpent {
         people: Duration::from_millis(400),
         ..TimeSpent::default()
     };
-    assert_eq!(time_row(&moment, Glyphs::Unicode), None);
+    assert_eq!(time_row(&moment), None);
 }
 
 /// A wait no person has answered yet weighs as well: the log says nothing of it

@@ -122,7 +122,7 @@ fn asked_to_record(screen: &RunScreen) -> Vec<Vec<(String, String)>> {
 /// The legend `screen` stands with, as Unicode spells it.
 fn legend(screen: &RunScreen) -> String {
     let legend = screen.state().screen(&Look::plain()).legend;
-    legend.spelled(Glyphs::Unicode)
+    super::support::spelled(&legend, Glyphs::Unicode)
 }
 
 #[tokio::test]

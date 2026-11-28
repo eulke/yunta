@@ -26,11 +26,14 @@ pub struct Detected {
     pub adapters: MachineAdapters,
 }
 
-/// An ecosystem a repository is in, and what to know about building in
-/// one checkout per task there.
+/// An ecosystem a repository is in: the language its code is in, and what
+/// to know about building in one checkout per task there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ecosystem {
-    pub name: &'static str,
+    /// The language a person names the repository's code in, as a setup
+    /// says it. Not the ecosystem's name: `node` is a runtime, its code
+    /// TypeScript or JavaScript.
+    pub language: &'static str,
     /// A tip printed to the terminal, never written to config — no key
     /// for it exists in the schema.
     pub cache_tip: &'static str,

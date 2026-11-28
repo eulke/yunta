@@ -14,6 +14,13 @@ pub fn shown(path: &Path, cwd: &Path, home: Option<&Path>) -> String {
             false => inside.display().to_string(),
         };
     }
+    from_home(path, home)
+}
+
+/// `path` as a line shows it where nothing is read relative to a directory, as a place a
+/// whole screen stands in: under the home mark when it is under `home`, and whole
+/// otherwise. Not [`shown`], which shortens a path under the directory it is read from.
+pub fn from_home(path: &Path, home: Option<&Path>) -> String {
     if let Some(under) = home.and_then(|home| path.strip_prefix(home).ok()) {
         return Path::new(&HOME.to_string())
             .join(under)
@@ -35,5 +42,12 @@ mod tests {
         assert_eq!(shown("/home/ana/repo"), ".");
         assert_eq!(shown("/home/ana/.yunta/runs/X"), "~/.yunta/runs/X");
         assert_eq!(shown("/tmp/x"), "/tmp/x");
+    }
+
+    #[test]
+    fn a_place_is_shown_from_the_home_whatever_directory_it_is_read_from() {
+        let home = Some(Path::new("/home/ana"));
+        assert_eq!(from_home(Path::new("/home/ana/repo"), home), "~/repo");
+        assert_eq!(from_home(Path::new("/cut/worktree"), home), "/cut/worktree");
     }
 }

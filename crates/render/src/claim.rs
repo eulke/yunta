@@ -5,9 +5,10 @@
 
 use surco::text;
 use yunta_core::events::{Claim, ExhaustedReroute, Failure, FailureMenu, Menu};
-use yunta_core::{listed_globs, NodeId};
+use yunta_core::NodeId;
 
 use crate::found;
+use crate::pause::FailedHold;
 
 /// The claim in the words a reader sees. `menu` is the failure menu the
 /// escalation carries: when its reroutes are used up, the node's claim
@@ -50,46 +51,28 @@ pub fn question(claim: &Claim, menu: Option<&Menu>) -> String {
         (Claim::NodeFailed { node }, Some(Menu::Failure(menu))) => failed(node, &menu.failure),
         (Claim::NodeFailed { node }, _) => what_now(node),
         (Claim::ScopeAsked { .. }, Some(Menu::Scope(wait))) if !wait.paths.is_empty() => {
-            format!("It asks to touch {}", listed_globs(&wait.paths))
+            crate::pause::asks_to_touch(&wait.paths)
         }
-        (Claim::Departs { .. }, _) => departs(1),
+        (Claim::Departs { .. }, _) => crate::pause::departs(1),
         (Claim::Written(said), _) => asked_last(&text::one_line(said)),
         _ => sentence(claim, None),
     }
 }
 
-/// The question a card asks about node `node`'s `failure`.
+/// The question a card asks about node `node`'s `failure`: a loop's spent cap, what holds
+/// the run in the failure's stead ([`FailedHold::asked`]), and what now otherwise.
 fn failed(node: &NodeId, failure: &Failure) -> String {
-    match failure {
-        Failure::ScopeOwed { owed } => match owed.as_slice() {
-            [one] => format!("It asks to touch {}", listed_globs(&one.paths)),
-            _ => format!(
-                "{} ask to touch paths outside their scope",
-                text::counted(owed.len(), "task")
-            ),
-        },
-        Failure::LoopCapped { node, .. } => cap_spent(node),
-        _ => match failure.departures_owed() {
-            Some(tasks) => departs(tasks),
-            None => what_now(node),
-        },
+    if let Failure::LoopCapped { node, .. } = failure {
+        return cap_spent(node);
     }
+    FailedHold::of(failure)
+        .and_then(|hold| hold.asked())
+        .unwrap_or_else(|| what_now(node))
 }
 
 /// What a card asks of node `node` that failed.
 fn what_now(node: &NodeId) -> String {
     format!("`{node}` failed. What now?")
-}
-
-/// What a card asks of a task, or of each of `tasks`, whose session departs from the plan.
-fn departs(tasks: usize) -> String {
-    match tasks {
-        1 => "The task departs from its plan. Accept it?".to_string(),
-        _ => format!(
-            "{} depart from the plan. Accept them?",
-            text::counted(tasks, "task")
-        ),
-    }
 }
 
 /// What a loop's spent iteration cap says: loop `node` needs another iteration.

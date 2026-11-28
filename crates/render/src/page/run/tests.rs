@@ -11,7 +11,7 @@ use yunta_core::events::{
     StoredEvent, TokenUsage,
 };
 use yunta_core::{NodeId, OnFailure, Workflow};
-use yunta_replay::frame::{Declares, GateAsks, NodeFrame, NodeStanding, RunFrame};
+use yunta_replay::frame::{Declares, GateAsks, NodeFrame, NodeStanding, RunFrame, RunTimes};
 use yunta_replay::RunState;
 use yunta_testkit_core::{fixed_now, Log};
 
@@ -223,19 +223,15 @@ fn closing_of(events: Vec<StoredEvent>) -> Run {
 /// The page of the run `events` write, in the scope its frame gives.
 fn framed(events: Vec<StoredEvent>, scope: impl FnOnce(&RunFrame) -> RunScope) -> Run {
     let state = RunState::replay(&events);
-    let frame = RunFrame::of(
-        &RUN,
-        &workflow(),
-        &state,
-        None,
-        &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
-        fixed_now(),
-    );
+    let engine = yunta_replay::registry::Engine::this(yunta_core::Pid::current());
+    let frame = RunFrame::of(&RUN, &workflow(), &state, None, &engine);
+    let times = RunTimes::of(&state, &engine, fixed_now());
     Run {
         scope: scope(&frame),
         depth: Depth::Glance,
         run_id: RUN,
         frame,
+        times,
         state,
         places: places(),
         decision: None,
@@ -246,12 +242,6 @@ fn framed(events: Vec<StoredEvent>, scope: impl FnOnce(&RunFrame) -> RunScope) -
 /// The status page of the run `spend_log` writes.
 fn running_page() -> Run {
     page_of(spend_log(), RunScope::Status)
-}
-
-#[test]
-fn the_closing_and_the_status_page_show_one_tokens_figure() {
-    assert_eq!(running_page().tokens().as_deref(), Some("100 in / 0 out"));
-    assert_eq!(closing_of(spend_log()).tokens(), running_page().tokens());
 }
 
 /// A plan node's row says the plan it accepted, not what its agent said last.
@@ -343,13 +333,11 @@ fn trace_nodes() -> Vec<NodeFrame> {
             ..NodeFrame::sample(&NodeId::from_static("build"), finished())
         },
         NodeFrame {
-            people: Duration::from_secs(724),
             question_rounds: 2,
             ..NodeFrame::sample(&NodeId::from_static("ask"), paused())
         },
         NodeFrame {
             standing: Standing::NeedsYou,
-            people: Duration::from_secs(60),
             decisions: 1,
             declares: gate(),
             ..NodeFrame::sample(&NodeId::from_static("approve"), paused())
@@ -411,15 +399,20 @@ fn corrected_nodes() -> Vec<NodeFrame> {
     ]
 }
 
-/// The status page of a run whose frame holds `nodes`, read at `Depth::Full`
-/// where its trace is drawn.
-fn trace_page(nodes: Vec<NodeFrame>) -> Run {
+/// The status page of a run whose frame holds `nodes`, a person asked about
+/// each of `people` as long as it says, read at `Depth::Full`.
+fn trace_page(nodes: Vec<NodeFrame>, people: &[(&str, Duration)]) -> Run {
     let mut page = page_of(Vec::new(), RunScope::Status);
     page.depth = Depth::Full;
     page.frame = RunFrame {
         nodes,
         ..RunFrame::sample(&RUN)
     };
+    let mut times = RunTimes::sample(&page.frame);
+    for (node, waited) in people {
+        times.nodes.entry(NodeId::from(*node)).or_default().people = *waited;
+    }
+    page.times = times;
     page
 }
 
@@ -436,11 +429,9 @@ fn row_of(drawn: &str, id: &str) -> String {
 /// A wait under a second would read as `0s`, which says nothing.
 #[test]
 fn a_wait_under_a_second_is_not_said() {
-    let nodes = vec![NodeFrame {
-        people: Duration::from_millis(400),
-        ..NodeFrame::sample(&NodeId::from_static("ask"), finished())
-    }];
-    let drawn = draw(&trace_page(nodes), &Look::plain());
+    let nodes = vec![NodeFrame::sample(&NodeId::from_static("ask"), finished())];
+    let waited = [("ask", Duration::from_millis(400))];
+    let drawn = draw(&trace_page(nodes, &waited), &Look::plain());
     let ask = row_of(&drawn, "ask");
     assert!(ask.contains("finished"), "{drawn}");
     assert!(!ask.contains("waited on you"), "{ask}");
@@ -461,7 +452,10 @@ fn the_trace_says_each_nodes_rounds_returns_and_waits() {
         width: Width::of(None, Some(120)),
         ..Look::plain()
     };
-    let drawn = draw(&trace_page(nodes), &look);
+    // `ask` asked a person over its two rounds; the gate `approve` was decided once.
+    let (ask, approve) = (Duration::from_secs(724), Duration::from_secs(60));
+    let people = [("ask", ask), ("approve", approve)];
+    let drawn = draw(&trace_page(nodes, &people), &look);
     let row = |id: &str| row_of(&drawn, id);
 
     let build = row("build");

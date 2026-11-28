@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use yunta_api::Workspace;
+use yunta_core::disk::SystemDisk;
 use yunta_core::events::Channel;
 use yunta_core::{Env, ProcessSecrets, SystemIdSource};
 use yunta_testkit_core::FixedClock;
@@ -24,6 +25,7 @@ fn performer(dir: PathBuf) -> Arc<Performer> {
         secrets: Arc::new(ProcessSecrets),
         forges: Arc::new(yunta_api::DeclaredForge),
         binary: PathBuf::from("yunta"),
+        disk: Arc::new(SystemDisk),
     };
     Arc::new(Performer::new(workspace, Channel::Mcp))
 }

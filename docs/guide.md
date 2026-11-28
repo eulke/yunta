@@ -540,7 +540,7 @@ documents Yunta reads and validates
   workflow     the nodes a run executes, and how they connect
 
 next
-  yunta schema <document>          the shape to write
+  yunta schema <document>          a document's shape
   yunta schema <document> --json   the JSON Schema an editor validates against
 ```
 
@@ -682,11 +682,22 @@ node the run keeps reroutes to or reads from.
 
 ## The application at a terminal
 
-`yunta` alone, at a terminal that draws, opens Yunta's application on the field of the
-repository's runs, the run that needs you first. Through a pipe, or with `TERM=dumb`, it
-prints the field as `yunta list --runs` does. Outside a repository it opens on what to run
-instead; in a repository Yunta was never set up in, on its setup; in one with no run yet,
-on the first run, which asks what to build.
+`yunta` alone, at a terminal that draws, opens Yunta's application. Through a pipe, or
+with `TERM=dumb`, it prints the field as `yunta list --runs` does. In a repository it opens
+on the field of the repository's runs, the run that needs you first; in a repository Yunta
+was never set up in, on its setup; in one set up with no run yet, on the first request,
+which asks what to build. Outside a repository it says that Yunta works in one, and `e`
+opens the runs on this machine.
+
+Every screen stands in one frame. The top row names where you are and, at its right, how
+many of the runs followed need you and how many stalled. The last row says the keys of the
+screen, and the row above it names the run that needs you, `a` going there; right after a
+key that acts, that row says once what the act came to. `?` lists every key the screen
+takes, those the last row leaves out among them, each with what it does, and `/` opens the
+palette: what can be done from here, each row what it does, the key that does it there
+where one does, and the command that does the same at a shell, narrowed by what is typed,
+`enter` taking a row. On a screen where a line is typed every key types, `/` and `?` among
+them.
 
 The application follows runs and never runs one: a run it starts is handed to an engine
 of its own, as `yunta run --detach` hands it, and the application reads its log as
@@ -694,12 +705,63 @@ of its own, as `yunta run --detach` hands it, and the application reads its log 
 with no key to press, and a run stays followed under every screen opened over it. Leaving
 leaves every run where it stands.
 
-The last row says the keys of the screen; `?` lists them, each with what it does, and `/`
-opens the palette: what can be done from here, each row what it does, the key that does it
-there where one does, and the command that does the same at a shell, narrowed by what is
-typed, `enter` taking a row. The row above the keys names the run that needs you, and `a`
-goes there; right after a key that acts, that row says once what the act came to. On the
-field, `enter` opens the run pointed at, `w` the workflows and `m` doctor.
+The field lists the runs by what you can do about them: one asking at its terminal now,
+those that need you, the oldest first, the stalled, the ones you stopped, the ones still
+moving, and those whose log or manifest does not read back. A run's row says its handle,
+its mode, a furrow of its nodes, what holds it and how long it has stood there. From 102
+columns the run pointed at stands at a glance beside the list: its workflow, its mode and
+how it stands, how far it has come, what it spent, its slowest nodes, its branch, and what
+you can do about it, a key each; on a narrower terminal what you can do stands under the
+list. `j` and `k` move along the runs, and `enter` opens the one pointed at. `space` marks
+a run, and `x` closes the marked runs, or the one pointed at, after one confirmation that
+names each, and each it leaves open with why; `r` resumes the run pointed at where it can
+be resumed, `c` stops it where it moves, once you confirm, and `s` opens what it cost. `d`
+lists the closed runs too, and `e` the runs of the whole machine; each again goes back.
+Outside a repository the field stands at the machine's reach alone. `w` opens the
+workflows and `m` the machine. `esc` does nothing there, and `q` leaves.
+
+`n` opens a new run wherever nothing is typed and no prompt stands, in a repository Yunta
+was set up in, and the field's first row says so; elsewhere nothing names a new run.
+
+The first request asks what you want to build over the box you type in, which shows what a
+request reads like while it is empty, and lists under it the workflows this repository can
+run, each with what it does. Every key types there: `enter` goes on to a new run with what
+is typed, and `esc` goes to the field, which takes the first request's place. With no run
+yet the field holds its first row alone, and `n` there asks the same question for a new
+run. A run started elsewhere meanwhile shows in the counts at the top and in the row over
+the keys, and what is typed stays.
+
+A new run is one screen with a row for the request, the workflow, each other input the
+workflow takes, its mode and the adapter, which open on what `yunta run` takes when none is
+named, and under them what the chosen workflow runs in the chosen mode and where it stops
+for you. `tab` and `shift-tab` move from row to row; on a row that is typed every key
+types, `↑` and `↓` move along the workflows, and `←` and `→` change the mode or the adapter.
+The adapter row offers the adapters the runners in `config.yaml` name, so where they name
+none it holds only the runners' own choice. The workflows that ran most here stand first.
+From 102 columns, beside the rows, stand what the chosen workflow usually took here and
+what this machine answers for; on a narrower terminal, what of the machine stands in the
+way of the run stays under the rows. `enter` starts the run `yunta run --detach` would
+start with the same choices, and its screen takes the new run's place; what `yunta run`
+would refuse, an input left empty, is said under that input's row. `esc` goes back with
+what was typed kept: in the first request's line, or for the next new run.
+
+A setup is one screen of what the repository was found to be, a fact a row, who would do
+its work, a role a row with its adapters in order, and the row that writes it all, where
+the pointer starts. `j` and `k` move along the rows that change: `enter` on the name or the
+base opens a line typed under it, where an empty line keeps what stands, and on a role the
+adapters this machine answers for, `←` and `→` choosing one, `enter` taking it and then a
+line for its model, which an empty line leaves to the adapter's CLI; `esc` gives the row
+back. A role keeps the other adapters after the one taken, in the order they were found.
+The `workflow` row says whether the setup fetched `yunta/fragua` from the Yunta repository
+at the tag of this binary's version, or why it could not. `enter` on the last row writes
+what `yunta init -i` writes with the same answers. Where the pack was fetched it first
+shows the pack's audit, as `yunta pack add` shows it before it installs, which the arrows
+scroll and `esc` leaves for the rows; `enter` there asks once, naming what is written and
+the commands that do the same at a shell, and `enter` installs the pack and writes the
+setup, where `esc` writes the setup without it. What was written stands then, with what
+the installed pack still needs of the project, and `enter` goes on to the first request.
+`q` leaves with nothing written, and `a` opens the run the row above the keys names over
+the setup, which `q` comes back to.
 
 A run's screen says across its top how the run stands and how far it has come; from 102
 columns its nodes stand beside what is shown, and its foot says what the run has spent.
@@ -719,13 +781,13 @@ run. The arrows, `PgUp`, `PgDn`, `Home`, `End` and the space bar move through wh
 it names, in place of this one. `r` continues the run from its log and `x` closes it where
 the last row names them; elsewhere the palette takes them where the run offers them. On a
 run with no room left on the disk, `u` opens upkeep over it, which makes room once you
-confirm it. `s` and `g` open its numbers and its graph, `o` its page in a browser, and,
-where no prompt stands in place, `n` starts a new run. `c` stops the run, `e` writes the
-receipt of a run that finished, and `v` verifies the evidence of a run that finished or
-whose log broke: the palette lists them with their keys. The palette also opens the run's
-whole chronicle, every moment of it as `yunta status <run> --follow` says each, the newest
-last, which keeps to its end the same way. `q` and `esc` leave the run for the field, which
-says until the next key whether the run keeps going, waits on someone or ended.
+confirm it. `s` and `g` open its numbers and its graph, and `o` its page in a browser. `c`
+stops the run, `e` writes the receipt of a run that finished, and `v` verifies the evidence
+of a run that finished or whose log broke: the palette lists them with their keys. The
+palette also opens the run's whole chronicle, every moment of it as
+`yunta status <run> --follow` says each, the newest last, which keeps to its end the same
+way. `q` and `esc` leave the run for the field, which says until the next key whether the
+run keeps going, waits on someone or ended.
 
 A run that finished shows its receipt: its criteria, its baseline, its scope, its review and
 its event chain, each checked, then what it cost, what it changed and its pull request, and,
@@ -753,12 +815,31 @@ says who answered. A run parked on a child run it started shows the child in its
 trail naming the run and the node that started the child before it: there `esc` goes up to
 the run, pointed at that node, and `f` shows the child again.
 
-On a page opened over a run or the field, `esc` goes back where you came from, and `q`
-leaves, as `q` and `esc` do on the field. Ctrl-C leaves with the code an interrupt exits
-with, and Ctrl-Z stops it as any program, `fg` bringing it back.
+The workflows, which `w` opens, list what this repository can run, the most run here first,
+with what the one pointed at does beside them: `enter` opens a new run of it, `c` checks it
+as `yunta check` does, `g` draws its graph and `h` reads its past runs; `n` asks for a new
+workflow, `t` runs the repository's cases, `p` opens the packs and `s` the shapes of the
+documents Yunta reads. On the packs, `a` audits the one pointed at, `u` updates it, `x`
+removes it, `i` installs one and `n` writes a new one. The machine, which `m` opens, shows
+what `yunta doctor` checks, `f` every check on its own row and `s` a session per binding
+once you confirm what it spends; there `u` opens upkeep, whose `c` removes what `yunta gc`
+removes once you confirm it. A run's numbers, its graph, its whole chronicle, its receipt,
+its verification and its page for a browser are pages too. A page stands in the frame of
+the screen it was opened over, its counts and the row above the keys included: `esc` goes
+back where you came from, and `q` goes down to the field under it, or back to the screen
+the application opened on where no field stands under it. `n` and `a` act on a page as
+anywhere, but where the page takes the key for an act of its own, as the workflows and the
+packs do.
+
+`q` leaves the application from the field and a setup; outside a repository `q` and `esc`
+leave. Ctrl-C leaves from anywhere, with the code an interrupt exits with, and Ctrl-Z
+stops it as any program, `fg` bringing it back.
 
 It needs 60 columns by 14 rows, and says so under them. It never takes the mouse:
-selecting and copying text works as at the shell.
+selecting and copying text works as at the shell. Where the glyphs are ASCII
+([compatibility](compatibility.md#glyphs)), every text a screen shows takes its ASCII
+form, so each row ends at the terminal's edge; a page a command prints keeps every
+character it holds.
 
 ## Reviewing what a gate approves
 

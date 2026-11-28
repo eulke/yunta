@@ -1,13 +1,22 @@
 //! The walk: from the application as it opens, and as it opens on each step the
-//! recordings answer the opening of ([`Recordings::opened_on`]), every stroke, what a
-//! terminal of a few rows laid out of the screen, each page a surface could not show,
-//! every recorded piece of news and answer of each piece of work a state waits on, and
-//! every recorded piece of what it follows ([`Recordings::followed`]), applied to every
-//! state it reaches. Each state is walked once, kept by its screen, the kinds of work it
-//! waits on, the rows its regions are scrolled to, where a run's pane or the page of its
-//! numbers stands and whether the last layout left it anything to scroll, the stages it has
-//! yet to open and what it follows. Its clock stands still at one instant: what time changes on a screen is each
-//! stage's own tests'.
+//! recordings answer the opening of ([`Recordings::opened_on`]), every stroke, what a terminal
+//! of a few rows laid out of the screen, each page
+//! a surface could not show, every recorded piece of news and answer of each piece of work a
+//! state waits on, and every recorded piece of what it follows ([`Recordings::followed`]),
+//! applied to every state it reaches. Each state is walked once, kept by its screen, the
+//! kinds of work it waits on, the rows its regions are scrolled to, where a run's pane or the
+//! page of its numbers stands and whether the last layout left it anything to scroll, the
+//! stages it has yet to open and what it follows. Its clock stands still at one instant: what
+//! time changes on a screen is each stage's own tests'.
+//!
+//! The palette and help are opened over each state too, and a box the walk has not met yet is
+//! kept as a state of its own, which every check holds as it holds any: kept by the box, the
+//! stage it stands over and the rows around it a box lays out among, and walked no further.
+//! Once an opening is walked whole, each row of each palette it met is taken over the first
+//! state it met that palette over, and a state a row leads to that no other way reached is
+//! kept and held as any, and walked no further: what only a palette's row leads to, a run's
+//! whole chronicle and the pages over a setup, the signpost or a run, is reached, its own way
+//! on left to the stages' tests, which the walk's bound has no room for.
 //!
 //! What is followed is recorded by place and handed to every state that follows it,
 //! whatever the state waits on, as a following hands it under no ticket. The state's fold
@@ -21,25 +30,33 @@
 //! a terminal's layout is its test's, which hands one walk both, so every state is reached
 //! once for all of them. Each holds the states on a thread of its own, in the order the
 //! walk reached them, while the cores expand the states after them (`checking`). A state
-//! that breaks one is named with the inputs that reach it ([`Reached`]).
+//! that breaks one is named with the inputs that reach it ([`Reached`]). What it reached is
+//! counted by class as it keeps each state ([`classes`]). How it tells a state apart is
+//! `seen`'s, and the moves it makes on one, a palette's rows among them, `moves`'.
 
 mod checking;
+pub mod classes;
 pub mod interface;
+mod moves;
+mod seen;
+mod strokes;
 
-use std::collections::{BTreeSet, HashSet, VecDeque};
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 use surco::doc::Block;
 use surco::surface::Markdown;
-use yunta_ui::prompt::Stroke;
 use yunta_ui::{Address, Input, Request, State};
 
 use crate::recorded::Recordings;
 use crate::sandbox::now;
 use crate::terminal::laid_out;
 use checking::{HandedOn, Kept, Unchecked};
+use classes::Walked;
+use moves::{Move, OPENS_HELP, OPENS_THE_PALETTE};
+use seen::{opens_a_box, Seen};
+use strokes::strokes;
 
 /// The most states the walk visits before it calls the application endless: near a third
 /// past the some 97,600 its openings reach, the runs whose scenes it opens among them, each
@@ -47,12 +64,6 @@ use checking::{HandedOn, Kept, Unchecked};
 /// it, and counted in states rather than seconds so the bound holds alike on a fast machine
 /// and on a slow runner beside the rest of the suite.
 const MOST_STATES: usize = 130_000;
-
-/// Each character a stage binds, and one no stage binds.
-const KEYS: [char; 25] = [
-    'q', 'j', 'k', ' ', 'r', 'c', 'x', 'a', 'd', 'f', 'w', 'p', 'n', 't', 'i', 'u', 'e', 'v', 'o',
-    's', 'g', 'h', 'm', '1', 'z',
-];
 
 /// The states the walk expands at once for each of the machine's cores: enough that every
 /// core has work while the slowest finishes its share, few enough that what they come to
@@ -133,61 +144,10 @@ struct Step {
     input: String,
 }
 
-/// How the walk tells a state apart: a fingerprint of its screen as Markdown draws it, the
-/// kinds of work it waits on, the rows its regions are scrolled to, where a run's pane
-/// stands, the stages it has yet to open and what it follows; and that Markdown, which the
-/// checks read.
-struct Seen {
-    fingerprint: u64,
-    markdown: String,
-}
-
-impl Seen {
-    /// How the walk tells `state` apart.
-    fn of(state: &State) -> Seen {
-        let screen = state.screen(&Markdown.look());
-        let markdown = Markdown.screen(&screen);
-        // What it waits on, by kind: the walk answers every piece of work of one kind
-        // with the same recorded outcomes, whichever run it names.
-        let kinds: BTreeSet<u64> = state
-            .waiting_on()
-            .iter()
-            .map(|(_, work)| {
-                let mut kind = DefaultHasher::new();
-                work.kind().hash(&mut kind);
-                kind.finish()
-            })
-            .collect();
-        // Where each region is scrolled to, which Markdown, drawing every line, does not say.
-        let tops = (
-            screen.main.sight.top,
-            screen.side.as_ref().map(|side| side.region.sight.top),
-        );
-        // Where a run's pane or the page of its numbers stands, and whether the last layout
-        // left it anything to scroll, which no row of either screen says: a state a surface
-        // laid out is told from the one it left, so the keys that scroll are tried where they
-        // move something.
-        let pane = state.pane().map(|pane| (pane.to(), pane.scrolls()));
-        // The stages a step opened the application on, which no screen shows before it
-        // first stands somewhere: each opening's own. A stage keeps no hash of its own, so
-        // they are told apart as they say themselves, and only where there are any.
-        let stages = state.stages_to_open();
-        let to_open = (!stages.is_empty()).then(|| format!("{stages:?}"));
-        // What it follows, which the news it is handed are chosen by.
-        let followed = state.followed();
-        let mut fingerprint = DefaultHasher::new();
-        (&markdown, kinds, tops, pane, to_open, followed).hash(&mut fingerprint);
-        Seen {
-            fingerprint: fingerprint.finish(),
-            markdown,
-        }
-    }
-}
-
-/// An input handed to a state on a core of its own, and what the state came to; nothing
-/// where it panicked.
+/// A move made on a state on a core of its own, and what the state came to; nothing where it
+/// panicked.
 struct Handed {
-    input: Input,
+    moved: Move,
     came: Option<Came>,
 }
 
@@ -200,11 +160,15 @@ struct Came {
 }
 
 /// The walk over what `recordings` answer. Not the states it reaches: it keeps a
-/// fingerprint of each and the step that first reached it.
+/// fingerprint of each, the step that first reached it and its class.
 pub struct Walk<'r> {
     recordings: &'r Recordings,
     fingerprints: HashSet<u64>,
+    /// Each palette whose rows the walk took, by its rows: a palette's rows are taken over the
+    /// first state the walk meets it over.
+    palettes: HashSet<u64>,
     steps: Vec<Step>,
+    walked: Walked,
 }
 
 impl<'r> Walk<'r> {
@@ -213,18 +177,20 @@ impl<'r> Walk<'r> {
         Walk {
             recordings,
             fingerprints: HashSet::new(),
+            palettes: HashSet::new(),
             steps: Vec::new(),
+            walked: Walked::default(),
         }
     }
 
     /// Every state reachable from the application as it opens, then from it opened on
     /// each step the recordings name, each state held by every one of `checks` as it is
-    /// reached and as an input is handed to it; how many states it reached. Each opening is
-    /// walked whole before the next: a state is kept by what shows, so walking them side by
-    /// side would let an opening on a step reach first a screen the opening reaches, with
-    /// other stages under it, and leave unwalked what only the opening's way on from it
-    /// reaches.
-    pub fn walked(mut self, checks: &mut [&mut dyn Checks]) -> usize {
+    /// reached and as an input is handed to it; what it reached, how many states and how many
+    /// of them in each class. Each opening is walked whole before the next: a state is kept
+    /// by what shows, so walking them side by side would let an opening on a step reach first
+    /// a screen the opening reaches, with other stages under it, and leave unwalked what only
+    /// the opening's way on from it reaches.
+    pub fn walked(mut self, checks: &mut [&mut dyn Checks]) -> Walked {
         let opened_on = self.recordings.opened_on().iter().map(|step| {
             let opened = State::opened_on(now(), step).expect("a stage takes the step");
             (format!("opened on {step:?}"), opened)
@@ -237,14 +203,15 @@ impl<'r> Walk<'r> {
             self.recordings
                 .carried_out(&requests, &self.opening(&opening));
             let seen = Seen::of(&opened);
-            if let Some(first) = self.kept(seen.fingerprint, None, move || opening) {
+            if let Some(first) = self.kept(seen.fingerprint, &opened, None, move || opening) {
                 for checks in checks.iter_mut() {
                     checks.reached(&opened, &seen.markdown, &self.reached_at(first));
                 }
                 self.walked_from(first, opened, checks);
             }
         }
-        self.steps.len()
+        self.walked.states = self.steps.len();
+        self.walked
     }
 
     /// Every state reachable from `opened`, reached at `first`, walked breadth first. The
@@ -259,23 +226,27 @@ impl<'r> Walk<'r> {
         let cores = std::thread::available_parallelism().map_or(1, NonZeroUsize::get);
         let mut frontier = VecDeque::from([(first, opened)]);
         let mut unchecked = Unchecked::default();
+        let mut palettes_met = Vec::new();
         while !frontier.is_empty() {
             let taken = frontier.len().min(cores * EXPANDED_PER_CORE);
             let expanding: Vec<(usize, State)> = frontier.drain(..taken).collect();
             let last = std::mem::take(&mut unchecked);
             let handed =
                 self.handed_on_every_core(&expanding, cores, || self.checked(&last, checks));
-            for (to, ((at, _), handed)) in expanding.iter().zip(handed).enumerate() {
-                for Handed { input, came } in handed {
-                    let reached = self.at(*at, &input);
+            for (to, ((at, state), handed)) in expanding.iter().zip(handed).enumerate() {
+                let handed = self.rows_kept(&mut palettes_met, (*at, state), handed);
+                for Handed { moved, came } in handed {
+                    let reached = self.at(*at, &moved);
                     let Some(Came { asked, seen, next }) = came else {
                         panic!("an input panicked, reached by:\n{}", reached.inputs())
                     };
                     self.recordings.carried_out(&asked, &reached);
                     let kept = next.and_then(|next| {
-                        let named = || format!("{input:?}");
-                        let place = self.kept(seen.fingerprint, Some(*at), named)?;
-                        frontier.push_back((place, next.clone()));
+                        let named = || moved.named();
+                        let place = self.kept(seen.fingerprint, &next, Some(*at), named)?;
+                        if !opens_a_box(&next) {
+                            frontier.push_back((place, next.clone()));
+                        }
                         Some(Kept {
                             place,
                             state: next,
@@ -284,7 +255,7 @@ impl<'r> Walk<'r> {
                     });
                     unchecked.handed.push(HandedOn {
                         to,
-                        input,
+                        moved,
                         asked,
                         kept,
                     });
@@ -293,6 +264,7 @@ impl<'r> Walk<'r> {
             unchecked.expanded = expanding;
         }
         self.checked(&unchecked, checks);
+        self.palettes_taken(palettes_met, checks);
     }
 
     /// Each input each of `expanding` can be handed, handed to it on `cores` threads, and
@@ -324,22 +296,22 @@ impl<'r> Walk<'r> {
         })
     }
 
-    /// Each input `state` can be handed, handed to a copy of it: what the copy came to and
+    /// Each move the walk makes on `state`, made on a copy of it: what the copy came to and
     /// asked, and how it is seen; the copy itself only where no state reached so far is
     /// seen the same.
     fn handed_to(&self, state: &State) -> Vec<Handed> {
-        self.inputs(state)
+        self.moves(state)
             .into_iter()
-            .map(|input| {
+            .map(|moved| {
                 let mut next = state.clone();
-                let came = catch_unwind(AssertUnwindSafe(|| next.update(input.clone())))
+                let came = catch_unwind(AssertUnwindSafe(|| moved.made(&mut next)))
                     .ok()
                     .map(|asked| {
                         let seen = Seen::of(&next);
                         let next = (!self.fingerprints.contains(&seen.fingerprint)).then_some(next);
                         Came { asked, seen, next }
                     });
-                Handed { input, came }
+                Handed { moved, came }
             })
             .collect()
     }
@@ -353,12 +325,16 @@ impl<'r> Walk<'r> {
         }
     }
 
-    /// How the walk comes to `input` handed to the state at `at`.
-    fn at<'a>(&'a self, at: usize, input: &'a Input) -> Reached<'a> {
+    /// How the walk comes to `moved` made on the state at `at`.
+    fn at<'a>(&'a self, at: usize, moved: &'a Move) -> Reached<'a> {
+        let then = match moved {
+            Move::Input(input) => Then::Handed(input),
+            Move::PaletteRow { .. } => Then::Named(moved.named()),
+        };
         Reached {
             steps: &self.steps,
             last: Some(at),
-            then: vec![Then::Handed(input)],
+            then: vec![then],
         }
     }
 
@@ -371,18 +347,21 @@ impl<'r> Walk<'r> {
         }
     }
 
-    /// A state told apart by `fingerprint`, reached by the input `named` names handed to the
-    /// state at `from`, kept where it is new: its place among the steps, the input named then
-    /// and only then. Nothing where a state seen the same was reached first.
+    /// `state`, told apart by `fingerprint`, reached by the input `named` names handed to the
+    /// state at `from`, kept where it is new and counted in its class: its place among the
+    /// steps, the input named then and only then. Nothing where a state seen the same was
+    /// reached first.
     fn kept(
         &mut self,
         fingerprint: u64,
+        state: &State,
         from: Option<usize>,
         named: impl FnOnce() -> String,
     ) -> Option<usize> {
         if !self.fingerprints.insert(fingerprint) {
             return None;
         }
+        self.walked.kept(state);
         let input = named();
         self.steps.push(Step { from, input });
         let place = self.steps.len() - 1;
@@ -407,6 +386,7 @@ impl<'r> Walk<'r> {
         let stroked = waiting.len() <= STROKED_WHILE_WAITING;
         let strokes = strokes()
             .into_iter()
+            .chain([OPENS_THE_PALETTE, OPENS_HELP])
             .filter(|stroke| !(typing && stroke.types()))
             .filter(|_| stroked)
             .map(Input::Stroke);
@@ -439,31 +419,6 @@ impl<'r> Walk<'r> {
             .chain(news)
             .collect()
     }
-}
-
-/// Every stroke but typing, and typing each key of [`KEYS`].
-fn strokes() -> Vec<Stroke> {
-    let mut strokes = vec![
-        Stroke::Enter,
-        Stroke::PastedBreak,
-        Stroke::Backspace,
-        Stroke::Delete,
-        Stroke::Left,
-        Stroke::Right,
-        Stroke::Home,
-        Stroke::End,
-        Stroke::PageUp,
-        Stroke::PageDown,
-        Stroke::Decline,
-        Stroke::Interrupt,
-        Stroke::Up,
-        Stroke::Down,
-        Stroke::Tab,
-        Stroke::BackTab,
-        Stroke::Ignored,
-    ];
-    strokes.extend(KEYS.map(Stroke::Insert));
-    strokes
 }
 
 /// Whether `state`'s screen shows a list narrowed by what was typed.

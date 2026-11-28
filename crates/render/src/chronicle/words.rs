@@ -102,9 +102,10 @@ fn run_words(happening: &run::happening::Happening, glyphs: Glyphs) -> (Option<M
 fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark>, String) {
     use node::happening::Happening as H;
     match happening {
+        // The moment a runner resolves, no session has reported a model yet.
         H::RunnerResolved(it) => (
             None,
-            format!("{} on {}/{}", it.runner, it.chosen.adapter, it.chosen.model),
+            crate::runner::on(&it.runner, &it.chosen.adapter, it.chosen.model.as_ref()),
         ),
         H::Reached { state, elapsed, .. } => {
             let display = NodeDisplay::of(yunta_replay::frame::node_word(state), Some(state));

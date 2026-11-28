@@ -1,7 +1,8 @@
 //! The field moving with no key pressed while other processes move its runs: a run started
 //! detached comes under what runs and parks on its gate under needs you, which the tally
 //! and the attention row say; answered from a shell, it leaves needs you, and it goes among
-//! the closed once it finishes; a run a shell cancels moves under what is stopped; a run
+//! the closed once it finishes, which `d` lists; a run a shell cancels moves under what is
+//! stopped; a run
 //! whose engine is killed moves under stalled, its log holding nothing past the kill. Each
 //! move is read once the one before it stands, the run held by a word between the two, and
 //! every run's engine is another process's, never the application's.
@@ -33,8 +34,28 @@ const RUNNING: &str = "running";
 /// The heading of the runs that wait on a decision.
 const NEEDS_YOU: &str = "needs you, oldest first";
 
-/// The headings the field groups its open runs under, each a row of its own.
-const GROUPS: [&str; 5] = ["asking now", NEEDS_YOU, "stalled", "stopped", RUNNING];
+/// How the tally counts one run that needs the person, by its mark, as it does at every
+/// width: where a repository's long path leaves the row no room, its words give way.
+const NEEDS_YOU_COUNTED: &str = "◆ 1";
+
+/// The mark the tally counts the runs that need the person by.
+const NEEDS_YOU_MARK: &str = "◆";
+
+/// How the tally counts one run stalled, by its mark.
+const STALLED_COUNTED: &str = "▲ 1";
+
+/// The heading of the runs that closed, which the field lists once `d` asks for them.
+const CLOSED: &str = "closed";
+
+/// The headings the field groups its runs under, each a row of its own.
+const GROUPS: [&str; 6] = [
+    "asking now",
+    NEEDS_YOU,
+    "stalled",
+    "stopped",
+    RUNNING,
+    CLOSED,
+];
 
 /// The binary these tests run.
 fn yunta() -> &'static Path {
@@ -158,8 +179,14 @@ fn a_run_started_detached_comes_under_what_runs_then_parks_under_needs_you() {
     let checkout = repository(&hold);
     let done = yunta_at!(&checkout, &["run", "done.yaml"]);
     assert!(done.status.success(), "{}", stderr(&done));
+    let done = full_run_id(&checkout.home, &run_id_from(&done));
     let mut terminal = opened(&checkout);
-    terminal.wait_on_screen("1 closed", "the field never counted its closed run");
+    terminal.keys("d");
+    wait_until_shown(
+        &terminal,
+        |screen| group_of(screen, &done) == Some(CLOSED),
+        "the field never listed its closed run",
+    );
 
     let id = started_detached(&checkout);
     wait_until_shown(
@@ -176,7 +203,7 @@ fn a_run_started_detached_comes_under_what_runs_then_parks_under_needs_you() {
         &terminal,
         |screen| {
             group_of(screen, &id) == Some(NEEDS_YOU)
-                && tally(screen).contains("1 needs you")
+                && tally(screen).contains(NEEDS_YOU_COUNTED)
                 && attention(screen).contains(&named)
         },
         "the run parked never moved under needs you, counted and named",
@@ -194,7 +221,9 @@ fn a_run_answered_from_a_shell_leaves_needs_you_then_goes_among_the_closed() {
     let mut terminal = opened(&checkout);
     wait_until_shown(
         &terminal,
-        |screen| group_of(screen, &id) == Some(NEEDS_YOU) && tally(screen).contains("1 needs you"),
+        |screen| {
+            group_of(screen, &id) == Some(NEEDS_YOU) && tally(screen).contains(NEEDS_YOU_COUNTED)
+        },
         "the run parked never stood under needs you",
     );
 
@@ -204,7 +233,7 @@ fn a_run_answered_from_a_shell_leaves_needs_you_then_goes_among_the_closed() {
         &terminal,
         |screen| {
             group_of(screen, &id) == Some(RUNNING)
-                && !tally(screen).contains("needs you")
+                && !tally(screen).contains(NEEDS_YOU_MARK)
                 && !attention(screen).contains("needs you")
         },
         "the run answered never left needs you",
@@ -215,10 +244,11 @@ fn a_run_answered_from_a_shell_leaves_needs_you_then_goes_among_the_closed() {
     );
     run_elsewhere(&checkout, &id, &terminal);
 
+    terminal.keys("d");
     hold.give(FINISH);
     wait_until_shown(
         &terminal,
-        |screen| group_of(screen, &id).is_none() && screen.holds("1 closed"),
+        |screen| group_of(screen, &id) == Some(CLOSED),
         "the run finished never went among the closed",
     );
     terminal.keys("q");
@@ -235,7 +265,8 @@ fn a_run_cancelled_from_a_shell_moves_under_what_is_stopped() {
     wait_until_shown(
         &terminal,
         |screen| {
-            group_of(screen, &held.id) == Some("stopped") && tally(screen).contains("1 stopped")
+            group_of(screen, &held.id) == Some("stopped")
+                && tally(screen).contains("nothing needs you")
         },
         "the run cancelled never moved under what is stopped",
     );
@@ -252,7 +283,7 @@ fn a_run_whose_engine_is_killed_moves_under_stalled_with_nothing_past_the_kill()
     wait_until_shown(
         &terminal,
         |screen| {
-            group_of(screen, &held.id) == Some("stalled") && tally(screen).contains("1 stalled")
+            group_of(screen, &held.id) == Some("stalled") && tally(screen).contains(STALLED_COUNTED)
         },
         "the run whose engine was killed never moved under stalled",
     );

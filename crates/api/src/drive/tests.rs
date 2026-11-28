@@ -87,6 +87,7 @@ async fn chased() -> Chased {
             secrets: Arc::new(ProcessSecrets),
             forges: Arc::new(crate::DeclaredForge),
             binary: PathBuf::from("yunta"),
+            disk: Arc::new(yunta_core::disk::SystemDisk),
         },
     };
     let means = Means {

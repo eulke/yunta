@@ -14,17 +14,19 @@
 //! here, and a failure at any step leaves the repository as it was.
 //!
 //! Packs belong to the repository a workspace works in, not to a project's
-//! state: listing, removing or scaffolding one reads no state root. What the
-//! mechanics are is `vendor`; the policy is `policy`; what an installed pack
-//! needs from the project is `needs`; a new pack's skeleton is `scaffold`; a
-//! pack fetched, before it is installed, is `fetched`; the packs held from a
-//! read of the lock to its write are `held`.
+//! state: listing, removing or scaffolding one reads no state root. Where a
+//! pack is fetched from, a repository and the directory inside it the pack
+//! stands at, is `source`; what the mechanics are is `vendor`; the policy is
+//! `policy`; what an installed pack needs from the project is `needs`; a new
+//! pack's skeleton is `scaffold`; a pack fetched, before it is installed, is
+//! `fetched`; the packs held from a read of the lock to its write are `held`.
 
 mod fetched;
 mod held;
 mod needs;
 mod policy;
 mod scaffold;
+mod source;
 mod vendor;
 
 use std::path::{Path, PathBuf};
@@ -33,6 +35,7 @@ use yunta_core::refusal::{PackRefusal, PackVerb};
 use yunta_core::{
     CommitSha, ContentHash, PackAudit, PackLock, PackLockEntry, PackManifest, PackRef,
 };
+use yunta_engine::PackTree;
 use yunta_render::page::pack::{Cases, Listed, Needs, VendoredPack, VendoredTree};
 use yunta_render::refusal::Refused;
 
@@ -41,6 +44,7 @@ pub use fetched::FetchedPack;
 use fetched::Installing;
 use held::held;
 use policy::PackPolicy;
+use source::{Checkout, Cloned, PackSource};
 use vendor::{PackError, Swap};
 
 pub use scaffold::ScaffoldedPack;
@@ -59,27 +63,53 @@ pub struct Packs<'w> {
 }
 
 impl<'w> Packs<'w> {
-    /// Fetches the pack `source` names, `<source>[@<ref>]`, to install it:
-    /// cloned and its manifest read, then refused before anything is shown
-    /// when it is installed already, its schema range leaves this binary
-    /// out, its publisher is not allowed or its executors are denied.
-    /// `confirmed` is the person's confirmation of what it executes, given
-    /// ahead.
+    /// Fetches the pack `source` names, `<repository>[//<directory>][@<ref>]`,
+    /// to install it: the repository cloned, the pack's directory found in it,
+    /// its tree walked and its manifest read there, then refused before
+    /// anything is shown when it is installed already, its schema range leaves
+    /// this binary out, its publisher is not allowed or its executors are
+    /// denied. A repository or a ref that begins with `-` is refused before
+    /// anything is cloned; a directory that would lead out of the clone, or
+    /// that the repository does not hold, and a pack whose tree holds a
+    /// symbolic link, before anything of it is read. `confirmed` is the
+    /// person's confirmation of what it executes, given ahead.
     pub async fn fetch(
         &self,
         source: &str,
         confirmed: bool,
         stop: &Stop,
     ) -> Result<FetchedPack, Error> {
-        let (source, reference) = vendor::split_source_and_ref(source);
-        let url = vendor::clone_url(source);
-        let clone = clone_dir()?;
+        let (named, reference) = PackSource::named(source)?;
+        let checkout = reference.map_or(Checkout::Landed, Checkout::Ref);
+        self.fetch_checking_out(named, checkout, confirmed, stop)
+            .await
+    }
+
+    /// Fetches the pack `source` names as [`Packs::fetch`] does, its ref a tag
+    /// known to be one, as a setup's is: the tag alone is cloned, at depth one.
+    pub(crate) async fn fetch_tagged(
+        &self,
+        source: &str,
+        stop: &Stop,
+    ) -> Result<FetchedPack, Error> {
+        let (named, reference) = PackSource::named(source)?;
+        let checkout = reference.map_or(Checkout::Landed, Checkout::Tag);
+        self.fetch_checking_out(named, checkout, false, stop).await
+    }
+
+    /// Fetches the pack `source` names with `checkout` checked out, as
+    /// [`Packs::fetch`] says.
+    async fn fetch_checking_out(
+        &self,
+        source: PackSource,
+        checkout: Checkout<'_>,
+        confirmed: bool,
+        stop: &Stop,
+    ) -> Result<FetchedPack, Error> {
         let supervision = self.workspace.supervision(stop);
         let from = &self.workspace.dir;
-        vendor::clone_pack(&url, reference, from, clone.path(), supervision)
-            .await
-            .map_err(failed)?;
-        let manifest = vendor::read_manifest(clone.path()).map_err(failed)?;
+        let cloned = source.cloned(checkout, from, supervision).await?;
+        let manifest = vendor::read_manifest(cloned.tree().root()).map_err(failed)?;
         let pack = manifest.reference();
         refuse_vendored(&self.workspace.dir, &pack)?;
         // Policy first: a refused publisher or denied executors leave no
@@ -88,18 +118,25 @@ impl<'w> Packs<'w> {
         let policy = PackPolicy::of(&self.workspace.dir, &self.workspace.env)?;
         policy.admit_publisher(&manifest.publisher)?;
         policy.refuse_denied(&manifest, PackVerb::Install)?;
-        let installing = Installing::Added {
-            source: url,
-            reference: reference.map(str::to_string),
+        let reference = match checkout {
+            Checkout::Landed => None,
+            Checkout::Ref(reference) | Checkout::Tag(reference) => Some(reference.to_string()),
         };
-        Ok(self.fetched(clone, manifest, policy, confirmed, installing))
+        let installing = Installing::Added {
+            source: source.recorded(),
+            reference,
+        };
+        Ok(self.fetched(cloned, manifest, policy, confirmed, installing))
     }
 
     /// Fetches `reference` of the installed `pack` to update it to: cloned
-    /// from the source its lock records, and refused before anything is
-    /// shown when the lock does not name it, the ref is another pack, its
-    /// schema range leaves this binary out, its publisher is no longer
-    /// allowed or its executors are denied.
+    /// from the source its lock records, and read from the directory it
+    /// names there, and refused before anything is shown when the lock does
+    /// not name it, the source its lock records or the ref begins with `-`,
+    /// the directory leads out of the clone or is gone, the tree there holds a
+    /// symbolic link, the ref is another pack, its schema range leaves this
+    /// binary out, its publisher is no longer allowed or its executors are
+    /// denied.
     pub async fn fetch_update(
         &self,
         pack: &PackRef,
@@ -112,19 +149,12 @@ impl<'w> Packs<'w> {
             let pack = pack.clone();
             return Err(refused(PackRefusal::NotInstalled { pack }));
         };
-        let clone = clone_dir()?;
+        let source = PackSource::read(&entry.source)?;
+        let checkout = Checkout::Ref(source.reference(reference)?);
         let supervision = self.workspace.supervision(stop);
         let from = &self.workspace.dir;
-        vendor::clone_pack(
-            &entry.source,
-            Some(reference),
-            from,
-            clone.path(),
-            supervision,
-        )
-        .await
-        .map_err(failed)?;
-        let manifest = vendor::read_manifest(clone.path()).map_err(failed)?;
+        let cloned = source.cloned(checkout, from, supervision).await?;
+        let manifest = vendor::read_manifest(cloned.tree().root()).map_err(failed)?;
         if manifest.reference() != *pack {
             return Err(refused(PackRefusal::AnotherPack {
                 pack: pack.clone(),
@@ -143,7 +173,7 @@ impl<'w> Packs<'w> {
             source: entry.source,
             reference: reference.to_string(),
         };
-        Ok(self.fetched(clone, manifest, policy, confirmed, installing))
+        Ok(self.fetched(cloned, manifest, policy, confirmed, installing))
     }
 
     /// Removes the installed `pack`: its lock entry first, then its tree,
@@ -201,9 +231,10 @@ impl<'w> Packs<'w> {
 
     /// The installed `pack`'s audit, read, never run: every command, context
     /// source, permission, agent, `mcp` server, executor and path a scope
-    /// names, and each workflow's whole prompt; then whether it ships cases
-    /// of its own, each run on it. Refused when it is not vendored here.
-    /// What its cases' runs say is said through `remarks`.
+    /// names, and each workflow's whole prompt, read through its tree walked,
+    /// which a symbolic link in it fails; then whether it ships cases of its
+    /// own, each run on it. Refused when it is not vendored here. What its
+    /// cases' runs say is said through `remarks`.
     pub async fn audit(
         &self,
         pack: &PackRef,
@@ -217,37 +248,50 @@ impl<'w> Packs<'w> {
             let pack = pack.clone();
             return Err(refused(PackRefusal::NotVendored { pack, root }));
         }
+        let tree = vendor::walked(&pack_dir).map_err(failed)?;
         let manifest = vendor::read_manifest(&pack_dir).map_err(failed)?;
-        let audit = yunta_engine::audit_pack(&pack_dir, manifest);
+        let audit = yunta_engine::audit_pack(&tree, manifest);
         let cases = self.workspace.cases_run(&pack_dir, remarks, stop).await;
         Ok(AuditedPack { audit, cases })
+    }
+
+    /// Whether the repository vendors `pack` already, read here with nothing fetched: what an
+    /// add of it is refused for once fetched, which a caller that knows the pack's name reads
+    /// first, a setup among them.
+    pub fn vendors(&self, pack: &PackRef) -> bool {
+        vendored(&self.workspace.dir, pack).is_some()
     }
 
     /// A fetched pack, ready to be audited by a person and installed.
     fn fetched(
         &self,
-        clone: tempfile::TempDir,
+        cloned: Cloned,
         manifest: PackManifest,
         policy: PackPolicy,
         confirmed: bool,
         installing: Installing,
     ) -> FetchedPack {
         let workspace = self.workspace.clone();
-        FetchedPack::new(workspace, clone, manifest, policy, confirmed, installing)
+        FetchedPack::new(workspace, cloned, manifest, policy, confirmed, installing)
     }
 }
 
 /// Refused when `pack` is vendored in the repository at `dir` already: what
 /// an add is judged on when it is fetched, and again once the packs are held.
 fn refuse_vendored(dir: &Path, pack: &PackRef) -> Result<(), Error> {
-    let at = vendor::vendor_dir(dir, pack);
-    match at.exists() {
-        true => Err(refused(PackRefusal::AlreadyInstalled {
+    match vendored(dir, pack) {
+        Some(at) => Err(refused(PackRefusal::AlreadyInstalled {
             pack: pack.clone(),
             at,
         })),
-        false => Ok(()),
+        None => Ok(()),
     }
+}
+
+/// Where `pack` stands vendored in the repository at `dir`, where it does.
+fn vendored(dir: &Path, pack: &PackRef) -> Option<PathBuf> {
+    let at = vendor::vendor_dir(dir, pack);
+    at.exists().then_some(at)
 }
 
 /// A pack vendored in the repository and recorded in its lock.
@@ -292,14 +336,15 @@ pub struct AuditedPack {
     pub cases: Cases,
 }
 
-/// Vendors the clone at `clone` as `pack` under `dir` through a staging
-/// directory and records it in `lock` with the entry `entry` makes of its
-/// content hash, the lock written atomically. A tree that cannot be vendored
-/// leaves the installed pack and the lock exactly as they were, and a failure
-/// after the swap puts the installed pack back. Answers where the pack is.
+/// Vendors `clone`, the pack's tree in its clone, as `pack` under `dir`
+/// through a staging directory and records it in `lock` with the entry
+/// `entry` makes of its content hash, the lock written atomically. A tree that
+/// cannot be vendored leaves the installed pack and the lock exactly as they
+/// were, and a failure after the swap puts the installed pack back. Answers
+/// where the pack is.
 fn vendor_and_lock(
     dir: &Path,
-    clone: &Path,
+    clone: &PackTree,
     pack: &PackRef,
     mut lock: PackLock,
     entry: impl FnOnce(ContentHash) -> PackLockEntry,
@@ -334,11 +379,6 @@ fn vendored_tree(at: &Path, entry: &PackLockEntry) -> VendoredTree {
     }
 }
 
-/// A fresh, empty directory a pack is cloned into.
-fn clone_dir() -> Result<tempfile::TempDir, Error> {
-    tempfile::tempdir().map_err(|source| Failure::new(CloneDirUncreated(source)).into())
-}
-
 /// A pack command `refusal` refuses, as the API returns it.
 fn refused(refusal: PackRefusal) -> Error {
     Refused::Pack(Box::new(refusal)).into()
@@ -352,8 +392,3 @@ fn failed(error: PackError) -> Error {
         error => Failure::new(error).into(),
     }
 }
-
-/// The directory a pack is cloned into could not be made.
-#[derive(Debug, thiserror::Error)]
-#[error("failed to create a temp directory to clone into: {0}")]
-struct CloneDirUncreated(#[source] std::io::Error);

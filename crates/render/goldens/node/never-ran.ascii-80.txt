@@ -9,4 +9,4 @@ what it hands over
 . spec  not yet
 
 next
-  yunta status Q78GRR   shows the whole run
+  yunta status Q78GRR   where the run stands

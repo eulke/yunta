@@ -1,5 +1,6 @@
 //! See [`super`]. A run read at one instant: the state and frame its log
-//! derives, the decision it stopped on, and the tree and branch it works in —
+//! derives, what the clock adds to the frame there, the decision it stopped
+//! on, and the tree and branch it works in —
 //! what every page and document about a run is drawn from, read once. And the
 //! pull request a gate the run waits at published, polled on the run's forge.
 
@@ -12,20 +13,23 @@ use yunta_core::events::{
 use yunta_core::port::{ForgeUnanswered, PolledGate, PullRequestRef};
 use yunta_core::shown::ShownDocument;
 use yunta_core::NodeId;
-use yunta_replay::frame::{NodeStanding, RunFrame, WaitingOn};
+use yunta_replay::frame::{NodeStanding, RunFrame, RunTimes, WaitingOn};
 use yunta_replay::RunState;
 
 use super::OpenedRun;
 use crate::Error;
 
-/// A run read at one instant: the state and frame its log derives, the
-/// decision it stopped on, and the tree and branch it works in.
+/// A run read at one instant: the state and frame its log derives, what the
+/// clock adds to the frame there, the decision it stopped on, and the tree
+/// and branch it works in.
 ///
 /// Not render's run page, which a person reads drawn from it.
 pub struct RunReading<'p> {
     pub run: OpenedRun<'p>,
     pub state: RunState,
     pub frame: RunFrame,
+    /// What the clock adds to the frame at [`RunReading::now`].
+    pub times: RunTimes,
     /// The decision the run stopped on, rebuilt from its state and the
     /// documents its gate shows: `None` for a run that stopped on none.
     pub decision: Option<(DecisionOn, Escalation)>,
@@ -38,12 +42,12 @@ pub struct RunReading<'p> {
 }
 
 impl<'p> OpenedRun<'p> {
-    /// Where the run stands at the project's clock's instant, as replay frames
-    /// its log beside the engine its lock names: what a drawing of the run's
-    /// graph reads, with no decision rebuilt and no estimate read.
+    /// Where the run stands, as replay frames its log beside the engine its
+    /// lock names: what a drawing of the run's graph reads, with no decision
+    /// rebuilt and no estimate read.
     pub fn frame(&self) -> RunFrame {
         let state = RunState::replay(&self.events);
-        self.frame_of(&state, self.project.workspace.clock.now())
+        self.frame_of(&state)
     }
 
     /// The run as its own log describes it at the project's clock's instant.
@@ -53,7 +57,7 @@ impl<'p> OpenedRun<'p> {
         let now = project.workspace.clock.now();
         let state = RunState::replay(&self.events);
         let decision = yunta_engine::current_escalation(manifest, &self.dir, &state).await?;
-        let mut frame = self.frame_of(&state, now);
+        let (mut frame, times) = self.framed(&state, now);
         frame.prior = project.budget_prior(manifest, &frame, &self.events).await;
         let bound = state.run.checkout().map(Path::to_path_buf);
         let tree = project.run_tree(manifest, bound.as_deref(), &self.id, &project.workspace.dir);
@@ -62,6 +66,7 @@ impl<'p> OpenedRun<'p> {
             run: self,
             state,
             frame,
+            times,
             decision,
             tree,
             now,
@@ -129,12 +134,20 @@ impl<'p> OpenedRun<'p> {
         PullRequestRef::of_handle(handle).ok()
     }
 
-    /// The frame `state` derives at `now`, beside the engine the run's lock
-    /// names.
-    pub(crate) fn frame_of(&self, state: &RunState, now: DateTime<Utc>) -> RunFrame {
+    /// The frame `state` derives, beside the engine the run's lock names.
+    pub(crate) fn frame_of(&self, state: &RunState) -> RunFrame {
         let engine = self.registry().engine();
         let workflow = &self.manifest.doc.workflow;
-        RunFrame::of(&self.id, workflow, state, None, &engine, now)
+        RunFrame::of(&self.id, workflow, state, None, &engine)
+    }
+
+    /// The frame `state` derives and what the clock adds to it at `now`, both
+    /// beside the engine the run's lock names, read once for the two.
+    pub(crate) fn framed(&self, state: &RunState, now: DateTime<Utc>) -> (RunFrame, RunTimes) {
+        let engine = self.registry().engine();
+        let workflow = &self.manifest.doc.workflow;
+        let frame = RunFrame::of(&self.id, workflow, state, None, &engine);
+        (frame, RunTimes::of(state, &engine, now))
     }
 }
 

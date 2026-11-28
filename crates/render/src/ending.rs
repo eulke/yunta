@@ -10,6 +10,7 @@
 use std::time::Duration;
 
 use surco::figures::duration;
+use surco::text::agreeing;
 use yunta_core::step::NextStep;
 use yunta_core::{Pid, RunId};
 
@@ -60,6 +61,36 @@ pub fn group_refused(pgid: Pid) -> String {
 /// what the disk said.
 pub fn registry_kept(said: &str) -> String {
     format!("could not delete engine.json: {said}")
+}
+
+/// What a close leaves of what a run holds, said before a close and once it is done: the
+/// run's branch stays, holding what it did, and its checkouts go back to the project's pool.
+/// The one owner of it: the confirmation over a close and the page `yunta close` answers with
+/// both say it here. `gc` takes neither: it reclaims a run's directory and a checkout outside
+/// the pool, never a run's branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CloseLeaves {
+    /// Before a close of as many `runs`, in words that agree with how many.
+    Ahead { runs: usize },
+    /// Once a close of one run is done.
+    Done,
+}
+
+impl CloseLeaves {
+    /// What it says: `Its branch stays; its checkouts go back to the project.` before a close
+    /// of one run, `its checkouts went back to the project, and its branch stays` once done.
+    pub(crate) fn said(self) -> String {
+        match self {
+            CloseLeaves::Ahead { runs } => format!(
+                "{}; {} checkouts go back to the project.",
+                agreeing(runs, "Its branch stays", "Their branches stay"),
+                agreeing(runs, "its", "their"),
+            ),
+            CloseLeaves::Done => {
+                "its checkouts went back to the project, and its branch stays".to_string()
+            }
+        }
+    }
 }
 
 /// What a cancel or a close says of a checkout of `run` that could not go

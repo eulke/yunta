@@ -1,0 +1,9 @@
+  ␛[38;2;123;117;111mprogress    ␛[0m 12 of 15 nodes done, 1 reroute
+  ␛[38;2;123;117;111mtokens      ␛[0m 26.1M in / 1.06M out (25M cached)
+  ␛[38;2;123;117;111mtime        ␛[0m 1h12m at work, 38m51s waiting on you
+  ␛[38;2;123;117;111mslowest     ␛[0m implement 41m05s, spec 13m53s, plan 6m25s
+  ␛[38;2;123;117;111mbranch      ␛[0m yunta/run/...Q78GRR off main
+
+␛[38;2;123;117;111mwhat you can do␛[0m
+␛[1;38;2;14;12;18mc      ␛[0mstop it and everything under it
+␛[1;38;2;14;12;18ms      ␛[0mwhat it cost

@@ -12,9 +12,9 @@
 
 use surco::text::counted;
 use surco::words::{Standing, NOTHING_NEEDS_YOU};
-use yunta_core::events::{Failure, NodeState, NodeWait, OwedScope, PauseReason, UnknownKindCount};
+use yunta_core::events::{Failure, NodeState, NodeWait, UnknownKindCount};
 use yunta_core::NodeId;
-use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, WaitingOn};
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunPhase, RunTimes};
 use yunta_replay::RunState;
 
 /// A node's state as a surface shows it: the word that carries the
@@ -143,17 +143,18 @@ pub fn unknown_kinds(counts: &[UnknownKindCount]) -> Option<String> {
     ))
 }
 
-/// The sentence under a page's headline: what the run comes to, as a person reads it. `None`
-/// for a run whose word says it all.
-pub fn gist(frame: &RunFrame) -> Option<String> {
+/// The sentence under a page's headline: what the run comes to, as a person reads it, whom
+/// its engine asks at its terminal as `times` says it. `None` for a run whose word says it
+/// all.
+pub fn gist(frame: &RunFrame, times: &RunTimes) -> Option<String> {
     let blocking = frame.blocking_findings;
     Some(match (frame.standing, &frame.phase) {
         (Standing::Stalled, _) => crate::engine::STALLED.to_string(),
-        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => match &frame.asking {
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => match &times.asking {
             Some(asking) => crate::engine::asking_claim(asking),
             None => format!("it {}", Standing::NeedsYou.word()),
         },
-        (_, RunPhase::Waiting { on }) => waiting(on),
+        (_, RunPhase::Waiting { on }) => crate::pause::holding(on),
         (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
         (
             _,
@@ -178,56 +179,6 @@ pub fn gist(frame: &RunFrame) -> Option<String> {
             | RunPhase::Promoted { to: None },
         ) => return None,
     })
-}
-
-/// What holds a run parked on `on`, said as what the person's answer settles: a round, how
-/// many questions its node asks and that nothing is recorded until every one is answered; a
-/// check's red verdict, the verdict alone, which names what it judged; a loop's tasks that
-/// ask to touch paths outside their scope, or depart from the plan, that they do; any other
-/// pause, what the log parked it on.
-fn waiting(on: &WaitingOn) -> String {
-    match on.reason() {
-        Some(PauseReason::Questions { node, pending }) => asks(node, pending.as_slice().len()),
-        Some(PauseReason::NodeFailed {
-            failure: failure @ Failure::Red { .. },
-            ..
-        }) => crate::failure::headline(failure),
-        Some(PauseReason::NodeFailed {
-            failure: Failure::ScopeOwed { owed },
-            ..
-        }) => asks_to_touch(owed),
-        Some(PauseReason::NodeFailed { failure, .. }) => match failure.departures_owed() {
-            Some(1) => "a task departs from what the plan decided".to_string(),
-            Some(tasks) => format!(
-                "{} depart from what the plan decided",
-                counted(tasks, "task")
-            ),
-            None => crate::pause::parked_claim(on),
-        },
-        _ => crate::pause::parked_claim(on),
-    }
-}
-
-/// What holds a run whose loop owes a person the answers to `owed`, its tasks' requests to
-/// touch paths outside their scope: one task's, or how many tasks ask.
-fn asks_to_touch(owed: &[OwedScope]) -> String {
-    match owed {
-        [one] if one.paths.len() == 1 => "a task asks to touch a path outside its scope".into(),
-        [_] => "a task asks to touch paths outside its scope".to_string(),
-        _ => format!(
-            "{} ask to touch paths outside their scope",
-            counted(owed.len(), "task")
-        ),
-    }
-}
-
-/// What holds a run whose node `node` asks `questions` of a person in one round.
-fn asks(node: &NodeId, questions: usize) -> String {
-    let asked = format!("node `{node}` asks {}", counted(questions, "question"));
-    match questions {
-        1 => asked,
-        _ => format!("{asked}: {}", crate::prompt::round::NOTHING_KEPT),
-    }
 }
 
 /// The failure that closed the run, said as the node it happened to.

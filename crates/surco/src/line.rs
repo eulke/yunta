@@ -8,7 +8,7 @@
 
 use std::ops::Range;
 
-use crate::glyphs::{Glyphs, Mark};
+use crate::glyphs::{Glyphs, InAscii, Mark};
 use crate::width::{cell_width, truncate};
 
 /// What a span of text is to a reader, which decides its color.
@@ -168,23 +168,6 @@ impl Line {
             });
         }
         self
-    }
-
-    /// How a row a pointer moves along opens, `on` the row pointed at or not: led by the
-    /// pointer in the needs-you tone and a space, the row standing on the selection to its
-    /// region's edge; or by the blank cells they take, with no fill, so no row moves when the
-    /// pointer does. The row's words follow. Not [`Glyphs::pointer`], the glyph alone.
-    pub fn pointed(on: bool, glyphs: Glyphs) -> Line {
-        let pointer = glyphs.pointer().to_string();
-        match on {
-            true => Line::new()
-                .push(Tone::NeedsYou, pointer)
-                .plain(" ")
-                .filled(Fill::Selection),
-            false => Line::new()
-                .plain(" ".repeat(cell_width(&pointer)))
-                .plain(" "),
-        }
     }
 
     /// The row that says how many rows a list hides on one `side` of those in sight, as a
@@ -435,6 +418,17 @@ impl Line {
     }
 }
 
+/// The line with each span's text in ASCII, and its fill as it was.
+impl InAscii for Line {
+    fn in_ascii(&self) -> Self {
+        let Line { spans, fill } = self;
+        Line {
+            spans: spans.in_ascii(),
+            fill: *fill,
+        }
+    }
+}
+
 /// Where the row of `text` that starts at byte `start` ends inside `room`
 /// cells, its trailing spaces left out, and where the next row starts, past
 /// the spaces between them. It ends at its last space past byte `after`
@@ -481,6 +475,8 @@ pub(crate) fn file_url(target: &std::path::Path) -> String {
     }
     uri
 }
+
+mod pointed;
 
 #[cfg(test)]
 mod tests;

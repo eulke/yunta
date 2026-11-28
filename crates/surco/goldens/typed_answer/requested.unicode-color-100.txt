@@ -1,0 +1,5 @@
+␛[1mWhat do you want to build?␛[0m
+␛[2m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮␛[0m
+␛[2m│␛[0m ␛[2madd support for installing a pack globally␛[0m                                                       ␛[2m│␛[0m
+␛[2m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯␛[0m
+␛[2mthis becomes the brief; fragua asks before it decides for you␛[0m

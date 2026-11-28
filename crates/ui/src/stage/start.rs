@@ -1,232 +1,301 @@
-//! See [`super`]. A run started: the workflow picked off the catalog, each input it
-//! declares typed, the request typed at the first run standing in the input the
-//! workflow reads it from, then its mode and its adapter picked, each list opening on
-//! what `yunta run` takes when none is named. What is chosen is the [`RunRequest`]
-//! `yunta run` builds from the same choices. The run is admitted, created and started
-//! detached, what admission says standing on the screen, and then followed in its
-//! stage, which takes this one's place.
+//! See [`super`]. A new run: one screen holding a row for each thing a run is started with, as
+//! `yunta run` takes them: the request, in the box the first request asks it in; the workflow,
+//! among those the catalog offers that read; each other input the workflow declares, typed; its
+//! mode, among those it declares; and the adapter its sessions are pinned to, or none, for its
+//! runners to say. They stand as one Surco form, each in render's words (`page::NewRun`), and
+//! under them stands what the chosen workflow runs in the chosen mode and where it stops for the
+//! person, which moves with those two choices and with nothing else.
 //!
-//! Opened from the catalog, the workflow is picked already and no request was typed:
-//! the input the workflow reads its request from is asked as every other is. Opened from a
-//! run's screen with `n`, nothing is picked or typed: the workflow is asked first.
+//! The keys act on one row at a time, the row in focus: `tab` and `shift-tab` move it from row
+//! to row, round from the last to the first; on a typed row printable keys type and `←→` move
+//! in the line; on the workflows `↑↓` move the pointer; on the mode and the adapter `←→` change
+//! the word chosen. The screen is one a line is typed on whichever row the keys act on, so no
+//! printable key opens the palette or help here, and its legend says the keys of the row in
+//! focus first.
 //!
-//! A refusal is said where the person stands, and the questions are asked again, to
-//! change what was refused. Escape goes back to where the start was opened from: the
-//! first run, the catalog, or a run's screen.
+//! A new run opens before anything is read for it, on the workflow a step names or none, with
+//! the request typed at the first request where it was opened there (`Stage::opened_by`, every
+//! way into it); as it opens it reads the catalog, and the workflow's row stands once it lands.
+//! One left unstarted and opened again takes the catalog it is opened with, what its rows hold
+//! kept by name (`opened_again`).
+//!
+//! What the rows hold is the [`RunRequest`] `yunta run` builds from the same choices: the
+//! request stands in the input the workflow reads it from, and a workflow that reads none says
+//! so under the box; an input left empty is not named; the mode and the adapter open on what
+//! `yunta run` takes when none is named, the workflow's first mode (`Workflow::first_mode`) and
+//! no adapter, which leaves each session to the adapter its runner names. Moving to another
+//! workflow keeps what was typed for each input by its name and opens the mode on that
+//! workflow's first. The workflows stand by how often each ran in this repository, most first,
+//! then in the catalog's order, and a new run opens on the first of them.
+//!
+//! The adapters the row offers after none are those a run here can be pinned to, which the
+//! catalog's reading carries from the config the project resolved with
+//! (`Catalog::pinnable`): the ones the runners name that this binary builds, the set admission
+//! refuses any other pin by, so the row offers no choice the product is known to refuse, and
+//! where the runners name none it holds none but the first word. A pin that a runner of the
+//! chosen workflow has no candidate on is still admission's to refuse, said in place: the row
+//! does not foresee it.
+//!
+//! Beside the rows, at the right, stands what the chosen workflow usually takes and what this
+//! machine answers for ([`WhatItTakes`](yunta_render::page::WhatItTakes), in `panel`): the
+//! past runs as the catalog read them, with every workflow's history, so choosing a workflow
+//! reads nothing; and what `doctor` finds at a glance, its sessions unopened, read once as the
+//! new run opens and never again while it stands, the panel saying nothing of the machine until
+//! it lands. Where the panel gives way, what of the machine stands in the way of the chosen
+//! workflow's run stays under the rows.
+//!
+//! `enter` asks for that run: admitted, created and started detached, then followed in its
+//! stage, which takes this one's place; while it is asked, keys wait but ctrl-c. What admission
+//! refused of an input is said under that input's row until the next key, the focus moved
+//! there; any other refusal or failure in the note's place, every row as it was and nothing
+//! asked again; what refused or failed other work, the machine's reading or an act left going
+//! under the new run, is said the same way, a start under way still waited on. `esc` goes back, keeping what was typed:
+//! into the first request's line where the new run was opened there; otherwise the state keeps
+//! this new run as it was left, for the next new run to open, until a run starts.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use surco::components::{Note, Prose, Region, Screen, Sight};
+use chrono::{DateTime, Utc};
+use surco::components::{Noted, Region, Screen};
 use surco::doc::Doc;
+use surco::glyphs::Mark;
 use surco::look::Look;
-use yunta_api::{Remark, RunRequest};
+use yunta_api::RunRequest;
 use yunta_core::step::NextStep;
-use yunta_core::{AdapterId, InputName, ModeName, RunAdapter, Workflow};
+use yunta_core::{AdapterId, InputName, ModeName, RunAdapter};
+use yunta_render::page::doctor::Finding;
 use yunta_render::page::Catalog;
-use yunta_render::prompt::Escape;
+use yunta_render::refusal::Refused;
+use yunta_render::screen::NewRunRow;
 
 use super::{Stage, Want};
-use crate::prompt::{Alternative, Answerable, LineAsked, Picker, Press, Stroke};
-use crate::{Operation, Outcome};
+use crate::followed_runs::Standpoint;
+use crate::prompt::{Stroke, TypedLine};
+use crate::{FollowedRuns, Operation, Outcome};
 
-/// A run being started.
+/// A new run, its rows as they are set.
 #[derive(Debug, Clone)]
 pub struct StartStage {
-    /// What the person asked for, typed at the first run; none where the start was
-    /// opened on a workflow picked off the catalog.
-    request: Option<String>,
-    /// The workflows the repository can run.
-    catalog: Box<Catalog>,
-    /// What is chosen so far.
-    chosen: Chosen,
-    /// The question in front of the person.
-    asking: Asking,
-    /// What admission said while it admitted the run.
-    remarked: Vec<Remark>,
-    /// What refused or failed, where something did.
-    said: Option<String>,
-}
-
-/// What a run is being started with, as far as it is chosen.
-#[derive(Debug, Clone, Default)]
-struct Chosen {
-    /// The workflow by the name the catalog offers it under, and as it reads.
-    workflow: Option<(String, Box<Workflow>)>,
-    inputs: HashMap<InputName, String>,
-    /// The inputs still to ask, in the order the workflow declares them.
-    pending: Vec<InputName>,
+    /// What the person asked for, typed: what the first request held where the new run was
+    /// opened there.
+    request: TypedLine,
+    /// The workflows the repository can run, as read when the new run opened; none until it
+    /// lands.
+    catalog: Option<Box<Catalog>>,
+    /// The workflow chosen, by the name the catalog offers it under; until the catalog lands,
+    /// the one the new run was opened on, where one was; none where the catalog offers none
+    /// that reads.
+    workflow: Option<String>,
+    /// What is typed for each input other than the request, by its name, kept from workflow to
+    /// workflow.
+    inputs: BTreeMap<InputName, TypedLine>,
+    /// The mode chosen, where the workflow declares modes: its first until another is.
     mode: Option<ModeName>,
+    /// The adapter every session is pinned to; none leaves each to its runner.
+    adapter: Option<AdapterId>,
+    /// The row the keys act on.
+    focus: Row,
+    /// Whether the run is being admitted and started: keys wait.
+    starting: bool,
+    /// What refused or failed the last start, or other work it waited on, until the next key.
+    said: Option<String>,
+    /// What admission refused of the input in focus, said under its row until the next key.
+    refusal: Option<String>,
+    /// What `doctor` found of this machine as the new run opened, its sessions unopened;
+    /// none until it lands.
+    machine: Option<Vec<Finding>>,
 }
 
-/// The question in front of the person.
-#[derive(Debug, Clone)]
-enum Asking {
-    /// Which workflow, by the name the catalog offers it under.
-    Workflow(Picker<String>),
-    /// One input the workflow declares.
-    Input { name: InputName, line: LineAsked },
-    /// Which mode it starts in.
-    Mode(Picker<ModeName>),
-    /// Which adapter its sessions are pinned to, or none, for its runners to say.
-    Adapter(Picker<Option<AdapterId>>),
-    /// Nothing: the run is being admitted and started.
-    Starting,
+/// A row of a new run, as the keys reach it. Not [`NewRunRow`], what its legend says of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Row {
+    Request,
+    Workflow,
+    Input(InputName),
+    Mode,
+    Adapter,
 }
 
 impl StartStage {
-    /// A run asked for with `request`, the workflow for it yet to be picked off
-    /// `catalog`.
-    pub(crate) fn asked(request: String, catalog: Box<Catalog>) -> Self {
-        let asking = Asking::Workflow(workflows(&catalog));
+    /// A new run, nothing read for it yet and nothing typed: of the workflow the catalog offers
+    /// as `workflow` where one is named and reads, else of the first by how often each ran
+    /// here, once the catalog lands.
+    pub(crate) fn opened(workflow: Option<String>) -> Self {
         StartStage {
-            request: Some(request),
-            catalog,
-            chosen: Chosen::default(),
-            asking,
-            remarked: Vec::new(),
+            request: TypedLine::default(),
+            catalog: None,
+            workflow,
+            inputs: BTreeMap::new(),
+            mode: None,
+            adapter: None,
+            focus: Row::Request,
+            starting: false,
             said: None,
+            refusal: None,
+            machine: None,
         }
     }
 
-    /// A run of a workflow `catalog` offers, nothing chosen and nothing asked for yet: which
-    /// workflow is asked first.
-    pub(crate) fn new(catalog: Box<Catalog>) -> Self {
-        let asking = Asking::Workflow(workflows(&catalog));
+    /// A new run asked for with `request`, typed at the first request, as
+    /// [`StartStage::opened`] opens one with no workflow named.
+    pub(crate) fn asked(request: TypedLine) -> Self {
         StartStage {
-            request: None,
-            catalog,
-            chosen: Chosen::default(),
-            asking,
-            remarked: Vec::new(),
-            said: None,
+            request,
+            ..StartStage::opened(None)
         }
     }
 
-    /// A run of the workflow `catalog` offers as `name`, picked already, with its
-    /// first question in front; none where the workflow does not read.
-    pub(crate) fn picked(catalog: Box<Catalog>, name: &str) -> Option<Self> {
-        readable(&catalog, name)?;
-        let asking = Asking::Workflow(workflows(&catalog));
-        let mut start = StartStage {
-            request: None,
-            catalog,
-            chosen: Chosen::default(),
-            asking,
-            remarked: Vec::new(),
-            said: None,
+    /// This new run, left unstarted, opened again as `opening` opens one: on the workflow
+    /// `opening` names where it names one, its mode then opening on that workflow's first, as
+    /// moving to another workflow does, and with its request where one was typed there; every
+    /// other row as it was left, and the catalog and the machine read again as it opens, so it
+    /// takes the catalog it is opened with. The focus stays on the row it was left on where the
+    /// rows hold it before the catalog is read, and goes to the request otherwise.
+    pub(crate) fn opened_again(self, opening: StartStage) -> StartStage {
+        let typed = !opening.request.answer().value.is_empty();
+        let moved = opening
+            .workflow
+            .as_ref()
+            .is_some_and(|named| Some(named) != self.workflow.as_ref());
+        let mut again = StartStage {
+            request: match typed {
+                true => opening.request,
+                false => self.request,
+            },
+            mode: self.mode.filter(|_| !moved),
+            workflow: opening.workflow.or(self.workflow),
+            inputs: self.inputs,
+            adapter: self.adapter,
+            focus: self.focus,
+            ..StartStage::opened(None)
         };
-        start.picked_workflow(name.to_string());
-        Some(start)
+        if !again.rows().contains(&again.focus) {
+            again.focus = Row::Request;
+        }
+        again
     }
 
-    /// The questions as a screen: what was asked for, the question in front, what
-    /// admission said, and what refused it.
-    pub(crate) fn screen(&self, look: &Look) -> Screen {
-        let mut doc = Doc::new();
-        if let Some(request) = &self.request {
-            doc = doc.with(Prose(yunta_render::screen::asked_for(request)));
-        }
-        doc = match &self.asking {
-            Asking::Workflow(picker) => doc
-                .with(Prose(yunta_render::screen::WHICH_WORKFLOW.to_string()))
-                .with(picker.block(look)),
-            Asking::Input { line, .. } => doc.with(line.block(look)),
-            Asking::Mode(picker) => doc
-                .with(Prose(yunta_render::screen::WHICH_MODE.to_string()))
-                .with(picker.block(look)),
-            Asking::Adapter(picker) => doc
-                .with(Prose(yunta_render::screen::WHICH_ADAPTER.to_string()))
-                .with(picker.block(look)),
-            Asking::Starting => doc.with(Note(yunta_render::screen::STARTING.to_string())),
-        };
-        for remark in &self.remarked {
-            doc = doc.with(Note(crate::remark::said(remark, look.glyphs).words));
-        }
-        if let Some(said) = &self.said {
-            doc = doc.with(Note(said.clone()));
-        }
-        let mut screen =
-            Screen::new(Region::new(doc).in_sight(Sight::at_the_end_with_the_pointer()));
+    /// What the new run asks for as it opens: the workflows the repository can run, each with
+    /// its past runs, and what `doctor` finds of this machine, its sessions unopened, which
+    /// opens no session and spends no prompt.
+    pub(crate) fn opening(&self) -> Vec<Want> {
+        vec![
+            Want::Work(Operation::ReadCatalog),
+            Want::Work(Operation::Doctor { sessions: false }),
+        ]
+    }
+
+    /// What was typed as the request, as it stands: what going back to the first request puts
+    /// in its line.
+    pub(crate) fn typed_request(&self) -> TypedLine {
+        self.request.clone()
+    }
+
+    /// The new run as a screen in `look` over what `followed` keeps at `now`: its rows, the keys
+    /// on the row in focus, and what runs under them; beside them, what the chosen workflow
+    /// usually takes and what this machine answers for, and what of it stands in the way of the
+    /// run where that gives way; where it stands on the trail; the tally and the attention row,
+    /// a line typed here; and what refused or failed the last start, in the note's place.
+    pub(crate) fn screen(
+        &self,
+        look: &Look,
+        followed: &FollowedRuns,
+        now: DateTime<Utc>,
+    ) -> Screen {
+        let form = self.form(look.glyphs);
+        let mut screen = Screen::new(Region::new(Doc::new().with(form)));
+        screen.side = Some(self.panel(look));
         screen.trail = vec![
             yunta_render::screen::YUNTA.to_string(),
-            yunta_render::screen::START.to_string(),
+            yunta_render::screen::NEW_RUN.to_string(),
         ];
+        let at = Standpoint {
+            run: None,
+            typed: true,
+        };
+        (screen.tally, screen.attention) = followed.framing(at, now);
+        screen.noted = self.said.clone().map(|said| Noted {
+            mark: Mark::Failed,
+            said,
+        });
+        screen.legend = yunta_render::screen::new_run_legend(self.legend_row());
+        screen.typed = true;
         screen
     }
 
-    /// What `stroke` asks for here: what the question in front makes of it, the next
-    /// question once it is answered, and the run started once the last one is; Escape
-    /// goes back to the first run, and Ctrl-C leaves.
+    /// What `stroke` asks for here: the row in focus typed on, moved along or changed; `tab`
+    /// and `shift-tab` moving the focus; `enter` asking for the run; `esc` going back; ctrl-c
+    /// leaving. While the run is asked for, keys wait but ctrl-c.
     pub(crate) fn pressed(&mut self, stroke: Stroke) -> Vec<Want> {
-        match &mut self.asking {
-            Asking::Workflow(picker) => match picker.press(stroke) {
-                Press::Answer(name) => self.picked_workflow(name),
-                other => left(other),
-            },
-            Asking::Input { name, line } => match line.press(stroke) {
-                Press::Answer(typed) => {
-                    if !typed.value.is_empty() {
-                        self.chosen.inputs.insert(name.clone(), typed.value);
-                    }
-                    self.next_question()
-                }
-                other => left(other),
-            },
-            Asking::Mode(picker) => match picker.press(stroke) {
-                Press::Answer(mode) => {
-                    self.chosen.mode = Some(mode);
-                    self.asking = Asking::Adapter(adapters());
-                    Vec::new()
-                }
-                other => left(other),
-            },
-            Asking::Adapter(picker) => match picker.press(stroke) {
-                Press::Answer(adapter) => self.starting(adapter),
-                other => left(other),
-            },
-            Asking::Starting => match stroke {
+        if self.starting {
+            return match stroke {
                 Stroke::Interrupt => vec![Want::Leave],
                 _ => Vec::new(),
-            },
+            };
+        }
+        self.said = None;
+        self.refusal = None;
+        match stroke {
+            Stroke::Interrupt => vec![Want::Leave],
+            Stroke::Decline => vec![Want::Back],
+            Stroke::Enter => self.started(),
+            Stroke::Tab => {
+                self.focus_moved(true);
+                Vec::new()
+            }
+            Stroke::BackTab => {
+                self.focus_moved(false);
+                Vec::new()
+            }
+            stroke => {
+                self.on_the_row(stroke);
+                Vec::new()
+            }
         }
     }
 
-    /// Whether words are being typed for an input.
+    /// Whether words are typed on the row in focus: the request's or an input's, while no run
+    /// is being asked for.
     pub(crate) fn typing(&self) -> bool {
-        match &self.asking {
-            Asking::Input { line, .. } => line.typing(),
-            Asking::Workflow(_) | Asking::Mode(_) | Asking::Adapter(_) | Asking::Starting => false,
-        }
+        !self.starting && matches!(self.focus, Row::Request | Row::Input(_))
     }
 
-    /// What admission says while it admits the run, kept to stand on the screen.
-    pub(crate) fn remarked(&mut self, remark: Remark) {
-        self.remarked.push(remark);
-    }
-
-    /// What an answer to the start does: the run started is followed in its stage,
-    /// which takes this one's place; what refused or failed is said, and the questions
-    /// are asked again.
-    pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
+    /// What an answer to the work `asked` does: the run started is followed in its stage, which
+    /// takes this one's place; the catalog read is taken, what the rows hold kept by name; what
+    /// `doctor` found stands in the panel; what refused the start is said under the row it
+    /// names, or in the note's place, and what failed it in the note's place, every row as it
+    /// was and the keys acting again; what refused or failed any other work is said too, a
+    /// start under way still waited on: a reading that refused or failed leaves the new run
+    /// saying nothing of what it would have read.
+    pub(crate) fn answered(&mut self, asked: &Operation, outcome: Outcome) -> Vec<Want> {
+        let start = matches!(asked, Operation::Start { .. });
         match outcome {
             // A run another start asked for, left before it started, is not this one's.
-            Outcome::Started { run } if matches!(self.asking, Asking::Starting) => {
+            Outcome::Started { run } if self.starting => {
                 let followed = Stage::opened_by(&NextStep::status(&run));
                 followed.map(Want::Replace).into_iter().collect()
             }
             Outcome::Started { .. } => Vec::new(),
-            Outcome::Refused(refused) => self.asked_again(refused.to_string()),
-            Outcome::Failed(said) => self.asked_again(said),
+            Outcome::Catalog(catalog) => {
+                self.read(catalog);
+                Vec::new()
+            }
+            Outcome::Doctor(findings) => {
+                self.machine = Some(findings);
+                Vec::new()
+            }
+            Outcome::Refused(refused) if start => self.refused_start(refused),
+            Outcome::Failed(said) if start => self.stood_back(said),
+            Outcome::Refused(refused) => self.noting(refused.to_string()),
+            Outcome::Failed(said) => self.noting(said),
             Outcome::Repository(_)
-            | Outcome::Catalog(_)
             | Outcome::Workflow(_)
             | Outcome::Pack(_)
             | Outcome::Evidence(_)
             | Outcome::PullRequest(_)
             | Outcome::History(_)
             | Outcome::Graph(_)
-            | Outcome::Doctor(_)
             | Outcome::Collected(_)
             | Outcome::Decided { .. }
             | Outcome::Answered { .. }
@@ -234,133 +303,90 @@ impl StartStage {
             | Outcome::Cancelled { .. }
             | Outcome::Closed { .. }
             | Outcome::Detected { .. }
-            | Outcome::Initialized(_)
+            | Outcome::SetupPack { .. }
+            | Outcome::Initialized { .. }
             | Outcome::Stopped => Vec::new(),
         }
     }
 
-    /// The workflow named `name` chosen, the request standing in the input it reads it
-    /// from, and the first of its other inputs asked.
-    fn picked_workflow(&mut self, name: String) -> Vec<Want> {
-        let Some(workflow) = readable(&self.catalog, &name) else {
-            return Vec::new();
-        };
-        let mut chosen = Chosen::default();
-        for (input, spec) in &workflow.inputs {
-            match (spec.is_request(), &self.request) {
-                (true, Some(request)) if !request.is_empty() => {
-                    chosen.inputs.insert(input.clone(), request.clone());
-                }
-                (true, Some(_)) => {}
-                (true, None) | (false, _) => chosen.pending.push(input.clone()),
-            }
-        }
-        chosen.workflow = Some((name, Box::new(workflow)));
-        self.chosen = chosen;
-        self.next_question()
-    }
-
-    /// The next input to ask, or, once every one is, the mode where the workflow
-    /// declares any, and its adapter.
-    fn next_question(&mut self) -> Vec<Want> {
-        let Some((_, workflow)) = &self.chosen.workflow else {
-            return Vec::new();
-        };
-        if !self.chosen.pending.is_empty() {
-            let name = self.chosen.pending.remove(0);
-            let Some(spec) = workflow.inputs.get(&name) else {
-                return self.next_question();
-            };
-            let line = LineAsked::new(yunta_render::screen::input_asks(&name, spec));
-            self.asking = Asking::Input { name, line };
-            return Vec::new();
-        }
-        self.asking = match modes(workflow) {
-            Some(picker) => Asking::Mode(picker),
-            None => Asking::Adapter(adapters()),
-        };
-        Vec::new()
-    }
-
-    /// The run asked for with every choice made, `adapter` last: admitted, created and
-    /// started.
-    fn starting(&mut self, adapter: Option<AdapterId>) -> Vec<Want> {
-        let Some((name, _)) = &self.chosen.workflow else {
-            return Vec::new();
-        };
-        let request = RunRequest {
+    /// The run the rows ask for, as `yunta run` builds it from the same choices; none where no
+    /// workflow is chosen.
+    fn run_request(&self) -> Option<RunRequest> {
+        let (name, workflow) = self.chosen()?;
+        let inputs = workflow
+            .inputs
+            .iter()
+            .filter_map(|(input, spec)| {
+                let line = match spec.is_request() {
+                    true => Some(&self.request),
+                    false => self.inputs.get(input),
+                }?;
+                let value = line.answer().value;
+                (!value.is_empty()).then(|| (input.clone(), value))
+            })
+            .collect();
+        Some(RunRequest {
             workflow: PathBuf::from(name),
-            inputs: self.chosen.inputs.clone(),
-            mode: self.chosen.mode.clone(),
-            adapter: adapter.map(RunAdapter::Named),
+            inputs,
+            mode: self.mode.clone(),
+            adapter: self.adapter.clone().map(RunAdapter::Named),
             hermetic: false,
+        })
+    }
+
+    /// The run asked for with what the rows hold; nothing where no workflow is chosen.
+    fn started(&mut self) -> Vec<Want> {
+        let Some(request) = self.run_request() else {
+            return Vec::new();
         };
-        self.asking = Asking::Starting;
-        self.remarked.clear();
-        self.said = None;
+        self.starting = true;
         vec![Want::Work(Operation::Start { request })]
     }
 
-    /// `said` said, and the questions asked again from the workflow.
-    fn asked_again(&mut self, said: String) -> Vec<Want> {
-        self.said = Some(said);
-        self.chosen = Chosen::default();
-        self.asking = Asking::Workflow(workflows(&self.catalog));
+    /// What admission `refused` of the last start, which no longer waits, said in place: under
+    /// the row it names, the focus moved there, else in the note's place; the rows as they were.
+    fn refused_start(&mut self, refused: Refused) -> Vec<Want> {
+        let Some(row) = self.row_refused(&refused) else {
+            return self.stood_back(refused.to_string());
+        };
+        self.starting = false;
+        self.focus = row;
+        self.refusal = Some(refused.to_string());
         Vec::new()
     }
-}
 
-/// What a question's `press` asks of the stage where it did not answer: going back to
-/// where the start was opened from for one left, and leaving for Ctrl-C.
-fn left<T>(press: Press<T>) -> Vec<Want> {
-    match press {
-        Press::Decline => vec![Want::Back],
-        Press::Interrupt => vec![Want::Leave],
-        Press::Answer(_) | Press::Stay | Press::Moved => Vec::new(),
+    /// `said` said of the last start, which no longer waits: the rows as they were.
+    fn stood_back(&mut self, said: String) -> Vec<Want> {
+        self.starting = false;
+        self.noting(said)
+    }
+
+    /// `said` said until the next key, of the start or of other work the new run waited on.
+    fn noting(&mut self, said: String) -> Vec<Want> {
+        self.said = Some(said);
+        Vec::new()
+    }
+
+    /// The row in focus, as its legend says it.
+    fn legend_row(&self) -> NewRunRow<'_> {
+        match &self.focus {
+            Row::Request => NewRunRow::Request,
+            Row::Workflow => NewRunRow::Workflow,
+            Row::Mode => NewRunRow::Mode,
+            Row::Adapter => NewRunRow::Adapter,
+            Row::Input(name) => {
+                let declared = self
+                    .chosen()
+                    .and_then(|(_, workflow)| workflow.inputs.get_key_value(name));
+                match declared {
+                    Some((name, spec)) => NewRunRow::Input { name, spec },
+                    None => NewRunRow::Request,
+                }
+            }
+        }
     }
 }
 
-/// The workflows of `catalog` that read, by the names it offers them under.
-fn workflows(catalog: &Catalog) -> Picker<String> {
-    let offered = catalog
-        .offered
-        .iter()
-        .filter(|offered| offered.workflow.is_ok())
-        .map(|offered| Alternative::named(offered.name.clone(), offered.name.clone()))
-        .collect();
-    Picker::new(offered, Escape::GoesBack)
-}
-
-/// The workflow `catalog` offers as `name`, where it reads.
-fn readable(catalog: &Catalog, name: &str) -> Option<Workflow> {
-    catalog
-        .offered
-        .iter()
-        .find(|offered| offered.name == name)
-        .and_then(|offered| offered.workflow.as_ref().ok())
-        .map(|readable| readable.workflow.clone())
-}
-
-/// The modes `workflow` declares, in its order, the first first, as `yunta run` starts
-/// it when none is named; none where it declares none.
-fn modes(workflow: &Workflow) -> Option<Picker<ModeName>> {
-    let modes = workflow.modes.as_ref().filter(|modes| !modes.is_empty())?;
-    let offered = modes
-        .keys()
-        .map(|mode| Alternative::named(mode.as_str(), mode.clone()))
-        .collect();
-    Some(Picker::new(offered, Escape::GoesBack))
-}
-
-/// Every adapter this binary builds, after none, which leaves it to the runners the
-/// config names, as `yunta run` does when none is named.
-fn adapters() -> Picker<Option<AdapterId>> {
-    let named = yunta_api::machine::built_adapter_ids()
-        .into_iter()
-        .map(|adapter| Alternative::named(adapter.as_str().to_string(), Some(adapter)));
-    let as_the_runners_say = Alternative::named(yunta_render::screen::AS_THE_RUNNERS_SAY, None);
-    Picker::new(
-        std::iter::once(as_the_runners_say).chain(named).collect(),
-        Escape::GoesBack,
-    )
-}
+mod form;
+mod panel;
+mod rows;

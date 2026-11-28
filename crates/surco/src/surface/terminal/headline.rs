@@ -15,18 +15,26 @@ impl Headline {
     /// the mark's tone, padded by a space of each side it takes from what
     /// stands beside it: a layer
     /// drawing 24-bit color paints it as a badge, and every other layer draws
-    /// the same text, the word in the tone's color where that layer has one.
+    /// the same text, the word in the tone's color where that layer has one. A headline with
+    /// no word says its mark and its subject alone.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let glyphs = look.glyphs;
         let tone = Tone::of(self.mark);
-        let sep = format!(" {} ", glyphs.sep());
+        let sep = glyphs.spaced_sep();
         let mark = format!("{} ", glyphs.mark(self.mark));
         let edge = self.edge_shown(look.width.cells(), &mark, &sep);
         let room = match edge.is_empty() {
             true => look.width.cells(),
             false => look.width.cells().saturating_sub(cell_width(edge) + 2),
         };
-        let fixed = cell_width(&mark) + cell_width(&sep) + cell_width(&self.said);
+        // A headline with no word, as a run that cannot be read is named, says its mark and
+        // its subject alone: no separator and no empty pill.
+        let worded = !self.said.is_empty();
+        let word = match worded {
+            true => cell_width(&sep) + cell_width(&self.said),
+            false => 0,
+        };
+        let fixed = cell_width(&mark) + word;
         let subject = match cell_width(&self.subject) + fixed <= room {
             true => self.subject.clone(),
             false => truncate(&self.subject, room.saturating_sub(fixed), glyphs)
@@ -35,21 +43,14 @@ impl Headline {
         };
         let mut used = fixed + cell_width(&subject);
         let facts = fitting(&self.facts, &sep, &mut used, room);
-        // The space after the pill is the next fact's, or the gap's before
-        // the edge; with neither, the line ends at the word.
-        let after = match facts.is_empty() && edge.is_empty() {
-            true => "",
-            false => " ",
-        };
-        let mut line = Line::new()
+        let line = Line::new()
             .push(tone, mark.trim_end())
             .plain(" ")
-            .push(Tone::Strong, subject)
-            .push(Tone::Muted, sep.trim_end())
-            .push_filled(tone, Fill::Pill, format!(" {}{after}", self.said));
+            .push(Tone::Strong, subject);
+        let mut line = self.worded(line, &sep, facts.is_empty() && edge.is_empty());
         for (at, fact) in facts.iter().enumerate() {
-            let lead = match at {
-                0 => sep.trim_start(),
+            let lead = match (at, worded) {
+                (0, true) => sep.trim_start(),
                 _ => sep.as_str(),
             };
             line = line.push(Tone::Muted, format!("{lead}{fact}"));
@@ -60,10 +61,28 @@ impl Headline {
                 .cells()
                 .saturating_sub(used + cell_width(edge))
                 .max(2);
-            let gap = gap - usize::from(facts.is_empty());
+            let gap = gap - usize::from(worded && facts.is_empty());
             line = line.plain(" ".repeat(gap)).plain(edge);
         }
         vec![line]
+    }
+
+    /// `line` with the word after `sep`, filled as a pill in the mark's tone, where the
+    /// headline has one; the space after it is the next fact's or the gap's before the edge,
+    /// and the line ends at the word where it stands `last`.
+    fn worded(&self, line: Line, sep: &str, last: bool) -> Line {
+        if self.said.is_empty() {
+            return line;
+        }
+        let after = match last {
+            true => "",
+            false => " ",
+        };
+        line.push(Tone::Muted, sep.trim_end()).push_filled(
+            Tone::of(self.mark),
+            Fill::Pill,
+            format!(" {}{after}", self.said),
+        )
     }
 }
 
@@ -111,6 +130,20 @@ mod tests {
     use crate::glyphs::Mark;
     use crate::line::{Fill, Tone};
     use crate::look::Look;
+
+    /// A headline with no word, as a run the field cannot read is named, says its mark and
+    /// its subject alone, its edge at the far end: no separator and no pill.
+    #[test]
+    fn a_headline_with_no_word_says_its_mark_and_subject_alone() {
+        let headline = Headline::new(Mark::Failed, "unreadable", "").edge_said_elsewhere("0RPHAN");
+        let look = Look {
+            width: crate::look::Width::exact(39),
+            ..Look::plain()
+        };
+        let lines = headline.lines(&look);
+        assert_eq!(lines[0].text(), "! unreadable                     0RPHAN");
+        assert!(lines[0].spans().iter().all(|span| span.fill.is_none()));
+    }
 
     /// The standing word is the one span of a headline that is filled, as a
     /// pill in its mark's tone padded by a space of each side. The words

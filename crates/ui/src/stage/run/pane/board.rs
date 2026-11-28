@@ -65,11 +65,11 @@ impl RunStage {
             return in_the_cards_place(framed, why);
         }
         let listed = self.listed(framed, pointed);
-        let feed = self.feed_of(framed, pointed, &listed, look);
+        let feed = self.feed_of(framed, pointed, listed, look);
         if listed.is_empty() {
             return feed.into();
         }
-        let calls = chronicle::open_attempt_calls(&listed);
+        let calls = framed.in_view.open_attempt_calls(pointed);
         let heading = chronicle::feed_heading(calls, look.glyphs);
         Block::Section(Section {
             lead: None,
@@ -82,7 +82,7 @@ impl RunStage {
 /// Each task at work of the run `framed`, in the order the log registered them, its proof
 /// titled by the tasks document handed over and turning while the run moves, with its scope.
 fn tasks_at_work(framed: &Framed<'_>) -> Vec<(TaskProof, Option<TaskScope>)> {
-    let state = &framed.in_view.run.state;
+    let state = framed.in_view.run.state();
     let titles = titles(framed.in_view);
     let turned = state.head().map(|head| head.get());
     let turned = turned.filter(|_| framed.frame.moves());
@@ -147,7 +147,7 @@ fn titles(in_view: &RunInView) -> BTreeMap<TaskId, String> {
     let plan = ArtifactId::Interpreted {
         kind: ArtifactKind::Tasks,
     };
-    let latest = in_view.run.state.artifacts.latest(&plan, None);
+    let latest = in_view.run.state().artifacts.latest(&plan, None);
     let producer = latest.and_then(|held| held.producer.as_ref());
     let handed = producer.and_then(|producer| in_view.handed_over.get(producer));
     let review = handed

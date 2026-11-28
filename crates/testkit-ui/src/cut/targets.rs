@@ -63,6 +63,20 @@ pub struct TargetCut {
     /// takes it to its next node's start; or they take the lead, and the run then closes.
     /// `None` where the keys leave the log as it stands.
     pub goes_on_to: Option<u64>,
+    /// Where the application opens before the keys are pressed.
+    pub opens: Opens,
+}
+
+/// Where the application opens in a target's place before the target's keys are pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Opens {
+    /// As bare `yunta` opens there.
+    Bare,
+    /// On the workflows, over where bare `yunta` stands, as the application opened on the
+    /// step that lists them opens them: in a repository set up with no run, over the first
+    /// request, where every key types. Not `esc` then `w` there, which reach them over the
+    /// field the first request gives way to.
+    OnTheWorkflows,
 }
 
 /// Where a target's screen opens, over the runs it shows.
@@ -98,12 +112,13 @@ pub enum HomePlace {
     /// The design's repository before its setup, a Rust workspace whose origin is on GitHub,
     /// never set up (`DesignsPlaces::setting_up`); a `claude` and a `codex` answering on its
     /// `PATH` (`Home::clis`, `DesignsPlaces::codex`), and its git pointing the Yunta
-    /// repository's URL at the pack a setup installs (`DesignsPlaces::reference_pack`).
+    /// repository's URL at the pack a setup installs (`Home::reference_pack`).
     SettingUp,
     /// The same repository, its git pointing the Yunta repository's URL at a directory no
     /// repository stands in: the pack a setup installs, out of reach.
     PackOutOfReach,
-    /// A repository set up with one workflow, a case of it and no run: `Home::set_up`.
+    /// A repository set up with its runners on both adapters this binary builds, one
+    /// workflow, a case of it and no run: `Home::set_up`.
     SetUp,
     /// A repository set up as the design's, `DesignsPlaces::with_fragua`: `yunta/fragua`
     /// installed as a pack beside its own `lint-fix` and `run-tasks`, which reads a tasks
@@ -113,7 +128,9 @@ pub enum HomePlace {
     WithFragua,
     /// A repository with a pack installed: `Home::packed`.
     Packed,
-    /// A repository with runs, one finished and one parked: `Home::worked`.
+    /// A repository set up with runs, one finished and one parked, no runner declared, git
+    /// alone on its `PATH` (no agent CLI, no C compiler), its checkouts keeping a budget a
+    /// disk of any size reads alike: `Home::worked`.
     Worked,
 }
 
@@ -161,6 +178,15 @@ impl TargetCut {
             keys: &[],
             asked: Asked::Handed,
             goes_on_to: None,
+            opens: Opens::Bare,
+        }
+    }
+
+    /// Opened on the workflows, over where bare `yunta` stands.
+    const fn on_the_workflows(self) -> TargetCut {
+        TargetCut {
+            opens: Opens::OnTheWorkflows,
+            ..self
         }
     }
 
@@ -307,8 +333,9 @@ const REQUEST: &str = "type:add support for installing a pack globally";
 const RELEASE_TYPED: &str = "type:Spring release";
 
 /// Every target screen's cut, by the target's name: a run at work, a decision in place,
-/// where a run stands, what stands over a run, the field, the first request, a new run
-/// and a setup, and the pages the design draws no frame for.
+/// where a run stands, what stands over a run, the field, the first request and the field
+/// with no run it gives way to, a new run and a setup, and the pages the design draws no
+/// frame for.
 pub const TARGET_CUTS: &[TargetCut] = &[
     // A run at work.
     TargetCut::run("work", AT_WORK),
@@ -406,8 +433,10 @@ pub const TARGET_CUTS: &[TargetCut] = &[
         .pressing(&["r"]),
     TargetCut::field("field-glance-stalled", FIELD).at_run("EKPBGE"),
     TargetCut::field("field-glance-stopped", FIELD).at_run("ST0PPD"),
-    // The first request, a new run and a setup.
+    // The first request, the field `esc` leaves it for with no run in it, a new run and a
+    // setup.
     TargetCut::home("first-request", HomePlace::SetUp),
+    TargetCut::home("field-empty", HomePlace::SetUp).pressing(&["esc"]),
     TargetCut::home("new-run", HomePlace::WithFragua).pressing(&["n", REQUEST]),
     TargetCut::home("new-run-mode", HomePlace::WithFragua).pressing(&["n", REQUEST, "tab", "tab"]),
     TargetCut::home("new-run-inputs", HomePlace::WithFragua)
@@ -423,15 +452,27 @@ pub const TARGET_CUTS: &[TargetCut] = &[
     // The pages the design draws no frame for.
     TargetCut::home("machine", HomePlace::Worked).pressing(&["m"]),
     TargetCut::home("upkeep", HomePlace::Worked).pressing(&["m", "u"]),
-    TargetCut::home("workflows", HomePlace::SetUp).pressing(&["w"]),
-    TargetCut::home("workflow-checked", HomePlace::SetUp).pressing(&["w", "c"]),
+    TargetCut::home("workflows", HomePlace::SetUp).on_the_workflows(),
+    TargetCut::home("workflow-checked", HomePlace::SetUp)
+        .on_the_workflows()
+        .pressing(&["c"]),
     TargetCut::home("workflow-history", HomePlace::WithFragua).pressing(&["w", "h"]),
     TargetCut::home("workflow-graph", HomePlace::WithFragua).pressing(&["w", "g"]),
-    TargetCut::home("cases", HomePlace::SetUp).pressing(&["w", "t"]),
-    TargetCut::home("new-workflow", HomePlace::SetUp).pressing(&["w", "n"]),
-    TargetCut::home("packs", HomePlace::Packed).pressing(&["w", "p"]),
-    TargetCut::home("pack-audited", HomePlace::Packed).pressing(&["w", "p", "a"]),
-    TargetCut::home("document-shape", HomePlace::SetUp).pressing(&["w", "s"]),
+    TargetCut::home("cases", HomePlace::SetUp)
+        .on_the_workflows()
+        .pressing(&["t"]),
+    TargetCut::home("new-workflow", HomePlace::SetUp)
+        .on_the_workflows()
+        .pressing(&["n"]),
+    TargetCut::home("packs", HomePlace::Packed)
+        .on_the_workflows()
+        .pressing(&["p"]),
+    TargetCut::home("pack-audited", HomePlace::Packed)
+        .on_the_workflows()
+        .pressing(&["p", "a"]),
+    TargetCut::home("document-shape", HomePlace::SetUp)
+        .on_the_workflows()
+        .pressing(&["s"]),
     TargetCut::run("evidence-receipt", FINISHED).pressing(&["e"]),
     TargetCut::run("evidence-verified", FINISHED).pressing(&["v"]),
     TargetCut::run("evidence-page", FINISHED).pressing(&["o"]),

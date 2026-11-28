@@ -72,18 +72,16 @@ fn list_runs_groups_a_run_under_what_can_be_done_about_it() {
     let list = yunta_in!(&repo, &home, &["list", "--runs", "--full"]);
     assert!(list.status.success());
     let text = stdout(&list);
-    let mut lines = text
-        .lines()
-        .skip_while(|line| *line != "closed, newest first");
+    let mut lines = text.lines().skip_while(|line| *line != "closed");
     assert_eq!(
         lines.next(),
-        Some("closed, newest first"),
+        Some("closed"),
         "a finished run is listed under what can be done about it: {text}"
     );
     let row = lines.next().unwrap_or_default();
     assert!(
         row.contains(&format!(
-            "✓ {}  only-node (default)",
+            "✓ {} only-node (default)",
             yunta_testkit::handle(&run_id)
         )),
         "the row says how the run closed and names the workflow and the mode: {text}"

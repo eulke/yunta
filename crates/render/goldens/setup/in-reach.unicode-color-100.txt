@@ -1,0 +1,20 @@
+␛[2mThis repository has never used yunta. Here is what it found. Nothing is written until you say so.␛[0m
+
+␛[2mwhat this repository is␛[0m
+  ␛[32m✓␛[0m ␛[1mname␛[0m          yunta
+  ␛[32m✓␛[0m ␛[1mlanguage␛[0m      rust
+  ␛[32m✓␛[0m ␛[1msuite␛[0m         cargo test
+  ␛[32m✓␛[0m ␛[1mlint␛[0m          cargo clippy --all-targets -- -D warnings
+  ␛[32m✓␛[0m ␛[1mforge␛[0m         github eulke/yunta, from origin
+  ␛[32m✓␛[0m ␛[1mbase␛[0m          main
+  ␛[32m✓␛[0m ␛[1mcommits as␛[0m    Marta Ruiz
+  ␛[32m✓␛[0m ␛[1mworkflow␛[0m      yunta/fragua, to install as a pack
+
+␛[2mwho does the work␛[0m
+␛[1m▸␛[0m ␛[32m✓␛[0m ␛[1mplanner␛[0m       claude-code/opus                ␛[2mthen codex␛[0m
+  ␛[32m✓␛[0m ␛[1mexecutor␛[0m      claude-code                     ␛[2mthen codex␛[0m
+  ␛[32m✓␛[0m ␛[1mreviewer␛[0m      claude-code                     ␛[2mthen codex␛[0m
+  ␛[32m✓␛[0m ␛[1mreviewer-alt␛[0m  claude-code                     ␛[2mthen codex␛[0m
+  ␛[32m✓␛[0m ␛[1mmechanical␛[0m    claude-code                     ␛[2mthen codex␛[0m
+
+   ␛[2mwrite .yunta/config.yaml and install yunta/fragua␛[0m␛[2m  · then yunta asks what to build␛[0m

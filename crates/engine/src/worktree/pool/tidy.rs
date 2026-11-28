@@ -2,9 +2,11 @@
 //! where nobody did, a build nobody used within retention is emptied, the
 //! builds are kept within the budget, and a free checkout holding no
 //! build goes — its source is a `git worktree add` away. What the pool
-//! keeps is said in one line.
+//! keeps is measured ([`PoolReport`]), and said where a person reads it.
 
 use std::path::{Path, PathBuf};
+
+use yunta_core::disk::Disk;
 
 use super::room::{Builds, Limits};
 use super::{slot, space, survey, CheckoutPool};
@@ -24,7 +26,8 @@ pub struct Tidied {
     pub kept: PoolReport,
 }
 
-/// What the pool keeps of the disk.
+/// What the pool keeps of the disk, as figures: the words that say them are
+/// the reader's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolReport {
     pub checkouts: usize,
@@ -39,48 +42,28 @@ pub struct PoolReport {
     pub keep_free: u64,
 }
 
-impl std::fmt::Display for PoolReport {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use surco::figures::Bytes;
-        write!(
-            f,
-            "{}, builds {} of a {} budget",
-            surco::text::counted(self.checkouts, "checkout"),
-            Bytes(self.builds),
-            Bytes(self.budget)
-        )?;
-        if self.uncounted > 0 {
-            write!(
-                f,
-                " and {} not counted",
-                surco::text::counted(self.uncounted, "build")
-            )?;
-        }
-        write!(
-            f,
-            "; {} free, {} kept free",
-            Bytes(self.available),
-            Bytes(self.keep_free)
-        )
-    }
-}
-
 impl CheckoutPool {
-    /// What the pool keeps of the disk now.
-    pub async fn report(&self, supervision: Supervision<'_>) -> Result<PoolReport, WorktreeError> {
+    /// What the pool keeps of the disk now, what the disk has free read by `disk`.
+    pub async fn report(
+        &self,
+        supervision: Supervision<'_>,
+        disk: &dyn Disk,
+    ) -> Result<PoolReport, WorktreeError> {
         let home = self.home(supervision).await?;
         let slots = survey::survey(&home, &self.repo, supervision).await?;
-        report(&self.limits, &home, &slots)
+        report(&self.limits, &home, &slots, disk)
     }
 
     /// Tidies the pool, `gc`'s part of it: measures every free checkout
     /// nobody measured, empties the builds of free checkouts unused for
     /// longer than `unused`, keeps the builds within the budget, and
-    /// removes the free checkouts that hold no build.
+    /// removes the free checkouts that hold no build; what it keeps after
+    /// reported with what the disk has free read by `disk`.
     pub async fn tidy(
         &self,
         unused: Option<chrono::Duration>,
         supervision: Supervision<'_>,
+        disk: &dyn Disk,
     ) -> Result<Tidied, WorktreeError> {
         let home = self.home(supervision).await?;
         let emptied = self.empty_idle(&home, unused, supervision).await?;
@@ -103,7 +86,7 @@ impl CheckoutPool {
             }
         }
         let slots = survey::survey(&home, &self.repo, supervision).await?;
-        let kept = report(&self.limits, &home, &slots)?;
+        let kept = report(&self.limits, &home, &slots, disk)?;
         Ok(Tidied {
             emptied,
             removed,
@@ -251,12 +234,15 @@ async fn still_free(
     Ok(status.clean)
 }
 
+/// What the pool keeps of the disk, its checkouts `slots` under `home` within `limits`, what
+/// the disk has free read by `disk`.
 fn report(
     limits: &yunta_core::PoolConfig,
     home: &Path,
     slots: &[survey::Slot],
+    disk: &dyn Disk,
 ) -> Result<PoolReport, WorktreeError> {
-    let space = yunta_core::disk::space(home).map_err(|source| WorktreeError::Io {
+    let space = disk.space(home).map_err(|source| WorktreeError::Io {
         action: "read how much of the disk is free".to_string(),
         path: home.to_path_buf(),
         source,

@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use surco::components::ScreenLaid;
+use surco::components::{Region, ScreenLaid};
 use surco::doc::Depth;
 use surco::glyphs::Glyphs;
 use surco::look::{Look, Width};
@@ -201,7 +201,7 @@ async fn promoted_while_followed(
         }
         if let Some(successor) = successor.as_ref() {
             let in_view = state.followed_runs().in_view.as_ref();
-            let onto = in_view.is_some_and(|in_view| in_view.run.run == *successor);
+            let onto = in_view.is_some_and(|in_view| in_view.run.run() == successor);
             let heads = yunta_testkit::heads(&project.storage_path);
             if onto && state.waiting_on().is_empty() && state.caught_up(&heads) {
                 return (state, successor.clone());
@@ -455,14 +455,15 @@ async fn a_workflows_past_runs_and_its_graph_open_from_the_catalog() {
     let name = WorkflowName::from("done");
     let past = project.history(&name).await.reading();
     assert_eq!(past.summaries.len(), 1, "the run is the workflow's past");
-    let printed = History {
+    let told = History {
         name: &name,
         history: &past.summaries,
         findings: past.findings.as_ref(),
     };
-    assert_eq!(main_region(&state), drawn(&printed));
+    let on_screen = Region::of_a_page(told.document(&Markdown.look()));
+    assert_eq!(main_region(&state), Markdown.draw(&on_screen.doc));
     let trail = state.screen(&Markdown.look()).trail;
-    assert_eq!(trail, ["yunta", "workflows", "done", "history"]);
+    assert_eq!(trail, ["yunta", "workflows", "finishes history"]);
     // Back to the workflows, then the graph of the one pointed at, as written.
     let strokes = [Stroke::Decline, Stroke::Insert('g')];
     let (state, _) = drive(state, Vec::new(), &performer, &strokes).await;
@@ -472,7 +473,7 @@ async fn a_workflows_past_runs_and_its_graph_open_from_the_catalog() {
     };
     assert_eq!(main_region(&state), drawn(&page));
     let trail = state.screen(&Markdown.look()).trail;
-    assert_eq!(trail, ["yunta", "workflows", "finishes", "graph"]);
+    assert_eq!(trail, ["yunta", "workflows", "finishes graph"]);
 }
 
 /// `stats.unicode-120` and `graph.unicode-120` row 35: the design's run at its last gate.

@@ -33,7 +33,8 @@ helps fix it under them:
     help: did you mean `prompt`? · `yunta schema workflow` lists every key
 
 next
-  yunta check .yunta/workflows/bad.yaml   again, once they are fixed
+  yunta check .yunta/workflows/bad.yaml
+    check the workflow, each broken rule named
 ```
 
 A name one or two typos away from one the workflow or the config declares — a

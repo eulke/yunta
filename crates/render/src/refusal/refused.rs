@@ -7,9 +7,7 @@ use std::path::PathBuf;
 
 use surco::components::{self, Edge, Next, RunLine, Runs, Said};
 use surco::doc::{Block, Doc};
-use surco::glyphs::Glyphs;
 use surco::look::Look;
-use surco::words::RUNS_THAT_NEED_YOU_FIRST;
 use yunta_core::check::CheckError;
 use yunta_core::diagnostic::Report;
 use yunta_core::events::{Claim, FailureMenu, ObjectProblem, Refusal};
@@ -23,7 +21,7 @@ use yunta_replay::receipt::ReceiptError;
 use yunta_replay::registry::Asking;
 
 use crate::blocks::diagnostic::{counted_under, document_problems, plain};
-use crate::command::{self, Reader};
+use crate::command::{self, Reader, SaidStep};
 use crate::page::{FieldRow, Page, Unrunnable};
 
 /// What Yunta refused, with what a reader needs to say it: the run it is
@@ -183,13 +181,13 @@ impl Candidate {
         Some(format!("{} ({})", frame.workflow, frame.mode))
     }
 
-    /// The run's row as the field draws it with `glyphs`, ending with the
-    /// command that opens it.
-    fn line(&self, glyphs: Glyphs) -> Option<RunLine> {
+    /// The run's row as the field draws it, ending with the command that
+    /// opens it.
+    fn line(&self) -> Option<RunLine> {
         let row = self.row.as_ref()?;
         let handle = self.run_id.handle().to_string();
         let opens = Edge::Command(command::line(&NextStep::status(&self.run_id)));
-        Some(row.line(handle, opens, glyphs))
+        Some(row.line(handle, opens))
     }
 }
 
@@ -213,37 +211,28 @@ impl Refused {
             Refused::Moving { run, .. } => {
                 let follow = NextStep::Follow { run: run.clone() };
                 let cancel = NextStep::Cancel { run: run.clone() };
-                let said = |step: &NextStep| (command::line_for(step, reader), command::does(step));
-                (None, vec![said(&follow), said(&cancel)])
+                let steps = [follow, cancel].map(|step| SaidStep::for_reader(&step, reader));
+                (None, steps.map(SaidStep::pair).to_vec())
             }
-            Refused::UnknownRun { roots, .. } => (
-                Some(format!("looked in {}", roots.join(" and "))),
-                vec![
-                    (
-                        command::line(&NextStep::ListRuns {
-                            reach: Reach::Repository,
-                        }),
-                        RUNS_THAT_NEED_YOU_FIRST,
-                    ),
-                    (
-                        command::line(&NextStep::ListRuns {
-                            reach: Reach::Machine,
-                        }),
-                        "every run on this machine",
-                    ),
-                ],
-            ),
+            Refused::UnknownRun { roots, .. } => {
+                let reaches = [Reach::Repository, Reach::Machine];
+                let steps = reaches.map(|reach| SaidStep::of(&NextStep::ListRuns { reach }));
+                (
+                    Some(format!("looked in {}", roots.join(" and "))),
+                    steps.map(SaidStep::pair).to_vec(),
+                )
+            }
             _ => (None, Vec::new()),
         }
     }
 
-    /// The blocks a person's page draws under the refusal, with `glyphs`:
-    /// each problem it found in a text, pointed at in its line, and what to
-    /// declare for the ones a declaration fixes; or the runs a reference
-    /// could mean. Empty for a refusal its sentence says whole.
-    pub fn blocks(&self, glyphs: Glyphs) -> Vec<Block> {
+    /// The blocks a person's page draws under the refusal: each problem it
+    /// found in a text, pointed at in its line, and what to declare for the
+    /// ones a declaration fixes; or the runs a reference could mean. Empty for
+    /// a refusal its sentence says whole.
+    pub fn blocks(&self) -> Vec<Block> {
         match self {
-            Refused::AmbiguousRun { candidates, .. } => choice(candidates, glyphs),
+            Refused::AmbiguousRun { candidates, .. } => choice(candidates),
             Refused::Document { report, text } => document_problems(report, text.as_deref())
                 .into_iter()
                 .map(Block::from)
@@ -370,14 +359,14 @@ impl std::error::Error for Refused {}
 /// looked, each problem it found pointed at in its line, and the commands
 /// that go on from here.
 impl Page for Refused {
-    fn document(&self, look: &Look) -> Doc {
+    fn document(&self, _look: &Look) -> Doc {
         let (detail, steps) = self.advice(Reader::Person);
         Doc::new()
             .with(components::Refusal {
                 said: self.said(Reader::Person),
                 detail,
             })
-            .with_all(self.blocks(look.glyphs))
+            .with_all(self.blocks())
             .with(Next { steps })
     }
 }
@@ -400,13 +389,9 @@ fn one_per_line(candidates: &[Candidate]) -> String {
 }
 
 /// The runs a reference could mean, as the rows a person chooses among: each
-/// as the field shows it with `glyphs`, and one that does not read back by
-/// its id.
-fn choice(candidates: &[Candidate], glyphs: Glyphs) -> Vec<Block> {
-    let rows: Vec<RunLine> = candidates
-        .iter()
-        .filter_map(|candidate| candidate.line(glyphs))
-        .collect();
+/// as the field shows it, and one that does not read back by its id.
+fn choice(candidates: &[Candidate]) -> Vec<Block> {
+    let rows: Vec<RunLine> = candidates.iter().filter_map(Candidate::line).collect();
     let unread: Vec<String> = candidates
         .iter()
         .filter(|candidate| candidate.row.is_none())

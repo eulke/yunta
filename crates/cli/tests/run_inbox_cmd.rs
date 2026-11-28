@@ -53,6 +53,23 @@ fn list_runs_all_shows_every_run() {
     assert!(!listed.contains("other projects"), "{listed}");
 }
 
+/// A listing that leaves its closed runs out names the same reach with the closed too: this
+/// repository's with `--full`, every run on this machine with `--all --full`, never the other.
+#[test]
+fn a_listing_names_its_own_reach_to_list_the_closed_too() {
+    let root = tempfile::tempdir().unwrap();
+    let ((first, _), _) = two_projects(root.path());
+
+    let here = stdout(&yunta_at!(&first, &["list", "--runs"]));
+    assert!(here.contains("yunta list --runs --full "), "{here}");
+    let machine = stdout(&yunta_at!(&first, &["list", "--runs", "--all"]));
+    assert!(
+        machine.contains("yunta list --runs --all --full "),
+        "{machine}"
+    );
+    assert!(!machine.contains("yunta list --runs --full "), "{machine}");
+}
+
 #[test]
 fn a_run_from_before_projects_were_recorded_belongs_where_its_branch_is() {
     let root = tempfile::tempdir().unwrap();

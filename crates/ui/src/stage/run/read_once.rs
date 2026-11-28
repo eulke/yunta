@@ -1,13 +1,12 @@
 //! See [`super`]. What a run's scene reads beyond the run's log as it comes to stand, never on
 //! a draw: each reading asked once for what it reads, kept with what it came to once
-//! answered, and asked again only for something else, or where a stage opened over the run's
-//! let it go before an answer came, as the person comes back to the run. The pull request a
+//! answered, and asked again only for something else. A stage opened over the run's leaves
+//! its reading under way, whose answer the run's stage takes under it. The pull request a
 //! gate waits on is read so for each pause (`pull_request`), and a finished run's event chain
 //! for each run (`receipt`).
 //!
 //! Each reading is work the performer carries out, so the stage stays a function of what it
-//! is handed. A reading the state let go never answers, so what is kept as under way as the
-//! person comes back is one that was let go.
+//! is handed.
 
 use super::{Framed, RunStage};
 use crate::stage::Want;
@@ -52,14 +51,6 @@ impl<K: PartialEq, T> ReadOnce<K, T> {
             Some(_) | None => None,
         }
     }
-
-    /// It forgotten where it stands under way: as the person comes back to the run, a
-    /// reading under way is one the state let go, which no answer reaches.
-    fn unanswered_forgotten(&mut self) {
-        if let Some((_, None)) = self.read {
-            self.read = None;
-        }
-    }
 }
 
 impl RunStage {
@@ -70,13 +61,5 @@ impl RunStage {
     pub(super) fn read_once(&mut self, framed: Option<&Framed<'_>>) -> Vec<Want> {
         let polled = self.pull_request_asked(framed);
         polled.into_iter().chain(self.chain_asked(framed)).collect()
-    }
-
-    /// Every reading asked and not answered forgotten, as the person comes back to the
-    /// stage: the state let each go as a stage opened over this one, so the scene asks it
-    /// again where it still stands.
-    pub(super) fn unanswered_readings_forgotten(&mut self) {
-        self.pull_request.unanswered_forgotten();
-        self.chain.unanswered_forgotten();
     }
 }

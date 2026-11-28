@@ -148,13 +148,15 @@ jobs:
 
       # The ceiling fails only on a dependency that is enormous, not on the
       # system's ordinary growth. The static musl release binary measured
-      # 36.1 MiB (37,865,856 bytes) in October 2026, all of it the
-      # workspace's own code and the dependencies it uses, so the ceiling
-      # sits above that with room for ordinary growth. The size is printed
-      # on every run, which keeps the history.
+      # 36.1 MiB (37,865,856 bytes) in October 2026 and 40.8 MiB
+      # (42,757,432 bytes) in November 2026, once the terminal application
+      # drew its designed screens: all of it the workspace's own code and
+      # the dependencies it uses, the growth read crate by crate before the
+      # ceiling moved. The ceiling sits above that with room for ordinary
+      # growth. The size is printed on every run, which keeps the history.
       - name: binary size stays under its ceiling
         run: |
-          ceiling=41943040
+          ceiling=47185920
           bytes=$(stat -c %s target/x86_64-unknown-linux-musl/release/yunta)
           echo "yunta (static musl, release): $((bytes / 1024 / 1024)) MiB ($bytes bytes; ceiling $ceiling bytes)" | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$bytes" -gt "$ceiling" ]; then

@@ -5,7 +5,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::components::{Checklist, Fields, Found, Horizon, Region};
+use crate::components::{
+    Checklist, Fields, Found, Horizon, Measure, Region, TypedAnswer, TypedRow,
+};
 use crate::doc::{Block, Doc};
 use crate::figures::files_moving;
 use crate::glyphs::Glyphs;
@@ -90,6 +92,87 @@ fn short_of_rows_for_the_blocks_their_blank_rows_give_way_first() {
     let drawn = |rows| texts(&terminal.pane(&three_over_the_field(), rows).lines);
     assert_eq!(drawn(3), ["one", "two", "three"]);
     assert_eq!(drawn(2), ["one", "… 2 more lines"]);
+}
+
+/// A line asked over the field, `abc` typed in its box, a row under it: what a screen that
+/// opens on one question over the field holds.
+fn asked_over_the_field() -> Region {
+    let asked = TypedAnswer {
+        asked: Line::new().push(Tone::Strong, "What?"),
+        typed: TypedRow {
+            prompt: "> ".to_string(),
+            before: "abc".to_string(),
+            after: String::new(),
+        },
+        placeholder: None,
+        hint: None,
+    };
+    Region::new(
+        Doc::new()
+            .with(asked)
+            .with(Block::Rows(vec![Line::new().plain("under")]))
+            .with(Horizon { tone: Tone::Faint }),
+    )
+}
+
+/// The rows a line asked and a row under it take, the box as wide as `cells`.
+fn asked_rows(cells: usize) -> Vec<String> {
+    let edge = "─".repeat(cells - 2);
+    let inside = format!("│ abc{}│", " ".repeat(cells - 6));
+    vec![
+        "What?".to_string(),
+        format!("╭{edge}╮"),
+        inside,
+        format!("╰{edge}╯"),
+        String::new(),
+        "under".to_string(),
+    ]
+}
+
+/// A line asked over the field is held as a prompt is, its cursor after what was typed in
+/// its box, and the field takes every row under it after a blank row.
+#[test]
+fn a_line_asked_over_the_field_keeps_its_cursor_and_the_field_takes_the_rows_left() {
+    let terminal = terminal(Glyphs::Unicode, 40);
+    let paned = terminal.pane(&asked_over_the_field(), 14);
+    let drawn = texts(&paned.lines);
+    assert_eq!(drawn[..6], asked_rows(40), "{drawn:#?}");
+    assert_eq!(drawn[6], "", "a blank row parts the words from the field");
+    let field = terminal.horizon(&Horizon { tone: Tone::Faint }, 7);
+    assert_eq!(drawn[7..], texts(&field), "{drawn:#?}");
+    assert_eq!(paned.cursor, Some((2, 5)), "after `abc`, inside the box");
+}
+
+/// Words set to a measure narrower than the pane stand in a column that wide, centred, the
+/// cursor moved with them; the field spans the pane under them. On a pane of 27 rows and more
+/// they stand two rows lower, the field taking what they leave; on fewer, they open the pane.
+#[test]
+fn words_set_to_a_measure_stand_centred_over_a_field_that_spans_the_pane() {
+    let terminal = terminal(Glyphs::Unicode, 40);
+    let region = asked_over_the_field().measured(Measure::of(20).lowered());
+    let centred = |row: &String| match row.is_empty() {
+        true => String::new(),
+        false => format!("{}{row}", " ".repeat(10)),
+    };
+    let words: Vec<String> = asked_rows(20).iter().map(centred).collect();
+    for (rows, lowered) in [(26, 0), (27, 2)] {
+        let paned = terminal.pane(&region, rows);
+        let drawn = texts(&paned.lines);
+        assert!(drawn[..lowered].iter().all(String::is_empty), "{drawn:#?}");
+        assert_eq!(drawn[lowered..lowered + 6], words, "{drawn:#?}");
+        let field = terminal.horizon(&Horizon { tone: Tone::Faint }, rows - lowered - 7);
+        assert_eq!(drawn[lowered + 7..], texts(&field), "{drawn:#?}");
+        assert_eq!(paned.cursor, Some((lowered + 2, 15)), "{drawn:#?}");
+    }
+    let narrow = terminal.pane(
+        &asked_over_the_field().measured(Measure::of(60).lowered()),
+        14,
+    );
+    assert_eq!(
+        texts(&narrow.lines)[..6],
+        asked_rows(40),
+        "a measure past the pane"
+    );
 }
 
 /// What a finished run's receipt holds over the harvested field, in `glyphs`: each check it

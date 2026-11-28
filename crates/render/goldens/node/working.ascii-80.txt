@@ -18,4 +18,4 @@ read    crates/cli/src/cli/pack.rs
 read    crates/engine/src/catalog.rs
 
 next
-  yunta status Q78GRR   shows the whole run
+  yunta status Q78GRR   where the run stands

@@ -22,7 +22,7 @@ fn feed(state: &State) -> Vec<String> {
             Markdown.draw(&screen.main.doc)
         );
     };
-    feed.rows.iter().map(|row| row.text()).collect()
+    feed.rows.iter().map(|row| row.line.text()).collect()
 }
 
 /// How many of `events` the log holds once the node `first` started, and once it ended.
@@ -56,7 +56,7 @@ async fn news_of_events_grows_the_feed_of_the_node_at_work() {
 
     let before = feed(&state);
     let came = FollowNews::Run {
-        run: whole.run.clone(),
+        run: whole.run().clone(),
         news: RunNews::Events(events[started..ended].to_vec()),
     };
     state.update(Input::FollowNews(came.clone()));

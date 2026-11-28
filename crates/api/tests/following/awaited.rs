@@ -1,6 +1,7 @@
 //! What a followed run waits on a person for: read once for each pause it waits at,
 //! handed as none once it waits on none, and said unreadable, with why, when what it
-//! shows fails today's shape. Over runs a bench parks.
+//! shows fails today's shape or is not held. Over runs a bench parks, and one a log
+//! written here parks.
 
 use std::time::Duration;
 
@@ -8,10 +9,13 @@ use yunta_api::{
     AnswerablePause, Awaited, FollowNews, Followed, FollowedRun, Following, RunNews, Stop,
 };
 use yunta_core::events::{
-    EventPayload, HumanChoice, PauseReason, RunEvent, RunPausedPayload, RunResumedPayload,
+    AuthorGate, Claim, DecisionOn, Escalation, EventPayload, GateOption, HumanChoice, Menu,
+    NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, PauseReason, RunEvent,
+    RunPausedPayload, RunResumedPayload, TokenUsage,
 };
-use yunta_core::ArtifactKind;
-use yunta_testkit::Bench;
+use yunta_core::reserved::ReservedOption;
+use yunta_core::{ArtifactKind, NodeId, NonEmpty, RunId, Seq, TreeId};
+use yunta_testkit::{Bench, SourceLog};
 use yunta_testkit_core::FixedClock;
 
 use super::documents::accepted_again;
@@ -106,15 +110,24 @@ sessions:
 /// Bytes a spec no longer reads as: its specs are no list.
 const BROKEN_SPEC: &[u8] = b"specs: 7\n";
 
+/// How long a test waits for what a run asks before it calls the following stuck: a few
+/// hundred looks, and far longer than reading a decision takes.
+const ASKED_WITHIN: Duration = Duration::from_secs(30);
+
 /// The next news of what the run `kept` holds waits on a person for, each news before it
-/// folded into it.
+/// folded into it, within [`ASKED_WITHIN`].
 async fn asked(following: &mut Following, kept: &mut FollowedRun) -> RunNews {
-    loop {
-        let news = next_of(following, kept).await;
-        if asks(&news) {
-            return news;
+    let asking = async {
+        loop {
+            let news = next_of(following, kept).await;
+            if asks(&news) {
+                return news;
+            }
         }
-    }
+    };
+    tokio::time::timeout(ASKED_WITHIN, asking)
+        .await
+        .expect("what the run asks comes within thirty seconds")
 }
 
 /// Whether `news` says what a run waits on a person for.
@@ -135,7 +148,7 @@ pub(super) async fn within(
         let FollowNews::Run { run, news } = news.expect("following reads the run") else {
             panic!("only news of the run held comes");
         };
-        assert_eq!(run, kept.run, "news of the run held");
+        assert_eq!(&run, kept.run(), "news of the run held");
         kept.took(&news);
         came.push(news);
     }
@@ -347,6 +360,86 @@ async fn a_run_held_again_is_asked_again() {
     assert!(
         matches!(news, RunNews::Awaited(None)),
         "a refollow to the run held hands nothing new: {news:?}"
+    );
+}
+
+/// A plan, then a gate that shows the tasks the plan hands over.
+const SHOWN: &str = r#"
+name: shown
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: approve
+    kind: gate
+    depends_on: [plan]
+    assignee: lead
+    message: "Approve the plan?"
+    shows:
+      - { node: plan, kind: tasks }
+"#;
+
+/// The planner `SHOWN` names, on the mock.
+const PLANNER: &str = "runners:\n  planner:\n    - { adapter: mock, model: mock-model }\n";
+
+/// A run of `SHOWN` whose plan closed handing nothing over and which then parked on its
+/// gate, as a log another binary wrote could stand: answers the run and the seq of its
+/// pause.
+async fn parked_on_what_it_does_not_hold(world: &World) -> (RunId, Seq) {
+    let run = RunId::from("shows-unheld");
+    world.dir_configured(&run, SHOWN, PLANNER).await;
+    SourceLog::open(&world.bench.storage, &run, world.clock());
+    let plan = NodeId::from("plan");
+    let tree: TreeId = "a1a1a1a".parse().expect("a tree id");
+    let started = NodeStartedPayload::attempt_from(1, tree);
+    world.record_of(&run, &plan, EventPayload::Node(NodeEvent::Started(started)));
+    let outcome = NodeOutcome::Summary("planned".into());
+    let finished = NodeFinishedPayload::new(outcome, TokenUsage::default());
+    world.record_of(
+        &run,
+        &plan,
+        EventPayload::Node(NodeEvent::Finished(finished)),
+    );
+    let gate = Escalation::new(
+        Claim::Written("Approve the plan?".to_string()),
+        Menu::Gate(AuthorGate {
+            assignee: "lead".into(),
+            node: Some(NodeId::from("approve")),
+        }),
+        NonEmpty::from((GateOption::reserved(ReservedOption::Approve), Vec::new())),
+    );
+    let pause = PauseReason::Escalation(Box::new(gate));
+    let paused = EventPayload::Run(RunEvent::Paused(RunPausedPayload { pause }));
+    (run.clone(), world.record(&run, paused))
+}
+
+/// A run parked on a gate that shows a document the run does not hold: the decision it
+/// waits on cannot be put. The node the run waits on, its menu and the pause the follower
+/// reads what it asks for agree, and what it asks is handed as unread at that pause, with
+/// why.
+#[tokio::test]
+async fn a_gate_showing_what_the_run_does_not_hold_is_asked_and_said_unread() {
+    let world = World::new();
+    let (run, paused_at) = parked_on_what_it_does_not_hold(&world).await;
+    let mut following = world.follow(&run).await;
+    let (mut kept, _) = whole(&mut following).await;
+
+    let on = yunta_engine::awaits_decision(kept.manifest(), kept.state());
+    let node = on.as_ref().and_then(DecisionOn::node).map(NodeId::as_str);
+    assert_eq!(node, Some("approve"), "the run waits on its gate");
+    assert!(kept.menu(), "the run waits on a decision with a menu");
+    let news = asked(&mut following, &mut kept).await;
+    let RunNews::AwaitedUnread { pause, why } = news else {
+        panic!("what the gate asks is said unreadable, and came {news:?}");
+    };
+    assert_eq!(pause.seq(), paused_at, "at the pause the run stands at");
+    assert!(
+        why.contains("tasks") && why.contains("does not hold"),
+        "{why}"
     );
 }
 

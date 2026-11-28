@@ -4,7 +4,7 @@
 
   progress     2 of 2 nodes done
   tokens       18k in / 2.2k out
-  slowest      lint 12s · review 12s
+  slowest      lint 12s, review 12s
   branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off
                main, in
                ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
@@ -12,4 +12,4 @@
 next
   yunta receipt 7E5PH4   write the receipt
   yunta verify 7E5PH4    verify its evidence
-  yunta status 7E5PH4    shows the whole run
+  yunta status 7E5PH4    where the run stands

@@ -1,0 +1,2 @@
+yunta pack add https://github.com/eulke/yunta//packs/fragua@v0.0.5
+yunta init

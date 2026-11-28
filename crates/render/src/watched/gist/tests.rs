@@ -5,7 +5,7 @@ use surco::paint::Paint;
 use surco::words::Standing;
 use yunta_core::events::{NodeWait, PauseReason};
 use yunta_core::{NodeId, RunId};
-use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
+use yunta_replay::frame::{RunFrame, RunPhase, RunTimes, WaitingOn};
 
 use super::gist;
 
@@ -27,7 +27,7 @@ fn standing(phase: RunPhase) -> RunFrame {
 
 /// The row's words and the tone they are said in.
 fn said(frame: &RunFrame) -> Option<(String, Vec<Tone>)> {
-    gist(frame).map(|row| {
+    gist(frame, &RunTimes::sample(frame)).map(|row| {
         let tones = row.spans().iter().map(|span| span.tone).collect();
         (Paint::Plain.line(&row), tones)
     })
@@ -57,7 +57,10 @@ fn a_run_that_needs_you_says_what_it_waits_on_in_your_tone() {
     });
     assert_eq!(parked.standing, Standing::NeedsYou);
     let (words, tones) = said(&parked).expect("a parked run's gist");
-    assert_eq!(Some(words), crate::state::gist(&parked));
+    assert_eq!(
+        Some(words),
+        crate::state::gist(&parked, &RunTimes::sample(&parked))
+    );
     assert_eq!(tones, [Tone::NeedsYou]);
 }
 
@@ -73,7 +76,10 @@ fn a_run_waiting_on_a_reset_says_it_muted() {
         },
     });
     let (words, tones) = said(&reset).expect("a waiting run's gist");
-    assert_eq!(Some(words), crate::state::gist(&reset));
+    assert_eq!(
+        Some(words),
+        crate::state::gist(&reset, &RunTimes::sample(&reset))
+    );
     assert_eq!(tones, [Tone::Muted]);
 }
 

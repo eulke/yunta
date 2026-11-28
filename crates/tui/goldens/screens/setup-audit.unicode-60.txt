@@ -1,0 +1,14 @@
+ yunta › set up › yunta/fragua            nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ● pack yunta/fragua · installing · 0.1.0
+   permissions  edit
+   network      none
+   executors    none
+   runners      planner, executor, mechanical, reviewer, r…
+   workflow .yunta/workflows/fragua.yaml
+     node `grill` prompt
+       permissions  read-only
+       prompt
+ … 496 more lines
+
+ ↑↓ scroll · enter install it · esc back · ? keys

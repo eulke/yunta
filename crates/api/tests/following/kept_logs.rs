@@ -112,7 +112,7 @@ async fn read_on_from_its_middle(world: &World, log: &[StoredEvent]) -> Followed
     for batch in rest.chunks(rest.len().div_ceil(BATCHES)) {
         appended(world, batch);
         let head = world.logged(&run).last().map(|event| event.seq);
-        while kept.state.head() != head {
+        while kept.state().head() != head {
             next_of(&mut following, &mut kept).await;
         }
     }
@@ -127,7 +127,7 @@ async fn read_on_from_its_middle(world: &World, log: &[StoredEvent]) -> Followed
 async fn followed_as_replayed(name: &str, log: &[StoredEvent]) -> RunState {
     let world = World::new();
     let kept = read_on_from_its_middle(&world, log).await;
-    let run = kept.run.clone();
+    let run = kept.run().clone();
     let logged = world.logged(&run);
     let replayed = RunState::replay(&logged);
     let (read, events) = whole(&mut world.follow(&run).await).await;
@@ -138,8 +138,8 @@ async fn followed_as_replayed(name: &str, log: &[StoredEvent]) -> RunState {
     let mut folded = RunState::default();
     events.iter().for_each(|event| folded.fold(event));
     for (reader, state) in [
-        ("folded from the news", &kept.state),
-        ("read whole again", &read.state),
+        ("folded from the news", kept.state()),
+        ("read whole again", read.state()),
         ("folded from the events read whole", &folded),
     ] {
         assert_eq!(

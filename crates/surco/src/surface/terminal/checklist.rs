@@ -3,6 +3,7 @@
 //! under a row, what its finding means and how to make it hold, each
 //! beside its label.
 
+use super::Values;
 use crate::components::{Check, Checklist, Fix, Found};
 use crate::line::{Line, Tone};
 use crate::look::Look;
@@ -33,8 +34,16 @@ impl Checklist {
     /// says more, each line as written. A list that folds draws the checks
     /// that hold as one row naming each, its lines broken only between two
     /// names unless one is wider than the row, and the others under it, a
-    /// line apart.
-    pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
+    /// line apart, or right under it where the list stands close under its
+    /// fold. Where `values` stand on their row, or the list sets its checks
+    /// on their rows, what a check found, what it means, how to make it hold
+    /// and the names folded each stand whole on one row, every row cut at the
+    /// line's end.
+    pub(in crate::surface) fn lines(&self, look: &Look, values: Values) -> Vec<Line> {
+        let values = match self.on_their_rows {
+            true => Values::OnTheirRow,
+            false => values,
+        };
         let fold = self.fold();
         let rest: Vec<&Check> = self.unfolded().collect();
         let subjects = fold.iter().map(|fold| fold.subject.as_str());
@@ -47,16 +56,26 @@ impl Checklist {
                 .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
                 .plain(" ")
                 .push(Tone::Strong, fold.subject.as_str());
-            let names = packed(&fold.names, look.glyphs.sep(), layout.room);
+            let room = match values {
+                Values::Wrapped => layout.room,
+                Values::OnTheirRow => usize::MAX,
+            };
+            let names = packed(&fold.names, look.glyphs.sep(), room);
             lines.extend(beside(head, &fold.subject, names, &layout));
-            if !rest.is_empty() {
+            if !rest.is_empty() && !self.close_under_its_fold {
                 lines.push(Line::new());
             }
         }
         for check in rest {
-            lines.extend(row(check, self.points_at(check), &layout, look));
+            lines.extend(row(check, self.points_at(check), &layout, (look, values)));
         }
-        lines
+        match values {
+            Values::Wrapped => lines,
+            Values::OnTheirRow => lines
+                .into_iter()
+                .map(|line| line.cut(look.width.cells(), look.glyphs))
+                .collect(),
+        }
     }
 
     /// The column the subjects of the fold and of `rows`, the labels under
@@ -97,26 +116,28 @@ impl Checklist {
 /// One check's row, the pointer in its margin where it is `pointed` at, then
 /// what hangs under it: what its finding means and how to make it hold, beside
 /// their labels in the subjects' column, then what says more.
-fn row(check: &Check, pointed: bool, layout: &Layout, look: &Look) -> Vec<Line> {
+fn row(
+    check: &Check,
+    pointed: bool,
+    layout: &Layout,
+    (look, values): (&Look, Values),
+) -> Vec<Line> {
     let mark = check.found.mark();
-    let margin = match pointed {
-        true => Line::new()
-            .push(Tone::Strong, look.glyphs.pointer().to_string())
-            .plain(" "),
-        false => Line::new().plain(INDENT),
-    };
+    let margin = Line::read_along(pointed, look.glyphs);
     let head = margin
         .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
         .plain(" ")
         .push(Tone::Strong, check.subject.as_str());
-    let said = wrap(&check.said, layout.room);
+    let said = match values {
+        Values::Wrapped => wrap(&check.said, layout.room),
+        Values::OnTheirRow => vec![check.said.clone()],
+    };
     let mut lines = beside(head, &check.subject, said, layout);
     lines.extend(hangers(
-        check.so.as_deref(),
-        check.fix.as_ref(),
+        (check.so.as_deref(), check.fix.as_ref()),
         cell_width(INDENT) * 2,
         cell_width(&layout.under),
-        look,
+        (look, values),
     ));
     let hang = " ".repeat(cell_width(INDENT) * 2 + 2);
     lines.extend(
@@ -135,11 +156,10 @@ fn row(check: &Check, pointed: bool, layout: &Layout, look: &Look) -> Vec<Line> 
 /// paste hang one step further in, or one step in from the labels when
 /// one would run past the line there.
 pub(in crate::surface) fn hangers(
-    so: Option<&str>,
-    fix: Option<&Fix>,
+    (so, fix): (Option<&str>, Option<&Fix>),
     label_at: usize,
     text_at: usize,
-    look: &Look,
+    (look, values): (&Look, Values),
 ) -> Vec<Line> {
     let column = text_at.saturating_sub(label_at + 2);
     let layout = Layout {
@@ -153,14 +173,17 @@ pub(in crate::surface) fn hangers(
             .push(Tone::Muted, word)
     };
     let mut lines = Vec::new();
+    let said = |words: &str| match values {
+        Values::Wrapped => wrap_unbroken(words, layout.room),
+        Values::OnTheirRow => vec![words.to_string()],
+    };
     if let Some(so) = so {
-        let said = wrap_unbroken(so, layout.room);
-        lines.extend(beside(label(SO), SO, said, &layout));
+        lines.extend(beside(label(SO), SO, said(so), &layout));
     }
     let Some(fix) = fix else {
         return lines;
     };
-    let said = wrap_unbroken(&fix.said, layout.room);
+    let said = said(&fix.said);
     lines.extend(beside(label(FIX), FIX, said, &layout));
     let deep = text_at + cell_width(INDENT);
     let fits = fix

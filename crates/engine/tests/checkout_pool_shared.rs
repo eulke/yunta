@@ -4,7 +4,8 @@
 //! for still has agents at work, and a checkout a crash left half added is
 //! made again. A second run finds the first run's checkouts where they
 //! were, with their builds, and the pool keeps those builds within its
-//! budget and the disk's floor free.
+//! budget and the disk's floor free, saying what the disk has free as its
+//! caller reads it.
 
 mod pool_world;
 
@@ -437,4 +438,30 @@ async fn a_reused_checkout_waits_for_a_worktree_being_added_beside_it() {
     );
     let (second, _held) = world.open("T002").await;
     assert_eq!(second.worktree, first.worktree);
+}
+
+/// A disk read as one a page names, whatever the machine's: what a caller hands the pool's
+/// report so a page reads the same on every machine.
+struct Named(yunta_core::disk::Space);
+
+impl yunta_core::disk::Disk for Named {
+    fn space(&self, _path: &Path) -> std::io::Result<yunta_core::disk::Space> {
+        Ok(self.0)
+    }
+}
+
+/// What the pool keeps of the disk says what the disk has free as its caller reads it, both
+/// in its report and in what tidying it keeps, never a reading of its own.
+#[tokio::test]
+async fn the_pools_report_says_the_disk_as_its_caller_reads_it() {
+    let world = World::new();
+    let named = Named(yunta_core::disk::Space {
+        total: 494_500_000_000,
+        available: 74_200_000_000,
+    });
+    let supervision = world.owner.supervision();
+    let report = world.pool.report(supervision, &named).await.unwrap();
+    assert_eq!(report.available, 74_200_000_000);
+    let tidied = world.pool.tidy(None, supervision, &named).await.unwrap();
+    assert_eq!(tidied.kept.available, 74_200_000_000);
 }

@@ -171,6 +171,21 @@ impl<'a> InternalGate<'a> {
         Ok(Ok(self.withholding(escalation, NonEmpty::new(flaws))))
     }
 
+    /// The escalation the gate puts as the run's log alone builds it, reading no document:
+    /// what it shows as the run holds it, its question its author's words or, where none
+    /// stands, that it needs a decision, and none of its options withheld. What it offers to
+    /// do about the run reads what it shows alone. Not [`InternalGate::asked`], the one way to
+    /// the escalation a person gets.
+    pub(crate) fn unread(
+        &self,
+        workflow: &Workflow,
+        state: &RunState,
+    ) -> Result<Escalation, GateEscalationError> {
+        let shows = self.shown(state)?;
+        let claim = claim(self.node, self.message, &[]);
+        Ok(self.escalation(workflow, claim, shows))
+    }
+
     /// `escalation` without the options that go on past the gate, when
     /// what it shows cannot be proven: `flaws` says why, and none leaves it
     /// whole. What is left is each option `on:` sends back, and `abort`.
@@ -338,8 +353,14 @@ async fn choice_at(
 /// Why a gate's question could not be put together, said in words here.
 fn unbuilt(node: &Node, source: GateEscalationError) -> RunError {
     RunError::Broken {
-        diagnostic: format!("node `{}`'s gate: {source}", node.id),
+        diagnostic: unbuilt_said(node, &source),
     }
+}
+
+/// Why `node`'s gate could not put its question together, `source`, in the words a
+/// diagnostic says it: what breaks a live run there, and what a reader of its log is told.
+pub(super) fn unbuilt_said(node: &Node, source: &GateEscalationError) -> String {
+    format!("node `{}`'s gate: {source}", node.id)
 }
 
 /// The question and the answer, together, on the log.

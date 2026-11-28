@@ -29,7 +29,8 @@
 //! The module denies `clippy::wildcard_enum_match_arm`, and `tests.rs` makes a scene for
 //! every `Standing` of the node pointed at; no `if let` or `matches!` decides a scene, a
 //! `match` does. What already decides part of it is taken as given: whether the engine
-//! rebuilds a decision (`awaits_decision`, kept as the run in view's `menu`), what the
+//! rebuilds a decision (`awaited_escalation`, kept as the run in view's decision and read
+//! as its `menu`), what the
 //! run in view keeps as read for the pause it stands at (the decision or the round it
 //! waits on, the change a gate counted), a failure's own questions, where the run puts its
 //! pointer at its end (`lead`), and the plan a decision shows (`desk::plan_among`).
@@ -146,7 +147,7 @@ impl RunStage {
         };
         Some(scene(
             framed.in_view,
-            &framed.frame,
+            framed.frame,
             node,
             self.leads(),
             plan,
@@ -202,7 +203,7 @@ fn pointed_at<'r>(run: &'r RunInView, frame: &RunFrame, pointed: &NodeFrame) -> 
         | RunPhase::Cancelled
         | RunPhase::Promoted { .. }
         | RunPhase::Broken { .. } => {
-            let at_its_end = lead::node_led(frame, &run.run.state, None);
+            let at_its_end = lead::node_led(frame, run.run.state(), None);
             match at_its_end.as_ref() == Some(&pointed.id) {
                 true => Scene::Ended,
                 false => Scene::Node,
@@ -303,7 +304,7 @@ fn paused<'r>(
 fn decided<'r>(run: &'r RunInView, pointed: &NodeFrame, plan: Plan) -> Scene<'r> {
     match run.awaited_decision() {
         Some(decision) => asked(run, decision, plan),
-        None => match run.run.menu {
+        None => match run.run.menu() {
             true => at_work(run, pointed),
             false => Scene::Standstill(Standstill::Unanswered),
         },
@@ -368,7 +369,7 @@ fn own<'r>(run: &'r RunInView, frame: &RunFrame, pointed: &NodeFrame) -> Scene<'
 /// person's decision holds it on where the run waits on them there.
 fn ended<'r>(run: &'r RunInView, frame: &RunFrame, pointed: &NodeFrame) -> Scene<'r> {
     let waited_at = frame.waits_on_a_person_at() == Some(&pointed.id);
-    let found = reviews_or_fixes(&run.run.state.findings, &pointed.id);
+    let found = reviews_or_fixes(&run.run.state().findings, &pointed.id);
     match (waited_at, found) {
         (false, true) => Scene::Findings,
         (false, false) | (true, true | false) => Scene::Node,
@@ -379,7 +380,7 @@ fn ended<'r>(run: &'r RunInView, frame: &RunFrame, pointed: &NodeFrame) -> Scene
 /// workflow declares it: a loop's board; else the findings where it posted or answered
 /// one, its work otherwise.
 fn at_work<'r>(run: &'r RunInView, node: &NodeFrame) -> Scene<'r> {
-    let workflow = &run.run.manifest.workflow;
+    let workflow = &run.run.manifest().workflow;
     let declared = workflow
         .iter_nodes()
         .find(|declared| declared.id == node.id);
@@ -395,7 +396,7 @@ fn at_work<'r>(run: &'r RunInView, node: &NodeFrame) -> Scene<'r> {
             | NodeKind::Workflow { .. }
             | NodeKind::PullRequest { .. },
         )
-        | None => match reviews_or_fixes(&run.run.state.findings, &node.id) {
+        | None => match reviews_or_fixes(&run.run.state().findings, &node.id) {
             true => Scene::Findings,
             false => Scene::Work,
         },

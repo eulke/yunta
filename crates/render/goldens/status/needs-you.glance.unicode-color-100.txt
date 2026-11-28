@@ -7,7 +7,7 @@
   ␛[2m  │ ␛[0m --> src/lib.rs:3:5
     ␛[2mwhole output: ␛[0m␛[1myunta status 7E5PH4 --node lint␛[0m
 
-  ␛[2mprogress    ␛[0m 2 of 5 nodes done · 1 reroute
+  ␛[2mprogress    ␛[0m 2 of 5 nodes done, 1 reroute
   ␛[2mnodes       ␛[0m ␛[32m✓ ␛[0m2 finished: plan, build
   ␛[2m            ␛[0m ␛[31m✗ ␛[0m1 failed: lint
   ␛[2m            ␛[0m ␛[2m◌ ␛[0m2 never ran: fix-lint, ship

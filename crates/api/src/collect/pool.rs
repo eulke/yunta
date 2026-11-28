@@ -55,7 +55,8 @@ impl Collection<'_> {
             .as_ref()
             .and_then(|storage| storage.retention_days)
             .map(|days| chrono::Duration::days(i64::from(days)));
-        let tidied = match self.pool.tidy(unused, self.supervision()).await {
+        let disk = self.project.workspace.disk.as_ref();
+        let tidied = match self.pool.tidy(unused, self.supervision(), disk).await {
             Ok(tidied) => tidied,
             Err(e) => {
                 return self.problem(Uncollected::Checkouts {
@@ -74,6 +75,6 @@ impl Collection<'_> {
                 checkout: self.shown(checkout),
             });
         }
-        self.collected.now = Some(tidied.kept.to_string());
+        self.collected.now = Some(crate::machine::pool_kept(&tidied.kept));
     }
 }

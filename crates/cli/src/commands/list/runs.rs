@@ -62,8 +62,6 @@ impl Answer for ListRunsAnswer {
             here: self.reading.here,
             storage: &self.storage,
             depth: self.depth,
-            pointed: None,
-            marked: &[],
         }
     }
 

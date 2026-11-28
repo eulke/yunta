@@ -143,8 +143,9 @@ impl Standing {
 /// What a page says when nothing needs the person.
 pub const NOTHING_NEEDS_YOU: &str = "nothing needs you";
 
-/// What `yunta list --runs` is offered as, in every place that offers it.
-pub const RUNS_THAT_NEED_YOU_FIRST: &str = "this repository's runs, what needs you first";
+/// Going to the run that has waited longest on the person, as an act a key or a palette's row
+/// offers.
+pub const TO_WHAT_NEEDS_YOU: &str = "go to what needs you";
 
 /// The plural of `needs you`, for a count of runs that need a person.
 pub const NEED_YOU: &str = "need you";

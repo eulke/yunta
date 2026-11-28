@@ -13,7 +13,6 @@ use clap::{ArgMatches, Command, CommandFactory};
 use surco::line::Tone;
 use surco::paint::Paint;
 use surco::width::{GAP, INDENT};
-use surco::words::RUNS_THAT_NEED_YOU_FIRST;
 use yunta_core::step::{Arg, NextStep, Reach};
 use yunta_render::command;
 
@@ -39,27 +38,19 @@ pub(crate) const GROUPS: [(&str, &[&str]); 6] = [
     ("Extend and maintain", &["pack", "mcp", "gc", "completions"]),
 ];
 
-/// The first steps, each with what it does.
+/// The first steps, each line beside what it does in the words every page says beside it.
 fn examples() -> [(String, &'static str); 4] {
     [
-        (command::line(&NextStep::Init), "prepare this repository"),
-        (
-            command::line(&NextStep::Run {
-                workflow: Arg::Given(".yunta/workflows/lint-fix.yaml".to_string()),
-            }),
-            "run a workflow from the catalog",
-        ),
-        (
-            command::line(&NextStep::ListRuns {
-                reach: Reach::Repository,
-            }),
-            RUNS_THAT_NEED_YOU_FIRST,
-        ),
-        (
-            command::line(&NextStep::Needs),
-            "the run waiting on you, and how to answer it",
-        ),
+        NextStep::Init { interactive: false },
+        NextStep::Run {
+            workflow: Arg::Given(".yunta/workflows/lint-fix.yaml".to_string()),
+        },
+        NextStep::ListRuns {
+            reach: Reach::Repository,
+        },
+        NextStep::Needs,
     ]
+    .map(|step| command::SaidStep::of(&step).pair())
 }
 
 /// The command clap reads the arguments with, its help and its usage lines
@@ -111,8 +102,8 @@ fn template(command: &Command, paint: Paint) -> String {
         .map(|(example, _)| example.len())
         .max()
         .unwrap_or(0);
-    for (example, gloss) in steps {
-        out.push_str(&row(&example, column, gloss, paint));
+    for (example, does) in steps {
+        out.push_str(&row(&example, column, does, paint));
     }
     out
 }
@@ -259,6 +250,24 @@ mod tests {
                 "`{name}`: {about:?}"
             );
         }
+    }
+
+    /// The help's examples say what each command does in the words every page says beside
+    /// it, under their heading, the lines in one column.
+    #[test]
+    fn the_examples_say_each_command_in_the_words_a_page_says_beside_it() {
+        let help = rendered(&["yunta", "--help"], Paint::Plain, Paint::Plain);
+        let examples = help
+            .split_once("Examples:\n")
+            .map(|(_, examples)| examples)
+            .expect("the help ends on its examples");
+        assert_eq!(
+            examples,
+            "  yunta init                                 prepare the repository for yunta\n\
+             \x20 yunta run .yunta/workflows/lint-fix.yaml   start a new run\n\
+             \x20 yunta list --runs                          this repository's runs\n\
+             \x20 yunta status needs                         go to what needs you\n"
+        );
     }
 
     /// Each example the help gives is a command line clap reads, so a renamed

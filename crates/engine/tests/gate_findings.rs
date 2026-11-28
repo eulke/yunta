@@ -199,14 +199,12 @@ fn settled(bench: &Bench) -> Vec<String> {
 fn blocking(bench: &Bench, workflow: &str) -> usize {
     let workflow: yunta_core::Workflow = yunta_core::yaml::parse(workflow).unwrap();
     let events = bench.events();
-    let at = events.last().unwrap().timestamp;
     yunta_replay::frame::RunFrame::of(
         &bench.run_id,
         &workflow,
         &yunta_replay::RunState::replay(&events),
         None,
         &yunta_replay::registry::Engine::this(yunta_core::Pid::current()),
-        at,
     )
     .blocking_findings
 }

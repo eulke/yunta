@@ -27,10 +27,10 @@ use std::sync::Arc;
 
 use yunta_core::check::CheckError;
 use yunta_core::port::ProbeReport;
-use yunta_core::{AdapterId, ConfigKey, Detected, MachineAdapters};
+use yunta_core::{AdapterId, ConfigKey, ConfigLayer, Detected, MachineAdapters, Workflow};
 use yunta_engine::{CheckoutPool, PoolReport};
 use yunta_render::declare;
-use yunta_render::page::doctor::{AdapterHealth, CheckoutsKeep, Finding};
+use yunta_render::page::doctor::{AdapterHealth, CheckoutsKeep, Finding, PoolKept};
 
 use crate::{Committer, Error, Project, Remarks, Stop};
 
@@ -48,7 +48,10 @@ impl Project {
         let mut findings = Vec::new();
         let (healthy, answered) = self.probe_adapters(&mut findings).await;
         findings.push(match self.workspace.committer(stop).await? {
-            Committer::Named(who) => Finding::Committer { who },
+            Committer::Named(who) => Finding::Committer {
+                name: who.name,
+                address: who.address,
+            },
             Committer::Unnamed { git_said } => Finding::NoCommitter { git_said },
         });
         findings.extend(forge::findings(self, stop).await?);
@@ -73,9 +76,10 @@ impl Project {
             .and_then(|storage| storage.pool.as_ref());
         let clock = Arc::clone(&self.workspace.clock);
         let pool = CheckoutPool::upkeep(&self.worktrees_root, &self.workspace.dir, limits, clock);
-        match pool.report(self.workspace.supervision(stop)).await {
+        let disk = self.workspace.disk.as_ref();
+        match pool.report(self.workspace.supervision(stop), disk).await {
             Ok(kept) => Finding::Checkouts {
-                kept: kept.to_string(),
+                kept: pool_kept(&kept),
                 keep: keep_of(&kept),
             },
             Err(e) => Finding::CheckoutsUnread {
@@ -101,6 +105,7 @@ impl Project {
         let mut healthy = BTreeSet::new();
         let mut names: Vec<&AdapterId> = adapters.keys().collect();
         names.sort();
+        let catalog = self.workspace.catalog_workflows();
         for name in names {
             let Some(adapter) = adapters.get(name) else {
                 continue;
@@ -112,6 +117,7 @@ impl Project {
             findings.push(Finding::Adapter {
                 adapter: name.clone(),
                 health,
+                serving: served(name, &self.config, &catalog),
             });
         }
         let answered = match healthy.is_empty() {
@@ -197,6 +203,40 @@ impl Project {
         for binding in &bindings {
             findings.push(session::session_probe(self, binding, remarks, stop).await);
         }
+    }
+}
+
+/// The workflows of `catalog` the adapter `adapter` serves under `config`: those with a node
+/// that takes a session on a runner naming it as a candidate, as runner resolution may pick it
+/// there, or a pin.
+fn served(
+    adapter: &AdapterId,
+    config: &ConfigLayer,
+    catalog: &[(String, Workflow)],
+) -> Vec<String> {
+    let serves = |workflow: &Workflow| {
+        workflow
+            .iter_nodes()
+            .filter(|node| node.opens_session())
+            .any(|node| yunta_engine::candidate_adapters(node, config).contains(adapter))
+    };
+    catalog
+        .iter()
+        .filter(|(_, workflow)| serves(workflow))
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+/// What the pool measured it keeps, as a person reads it: what `doctor` and
+/// `gc` say of the pool.
+pub(crate) fn pool_kept(kept: &PoolReport) -> PoolKept {
+    PoolKept {
+        checkouts: kept.checkouts,
+        builds: kept.builds,
+        uncounted: kept.uncounted,
+        budget: kept.budget,
+        available: kept.available,
+        keep_free: kept.keep_free,
     }
 }
 

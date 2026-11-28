@@ -1,18 +1,35 @@
 //! `yunta stats --workflow <name>`: a workflow's history — its cost per
 //! verified task over time, its modes side by side, and what its checks
-//! never caught.
+//! never caught — told as a run's numbers are, one page printed and on the
+//! application's screen: a headline that names the workflow and counts its
+//! runs, what they usually take as its sentence, the cost per verified task as
+//! a labelled row, and a mode a row as who spent a run's tokens is drawn, a bar
+//! of its median task cost against the dearest.
 
+use super::barred::barred;
+use super::run::TASK_COST;
 use crate::page::Page;
 use surco::bars::sparkline;
-use surco::components::{Checklist, Found};
+use surco::components::{Checklist, Found, Furrow, Gist, Headline};
 use surco::doc::{Block, Doc};
 use surco::figures::Tokens;
+use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::look::Look;
-use surco::width::{cell_width, truncate, INDENT, LABEL_WIDTH};
+use surco::text::counted;
+use surco::width::{cell_width, INDENT, LABEL_WIDTH};
 use yunta_core::{ModeName, WorkflowName};
 use yunta_replay::history::{PriorEstimation, RunSummary};
 use yunta_replay::verification_effectiveness::VerificationFindings;
+
+/// What heads the advice a workflow's history gives about its checks.
+const CHECKS_PERFORMED: &str = "how its checks performed";
+
+/// What the advice is said to be beside its heading: never acted on.
+const ADVICE_ONLY: &str = ": advice, nothing here is acted on";
+
+/// What heads a workflow's modes on its screen.
+const BY_MODE: &str = "by mode";
 
 /// What the `yunta stats --workflow <name>` page is drawn from: a
 /// workflow's past runs, and what their logs say about its checks.
@@ -23,86 +40,98 @@ pub struct History<'a> {
 }
 
 impl Page for History<'_> {
-    /// The page as one document: the history, then what the checks say
-    /// when there is anything to say. A workflow nobody has run is told so
-    /// in a line of its own.
+    /// The page, printed and on a screen alike, as a run's numbers are told: a headline that
+    /// names the workflow and counts its runs, what they usually take under it, its cost per
+    /// verified task over time as a labelled row, `by mode` and a mode a row with a bar of its
+    /// median task cost against the dearest, then what its checks never caught, under their
+    /// heading. A workflow nobody has run is told so in a line of its own.
     fn document(&self, look: &Look) -> Doc {
         if self.history.is_empty() {
             return Doc::new().with(Block::Lines(vec![
                 Line::new().plain(format!("no runs of workflow `{}` yet", self.name))
             ]));
         }
-        let mut doc = Doc::new().with(Block::Lines(history_lines(self.name, self.history, *look)));
+        let runs = counted(self.history.len(), "run");
+        let headline = Headline::new(Mark::Absent, self.name.as_str(), runs);
+        let usually = match PriorEstimation::of(self.history) {
+            Some(estimation) => [
+                crate::spend::usual_tokens(&estimation),
+                crate::spend::usual_wall_clock(&estimation),
+            ]
+            .join(&look.glyphs.spaced_sep()),
+            None => too_few_runs(self.history),
+        };
+        let modes = mode_table(self.history)
+            .into_iter()
+            .map(|(mode, runs, cptv, tokens)| {
+                let figure = [
+                    counted(runs, "run"),
+                    format!("median task cost {}", figure_of(cptv)),
+                    format!("median tokens {}", figure_of(tokens)),
+                ]
+                .join(&look.glyphs.spaced_sep());
+                (mode.to_string(), cptv.unwrap_or_default(), figure)
+            });
+        let mut doc = Doc::new()
+            .with(headline)
+            .with(Furrow(Vec::new()))
+            .with(Gist::new(usually))
+            .with(Block::Rows(vec![task_cost(self.history, *look)]))
+            .with(Block::Heading(BY_MODE.to_string()))
+            .with(Block::Rows(barred(modes.collect(), look)));
         if let Some(findings) = self.findings.filter(|findings| !findings.is_empty()) {
-            doc = doc
-                .with(Block::Lines(vec![Line::new()]))
-                .with_all(findings.document(look).into_blocks());
+            let heading = format!("{CHECKS_PERFORMED}{ADVICE_ONLY}");
+            doc = doc.with(Block::Heading(heading)).with(advice(findings));
         }
         doc
     }
 }
 
-/// The lines of `yunta stats --workflow <name>`'s history: how many runs it
-/// has, its CPTV over time, its modes side by side, and what its history
-/// estimates.
-fn history_lines(workflow_name: &WorkflowName, history: &[RunSummary], look: Look) -> Vec<Line> {
-    let mut lines = vec![Line::new().plain(format!(
-        "workflow `{workflow_name}`: {}",
-        surco::text::counted(history.len(), "run")
-    ))];
-
-    lines.push(Line::new());
-    lines.push(Line::new().plain("cost per verified task over time:"));
-    lines.push(Line::new().plain(cptv_line(history, look)));
-
-    lines.push(Line::new());
-    lines.push(Line::new().plain("modes:"));
-    for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
-        lines.push(Line::new().plain(format!(
-            "{INDENT}{} {:>3} {:<4}   median task cost {}   median tokens {}",
-            truncate(mode.as_str(), LABEL_WIDTH, look.glyphs),
-            runs,
-            surco::text::agreeing(runs, "run", "runs"),
-            median_cptv
-                .map(|v| Tokens::rounded(v).figure())
-                .unwrap_or_else(|| "n/a".to_string()),
-            median_tokens
-                .map(|v| Tokens::rounded(v).figure())
-                .unwrap_or_else(|| "n/a".to_string()),
-        )));
-    }
-
-    lines.push(Line::new());
-    lines.push(Line::new().plain(match PriorEstimation::of(history) {
-        Some(estimation) => crate::spend::estimation(&estimation, look.glyphs),
-        None => format!(
-            "estimation: not enough runs yet (need {}, have {})",
-            yunta_replay::history::MIN_SAMPLES,
-            history.len()
-        ),
-    }));
-    lines
+/// The cost per verified task over time as a row of a page's facts, one row cut where it
+/// ends: its label muted in the column a page's facts stand in, every past run's cost a cell
+/// of a sparkline in the running tone, oldest first, then what it is and the latest's figure,
+/// `█▁▂  per verified task, oldest → newest; the latest 2.17M`. Where the row has no room
+/// for a cell a run and what it says, the sparkline narrows to its newest runs, which it
+/// says, down to [`LEAST_SPARKLINE`] cells.
+fn task_cost(history: &[RunSummary], Look { glyphs, width, .. }: Look) -> Line {
+    let series: Vec<f64> = history.iter().map(|r| r.cptv.unwrap_or(0.0)).collect();
+    let latest = history.last().and_then(|r| r.cptv);
+    let said = format!(
+        "  per verified task, oldest {} newest; the latest {}",
+        glyphs.arrow(),
+        figure_of(latest)
+    );
+    let label = cell_width(INDENT) + LABEL_WIDTH + 1;
+    let room = width.cells().saturating_sub(label + cell_width(&said));
+    let cells = series.len().min(room.max(LEAST_SPARKLINE));
+    Line::new()
+        .plain(INDENT)
+        .push(Tone::Muted, format!("{TASK_COST:<LABEL_WIDTH$}"))
+        .plain(" ")
+        .push(Tone::Running, sparkline(&series, cells, glyphs))
+        .plain(said)
 }
 
-/// Every past run's CPTV as one cell, oldest first, with the newest
-/// value spelled out beside it — the sparkline carries the shape and the
-/// number carries the scale.
-///
-/// The sparkline gets whatever `width` leaves after the indent and that
-/// note, so a workflow with hundreds of runs narrows its window
-/// instead of wrapping the line and breaking the block it sits in.
-fn cptv_line(history: &[RunSummary], Look { glyphs, width, .. }: Look) -> String {
-    let latest = history
-        .last()
-        .and_then(|r| r.cptv)
-        .map(|c| format!("{c:.1}"))
-        .unwrap_or_else(|| "n/a".to_string());
-    let note = format!("  (oldest {} newest, latest = {latest})", glyphs.arrow());
-    let cells = width
-        .cells()
-        .saturating_sub(cell_width(INDENT) + cell_width(&note));
-    let series: Vec<f64> = history.iter().map(|r| r.cptv.unwrap_or(0.0)).collect();
-    format!("{INDENT}{}{note}", sparkline(&series, cells, glyphs))
+/// The fewest cells the sparkline of a workflow's cost per verified task keeps however narrow
+/// its row: a short history stays whole and what the row says after it is cut instead; a
+/// longer one narrows to its newest runs only down to this.
+const LEAST_SPARKLINE: usize = 8;
+
+/// A median or a cost as its figure, rounded: `n/a` where there is none.
+fn figure_of(value: Option<f64>) -> String {
+    value
+        .map(|v| Tokens::rounded(v).figure())
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+/// What a history too short for an estimate says in its place: how many runs it needs, and
+/// how many stand.
+fn too_few_runs(history: &[RunSummary]) -> String {
+    format!(
+        "estimation: not enough runs yet (need {}, have {})",
+        yunta_replay::history::MIN_SAMPLES,
+        history.len()
+    )
 }
 
 /// How effective a workflow's checks were across its runs, as its history
@@ -114,8 +143,8 @@ impl Page for VerificationFindings {
         Doc::new()
             .with(Block::Title(surco::components::Title::named(
                 Line::new()
-                    .push(Tone::Strong, "how its checks performed")
-                    .push(Tone::Muted, ": advice, nothing here is acted on"),
+                    .push(Tone::Strong, CHECKS_PERFORMED)
+                    .push(Tone::Muted, ADVICE_ONLY),
             )))
             .with(advice(self))
     }
@@ -236,25 +265,26 @@ mod tests {
     }
 
     #[test]
-    fn a_long_history_narrows_its_sparkline_instead_of_wrapping_the_line() {
+    fn a_long_history_narrows_its_sparkline_instead_of_passing_its_row() {
         let history: Vec<RunSummary> = (1..=200).map(|n| summary(f64::from(n))).collect();
-        let line = cptv_line(&history, Look::plain());
-        let cells = cell_width(&line);
+        let row = task_cost(&history, Look::plain()).text();
+        let cells = cell_width(&row);
+        assert!(cells <= Look::plain().width.cells(), "{cells} cells: {row}");
         assert!(
-            cells <= Look::plain().width.cells(),
-            "{cells} cells: {line}"
+            row.contains(Glyphs::Ascii.ellipsis()),
+            "a narrowed window says so: {row}"
         );
         assert!(
-            line.contains(Glyphs::Ascii.ellipsis()),
-            "a narrowed window says so: {line}"
+            row.ends_with("the latest 200"),
+            "what it says stays whole: {row}"
         );
     }
 
     #[test]
     fn a_history_that_fits_draws_every_run_and_marks_no_window() {
         let history: Vec<RunSummary> = (1..=3).map(|n| summary(f64::from(n))).collect();
-        let line = cptv_line(&history, Look::plain());
-        assert!(!line.contains(Glyphs::Ascii.ellipsis()), "{line}");
-        assert!(line.contains("latest = 3.0"), "{line}");
+        let row = task_cost(&history, Look::plain()).text();
+        assert!(!row.contains(Glyphs::Ascii.ellipsis()), "{row}");
+        assert!(row.ends_with("the latest 3"), "{row}");
     }
 }

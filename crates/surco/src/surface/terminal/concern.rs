@@ -20,11 +20,10 @@ impl Concern {
         let step = cell_width(&look.glyphs.mark(Mark::Caution).to_string()) + 1;
         let label_at = step + cell_width(INDENT);
         lines.extend(super::checklist::hangers(
-            Some(self.so.as_str()),
-            Some(&self.fix),
+            (Some(self.so.as_str()), Some(&self.fix)),
             label_at,
             label_at + LABEL_WIDTH + 1,
-            look,
+            (look, super::Values::Wrapped),
         ));
         lines
     }

@@ -6,11 +6,17 @@
 //! adds the pull requests the run opened, what it took, what it changed,
 //! where its time went and where its work is; `--full` says every fact;
 //! `--dig` adds where the run itself is kept.
+//!
+//! The rows the field's glance at a run says too (how far it came, what it spent, where its
+//! time went, its slowest nodes, its branch, how long it has stood) are worded here once, each
+//! label and each value, so `yunta status` and the glance say a fact the same way; a value of
+//! several parts takes a comma between two, as the glance has it.
 
 use std::time::Duration;
 
 use crate::children;
 use crate::progress;
+use crate::spend::Breakdown;
 use surco::components::{Diffstat, Fields, Said, Section};
 use surco::doc::{Block, Depth};
 use surco::figures::duration;
@@ -20,7 +26,7 @@ use surco::paths;
 use surco::text::{counted, counted_as};
 use surco::words::{AT_WORK, WAITING_ON_YOU};
 use yunta_core::Isolation;
-use yunta_replay::frame::{NodeFrame, NodeStanding};
+use yunta_replay::frame::{NodeFrame, NodeStanding, RunFrame, RunTimes};
 use yunta_replay::history::PriorEstimation;
 use yunta_replay::TimeSpent;
 
@@ -28,7 +34,22 @@ use super::{caution_row, Run, RunScope};
 
 /// How many of the run's longest nodes the `slowest` row names. Enough to
 /// point at where the time went, few enough that the row stays one row.
-const SLOWEST: usize = 3;
+const SLOWEST_NAMED: usize = 3;
+
+/// The label of how far a run has come.
+pub(crate) const PROGRESS: &str = "progress";
+
+/// The label of what a run spent.
+pub(crate) const TOKENS: &str = "tokens";
+
+/// The label of where a run's time went, where a person weighed in it.
+pub(crate) const TIME: &str = "time";
+
+/// The label of a run's longest nodes.
+pub(crate) const SLOWEST: &str = "slowest";
+
+/// The label of the branch a run works on and the one it started from.
+pub(crate) const BRANCH: &str = "branch";
 
 impl Run {
     /// The facts with something to say on this page, in the order a reader
@@ -36,7 +57,7 @@ impl Run {
     pub(super) fn facts(&self, glyphs: Glyphs) -> Fields {
         let full = self.depth.reaches(Depth::Full);
         let harvest = self.holds_harvest();
-        let mut fields = Fields::new().push_if("progress", progress::row(&self.frame, glyphs));
+        let mut fields = Fields::new().push_if(PROGRESS, progress::row(&self.frame));
         // The whole story names every node and task in a table of its own.
         if !full {
             for place in progress::places(&self.frame) {
@@ -53,7 +74,7 @@ impl Run {
         }
         fields = fields.push_if("caution", caution_row(&self.frame));
         if harvest {
-            fields = self.went_to(fields, glyphs);
+            fields = self.went_to(fields);
         }
         if full {
             fields = fields
@@ -102,7 +123,7 @@ impl Run {
                 glyphs.sep(),
                 history(prior, glyphs)
             ),
-            None => self.tokens().unwrap_or_default(),
+            None => tokens(&self.frame).unwrap_or_default(),
         }
     }
 
@@ -133,21 +154,24 @@ impl Run {
                     crate::outcome::pull_request(pull.number, pull.url),
                 )
             })
-            .push_if("tokens", self.spent(glyphs))
+            .push_if(TOKENS, self.spent(glyphs))
             .push_if("changed", self.changed(glyphs))
     }
 
     /// Where the run's time went and where its work is.
-    fn went_to(&self, fields: Fields, glyphs: Glyphs) -> Fields {
+    fn went_to(&self, fields: Fields) -> Fields {
         fields
             .push_if(
-                "time",
+                TIME,
                 // Read to the instant the page is read at while the run is
                 // open: the log says nothing of a wait until it is answered.
-                time_row(&self.frame.time, glyphs).unwrap_or_default(),
+                time_row(&self.times.time).unwrap_or_default(),
             )
-            .push_if("slowest", self.slowest(glyphs).unwrap_or_default())
-            .push_if("branch", self.branch())
+            .push_if(
+                SLOWEST,
+                slowest(&self.frame, &self.times).unwrap_or_default(),
+            )
+            .push_if(BRANCH, self.branch())
             .push_if("artifacts", self.artifacts())
             .push_if("degraded", self.degraded())
     }
@@ -162,29 +186,6 @@ impl Run {
             .and_then(crate::changes::by_file)
     }
 
-    /// The run's longest nodes, longest first. `None` for a run where no
-    /// node ever started.
-    fn slowest(&self, glyphs: Glyphs) -> Option<String> {
-        let mut timed: Vec<(&NodeFrame, Duration)> = self
-            .frame
-            .nodes
-            .iter()
-            .filter_map(|node| node.elapsed.map(|elapsed| (node, elapsed)))
-            .collect();
-        if timed.is_empty() {
-            return None;
-        }
-        timed.sort_by_key(|(_, elapsed)| std::cmp::Reverse(*elapsed));
-        Some(
-            timed
-                .iter()
-                .take(SLOWEST)
-                .map(|(node, elapsed)| format!("{} {}", node.id, duration(*elapsed)))
-                .collect::<Vec<_>>()
-                .join(&format!(" {} ", glyphs.sep())),
-        )
-    }
-
     /// The branch the run worked on and where that work sits now.
     fn branch(&self) -> String {
         let tree = paths::shown(
@@ -194,8 +195,8 @@ impl Run {
         );
         match self.places.isolation {
             Isolation::Worktree => format!(
-                "{} off {}, in {tree}",
-                self.places.branch, self.places.base_branch,
+                "{}, in {tree}",
+                off(&self.places.branch, &self.places.base_branch),
             ),
             Isolation::None => match tree.as_str() {
                 "." => format!("{}, in this checkout", self.places.base_branch),
@@ -295,19 +296,64 @@ impl Run {
 /// Where a run's time went, where a person weighed in it: what was at work on it,
 /// and what waited on a person, a part under a second being no part. Nothing for
 /// a run no person held up: the row of its slowest nodes says where its time went.
-pub(super) fn time_row(time: &TimeSpent, glyphs: Glyphs) -> Option<String> {
+pub(crate) fn time_row(time: &TimeSpent) -> Option<String> {
     if time.people.as_secs() == 0 {
         return None;
     }
     let waited = format!("{} {WAITING_ON_YOU}", duration(time.people));
     Some(match time.working.as_secs() {
         0 => waited,
-        _ => format!(
-            "{} {AT_WORK} {} {waited}",
-            duration(time.working),
-            glyphs.sep()
-        ),
+        _ => format!("{} {AT_WORK}, {waited}", duration(time.working)),
     })
+}
+
+/// What the run framed as `frame` spent, settled and in flight, split in and out: nothing for
+/// a run that spent none. Every page reads this one figure, from the frame the run's log
+/// derives.
+pub(crate) fn tokens(frame: &RunFrame) -> Option<String> {
+    let spend = &frame.tokens;
+    (spend.total() > 0).then(|| Breakdown(spend).to_string())
+}
+
+/// The longest nodes of the run framed as `frame`, longest first, each with how long it took
+/// as `times` measures it. `None` for a run where no node ever started.
+pub(crate) fn slowest(frame: &RunFrame, times: &RunTimes) -> Option<String> {
+    let mut timed: Vec<(&NodeFrame, Duration)> = frame
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let elapsed = times.node(&node.id).elapsed;
+            elapsed.map(|elapsed| (node, elapsed))
+        })
+        .collect();
+    if timed.is_empty() {
+        return None;
+    }
+    timed.sort_by_key(|(_, elapsed)| std::cmp::Reverse(*elapsed));
+    Some(
+        timed
+            .iter()
+            .take(SLOWEST_NAMED)
+            .map(|(node, elapsed)| format!("{} {}", node.id, duration(*elapsed)))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
+/// A run's `branch` and the `base` it started from, as a page names the two.
+pub(crate) fn off(branch: &str, base: &str) -> String {
+    format!("{branch} off {base}")
+}
+
+/// How long a run has stood where it is, `stood` as a page says that time.
+pub(crate) fn stood_for(stood: impl std::fmt::Display) -> String {
+    format!("for {stood}")
+}
+
+/// The whole span of a run that closed, `took`, as its screen's headline and its printed
+/// page both say it, however it closed: `in 7m41s`.
+pub(crate) fn closed_in(took: Duration) -> String {
+    format!("in {}", surco::figures::duration(took))
 }
 
 /// What this workflow's past runs cost, in the one phrasing every surface

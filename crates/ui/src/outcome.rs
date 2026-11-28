@@ -4,18 +4,21 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use surco::components::Check;
+use surco::components::{Check, Note};
+use surco::doc::Doc;
+use surco::look::Look;
 use yunta_api::{
-    AuditedPack, HistoryReading, InitializedProject, ProjectDraft, PullRequestPolled, Repository,
-    WorkflowCheck,
+    AuditedPack, Committer, HistoryReading, InitializedProject, ProjectDraft, ProposedRunners,
+    PullRequestPolled, Repository, WorkflowCheck,
 };
 use yunta_core::receipt::{EventChainStatus, Receipt};
 use yunta_core::step::NextStep;
 use yunta_core::{CommitSha, PackAudit, PackManifest, PackRef, PricingEntry, RunId, WorkflowShape};
 use yunta_render::page::doctor::Finding;
-use yunta_render::page::pack::{Cases, Listed, Needs, NewPackCheck};
+use yunta_render::page::pack::{Cases, Installed, Listed, Needs, NewPackCheck};
 use yunta_render::page::Collected;
-use yunta_render::page::{CancelState, Catalog, Diagnosis, Graph, Tested};
+use yunta_render::page::Page;
+use yunta_render::page::{Catalog, Diagnosis, Graph, Tested};
 use yunta_render::refusal::Refused;
 
 use crate::Ticket;
@@ -27,14 +30,26 @@ pub enum Outcome {
     /// The repository the application works in, as far as Yunta goes, with where the
     /// project keeps its runs and its prices.
     Repository(Box<RepositoryReading>),
-    /// What setting the repository up found, and the ticket the performer holds the
-    /// project detected under, which its setup is written with.
+    /// What setting the repository up found, who git commits a run's work as there, and
+    /// the ticket the performer holds the project detected under, which its setup is
+    /// written with.
     Detected {
         draft: Box<ProjectDraft>,
         held: Ticket,
+        committer: Committer,
     },
-    /// What setting the repository up wrote, and what it left as it was.
-    Initialized(Box<InitializedProject>),
+    /// What fetching the pack a setup installs came to, and the ticket it went under, which
+    /// holds its copy until the project it is held with is detected.
+    SetupPack {
+        fetched: Arc<SetupPackFetch>,
+        held: Ticket,
+    },
+    /// What setting the repository up wrote, what it left as it was, and the pack it
+    /// installed where it installed one, as `yunta pack add` says it.
+    Initialized {
+        initialized: Box<InitializedProject>,
+        installed: Option<Arc<PackInstalled>>,
+    },
     /// The workflows the repository can run.
     Catalog(Box<Catalog>),
     /// What work on a workflow came to.
@@ -62,8 +77,9 @@ pub enum Outcome {
     Started { run: RunId },
     /// The run handed back to a detached resume.
     Resumed { run: RunId },
-    /// How cancelling the run ended.
-    Cancelled { run: RunId, state: CancelState },
+    /// The run cancelled: how it stands then is the run's own log to say, which the state
+    /// follows.
+    Cancelled { run: RunId },
     /// The runs closed, why each of the others was not, and what failed below Yunta
     /// and stopped the closing short, where something did: the runs closed before it
     /// stand closed whatever came after.
@@ -92,7 +108,8 @@ impl Outcome {
             | Outcome::Answered { run } => Some(run),
             Outcome::Repository(_)
             | Outcome::Detected { .. }
-            | Outcome::Initialized(_)
+            | Outcome::SetupPack { .. }
+            | Outcome::Initialized { .. }
             | Outcome::Catalog(_)
             | Outcome::Workflow(_)
             | Outcome::Pack(_)
@@ -112,9 +129,9 @@ impl Outcome {
 }
 
 /// The repository the application works in, read as it opens: where Yunta stands in it,
-/// where the project keeps its runs, and what it prices tokens at. Neither of the last
-/// two is followed, so the state keeps them from here for every stage to read. Not
-/// `yunta_api::Repository`, which says only how far Yunta went there.
+/// where the project keeps its runs, what it prices tokens at, and the person's home. None
+/// of the last three is followed, so the state keeps them from here for every stage to read.
+/// Not `yunta_api::Repository`, which says only how far Yunta went there.
 #[derive(Debug, Clone)]
 pub struct RepositoryReading {
     pub repository: Repository,
@@ -122,6 +139,8 @@ pub struct RepositoryReading {
     pub storage: PathBuf,
     /// What the project prices each model's tokens at, where its configuration says.
     pub prices: Option<BTreeMap<String, PricingEntry>>,
+    /// The person's home, where the environment names one: a path under it is shown from it.
+    pub home: Option<PathBuf>,
 }
 
 /// What work on a workflow came to: a [`WorkflowOperation`](crate::WorkflowOperation)'s
@@ -221,6 +240,40 @@ pub struct PackFetched {
     pub checkout: PathBuf,
 }
 
+/// The pack a setup installs, as fetching it went: in reach, installed in the repository
+/// already, or out of reach. What the setup's `workflow` row says, the roles it proposes and
+/// what its write installs follow from it.
+#[derive(Debug)]
+pub enum SetupPackFetch {
+    /// Fetched, its copy held with the project: the command that fetches and installs it
+    /// as this did, `yunta pack add` with the source it was fetched from; its audit, what a
+    /// person confirms its install against, on the heap since it is far the largest of what
+    /// a fetch comes to; and the roles the project proposes once it is installed.
+    Fetched {
+        pack: PackRef,
+        installs_as: NextStep,
+        audit: Box<PackAudit>,
+        proposed: ProposedRunners,
+    },
+    /// Vendored in the repository already, which the fetch refuses: the project proposes
+    /// its roles as detected, and the setup installs nothing.
+    Installed { pack: PackRef },
+    /// Out of reach: why, in the words of what refused it or failed below, git's own where
+    /// git did not answer.
+    OutOfReach { pack: PackRef, why: String },
+}
+
+impl SetupPackFetch {
+    /// The pack, whatever fetching it came to.
+    pub fn pack(&self) -> &PackRef {
+        match self {
+            SetupPackFetch::Fetched { pack, .. }
+            | SetupPackFetch::Installed { pack }
+            | SetupPackFetch::OutOfReach { pack, .. } => pack,
+        }
+    }
+}
+
 /// A pack installed, as `yunta pack add` says it: what it declares, the commit it
 /// was vendored from, where, as a reader in the repository names it, its own cases
 /// counted, and what its workflows need from the project, or what stopped reading
@@ -232,4 +285,25 @@ pub struct PackInstalled {
     pub at: String,
     pub cases: Cases,
     pub needs: Result<Needs, String>,
+}
+
+impl PackInstalled {
+    /// The page `yunta pack add` ends with at `look`'s width: the pack installed, and what
+    /// its workflows still need from the project, or what stopped reading that.
+    pub(crate) fn page(&self, look: &Look) -> Doc {
+        let unread = Needs::default();
+        let needs = self.needs.as_ref().unwrap_or(&unread);
+        let page = Installed {
+            manifest: &self.manifest,
+            commit: &self.commit,
+            at: &self.at,
+            cases: &self.cases,
+            needs,
+        };
+        let doc = page.document(look);
+        match &self.needs {
+            Ok(_) => doc,
+            Err(unread) => doc.with(Note(unread.clone())),
+        }
+    }
 }

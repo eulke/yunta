@@ -1,0 +1,24 @@
+ yunta › set up                                               nothing needs you
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ✓ pack yunta/fragua · installed · 0.1.0 · 9fe5b41307ae
+
+   at           .yunta/packs/yunta/fragua
+
+   tests        4 cases shipped, not run (pass --run-tests)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ✓ Wrote .yunta/config.yaml and installed yunta/fragua. Nothing outside .yunta…
+ enter on to what to build · q quit · ? keys

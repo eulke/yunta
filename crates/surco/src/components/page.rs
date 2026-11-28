@@ -16,8 +16,15 @@ pub struct Furrow(pub Vec<Standing>);
 
 /// The gist of a page, in the sentence under its headline: what it asks
 /// of its reader, what holds what it is about, or what was just done.
-/// Said whole — wrapped, never cut — and ending with its period.
-pub struct Gist(pub String);
+/// Said whole — wrapped, never cut — and ending with its period; or, on a
+/// screen, as a run's gist is said, on its one row.
+pub struct Gist {
+    pub said: String,
+    /// Whether it stands on its one row, as a run's gist does on a screen: cut
+    /// where the row ends, with no closing period. Not wrapped whole, as a
+    /// printed page says it.
+    pub on_one_row: bool,
+}
 
 impl Gist {
     /// `said` as a page's gist: ended with a period when nothing ends it
@@ -29,6 +36,19 @@ impl Gist {
             said.truncate(said.trim_end().len());
             said.push('.');
         }
-        Gist(said)
+        Gist {
+            said,
+            on_one_row: false,
+        }
+    }
+
+    /// This gist as a run's gist is said on a screen: on its one row, its
+    /// closing period left out.
+    pub fn on_one_row(self) -> Self {
+        let said = self.said.strip_suffix('.').unwrap_or(&self.said);
+        Gist {
+            said: said.to_string(),
+            on_one_row: true,
+        }
     }
 }

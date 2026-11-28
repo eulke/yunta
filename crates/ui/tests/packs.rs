@@ -1,7 +1,7 @@
 //! The packs in the application: listed from the catalog, a pack audited as
 //! `yunta pack audit` prints it, one removed once a person confirmed it, the listing
 //! read again; and a pack installed from the very copy its audit read, its executors
-//! confirmed first, or left unconfirmed with no copy behind.
+//! confirmed first, said installing while it is, or left unconfirmed with no copy behind.
 
 mod support;
 
@@ -15,7 +15,9 @@ use yunta_core::events::Channel;
 use yunta_core::PackRef;
 use yunta_render::page::pack::Inventory;
 use yunta_render::page::Page;
-use yunta_testkit_ui::driving::drive;
+use yunta_testkit_ui::driving::{
+    carried_out, drive, driven_through, pressed_while, CarriedOut, Inputs, Withheld,
+};
 use yunta_testkit_ui::sandbox::{
     commit_of, pack_with_an_executor, with_a_pack_installed, workspace,
 };
@@ -167,6 +169,53 @@ async fn a_pack_with_an_executor_installs_the_commit_its_audit_read() {
     assert_eq!(installed.locked.commit.to_string(), audited);
 }
 
+/// A pack whose executors are confirmed shows that it is installing while it is, `esc`
+/// letting nothing go meanwhile, and what installing came to lands on the packs' page.
+#[tokio::test]
+async fn a_confirmed_install_shows_it_installs_and_its_answer_lands_on_the_packs() {
+    let root = tempfile::tempdir().expect("a temporary root");
+    let (upstream, _) = pack_with_an_executor(root.path());
+    let repo = set_up(root.path());
+    let performer = Arc::new(Performer::new(workspace(&repo, root.path()), Channel::Tty));
+    let (field, _) = on_the_field(&[&yunta_core::RunId::from("01M7PACKS00000000000000004")]).await;
+    let mut strokes = vec![
+        Stroke::Insert('w'),
+        Stroke::Insert('p'),
+        Stroke::Insert('i'),
+    ];
+    strokes.extend(typed(upstream.to_str().expect("a path that reads")));
+    // The inventory's Enter asks its executor confirmed, Enter confirms it, and `esc` comes
+    // while the install is under way.
+    strokes.extend([Stroke::Enter, Stroke::Enter, Stroke::Decline]);
+    let installs =
+        |work: &Operation| matches!(work, Operation::Pack(PackOperation::Install { .. }));
+    let mut inputs = Inputs::new();
+    let pressed = pressed_while(
+        &mut inputs,
+        field,
+        Vec::new(),
+        &performer,
+        installs,
+        &strokes,
+    );
+    let Withheld { driven, withheld } = pressed.await;
+    let shown = main_region(&driven.state);
+    assert!(
+        shown.contains("installing ") && !shown.contains("runner.py"),
+        "{shown}"
+    );
+    let [(_, Operation::Pack(PackOperation::Install { .. }))] = withheld.as_slice() else {
+        panic!("the pack is installed once: {withheld:?}");
+    };
+    let installing = withheld
+        .into_iter()
+        .map(|(ticket, work)| Request::Perform(ticket, work))
+        .collect();
+    let done = driven_through(&mut inputs, driven.state, installing, &performer, &[]).await;
+    let shown = main_region(&done.state);
+    assert!(shown.contains("installed"), "{shown}");
+}
+
 #[tokio::test]
 async fn a_pack_left_unconfirmed_leaves_no_temporary_checkout() {
     let root = tempfile::tempdir().expect("a temporary root");
@@ -189,14 +238,8 @@ async fn a_pack_left_unconfirmed_leaves_no_temporary_checkout() {
     else {
         panic!("the pack is fetched: {asked:?}");
     };
-    let (inputs, mut received) = mpsc::unbounded_channel();
-    performer.perform(*fetching, fetch.clone(), inputs).await;
-    let fetched = loop {
-        match received.recv().await.expect("the fetch hands back") {
-            Input::Outcome(ticket, outcome) => break (ticket, outcome),
-            _ => continue,
-        }
-    };
+    let CarriedOut { outcome, .. } = carried_out(&performer, *fetching, fetch.clone()).await;
+    let fetched = (*fetching, outcome);
     let Outcome::Pack(PackOutcome::Fetched(copy)) = &fetched.1 else {
         panic!("{:?}", fetched.1);
     };
@@ -231,4 +274,29 @@ async fn leaving_the_packs_reads_the_workflows_again() {
             .any(|request| matches!(request, Request::Perform(_, Operation::ReadCatalog))),
         "{asked:?}"
     );
+}
+
+/// The packs' listing refused: what refused it is said, and the packs are no longer said to be
+/// read, as nothing reads them.
+#[tokio::test]
+async fn a_refused_listing_of_the_packs_is_said_and_no_longer_said_to_read() {
+    let (mut state, _) =
+        on_the_field(&[&yunta_core::RunId::from("01M7PACKS00000000000000004")]).await;
+    state.update(Input::Stroke(Stroke::Insert('w')));
+    let asked = state.update(Input::Stroke(Stroke::Insert('p')));
+    let listing = asked.iter().find_map(|request| match request {
+        Request::Perform(ticket, Operation::Pack(PackOperation::List)) => Some(*ticket),
+        _ => None,
+    });
+    let listing = listing.unwrap_or_else(|| panic!("the packs are listed: {asked:?}"));
+    let refused = yunta_render::refusal::Refused::NoRunHere;
+    let said = refused.to_string();
+    state.update(Input::Outcome(listing, Outcome::Refused(refused)));
+    let shown = main_region(&state);
+    assert!(shown.contains(&said), "{shown}");
+    assert!(
+        !shown.contains(yunta_render::screen::READING_THE_PACKS),
+        "{shown}"
+    );
+    assert_eq!(state.shown_under_way(), None);
 }

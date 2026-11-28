@@ -3,7 +3,7 @@
 //! of a document a node produces, each with the command that shows a shape and
 //! its JSON Schema where it has one.
 
-use surco::components::{Fields, Next};
+use surco::components::Fields;
 use surco::doc::{Block, Doc};
 use surco::look::Look;
 use surco::surface::Surface;
@@ -12,10 +12,7 @@ use yunta_core::step::{Arg, NextStep};
 use yunta_core::{ArtifactKind, DocumentKind, NodeKind};
 
 use super::Page;
-use crate::command;
-
-/// What a document's JSON Schema is for, wherever a page offers it.
-const JSON_SCHEMA: &str = "the JSON Schema an editor validates against";
+use crate::command::{self, SaidStep};
 
 /// What `schema` shows a person: the documents it can show the shape of, or
 /// the shape of one.
@@ -88,15 +85,10 @@ fn workflow_keys() -> Doc {
             "the keys each kind of node reads".to_string(),
         ))
         .with(kinds)
-        .with(Next {
-            steps: vec![(
-                command::line(&NextStep::Schema {
-                    document: Arg::Given(DocumentKind::Workflow.as_str().to_string()),
-                    json: true,
-                }),
-                JSON_SCHEMA,
-            )],
-        })
+        .with(command::next([SaidStep::of(&NextStep::Schema {
+            document: Arg::Given(DocumentKind::Workflow.as_str().to_string()),
+            json: true,
+        })]))
 }
 
 /// The catalog, one document per row with what it is for, and the two
@@ -105,24 +97,12 @@ fn list() -> Doc {
     let documents = DocumentKind::all().fold(Fields::new(), |fields, shown| {
         fields.push_if(shown.as_str(), shown.purpose())
     });
-    let next = Next {
-        steps: vec![
-            (
-                command::line(&NextStep::Schema {
-                    document: Arg::Blank,
-                    json: false,
-                }),
-                "the shape to write",
-            ),
-            (
-                command::line(&NextStep::Schema {
-                    document: Arg::Blank,
-                    json: true,
-                }),
-                JSON_SCHEMA,
-            ),
-        ],
-    };
+    let next = command::next([false, true].map(|json| {
+        SaidStep::of(&NextStep::Schema {
+            document: Arg::Blank,
+            json,
+        })
+    }));
     Doc::new()
         .with(Block::Heading(
             "documents Yunta reads and validates".to_string(),

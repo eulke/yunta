@@ -23,9 +23,6 @@ pub enum ChosenWith {
 /// What an option that needs words says when none were given.
 pub const NEEDS_WORDS: &str = "this option needs an answer";
 
-/// What a note is asked with, on an option that asks for no words of its own.
-pub const A_NOTE: &str = "add a note";
-
 /// What stands on a card's far edge: the `node` the decision is on, or the handle of the
 /// `run` it stopped where it is on no node.
 pub fn edge(node: Option<&NodeId>, run: Option<&RunId>) -> Option<String> {
@@ -112,7 +109,7 @@ pub fn saying_legend(asks: bool) -> Legend {
 }
 
 /// The words being said for the option `choices` points at, every option still in sight:
-/// what it asks of them, or a note where it asks for none; the row they are typed on,
+/// what it asks of them, or a note where it asks for none, as the key that opens one says it; the row they are typed on,
 /// before the cursor and after it; and, where an answer was `refused` for having none, that
 /// the option needs one.
 pub fn saying(
@@ -123,7 +120,7 @@ pub fn saying(
 ) -> CardBody {
     CardBody::Saying {
         choices,
-        asks: asks.unwrap_or_else(|| A_NOTE.to_string()),
+        asks: asks.unwrap_or_else(|| PromptAct::AddANote.said().to_string()),
         typed: typed_row(before, after),
         refused: refused.then(|| NEEDS_WORDS.to_string()),
     }

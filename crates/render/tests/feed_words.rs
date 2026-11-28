@@ -115,7 +115,7 @@ fn every_row_of_a_feed_says_what_the_chronicle_logs_after_its_time_and_subject()
             assert_eq!(fed.rows.len(), listed.len(), "{}: {node}", path.display());
             for (row, moment) in fed.rows.iter().zip(&listed) {
                 let told = after_time_and_subject(&logged(moment, &look).text(), node);
-                let mut said = words(&row.text());
+                let mut said = words(&row.line.text());
                 let task = match &moment.happening {
                     Happening::Session(
                         yunta_core::events::session::happening::Happening::Called {
@@ -128,7 +128,13 @@ fn every_row_of_a_feed_says_what_the_chronicle_logs_after_its_time_and_subject()
                 if task.is_some_and(|task| said.get(1) == Some(&task.to_string())) {
                     said.remove(1);
                 }
-                assert_eq!(said, told, "{}: {node}: {}", path.display(), row.text());
+                assert_eq!(
+                    said,
+                    told,
+                    "{}: {node}: {}",
+                    path.display(),
+                    row.line.text()
+                );
                 rows += 1;
             }
         }
@@ -153,7 +159,7 @@ fn a_red_check_says_red_as_a_word_of_its_own() {
     let rows: Vec<String> = feed(&moments, &tasks, 0, 0, &look())
         .rows
         .iter()
-        .map(|row| row.text())
+        .map(|row| row.line.text())
         .filter(|row| row.starts_with("global-pack-install post: 1 criterion"))
         .collect();
     assert!(!rows.is_empty(), "the design's run checks the task red");

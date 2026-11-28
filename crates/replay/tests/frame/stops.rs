@@ -69,7 +69,7 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
     ]);
 
     assert_eq!(
-        frame(&workflow, &events, 100).phase,
+        frame(&workflow, &events).phase,
         RunPhase::Waiting {
             on: WaitingOn::Node {
                 node: "plan".into(),
@@ -115,7 +115,7 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
     ]);
 
     assert_eq!(
-        frame(&workflow, &events, 100).phase,
+        frame(&workflow, &events).phase,
         RunPhase::Waiting {
             on: WaitingOn::Node {
                 node: "plan".into(),
@@ -145,7 +145,7 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
     ]);
 
     assert_eq!(
-        frame(&workflow, &events, 100).phase,
+        frame(&workflow, &events).phase,
         RunPhase::Waiting {
             on: WaitingOn::Run {
                 reason: PauseReason::Recorded {
@@ -167,7 +167,7 @@ fn a_failed_run_carries_the_failure_its_last_node_failed_recorded() {
     ]);
 
     assert_eq!(
-        frame(&workflow, &events, 100).phase,
+        frame(&workflow, &events).phase,
         RunPhase::Failed {
             failure: Some(Failure::Message {
                 outcome: "criteria still red".into()
@@ -202,7 +202,7 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
     ]);
 
     assert_eq!(
-        frame(&workflow, &events, 100).phase,
+        frame(&workflow, &events).phase,
         RunPhase::Promoted {
             to: Some("beta".into()),
         }
@@ -263,7 +263,7 @@ fn a_failed_node_the_run_is_parked_on_for_a_person_is_where_it_waits_on_one() {
             }),
         ),
     ]);
-    let parked = frame(&workflow, &failed_and_parked, 100);
+    let parked = frame(&workflow, &failed_and_parked);
     assert_eq!(parked.nodes[1].standing, Standing::Failed);
     assert_eq!(parked.waits_on_a_person_at(), Some(&NodeId::from("build")));
 
@@ -272,7 +272,7 @@ fn a_failed_node_the_run_is_parked_on_for_a_person_is_where_it_waits_on_one() {
         (1, Some("plan"), started(1)),
         (2, Some("plan"), gate_waiting(None)),
     ]);
-    let asked = frame(&workflow, &gate, 100);
+    let asked = frame(&workflow, &gate);
     assert_eq!(asked.waits_on_a_person_at(), Some(&NodeId::from("plan")));
 
     let stopped = log(vec![
@@ -280,7 +280,7 @@ fn a_failed_node_the_run_is_parked_on_for_a_person_is_where_it_waits_on_one() {
         (1, Some("build"), started(1)),
         (2, None, paused(PauseReason::Cancelled)),
     ]);
-    assert_eq!(frame(&workflow, &stopped, 100).waits_on_a_person_at(), None);
+    assert_eq!(frame(&workflow, &stopped).waits_on_a_person_at(), None);
 }
 
 /// A pause an older log kept with no menu names the node it waits on in its claim alone, as
@@ -317,7 +317,7 @@ fn a_pause_that_names_its_node_only_in_its_claim_waits_on_a_person_at_it() {
         (0, None, created("alpha")),
         (1, None, paused(menuless)),
     ]);
-    let parked = frame(&workflow, &events, 100);
+    let parked = frame(&workflow, &events);
     assert!(
         matches!(
             &parked.phase,

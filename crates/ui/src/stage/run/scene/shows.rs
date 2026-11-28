@@ -65,7 +65,7 @@ pub(crate) enum NamedActs {
 impl Scene<'_> {
     /// Whether the run's own decision stands in it, for the person to answer in place: a
     /// round, the desk, a card.
-    pub(crate) fn asks_in_place(&self) -> bool {
+    pub fn asks_in_place(&self) -> bool {
         match self {
             Scene::Round | Scene::Desk | Scene::Card(..) => true,
             Scene::Work

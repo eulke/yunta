@@ -13,7 +13,10 @@
 //! kind with a name of its own (`criteria_checked_v2`), and every kind is
 //! written at [`KIND_VERSION`]. Words an older log stored where a field now
 //! holds data read back as [`LoggedWords`], shown and written back as
-//! stored.
+//! stored. A field every log holds may become optional, which is growing
+//! too: a log written before reads as it did, and a binary older than the
+//! change refuses a log that leaves the field out, as it refuses any
+//! payload that is not the kind it names.
 //!
 //! A reader is tolerant and a writer strict. A field this binary does not
 //! know is ignored; a kind it does not know reads as [`EventBody::Unknown`],

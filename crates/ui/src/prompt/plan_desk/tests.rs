@@ -94,6 +94,14 @@ pub(crate) fn review() -> PlanReview {
     }
 }
 
+/// What `desk`'s legend says on a screen, as these tests' terminal draws its row of keys.
+fn keys_said(desk: &PlanDesk) -> String {
+    let none = surco::components::Legend::new();
+    surco::surface::Terminal::on(look())
+        .legend(&desk.legend_on_a_screen(), &none)
+        .text()
+}
+
 /// The option `name`, which says `said`, asking `asks` of words where it asks any.
 fn option(name: &str, said: &str, asks: Option<&str>) -> Offered {
     Offered {
@@ -314,16 +322,13 @@ fn on_a_screen_it_takes_only_the_keys_it_reads_by() {
     assert!(reads_by.iter().all(|stroke| desk.takes(*stroke)) && !desk.typing());
     assert!(!the_screens.iter().any(|stroke| desk.takes(*stroke)));
     assert_eq!(
-        desk.legend_on_a_screen().spelled(Glyphs::Unicode),
+        keys_said(&desk),
         "1 2 answer · tab next place · ↑↓ scroll · p proof · d decided for you · esc leave it \
          waiting"
     );
     press(&mut desk, "1");
     assert!(desk.takes(Stroke::Enter) && desk.takes(Stroke::Decline));
-    assert_eq!(
-        desk.legend_on_a_screen().spelled(Glyphs::Unicode),
-        "enter confirm · esc go back"
-    );
+    assert_eq!(keys_said(&desk), "enter confirm · esc go back");
     press(&mut desk, "2");
     assert!(
         !desk.typing(),
@@ -332,10 +337,7 @@ fn on_a_screen_it_takes_only_the_keys_it_reads_by() {
     assert_eq!(desk.press(Stroke::Enter), Press::Stay);
     assert!(desk.typing());
     assert!(the_screens.iter().all(|stroke| desk.takes(*stroke)));
-    assert_eq!(
-        desk.legend_on_a_screen().spelled(Glyphs::Unicode),
-        "enter send it · esc go back"
-    );
+    assert_eq!(keys_said(&desk), "enter send it · esc go back");
 }
 
 /// `p` turns a task's card over, and `j` walks the proofs while it is. The suite every task

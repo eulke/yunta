@@ -46,7 +46,7 @@ workflow never names an adapter directly inside a node.
 
 Instead, a node names a **role** (`runner: reviewer`), and a project's
 `.yunta/config.yaml` resolves each role to one or more candidate bindings
-under `runners:` — `{ adapter, model, agent? }`. This indirection is what
+under `runners:` — `{ adapter, model?, agent? }`. This indirection is what
 lets the same workflow run unedited on a team that's all Claude Code and one
 that's all Codex: the workflow author picks roles, the installing team picks
 adapters. See [adapters](adapters.md) for configuring this and for what

@@ -510,6 +510,11 @@ the catalog of workflows: it asks `list_workflows`, which is always current.
   matter with `name` and `description`, and the body as instructions. The same
   definition runs on every adapter, and a name with no definition refuses the
   run before it is created, naming where it looked.
+- **`model:`** on a runner's candidate is optional. Named, both `claude-code`
+  and `codex` receive it as `--model`. Absent, the candidate leaves the model to
+  its CLI, which runs on its own default: the session is opened with no model
+  named, and the model it reports is the one `yunta stats` and the receipt name
+  (`- { adapter: claude-code }`).
 - **`effort:`**, on a runner's candidate or on a node, whose own wins: `low`,
   `medium`, `high` or `xhigh`, the levels every CLI accepts. `claude-code`
   receives it as `--effort` and `codex` as `-c model_reasoning_effort`, a

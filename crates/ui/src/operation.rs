@@ -24,12 +24,25 @@ pub enum Operation {
     /// set up, or one set up.
     ReadRepository,
     /// What setting the repository up finds: what it runs, the adapters this machine
-    /// answers for and the runners its workflows propose. The performer holds the
-    /// project detected under this work's ticket, for its setup to write.
+    /// answers for, the runners its workflows propose and who git commits as. The
+    /// performer holds the project detected under this work's ticket, for its setup to
+    /// write.
     DetectProject,
+    /// The pack a setup installs ([`SetupPack::of_this_binary`]) fetched, unless the repository
+    /// vendors it already: work of its own, asked beside the detection as the setup opens, so a
+    /// person waits for the slower of the two. It needs nothing the detection finds; the
+    /// performer holds its copy with the project the detection keeps, whichever lands second.
+    ///
+    /// [`SetupPack::of_this_binary`]: yunta_api::SetupPack::of_this_binary
+    FetchSetupPack,
     /// `setup` written into the repository whose project the performer holds under
-    /// `held`, the ticket that detected it.
-    WriteSetup { held: Ticket, setup: ProjectSetup },
+    /// `held`, the ticket that detected it, after the pack held with it is installed where
+    /// `pack` says so.
+    WriteSetup {
+        held: Ticket,
+        setup: ProjectSetup,
+        pack: InstallsThePack,
+    },
     /// The workflows the repository can run.
     ReadCatalog,
     /// What is done to a workflow the catalog offers, or to the repository's cases.
@@ -77,13 +90,23 @@ pub enum Operation {
     Collect { dry_run: bool },
 }
 
+/// Whether a setup's write installs the pack fetched with the project, as `yunta pack add
+/// --yes` installs it, its audit read by the person who said so: where none was fetched,
+/// the setup is written alone either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallsThePack {
+    Yes,
+    No,
+}
+
 impl Operation {
     /// Whether the operation only reads, so one asked again supersedes one of its kind
     /// still under way, whose answer would be stale by the time it came.
-    pub(crate) fn reads(&self) -> bool {
+    pub fn reads(&self) -> bool {
         match self {
             Operation::ReadRepository
             | Operation::DetectProject
+            | Operation::FetchSetupPack
             | Operation::ReadCatalog
             | Operation::ReadPullRequest { .. }
             | Operation::ReadHistory { .. }
@@ -118,6 +141,7 @@ impl Operation {
             | Operation::Collect { dry_run: false } => true,
             Operation::ReadRepository
             | Operation::DetectProject
+            | Operation::FetchSetupPack
             | Operation::WriteSetup { .. }
             | Operation::ReadCatalog
             | Operation::Workflow(_)

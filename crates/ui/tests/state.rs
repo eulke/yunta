@@ -1,8 +1,12 @@
-//! The application as values, through `State` alone: what it asks as it opens, an
-//! answer that comes late, where it stands outside a repository, in one set up once the
-//! field's first news comes, and where it stands opened on a step; and, driven by its
-//! performer, what opening runs.
+//! The application as values, through `State` alone: what it asks as it opens, an answer
+//! that comes late, where it stands outside a repository, in one set up once the field's
+//! first news comes or a look at it fails first, and where it stands opened on a step; and,
+//! driven by its performer, what opening runs, and a run started here on its way in.
 
+#[path = "state/on_its_way.rs"]
+mod on_its_way;
+#[path = "state/outside.rs"]
+mod outside;
 mod support;
 
 use std::path::PathBuf;
@@ -13,14 +17,13 @@ use surco::components::{Binding, Keys};
 use surco::look::Look;
 use surco::surface::{Markdown, Surface};
 use tokio::sync::mpsc;
-use yunta_api::{FieldReach, FollowNews, Followed, Repository, RunNews};
+use yunta_api::{FieldReach, FollowNews, Followed, FollowedRun, Repository, RunNews};
 use yunta_core::events::Channel;
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
-use yunta_render::page::{Page, Signpost};
+use yunta_render::page::FieldGroup;
 use yunta_render::screen::Leaving;
 use yunta_replay::registry::Engine;
-use yunta_replay::RunState;
 use yunta_testkit::stubs;
 use yunta_testkit::workflows::FINISHES;
 use yunta_testkit::Bench;
@@ -43,6 +46,20 @@ fn main_region(state: &State) -> String {
     Markdown.draw(&state.screen(&look).main.doc)
 }
 
+/// `state` stands on the field of the repository at `place`, which holds `run`, closed.
+fn on_the_field_holding_closed(state: &State, run: &RunId, place: &str) {
+    let trail = state.screen(&Markdown.look()).trail;
+    assert_eq!(trail, ["yunta", place], "it stands on the field");
+    let field = state.followed_runs().field.as_ref();
+    let held = field.and_then(|field| field.runs.get(run));
+    let held = held.unwrap_or_else(|| panic!("`{run}` stands in the field: {field:?}"));
+    assert_eq!(
+        held.row(now()).group(),
+        FieldGroup::Closed,
+        "`{run}` closed"
+    );
+}
+
 /// The repository read as `repository`, its project keeping its runs in a store of its
 /// own and pricing nothing.
 fn read_as(repository: Repository) -> Outcome {
@@ -50,6 +67,7 @@ fn read_as(repository: Repository) -> Outcome {
         repository,
         storage: PathBuf::from("/home/me/.yunta/yunta.db"),
         prices: None,
+        home: None,
     }))
 }
 
@@ -59,7 +77,12 @@ fn opened_set_up() -> (State, Vec<Request>) {
     let [Request::Perform(ticket, _)] = requests.as_slice() else {
         panic!("{requests:?}");
     };
-    let asked = state.update(Input::Outcome(*ticket, read_as(Repository::SetUp)));
+    let asked = state.update(Input::Outcome(
+        *ticket,
+        read_as(Repository::SetUp {
+            dir: PathBuf::from("/home/me/repo"),
+        }),
+    ));
     (state, asked)
 }
 
@@ -112,12 +135,32 @@ async fn in_a_repository_set_up_the_fields_first_news_stands_it_on_the_field() {
 
     let asked = state.update(the_fields_first_news(&bench).await);
     assert!(asked.is_empty(), "{asked:?}");
-    let field = main_region(&state);
-    assert!(field.contains("runs of this repository"), "{field}");
-    assert!(
-        field.contains("1 closed"),
-        "the bench's run, finished: {field}"
-    );
+    on_the_field_holding_closed(&state, &STANDS, "/home/me/repo");
+}
+
+/// In a repository set up, a look at the field that fails before its first news is said
+/// under the runs being read, as the field says one under its list, and `q` and `esc` leave
+/// while it stands: the application is never left on a screen with no key.
+#[test]
+fn a_look_that_fails_before_the_fields_first_news_is_said_and_leaving_is_left() {
+    for leaving in [Stroke::Insert('q'), Stroke::Decline] {
+        let (mut state, _) = opened_set_up();
+        let failed = "the store could not be opened: permission denied".to_string();
+        let asked = state.update(Input::LookFailed(failed.clone()));
+        assert!(asked.is_empty(), "{asked:?}");
+        let shown = main_region(&state);
+        assert!(
+            shown.contains(yunta_render::screen::READING_THE_RUNS) && shown.contains(&failed),
+            "{shown}"
+        );
+        let legend = state.screen(&Look::plain()).legend;
+        let glyphs = surco::glyphs::Glyphs::Unicode;
+        assert_eq!(
+            support::spelled(&legend, glyphs),
+            support::spelled(&yunta_render::screen::leaving_legend(), glyphs)
+        );
+        assert_eq!(state.update(Input::Stroke(leaving)), [Request::Leave]);
+    }
 }
 
 /// In a repository set up with no run, the field's first news, empty, stands the
@@ -153,23 +196,6 @@ fn opening_asks_where_it_stands() {
     );
 }
 
-/// Outside a repository the screen is the signpost, and its trail starts at yunta.
-#[test]
-fn outside_a_repository_the_screen_is_the_signpost() {
-    let (mut state, requests) = State::opened(now());
-    let [Request::Perform(ticket, _)] = requests.as_slice() else {
-        panic!("{requests:?}");
-    };
-    let asked = state.update(Input::Outcome(*ticket, read_as(Repository::Absent)));
-    assert!(asked.is_empty(), "{asked:?}");
-    let look = Markdown.look();
-    assert_eq!(
-        main_region(&state),
-        Markdown.draw(&Signpost.document(&look))
-    );
-    assert_eq!(state.screen(&Look::plain()).trail, ["yunta"]);
-}
-
 /// An answer to a ticket the state no longer waits on changes nothing: a stage left
 /// can never be undone by a late answer.
 #[test]
@@ -178,7 +204,12 @@ fn a_late_outcome_is_dropped() {
     let [Request::Perform(ticket, _)] = requests.as_slice() else {
         panic!("{requests:?}");
     };
-    state.update(Input::Outcome(*ticket, read_as(Repository::NeverSetUp)));
+    state.update(Input::Outcome(
+        *ticket,
+        read_as(Repository::NeverSetUp {
+            dir: PathBuf::from("/home/me/repo"),
+        }),
+    ));
     let before = main_region(&state);
     // Taken, this answer would put the signpost on screen.
     let asked = state.update(Input::Outcome(*ticket, read_as(Repository::Absent)));
@@ -227,7 +258,19 @@ fn a_clone_goes_its_own_way() {
 fn opened_on_review_it_stands_at_the_plan_and_esc_twice_reaches_the_field() {
     yunta_testkit::on_a_deep_stack(|| async {
         let look = Markdown.look();
-        let drawn = |state: &State| Markdown.screen(&state.screen(&look));
+        // Each world stands in a directory of its own, which the field's trail names.
+        let drawn = |state: &State| {
+            let screen = Markdown.screen(&state.screen(&look));
+            let repository = state
+                .followed_runs()
+                .repository
+                .as_ref()
+                .and_then(Repository::dir);
+            let place = repository.map(|place| place.display().to_string());
+            place.map_or(screen.clone(), |place| {
+                screen.replace(&place, "<repository>")
+            })
+        };
         let desk = |state: &State| Markdown.draw(&state.screen(&look).main.doc);
         let to_the_plan = [Stroke::Enter, Stroke::Insert('r')];
         let reviewed = screens::reviewed(&[]).await;
@@ -317,7 +360,9 @@ fn opening_on_the_field_runs_git_as_the_printed_field_does() {
         let performer = Arc::new(Performer::new(workspace, Channel::Tty));
         let (opened, asked) = State::opened(now());
         let (state, _) = drive(opened, asked, &performer, &[]).await;
-        assert!(main_region(&state).contains("runs of this repository"));
+        let place = bench.worktree.display().to_string();
+        let trail = state.screen(&Markdown.look()).trail;
+        assert_eq!(trail, ["yunta", place.as_str()], "it stands on the field");
         let log = std::fs::read_to_string(&ran).unwrap_or_default();
         assert_eq!(
             log.lines().count(),
@@ -359,13 +404,12 @@ async fn started_from_the_first_request() -> StartedHere {
         Channel::Tty,
     ));
     let (opened, asked) = State::opened(now());
-    let typed: Vec<Stroke> = "greet ana".chars().map(Stroke::Insert).collect();
+    // The request goes on to its new run, which reads what it needs as it opens; `enter`
+    // starts it with every row as it opens.
+    let mut typed: Vec<Stroke> = "greet ana".chars().map(Stroke::Insert).collect();
+    typed.push(Stroke::Enter);
     let (mut state, _) = drive(opened, asked, &performer, &typed).await;
-    let strokes = [Stroke::Enter, Stroke::Enter, Stroke::Enter];
-    let asked: Vec<Request> = strokes
-        .into_iter()
-        .flat_map(|stroke| state.update(Input::Stroke(stroke)))
-        .collect();
+    let asked = state.update(Input::Stroke(Stroke::Enter));
     let Some(starting) = asked.iter().find_map(|request| match request {
         Request::Perform(ticket, Operation::Start { .. }) => Some(*ticket),
         _ => None,
@@ -397,10 +441,12 @@ fn leaving_a_run_started_from_the_first_request_ends_on_the_field() {
 
         let asked = state.update(Input::Stroke(Stroke::Insert('q')));
         assert!(!asked.contains(&Request::Leave), "{asked:?}");
+        let place = started.world.worktree.display().to_string();
+        on_the_field_holding_closed(&state, &STARTED, &place);
+        let screen = state.screen(&Markdown.look());
+        let noted = screen.noted.map(|noted| noted.said);
+        assert_eq!(noted.as_deref(), Some(Leaving::Ended.said()));
         let field = Markdown.screen(&state.screen(&Markdown.look()));
-        assert!(field.contains("runs of this repository"), "{field}");
-        assert!(field.contains("1 closed"), "the run started: {field}");
-        assert!(field.contains(Leaving::Ended.said()), "{field}");
         assert!(!field.contains("What do you want to build?"), "{field}");
     });
 }
@@ -428,14 +474,14 @@ fn a_run_started_here_keeps_going_until_its_engine_is_read() {
         let StartedHere {
             mut state, world, ..
         } = started_from_the_first_request().await;
-        let FollowNews::Whole { mut run, events } = support::read_whole(&world).await else {
+        let FollowNews::Whole { run, events } = support::read_whole(&world).await else {
             unreachable!("a run read whole");
         };
         // As the run stands an instant after the start, at work, its registry not written.
-        run.state = RunState::replay(&events[..2]);
-        run.engine = Engine::Unrecorded;
+        let (id, manifest) = (run.run().clone(), run.manifest().clone());
+        let run = FollowedRun::read(id, manifest, &events[..2], Engine::Unrecorded);
         let whole = FollowNews::Whole {
-            run,
+            run: Box::new(run),
             events: events[..2].to_vec(),
         };
         state.update(Input::FollowNews(whole));

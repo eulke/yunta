@@ -22,6 +22,8 @@ use super::{
     driven_by_this_process, left_by_a_dead_engine, next, World, NOTHING_COMES, STALL_OWED, WORKFLOW,
 };
 
+#[path = "field/followed_unreadable.rs"]
+mod followed_unreadable;
 #[path = "field/rows.rs"]
 mod rows;
 
@@ -35,6 +37,8 @@ struct Kept {
     elsewhere: usize,
     here: bool,
     whole: Option<FollowedRun>,
+    /// Why the run followed could not be read whole, as last said; none once it is.
+    whole_unreadable: Option<UnreadableRun>,
 }
 
 impl Kept {
@@ -46,7 +50,7 @@ impl Kept {
                 self.field = field
                     .runs
                     .iter()
-                    .map(|run| (run.run.clone(), run.clone()))
+                    .map(|run| (run.run().clone(), run.clone()))
                     .collect();
                 self.unreadable = field
                     .unreadable
@@ -57,8 +61,8 @@ impl Kept {
                 self.here = field.here;
             }
             FollowNews::Joined(run) => {
-                self.unreadable.remove(&run.run);
-                self.field.insert(run.run.clone(), (**run).clone());
+                self.unreadable.remove(run.run());
+                self.field.insert(run.run().clone(), (**run).clone());
             }
             FollowNews::Unreadable(unread) => {
                 self.field.remove(&unread.run_id);
@@ -70,9 +74,13 @@ impl Kept {
                 self.unreadable.remove(run);
             }
             FollowNews::Elsewhere(elsewhere) => self.elsewhere = *elsewhere,
-            FollowNews::Whole { run, .. } => self.whole = Some((**run).clone()),
+            FollowNews::Whole { run, .. } => {
+                self.whole = Some((**run).clone());
+                self.whole_unreadable = None;
+            }
+            FollowNews::WholeUnreadable(unread) => self.whole_unreadable = Some(unread.clone()),
             FollowNews::Run { run, news } => {
-                if let Some(whole) = self.whole.as_mut().filter(|whole| whole.run == *run) {
+                if let Some(whole) = self.whole.as_mut().filter(|whole| whole.run() == run) {
                     whole.took(news);
                 }
                 if let (Some(kept), RunNews::Events(_) | RunNews::Engine(_)) =
@@ -110,14 +118,14 @@ async fn took(following: &mut Following, kept: &mut Kept) -> FollowNews {
 /// head: its state, and the head itself, which a state's equality leaves out.
 fn each_run_stands_as_its_log(world: &World, kept: &Kept) {
     for (run, followed) in &kept.field {
-        let head = followed.state.head();
+        let head = followed.state().head();
         let logged: Vec<_> = world
             .logged(run)
             .into_iter()
             .take_while(|event| Some(event.seq) <= head)
             .collect();
         let replayed = RunState::replay(&logged);
-        assert_eq!(followed.state, replayed, "{run} as its log replays");
+        assert_eq!(*followed.state(), replayed, "{run} as its log replays");
         assert_eq!(head, replayed.head(), "{run} at its head");
     }
 }
@@ -139,7 +147,7 @@ fn at(kept: &Kept, heads: &BTreeMap<RunId, Option<Seq>>) -> bool {
     heads.iter().all(|(run, head)| {
         kept.field
             .get(run)
-            .is_some_and(|followed| followed.state.head() == *head)
+            .is_some_and(|followed| followed.state().head() == *head)
     })
 }
 
@@ -232,15 +240,15 @@ fn agree(kept: &Kept) {
     let Some(whole) = &kept.whole else {
         return;
     };
-    let Some(placed) = kept.field.get(&whole.run) else {
+    let Some(placed) = kept.field.get(whole.run()) else {
         return;
     };
-    assert_eq!(whole.state, placed.state, "{} one state", whole.run);
+    assert_eq!(whole.state(), placed.state(), "{} one state", whole.run());
     assert_eq!(
-        whole.state.head(),
-        placed.state.head(),
+        whole.state().head(),
+        placed.state().head(),
         "{} one head",
-        whole.run
+        whole.run()
     );
 }
 
@@ -256,7 +264,7 @@ async fn read_on_agreeing(
     let held_at = |kept: &Kept| {
         kept.whole
             .as_ref()
-            .is_some_and(|whole| awaited.get(&whole.run) == Some(&whole.state.head()))
+            .is_some_and(|whole| awaited.get(whole.run()) == Some(&whole.state().head()))
     };
     while !(at(kept, &awaited) && held_at(kept)) {
         took(following, kept).await;
@@ -282,7 +290,7 @@ async fn a_run_of_the_field_read_whole_never_disagrees_with_its_place_in_it() {
         run: Some(second.clone()),
     });
     read_on_agreeing(&world, &mut following, &mut kept, &runs).await;
-    assert_eq!(kept.whole.as_ref().map(|whole| &whole.run), Some(&second));
+    assert_eq!(kept.whole.as_ref().map(|whole| whole.run()), Some(&second));
     for _ in 0..ROUNDS {
         paused_and_resumed(&world, &second);
         world.slept(&first);
@@ -345,7 +353,7 @@ async fn an_engine_killed_in_the_field_is_handed_as_its_runs_engine_within_two_s
     };
     assert_eq!(&run, killed);
     assert!(matches!(news, RunNews::Engine(Engine::Dead)), "{news:?}");
-    let frame = kept.field[killed].frame(world.clock().now());
+    let frame = kept.field[killed].frame();
     assert_eq!(frame.standing, Standing::Stalled);
     let after = tokio::time::timeout(NOTHING_COMES, following.next(&stop)).await;
     assert!(after.is_err(), "nothing else moved, and came {after:?}");
@@ -465,10 +473,7 @@ async fn a_run_of_the_field_parked_then_resumed_from_another_process_is_read_on(
     while !at(&kept, &awaited) {
         took(&mut following, &mut kept).await;
     }
-    assert!(
-        !kept.field[&run].frame(world.clock().now()).moves(),
-        "parked"
-    );
+    assert!(!kept.field[&run].frame().moves(), "parked");
 
     let _resumed_by = driven_by_this_process(&dir);
     world.record(
@@ -482,8 +487,5 @@ async fn a_run_of_the_field_parked_then_resumed_from_another_process_is_read_on(
         took(&mut following, &mut kept).await;
     }
     each_run_stands_as_its_log(&world, &kept);
-    assert!(
-        kept.field[&run].frame(world.clock().now()).moves(),
-        "moves again"
-    );
+    assert!(kept.field[&run].frame().moves(), "moves again");
 }

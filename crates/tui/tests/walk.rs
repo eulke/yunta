@@ -9,7 +9,9 @@
 //! Every state is drawn with [`yunta_tui::drawn`] on Ratatui's test backend at the design's
 //! own size, 120×36, in ASCII, where a side region stands beside the main one, and at the
 //! least, 60×14, in Unicode, where it gives way, and holds the layout's rules. 80×24 is held
-//! by each scene's goldens. No drawing panics; nothing is written in a margin
+//! by each scene's goldens. No drawing panics; in ASCII every cell holds ASCII, the words a
+//! session or a pack recorded among them, and each rule reads the screen's texts in their
+//! ASCII form, as the terminal draws them; nothing is written in a margin
 //! but the rule; the side region's edge stands whole on every row it spans; the legend is
 //! on the last row, the box's where a box is open, with the note right above it where one
 //! stands and the attention otherwise, and what the run spent on the row over that where
@@ -32,6 +34,9 @@
 //!
 //! The layout's rules are stated here apart from the crate's `layout`, as the target frames
 //! state them: what each row holds is Surco's, where it stands is checked.
+//!
+//! Where a person names a file for the walk's table ([`classes::TABLE`]), its totals and its
+//! states by class are written there.
 
 mod covered;
 #[path = "walk/cursor.rs"]
@@ -47,7 +52,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::Terminal as Drawing;
-use surco::components::{Legend, Overlay, Screen, SideAt};
+use surco::components::{Legend, Overlay, Screen, Side, SideAt};
 use surco::diagram::{Shape, Stroke};
 use surco::glyphs::Glyphs;
 use surco::look::{Look, Width};
@@ -57,7 +62,7 @@ use surco::width::cell_width;
 use yunta_testkit_ui::home::Home;
 use yunta_testkit_ui::recorded::Recordings;
 use yunta_testkit_ui::walk::interface::InterfaceChecks;
-use yunta_testkit_ui::walk::{Checks, Reached, Walk};
+use yunta_testkit_ui::walk::{classes, Checks, Reached, Walk};
 use yunta_ui::{Input, Request, State};
 
 /// The cells a margin takes at each side of the terminal, but on the rule's row.
@@ -144,6 +149,11 @@ impl OnATerminal {
         if let Some(failed) = drawn_on(&mut self.drawing, &screen, &look) {
             named(&failed, String::new());
         }
+        // The rules read the screen as the terminal draws it: in ASCII, each text in its form.
+        let screen = match look.glyphs {
+            Glyphs::Ascii => screen.in_ascii(),
+            Glyphs::Unicode => screen,
+        };
         let backend = self.drawing.backend();
         let cursor = backend.cursor_visible().then(|| backend.cursor_position());
         if let Some(rule) = broken(&screen, &look, backend.buffer(), cursor, state.typing()) {
@@ -205,7 +215,8 @@ fn every_state_the_application_reaches_holds_and_lays_out_at_both_sizes() {
         ];
         let [ascii_120, unicode_60] = &mut terminals;
         let mut checks: [&mut dyn Checks; 3] = [&mut interface, ascii_120, unicode_60];
-        let states = Walk::over(&recordings).walked(&mut checks);
+        let walked = Walk::over(&recordings).walked(&mut checks);
+        let states = walked.states();
         let drawn: Vec<String> = terminals
             .iter()
             .map(|terminal| format!("{} screens at {}", terminal.drawn.len(), terminal.name))
@@ -218,6 +229,19 @@ fn every_state_the_application_reaches_holds_and_lays_out_at_both_sizes() {
             drawn.join(" and "),
             started.elapsed()
         );
+        if let Some(table) = classes::asked() {
+            let mut screens: Vec<usize> = terminals.iter().map(|on| on.drawn.len()).collect();
+            screens.dedup();
+            let screens: Vec<String> = screens.iter().map(usize::to_string).collect();
+            let totals = format!(
+                "states {states}  palettes {}  helps {}  screens {}",
+                interface.palettes_taken(),
+                interface.helps_opened(),
+                screens.join("/")
+            );
+            std::fs::write(&table, format!("{totals}\n{}", walked.by_class()))
+                .unwrap_or_else(|error| panic!("the walk's table at {table:?}: {error}"));
+        }
         interface.met_all_it_must();
     });
 }
@@ -234,19 +258,19 @@ fn broken(
 ) -> Option<String> {
     let (width, height) = (frame.area.width, frame.area.height);
     let inner = at(look, width - 2 * MARGIN);
+    if look.glyphs == Glyphs::Ascii {
+        let mut cells = (0..height).flat_map(|y| (0..width).map(move |x| (x, y)));
+        if let Some((x, y)) = cells.find(|at| !frame[*at].symbol().is_ascii()) {
+            let symbol = frame[(x, y)].symbol();
+            return Some(format!("row {} holds `{symbol}`, outside ASCII", y + 1));
+        }
+    }
     for y in (0..height).filter(|y| *y != RULE_ROW) {
         if frame[(0, y)].symbol() != " " || frame[(width - 1, y)].symbol() != " " {
             return Some(format!("row {} writes in a margin", y + 1));
         }
     }
-    let none = Legend::new();
-    let (legend, anywhere) = screen
-        .overlay
-        .as_ref()
-        .map_or((&screen.legend, &screen.anywhere), |overlay| {
-            (&overlay.legend, &none)
-        });
-    if !said_on(frame, height - 1, &inner.legend(legend, anywhere).text()) {
+    if !said_on(frame, height - 1, &keys_drawn(screen, &inner)) {
         return Some("the legend is not on the last row".to_string());
     }
     let side = screen.side.as_ref().filter(|_| width >= SIDE_FROM);
@@ -272,7 +296,7 @@ fn broken(
     }
     let spans = 2 + across..=height - 3 - meter;
     side.filter(|_| screen.overlay.is_none())
-        .and_then(|side| edge_broken(side.at, look, frame, spans))
+        .and_then(|side| edge_broken(side, look, frame, spans))
         .or_else(|| {
             screen
                 .overlay
@@ -345,19 +369,24 @@ fn box_broken(overlay: &Overlay, look: &Look, frame: &Buffer) -> Option<String> 
     }
 }
 
-/// Where the edge of a side region standing at `at`, drawn in `look`, breaks on `frame`:
-/// the first of the rows it `spans` that does not hold it whole.
+/// Where the edge of `side`, drawn in `look`, breaks on `frame`: the first of the rows it
+/// `spans` that does not hold it whole. A side region whose words keep a measure stands that
+/// wide, as a new run's panel does.
 fn edge_broken(
-    at: SideAt,
+    side: &Side,
     look: &Look,
     frame: &Buffer,
     spans: RangeInclusive<u16>,
 ) -> Option<String> {
     let edge = Terminal::on(*look).edge().text();
     let cells = u16::try_from(cell_width(&edge)).expect("an edge's cells");
-    let from = match at {
-        SideAt::Left => MARGIN + SIDE_AT_LEFT,
-        SideAt::Right => frame.area.width - MARGIN - SIDE_AT_RIGHT - cells,
+    let measure = side
+        .region
+        .measure
+        .map(|measure| u16::try_from(measure.cells).expect("a measure"));
+    let from = match side.at {
+        SideAt::Left => MARGIN + measure.unwrap_or(SIDE_AT_LEFT),
+        SideAt::Right => frame.area.width - MARGIN - measure.unwrap_or(SIDE_AT_RIGHT) - cells,
     };
     let edge_at = |y: u16| {
         (from..from + cells)
@@ -390,6 +419,17 @@ fn said_on(frame: &Buffer, y: u16, said: &str) -> bool {
         .map(|x| frame[(x, y)].symbol())
         .collect();
     row.trim_end() == said.trim_end()
+}
+
+/// The keys `screen`'s last row holds on `inner`: a box's own keys while one stands over it,
+/// with no far keys; where a line is typed on it, its keys alone, folded as such a screen folds
+/// them; its keys and the far keys otherwise.
+fn keys_drawn(screen: &Screen, inner: &Terminal) -> String {
+    match (&screen.overlay, screen.typed) {
+        (Some(overlay), _) => inner.legend(&overlay.legend, &Legend::new()).text(),
+        (None, true) => inner.typed_legend(&screen.legend).text(),
+        (None, false) => inner.legend(&screen.legend, &screen.anywhere).text(),
+    }
 }
 
 /// Surco's terminal in `look`, its lines exactly `cells` wide.

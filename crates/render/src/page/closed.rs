@@ -4,14 +4,13 @@ use surco::components::{Gist, Headline};
 use surco::doc::Doc;
 use surco::look::Look;
 use surco::words::Standing;
-use yunta_core::step::NextStep;
 use yunta_core::{Responder, RunId};
 
 use super::Page;
-use crate::command;
+use crate::ending::CloseLeaves;
 
 /// A close, as the person who asked for it reads it: the word the run
-/// stands in, who closed it, and what stays until `gc`.
+/// stands in, who closed it, and what the close left of it.
 pub struct Closed<'a> {
     pub run_id: &'a RunId,
     pub word: Standing,
@@ -25,12 +24,7 @@ impl Page for Closed<'_> {
             format!("run {}", self.run_id.handle()),
             self.word.to_string(),
         );
-        let gist = format!(
-            "closed by {}: its checkouts went back to the project, and its branch stays until \
-             `{}` removes it",
-            self.by,
-            command::line(&NextStep::Gc { dry_run: false })
-        );
+        let gist = format!("closed by {}: {}", self.by, CloseLeaves::Done.said());
         Doc::new().with(headline).with(Gist::new(gist))
     }
 }

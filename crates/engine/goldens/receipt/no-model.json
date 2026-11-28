@@ -1,0 +1,81 @@
+{
+  "schema_version": 3,
+  "run_id": "run-2026-08-21-0001",
+  "workflow": "release-cycle",
+  "mode": "default",
+  "terminal_state": "done",
+  "criteria": {
+    "total": 3,
+    "green": 3,
+    "tasks": 2,
+    "proving": 3,
+    "proved": 3,
+    "red_before": 3,
+    "guards": 0,
+    "guards_green": 0,
+    "entries": [
+      {
+        "task_id": "T001",
+        "cmd": "test -f hello.txt",
+        "exit_code": 0
+      },
+      {
+        "task_id": "T002",
+        "cmd": "cargo test -p yunta-core",
+        "exit_code": 0
+      },
+      {
+        "task_id": "T002",
+        "cmd": "cargo clippy --workspace -- -D warnings",
+        "exit_code": 0
+      }
+    ]
+  },
+  "baseline": {
+    "suite": "make test",
+    "hash": "22cc66aa7d2624b4eb4d5b61658614cd6c32477b123afbf7dbc7fc3d7d0f3713",
+    "compared": 2,
+    "regressions": 0,
+    "origin": {
+      "type": "measured"
+    }
+  },
+  "scope": {
+    "files_touched": 4,
+    "violations": [],
+    "granted": 0
+  },
+  "changed": {
+    "tree": "deadbeef",
+    "files": 9,
+    "added": 412,
+    "removed": 87
+  },
+  "runners": [
+    {
+      "node_id": "build",
+      "runner": "executor",
+      "adapter": "codex"
+    }
+  ],
+  "cost": {
+    "tokens": {
+      "input": 1200,
+      "output": 340,
+      "cached": 200
+    },
+    "cptv": 770.0,
+    "reroutes": 2
+  },
+  "event_chain": {
+    "status": "intact",
+    "events": 40
+  },
+  "unknown_kinds": [],
+  "diagnostics": [],
+  "blocking_findings": 0,
+  "findings": {
+    "posted": 0,
+    "answered": 0
+  }
+}

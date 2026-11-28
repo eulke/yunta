@@ -115,7 +115,7 @@ impl<'p> OpenedRun<'p> {
         let worktree = project
             .still_or_again(manifest, &self.id, named, stop)
             .await?;
-        let frame = self.frame_of(&state, project.workspace.clock.now());
+        let frame = self.frame_of(&state);
         let prior = project.budget_prior(manifest, &frame, &self.events).await;
         Ok(Some(HeldRun {
             project,

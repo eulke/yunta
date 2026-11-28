@@ -29,14 +29,26 @@ fn main_region(state: &State) -> String {
     Markdown.draw(&state.screen(&Markdown.look()).main.doc)
 }
 
-/// `state` stands on the field, following no run, the note `leaving` says on it.
+/// What `state` notes in its attention row's place, where it notes anything.
+fn noted(state: &State) -> Option<String> {
+    let noted = state.screen(&Markdown.look()).noted;
+    noted.map(|noted| noted.said)
+}
+
+/// `state` stands on the field of the repository it opened in, following no run, the note
+/// `leaving` says in its attention row's place.
 fn on_the_field_saying(state: &State, asked: &[Request], leaving: Leaving) {
     assert!(!asked.contains(&Request::Leave), "it stays open: {asked:?}");
     let screen = state.screen(&Markdown.look());
-    assert_eq!(screen.trail, ["yunta"], "on the field");
+    let repository = state
+        .followed_runs()
+        .repository
+        .as_ref()
+        .and_then(yunta_api::Repository::dir);
+    let place = repository.map(|place| place.display().to_string());
+    assert_eq!(screen.trail.get(1), place.as_ref(), "on the field");
     assert_eq!(state.followed().run, None, "no run is followed under it");
-    let said = main_region(state);
-    assert!(said.contains(leaving.said()), "{said}");
+    assert_eq!(noted(state).as_deref(), Some(leaving.said()));
 }
 
 #[tokio::test]
@@ -53,11 +65,7 @@ async fn q_on_a_run_at_work_goes_to_the_field_saying_it_keeps_going() {
         "the field the state keeps, the run among it"
     );
     field.update(Input::Stroke(Stroke::Insert('j')));
-    let said = main_region(&field);
-    assert!(
-        !said.contains(Leaving::KeepsGoing.said()),
-        "the next key takes the note away: {said}"
-    );
+    assert_eq!(noted(&field), None, "the next key takes the note away");
 }
 
 /// A run no engine drives waits, though it stands created or running, as one created and
@@ -86,10 +94,10 @@ async fn q_on_a_run_that_closed_cancelled_says_it_ended() {
     let mut state = stopped.state().clone();
     let in_view = state.followed_runs().in_view.clone();
     let in_view = in_view.expect("the run is in view");
-    let head = in_view.run.state.head().expect("a run with events");
+    let head = in_view.run.state().head().expect("a run with events");
     let at = in_view
         .run
-        .state
+        .state()
         .clock()
         .last_at()
         .expect("a run with events");
@@ -98,13 +106,13 @@ async fn q_on_a_run_that_closed_cancelled_says_it_ended() {
         RunMetrics::of(TokenUsage::default(), 0),
     );
     let closing = StoredEvent {
-        run_id: in_view.run.run.clone(),
+        run_id: in_view.run.run().clone(),
         seq: (head.get() + 1).into(),
         timestamp: at,
         node_id: None,
         body: EventBody::Known(EventPayload::Run(RunEvent::Finished(closed))),
     };
-    let run = in_view.run.run.clone();
+    let run = in_view.run.run().clone();
     let news = RunNews::Events(vec![closing]);
     state.update(Input::FollowNews(FollowNews::Run { run, news }));
     assert_eq!(key_does(&state, "q").as_deref(), Some("field"));

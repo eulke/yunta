@@ -8,14 +8,17 @@ mod support;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use surco::doc::Block;
 use surco::surface::{Markdown, Surface};
 use yunta_core::events::Channel;
 use yunta_core::step::{Arg, NextStep};
 use yunta_core::{PackRef, RunId};
 use yunta_render::command;
 use yunta_render::page::Collected;
+use yunta_testkit_ui::cut::{Built, Cut, Shown};
 use yunta_testkit_ui::driving::drive;
 use yunta_testkit_ui::sandbox::{pack_with_an_executor, with_a_pack_installed, workspace};
+use yunta_testkit_ui::screens::field;
 use yunta_ui::prompt::Stroke;
 use yunta_ui::{Input, Operation, Outcome, Performer, Request, State};
 
@@ -26,20 +29,32 @@ fn the_run() -> RunId {
     "01M7DIALOGS000000000000000".parse().expect("a run's id")
 }
 
-/// What the confirmation standing over `state` says, as Markdown writes it.
+/// What the confirmation standing over `state` says under its question, as Markdown writes
+/// it.
 fn confirmation(state: &State) -> String {
     let overlay = state.screen(&Markdown.look()).overlay;
     let overlay = overlay
-        .filter(|overlay| overlay.title == yunta_render::screen::CONFIRM)
+        .filter(|overlay| overlay.confirms)
         .unwrap_or_else(|| panic!("a confirmation stands"));
     Markdown.draw(&overlay.doc)
 }
 
-/// `state`, with a confirmation standing, says the command `same` that does the same,
-/// and Escape leaves it with nothing asked.
+/// Whether `says` names `command` on a row of its own: nothing beside it on that row but
+/// what marks it as code or as an item of a list.
+fn alone_on_its_row(says: &str, command: &str) -> bool {
+    says.lines().any(|row| {
+        row.trim_matches(|mark: char| mark == '-' || mark == '`' || mark.is_whitespace()) == command
+    })
+}
+
+/// `state`, with a confirmation standing, names the command `same` that does the same on a
+/// row of its own, with no gloss beside it nor a heading over it, and Escape leaves it with
+/// nothing asked.
 fn confirmed_first(mut state: State, same: &NextStep) {
     let says = confirmation(&state);
-    assert!(says.contains(&command::line(same)), "{says}");
+    assert!(alone_on_its_row(&says, &command::line(same)), "{says}");
+    assert!(!says.contains("does the same at a shell"), "{says}");
+    assert!(!says.contains("**next**"), "{says}");
     let asked = state.update(Input::Stroke(Stroke::Decline));
     assert!(asked.is_empty(), "Escape asks nothing: {asked:?}");
     assert!(state.screen(&Markdown.look()).overlay.is_none());
@@ -55,12 +70,51 @@ fn asks_first(mut state: State, key: char, same: &NextStep) {
     confirmed_first(state, same);
 }
 
+/// The field over a run asking a person at its own terminal, the pointer on it, and the run:
+/// its acts offer a stop and no close, since an engine drives it.
+async fn asked_at_its_terminal() -> (State, RunId) {
+    let cut = Cut::of(&[Shown::at(Built::AskedElsewhere, 6).asking("ship")]).await;
+    let field = field::over(cut).await;
+    let kept = field.state().followed_runs().field.as_ref();
+    let run = kept.and_then(|kept| kept.runs.keys().next().cloned());
+    (field.state().clone(), run.expect("the field reads the run"))
+}
+
+/// Stopping a run whose acts offer its stop, and closing one whose acts offer its close, each
+/// ask first.
 #[tokio::test]
 async fn cancelling_and_closing_a_run_ask_first() {
     let run = the_run();
     let (field, _) = on_the_field(&[&run]).await;
-    asks_first(field.clone(), 'c', &NextStep::Cancel { run: run.clone() });
     asks_first(field, 'x', &NextStep::Close { run });
+    let (asking, run) = asked_at_its_terminal().await;
+    asks_first(asking, 'c', &NextStep::Cancel { run });
+}
+
+/// A key asks nothing of a run whose acts do not hold the act it takes: no stop of a run a
+/// person stopped, no close of one an engine drives.
+#[tokio::test]
+async fn a_key_asks_nothing_of_a_run_whose_acts_do_not_hold_its_act() {
+    let (stopped, _) = on_the_field(&[&the_run()]).await;
+    let (asking, _) = asked_at_its_terminal().await;
+    for (mut state, key) in [(stopped, 'c'), (asking, 'x')] {
+        let asked = state.update(Input::Stroke(Stroke::Insert(key)));
+        assert!(asked.is_empty(), "{key}: {asked:?}");
+        let overlay = state.screen(&Markdown.look()).overlay;
+        let title = overlay.map(|overlay| overlay.title);
+        assert_eq!(title, None, "{key} stands nothing");
+    }
+}
+
+/// Closing a run titles its box with what it asks: the act, and the run by its handle.
+#[tokio::test]
+async fn closing_a_run_titles_its_box_with_the_question() {
+    let run = the_run();
+    let (mut field, _) = on_the_field(&[&run]).await;
+    field.update(Input::Stroke(Stroke::Insert('x')));
+    let overlay = field.screen(&Markdown.look()).overlay;
+    let title = overlay.map(|overlay| overlay.title);
+    assert_eq!(title, Some(format!("close {}?", run.handle())));
 }
 
 #[tokio::test]
@@ -135,12 +189,21 @@ async fn help_lists_the_keys_where_the_person_is_and_escape_closes_it() {
         .filter(|overlay| overlay.title == yunta_render::screen::HELP)
         .expect("help stands");
     let listed = Markdown.draw(&overlay.doc);
+    let helped: Vec<&str> = overlay
+        .doc
+        .blocks()
+        .iter()
+        .find_map(|block| match block {
+            Block::KeyList(list) => Some(&list.keys.0),
+            _ => None,
+        })
+        .expect("help lists its keys")
+        .iter()
+        .map(|binding| binding.keys.named())
+        .collect();
     for binding in &keys.0 {
-        assert!(
-            listed.contains(&binding.does),
-            "{} in {listed}",
-            binding.does
-        );
+        let key = binding.keys.named();
+        assert!(helped.contains(&key), "{key} in {listed}");
     }
     assert!(
         listed.contains("every run keeps going without this window"),
@@ -154,15 +217,16 @@ async fn help_lists_the_keys_where_the_person_is_and_escape_closes_it() {
 /// No work is asked by any of these keys before it is confirmed.
 #[tokio::test]
 async fn a_stroke_never_asks_what_stops_closes_removes_or_spends() {
-    let (mut state, _) = on_the_field(&[&the_run()]).await;
-    for key in ['c', 'x'] {
+    let (stopped, _) = on_the_field(&[&the_run()]).await;
+    let (asking, _) = asked_at_its_terminal().await;
+    for (mut state, key) in [(stopped, 'x'), (asking.clone(), 'c')] {
         let asked = state.update(Input::Stroke(Stroke::Insert(key)));
         let unconfirmed = asked.iter().any(|request| {
             matches!(request, Request::Perform(_, operation) if operation.needs_confirming())
         });
         assert!(!unconfirmed, "{asked:?}");
-        state.update(Input::Stroke(Stroke::Decline));
     }
+    let mut state = asking;
     let confirmed = state.update(Input::Stroke(Stroke::Insert('c')));
     assert!(confirmed.is_empty());
     let asked = state.update(Input::Stroke(Stroke::Enter));

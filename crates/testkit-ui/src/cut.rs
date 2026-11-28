@@ -36,7 +36,9 @@ mod built;
 mod targets;
 
 pub use built::{Built, BuiltRun};
-pub use targets::{Asked, HomePlace, Pointed, Stands, TargetCut, BESIDE, TARGET_CUTS, WITH_FRAGUA};
+pub use targets::{
+    Asked, HomePlace, Opens, Pointed, Stands, TargetCut, BESIDE, TARGET_CUTS, WITH_FRAGUA,
+};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -3,8 +3,8 @@
 //! from here.
 
 use super::Page;
-use crate::command;
-use surco::components::{Gist, Headline, Next};
+use crate::command::{self, Reader, SaidStep};
+use surco::components::{Gist, Headline};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
@@ -12,7 +12,7 @@ use surco::text::counted;
 use surco::words::Standing;
 use yunta_core::step::NextStep;
 use yunta_core::{Pid, RunId};
-use yunta_replay::frame::Effect;
+use yunta_replay::frame::{Action, Effect};
 
 /// How a cancel ended, and what it did to the processes that were left.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -66,7 +66,7 @@ impl Page for Cancelled<'_> {
         Doc::new()
             .with(Headline::new(mark, format!("run {called}"), word))
             .with(Gist::new(gist))
-            .with(Next { steps })
+            .with(command::next(steps))
     }
 }
 
@@ -76,7 +76,7 @@ struct Said {
     mark: Mark,
     word: &'static str,
     gist: String,
-    steps: Vec<(String, &'static str)>,
+    steps: Vec<SaidStep>,
 }
 
 impl Cancelled<'_> {
@@ -111,10 +111,7 @@ impl Cancelled<'_> {
                 mark: Mark::Absent,
                 word: "nothing to cancel",
                 gist: "it closed before the interrupt reached it".to_string(),
-                steps: vec![(
-                    command::line(&NextStep::status(self.run_id)),
-                    "shows how it ended",
-                )],
+                steps: vec![SaidStep::of(&NextStep::status(self.run_id))],
             }),
             CancelState::Cancelled { .. } => stopped(
                 Standing::Stopped.word(),
@@ -135,21 +132,22 @@ impl Cancelled<'_> {
     }
 
     /// The step that closes the run for good.
-    fn closes(&self) -> (String, &'static str) {
-        let close = NextStep::Close {
+    fn closes(&self) -> SaidStep {
+        SaidStep::of(&NextStep::Close {
             run: self.run_id.clone(),
-        };
-        (command::line(&close), command::does(&close))
+        })
     }
 
     /// The steps that go on from a stop: the run continued where it stopped,
     /// or closed for good.
-    fn goes_on(&self) -> Vec<(String, &'static str)> {
-        let resume = NextStep::Resume {
-            run: self.run_id.clone(),
+    fn goes_on(&self) -> Vec<SaidStep> {
+        let resume = Action {
+            step: NextStep::Resume {
+                run: self.run_id.clone(),
+            },
+            effect: Effect::ContinuesWhereStopped,
         };
-        let continues = command::effect(Effect::ContinuesWhereStopped);
-        vec![(command::line(&resume), continues), self.closes()]
+        vec![SaidStep::of_action(&resume, Reader::Person), self.closes()]
     }
 }
 
@@ -157,11 +155,7 @@ impl Cancelled<'_> {
 /// it: the word it stands at, then what the cancel did to the process
 /// groups its engine could not stop, or that there was nothing to cancel,
 /// with `closes` when the run waits on a person.
-fn already_stopped(
-    standing: Standing,
-    killed: usize,
-    closes: Option<(String, &'static str)>,
-) -> Said {
+fn already_stopped(standing: Standing, killed: usize, closes: Option<SaidStep>) -> Said {
     let (gist, steps) = match killed {
         0 => (
             "nothing to cancel".to_string(),
@@ -250,7 +244,7 @@ mod tests {
                 closed: false
             }),
             "# run AAAAAA ; stopped\n  its engine stopped every session and recorded the pause.\n\n\
-             next\n  yunta resume AAAAAA   continues it where it stopped\n  \
+             next\n  yunta resume AAAAAA   continue it where it stopped\n  \
              yunta close AAAAAA    close it for good\n"
         );
         // A run that finished before the interrupt reached it is no pause
@@ -261,7 +255,7 @@ mod tests {
                 closed: true
             }),
             ". run AAAAAA ; nothing to cancel\n  it closed before the interrupt reached it.\n\n\
-             next\n  yunta status AAAAAA   shows how it ended\n"
+             next\n  yunta status AAAAAA   where the run stands\n"
         );
         assert_eq!(
             said(CancelState::Crashed {
@@ -269,7 +263,7 @@ mod tests {
                 killed: 1
             }),
             "# run AAAAAA ; stopped\n  its engine (pid 4321) had already died, so this cancel killed 1 orphaned\n  \
-             process group and recorded the pause.\n\nnext\n  yunta resume AAAAAA   continues it where it \
+             process group and recorded the pause.\n\nnext\n  yunta resume AAAAAA   continue it where it \
              stopped\n  yunta close AAAAAA    close it for good\n"
         );
         // A stop the engine answers to draws no line of its own.

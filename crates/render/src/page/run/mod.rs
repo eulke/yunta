@@ -20,7 +20,7 @@
 
 mod browser;
 mod evidence;
-mod facts;
+pub(crate) mod facts;
 mod story;
 
 pub use browser::RunInABrowser;
@@ -29,9 +29,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::Page;
-use crate::command::{self, Reader};
+use crate::command::{self, Reader, SaidStep};
 use crate::escalation::{self, Beside, Decision};
-use crate::spend::Breakdown;
 use surco::components::{Furrow, Gist, Headline, Next, Note, Prose};
 use surco::doc::{Block, Depth, Doc};
 use surco::figures::duration;
@@ -40,7 +39,7 @@ use surco::words::Standing;
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::step::NextStep;
 use yunta_core::{Isolation, NodeId, RunId};
-use yunta_replay::frame::{RunFrame, RunPhase};
+use yunta_replay::frame::{RunFrame, RunPhase, RunTimes};
 use yunta_replay::RunState;
 
 /// Where a run lives and where its paths are shown from, as the caller found
@@ -73,9 +72,6 @@ pub enum RunScope {
     Browser,
 }
 
-/// What `yunta open` is offered as.
-const IN_A_BROWSER: &str = "the whole page, in a browser";
-
 /// What a page is drawn from: one run as its log derives it, the places
 /// its page names, the decision it waits on, and how much of it a reader
 /// asked for.
@@ -84,9 +80,11 @@ pub struct Run {
     pub scope: RunScope,
     pub depth: Depth,
     pub run_id: RunId,
-    /// The run at the instant the page is read at: what drives it, and how
-    /// long it has stood where it is, measured there.
+    /// The run as its log stands, beside what drives it.
     pub frame: RunFrame,
+    /// What the clock adds to the frame at the instant the page is read at:
+    /// how long the run has stood where it is, measured there.
+    pub times: RunTimes,
     /// The run as its log derives it; the frame is read from the same log.
     pub state: RunState,
     /// Where the page's paths are shown from, and the tree the run works in.
@@ -105,7 +103,7 @@ impl Page for Run {
         let mut doc = Doc::new().with(self.headline()).with(Furrow(
             self.frame.nodes.iter().map(|node| node.standing).collect(),
         ));
-        if let Some(gist) = crate::state::gist(&self.frame) {
+        if let Some(gist) = crate::state::gist(&self.frame, &self.times) {
             doc = doc.with(Gist::new(gist));
         }
         let doc = doc
@@ -162,8 +160,10 @@ impl Run {
     }
 
     /// How long the run has stood where its word says: for how long an open
-    /// run has been there, and how long a closed one took and how long ago
-    /// it stopped. Nothing for a log with no event.
+    /// run has been there, and how long a closed one took, as its screen says
+    /// it ([`facts::closed_in`]), and how long ago it stopped; on a closing of a
+    /// run that stays open, how long the invocation drove it before it stopped.
+    /// Nothing for a log with no event.
     fn stood(&self) -> Vec<String> {
         let open = matches!(
             self.frame.phase,
@@ -172,17 +172,17 @@ impl Run {
         if !matches!(self.scope, RunScope::Closing { .. }) && open {
             return self.open_for().into_iter().collect();
         }
-        let Some(took) = self.frame.elapsed else {
+        let Some(took) = self.times.elapsed else {
             return Vec::new();
         };
-        let mut stood = vec![match self.frame.standing {
-            Standing::Finished | Standing::Reported => format!("in {}", duration(took)),
-            _ => format!("after {}", duration(took)),
+        let mut stood = vec![match open {
+            true => format!("after {}", duration(took)),
+            false => facts::closed_in(took),
         }];
         if let (true, false, Some(ago)) = (
             !matches!(self.scope, RunScope::Closing { .. }),
             open,
-            self.frame.since_last_event,
+            self.times.since_last_event,
         ) {
             stood.push(format!("{} ago", duration(ago)));
         }
@@ -192,11 +192,11 @@ impl Run {
     /// How long an open run has stood at its word ([`stood_open`]), said as gone quiet for
     /// one that stalled with nobody asked.
     fn open_for(&self) -> Option<String> {
-        let stood = duration(stood_open(&self.frame)?);
-        let quiet = self.frame.asking.is_none() && self.frame.standing == Standing::Stalled;
+        let stood = facts::stood_for(duration(stood_open(&self.frame, &self.times)?));
+        let quiet = self.times.asking.is_none() && self.frame.standing == Standing::Stalled;
         Some(match quiet {
-            true => format!("quiet for {stood}"),
-            false => format!("for {stood}"),
+            true => format!("quiet {stood}"),
+            false => stood,
         })
     }
 
@@ -248,11 +248,11 @@ impl Run {
 
     /// What the run offers a person next, each action as its line and what
     /// it does.
-    fn offered(&self) -> Vec<(String, &'static str)> {
+    fn offered(&self) -> Vec<SaidStep> {
         self.frame
             .actions(self.decided_escalation())
             .iter()
-            .map(|action| command::said(action, Reader::Person))
+            .map(|action| SaidStep::of_action(action, Reader::Person))
             .collect()
     }
 
@@ -261,70 +261,48 @@ impl Run {
     fn otherwise(&self) -> Vec<(String, &'static str)> {
         let mut steps = self.offered();
         if self.scope == RunScope::Status {
-            steps.push((
-                command::line(&NextStep::Open {
-                    run: self.run_id.clone(),
-                }),
-                IN_A_BROWSER,
-            ));
+            steps.push(SaidStep::of(&NextStep::Open {
+                run: self.run_id.clone(),
+            }));
         }
-        steps
+        steps.into_iter().map(SaidStep::pair).collect()
     }
 
     /// What a person types next, for where the run stands, and where to
     /// read more of it.
     fn next(&self) -> Next {
         let mut steps = self.offered();
-        match (self.scope, self.depth) {
-            (RunScope::Closing { .. }, _) => steps.push((
-                command::line(&NextStep::status(&self.run_id)),
-                "shows the whole run",
-            )),
-            (RunScope::Status, Depth::Glance) => steps.push((
-                command::line(&NextStep::Status {
-                    run: self.run_id.clone(),
-                    node: None,
-                    depth: Depth::Full,
-                }),
-                "the whole story, node by node",
-            )),
-            (RunScope::Status, Depth::Full | Depth::Dig) => {
-                steps.push((
-                    command::line(&NextStep::Open {
-                        run: self.run_id.clone(),
-                    }),
-                    IN_A_BROWSER,
-                ));
-            }
-            (RunScope::Browser, _) => {}
-        }
-        Next { steps }
+        let run = self.run_id.clone();
+        let more = match (self.scope, self.depth) {
+            (RunScope::Closing { .. }, _) => Some(NextStep::status(&run)),
+            (RunScope::Status, Depth::Glance) => Some(NextStep::Status {
+                run,
+                node: None,
+                depth: Depth::Full,
+            }),
+            (RunScope::Status, Depth::Full | Depth::Dig) => Some(NextStep::Open { run }),
+            (RunScope::Browser, _) => None,
+        };
+        steps.extend(more.as_ref().map(SaidStep::of));
+        command::next(steps)
     }
 
     /// The escalation the run stopped on, when the log rebuilds one.
     pub(crate) fn decided_escalation(&self) -> Option<&GateWaitingPayload> {
         self.decision.as_ref().map(|decision| &decision.escalation)
     }
-
-    /// Settled and in-flight spend, split in and out: nothing for a run that
-    /// spent none. Every page reads this one figure, from the frame the run's
-    /// log derives.
-    pub(crate) fn tokens(&self) -> Option<String> {
-        let spend = &self.frame.tokens;
-        (spend.total() > 0).then(|| Breakdown(spend).to_string())
-    }
 }
 
-/// How long `frame`, an open run, has stood at its word: since it was asked at a terminal,
-/// since its last event for one that stalled or parked, and since it started for one that
-/// moves. None where the frame cannot say, as for a log with no event.
-pub(crate) fn stood_open(frame: &RunFrame) -> Option<Duration> {
-    if let Some(asking) = &frame.asking {
+/// How long `frame`, an open run, has stood at its word as `times` measures it: since it was
+/// asked at a terminal, since its last event for one that stalled or parked, and since it
+/// started for one that moves. None where the times cannot say, as for a log with no event.
+pub(crate) fn stood_open(frame: &RunFrame, times: &RunTimes) -> Option<Duration> {
+    if let Some(asking) = &times.asking {
         return Some(asking.waited);
     }
     match (frame.standing, &frame.phase) {
-        (Standing::Stalled, _) | (_, RunPhase::Waiting { .. }) => frame.since_last_event,
-        _ => frame.elapsed,
+        (Standing::Stalled, _) | (_, RunPhase::Waiting { .. }) => times.since_last_event,
+        _ => times.elapsed,
     }
 }
 

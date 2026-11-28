@@ -92,7 +92,7 @@ impl TypedLine {
             Stroke::Right => self.cursor = at.saturating_add(1).min(end),
             Stroke::Home => self.cursor = 0,
             Stroke::End => self.cursor = end,
-            Stroke::Enter => return Edit::Answered(self.finish()),
+            Stroke::Enter => return Edit::Answered(self.answer()),
             Stroke::Decline => return Edit::Declined,
             Stroke::Interrupt => return Edit::Interrupted,
             Stroke::Backspace
@@ -114,8 +114,9 @@ impl TypedLine {
         self.cursor = at + 1;
     }
 
-    /// The answer the line holds.
-    fn finish(&self) -> Typed {
+    /// The answer the line holds, as `enter` would give it: what a form reads off a line it
+    /// does not end.
+    pub fn answer(&self) -> Typed {
         let line: String = self.characters.iter().collect();
         Typed {
             value: one_line(&line),
@@ -138,7 +139,7 @@ mod tests {
                 return answer;
             }
         }
-        field.finish()
+        field.answer()
     }
 
     fn insert(text: &str) -> Vec<Stroke> {
@@ -205,7 +206,7 @@ mod tests {
         ] {
             field.apply(stroke);
         }
-        assert_eq!(field.finish().value, "");
+        assert_eq!(field.answer().value, "");
         let (_, after) = field.split();
         assert_eq!(cell_width(&after), 0);
     }

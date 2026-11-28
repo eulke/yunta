@@ -22,4 +22,4 @@ submit  questions
 ␛[1mneeds you: asked 3 questions: `where-global-lives`, `how-requested`, `beside-project-packs`␛[0m
 
 ␛[2mnext␛[0m
-  ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m
+  ␛[1myunta status Q78GRR␛[0m   ␛[2mwhere the run stands␛[0m

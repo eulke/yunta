@@ -29,7 +29,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use tokio::time::Instant;
 use yunta_core::events::StoredEvent;
 use yunta_core::{RunId, Seq};
@@ -131,7 +130,7 @@ impl Following {
     /// `news` of `run` folded into each copy the following keeps of it, the run held and
     /// its place in the field, and kept to hand back once for both.
     pub(super) fn found_of(&mut self, run: RunId, news: RunNews) {
-        if let Some(held) = self.held.as_mut().filter(|held| held.run.run == run) {
+        if let Some(held) = self.held.as_mut().filter(|held| held.run.run() == &run) {
             held.run.folded(&news);
         }
         if let Some(field) = self.field.as_mut() {
@@ -163,7 +162,7 @@ impl Following {
         else {
             return Ok(None);
         };
-        let head = read.state.head();
+        let head = read.state().head();
         let events = self.reader.events(run).await.map_err(Failure::new)?;
         let events = events
             .into_iter()
@@ -238,7 +237,7 @@ impl Following {
                 continue;
             }
             match field.runs.get(&head.run_id) {
-                Some(InField::Read { run, .. }) if run.state.head() < Some(head.seq) => {
+                Some(InField::Read { run, .. }) if run.state().head() < Some(head.seq) => {
                     self.read_on(head.run_id, head.seq).await;
                 }
                 Some(InField::Unreadable { head: tried, .. }) if *tried != Some(head.seq) => {
@@ -254,8 +253,8 @@ impl Following {
 
     /// The registry of each run of the field whose log says it moves or asks a person,
     /// read once a second has passed since the last reading, a change kept to hand after
-    /// the look's events. `now` frames the runs.
-    pub(super) fn read_field_registries(&mut self, now: DateTime<Utc>) {
+    /// the look's events.
+    pub(super) fn read_field_registries(&mut self) {
         let Some(field) = self.field.as_mut() else {
             return;
         };
@@ -267,11 +266,11 @@ impl Following {
             let InField::Read { run, registry } = run else {
                 continue;
             };
-            if !moves_or_asks(&run.frame(now)) {
+            if !moves_or_asks(run.frame()) {
                 continue;
             }
             let engine = registry.engine();
-            if engine != run.engine {
+            if engine != *run.engine() {
                 field.engines_read.push((id.clone(), engine));
             }
         }
@@ -310,7 +309,7 @@ impl Following {
             .iter()
             .filter_map(|(id, run)| match run {
                 InField::Read { run, registry } if !has_its_directory(registry.run_dir()) => {
-                    Some((id.clone(), run.state.head()))
+                    Some((id.clone(), run.state().head()))
                 }
                 InField::Read { .. } | InField::Unreadable { .. } => None,
             })
@@ -324,7 +323,7 @@ impl Following {
     /// `run` read for the field and placed by `here`, as every field reads a run, the
     /// run held's own copy standing for it when it is the run read whole.
     async fn placed(&self, here: Option<&Here>, run: &RunId) -> Placed {
-        let held = self.held.as_ref().filter(|held| held.run.run == *run);
+        let held = self.held.as_ref().filter(|held| held.run.run() == run);
         let held = held.map(|held| (&held.run, &held.registry));
         Placed::of(&self.project, &self.reader, here, run, held).await
     }
@@ -337,7 +336,7 @@ impl Following {
         let Some(InField::Read { run: read, .. }) = held else {
             return;
         };
-        let past = match read.state.head() {
+        let past = match read.state().head() {
             Some(from) => self.reader.events_after(&run, from).await,
             None => self.reader.events(&run).await,
         };
@@ -366,7 +365,7 @@ impl Following {
         let was = field.runs.remove(&run);
         match placed {
             Placed::Read(read, registry) => {
-                let behind = read.state.head() < Some(head);
+                let behind = read.state().head() < Some(head);
                 self.news.push_back(FollowNews::Joined(read.clone()));
                 let read = InField::Read {
                     run: read,

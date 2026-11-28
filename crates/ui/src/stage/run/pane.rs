@@ -128,12 +128,12 @@ impl RunStage {
     ) -> Region {
         let run = &framed.in_view.run;
         let declared = run
-            .manifest
+            .manifest()
             .workflow
             .iter_nodes()
             .find(|declared| declared.id == *pointed);
         let runs = declared
-            .and_then(|declared| NodeCommand::of(declared, &run.manifest.config, &run.state));
+            .and_then(|declared| NodeCommand::of(declared, &run.manifest().config, run.state()));
         let above = || -> Vec<Block> {
             let does = match (&runs, declared) {
                 (Some(runs), _) => runs.blocks(),
@@ -163,7 +163,7 @@ impl RunStage {
     pub(super) fn unread_in_its_pane<'a>(&self, framed: &Framed<'a>) -> Option<&'a str> {
         let in_view = framed.in_view;
         self.leads()
-            .then(|| in_view.unreadable_ask(&framed.frame))
+            .then(|| in_view.unreadable_ask(framed.frame))
             .flatten()
     }
 
@@ -180,11 +180,11 @@ impl RunStage {
             return vec![in_the_cards_place(framed, why)];
         }
         let listed = self.listed(framed, pointed);
-        let feed = self.feed_of(framed, pointed, &listed, look).into();
+        let feed = self.feed_of(framed, pointed, listed, look).into();
         if listed.is_empty() {
             return vec![feed];
         }
-        let calls = chronicle::open_attempt_calls(&listed);
+        let calls = framed.in_view.open_attempt_calls(pointed);
         let heading = Block::Heading(chronicle::feed_heading(calls, look.glyphs));
         vec![heading, feed]
     }
@@ -193,8 +193,8 @@ impl RunStage {
 /// What the node's work of the run `framed`, standing still, says above it, as render says
 /// it, on a row of its own: none where nothing holds it still that it says.
 fn still(framed: &Framed<'_>, look: &Look) -> Option<Block> {
-    let state = &framed.in_view.run.state;
-    let line = watched::still(&framed.frame, state, look.glyphs)?;
+    let state = framed.in_view.run.state();
+    let line = watched::still(framed.frame, state, look.glyphs)?;
     Some(Block::Rows(vec![line]))
 }
 
@@ -203,10 +203,10 @@ fn still(framed: &Framed<'_>, look: &Look) -> Option<Block> {
 /// asks it, else its gist; the node it waits at; then why, a line a part, and nothing to
 /// choose.
 fn in_the_cards_place(framed: &Framed<'_>, why: &str) -> Block {
-    let frame = &framed.frame;
+    let frame = framed.frame;
     let question = match frame.phase.waiting_on().and_then(WaitingOn::reason) {
         Some(PauseReason::Escalation(escalation)) => escalation::question(escalation),
-        _ => state::gist(frame).unwrap_or_default(),
+        _ => state::gist(frame, &framed.times).unwrap_or_default(),
     };
     let about = why.lines().map(str::trim).filter(|part| !part.is_empty());
     Block::Card(Card {
@@ -237,7 +237,7 @@ fn titled(region: Region, framed: &Framed<'_>, pointed: &NodeId) -> Region {
 fn title_of(framed: &Framed<'_>, pointed: &NodeId) -> Option<NodeTitle> {
     let run = &framed.in_view.run;
     let declared = run
-        .manifest
+        .manifest()
         .workflow
         .iter_nodes()
         .find(|declared| declared.id == *pointed);
@@ -245,8 +245,8 @@ fn title_of(framed: &Framed<'_>, pointed: &NodeId) -> Option<NodeTitle> {
     Some(NodeTitle::of(
         node,
         declared,
-        &run.state,
-        &run.manifest.config,
+        run.state(),
+        &run.manifest().config,
     ))
 }
 
@@ -269,5 +269,5 @@ fn hands_over(framed: &Framed<'_>, declared: &Node, look: &Look) -> Vec<Block> {
             Document::Read(_) => None,
         })
         .collect();
-    HandsOver::of(&declared.id, produces, &framed.in_view.run.state, &unread).blocks(look)
+    HandsOver::of(&declared.id, produces, framed.in_view.run.state(), &unread).blocks(look)
 }

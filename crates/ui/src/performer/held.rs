@@ -2,6 +2,14 @@
 //! stop of each piece of work under way, and what a piece of work found that later
 //! work takes. Both stand under one lock, so a ticket let go while its work ends never
 //! leaves anything behind: what work finds is kept only while its ticket is held.
+//!
+//! A setup holds its project under the ticket that detected it, and the pack it installs
+//! beside it. The two are fetched and detected at once, so they are joined here, where both
+//! copies are, by whichever lands second: a pack that lands first waits under its fetch's
+//! ticket for the project, which takes it as it lands; a pack that lands second joins the
+//! project held. A performer works in one repository, so it sets up one at a time, and the
+//! one project held without a pack is the one a pack joins. Letting the setup go lets both
+//! go, and its write takes both.
 
 use std::collections::BTreeMap;
 
@@ -21,8 +29,17 @@ pub(super) struct Held {
 
 /// What a piece of work found that later work takes.
 pub(super) enum Found {
-    /// A repository's project as setting it up detected it, which its setup writes.
-    Project(Box<DetectedProject>),
+    /// A repository's project as setting it up detected it, which its setup writes, and
+    /// the pack the setup installs once it is fetched, its copy the one its audit read:
+    /// held together under the ticket that detected the project, so a setup let go lets
+    /// both go.
+    Setup {
+        project: Box<DetectedProject>,
+        pack: Option<Box<FetchedPack>>,
+    },
+    /// The pack a setup installs, fetched before the project it is held with was detected:
+    /// kept under the fetch's ticket until the detection lands and takes it.
+    SetupPack(Box<FetchedPack>),
     /// A pack fetched, its copy the one its audit read, which its install vendors.
     Pack(Box<FetchedPack>),
 }
@@ -55,11 +72,59 @@ impl Held {
         under_way
     }
 
-    /// The project detected under `ticket`, taken: none where it was let go, or what
-    /// the ticket found is no project.
-    pub(super) fn take_project(&mut self, ticket: Ticket) -> Option<DetectedProject> {
+    /// `project`, detected under `ticket` for its setup, kept with the pack a setup installs
+    /// where its fetch landed first, which it takes; whether it was kept, as [`Held::keep`]
+    /// says.
+    pub(super) fn detected_for_the_setup(
+        &mut self,
+        ticket: Ticket,
+        project: DetectedProject,
+    ) -> bool {
+        if !self.under_way(ticket) {
+            return false;
+        }
+        let waiting = (self.found.iter())
+            .find_map(|(at, found)| matches!(found, Found::SetupPack(_)).then_some(*at));
+        let pack = match waiting.and_then(|at| self.found.remove(&at)) {
+            Some(Found::SetupPack(pack)) => Some(pack),
+            Some(_) | None => None,
+        };
+        let project = Box::new(project);
+        self.found.insert(ticket, Found::Setup { project, pack });
+        true
+    }
+
+    /// `fetched`, the pack a setup installs fetched under `ticket`: held with the project its
+    /// setup detected where that landed first, else kept under `ticket` until it does; whether
+    /// it was kept, as [`Held::keep`] says.
+    pub(super) fn fetched_for_the_setup(&mut self, ticket: Ticket, fetched: FetchedPack) -> bool {
+        if !self.under_way(ticket) {
+            return false;
+        }
+        let held = self.found.values_mut().find_map(|found| match found {
+            Found::Setup {
+                pack: pack @ None, ..
+            } => Some(pack),
+            _ => None,
+        });
+        match held {
+            Some(pack) => *pack = Some(Box::new(fetched)),
+            None => {
+                self.found
+                    .insert(ticket, Found::SetupPack(Box::new(fetched)));
+            }
+        }
+        true
+    }
+
+    /// The project detected under `ticket`, and the pack fetched with it where one was,
+    /// taken: none where it was let go, or what the ticket found is no setup.
+    pub(super) fn take_setup(
+        &mut self,
+        ticket: Ticket,
+    ) -> Option<(DetectedProject, Option<FetchedPack>)> {
         match self.found.remove(&ticket)? {
-            Found::Project(detected) => Some(*detected),
+            Found::Setup { project, pack } => Some((*project, pack.map(|pack| *pack))),
             other => {
                 self.found.insert(ticket, other);
                 None

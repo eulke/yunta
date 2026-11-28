@@ -21,7 +21,7 @@ mod feed;
 use std::path::Path;
 use std::sync::Arc;
 
-use surco::components::{Region, Screen, ScreenLaid, Sight};
+use surco::components::{Binding, Region, Screen, ScreenLaid, Sight};
 use surco::glyphs::Glyphs;
 use surco::line::Line;
 use surco::look::{Look, Width};
@@ -104,13 +104,10 @@ fn scrolled(screen: &Screen) -> &Region {
     &screen.main
 }
 
-/// Whether the legend offers the keys that scroll a page.
-fn offers_paging(screen: &Screen) -> bool {
-    screen
-        .legend
-        .0
-        .iter()
-        .any(|binding| binding.does == "by the page")
+/// What `screen`'s legend says: each key it names, with what it does.
+fn legend_said(screen: &Screen) -> Vec<(String, String)> {
+    let named = |binding: &Binding| (binding.keys.named().to_string(), binding.does.clone());
+    screen.legend.0.iter().map(named).collect()
 }
 
 /// The state root of `bench`'s repository: where its runs and log are.
@@ -149,11 +146,8 @@ async fn at(bench: &Bench, strokes: &[Stroke]) -> State {
     state
 }
 
-/// A stage a page is shown on: what it is, the strokes that reach it from the field, and
-/// whether its legend names the keys that scroll a page at a time once the page scrolls. A
-/// run's screen keeps its keys' row for the run's own, as it does over a feed, and so do the
-/// pages that stand in the run's frame, its numbers and its graph.
-type PagedStage = (&'static str, Vec<Stroke>, bool);
+/// A stage a page is shown on: what it is, and the strokes that reach it from the field.
+type PagedStage = (&'static str, Vec<Stroke>);
 
 #[tokio::test]
 async fn every_page_a_stage_shows_scrolls_by_what_a_surface_laid_out_of_it() {
@@ -161,33 +155,28 @@ async fn every_page_a_stage_shows_scrolls_by_what_a_surface_laid_out_of_it() {
     // What a run cost, as a screen tells it, is a page taller than its rows where the run
     // spent and found something: the design's run at its last gate.
     let spent = run::opened("stats").await;
-    scrolls_by_what_was_laid_out(spent.state().clone(), "what it cost", false);
+    scrolls_by_what_was_laid_out(spent.state().clone(), "what it cost");
     let stages: [PagedStage; 3] = [
-        ("its graph", vec![Stroke::Enter, Stroke::Insert('g')], false),
-        (
-            "its receipt",
-            vec![Stroke::Enter, Stroke::Insert('e')],
-            true,
-        ),
+        ("its graph", vec![Stroke::Enter, Stroke::Insert('g')]),
+        ("its receipt", vec![Stroke::Enter, Stroke::Insert('e')]),
         (
             "a workflow checked",
             vec![Stroke::Insert('w'), Stroke::Insert('c')],
-            true,
         ),
     ];
-    for (what, strokes, names_the_keys) in stages {
+    for (what, strokes) in stages {
         let state = at(&bench, &strokes).await;
-        scrolls_by_what_was_laid_out(state, what, names_the_keys);
+        scrolls_by_what_was_laid_out(state, what);
     }
 }
 
 /// `state`'s page, `what`, a page taller than its rows, scrolled by the keys from what the
 /// terminal laid out of it: from its first line, a page down, its last lines and never past
-/// them, its first line again; its legend naming the keys once it scrolls where
-/// `names_the_keys`, and never before a surface laid it out.
-fn scrolls_by_what_was_laid_out(mut state: State, what: &str, names_the_keys: bool) {
+/// them, its first line again; its legend the same before a surface laid it out and after,
+/// since a page's legend says the same at every size, the keys that scroll named by how the
+/// page is read and not by whether it scrolls where it is shown.
+fn scrolls_by_what_was_laid_out(mut state: State, what: &str) {
     let before = state.screen(&look());
-    assert!(!offers_paging(&before), "{what}: nothing laid out yet");
     let whole = Terminal::on(look()).lines(&scrolled(&before).doc);
     assert!(
         whole.len() > ROWS + A_PAGE,
@@ -196,9 +185,9 @@ fn scrolls_by_what_was_laid_out(mut state: State, what: &str, names_the_keys: bo
     );
     let screen = laid_out(&mut state);
     assert_eq!(
-        offers_paging(&screen),
-        names_the_keys,
-        "{what}: the legend names the keys where the stage's does"
+        legend_said(&screen),
+        legend_said(&before),
+        "{what}: its legend says the same once the page scrolls"
     );
     assert_eq!(scrolled(&screen).sight.top, 0, "{what}");
 

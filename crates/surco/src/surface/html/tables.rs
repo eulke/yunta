@@ -146,15 +146,7 @@ fn run_row(run: &RunLine) -> String {
     let cells = [
         element("td", Some("state"), &state),
         element("td", Some("id"), &text::esc(&run.handle)),
-        element(
-            "td",
-            None,
-            &format!(
-                "{} ({})",
-                text::words(&run.workflow),
-                text::words(&run.mode)
-            ),
-        ),
+        element("td", None, &text::words(&run.name())),
         element("td", None, &furrow(&run.furrow)),
         element("td", Some("rest"), &text::words(&run.said)),
         element("td", Some("figure"), &edge(&run.edge)),
@@ -233,7 +225,7 @@ pub(super) fn checklist(list: &Checklist) -> String {
 /// of each, a separator apart.
 fn fold_row(subject: &str, names: &[&str]) -> String {
     let names: Vec<String> = names.iter().map(|name| text::words(name)).collect();
-    let separator = format!(" {} ", GLYPHS.sep());
+    let separator = GLYPHS.spaced_sep();
     format!(
         r#"<li>{} <span class="subject">{}</span> <span>{}</span></li>"#,
         text::mark(Found::Holds.mark()),

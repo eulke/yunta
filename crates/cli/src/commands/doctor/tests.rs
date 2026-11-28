@@ -18,9 +18,11 @@ fn ready() -> Vec<Finding> {
             health: AdapterHealth::Healthy {
                 version: Some("2.1.305 (Claude Code)".to_string()),
             },
+            serving: Vec::new(),
         },
         Finding::Committer {
-            who: "Ada <ada@example.com>".to_string(),
+            name: "Ada".to_string(),
+            address: "ada@example.com".to_string(),
         },
         Finding::FirstRun {
             first: Duration::from_millis(337),
@@ -52,8 +54,8 @@ fn a_glance_folds_what_holds_and_says_how_to_make_a_caution_hold() {
              suite pays that for every test binary it links again\n    \
              fix        add the terminal that runs yunta under System Settings > Privacy\n               \
              & Security > Developer Tools, then open it again\n\n\
-             next\n  yunta doctor --session   opens a session per binding, a prompt each\n  \
-             yunta doctor --full      every check on its own row, with what it found\n"
+             next\n  yunta doctor --session   open a session on each agent binding\n  \
+             yunta doctor --full      check this machine, every check unfolded\n"
         )
     );
     let json = serde_json::to_value(&answer).expect("the answer serializes");

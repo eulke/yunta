@@ -2,8 +2,9 @@
 //! workflow needs, as the repository was detected to answer it, and the
 //! runners a workflow names, on the adapters the machine answers for.
 //!
-//! A probe reports a version and never a model: a model is the project's
-//! choice, so the runner proposed here leaves it for the person to name.
+//! A probe reports a version and never a model, and a candidate that names no
+//! model leaves it to its adapter's CLI: the runner proposed here names the
+//! adapter alone, and a person adds a model where the project wants one.
 
 use surco::components::Fix;
 use yunta_core::{AdapterId, ConfigKey, Detected, MachineAdapters, RunnerName};
@@ -35,9 +36,10 @@ pub fn as_detected(detected: &Detected, key: &ConfigKey) -> Option<String> {
 
 /// The lines that say how to declare the runners `roles` names — the
 /// proposed role when it names none — each on the first adapter that
-/// answered on the machine, and `defaults.runner` when a node names no
-/// runner of its own (`needs_default`). Ready to paste: the one placeholder
-/// is the model, which only the project can choose.
+/// answered on the machine, its model left to that adapter, and
+/// `defaults.runner` when a node names no runner of its own
+/// (`needs_default`). Ready to paste where an adapter answered; where none
+/// did, the one placeholder is the adapter.
 pub fn runners(roles: &[RunnerName], needs_default: bool, adapters: &MachineAdapters) -> Fix {
     let proposed = [RunnerName::PROPOSED];
     let roles = match roles.is_empty() {
@@ -52,18 +54,12 @@ pub fn runners(roles: &[RunnerName], needs_default: bool, adapters: &MachineAdap
                 surco::text::listed(adapters.healthy.iter().map(AdapterId::as_str))
             ),
         ),
-        None => (
-            "<adapter>".to_string(),
-            format!(
-                "no adapter CLI answered on this machine (this build knows {})",
-                surco::text::listed(adapters.known.iter().map(AdapterId::as_str))
-            ),
-        ),
+        None => ("<adapter>".to_string(), none_answered(&adapters.known)),
     };
     let mut paste = vec!["runners:".to_string()];
     for role in roles {
         paste.push(format!("  {role}:"));
-        paste.push(format!("    - {{ adapter: {adapter}, model: <model> }}"));
+        paste.push(format!("    - {{ adapter: {adapter} }}"));
     }
     if let (true, Some(first)) = (needs_default, roles.first()) {
         paste.push("defaults:".to_string());
@@ -73,6 +69,15 @@ pub fn runners(roles: &[RunnerName], needs_default: bool, adapters: &MachineAdap
         said: format!("declare a runner in .yunta/config.yaml; {where_from}:"),
         paste,
     }
+}
+
+/// What a machine on which no adapter answered says of it: none did, and the `known` ones
+/// this build would have run on.
+pub(crate) fn none_answered(known: &[AdapterId]) -> String {
+    format!(
+        "no adapter CLI answered on this machine (this build knows {})",
+        surco::text::listed(known.iter().map(AdapterId::as_str))
+    )
 }
 
 #[cfg(test)]
@@ -99,7 +104,7 @@ mod tests {
             vec![
                 "runners:",
                 "  implementer:",
-                "    - { adapter: claude-code, model: <model> }",
+                "    - { adapter: claude-code }",
                 "defaults:",
                 "  runner: implementer",
             ]
@@ -135,6 +140,6 @@ mod tests {
         assert!(step
             .paste
             .iter()
-            .any(|line| line.contains("adapter: <adapter>")));
+            .any(|line| line.contains("- { adapter: <adapter> }")));
     }
 }

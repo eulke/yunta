@@ -21,7 +21,8 @@ use yunta_core::{
     AdapterId, CommitSha, ContentHash, Isolation, NodeId, NonEmpty, RunId, Seq, TaskId,
 };
 use yunta_replay::frame::{
-    Counter, NodeFrame, NodeStanding, RunFrame, RunPhase, TaskCounter, WaitingOn,
+    Counter, NodeFrame, NodeStanding, NodeTimes, RunFrame, RunPhase, RunTimes, TaskCounter,
+    WaitingOn,
 };
 use yunta_replay::RunState;
 use yunta_testkit_core::{fixed_now, Log};
@@ -76,13 +77,26 @@ pub(crate) fn finished(id: &str) -> NodeFrame {
     )
 }
 
-/// A node the run has not reached.
+/// A node the run has not reached: its log never started it, so the clock
+/// adds nothing to it ([`times`]).
 pub(crate) fn ahead(id: &str) -> NodeFrame {
     NodeFrame {
         attempt: None,
-        elapsed: None,
-        last_event_age: None,
         ..NodeFrame::sample(&NodeId::from(id), NodeStanding::ToGo)
+    }
+}
+
+/// What the clock adds to `frame`, built by [`frame`], at the instant its
+/// case is read: the run gone seven minutes and forty-one seconds, each node
+/// that started [`NodeTimes::sample`], each it never started nothing.
+pub(crate) fn times(frame: &RunFrame) -> RunTimes {
+    let started = frame.nodes.iter().filter(|node| node.attempt.is_some());
+    RunTimes {
+        elapsed: Some(Duration::from_secs(7 * 60 + 41)),
+        nodes: started
+            .map(|node| (node.id.clone(), NodeTimes::sample()))
+            .collect(),
+        ..RunTimes::sample(frame)
     }
 }
 
@@ -163,7 +177,6 @@ pub(crate) fn frame(phase: RunPhase, nodes: Vec<NodeFrame>, blocking_findings: u
             total: nodes.len(),
             ..Counter::default()
         },
-        elapsed: Some(Duration::from_secs(7 * 60 + 41)),
         tokens: TokenUsage {
             input: 18_000,
             output: 2_200,
@@ -280,6 +293,7 @@ pub(crate) struct Case {
     pub(crate) name: &'static str,
     run_id: RunId,
     pub(crate) frame: RunFrame,
+    pub(crate) times: RunTimes,
     pub(crate) state: RunState,
     pub(crate) decision: Option<(DecisionOn, GateWaitingPayload)>,
 }
@@ -304,22 +318,23 @@ impl Case {
     }
 
     /// The run `frame` describes, its log `log`, read `READ_AFTER` that
-    /// log's last event: the frame carries what that instant measures, as
-    /// `RunFrame::of` measures it.
+    /// log's last event: its times carry what that instant measures, as
+    /// `RunTimes::of` measures it.
     fn logged(name: &'static str, frame: RunFrame, log: &[StoredEvent]) -> Self {
         let state = yunta_replay::RunState::replay(log);
         let read_at = state.clock().last_at().unwrap_or_else(fixed_now)
             + chrono::Duration::from_std(READ_AFTER).expect("a wait fits a chrono duration");
-        let frame = RunFrame {
+        let times = RunTimes {
             since_last_event: Some(READ_AFTER),
             time: state.time_spent((!state.ended()).then_some(read_at)),
-            ..frame
+            ..times(&frame)
         };
         Case {
             name,
             run_id: RUN,
             state,
             frame,
+            times,
             decision: None,
         }
     }
@@ -336,6 +351,7 @@ impl Case {
             depth,
             run_id: self.run_id.clone(),
             frame: self.frame.clone(),
+            times: self.times.clone(),
             state: self.state.clone(),
             places: places(),
             decision: self.decision.clone().map(|(on, escalation)| Decision {

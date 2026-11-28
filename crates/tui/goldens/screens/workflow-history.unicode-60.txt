@@ -1,0 +1,14 @@
+ yunta › workflows › yunta/fragua history         ◆ 1 · ▲ 1
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+ ◌ fragua · 3 runs
+   median 2.17M tokens, p90 27.1M · median wall-clock 1h07m
+   task cost    █▁▂  per verified task, oldest → newest; t…
+ by mode
+ quick         2 runs · median task cost 1.78M · median to…
+ standard      1 run · median task cost 27.1M · median tok…
+ how its checks performed: advice, nothing here is acted on
+   ▲ mode `full`  never chosen across 3 runs: still worth…
+
+
+ ◆ C0NS0E needs you: node `approve` wants an…  · a go there
+ esc back · n new run · ? keys

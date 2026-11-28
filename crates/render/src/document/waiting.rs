@@ -2,7 +2,7 @@
 //! program: a node parked on a person, the run itself paused, or the engine
 //! asking at its terminal.
 
-use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
+use yunta_replay::frame::{RunFrame, RunPhase, RunTimes, WaitingOn};
 
 use super::node::NodeWaitJson;
 
@@ -43,12 +43,12 @@ pub enum WaitingOnJson {
 
 impl WaitingOnJson {
     /// The frame's own answer, in the document's shape — or, for a run
-    /// that is moving, the question its engine is asking at its terminal.
-    /// `None` for a run that is not waiting on anything.
-    pub(super) fn of(frame: &RunFrame) -> Option<Self> {
+    /// that is moving, the question its engine is asking at its terminal, as
+    /// `times` says it. `None` for a run that is not waiting on anything.
+    pub(super) fn of(frame: &RunFrame, times: &RunTimes) -> Option<Self> {
         let RunPhase::Waiting { on } = &frame.phase else {
             let moving = matches!(frame.phase, RunPhase::Created | RunPhase::Running);
-            return frame
+            return times
                 .asking
                 .as_ref()
                 .filter(|_| moving)

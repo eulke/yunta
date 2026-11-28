@@ -1,0 +1,21 @@
+␛[32m✓␛[0m ␛[1myunta init␛[0m␛[2m ·␛[0m␛[32m done ␛[0m␛[2m· in /home/me/project␛[0m
+␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+
+  ␛[2mwrote       ␛[0m .yunta/config.yaml
+  ␛[2mlanguage    ␛[0m rust: wrote 3 project commands and the suite a run measures
+  ␛[2mtip         ␛[0m share a build cache across worktrees
+  ␛[2mforge       ␛[0m github eulke/yunta, from origin; its token is read from `GITHUB_TOKEN`
+
+  ␛[32m✓␛[0m ␛[1mclaude-code␛[0m  healthy (2.1.0)
+  ␛[33m▲␛[0m ␛[1mcodex␛[0m        unavailable (not on PATH)
+
+  ␛[2mrunners     ␛[0m implementer (the default) on claude-code/opus
+
+␛[2mfor this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file␛[0m
+  This repo uses Yunta for verified workflows. Before implementing
+  something ad hoc, check `yunta list` (or the `list_workflows` MCP
+  tool) for an existing verified workflow that already covers it.
+
+␛[2mnext␛[0m
+  ␛[1myunta pack add <source>␛[0m   ␛[2minstall a pack␛[0m
+  ␛[1myunta doctor           ␛[0m   ␛[2mcheck adapters, git, forge, packs␛[0m

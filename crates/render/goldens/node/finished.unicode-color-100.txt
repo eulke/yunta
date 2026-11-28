@@ -23,4 +23,4 @@ accepted brief.md
 ␛[1mfinished: Wrote and verified brief.md. It captures the idea and lists unsettled details as open poi␛[0m␛[1m…␛[0m
 
 ␛[2mnext␛[0m
-  ␛[1myunta status Q78GRR␛[0m   ␛[2mshows the whole run␛[0m
+  ␛[1myunta status Q78GRR␛[0m   ␛[2mwhere the run stands␛[0m

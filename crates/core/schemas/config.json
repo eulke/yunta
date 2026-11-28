@@ -832,7 +832,7 @@
       "additionalProperties": false
     },
     "RunnerCandidate": {
-      "description": "One candidate of a runner in `runners:`: the adapter, the model it asks\nthat adapter's CLI for, and optionally an agent and an effort.\n\nThree words, three things. An adapter is the integration with one agent\nCLI (`claude-code`, `codex`, `mock`); a runner is the binding a node asks\nfor by name — the role a workflow needs, `runner: planner`, which the\nproject's config fills with the CLIs it has; an agent is a set of\ninstructions the run owns, added to the CLI's own.",
+      "description": "One candidate of a runner in `runners:`: the adapter, and optionally the\nmodel it asks that adapter's CLI for, an agent and an effort.\n\nThree words, three things. An adapter is the integration with one agent\nCLI (`claude-code`, `codex`, `mock`); a runner is the binding a node asks\nfor by name — the role a workflow needs, `runner: planner`, which the\nproject's config fills with the CLIs it has; an agent is a set of\ninstructions the run owns, added to the CLI's own.",
       "type": "object",
       "properties": {
         "adapter": {
@@ -861,13 +861,20 @@
           ]
         },
         "model": {
-          "$ref": "#/$defs/ModelName"
+          "description": "The model its sessions are opened on; absent leaves it to the CLI,\nwhich runs its own default. Not the model a session reported, which\nthe log keeps.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelName"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
       "required": [
-        "adapter",
-        "model"
+        "adapter"
       ]
     },
     "RunnerName": {

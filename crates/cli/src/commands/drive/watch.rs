@@ -73,7 +73,6 @@ pub(super) async fn watch(
             SurfaceEnv {
                 run_id: &held.id,
                 manifest: &held.manifest,
-                prior: held.prior.as_ref(),
                 log: &log,
                 clock: std::sync::Arc::clone(&env.project.workspace.clock),
                 delivery: shown.delivery,

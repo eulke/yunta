@@ -1,12 +1,10 @@
 //! A run started end to end: what is asked for typed at the first run of a repository
-//! set up with no run, the workflow, its inputs and its adapter chosen, and the run
-//! started detached by this build and followed to its end; and an input left empty,
-//! refused as `yunta run` refuses it.
+//! set up with no run, then started from the new run it goes on to, every other row as it
+//! opens, detached by this build and followed to its end; and an input left empty, refused
+//! as `yunta run` refuses it, said under that input's row.
 
 use super::*;
 
-use surco::components::Note;
-use surco::doc::Block;
 use yunta_testkit::workflows::GREETS;
 use yunta_testkit::{runs_root, stderr, wait_until, yunta_at, Checkout};
 
@@ -35,9 +33,9 @@ fn runs_under(home: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// What is asked for at the first run, with the workflow and the adapter each list
-/// opens on, starts the run detached, the request in the input the workflow reads it
-/// from; the application follows it to its end.
+/// What is asked for at the first run, with the workflow and the adapter the new run opens
+/// on, starts the run detached, the request in the input the workflow reads it from; the
+/// application follows it to its end.
 #[tokio::test]
 async fn a_run_started_at_the_first_run_is_followed_to_its_end() {
     let checkout = Checkout::new()
@@ -51,7 +49,7 @@ async fn a_run_started_at_the_first_run_is_followed_to_its_end() {
     let (opened, asked) = State::opened(now());
 
     let mut strokes = typed("greet ana");
-    strokes.extend([Stroke::Enter, Stroke::Enter]);
+    strokes.push(Stroke::Enter);
     let (state, _) = drive(opened, asked, &performer, &strokes).await;
 
     let [id] = runs_under(&checkout.home)
@@ -74,8 +72,8 @@ async fn a_run_started_at_the_first_run_is_followed_to_its_end() {
     assert!(manifest.contains("greet ana"), "{manifest}");
 }
 
-/// An input left empty is refused by admission as `yunta run` refuses it, said where
-/// the person stands, and no run is made.
+/// An input left empty is refused by admission as `yunta run` refuses it, said in place on the
+/// new run, under that input's row and in no note, and no run is made.
 #[tokio::test]
 async fn an_input_left_empty_is_refused_as_yunta_run_refuses_it() {
     let checkout = Checkout::new()
@@ -92,24 +90,21 @@ async fn an_input_left_empty_is_refused_as_yunta_run_refuses_it() {
     let (opened, asked) = State::opened(now());
 
     let mut strokes = typed("greet ana");
-    strokes.extend([Stroke::Enter, Stroke::Enter, Stroke::Enter]);
+    strokes.push(Stroke::Enter);
     let (state, _) = drive(opened, asked, &performer, &strokes).await;
 
     let screen = state.screen(&Markdown.look());
-    let said: Vec<String> = screen
-        .main
-        .doc
-        .blocks()
-        .iter()
-        .filter_map(|block| match block {
-            Block::Note(Note(said)) => Some(said.clone()),
-            _ => None,
-        })
-        .collect();
-    let refusal = said.last().expect("the refusal is said");
+    assert!(screen.noted.is_none(), "said in place, not in the note");
+    let drawn = Markdown.screen(&screen);
+    let row = drawn.find("whom it greets").expect("the input's row");
+    let under = drawn[row..]
+        .lines()
+        .find_map(|line| line.strip_prefix("✗ "));
+    let refusal = under.expect("the refusal, under the input's row");
     let printed = stderr(&refused_at_the_command_line);
-    for line in refusal.lines() {
-        assert!(printed.contains(line), "`{line}` is not in:\n{printed}");
-    }
+    assert!(
+        printed.contains(refusal),
+        "`{refusal}` is not in:\n{printed}"
+    );
     assert!(runs_under(&checkout.home).is_empty(), "no run is made");
 }

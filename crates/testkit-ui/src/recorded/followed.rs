@@ -14,6 +14,8 @@
 //! The runs whose screens the walk opens on a scene stand in places of their own, the cuts
 //! of the home, whose fields are no field the walk shows: there only what is about a run is
 //! kept, beside what the run's screen asks to read as its scene opens (`on_their_screens`).
+//! So it is where a run's screen stands over the setup of a place never set up, whose field
+//! the setup follows (`FieldNews`).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -37,6 +39,15 @@ use crate::sandbox::{now, workspace};
 /// looks a tenth of a second apart and reads what a run waits on beside, and a place's
 /// work is a reading or two, so only a state that never stands waits half a minute.
 const STANDING: Duration = Duration::from_secs(30);
+
+/// What a recording keeps of the field's pieces a state takes as it follows it: each under
+/// the reach followed, in the places the walk's field comes from; none in a place whose field
+/// is no field the walk shows, where only what is about a run is kept.
+#[derive(Debug, Clone, Copy)]
+enum FieldNews {
+    Kept,
+    Dropped,
+}
 
 /// What the application's following handed where it was recorded, each piece by what it
 /// is about: the field, by the reach it was followed at, or the run it names, by the head
@@ -98,8 +109,11 @@ impl FollowedNews {
             | FollowNews::Unreadable(_)
             | FollowNews::Left(_)
             | FollowNews::Elsewhere(_) => None,
-            FollowNews::Whole { run, .. } => Some(run.run.clone()),
+            FollowNews::Whole { run, .. } => Some(run.run().clone()),
             FollowNews::Run { run, .. } => Some(run.clone()),
+            FollowNews::WholeUnreadable(why) => {
+                panic!("the run a place follows cannot be read whole: {why:?}")
+            }
         };
         match (run, reach) {
             (Some(run), _) => {
@@ -125,10 +139,12 @@ impl Recordings {
     /// repository is set up, as the walk answers its opening, and follows the field there:
     /// here, where no run stands and its first request does; here and then at the machine's
     /// reach, where the field stands. Each run is followed from the application opened on
-    /// following it: one in a repository never set up stands over its setup, the asking
-    /// runs, the typed round's and the round of choices', each in its own place, and the reviewing run over its field, which it goes back to, its
-    /// prompt in place put aside first, and follows at the machine's reach. Then each run of
-    /// the home's cuts, on its screen in its cut.
+    /// following it: one in a repository never set up stands over its setup, which follows
+    /// the field there too, no field the walk shows, so only what is about the run is kept
+    /// (the asking runs, the typed round's and the round of choices', each in its own place);
+    /// and the reviewing run over its field, which it goes back to, its prompt in place put
+    /// aside first, and follows at the machine's reach. Then each run of the home's cuts, on
+    /// its screen in its cut.
     pub(super) async fn followings(&mut self, home: &Home) {
         let here = Followed {
             field: Some(FieldReach::Here),
@@ -138,27 +154,35 @@ impl Recordings {
             field: Some(FieldReach::Machine),
             run: None,
         };
-        let further = Some(Stroke::Insert('a'));
+        let further = Some(Stroke::Insert('e'));
         let never_set_up = workspace(&home.never_set_up, home.root());
         // The home's own root holds no run until the acts start one.
         let empty = BTreeMap::new();
         let field_here = [(None, here.clone())];
         let opened = told_set_up(&never_set_up);
-        self.followed_through(never_set_up, &empty, opened, &field_here)
+        self.followed_through(never_set_up, &empty, opened, &field_here, FieldNews::Kept)
             .await;
         let worked = workspace(&home.worked.worktree, home.worked_root());
         let at_worked = yunta_testkit::heads(home.worked.store_path());
         let each_reach = [(None, here.clone()), (further, machine.clone())];
         let opened = told_set_up(&worked);
-        self.followed_through(worked.clone(), &at_worked, opened, &each_reach)
-            .await;
+        self.followed_through(
+            worked.clone(),
+            &at_worked,
+            opened,
+            &each_reach,
+            FieldNews::Kept,
+        )
+        .await;
         for run in [&home.worked.run_id, &home.parked] {
-            self.followed_alone(worked.clone(), &at_worked, run).await;
+            self.followed_over_its_setup(worked.clone(), &at_worked, run)
+                .await;
         }
         for asking in [&home.asking, &home.scenes.choosing] {
             let place = workspace(&asking.worktree, root_of(asking));
             let at_asking = yunta_testkit::heads(asking.store_path());
-            self.followed_alone(place, &at_asking, &asking.run_id).await;
+            self.followed_over_its_setup(place, &at_asking, &asking.run_id)
+                .await;
         }
         let reviewing = &home.reviewing;
         let over_its_field = Followed {
@@ -174,33 +198,37 @@ impl Recordings {
         let opened = opened_following(&reviewing.run_id);
         let place = workspace(&reviewing.worktree, root_of(reviewing));
         let at_reviewing = yunta_testkit::heads(reviewing.store_path());
-        self.followed_through(place, &at_reviewing, opened, &back_and_further)
+        let steps = &back_and_further;
+        self.followed_through(place, &at_reviewing, opened, steps, FieldNews::Kept)
             .await;
         for cut in home.scenes.cuts() {
             self.on_their_screens(cut.workspace(), cut.runs()).await;
         }
     }
 
-    /// What the following of `run` alone hands, the application opened on its screen in
-    /// `place`, whose log stands at `heads`.
-    async fn followed_alone(
+    /// What the following of `run` hands, the application opened on its screen in `place`,
+    /// a repository never set up whose log stands at `heads`: the run's screen stands over the
+    /// place's setup, which follows the field here, and only what is about the run is kept.
+    async fn followed_over_its_setup(
         &mut self,
         place: Workspace,
         heads: &BTreeMap<RunId, Seq>,
         run: &RunId,
     ) {
-        let alone = Followed {
-            field: None,
+        let over_its_setup = Followed {
+            field: Some(FieldReach::Here),
             run: Some(run.clone()),
         };
         let opened = opened_following(run);
-        self.followed_through(place, heads, opened, &[(None, alone)])
+        let steps = [(None, over_its_setup)];
+        self.followed_through(place, heads, opened, &steps, FieldNews::Dropped)
             .await;
     }
 
     /// What the following of `state`, just opened and asking `asked`, hands, its work
-    /// carried out by a performer working through `workspace`: each piece kept under what
-    /// the state followed as it took it. At each of `steps` its stroke is pressed, where it
+    /// carried out by a performer working through `workspace`: each piece about a run kept
+    /// under it, and each piece of the field under the reach the state followed as it took
+    /// it, where `field` keeps them. At each of `steps` its stroke is pressed, where it
     /// has one, and pieces are taken until the state follows what the step names, stands
     /// caught up with `heads`, each run's last seq in the place's log, and waits on
     /// nothing: where the next stroke finds the stage it is for.
@@ -210,6 +238,7 @@ impl Recordings {
         heads: &BTreeMap<RunId, Seq>,
         (mut state, mut asked): (State, Vec<Request>),
         steps: &[(Option<Stroke>, Followed)],
+        field: FieldNews,
     ) {
         let performer = Arc::new(Performer::new(workspace, Channel::Tty));
         let (inputs, mut received) = mpsc::unbounded_channel();
@@ -240,7 +269,10 @@ impl Recordings {
                     .expect("the performer hands back what it reads");
                 match &input {
                     Input::FollowNews(news) => {
-                        let reach = state.followed().field;
+                        let reach = match field {
+                            FieldNews::Kept => state.followed().field,
+                            FieldNews::Dropped => None,
+                        };
                         self.followed.kept(reach, news.clone(), heads);
                     }
                     Input::LookFailed(why) => panic!("a look at what is followed failed: {why}"),
@@ -354,6 +386,7 @@ pub(super) fn read_as(workspace: &Workspace, repository: Repository) -> Outcome 
         repository,
         storage: project.storage_path,
         prices: project.config.pricing,
+        home: workspace.env.home.clone(),
     }))
 }
 
@@ -364,7 +397,8 @@ fn told_set_up(workspace: &Workspace) -> (State, Vec<Request>) {
     let [Request::Perform(opening, _)] = requests.as_slice() else {
         panic!("the application asks where it stands as it opens");
     };
-    let set_up = read_as(workspace, Repository::SetUp);
+    let dir = workspace.dir.clone();
+    let set_up = read_as(workspace, Repository::SetUp { dir });
     let requests = state.update(Input::Outcome(*opening, set_up));
     (state, requests)
 }

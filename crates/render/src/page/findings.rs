@@ -129,7 +129,7 @@ fn run_document(view: &RunFindings, glyphs: Glyphs) -> Doc {
         .filter(|standing| standing.settled.is_some())
         .count();
     said.extend((settled > 0).then(|| format!("{settled} settled")));
-    let title = Line::new().push(Tone::Strong, said.join(&format!(" {} ", glyphs.sep())));
+    let title = Line::new().push(Tone::Strong, said.join(&glyphs.spaced_sep()));
     let mut doc = Doc::new()
         .with(Block::Title(surco::components::Title::named(title)))
         .with(Block::Findings(list(view)));

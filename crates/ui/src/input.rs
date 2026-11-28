@@ -5,10 +5,10 @@ use surco::components::ScreenLaid;
 use yunta_api::{FollowNews, Remark};
 
 use crate::prompt::Stroke;
-use crate::{Address, News, Outcome, Ticket};
+use crate::{Address, News, Outcome, Room, Ticket};
 
-/// What reaches the application: a stroke a person gave, what a surface laid out, the
-/// time, what work it asked for says while it works, hands back while it lasts and came
+/// What reaches the application: a stroke a person gave, what a surface laid out and
+/// whether it had the room to, the time, what work it asked for says while it works, hands back while it lasts and came
 /// to, what it follows and a look at it that failed, and a page the surface could not
 /// show.
 #[derive(Debug, Clone)]
@@ -17,6 +17,8 @@ pub enum Input {
     /// What a surface laid out of the screen's regions that it shows in part: of each,
     /// its first line, a page, the last first line.
     Laid(ScreenLaid),
+    /// Whether the surface has the room it lays a screen out in, as it changes.
+    Room(Room),
     /// The instant the application stands at now.
     Time(DateTime<Utc>),
     /// What a piece of work remarks while it works.

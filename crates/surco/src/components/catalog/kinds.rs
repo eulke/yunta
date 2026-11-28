@@ -6,100 +6,74 @@ use std::collections::BTreeSet;
 use super::catalog;
 use crate::doc::Block;
 
-/// What a block is called. Naming every kind here is what stops the build on a new one until
-/// it is named, and then the test below asks the catalog for a sample of it.
-fn kind_of(block: &Block) -> &'static str {
-    match block {
-        Block::Headline(_) => "headline",
-        Block::Furrow(_) => "furrow",
-        Block::Ribbon(_) => "ribbon",
-        Block::Gist(_) => "gist",
-        Block::Fields(_) => "fields",
-        Block::Labelled(_) => "labelled",
-        Block::Table(_) => "table",
-        Block::Nodes(_) => "nodes",
-        Block::Runs(_) => "runs",
-        Block::Evidence(_) => "evidence",
-        Block::Said(_) => "said",
-        Block::Paths(_) => "paths",
-        Block::Diffstat(_) => "diffstat",
-        Block::Decision(_) => "decision",
-        Block::Card(_) => "card",
-        Block::Desk(_) => "desk",
-        Block::TypedAnswer(_) => "typed answer",
-        Block::ChoiceList(_) => "choice list",
-        Block::Checklist(_) => "checklist",
-        Block::Findings(_) => "findings",
-        Block::Problem(_) => "problem",
-        Block::Refusal(_) => "refusal",
-        Block::Next(_) => "next",
-        Block::Legend(_) => "legend",
-        Block::KeyList(_) => "key list",
-        Block::Attention(_) => "attention",
-        Block::Noted(_) => "noted",
-        Block::Title(_) => "title",
-        Block::Heading(_) => "heading",
-        Block::Section(_) => "section",
-        Block::Fold(_) => "fold",
-        Block::Prose(_) => "prose",
-        Block::Note(_) => "note",
-        Block::Markdown(_) => "markdown",
-        Block::Marked(_) => "marked",
-        Block::Concern(_) => "concern",
-        Block::Diagram(_) => "diagram",
-        Block::Code(_) => "code",
-        Block::Lines(_) => "lines",
-        Block::Rows(_) => "rows",
-        Block::Feed(_) => "feed",
-        Block::Meter(_) => "meter",
-        Block::Horizon(_) => "horizon",
-    }
+/// Names each kind of block once, in one list that both [`kind_of`] and [`KINDS`] are made
+/// from: [`kind_of`] matches every variant, so a variant added to [`Block`] stops the build
+/// until it is named here, and naming it puts it among the kinds the catalog is asked for.
+macro_rules! kinds {
+    ($($variant:ident => $name:literal),* $(,)?) => {
+        /// What a block is called.
+        fn kind_of(block: &Block) -> &'static str {
+            match block {
+                $(Block::$variant(_) => $name,)*
+            }
+        }
+
+        /// Every kind there is, as [`kind_of`] names it.
+        const KINDS: &[&str] = &[$($name),*];
+    };
 }
 
-/// Every kind there is, as [`kind_of`] names it.
-const KINDS: [&str; 41] = [
-    "headline",
-    "furrow",
-    "ribbon",
-    "gist",
-    "fields",
-    "table",
-    "nodes",
-    "runs",
-    "evidence",
-    "said",
-    "paths",
-    "diffstat",
-    "decision",
-    "card",
-    "desk",
-    "typed answer",
-    "choice list",
-    "checklist",
-    "findings",
-    "problem",
-    "refusal",
-    "next",
-    "legend",
-    "key list",
-    "attention",
-    "noted",
-    "title",
-    "heading",
-    "section",
-    "fold",
-    "prose",
-    "note",
-    "markdown",
-    "marked",
-    "concern",
-    "diagram",
-    "code",
-    "lines",
-    "feed",
-    "meter",
-    "horizon",
-];
+kinds!(
+    Headline => "headline",
+    Furrow => "furrow",
+    Ribbon => "ribbon",
+    Gist => "gist",
+    Fields => "fields",
+    Labelled => "labelled",
+    Table => "table",
+    Nodes => "nodes",
+    Runs => "runs",
+    AtAGlance => "at a glance",
+    Evidence => "evidence",
+    Said => "said",
+    Paths => "paths",
+    Diffstat => "diffstat",
+    Decision => "decision",
+    Card => "card",
+    Desk => "desk",
+    TypedAnswer => "typed answer",
+    ChoiceList => "choice list",
+    WordChoice => "word choice",
+    Form => "form",
+    Survey => "survey",
+    Checklist => "checklist",
+    Findings => "findings",
+    Problem => "problem",
+    Refusal => "refusal",
+    Next => "next",
+    SameAtAShell => "same at a shell",
+    Legend => "legend",
+    KeyList => "key list",
+    Attention => "attention",
+    Noted => "noted",
+    Title => "title",
+    Heading => "heading",
+    Section => "section",
+    Fold => "fold",
+    Prose => "prose",
+    Note => "note",
+    Markdown => "markdown",
+    Marked => "marked",
+    Concern => "concern",
+    Diagram => "diagram",
+    Code => "code",
+    Lines => "lines",
+    Rows => "rows",
+    Feed => "feed",
+    Meter => "meter",
+    Wordmark => "wordmark",
+    Horizon => "horizon",
+);
 
 /// Adds to `seen` what `blocks` are, and what each of them holds.
 fn seen_in(blocks: &[Block], seen: &mut BTreeSet<&'static str>) {
@@ -118,7 +92,8 @@ fn every_kind_of_block_stands_in_the_catalog() {
     let mut seen = BTreeSet::new();
     seen_in(catalog().blocks(), &mut seen);
     let missing: Vec<&str> = KINDS
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|kind| !seen.contains(kind))
         .collect();
     assert!(missing.is_empty(), "no sample of: {}", missing.join(", "));

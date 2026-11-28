@@ -1,0 +1,26 @@
+. close ST0PPD? -----------------------------------------------.
+| It closes as cancelled, by you, and stops waiting on a       |
+| person. Its branch stays; its checkouts go back to the       |
+| project.                                                     |
+|                                                              |
+| yunta close ST0PPD                                           |
+|                                                              |
+'--------------------------------------------------------------'
+
+. close ST0PPD? -----------------------------------------------.
+| It closes as cancelled, by you, and stops waiting on a       |
+| person. Its branch stays; its checkouts go back to the       |
+| project.                                                     |
+|                                                              |
+| yunta close ST0PPD                                           |
+|                                                              |
+'--------------------------------------------------------------'
+
+. close ST0PPD? ---------------------------------------.
+| It closes as cancelled, by you, and stops waiting on |
+| a person. Its branch stays; its checkouts go back to |
+| the project.                                         |
+|                                                      |
+| yunta close ST0PPD                                   |
+|                                                      |
+'------------------------------------------------------'

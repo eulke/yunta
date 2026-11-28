@@ -1,22 +1,28 @@
 //! A run waiting on its pull request, through `State` alone, in what its frames cannot hold:
-//! its forge is read once as the scene opens, and not again on news of the same pause, but
-//! again where a stage opened over the run let the reading go before the forge answered;
+//! its forge is read once as the scene opens, and not again on news of the same pause, nor as
+//! the person comes back from a stage opened over the run before the forge answered, the
+//! answer landing on the run under it;
 //! `o` asks the surface to show the pull request by its link, where on every other scene it
 //! shows the run's page; and a link the surface could not show is said, with the link.
 
 use surco::glyphs::Mark;
 use surco::look::Look;
-use yunta_api::{FollowNews, FollowedField, Repository, RunNews};
+use yunta_api::{FollowNews, FollowedField, RunNews};
 use yunta_core::step::NextStep;
 use yunta_replay::registry::Engine;
 use yunta_testkit_ui::screens::run::{self, RunScreen};
 use yunta_ui::prompt::Stroke;
-use yunta_ui::{Address, Input, Operation, Outcome, RepositoryReading, Request, State};
+use yunta_ui::{Address, Input, Operation, Outcome, RepositoryReading, Request, State, WebLink};
 
 use super::scene_of;
 
 /// The link of the pull request the small run's gate published.
 const LINK: &str = "https://github.com/acme/web/pull/7";
+
+/// The pull request the small run's gate published, as a page a surface shows.
+fn pull_request() -> WebLink {
+    WebLink::https(LINK).expect("an https link")
+}
 
 #[tokio::test]
 async fn the_forge_is_read_once_as_the_scene_opens_and_not_again_on_news_of_the_same_pause() {
@@ -42,10 +48,7 @@ async fn the_forge_is_read_once_as_the_scene_opens_and_not_again_on_news_of_the_
 async fn o_asks_the_surface_to_show_the_pull_request_by_its_link() {
     let mut screen = run::opened("pull-request").await;
     let surfaced = screen.pressed(&[Stroke::Insert('o')]).await;
-    assert_eq!(
-        surfaced,
-        [Request::ShowPage(Address::Link(LINK.to_string()))]
-    );
+    assert_eq!(surfaced, [Request::ShowPage(Address::Link(pull_request()))]);
 }
 
 /// A link the surface could not open is a failed act: the screen notes it under the failed
@@ -53,7 +56,7 @@ async fn o_asks_the_surface_to_show_the_pull_request_by_its_link() {
 #[tokio::test]
 async fn a_link_that_could_not_be_opened_is_noted_with_it_as_a_failed_act() {
     let mut screen = run::opened("pull-request").await;
-    let link = Address::Link(LINK.to_string());
+    let link = Address::Link(pull_request());
     let surfaced = screen.pressed(&[Stroke::Insert('o')]).await;
     assert_eq!(surfaced, [Request::ShowPage(link.clone())]);
     screen.unshown(link);
@@ -84,19 +87,20 @@ fn opened_unanswered(screen: &RunScreen) -> (State, Vec<Request>) {
     let field = kept.field.as_ref().expect("the field is read");
     let now = in_view
         .run
-        .state
+        .state()
         .clock()
         .last_at()
         .expect("the run has events");
-    let step = NextStep::status(&in_view.run.run);
+    let step = NextStep::status(in_view.run.run());
     let (mut state, asked) = State::opened_on(now, &step).expect("a run's step opens it");
     let [Request::Perform(repository, _)] = asked.as_slice() else {
         panic!("the repository is read first: {asked:?}");
     };
     let read = RepositoryReading {
-        repository: Repository::SetUp,
+        repository: kept.repository.clone().expect("the repository is read"),
         storage: kept.storage.clone().expect("the store is read"),
         prices: None,
+        home: None,
     };
     state.update(Input::Outcome(
         *repository,
@@ -117,25 +121,28 @@ fn opened_unanswered(screen: &RunScreen) -> (State, Vec<Request>) {
     (state, asked)
 }
 
-/// A reading of the pull request let go as a stage opened over the run, before the forge
-/// answered it, is asked again as the person comes back: the scene still stands at the pause
-/// it was asked for, and nothing of the forge's answer came.
+/// A reading of the pull request under way as a stage opens over the run stays the run's:
+/// the stage over it lets nothing go, the forge's answer lands on the run under it, and coming
+/// back asks nothing again.
 #[tokio::test]
-async fn a_poll_let_go_before_the_forge_answered_is_asked_again_on_coming_back() {
+async fn a_poll_under_way_as_a_stage_opens_over_the_run_is_answered_there() {
     let screen = run::opened("pull-request").await;
     let (mut state, asked) = opened_unanswered(&screen);
     let [polled] = polls(&asked)[..] else {
         panic!("the forge is read as the scene opens: {asked:?}");
     };
+    let waits_on_it = |state: &State| state.waiting_on().iter().any(|(on, _)| *on == polled);
     let over = state.update(Input::Stroke(Stroke::Insert('s')));
     assert!(
-        over.contains(&Request::LetGo(polled)),
-        "a stage opened over the run lets the reading go: {over:?}"
+        !over.contains(&Request::LetGo(polled)) && waits_on_it(&state),
+        "a stage opened over the run lets the reading go on: {over:?}"
     );
+    let answered = state.update(Input::Outcome(polled, Outcome::PullRequest(None)));
+    assert!(answered.is_empty(), "{answered:?}");
+    assert!(!waits_on_it(&state));
     let back = state.update(Input::Stroke(Stroke::Decline));
-    assert_eq!(
-        polls(&back).len(),
-        1,
-        "the reading let go is asked again: {back:?}"
+    assert!(
+        polls(&back).is_empty(),
+        "what the forge answered stands on the run: {back:?}"
     );
 }

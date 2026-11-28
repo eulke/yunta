@@ -27,7 +27,7 @@ fn readable(name: &str, description: &str) -> OfferedWorkflow {
         name: name.to_string(),
         workflow: Ok(ReadableWorkflow {
             workflow,
-            usually: None,
+            past: None,
         }),
     }
 }
@@ -46,6 +46,7 @@ fn catalog() -> Catalog {
                 workflow: Err(UnreadableWorkflow::File("no such file".to_string())),
             },
         ],
+        pinnable: Vec::new(),
     }
 }
 

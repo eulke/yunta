@@ -19,4 +19,4 @@ running: attempt 1
 failed: exit 101 · 6s
 
 next
-  yunta status Q78GRR   shows the whole run
+  yunta status Q78GRR   where the run stands

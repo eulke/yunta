@@ -2,10 +2,10 @@
 ................................................................................
 
   wrote        .yunta/config.yaml
-  ecosystem    none known (looked for Cargo.toml, package.json, go.mod,
+  language     none known (looked for Cargo.toml, package.json, go.mod,
                pyproject.toml); declare `commands:` and `baseline.suite` by hand
 
-  + claude-code  healthy (2.1.0)
+  ^ claude-code  unavailable (not on PATH)
   ^ codex        unavailable (not on PATH)
 
 for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file
@@ -14,10 +14,11 @@ for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file
   tool) for an existing verified workflow that already covers it.
 
 no runner is declared, so a workflow's agent nodes cannot run until one is
-declare a runner in .yunta/config.yaml; this machine answers for `claude-code`:
+declare a runner in .yunta/config.yaml; no adapter CLI answered on this machine
+(this build knows `claude-code`, `codex`):
   runners:
     implementer:
-      - { adapter: claude-code, model: <model> }
+      - { adapter: <adapter> }
   defaults:
     runner: implementer
 

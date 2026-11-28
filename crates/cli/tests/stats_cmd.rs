@@ -150,17 +150,17 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     assert!(workflow_stats.status.success());
     let text = stdout(&workflow_stats);
     assert!(
-        text.lines()
-            .any(|l| l == "workflow `bash-only-stats`: 4 runs"),
-        "got: {text}"
-    );
-    assert!(
-        text.lines().any(|l| l.starts_with("4 past runs · ")),
+        text.lines().any(|l| l == "◌ bash-only-stats · 4 runs"),
         "got: {text}"
     );
     assert!(
         text.lines()
-            .any(|l| l == "cost per verified task over time:"),
+            .any(|l| l.starts_with("  median ") && l.contains(" · median wall-clock ")),
+        "got: {text}"
+    );
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with("  task cost ") && l.contains("per verified task, oldest")),
         "got: {text}"
     );
     assert!(
@@ -291,7 +291,7 @@ fn history_sees_a_run_under_the_default_state_root() {
     let text = stdout(&stats);
     assert!(
         text.lines()
-            .any(|line| line == "workflow `bash-only-stats`: 2 runs"),
+            .any(|line| line == "◌ bash-only-stats · 2 runs"),
         "the runs under the default root are still this workflow's history: {text}"
     );
 }

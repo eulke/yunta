@@ -212,7 +212,7 @@ fn a_pack_runner_is_declared_on_an_adapter_this_machine_answers_for() {
     );
     assert!(
         text.lines()
-            .any(|line| line.trim() == "- { adapter: claude-code, model: <model> }"),
+            .any(|line| line.trim() == "- { adapter: claude-code }"),
         "{text}"
     );
 }
@@ -333,8 +333,8 @@ fn doctor_session_names_every_runner_that_reaches_a_binding() {
         &["doctor", "--session"],
     ));
     assert!(
-        text.contains("codex/codex-model (planner fallback, reviewer)"),
-        "each runner that reaches it, and which of them falls back to it: {text}"
+        text.contains("codex/codex-model (planner's 2nd candidate, reviewer)"),
+        "each runner that reaches it, and where among that runner's candidates: {text}"
     );
     assert!(
         text.contains("codex/other-model (planner)"),

@@ -11,7 +11,7 @@ use yunta_core::events::{
 };
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{NodeId, NonEmpty, QuestionId, RunId, TaskId};
-use yunta_replay::frame::{RunFrame, RunPhase, WaitingOn};
+use yunta_replay::frame::{RunFrame, RunPhase, RunTimes, WaitingOn};
 
 use crate::claim::sentence;
 use crate::escalation::question;
@@ -371,9 +371,10 @@ fn parked(on: WaitingOn) -> RunFrame {
 /// The gist of a run parked on node `node`'s `failure`.
 fn failed_gist(node: &str, failure: Failure) -> Option<String> {
     let node = NodeId::from(node);
-    gist(&parked(WaitingOn::Run {
+    let parked = parked(WaitingOn::Run {
         reason: PauseReason::NodeFailed { node, failure },
-    }))
+    });
+    gist(&parked, &RunTimes::sample(&parked))
 }
 
 /// A run parked on a check's red verdict says the verdict, one parked on a task's request
@@ -413,7 +414,62 @@ fn a_gist_says_a_round_records_nothing_until_it_is_answered() {
         }),
     };
     assert_eq!(
-        gist(&parked(on)).as_deref(),
+        gist(&parked(on), &RunTimes::default()).as_deref(),
         Some("node `grill` asks 3 questions: nothing is recorded until every one is answered")
     );
+}
+
+/// A run parked on what a person answers says what holds it in one sentence wherever it
+/// stands: its field's row, its glance and its page's gist, for a round, a red check, a task's
+/// request for scope and a task's departure alike.
+#[test]
+fn a_parked_run_s_row_glance_and_gist_say_one_hold() {
+    let asked: Vec<QuestionId> = ["where", "how", "beside"].map(QuestionId::from).to_vec();
+    let asked = NonEmpty::new(asked).expect("a round asks");
+    let grill = NodeId::from("grill");
+    let round = WaitingOn::Node {
+        node: grill.clone(),
+        on: NodeWait::Questions {
+            asked: asked.clone(),
+        },
+        reason: Some(PauseReason::Questions {
+            node: grill,
+            pending: asked,
+        }),
+    };
+    let failed_on = |node: &str, failure: Failure| WaitingOn::Run {
+        reason: PauseReason::NodeFailed {
+            node: NodeId::from(node),
+            failure,
+        },
+    };
+    for on in [
+        round,
+        failed_on("tests", regression()),
+        failed_on("implement", scope_owed()),
+        failed_on("implement", departure_owed()),
+    ] {
+        let frame = parked(on);
+        let times = RunTimes::sample(&frame);
+        let said = gist(&frame, &times).expect("a parked run says what holds it");
+        let row = crate::page::FieldRow {
+            frame: std::sync::Arc::new(frame),
+            times,
+            menu: true,
+        };
+        assert_eq!(row.said(), said, "the field's row");
+        let glance = crate::page::RunAtAGlance::Read {
+            row: &row,
+            base_branch: "main",
+            isolation: yunta_core::Isolation::Worktree,
+            acts: &[],
+        };
+        let doc = crate::page::Page::document(&glance, &surco::look::Look::plain());
+        let glanced = doc.blocks().iter().find_map(|block| match block {
+            surco::doc::Block::Gist(gist) => Some(gist.said.clone()),
+            _ => None,
+        });
+        let gisted = surco::components::Gist::new(said).said;
+        assert_eq!(glanced, Some(gisted), "the glance, as a gist says it");
+    }
 }

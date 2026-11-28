@@ -34,7 +34,7 @@ pub(super) fn desk(reader: &mut Reader, desk: &Desk) -> String {
 
 /// The title's parts, the first in bold, with the desk's edge after them.
 fn title(desk: &Desk) -> String {
-    let sep = format!(" {} ", GLYPHS.sep());
+    let sep = GLYPHS.spaced_sep();
     let parts: Vec<String> = desk
         .title
         .iter()

@@ -71,7 +71,7 @@ async fn findings_at(seq: u64) -> FindingLedger {
     };
     let mut following = project.follow(followed).await.expect("the design's run");
     match following.next(&Stop::new()).await {
-        Ok(FollowNews::Whole { run, .. }) => run.state.findings,
+        Ok(FollowNews::Whole { run, .. }) => run.state().findings.clone(),
         other => panic!("the run read whole comes first: {other:?}"),
     }
 }

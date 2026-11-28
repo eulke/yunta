@@ -114,7 +114,7 @@ impl RunStage {
         let Some(framed) = framed else {
             return Vec::new();
         };
-        let standing = framed.in_view.run.state.findings.effective();
+        let standing = &framed.in_view.run.state().findings.effective();
         if standing.is_empty() {
             return Vec::new();
         }
@@ -138,7 +138,7 @@ impl RunStage {
         &self,
         framed: &Framed<'_>,
     ) -> Option<(Option<NodeId>, FindingId)> {
-        let findings = &framed.in_view.run.state.findings;
+        let findings = &framed.in_view.run.state().findings;
         let standing = findings.effective();
         let held = |(node, id): &(Option<NodeId>, FindingId)| {
             standing

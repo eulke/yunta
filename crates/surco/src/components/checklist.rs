@@ -151,6 +151,14 @@ pub struct Checklist {
     /// every row stands where it would without it; a file draws it before the
     /// row.
     pub(crate) pointed: Option<String>,
+    /// Whether the checks that do not hold stand right under the row the others fold into,
+    /// as one list of what one thing answers for stands on a screen, rather than a line
+    /// apart from it, as a printed report sets them.
+    pub(crate) close_under_its_fold: bool,
+    /// Whether what each check found stands whole on its row, cut at the line's end where it
+    /// is wider, rather than wrapped under itself: commands, which a cut still names and a
+    /// wrapped one does not run.
+    pub(crate) on_their_rows: bool,
 }
 
 impl Checklist {
@@ -178,6 +186,21 @@ impl Checklist {
     /// each, `word` beside how many there are: `4 healthy`.
     pub fn folded(mut self, word: impl Into<String>) -> Self {
         self.folded = Some(word.into());
+        self
+    }
+
+    /// This list with the checks that do not hold right under the row the others fold into,
+    /// no line apart: one list of what one thing answers for, as a screen sets it.
+    pub fn close_under_its_fold(mut self) -> Self {
+        self.close_under_its_fold = true;
+        self
+    }
+
+    /// This list with what each check found on its row, cut at the line's end where it is
+    /// wider and never wrapped: commands a person reads by how they start, as a screen's page
+    /// sets them.
+    pub fn on_their_rows(mut self) -> Self {
+        self.on_their_rows = true;
         self
     }
 

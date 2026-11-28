@@ -1,49 +1,73 @@
 //! See [`super`]. The field: the runs of this repository, or of this machine, as
-//! render's `Field` page lists them, a pointer on the one a key acts on and the runs a
-//! person picked for an act that takes several.
+//! render lists them for a screen ([`FieldRows`]), a pointer on the one a key acts on and
+//! the runs a person picked for an act that takes several.
 //!
 //! The stage keeps none of the runs: it is drawn from the field the state keeps of what
-//! it follows, framed at the instant of each draw, so a run moves to its group, and the
-//! tally and the attention row count it, as its news come, and its age moves with the
-//! clock. A look that failed is said over the field as it was last read, until the next
-//! news. Widening the reach follows the machine's field, which comes whole in place of
-//! the field shown.
+//! it follows, framed at the instant of each draw, so a run moves to its group as its news
+//! come, and its age moves with the clock. Its screen: the list in the main region, the row
+//! pointed at on the selection to the region's edge; the run pointed at, at a glance in the
+//! region beside it at the right (`glance`), with what a person can do about it, its acts as
+//! the follower keeps them for the run's head, which the list holds under its own where the
+//! glance gives way; the trail naming the repository's path as the repository's reading gave
+//! it, or this machine where the field lists every run on it; the tally and the attention row as
+//! `FollowedRuns::framing` composes them for a screen that shows no run, so a run asked at
+//! its own terminal is counted and listed under `asking now`, never named in the attention
+//! row; the note, in the attention row's place until the next key, saying what an act here
+//! came to or what leaving a run for the field said of it, news leaving it standing; and the
+//! legend render words, with the far keys beside it where no line is typed: the keys that act
+//! on a run stand in it where a run stands in sight or may yet, before the field is read and
+//! while a run started here is on its way into it. A look that failed is said under the list
+//! as it was last read, until the next news. Widening the reach follows the machine's field,
+//! which comes whole in place of the field shown. A field
+//! that holds no run, as `esc` finds it from the first request of a repository with none,
+//! lists its first row alone, with no glance beside it; its legend names a new run and
+//! quitting, and the keys that act on a run, which act on none there, stand in help alone, as
+//! on a field whose runs are closed and hidden.
 //!
-//! The pointer moves along the runs in the order the page lists them, which the page
-//! says ([`Field::listed`]), and is kept by the run it stands on, so it stays on a run
+//! The pointer moves along the runs in the order the list holds them, which render
+//! says ([`FieldRows::listed`]), and is kept by the run it stands on, so it stays on a run
 //! that moves; where its run left the field, the first run listed stands for it, and a
-//! pick whose run left goes. Resuming acts at once; cancelling and closing ask a
-//! confirmation first, closing naming every run it closes. No act asks for the field:
-//! its runs move as their news come. Opening the run pointed at, or the one that has
-//! waited longest on a person, opens its stage over the field; so do the workflows, with
-//! `w`, and doctor, with `m`. A person who comes back to the field finds it as the state
-//! keeps it, and nothing is asked; one who leaves a run for it finds noted there, until the
-//! next key, whether the run keeps going, waits or ended.
-
-use std::path::Path;
+//! pick, kept by its run too, goes where its run left. A key acts on a run only where the
+//! acts the follower keeps for it hold the act the key takes (the glance's one table of
+//! keys), so it acts on none the field cannot read: resuming acts at once and notes what it
+//! did, and on a run that waits on a decision, which no resume answers, notes that `enter`
+//! reads it; stopping asks a confirmation first; closing asks one confirmation for the runs
+//! picked, or the one pointed at where none is, naming in its question each run it closes
+//! and under its sentence each it leaves open, with why, and asks nothing where it closes
+//! none. A confirmation holds what it named until it is answered: news that move rows or
+//! bring runs leave its runs as they were, and confirming it closes exactly those, what
+//! refused or failed then noted. No act asks for the field: its runs move as their news
+//! come. `d` lists the closed too and hides them again; `e` reaches the whole machine and
+//! back, in a repository: outside one the field stands at the machine's reach alone, and `e`
+//! does nothing and nothing names it; `esc` does nothing, and `q` leaves. Help lists every key the field takes, those its
+//! legend leaves out among them, in render's words. Opening the run pointed at, where the
+//! field reads it, or the one the attention row names, with `a`, opens its stage over the
+//! field; so do the workflows, with `w`, doctor, with `m`, and a new run, with `n`, which reads
+//! what it needs as it opens, where a run can be asked for (in a repository set up: outside
+//! one the field at the machine's reach neither draws its first row nor names `n`); what the
+//! run pointed at cost, with `s`, opens over its screen, as a person walks there. A person who comes back to the
+//! field finds it as the state keeps it, and nothing is asked; one who leaves a run for it
+//! finds noted there, until the next key, whether the run keeps going, waits or ended.
 
 use chrono::{DateTime, Utc};
-use surco::components::{Attention, Count, Note, Region, Screen, Sight, Tally};
+use surco::components::{Legend, Note, Noted, Region, Screen};
 use surco::doc::{Depth, Doc};
+use surco::glyphs::Mark;
 use surco::look::Look;
-use surco::words::Standing;
 use yunta_api::{FieldReach, FieldReading};
-use yunta_core::step::{NextStep, Reach};
+use yunta_core::step::{Arg, NextStep};
 use yunta_core::RunId;
-use yunta_render::page::{Field, FieldGroup, Page};
+use yunta_render::page::{FieldRows, Page};
 
-use super::{Act, Want};
-use crate::dialog::Confirmation;
+use super::{Stage, Want};
+use crate::followed_runs::Standpoint;
 use crate::prompt::Stroke;
-use crate::{FollowedRuns, Operation, Outcome};
+use crate::{FollowedRuns, Outcome};
 
-/// The standings a screen's tally counts, in the order it says them.
-const TALLIED: [Standing; 4] = [
-    Standing::NeedsYou,
-    Standing::Stalled,
-    Standing::Stopped,
-    Standing::Running,
-];
+mod acts;
+mod glance;
+
+use acts::{attended, CLOSES, RESUMES, STOPS};
 
 /// The field a person moves through: where they stand in it, and how far and how deep
 /// it reads. Not the field's runs, which the state keeps of what it follows.
@@ -55,17 +79,19 @@ pub struct FieldStage {
     /// The runs picked for an act that takes several, in the order they were picked.
     marked: Vec<RunId>,
     pub(super) reach: FieldReach,
-    depth: Depth,
+    /// How deep it lists the runs: at a glance, or the closed too.
+    pub(super) depth: Depth,
     /// What the last act came to where it did not do what it was asked, or what leaving a
     /// run said of it: noted until the next key.
-    said: Option<String>,
+    said: Option<FieldNote>,
 }
 
-/// The field the state keeps, framed at an instant, beside where the project keeps its
-/// runs: what the stage draws and acts on.
-struct Framed<'a> {
-    reading: FieldReading,
-    storage: &'a Path,
+/// What the field notes in its attention row's place until the next key, under the mark of
+/// how it went. Not Surco's `Noted`, the note as a screen holds it.
+#[derive(Debug, Clone)]
+struct FieldNote {
+    mark: Mark,
+    said: String,
 }
 
 impl FieldStage {
@@ -83,43 +109,44 @@ impl FieldStage {
     /// `said` noted on the field until the next key, where anything was said: what leaving a
     /// run for it said of the run.
     pub(crate) fn noting(&mut self, said: Option<String>) {
-        self.said = said;
+        self.said = said.map(|said| FieldNote {
+            mark: Mark::Done,
+            said,
+        });
     }
 
-    /// The field `followed` keeps, framed at `now`: none until it is read. A field read
-    /// at the reach before stands until the field at this one comes in its place.
-    fn framed<'a>(followed: &'a FollowedRuns, now: DateTime<Utc>) -> Option<Framed<'a>> {
-        let field = followed.field.as_ref()?;
-        Some(Framed {
-            reading: field.reading(now),
-            storage: followed.storage.as_deref()?,
-        })
+    /// The field `followed` keeps, framed at `now`: what the stage draws and acts on; none
+    /// until it is read. A field read at the reach before stands until the field at this one
+    /// comes in its place.
+    fn framed(followed: &FollowedRuns, now: DateTime<Utc>) -> Option<FieldReading> {
+        Some(followed.field.as_ref()?.reading(now))
     }
 
-    /// `framed` as render's page draws it, the pointer on `pointed`.
-    fn page<'a>(&'a self, framed: &'a Framed<'_>, pointed: Option<&'a RunId>) -> Field<'a> {
-        Field {
-            rows: &framed.reading.rows,
-            unreadable: &framed.reading.unreadable,
-            elsewhere: framed.reading.elsewhere,
-            here: framed.reading.here,
-            storage: framed.storage,
+    /// `framed` as render lists it for a screen, the pointer on `pointed`, its first row asking
+    /// for a run where one `asks_for_a_run` here.
+    fn rows<'a>(
+        &'a self,
+        framed: &'a FieldReading,
+        pointed: Option<&'a RunId>,
+        asks_for_a_run: bool,
+    ) -> FieldRows<'a> {
+        FieldRows {
+            rows: &framed.rows,
+            unreadable: &framed.unreadable,
             depth: self.depth,
             pointed,
             marked: &self.marked,
+            asks_for_a_run,
         }
     }
 
-    /// The runs the page lists of `framed`, in its order: none where the field is not
-    /// read.
-    fn listed(&self, framed: Option<&Framed<'_>>) -> Vec<RunId> {
+    /// The runs the list holds of `framed`, in its order, which its first row is none of: none
+    /// where the field is not read.
+    fn listed(&self, framed: Option<&FieldReading>) -> Vec<RunId> {
         framed
             .map(|framed| {
-                self.page(framed, None)
-                    .listed()
-                    .into_iter()
-                    .cloned()
-                    .collect()
+                let rows = self.rows(framed, None, false);
+                rows.listed().into_iter().cloned().collect()
             })
             .unwrap_or_default()
     }
@@ -138,37 +165,75 @@ impl FieldStage {
         self.pointed = self.pointed_in(listed);
     }
 
-    /// The field `followed` keeps as a screen at `now`: the page, how many runs stand at
-    /// each word that asks for a look, the run that has waited longest on a person, and
-    /// the keys; a look that failed and what the last act came to said under the page.
+    /// The field `followed` keeps as a screen at `now`, a line typed over it where `typed`:
+    /// its list; the run pointed at, at a glance beside it, with what a person can do about it;
+    /// where it stands on the trail; the tally and the attention row; the note; and the keys.
+    /// A look that failed is said under the list.
     pub(crate) fn screen(
         &self,
         look: &Look,
         followed: &FollowedRuns,
         now: DateTime<Utc>,
+        typed: bool,
     ) -> Screen {
         let framed = FieldStage::framed(followed, now);
+        let pointed = framed
+            .as_ref()
+            .and_then(|framed| self.pointed_in(&self.listed(Some(framed))));
+        let asks_for_a_run = followed.can_ask_for_a_run();
         let mut doc = match &framed {
-            Some(framed) => {
-                let pointed = self.pointed_in(&self.listed(Some(framed)));
-                self.page(framed, pointed.as_ref()).document(look)
-            }
+            Some(framed) => self
+                .rows(framed, pointed.as_ref(), asks_for_a_run)
+                .document(look),
             None => Doc::new().with(Note(yunta_render::screen::READING_THE_RUNS.to_string())),
         };
-        for said in [&followed.look_failed, &self.said].into_iter().flatten() {
-            doc = doc.with(Note(said.clone()));
+        if let Some(failed) = &followed.look_failed {
+            doc = doc.with(Note(failed.clone()));
         }
-        let mut screen = Screen::new(Region::new(doc).in_sight(Sight::following_pointer()));
-        screen.trail = vec![yunta_render::screen::YUNTA.to_string()];
-        if let Some(framed) = &framed {
-            screen.tally = Tally::Counted(tally(&framed.reading));
-            screen.attention = waiting_longest(&framed.reading, look);
-        }
-        screen.legend = yunta_render::screen::field_legend(
-            self.reach == FieldReach::Machine,
-            self.depth.reaches(Depth::Full),
-        );
+        let mut screen = Screen::new(Region::new(doc).listing_runs());
+        screen.side = framed
+            .as_ref()
+            .zip(pointed.as_ref())
+            .and_then(|(framed, pointed)| glance::beside(followed, framed, pointed, look));
+        let place = framed.as_ref().and_then(|framed| place(followed, framed));
+        screen.trail = std::iter::once(yunta_render::screen::YUNTA.to_string())
+            .chain(place)
+            .collect();
+        let at = Standpoint { run: None, typed };
+        (screen.tally, screen.attention) = followed.framing(at, now);
+        screen.noted = self.said.as_ref().map(|note| Noted {
+            mark: note.mark,
+            said: note.said.clone(),
+        });
+        let acts_on_a_run = self.acts_on_a_run(framed.as_ref(), followed);
+        screen.legend = yunta_render::screen::field_legend(asks_for_a_run, acts_on_a_run);
+        screen.anywhere = match typed {
+            true => Legend::new(),
+            false => yunta_render::screen::anywhere(),
+        };
         screen
+    }
+
+    /// Whether the keys that act on a run serve on `framed`, the field `followed` keeps, as
+    /// its legend names them: where it lists a run in sight, and where it may yet list one,
+    /// before it is read and while a run started here is on its way into it. A field read
+    /// that lists none and awaits none has nothing to move to, open or close: its runs closed
+    /// and hidden, or none at all.
+    fn acts_on_a_run(&self, framed: Option<&FieldReading>, followed: &FollowedRuns) -> bool {
+        match framed {
+            None => true,
+            Some(framed) => !self.listed(Some(framed)).is_empty() || followed.a_run_is_coming(),
+        }
+    }
+
+    /// Every key the field takes, as help lists them over it: those its legend leaves out
+    /// among them, `d` and `e` saying what they do from as deep and as far as it reads, and a
+    /// new run where `followed` says one can be asked for here.
+    pub(crate) fn help(&self, followed: &FollowedRuns) -> Doc {
+        let closed = self.depth.reaches(Depth::Full);
+        let asks_for_a_run = followed.can_ask_for_a_run();
+        let farther = self.farther(followed);
+        yunta_render::screen::help_over_the_field(closed, asks_for_a_run, farther.as_ref())
     }
 
     /// What `stroke` asks for in the field `followed` keeps at `now`, the pointer and the
@@ -188,27 +253,19 @@ impl FieldStage {
         match stroke {
             Stroke::Down | Stroke::Insert('j') => self.moved(1, &listed),
             Stroke::Up | Stroke::Insert('k') => self.moved(-1, &listed),
-            Stroke::Enter => opened(self.pointed_in(&listed)),
-            Stroke::Insert('n') => opened(
-                framed
-                    .as_ref()
-                    .and_then(|framed| run_waiting_longest(&framed.reading)),
-            ),
-            Stroke::Insert(' ') => self.picked(&listed),
-            Stroke::Insert('r') => self.act(&listed, |run| Want::Work(Operation::Resume { run })),
-            Stroke::Insert('c') => self.act(&listed, |run| {
-                let asks = yunta_render::screen::cancelling(run.handle());
-                let same = vec![NextStep::Cancel { run: run.clone() }];
-                Want::Confirm(Confirmation::new(asks, same, Operation::Cancel { run }))
+            Stroke::Enter => opened(self.read_pointed(&listed, followed)),
+            Stroke::Insert('n') if followed.can_ask_for_a_run() => Want::taking(&NextStep::Run {
+                workflow: Arg::Blank,
             }),
-            Stroke::Insert('x') => self.closing(&listed),
-            Stroke::Insert('a') => {
-                self.reach = match self.reach {
-                    FieldReach::Here => FieldReach::Machine,
-                    FieldReach::Machine => FieldReach::Here,
-                };
-                Vec::new()
-            }
+            Stroke::Insert(' ') => self.picked(&listed),
+            RESUMES => self.resuming(&listed, followed),
+            STOPS => self.stopping(&listed, followed),
+            CLOSES => self.closing(&listed, followed, framed.as_ref()),
+            Stroke::Insert('s') => self
+                .read_pointed(&listed, followed)
+                .map(what_it_cost)
+                .unwrap_or_default(),
+            Stroke::Insert('a') => opened(attended(followed, now)),
             Stroke::Insert('d') => {
                 self.depth = match self.depth.reaches(Depth::Full) {
                     true => Depth::Glance,
@@ -216,84 +273,53 @@ impl FieldStage {
                 };
                 Vec::new()
             }
+            Stroke::Insert('e') => {
+                self.reach = self.reach_by_e(followed).unwrap_or(self.reach);
+                Vec::new()
+            }
             Stroke::Insert('w') => Want::taking(&NextStep::List),
             Stroke::Insert('m') => Want::taking(&NextStep::Doctor {
                 sessions: false,
                 full: false,
             }),
-            Stroke::Insert('q') | Stroke::Decline | Stroke::Interrupt => vec![Want::Leave],
+            Stroke::Insert('q') | Stroke::Interrupt => vec![Want::Leave],
             _ => Vec::new(),
         }
     }
 
-    /// What the field `followed` keeps at `now` offers, each with the key that takes it
-    /// here: following the run pointed at, resuming and cancelling it, closing what `x`
-    /// closes where one command does it, the run waiting on the person, the field as far
-    /// again or with its closed runs, the workflows and doctor.
-    pub(crate) fn offered(&self, followed: &FollowedRuns, now: DateTime<Utc>) -> Vec<Act> {
-        let framed = FieldStage::framed(followed, now);
-        let listed = self.listed(framed.as_ref());
-        let on_the_run = self.pointed_in(&listed).into_iter().flat_map(|run| {
-            [
-                (Stroke::Enter, NextStep::Follow { run: run.clone() }),
-                (Stroke::Insert('r'), NextStep::Resume { run: run.clone() }),
-                (Stroke::Insert('c'), NextStep::Cancel { run }),
-            ]
-        });
-        let closing = self
-            .closed_by_one_command(&listed)
-            .map(|run| (Stroke::Insert('x'), NextStep::Close { run }));
-        let needs = framed
-            .as_ref()
-            .and_then(|framed| run_waiting_longest(&framed.reading))
-            .map(|_| (Stroke::Insert('n'), NextStep::Needs));
-        let reach = match self.reach {
-            FieldReach::Here => Reach::Machine,
-            FieldReach::Machine => Reach::Repository,
-        };
-        let closed = match self.depth.reaches(Depth::Full) {
-            true => Reach::Repository,
-            false => Reach::WithClosed,
-        };
-        let always = [
-            (Stroke::Insert('a'), NextStep::ListRuns { reach }),
-            (Stroke::Insert('d'), NextStep::ListRuns { reach: closed }),
-            (Stroke::Insert('w'), NextStep::List),
-            (
-                Stroke::Insert('m'),
-                NextStep::Doctor {
-                    sessions: false,
-                    full: false,
-                },
-            ),
-        ];
-        on_the_run
-            .chain(closing)
-            .chain(needs)
-            .chain(always)
-            .map(|(key, step)| Act::by(key, step))
-            .collect()
+    /// What an answer to work the field asked for does: what [`FieldStage::noted`] notes.
+    /// The field moves as its runs do, so no answer asks for it.
+    pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
+        self.noted(&outcome);
+        Vec::new()
     }
 
-    /// What an answer to work the field asked for does: the runs closed no longer
-    /// picked, and what refused or failed said. The field moves as its runs do, so no
-    /// answer asks for it.
-    pub(crate) fn answered(&mut self, outcome: Outcome) -> Vec<Want> {
-        match outcome {
+    /// What an act on runs came to, noted, whether the field asked it or a stage left asked
+    /// it: the runs closed no longer picked, and what refused or failed said; a run handed back
+    /// to its resume noted.
+    pub(crate) fn noted(&mut self, outcome: &Outcome) {
+        let (mark, said) = match outcome {
+            Outcome::Resumed { run } => (Mark::Done, yunta_render::start::resumed_note(run)),
             Outcome::Closed {
                 closed,
                 refused,
                 failed,
             } => {
                 self.marked.retain(|run| !closed.contains(run));
-                self.said = failed.or_else(|| refused.first().map(ToString::to_string));
+                match (failed, yunta_render::screen::not_closed(refused)) {
+                    (Some(failed), _) => (Mark::Failed, failed.clone()),
+                    (None, Some(refused)) => (Mark::Done, refused),
+                    (None, None) => {
+                        self.said = None;
+                        return;
+                    }
+                }
             }
-            Outcome::Refused(refused) => self.said = Some(refused.to_string()),
-            Outcome::Failed(said) => self.said = Some(said),
-            Outcome::Resumed { .. }
-            | Outcome::Cancelled { .. }
-            | Outcome::Repository(_)
+            Outcome::Refused(refused) => (Mark::Done, refused.to_string()),
+            Outcome::Failed(said) => (Mark::Failed, said.clone()),
+            Outcome::Cancelled { .. }
             | Outcome::Catalog(_)
+            | Outcome::Repository(_)
             | Outcome::Workflow(_)
             | Outcome::Pack(_)
             | Outcome::Evidence(_)
@@ -306,10 +332,11 @@ impl FieldStage {
             | Outcome::Decided { .. }
             | Outcome::Answered { .. }
             | Outcome::Detected { .. }
-            | Outcome::Initialized(_)
-            | Outcome::Stopped => {}
-        }
-        Vec::new()
+            | Outcome::SetupPack { .. }
+            | Outcome::Initialized { .. }
+            | Outcome::Stopped => return,
+        };
+        self.said = Some(FieldNote { mark, said });
     }
 
     /// The pointer moved `by` rows along `listed`, around at either end.
@@ -338,84 +365,28 @@ impl FieldStage {
         }
         Vec::new()
     }
+}
 
-    /// `act` on the run pointed at among `listed`, where there is one.
-    fn act(&self, listed: &[RunId], act: impl FnOnce(RunId) -> Want) -> Vec<Want> {
-        self.pointed_in(listed).map(act).into_iter().collect()
-    }
-
-    /// The runs picked among `listed`, in the order they were picked.
-    fn marked_in(&self, listed: &[RunId]) -> Vec<RunId> {
-        let marked = self.marked.iter().filter(|run| listed.contains(run));
-        marked.cloned().collect()
-    }
-
-    /// The one run `x` closes among `listed`, where it closes one: the run picked, or
-    /// the one pointed at where none is. Several picked are closed together, which no
-    /// one command does, so the palette offers that by its key alone.
-    fn closed_by_one_command(&self, listed: &[RunId]) -> Option<RunId> {
-        match self.marked_in(listed).as_slice() {
-            [] => self.pointed_in(listed),
-            [only] => Some(only.clone()),
-            _ => None,
+/// Where the field `reading` stands on the trail: the repository's path the repository's
+/// reading in `followed` gave, where it lists that repository's runs; this machine, where it
+/// lists every run on it. None before the repository is read.
+fn place(followed: &FollowedRuns, reading: &FieldReading) -> Option<String> {
+    let home = followed.home.as_deref();
+    match reading.here {
+        true => {
+            let repository = followed.repository.as_ref()?.dir()?;
+            Some(yunta_render::screen::field_place(Some(repository), home))
         }
-    }
-
-    /// Closing the runs picked among `listed`, or the one pointed at where none is,
-    /// asked first with every run it closes named.
-    fn closing(&self, listed: &[RunId]) -> Vec<Want> {
-        let runs = match self.marked_in(listed) {
-            marked if marked.is_empty() => self.pointed_in(listed).into_iter().collect(),
-            marked => marked,
-        };
-        if runs.is_empty() {
-            return Vec::new();
-        }
-        let handles: Vec<&str> = runs.iter().map(RunId::handle).collect();
-        let asks = yunta_render::screen::closing(&handles);
-        let same = runs
-            .iter()
-            .map(|run| NextStep::Close { run: run.clone() })
-            .collect();
-        vec![Want::Confirm(Confirmation::new(
-            asks,
-            same,
-            Operation::Close { runs },
-        ))]
+        false => Some(yunta_render::screen::field_place(None, home)),
     }
 }
 
-/// How many open runs of `reading` stand at each word a screen's tally counts, the words
-/// none stands at left out.
-fn tally(reading: &FieldReading) -> Vec<Count> {
-    TALLIED
-        .into_iter()
-        .map(|standing| Count {
-            standing,
-            runs: reading
-                .rows
-                .iter()
-                .filter(|row| row.group() != FieldGroup::Closed && row.frame.standing == standing)
-                .count(),
-        })
-        .filter(|count| count.runs > 0)
-        .collect()
-}
-
-/// The run of `reading` that has waited longest on a person, and the command that
-/// answers it.
-fn waiting_longest(reading: &FieldReading, look: &Look) -> Option<Attention> {
-    let row = *reading.needing_a_person().first()?;
-    let command = row.command()?;
-    let mut attention = Attention::command(row.said(look.glyphs), command);
-    attention.subject = Some(row.frame.run_id.handle().to_string());
-    Some(attention)
-}
-
-/// The run of `reading` that has waited longest on a person, where one waits.
-fn run_waiting_longest(reading: &FieldReading) -> Option<RunId> {
-    let longest = reading.needing_a_person().first().copied()?;
-    Some(longest.frame.run_id.clone())
+/// What `run` cost, opened as a person walks there from the field: its screen over the
+/// field, then its numbers over its screen, which going back walks the same way.
+fn what_it_cost(run: RunId) -> Vec<Want> {
+    let screen = Stage::opened_by(&NextStep::status(&run));
+    let numbers = Stage::opened_by(&NextStep::Stats { run });
+    screen.into_iter().chain(numbers).map(Want::Open).collect()
 }
 
 /// `run` followed in its stage, opened over the field, where there is a run.

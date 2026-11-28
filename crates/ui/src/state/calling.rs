@@ -62,11 +62,11 @@ impl Moved {
     pub(super) fn by(news: &FollowNews) -> Moved {
         let runs = match news {
             FollowNews::Field(_) => return Moved::Field,
-            FollowNews::Whole { run, .. } => return Moved::Read(run.run.clone()),
-            FollowNews::Elsewhere(_) => Vec::new(),
+            FollowNews::Whole { run, .. } => return Moved::Read(run.run().clone()),
+            FollowNews::Elsewhere(_) | FollowNews::WholeUnreadable(_) => Vec::new(),
             FollowNews::Run { run, news } => match news {
                 RunNews::Events(_) | RunNews::Engine(_) => vec![run.clone()],
-                RunNews::Successor { run: by, .. } => vec![run.clone(), by.run.clone()],
+                RunNews::Successor { run: by, .. } => vec![run.clone(), by.run().clone()],
                 RunNews::Said { .. }
                 | RunNews::NoSuccessor
                 | RunNews::Awaited(_)
@@ -74,7 +74,7 @@ impl Moved {
                 | RunNews::Document { .. }
                 | RunNews::Remark(_) => Vec::new(),
             },
-            FollowNews::Joined(run) => vec![run.run.clone()],
+            FollowNews::Joined(run) => vec![run.run().clone()],
             FollowNews::Unreadable(why) => vec![why.run_id.clone()],
             FollowNews::Left(run) => vec![run.clone()],
         };
@@ -95,7 +95,7 @@ impl Calling {
         let (runs, calling) = match moved {
             Moved::Field => {
                 let field = kept.field.iter().flat_map(|field| field.runs.keys());
-                let in_view = kept.in_view.iter().map(|in_view| &in_view.run.run);
+                let in_view = kept.in_view.iter().map(|in_view| in_view.run.run());
                 let needing = field.chain(in_view).filter_map(|run| {
                     let row = needing_row(kept, run, now)?;
                     Some((run.clone(), row))
@@ -130,7 +130,7 @@ impl Calling {
     pub(super) fn title(&self, kept: &FollowedRuns, glyphs: Glyphs) -> Option<String> {
         let needing = self.needing.as_ref()?;
         let in_view = kept.in_view.as_deref();
-        let in_view = in_view.and_then(|in_view| needing.get(&in_view.run.run));
+        let in_view = in_view.and_then(|in_view| needing.get(in_view.run.run()));
         let in_the_field = |run: &&RunId| {
             let field = kept.field.as_ref();
             field.is_some_and(|field| field.runs.contains_key(*run))
@@ -183,7 +183,7 @@ fn held<'a>(kept: &'a FollowedRuns, run: &RunId) -> Option<&'a FollowedRun> {
     let field = kept.field.as_ref().and_then(|field| field.runs.get(run));
     let in_view = || {
         let in_view = kept.in_view.as_deref().map(|in_view| &in_view.run);
-        in_view.filter(|held| held.run == *run)
+        in_view.filter(|held| held.run() == run)
     };
     field.map(Arc::as_ref).or_else(in_view)
 }
